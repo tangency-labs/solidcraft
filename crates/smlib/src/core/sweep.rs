@@ -1549,6 +1549,12 @@ fn tolerances_ok(pick: f64, tolerance: f64) -> bool {
     pick.is_finite() && pick > 0.0 && pick < 1e6 && tolerance.is_finite() && (1e-9..1e3).contains(&tolerance)
 }
 
+/// Whether `v` is longer than 1e-12, as the capi's `unit` takes a direction (the kernel's
+/// distance from the origin, [`solidcore_ops::point_distance`]).
+fn longer_than_1e_12(v: [f64; 3]) -> bool {
+    solidcore_ops::point_distance([0.0; 3], v).is_ok_and(|d| d.value > 1e-12)
+}
+
 /// The face of `body` nearest `point` within `tolerance` (`smlib_pick::pick_faces` of one
 /// point, [`solidcore_ops::pick::faces`]), as an index of its own order, with that order.
 fn picked_face(call: &'static str, body: &Body, point: [f64; 3], tolerance: f64) -> Result<(solidcore_ops::Order, usize)> {
@@ -1592,8 +1598,9 @@ pub(crate) fn project_curves(
     if !face_point.iter().chain(&direction).all(|x| x.is_finite()) || !tolerances_ok(pick_tolerance, tolerance) {
         return Err(Error::Argument);
     }
-    // a direction of no length is the capi's argument refusal, before any face is picked
-    if solidcore_ops::unit_direction(direction).is_none() {
+    // a direction of no length (not longer than 1e-12) or no curves is the capi's argument
+    // refusal, before any face is picked
+    if !longer_than_1e_12(direction) || curves.is_empty() || curves.len() > MAX_CURVES {
         return Err(Error::Argument);
     }
     const CALL: &str = "smlib_project_curves";
@@ -1619,8 +1626,9 @@ pub(crate) fn face_section(
     if !face_point.iter().chain(&plane_point).chain(&plane_normal).all(|x| x.is_finite()) || !tolerances_ok(pick_tolerance, tolerance) {
         return Err(Error::Argument);
     }
-    // a plane normal of no length is the capi's argument refusal, before any face is picked
-    if solidcore_ops::unit_direction(plane_normal).is_none() {
+    // a plane normal of no length (not longer than 1e-12) is the capi's argument refusal,
+    // before any face is picked
+    if !longer_than_1e_12(plane_normal) {
         return Err(Error::Argument);
     }
     const CALL: &str = "smlib_face_section";
