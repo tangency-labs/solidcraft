@@ -9938,8 +9938,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             let undo = app.status_undo;
             // A JSON save refused for its binary data offers to save the design as a container.
             let save_sc = app.status_save_sc && !undo;
-            // An error offers Report…: the report dialog, filled in with it (when tickets work here).
-            let report = error && !undo && !save_sc && crate::issue_report::ticket::enabled(app);
+            // An error offers Report…: the report dialog, filled in with it (when tickets work here
+            // and the organization's policy allows problem reports).
+            let report = error && !undo && !save_sc && crate::issue_report::toast_offers_report(app);
             let actions = if undo {
                 vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)]
             } else if save_sc {

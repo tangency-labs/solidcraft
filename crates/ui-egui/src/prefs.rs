@@ -3345,6 +3345,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
                 "locked": app.policy.locked(),
                 "check_updates": crate::policy::check_updates(app),
                 "settings": crate::policy::in_force(app),
+                "off": app.policy.turned_off(),
             });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
