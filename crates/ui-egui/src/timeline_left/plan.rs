@@ -35,6 +35,7 @@ struct PlanKey {
     groups: usize,
     project_link_tools: bool,
     under_feature: bool,
+    show_hidden: bool,
 }
 
 impl PlanKey {
@@ -49,6 +50,7 @@ impl PlanKey {
             groups: doc.timeline_groups.len(),
             project_link_tools: app.ui.project_link_tools,
             under_feature,
+            show_hidden: app.tree.history_show_hidden,
         }
     }
 }
@@ -72,6 +74,11 @@ pub(super) struct RowPlan {
     key: PlanKey,
     pub features: Vec<FeatureInfo>,
     pub groups: Vec<TimelineGroup>,
+    /// By timeline position: whether the feature's component has its history hidden (#10393, #22211).
+    pub hidden: Vec<bool>,
+    /// By folder index: whether the folder is hidden because all its features are hidden and it
+    /// holds no joints (own or nested).
+    pub hidden_groups: Vec<bool>,
     /// The rows to draw (`drawn_rows`).
     pub rows: HistoryRows,
     /// Each feature id's first timeline position.
@@ -137,9 +144,22 @@ impl RowPlan {
                 )
             })
             .collect();
+        let hides = !app.tree.history_show_hidden && doc.components.iter().any(|c| c.history_hidden);
+        let hidden: Vec<bool> = doc.features.iter().map(|feature| hides && doc.component_history_hidden(feature.component)).collect();
         let groups = doc.timeline_groups.clone();
         let rows = if under_feature {
-            let listed: Vec<HistoryFeature> = doc.features.iter().map(HistoryFeature::of).collect();
+            let listed: Vec<HistoryFeature> = doc
+                .features
+                .iter()
+                .enumerate()
+                .map(|(index, feature)| {
+                    if hidden.get(index).copied().unwrap_or(false) {
+                        HistoryFeature { id: feature.id, sketch: false, inputs: Vec::new() }
+                    } else {
+                        HistoryFeature::of(feature)
+                    }
+                })
+                .collect();
             crate::history_rows::rows(&listed, &groups, doc.marker, true)
         } else {
             let sketch = |feature: &solidcraft_engine::doc::Feature| matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. });
@@ -175,6 +195,7 @@ impl RowPlan {
         let fold_ids: BTreeSet<u64> = groups.iter().flat_map(|group| [Some(group.id), group.parent]).flatten().collect();
         let mut plan = Self {
             key: PlanKey::of(app, under_feature),
+            hidden_groups: Vec::new(),
             index_of,
             group_of,
             has_patterns,
@@ -189,13 +210,25 @@ impl RowPlan {
             contents: Vec::new(),
             joints: Vec::new(),
             fold_keys: fold_ids.into_iter().map(|id| (id, format!("{}{id}", crate::timeline_folders::KEY))).collect(),
-            host_keys: rows.rows.iter().filter(|row| !row.listed.is_empty()).map(|row| (row.feature, sketches_key(row.feature))).collect(),
+            host_keys: rows
+                .rows
+                .iter()
+                .filter(|row| !hidden.get(row.index).copied().unwrap_or(false) && !row.listed.is_empty())
+                .map(|row| (row.feature, sketches_key(row.feature)))
+                .collect(),
+            hidden,
             features,
             groups,
             rows,
         };
         plan.place_folders(&children);
         plan
+    }
+
+    /// Whether the feature at timeline position `index` is hidden by its component's `history_hidden`
+    /// flag (#10393, #22211).
+    pub(super) fn is_hidden(&self, index: usize) -> bool {
+        self.hidden.get(index).copied().unwrap_or(false)
     }
 
     /// The folders' depths, extents, header places and contents.
@@ -227,26 +260,6 @@ impl RowPlan {
             })
             .collect();
         let paths: Vec<Vec<u64>> = ids.iter().map(|id| group_path(groups, *id)).collect();
-        for (index, position) in self.position.iter().enumerate() {
-            if let Some(slot) = position.and_then(|position| self.starting.get_mut(position)) {
-                slot.push(index);
-            }
-        }
-        for starting in &mut self.starting {
-            starting.sort_by(|a, b| paths.get(*a).cmp(&paths.get(*b)));
-        }
-        for (index, id) in ids.iter().enumerate() {
-            if let Some(slot) = last.get(id).copied().flatten().and_then(|last| self.ending.get_mut(last)) {
-                slot.push(index);
-            }
-        }
-        for ending in &mut self.ending {
-            ending.sort_by_key(|index| std::cmp::Reverse(self.depth.get(*index).copied()));
-        }
-        let mut trailing: Vec<usize> = (0..groups.len()).collect();
-        let place = |at: usize| (self.position.get(at).copied().flatten().unwrap_or(usize::MAX), paths.get(at));
-        trailing.sort_by(|a, b| place(*a).cmp(&place(*b)));
-        self.trailing = trailing;
         // A folder holds its own features and those of the folders nested in it, as
         // `group_is_descendant` decides (a broken chain of parents counts as inside everything).
         let ancestors: HashMap<u64, Option<HashSet<u64>>> = ids.iter().map(|id| (*id, self.ancestors(*id))).collect();
@@ -256,8 +269,9 @@ impl RowPlan {
             .map(|root| {
                 self.group_of
                     .iter()
+                    .enumerate()
                     .zip(&self.features)
-                    .filter(|(group, _)| group.is_some_and(|group| inside(group, *root)))
+                    .filter(|((index, group), _)| !self.is_hidden(*index) && group.is_some_and(|group| inside(group, *root)))
                     .map(|(_, feature)| feature.0)
                     .collect()
             })
@@ -266,6 +280,44 @@ impl RowPlan {
             .iter()
             .map(|root| groups.iter().filter(|candidate| inside(candidate.id, *root)).flat_map(|group| group.joints.iter().copied()).collect())
             .collect();
+        // A folder that holds features in the design, all of them hidden, and no joints is left out
+        // of the vertical History, matching the bottom bar (#10393, #22211). An empty folder with
+        // no features at all stays visible.
+        self.hidden_groups = ids
+            .iter()
+            .enumerate()
+            .map(|(at, root)| {
+                self.first.get(at).copied().flatten().is_none()
+                    && self.joints.get(at).is_none_or(Vec::is_empty)
+                    && self.group_of.iter().any(|group| group.is_some_and(|group| inside(group, *root)))
+            })
+            .collect();
+        for (index, position) in self.position.iter().enumerate() {
+            if self.hidden_groups.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(slot) = position.and_then(|position| self.starting.get_mut(position)) {
+                slot.push(index);
+            }
+        }
+        for starting in &mut self.starting {
+            starting.sort_by(|a, b| paths.get(*a).cmp(&paths.get(*b)));
+        }
+        for (index, id) in ids.iter().enumerate() {
+            if self.hidden_groups.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Some(slot) = last.get(id).copied().flatten().and_then(|last| self.ending.get_mut(last)) {
+                slot.push(index);
+            }
+        }
+        for ending in &mut self.ending {
+            ending.sort_by_key(|index| std::cmp::Reverse(self.depth.get(*index).copied()));
+        }
+        let mut trailing: Vec<usize> = (0..groups.len()).filter(|index| !self.hidden_groups.get(*index).copied().unwrap_or(false)).collect();
+        let place = |at: usize| (self.position.get(at).copied().flatten().unwrap_or(usize::MAX), paths.get(at));
+        trailing.sort_by(|a, b| place(*a).cmp(&place(*b)));
+        self.trailing = trailing;
     }
 
     /// The first and last timeline positions of `id`'s own and nested features.
@@ -289,7 +341,8 @@ impl RowPlan {
             last.insert(id, None);
             return (None, None);
         };
-        let direct: Vec<usize> = group.features.iter().filter_map(|feature| self.index_of.get(feature).copied()).collect();
+        let direct: Vec<usize> =
+            group.features.iter().filter_map(|feature| self.index_of.get(feature).copied()).filter(|index| !self.is_hidden(*index)).collect();
         let (mut low, mut high) = (direct.iter().copied().min(), direct.iter().copied().max());
         for child in children.get(&id).into_iter().flatten() {
             let Some(child) = self.groups.get(*child).map(|child| child.id) else { continue };
@@ -399,6 +452,9 @@ impl RowPlan {
                     order.push(TimelineItem::Group(group.id));
                 }
             }
+            if self.is_hidden(index) {
+                continue;
+            }
             // A listed sketch follows the feature built from it.
             let Some(row) = self.rows.row_at(index) else { continue };
             if self.group_of.get(index).copied().flatten().is_none_or(|group| self.is_open(folds, group)) {
@@ -427,8 +483,10 @@ impl RowPlan {
         let mut by_id: Vec<_> = self.by_id.iter().collect();
         by_id.sort();
         format!(
-            "{features:?}\n{:?}\n{:?}\n{index_of:?}\n{:?}\n{:?}\n{by_id:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+            "{features:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{index_of:?}\n{:?}\n{:?}\n{by_id:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
             self.groups,
+            self.hidden,
+            self.hidden_groups,
             self.rows,
             self.group_of,
             self.has_patterns,

@@ -25,5 +25,8 @@
   },
   "zh": {
     "policy.ai_permissions_hold": "您的组织为所有智能体设置权限：智能体自己的权限和“始终允许的项目”中的答复不适用。它们会被保留，直到此设置不再受管理。"
+  },
+  "fr": {
+    "policy.ai_permissions_hold": "Votre organisation définit les autorisations de chaque agent : les autorisations propres à un agent et les réponses « Toujours autorisé » ne s’appliquent pas. Elles sont conservées jusqu’à ce que ce paramètre ne soit plus géré."
   }
 }
