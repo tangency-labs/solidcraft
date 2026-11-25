@@ -1478,7 +1478,7 @@ fn saved_projections_of_a_revolve_cuts_flanks_open_with_0_45_numbered_names() {
     for (name, at) in [
         (format!("F{first}:side:a1#[F{first}:side:l3]|F{}:side:l1#1~2", id(&s, "Revolve2")), near),
         (old(1, 2), near + Vec3::new(0., 0., 3.)),
-        (format!("F{first}:side:a1#[F{first}:side:l3]#2|F{cut}:side:l1#1~2"), near),
+        (format!("F{first}:side:a1#2#[F{first}:side:l3]|F{cut}:side:l1#1~2"), near),
     ] {
         let mut doc = solidcraft_doc::Document::clone(&s.doc);
         let solidcraft_doc::FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(profile).unwrap().kind else { panic!("sketch") };
