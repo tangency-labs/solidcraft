@@ -1195,7 +1195,8 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
 /// lengths (a tapered duct) is a planar trapezoid, which the skin would make a bilinear
 /// B-spline surface. `None` for any other loft, or where the kernel does not prove a section
 /// closed, a side's lines apart (more than 1e-9) or its fourth corner on the plane of the other
-/// three (the kernel's [`path::point_off_plane_of`] at 1e-9 of its size): the skin takes it.
+/// three (the kernel's [`path::point_off_plane_of`] at 1e-9 of its size), or where the planar
+/// faces do not build or stitch: the skin takes it.
 fn planar_sides(
     k: &mut Kernel,
     counts: &[usize],
@@ -1284,11 +1285,11 @@ fn planar_sides(
         }
         Ok(())
     });
-    if let Err(e) = built {
-        return Ok(Some(Err(e)));
-    }
-    if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
-        return Ok(Some(Err(status(e))));
+    // a side the face builder will not take as planar (its own test is absolute, the flatness
+    // proof above is relative to the loft's size) or a stitch that fails: the skin takes the
+    // loft, as it takes any loft not proved planar, rather than the loft being refused
+    if built.is_err() || stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()).is_err() {
+        return Ok(None);
     }
     b.refresh_cached_topology();
     finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
