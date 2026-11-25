@@ -1,9 +1,9 @@
 //! Operations on bodies: booleans, placements and splits by a plane, through SMLib. Bodies apart
 //! from each other join without any intersection work, their records side by side.
 
+use crate::placement::Rigid;
 use solidcore_record::Vec3;
 use solidcore_record::brep::part;
-use solidcraft_geom::brep::placement::Rigid;
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
@@ -208,8 +208,8 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     }
     let exact = match Rigid::of_matrix(&m) {
         // (a body with a blend by its definition is moved by the kernel, the definition with it)
-        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
-        None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
+        Some(motion) => crate::placement::moved(body.record(), &motion),
+        None => crate::placement::mapped(body.record(), &m),
     };
     let (placed, sources, paint) = match exact {
         Some(record) => {
