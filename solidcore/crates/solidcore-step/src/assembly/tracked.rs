@@ -483,8 +483,6 @@ mod tests {
         Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![a, b] }
     }
 
-    const U_TURN: [Option<f64>; 2] = [Some(1.0), None];
-
     /// #20575's loop: the cut's second piece followed round the tube the other way from the
     /// kernel's trim, a period up from it, and the seam's second use after it on the kernel's side.
     /// Both are moved a period down to run on from the cut's first piece, and the loop closes.
@@ -498,11 +496,11 @@ mod tests {
             line([0.25, 0.6], [1.0, 0.5]),
             line([1.0, 0.0], [1.0, 0.5]),
         ];
-        assert!(install(U_TURN, &l, &mut pcs, 3, line([1.75, 0.8], [1.0, 0.5])).unwrap());
+        assert!(install([Some(1.0), None], &l, &mut pcs, 3, line([1.75, 0.8], [1.0, 0.5])).unwrap());
         assert_eq!(use_end(&l, &pcs, 3, false).unwrap(), [0.75, 0.8]);
         assert_eq!(use_end(&l, &pcs, 3, true).unwrap(), [0.0, 0.5]);
         assert_eq!(use_end(&l, &pcs, 4, true).unwrap(), [0.0, 0.0]);
-        assert!(jumps(U_TURN, &l, &pcs).unwrap().iter().all(|j| !j));
+        assert!(jumps([Some(1.0), None], &l, &pcs).unwrap().iter().all(|j| !j));
         // The uses before it stay as they were.
         assert_eq!(use_end(&l, &pcs, 1, false).unwrap(), [1.0, 0.0]);
     }
@@ -515,7 +513,7 @@ mod tests {
         let l = [(0, true), (1, true)];
         let given = vec![line([0.0, 0.0], [0.25, 1.0]), line([0.25, 1.0], [0.0, 0.0])];
         let mut pcs = given.clone();
-        assert!(!install(U_TURN, &l, &mut pcs, 0, line([0.0, 0.0], [-0.75, 1.0])).unwrap());
+        assert!(!install([Some(1.0), None], &l, &mut pcs, 0, line([0.0, 0.0], [-0.75, 1.0])).unwrap());
         assert_eq!(pcs, given);
     }
 }
