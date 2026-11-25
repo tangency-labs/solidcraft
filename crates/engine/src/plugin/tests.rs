@@ -51,6 +51,89 @@ fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
 }
 
 #[test]
+fn edit_form_validates_conditional_root_alternatives_under_the_field_key() {
+    let s = Session::default();
+    let schema = json!({"type":"object","additionalProperties":true,"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}
+    },"oneOf":[{
+        "type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }
+    }]});
+    let invalid = json!({"gate":true,"mode":true,"secret":"invalid"});
+    assert!(matches!(check_input(&schema, &invalid), Err(HostError::InvalidInput { field, .. }) if field == "params.secret"));
+    let errors = form_errors(&s, &schema, &invalid);
+    assert!(matches!(errors.get("secret"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })), "{errors:?}");
+    assert!(!errors.contains_key("params"), "{errors:?}");
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":7})).is_empty());
+}
+
+#[test]
+fn edit_form_validates_values_against_an_additional_property_schema() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","properties":{"depth":{"type":"integer"}},"additionalProperties":{"type":"integer"}});
+    assert!(form_errors(&s, &schema, &json!({"depth":2,"operation_id":7})).is_empty());
+    let errors = form_errors(&s, &schema, &json!({"depth":"invalid","operation_id":"invalid"}));
+    assert!(matches!(errors.get("depth"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert!(matches!(errors.get("operation_id"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    schema["additionalProperties"] = json!(false);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":7})).contains_key("operation_id"));
+    schema["additionalProperties"] = json!(true);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":"allowed"})).is_empty());
+}
+
+#[test]
+fn edit_form_keeps_selection_context_in_alternatives_and_ordinary_object_arrays_closed() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    let selection = json!({"targets":[{"type":"body","name":"Stock"}]});
+    let schema = json!({"type":"object","properties":{
+        "targets":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    assert!(check_input(&schema, &selection).is_ok());
+    assert!(form_errors(&s, &schema, &selection).is_empty());
+    let ordinary = json!({"type":"object","properties":{
+        "records":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    let values = json!({"records":[{"type":"body","name":"Stock"}]});
+    assert!(check_input(&ordinary, &values).is_err());
+    assert!(matches!(form_errors(&s, &ordinary, &values).get("records"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+}
+
+#[test]
+fn edit_form_checks_pick_existence_in_selection_array_alternatives() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    for composition in ["oneOf", "anyOf"] {
+        let schema = json!({"type":"object","properties":{
+            "enabled":{"type":"boolean"},
+            "picks":{composition:[{"type":"array","items":{"type":"object"}}],"x-solidcraft-selection":{"version":1,"accept":["body"]},
+                "x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }});
+        let values = json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]});
+        assert!(check_input(&schema, &values).is_ok());
+        assert!(form_errors(&s, &schema, &values).is_empty(), "{composition}");
+        let deleted = json!({"enabled":true,"picks":[{"type":"body","name":"deleted"}]});
+        assert!(check_input(&schema, &deleted).is_ok());
+        assert!(matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)), "{composition}");
+    }
+    let filtered = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(form_errors(&s, &filtered, &json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]})).is_empty());
+    assert!(matches!(
+        form_errors(&s, &filtered, &json!({"enabled":false,"picks":[{"type":"body","name":"Stock"}]})).get("picks"),
+        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
+    ));
+}
+
+#[test]
 fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
     use solidcore_record::Vec3;
     let mut s = Session::default();
@@ -428,6 +511,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         ("canvas.insert", Some("file")),
         ("library.export", Some("file")),
         ("doc.open", Some("doc")),
+        ("doc.info", Some("doc")),
         ("settings.get", Some("app")),
         ("plugin.run", Some("plugin")),
     ] {
@@ -521,6 +605,58 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
     assert!(host.run_command("file.export_stl", &json!({"path":output})).is_err(), "export also requires write authority");
     assert!(!output.exists());
     assert!(source_path.exists(), "the imported STEP is unchanged");
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A granted `file` command names a file by its grant's name; the reply names the real file.
+/// A read-only grant serves only input readers; a name the command may not use is refused first.
+#[test]
+fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-grant-paths-{}", std::process::id()));
+    let (outbox, input) = (root.join("outbox"), root.join("input"));
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::create_dir_all(&input).unwrap();
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: vec![outbox.clone()],
+        file_read_folders: vec![outbox.clone(), input.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+    };
+    host.session.plugin_state.file_grants = vec![
+        FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write: true },
+        FileGrant { name: "input".into(), folder: input.clone(), read: true, write: false },
+    ];
+    host.begin_transaction().unwrap();
+    s_box(&mut host);
+    let exported = host.run_command("file.export_step", &json!({"path":"grant:outbox/part.step"})).unwrap();
+    assert!(outbox.join("part.step").is_file());
+    assert_eq!(exported["path"], json!(outbox.join("part.step").to_string_lossy()), "the reply names the file where it is");
+    std::fs::copy(outbox.join("part.step"), input.join("part.step")).unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":"grant:input/part.step"}));
+    assert!(inserted.is_ok(), "an input reader uses a read-only grant: {inserted:?}");
+    for path in ["grant:input/copy.step", "grant:elsewhere/copy.step", "grant:outbox/../copy.step"] {
+        let refused = host.run_command("file.export_step", &json!({"path": path}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.starts_with(path)), "{path}: {refused:?}");
+    }
+    // The rewritten path is then judged by the command's scope like any other (here Windows' rules
+    // for device names and streams), so the grant form reaches nothing a full path could not.
+    if cfg!(windows) {
+        for path in ["grant:outbox/nul.step", "grant:outbox/part.step:stream"] {
+            let refused = host.run_command("file.export_step", &json!({"path": path}));
+            assert!(
+                matches!(&refused, Err(HostError::CommandFailed { reason, .. }) if reason.contains("not allowed for this agent")),
+                "{path}: {refused:?}"
+            );
+        }
+    }
+    assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
     host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1965,6 +2101,52 @@ mod native {
         }
     }
 
+    /// A plugin saves into its folder by the grant's name; under a read-only grant nothing is written.
+    #[test]
+    fn a_plugin_saves_into_its_granted_folder_by_the_grants_name() {
+        for write in [true, false] {
+            let f = Fixture::new("call $box");
+            let outbox = f.0.join("outbox");
+            std::fs::create_dir_all(&outbox).unwrap();
+            let (command, args) = ("file.save_as", r#"{"path":"grant:outbox/part.sc"}"#);
+            let call = format!("      i32.const 2048 i32.const {} i32.const 3072 i32.const {} i32.const 0 call $run\n", command.len(), args.len());
+            let source = component_template()
+                .replace("      call $box\n      call $box\n", &call)
+                .replace("\"file.export\"", &format!("\"{command}\")\n    (data (i32.const 3072) \"{}\"", args.replace('"', "\\22")));
+            std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([command]);
+            m["runtime"]["permissions"] = json!({"command_groups":["file"],"files":[{"name":"outbox","read":true,"write":write}]});
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            s.plugin_state.grants.insert(
+                "sample".into(),
+                Grants {
+                    package_hash: Some(read_package(&f.path()).unwrap().approval),
+                    command_groups: BTreeSet::from(["file".into()]),
+                    folders: vec![FileGrant { name: "outbox".into(), folder: outbox.clone(), read: true, write }],
+                    fuel: None,
+                    memory_mib: None,
+                    input_folder: false,
+                },
+            );
+            let saved = outbox.join("part.sc");
+            let result = f.run(&mut s);
+            if write {
+                result.unwrap();
+                assert!(saved.is_file(), "the design is saved in the granted folder");
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`outbox` is not a folder this command may use")),
+                    "{error}"
+                );
+                assert!(!saved.exists(), "a read-only grant writes nothing");
+            }
+        }
+    }
+
     #[test]
     fn hand_installed_plugins_get_no_legacy_or_other_plugins_folder_grants() {
         let f = Fixture::new("call $box");
@@ -2017,6 +2199,50 @@ mod native {
         s.plugin_state.grants.remove("sample");
         assert!(matches!(f.run(&mut s).err().as_ref().and_then(EngineError::host_error), Some(HostError::PermissionDenied { .. })));
         assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn doc_info_in_a_plugin_run_needs_the_doc_grant_and_names_the_users_design() {
+        let f = Fixture::new("call $box");
+        let source = component_template()
+            .replace(
+                "      call $box\n      call $box\n",
+                "      call $box i32.const 2048 i32.const 8 i32.const 3072 i32.const 2 i32.const 0 call $run\n",
+            )
+            .replace("file.export", "doc.info\")\n    (data (i32.const 3072) \"{}");
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(&source).unwrap()).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["solid.box", "doc.info"]);
+        m["runtime"]["permissions"] = json!({"command_groups":["doc"]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let file = f.0.join("Bracket.sc").to_string_lossy().into_owned();
+        let mut s = Session::default();
+        s.execute("file.save_as", &json!({"path": file})).unwrap();
+        let bytes = std::fs::read(&file).unwrap();
+        let before = s.execute("doc.info", &json!({})).unwrap();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`doc`")), "{error}");
+        assert!(s.doc.features.is_empty() && s.undo.is_empty());
+        let approval = read_package(&f.path()).unwrap().approval;
+        s.plugin_state.grants.insert(
+            "sample".into(),
+            Grants { package_hash: Some(approval.clone()), command_groups: BTreeSet::from(["doc".to_string()]), ..Default::default() },
+        );
+        assert_eq!(f.run(&mut s).unwrap()["result"], before, "saved before the run, though the run's box came first");
+        assert_eq!((s.doc.features.len(), s.path.as_deref()), (1, Some(file.as_str())));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes, "the run wrote nothing to the file");
+        // What the run was told stays in the run: the user's session keeps none of it.
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
+        // The desktop's worker: a copy of a copy, neither with a `path`.
+        let now = s.execute("doc.info", &json!({})).unwrap();
+        assert_eq!(now["unsaved"], true);
+        let params = json!({"path": f.path(), "approval": approval, "entry": "make", "params": {}});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), params)], None).unwrap();
+        assert!(prepared.is_current(&s));
+        let replies = s.accept_commands(prepared).unwrap();
+        assert_eq!(replies[0].1["result"], now, "{replies:?}");
+        assert_eq!(s.doc.features.len(), 2);
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
     }
 
     /// `plugin.check` finds what Install and a call would refuse, with a fix for each, and runs
@@ -2729,6 +2955,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         "inspect.measure",
         "sketch.inspect",
         "sketch.solve",
+        "doc.info",
     ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }

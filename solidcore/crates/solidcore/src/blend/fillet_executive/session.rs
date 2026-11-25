@@ -521,9 +521,10 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("solver is not live in this session"))
     }
 
-    /// An additional parallel-line overlap certificate, including when current
-    /// rails have passed completely beyond the opposite edges. A missing
-    /// certificate leaves the independent rail checks to decide their geometry.
+    /// An additional planar straight-band overlap certificate (both parallel
+    /// and opposing non-parallel lines), including when current rails have
+    /// passed completely beyond the opposite edges. A missing certificate
+    /// leaves the independent rail checks to decide their geometry.
     fn planar_bands_overlap(
         &mut self,
         k: &Kernel,
@@ -536,7 +537,14 @@ impl SessionObjects<'_> {
             return Err(invalid("object is not a solver"));
         };
         let contact = {
-            let (a, b) = (self.solver(ia)?, self.solver(ib)?);
+            let solvers_ref = &self.solvers;
+            let solver_of = |id: FilletSolverId| -> Result<&SolverObject> {
+                solvers_ref
+                    .get(id.0 as usize)
+                    .and_then(Option::as_ref)
+                    .ok_or_else(|| invalid("solver is not live in this session"))
+            };
+            let (a, b) = (solver_of(ia)?, solver_of(ib)?);
             let rail_on_face = |solver: &SolverObject| -> Result<Option<usize>> {
                 for rail in 0..2 {
                     if let Some(use_) = solver.base().edgeuse(rail)? {
@@ -550,9 +558,6 @@ impl SessionObjects<'_> {
             let (Some(rail_a), Some(rail_b)) = (rail_on_face(a)?, rail_on_face(b)?) else {
                 return Ok(false);
             };
-            if !planar_bands::parallel_overlap_candidate(self.target, a, b, rail_a, rail_b)? {
-                return Ok(false);
-            }
             let mut corners = Vec::new();
             for &object in solvers {
                 let FilletObject::Solver(id) = object else {
@@ -561,8 +566,7 @@ impl SessionObjects<'_> {
                 if id == ia || id == ib {
                     continue;
                 }
-                if let Some(corner) =
-                    planar_bands::corner_band(self.target, self.solver(id)?, face)?
+                if let Some(corner) = planar_bands::corner_band(self.target, solver_of(id)?, face)?
                 {
                     corners.push(corner);
                 }
@@ -889,7 +893,9 @@ impl crate::blend::blend_corner::chamfer::ChamferSolvers for SweptSessionSolvers
             SolverObject::ConstantRadius(s) if !FilletSolverOps::offset_radii_can_change(&**s)? => {
                 Some(ChamferSizeKind::Offsets)
             }
-            SolverObject::ConstantDistance(s) => Some(ChamferSizeKind::Chord(s.distance())),
+            SolverObject::ConstantDistance(s) if s.solver.station_setback().is_none() => {
+                Some(ChamferSizeKind::Chord(s.distance()))
+            }
             _ => None,
         };
         Ok(Some((slot.base(), size)))
@@ -6550,6 +6556,10 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             .collect();
         // faces whose guards main runs at their first sample, kept as it ran them
         let mut guarded: BTreeSet<FaceId> = BTreeSet::new();
+        // straight planar bands prepared once per `(solver_index, face)` so
+        // candidate filtering across all pairs does O(1) stack arithmetic
+        let mut prepared_straight: BTreeMap<(usize, FaceId), Option<planar_bands::PreparedBand>> =
+            BTreeMap::new();
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
                 if a == b || edge_a == edge_b {
@@ -6635,14 +6645,50 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         else {
                             return Err(invalid("band without its solver"));
                         };
-                        if self.planar_bands_overlap(
-                            k,
-                            [solver_a, solver_b],
-                            *face_a,
-                            &edge_ids,
-                            solvers,
-                        )? {
-                            return Ok(false);
+                        let prep_a = if let Some(cached) = prepared_straight.get(&(a, *face_a)) {
+                            *cached
+                        } else {
+                            let FilletObject::Solver(id_a) = solver_a else {
+                                return Err(invalid("object is not a solver"));
+                            };
+                            let built = planar_bands::prepare_straight_band(
+                                k,
+                                self.target,
+                                self.solver(id_a)?,
+                                *face_a,
+                                &edge_ids,
+                            )?;
+                            prepared_straight.insert((a, *face_a), built);
+                            built
+                        };
+                        let prep_b = if let Some(cached) = prepared_straight.get(&(b, *face_a)) {
+                            *cached
+                        } else {
+                            let FilletObject::Solver(id_b) = solver_b else {
+                                return Err(invalid("object is not a solver"));
+                            };
+                            let built = planar_bands::prepare_straight_band(
+                                k,
+                                self.target,
+                                self.solver(id_b)?,
+                                *face_a,
+                                &edge_ids,
+                            )?;
+                            prepared_straight.insert((b, *face_a), built);
+                            built
+                        };
+                        if let (Some(pa), Some(pb)) = (prep_a, prep_b) {
+                            if planar_bands::overlap_candidate(&pa, &pb)?
+                                && self.planar_bands_overlap(
+                                    k,
+                                    [solver_a, solver_b],
+                                    *face_a,
+                                    &edge_ids,
+                                    solvers,
+                                )?
+                            {
+                                return Ok(false);
+                            }
                         }
                         if let (Some(eb), Some(Some(box_a)), Some(Some(box_b))) = (
                             edge_box_b,

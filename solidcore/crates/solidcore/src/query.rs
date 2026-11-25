@@ -19,6 +19,7 @@ pub(crate) mod exact;
 pub mod face;
 mod face_surface;
 pub mod faces_continue;
+pub mod flush_contact;
 pub mod r#loop;
 pub mod member_turn;
 pub mod normal;

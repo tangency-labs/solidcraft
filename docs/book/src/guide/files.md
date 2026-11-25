@@ -356,9 +356,17 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
 running opens it in that window, as File > Open does, and no second app starts. The two launches
 talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
-nothing listens on the network, and only file paths are sent. If the running window does not answer
-within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
-a separate app.
+nothing listens on the network, and only file paths are sent, with whether they open read-only.
+If the running window does not answer within a moment, the new launch starts normally.
+`solidcraft --new-instance part.sc` always starts a separate app.
+
+`solidcraft --read-only part.sc` opens the design read-only, as **Open Read-Only** does (see
+[Designs in shared or synced folders](#designs-in-shared-or-synced-folders)): you can change it,
+and Save asks for a new file. It covers every file named on that command line, in a new window or
+in the running one. A design that another SolidCraft has open opens without asking. A SolidCraft
+from before this option doesn't take read-only files from a new launch; that launch opens them in
+a window of its own. STEP, mesh and other imported files always open as new, unsaved designs, so
+the option changes nothing for them. Without a file it does nothing.
 
 ## Large files
 
@@ -417,6 +425,23 @@ name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in fron
 cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
 offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
 channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
+## Default folders
+
+**Preferences → Design → Folders** sets where the save dialogs open. Both settings are empty by
+default. An empty setting keeps the old behaviour: the dialog opens in the folder you used last, or
+in the folder of the open design.
+
+- **Designs folder**: **Save** and **Save As** open here for a design that has never been saved.
+  **Save As** for a design that is already saved still opens in that design's folder.
+- **Exports folder**: **File → Export**, **Save As Mesh**, drawings and the other files SolidCraft
+  saves open here. When you choose another folder in one of these dialogs, the next one opens in
+  that folder until you quit or change the setting.
+
+Type a folder or choose one with **Browse…**. **Clear** empties the setting. A folder that no longer
+exists is ignored, and the dialog opens in the folder you used last. The web app saves through the
+browser, so it has no folder settings. The control channel sets them with
+`ui.prefs {"designs_folder": "/home/sam/Designs", "exports_folder": "/home/sam/Prints"}`.
 
 ## Design properties
 

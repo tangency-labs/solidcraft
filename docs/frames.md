@@ -2,8 +2,9 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates and retained round-tube copes with printable DXF templates.
-Trims, gussets, welds and the cut list follow.
+members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
+attached gusset plates, trimming or extending to members, planes and faces, and retained round-tube
+copes with printable DXF templates. Welds and the cut list follow.
 
 ## The workflow
 
@@ -17,6 +18,8 @@ Trims, gussets, welds and the cut list follow.
 3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per selected
    line or arc. Enable **One Continuous Member** to make a connected tangent line–arc–line run
    into one tube. Select its segments in path order. Repeat for another physical member.
+4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
+   members they meet, or trims or extends them to a plane or face (below).
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -24,7 +27,7 @@ Trims, gussets, welds and the cut list follow.
 ```
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
-commands. Where members meet they overlap unless you choose a corner type (see Corners).
+commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
 
 ## Round-tube cope templates
 
@@ -98,8 +101,8 @@ pristine stock. Saving, thinning and reopening a cache cannot restore a certific
 ineligible source frame.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap,
-Mounting Plate and Parameters. Like Sheet Metal it is always there, and it selects itself when a
-frame member, end cap or mounting plate is the selected body (or the last body of the active component).
+Mounting Plate, Gusset, Trim/Extend and Parameters. Like Sheet Metal it is always there, and it selects itself when a
+frame member, end cap, mounting plate or gusset is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 
@@ -617,6 +620,68 @@ centre of its profile's bounding box, so it stays where it is.
 `parallel_to` is a `{sketch, curve}` line or an edge or axis pick. Give `angle` or `parallel_to`;
 when both are given, `parallel_to` wins. **Edit Feature** reopens the step with its angle.
 
+## Trim/Extend
+
+General Trim/Extend currently accepts unjointed Frame Members: **None**, without corner overrides,
+**Fit Ends** or **Coped**. It refuses members made with Auto, Mitre, Butt, overrides, fitted ends
+or copes, both as members to trim and as member targets. Rebuilding their original stock would
+discard their existing cuts. Their ordinary Frame Member and Multi-Trim Corner operations stay
+available. A planar face on such a member can still be used as a plane target.
+
+**Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) moves the ends of members to what they meet:
+
+- **Another member** (a butt joint): the end stops flat against that member's side. The side is
+  worked out from the other member's line and profile, not from a face of its body, so the joint
+  follows sketch and parameter edits: widen the frame and the rails between the posts grow with it.
+- **A plane or a planar face**: an origin or construction plane, or a flat face of any body. A
+  face that slants across the member cuts its end at that slant. A face is attached as a sketch on
+  it is, so the trim follows the face: make the plate under a post thicker and the post stands on
+  its new top.
+
+A member trims or extends alike: an end short of its target grows to it. Each member keeps its
+body and its name, and later trims see it as it now is (trim the cross members to rails that were
+themselves trimmed to the posts).
+
+```json
+{"command": "frame.trim", "params": {"members": ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"], "to": ["Post", "Post (2)", "Post (3)", "Post (4)"]}}
+{"command": "frame.trim", "params": {"members": ["Brace"], "to": {"plane": {"face": [0, 200, 500]}}, "gap": "1.5 mm"}}
+```
+
+- `members`: the members to trim, each a member's body name or `{feature, line}` (its Frame Member
+  feature and its line's id). A trim keeps them by feature and line, so renaming a member or its
+  feature keeps the trim.
+- `to`: what to trim them to, one or a list: a member (its body name, or `{member, side}` with
+  `side` one of `right`, `left`, `top`, `bottom` of its profile; by default the side the trimmed
+  member meets), or `{plane}` as `sketch.create` takes it (`XY`, a construction plane,
+  `{origin, normal}`, or `{face: [x, y, z]}` for a planar face, with `body`, `index` and `path` for
+  the exact face picked).
+- `end`: `auto` (the default: for each target, the end of the member nearer it), `start` or `end`.
+- `gap`: the weld gap between each end and its target, a length expression (default 0, at most
+  1 m).
+
+A member meets a member target when the line through the middle of its profile passes through the
+target's profile and along the target's length; a plane it crosses. With several targets, each
+moves the end it meets, so one trim can butt every rail of a frame against its posts. It is refused,
+with the reason, when a member meets none of the targets, when two targets would move the same end
+(trim them in separate features), when a chosen side faces away from the member, and when the
+member's body was changed after it was made (a hole drilled in it, say): a trim rebuilds the member
+from its line and profile, and would lose that change, so trim it before the features that change
+it. A changed member is also refused as a member target, because its sketch line and profile
+may no longer describe its actual side. Use a planar face target to follow the modified body.
+This includes symmetric rotations whose outline stays the same and bodies transferred into
+another component after the member was made. Members of another component
+are not supported yet.
+
+### The Trim/Extend dialog
+
+- **Members**: pick the members to trim (their bodies or faces of them).
+- **To**: pick members, planar faces or planes. A face of an unmodified member selects that
+  member; a face on a modified member is kept as a planar-face target.
+- **End** (Nearer End, Start, End) and **Gap** as above.
+- **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
+  (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
+  n more targets**, kept while ticked; untick it to drop them all and pick again.
+
 ## Built-in profiles
 
 A profile is JSON with a `kind` and its dimensions, each a number in the design's units or a
@@ -682,3 +747,19 @@ given larger than the room for it.
 ```json
 {"command": "frame.profile.insert", "params": {"profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}, "at": [0, 0], "anchor": "bottom_left"}}
 ```
+
+## Gussets
+
+**Weldments › Create › Gusset** (`frame.gusset`) adds a separate reinforcing plate between two planar support faces. Select the faces in order, enter the two leg lengths and thickness, and use the preview to check placement. A triangular outline uses zero outer clipping; **Clipped Tips** cuts equal distances from the two outer tips. **Corner Relief** removes the inside vertex, leaving room at the existing weld corner. The plate is named **Gusset**, then **Gusset (2)** and so on, unless you give it a name.
+
+The legs follow the selected faces into their outward-facing joint space. This also supports non-right-angle joints. The three thickness-placement icons show the plate on the negative side, centred on the gusset plane, or on the positive side. Click an icon to update the live preview; the selected button stays highlighted and its tooltip names the placement. Positive direction is the cross product of the first and second support normals; swapping supports reverses it. **Joint Offset** moves the plate along that direction from the centre of the faces' common span.
+
+```json
+{"command":"frame.gusset","params":{"supports":[{"body":"Post","index":2,"face":[20,0,100]},{"body":"Rail","index":5,"face":[100,0,40]}],"leg1":"80 mm","leg2":"100 mm","thickness":"6 mm","relief":"10 mm","clip":"0 mm","placement":"center","offset":"0 mm","body_name":"Joint plate"}}
+```
+
+Face indices in this example are illustrative: obtain the current exact picks from selection or `model.faces`. The saved feature holds persistent face identities, not those transient indices. Length numbers use the design unit; picked point coordinates are world millimetres. Every length can instead be a parameter expression.
+
+The entire contact strip must fit on material on both finite faces. Oversize legs/thickness, holes crossing a contact strip, parallel faces and lost or replaced supports return an error. The supporting bodies stay separate and unchanged; the gusset is not a weld or a strength calculation. The first tool requires planar faces. Curved/coped supports and fastener patterns remain separate work.
+
+Edit Feature restores both exact picks and dimensions; preview, undo/redo and save/reopen use the same command. Frame-member supports also retain the producing sketch line, so another line cannot silently take over an attachment through a reused body name.

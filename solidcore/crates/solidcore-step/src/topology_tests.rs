@@ -2346,6 +2346,131 @@ fn quarter_circle_spline(quarters: usize) -> Curve {
     }))
 }
 
+/// The seam of the last wall of #21379's swept tube, as its file writes it: a rational cubic
+/// (weights 1 up to rounding) 48 mm long, about 700 mm from the origin. Three of its points lie
+/// on a circle of radius 8.6 km, and the rest of it lies microns off that circle: it is no
+/// circle, and read as one it lay about 4 µm off its wall, which was then started anew a sliver
+/// off its seam. A
+/// rational quadratic quarter circle of radius 500 at the same distance is still its circle. Both
+/// stay so moved 50 m off: the bound is at the spline's own size, wherever it lies. A spline with
+/// a point that is not a number is no circle.
+#[test]
+fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
+    let moved = |b: &crate::geom::BSplineCurve, by: f64| crate::geom::BSplineCurve {
+        points: b.points.iter().map(|p| [p[0] + by, p[1], p[2]]).collect(),
+        ..b.clone()
+    };
+    let seam = crate::geom::BSplineCurve {
+        degree: 3,
+        points: vec![
+            [681.260037996487, 187.44692670357483, 52.85495796514432],
+            [680.9158873817419, 191.38065431391036, 54.27139725475507],
+            [680.2537941324069, 198.9485961621376, 56.9964316584237],
+            [679.3160225935635, 209.66758248669714, 60.856078497380125],
+            [678.5127273075279, 218.84917330359616, 64.16212726839862],
+            [677.8622207424097, 226.28433846458321, 66.83933124789313],
+            [677.4874017361843, 230.568439785698, 68.3819177764027],
+            [677.3222395706246, 232.45620871116463, 69.06165148653872],
+        ],
+        weights: Some(vec![1.0, 1.0, 1.0000000000000002, 0.9999999999999993, 1.0000000000000002, 0.9999999999999998, 1.0, 1.0]),
+        knots: vec![3.0, 3.262194489040001, 3.5044250097276883, 3.7144522474345854, 3.8741747496344305, 4.0],
+        multiplicities: vec![4, 1, 1, 1, 1, 4],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let (r, o) = (500.0, [700.0, 200.0, 50.0]);
+    let arc = crate::geom::BSplineCurve {
+        degree: 2,
+        points: vec![[o[0] + r, o[1], o[2]], [o[0] + r, o[1] + r, o[2]], [o[0], o[1] + r, o[2]]],
+        weights: Some(vec![1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0]),
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![3, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    for by in [0.0, 5e4] {
+        assert!(swept::spline_circle(&moved(&seam, by)).is_none(), "seam moved {by}");
+        let Some((Curve::Circle { position, radius }, swept)) = swept::spline_circle(&moved(&arc, by)) else {
+            panic!("a quarter circle moved {by} is a circle")
+        };
+        assert!((radius - r).abs() <= 1e-9 * r, "moved {by}: radius {radius}");
+        assert!((swept - std::f64::consts::FRAC_PI_2).abs() <= 1e-9, "moved {by}: swept {swept}");
+        let centre = [o[0] + by, o[1], o[2]];
+        assert!(position.origin.iter().zip(centre).all(|(a, b)| (a - b).abs() <= 1e-9 * r), "moved {by}: {:?}", position.origin);
+    }
+    let mut broken = arc.clone();
+    broken.points[1][2] = f64::NAN;
+    assert!(swept::spline_circle(&broken).is_none());
+}
+
+/// A circle is accepted on the whole of the spline, not at sample points: a quarter circle with
+/// knots 0.1, 0.101, 0.102 and 0.103 inserted is still its circle, and with the one control
+/// point whose basis function lives on [0.1, 0.103] moved 1 mm out of the circle, or out of its
+/// plane, it is not. That point is zero at every one of the 65 samples k/64 (6/64 < 0.1 and
+/// 0.103 < 7/64), so the moved spline matches the circle at all of them and departs from it
+/// only between two of them.
+#[test]
+fn a_spline_that_departs_from_its_circle_between_the_samples_is_not_a_circle() {
+    let (r, o) = (500.0, [700.0, 200.0, 50.0]);
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let mut knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let mut h: Vec<[f64; 4]> = vec![[o[0] + r, o[1], o[2], 1.0], [(o[0] + r) * w, (o[1] + r) * w, o[2] * w, w], [o[0], o[1] + r, o[2], 1.0]];
+    // Boehm's insertion of one knot into the degree 2 spline, on homogeneous points.
+    for t in [0.1, 0.101, 0.102, 0.103] {
+        let k = knots.iter().rposition(|u| *u <= t).unwrap();
+        let mut next = Vec::with_capacity(h.len() + 1);
+        for i in 0..=h.len() {
+            next.push(if i + 2 <= k {
+                h[i]
+            } else if i > k {
+                h[i - 1]
+            } else {
+                let a = (t - knots[i]) / (knots[i + 2] - knots[i]);
+                std::array::from_fn(|c| a * h[i][c] + (1.0 - a) * h[i - 1][c])
+            });
+        }
+        h = next;
+        knots.insert(k + 1, t);
+    }
+    let spline = |h: &[[f64; 4]]| crate::geom::BSplineCurve {
+        degree: 2,
+        points: h.iter().map(|q| [q[0] / q[3], q[1] / q[3], q[2] / q[3]]).collect(),
+        weights: Some(h.iter().map(|q| q[3]).collect()),
+        knots: vec![0.0, 0.1, 0.101, 0.102, 0.103, 1.0],
+        multiplicities: vec![3, 1, 1, 1, 1, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let circle = spline(&h);
+    let Some((Curve::Circle { radius, .. }, _)) = swept::spline_circle(&circle) else { panic!("the quarter circle with knots inserted is a circle") };
+    assert!((radius - r).abs() <= 1e-9 * r, "radius {radius}");
+    // Point 3's basis function is the one on knots 0.1 to 0.103.
+    assert_eq!(&knots[3..=6], &[0.1, 0.101, 0.102, 0.103]);
+    let q = h[3];
+    let p = [q[0] / q[3], q[1] / q[3], q[2] / q[3]];
+    let out = [p[0] - o[0], p[1] - o[1]];
+    let reach = out[0].hypot(out[1]);
+    for (name, by) in [("out of the circle", [out[0] / reach, out[1] / reach, 0.0]), ("out of its plane", [0.0, 0.0, 1.0])] {
+        let mut moved = h.clone();
+        moved[3] = [(p[0] + by[0]) * q[3], (p[1] + by[1]) * q[3], (p[2] + by[2]) * q[3], q[3]];
+        let moved = spline(&moved);
+        for k in 0..=64 {
+            let s = f64::from(k) / 64.0;
+            let (a, b) = (circle.point(s).unwrap(), moved.point(s).unwrap());
+            assert!(a.iter().zip(b).all(|(a, b)| (a - b).abs() <= 1e-12 * r), "{name}: sample {k} moved");
+        }
+        let (a, b) = (circle.point(0.1015).unwrap(), moved.point(0.1015).unwrap());
+        assert!(a.iter().zip(b).map(|(a, b)| (a - b) * (a - b)).sum::<f64>() > 0.25, "{name}: the spline departs between the samples");
+        assert!(swept::spline_circle(&moved).is_none(), "a spline moved {name} between the samples is a circle");
+    }
+}
+
 #[test]
 fn a_closed_edge_on_a_spline_that_runs_on_past_a_full_turn_is_the_turn_between_its_passes() {
     // Five quarters from (2, 0): the curve passes (0, 2) at 1 and again at 5, its end. A
@@ -4427,4 +4552,63 @@ fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
     let scale = scaled.last().unwrap() / 1e-7;
     assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
     assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
+}
+
+/// `text` with the reference direction of every conical surface's placement turned about its axis by `angle`.
+fn cone_frames_turned(text: &str, angle: f64) -> String {
+    let refs = |s: &str| -> Vec<u64> {
+        s.split_once('=')
+            .map_or("", |(_, r)| r)
+            .split('#')
+            .skip(1)
+            .filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
+            .collect()
+    };
+    let lines: std::collections::HashMap<u64, &str> = text
+        .lines()
+        .filter_map(|l| {
+            let (id, _) = l.strip_prefix('#')?.split_once('=')?;
+            Some((id.trim().parse().ok()?, l))
+        })
+        .collect();
+    let numbers = |l: &str| -> Vec<f64> {
+        l.rsplit_once(",(").map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect())
+    };
+    let mut out = text.to_string();
+    for l in lines.values().filter(|l| l.contains("=CONICAL_SURFACE(")) {
+        let placement = refs(l)[0];
+        let [_, z, x] = refs(lines[&placement])[..] else { panic!("placement {placement}") };
+        let (zd, xd) = (numbers(lines[&z]), numbers(lines[&x]));
+        let y = [zd[1] * xd[2] - zd[2] * xd[1], zd[2] * xd[0] - zd[0] * xd[2], zd[0] * xd[1] - zd[1] * xd[0]];
+        let t: [f64; 3] = std::array::from_fn(|i| xd[i] * angle.cos() + y[i] * angle.sin());
+        out = out.replace(lines[&x], &format!("#{x}=DIRECTION('',({:?},{:?},{:?}));", t[0], t[1], t[2]));
+    }
+    out
+}
+
+/// solidcore#3253: a whole-turn cone face whose seam lies a hair (well within the face's
+/// tolerance, far beyond rounding) beside a quarter line kept its form starting on that
+/// line, a quarter away from the seam, and the block read back without its stepped hole.
+#[test]
+fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
+    let text = include_str!("../tests/fixtures/stepped_tapered_hole.step");
+    let slope = 4.0_f64.to_radians().tan();
+    let frustum = |r: f64, h: f64| std::f64::consts::PI * h * (r * r + r * (r + h * slope) + (r + h * slope).powi(2)) / 3.0;
+    let exact = 9.0 * 24.0 * 18.0 - frustum(1.35, 5.0) - frustum(2.65, 3.5);
+    let wrong: Vec<String> = [0.0, 1e-12, -1e-12, 1e-7, 1e-6, 1e-5, -1e-6, -1e-5]
+        .into_iter()
+        .filter_map(|angle| {
+            let ex = p21::parse(&cone_frames_turned(text, angle)).unwrap();
+            let s = one_solid(&ex);
+            let volume = solidcore_ops::body::Body::from_record(&s.brep, false)
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|(body, _)| body.mass_properties(1e-6).map_err(|e| format!("{e:?}")))
+                .map(|m| m.volume);
+            match volume {
+                Ok(v) if (v - exact).abs() < 1e-6 * exact => None,
+                other => Some(format!("frames turned {angle:e}: {other:?} vs {exact}")),
+            }
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
