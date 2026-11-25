@@ -725,7 +725,9 @@ pub(super) fn fillet_3d(s: &mut Session, p: &Value, cmd: &str, radius: &str, cor
     let line = |q: &Value, k: &str| q.get(k).and_then(Value::as_str).filter(|id| sk.is_drawn_line(id)).map(str::to_string);
     let pairs: Vec<Option<(String, String)>> = corners.iter().map(|q| line(q, "a").zip(line(q, "b"))).collect();
     // A 3D point names no corner: lines that meet there are told apart only by naming them.
-    let text = |q: &Value, k: &str| q.get(k).and_then(Value::as_str);
+    fn text<'a>(q: &'a Value, k: &str) -> Option<&'a str> {
+        q.get(k).and_then(Value::as_str)
+    }
     if corners.iter().filter_map(|q| text(q, "point")).any(|r| sk.resolve_point(r).is_none() && sk.wire_point(r).is_some()) {
         return Err(bad(cmd, "a 3D corner is given as its two 3D lines, `a` and `b`, not as a point"));
     }
