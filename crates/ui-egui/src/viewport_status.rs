@@ -114,6 +114,8 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
         setting,
         has_key: if app.preferences.viewport_status_details { effect.has_details() } else { effect.has_key },
         editable: if app.preferences.viewport_status_details { effect.has_details() } else { effect.id == StatusId::Section },
+        // Escape never ends an isolation; its own key does (#8120).
+        clear_key: (effect.id == StatusId::Isolate).then(|| crate::keymap::display_for(app, "browser.unisolate")).flatten(),
     })
 }
 

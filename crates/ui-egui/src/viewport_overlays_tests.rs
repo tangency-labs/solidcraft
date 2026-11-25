@@ -485,7 +485,15 @@ fn viewport_status_kinds_keep_shape_outline_and_typography_across_themes() {
             let t = Tokens::get();
             for (kind, outline) in [(StatusKind::Mode, t.accent), (StatusKind::Result, t.border), (StatusKind::Attention, t.warning)] {
                 let ctx = crate::fonts::test_context();
-                let item = StatusItem { id: "test".into(), kind, name: "Draft".into(), setting: "Z · 1°".into(), has_key: true, editable: false };
+                let item = StatusItem {
+                    id: "test".into(),
+                    kind,
+                    name: "Draft".into(),
+                    setting: "Z · 1°".into(),
+                    has_key: true,
+                    editable: false,
+                    clear_key: None,
+                };
                 let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     viewport_status_item(ui, &item, &mut StatusPresentation::default());
                 });
@@ -531,7 +539,8 @@ fn viewport_status_every_part_is_centred_within_its_pill_in_every_theme() {
                     ("Draft", "Z · 1°", true, true),
                 ] {
                     let ctx = crate::fonts::test_context();
-                    let item = StatusItem { id: "centred".into(), kind, name: name.into(), setting: setting.into(), has_key, editable };
+                    let item =
+                        StatusItem { id: "centred".into(), kind, name: name.into(), setting: setting.into(), has_key, editable, clear_key: None };
                     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                         viewport_status_item(ui, &item, &mut StatusPresentation::default());
                     });
@@ -618,6 +627,7 @@ fn viewport_status_close_hover_has_a_theme_fill_and_native_space_action_in_every
                 setting: "12 stripes".into(),
                 has_key: false,
                 editable: false,
+                clear_key: None,
             };
             let mut state = StatusPresentation::default();
             let (rest, action) = paint(&ctx, &item, &mut state, vec![]);
@@ -2646,6 +2656,7 @@ fn summary_component_uses_supplied_newest_and_aggregate_attention_at_three_and_f
                         setting: format!("{i} mm"),
                         has_key: false,
                         editable: false,
+                        clear_key: None,
                     })
                     .collect();
                 for width in [320.0, 1600.0] {
@@ -2979,6 +2990,7 @@ fn status_item_actions_are_round_and_their_card_is_opaque() {
             setting: "Z · 1°".into(),
             has_key: true,
             editable: false,
+            clear_key: None,
         };
         let mut state = StatusPresentation::default();
         let mut draw = |input: egui::RawInput| {
@@ -3083,6 +3095,7 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
     let effect = isolate(&h).expect("an Isolate status");
     let item = crate::viewport_status::presentation(&h.app, &effect).expect("a pill, the bar having no Isolate slot");
     assert_eq!((item.name.as_str(), item.setting.as_str()), ("Isolation", "1 hidden"));
+    assert_eq!(item.clear_key.as_deref(), Some("Ctrl+Shift+I"), "its close names its own key, not Escape");
     let close = format!("viewport_status:{}:close", item.id);
     assert!(solidcraft_ui_registry::handle_at(&close).is_some(), "drawn with its close");
     h.app.preferences.escape_closes_analyses = true;

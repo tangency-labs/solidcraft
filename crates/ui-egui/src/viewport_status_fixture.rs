@@ -10,7 +10,7 @@ pub(crate) struct Fixture {
 }
 
 fn item(id: &str, kind: StatusKind, label: &str, setting: String, has_key: bool) -> StatusItem {
-    StatusItem { id: id.into(), kind, name: solidcraft_ui_text::tr(label).into(), setting, has_key, editable: false }
+    StatusItem { id: id.into(), kind, name: solidcraft_ui_text::tr(label).into(), setting, has_key, editable: false, clear_key: None }
 }
 
 fn specimen(id: &str, readout: bool) -> crate::ui_kit::Details {
