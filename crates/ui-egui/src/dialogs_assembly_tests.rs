@@ -1214,8 +1214,6 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
     for name in ["Offset X", "Offset Y", "Offset Z"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} is editable");
     }
@@ -1226,8 +1224,19 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.settle();
     assert_eq!(harness.app.session.doc, before, "Cancel preserves the joint");
 
+    // Even if a prior joint had its Position section folded, Edit Joint opens the saved
+    // offsets again. The user can still fold it while editing.
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset X").is_none(), "Position still folds on click");
+    crate::dialogs::cancel(&mut harness.app);
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    for name in ["Offset X", "Offset Y", "Offset Z"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} reopens automatically");
+    }
     for (name, value) in [("Offset X", "20 mm"), ("Offset Y", "40 mm")] {
         harness.step(&json!({"click":{"handle":format!("dialog:{name}")}})).unwrap();
         harness.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -3560,9 +3569,7 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let joint = harness.app.session.doc.assembly.joints[0].id;
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
-    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some());
+    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some(), "Position opens on an existing constraint");
     for name in ["Offset X", "Offset Y"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_none());
     }

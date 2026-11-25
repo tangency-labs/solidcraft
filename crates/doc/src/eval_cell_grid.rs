@@ -69,7 +69,7 @@ pub(crate) fn tools(
         f,
     )?;
     let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-    let defaults = solidcore_ops::cell_grid::default_spec();
+    let defaults = solidcraft_kernel::services::cell_grid::default_spec();
     let sides = match sides {
         Some(e) => {
             let n = val(vals, e, Kind::Unitless)?;
@@ -117,7 +117,7 @@ pub(crate) fn tools(
         },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
-    let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let plan = solidcraft_kernel::services::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
     if plan.cells.is_empty() {
         return Err(DocError::Invalid("no cell fits inside the profiles: use smaller cells, a thinner web or `clip: free`".into()));
     }
@@ -155,7 +155,7 @@ pub(crate) fn tools(
     extrude_within_reach([lo, hi])?;
     let mut tools: Vec<Traced> = Vec::new();
     for cell in &plan.cells {
-        let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let pieces = solidcraft_kernel::services::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
         for region in &pieces {
             tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
