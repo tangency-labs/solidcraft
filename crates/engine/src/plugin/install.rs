@@ -185,9 +185,11 @@ fn check_shaders(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), In
         })?;
         craft_plugin::shader::compile(shader, text).map_err(InstallError::Manifest)?;
         for texture in &shader.textures {
-            let picture = file(&texture.file).ok_or_else(|| InstallError::MissingModule(texture.file.clone()))?;
+            // A texture the person chooses may ship no file at all.
+            let Some(name) = &texture.file else { continue };
+            let picture = file(name).ok_or_else(|| InstallError::MissingModule(name.clone()))?;
             if picture.bytes.len() > craft_plugin::shader::MAX_TEXTURE_BYTES {
-                return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("{} is over 16 MiB", texture.file) }));
+                return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("{name} is over 16 MiB") }));
             }
         }
     }
