@@ -384,13 +384,13 @@ fn extract_single_planar_face(
     }
 
     let mut first_edge: Option<EdgeId> = None;
-    let mut raw_loops: Vec<Vec<(EdgeId, Point3)>> = Vec::with_capacity(loopuses.len());
+    let mut raw_loops: Vec<Vec<(EdgeId, Point3)>> = Vec::new();
     for lu in loopuses {
         let eus = loopuse::edgeuses(brep, lu, None, None)?;
         if eus.len() < 3 {
             return Ok(None);
         }
-        let mut loop_items = Vec::with_capacity(eus.len());
+        let mut loop_items = Vec::new();
         for eu in eus {
             let eu_rec = brep.edgeuse(eu)?;
             let (Some(e_id), Some(vu_id)) = (eu_rec.edge, eu_rec.vertexuse) else {
@@ -448,13 +448,13 @@ fn extract_single_planar_face(
         .and_then(|l| l.first())
         .map_or(support_origin, |&(_, p)| p);
     let plane_origin = anchor - normal * (anchor - support_origin).dot(normal);
-    let mut loops_3d = Vec::with_capacity(raw_loops.len());
-    let mut loops_2d = Vec::with_capacity(raw_loops.len());
+    let mut loops_3d = Vec::new();
+    let mut loops_2d = Vec::new();
     let mut edges = Vec::new();
     for loop_items in raw_loops {
         let n_pts = loop_items.len();
-        let mut pts_3d = Vec::with_capacity(n_pts);
-        let mut pts_2d = Vec::with_capacity(n_pts);
+        let mut pts_3d = Vec::new();
+        let mut pts_2d = Vec::new();
         for &(_, p) in &loop_items {
             if (p - support_origin).dot(normal).abs() > eps
                 || (p - plane_origin).dot(normal).abs() > eps
@@ -466,7 +466,7 @@ fn extract_single_planar_face(
             pts_2d.push([d.dot(u), d.dot(v)]);
         }
         for i in 0..n_pts {
-            let next = (i + 1) % n_pts;
+            let next = if i + 1 < n_pts { i + 1 } else { 0 };
             let (Some(&(edge_id, start)), Some(&(_, end))) =
                 (loop_items.get(i), loop_items.get(next))
             else {
@@ -979,7 +979,8 @@ fn point_in_polygon_2d(loops: &[Vec<[f64; 2]>], p: [f64; 2], eps: f64) -> PolyCl
     for lp in loops {
         let n = lp.len();
         for i in 0..n {
-            let (Some(&a), Some(&b)) = (lp.get(i), lp.get((i + 1) % n)) else {
+            let next = if i + 1 < n { i + 1 } else { 0 };
+            let (Some(&a), Some(&b)) = (lp.get(i), lp.get(next)) else {
                 continue;
             };
             if dist_point_to_segment_2d(p, a, b) <= eps {
@@ -1010,7 +1011,8 @@ fn point_to_face_distance_3d(face: &PlanarFace, p: Point3) -> f64 {
     for lp in &face.loops_2d {
         let n = lp.len();
         for i in 0..n {
-            let (Some(&a), Some(&b)) = (lp.get(i), lp.get((i + 1) % n)) else {
+            let next = if i + 1 < n { i + 1 } else { 0 };
+            let (Some(&a), Some(&b)) = (lp.get(i), lp.get(next)) else {
                 continue;
             };
             d_edge = d_edge.min(dist_point_to_segment_2d(uv, a, b));
@@ -1024,7 +1026,8 @@ fn scanline_intervals_2d(loops: &[Vec<[f64; 2]>], y: f64) -> Vec<(f64, f64)> {
     for lp in loops {
         let n = lp.len();
         for i in 0..n {
-            let (Some(&a), Some(&b)) = (lp.get(i), lp.get((i + 1) % n)) else {
+            let next = if i + 1 < n { i + 1 } else { 0 };
+            let (Some(&a), Some(&b)) = (lp.get(i), lp.get(next)) else {
                 continue;
             };
             if (a[1] > y) != (b[1] > y) {
@@ -1077,7 +1080,8 @@ fn face_interior_point_3d(k: &Kernel, face: &PlanarFace, eps: f64) -> Result<Opt
             for lp in &face.loops_2d {
                 let n = lp.len();
                 for i in 0..n {
-                    let (Some(&a), Some(&b)) = (lp.get(i), lp.get((i + 1) % n)) else {
+                    let next = if i + 1 < n { i + 1 } else { 0 };
+                    let (Some(&a), Some(&b)) = (lp.get(i), lp.get(next)) else {
                         continue;
                     };
                     clearance = clearance.min(dist_point_to_segment_2d(cand, a, b));
@@ -1123,7 +1127,8 @@ fn polygons_2d_interiors_overlap(
     for la in a {
         let na = la.len();
         for i in 0..na {
-            let (Some(&a0), Some(&a1)) = (la.get(i), la.get((i + 1) % na)) else {
+            let next_a = if i + 1 < na { i + 1 } else { 0 };
+            let (Some(&a0), Some(&a1)) = (la.get(i), la.get(next_a)) else {
                 continue;
             };
             let da = sub2(a1, a0);
@@ -1137,7 +1142,8 @@ fn polygons_2d_interiors_overlap(
                         k.check_cancelled(OP)?;
                     }
                     pairs_checked += 1;
-                    let (Some(&b0), Some(&b1)) = (lb.get(j), lb.get((j + 1) % nb)) else {
+                    let next_b = if j + 1 < nb { j + 1 } else { 0 };
+                    let (Some(&b0), Some(&b1)) = (lb.get(j), lb.get(next_b)) else {
                         continue;
                     };
                     let db = sub2(b1, b0);
@@ -1301,7 +1307,7 @@ fn clip_line_to_face_2d(
 }
 
 fn dedup_sorted(sorted: &[f64], tol: f64) -> Vec<f64> {
-    let mut out: Vec<f64> = Vec::with_capacity(sorted.len());
+    let mut out: Vec<f64> = Vec::new();
     for &x in sorted {
         if out.last().is_none_or(|&prev| (x - prev).abs() > tol) {
             out.push(x);
