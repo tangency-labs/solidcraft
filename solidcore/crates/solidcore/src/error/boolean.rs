@@ -174,7 +174,9 @@ pub enum BooleanFailure {
     /// vertices to the other's lies within their tolerances, or both do.
     CoincidentEdgeEndsDiffer,
     /// Merging the curves of two coincident faces into each other still changes the
-    /// topology after the port's bound on the passes (upstream repeats without bound).
+    /// topology after the port's bound on the passes (upstream repeats without bound). A
+    /// bound of the port, as [`BooleanFailure::EdgeListLimit`] and
+    /// [`BooleanFailure::FaceListLimit`] are ([`ErrorKind::Unsupported`]).
     CoincidentFacesNotSettled {
         /// The bound on the passes.
         passes: usize,
@@ -456,7 +458,8 @@ impl BooleanFailure {
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
     /// [`BooleanFailure::Defect`], a defect; [`ErrorKind::InvalidInput`] for a check of the
     /// caller's argument or body; [`ErrorKind::Unsupported`] for a curve kind or case the
-    /// Boolean does not take; [`ErrorKind::NotConverged`] for drops that stopped;
+    /// Boolean does not take or a bound of the port; [`ErrorKind::NotConverged`] for drops
+    /// that stopped;
     /// [`ErrorKind::Missing`] for [`BooleanFailure::EntityMissing`];
     /// [`ErrorKind::Failed`] otherwise.
     #[must_use]
@@ -488,7 +491,8 @@ impl BooleanFailure {
             | Self::TreeBooleanFailed
             | Self::VertexInNoRegion => ErrorKind::Failed,
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::DegenerateCurveOnEdges
+            Self::CoincidentFacesNotSettled { .. }
+            | Self::DegenerateCurveOnEdges
             | Self::EdgeListLimit { .. }
             | Self::FaceListLimit { .. }
             | Self::IntersectionCurveNotCopyable => ErrorKind::Unsupported,
@@ -501,9 +505,7 @@ impl BooleanFailure {
             | Self::TreeOperatorWithoutOperands
             | Self::UnknownTreeOperator { .. } => ErrorKind::InvalidInput,
             Self::EntityMissing { .. } => ErrorKind::Missing,
-            Self::VertexPairNotDropped { .. } | Self::CoincidentFacesNotSettled { .. } => {
-                ErrorKind::NotConverged
-            }
+            Self::VertexPairNotDropped { .. } => ErrorKind::NotConverged,
         }
     }
 }
@@ -863,7 +865,7 @@ mod tests {
             (
                 F::CoincidentFacesNotSettled { passes: 4 },
                 SM_ERR,
-                K::NotConverged,
+                K::Unsupported,
             ),
         ];
         for (failure, status, kind) in cases {

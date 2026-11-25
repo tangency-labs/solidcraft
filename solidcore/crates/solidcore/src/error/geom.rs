@@ -80,6 +80,7 @@ pub enum GeomFailure {
         class: ErrorKind,
     },
     /// Two of the three points a circle should pass through coincide.
+    /// [`ErrorKind::Degenerate`], as [`GeomFailure::CollinearPoints`] is.
     CoincidentPoints,
     /// The points a circle should pass through are collinear: `measure` is below the
     /// kernel's zero for them. [`ErrorKind::Degenerate`].
@@ -130,7 +131,8 @@ pub enum GeomFailure {
     /// edge's curve"). Not built by the geometry utilities any more.
     Missing(&'static str),
     /// The linear system for the circle's centre is nearly singular: the three points
-    /// lie (nearly) on one line.
+    /// lie (nearly) on one line. [`ErrorKind::Degenerate`], as
+    /// [`GeomFailure::CollinearPoints`] is.
     NearlySingular,
     /// The global solve's branch still needs subdividing after its local solve, but none
     /// of its trees has a node left to subdivide. [`ErrorKind::Failed`].
@@ -314,14 +316,14 @@ impl GeomFailure {
             | Self::JacobiDidNotConverge { .. }
             | Self::StageFailed => ErrorKind::StageFailed,
             Self::CallFailed { class } => *class,
-            Self::CoincidentPoints
-            | Self::Disjoint { .. }
+            Self::Disjoint { .. }
             | Self::Failed(_)
-            | Self::NearlySingular
             | Self::NoNodeToSubdivide { .. }
             | Self::PointOutsideExtent { .. }
             | Self::ZeroDifferenceStep { .. } => ErrorKind::Failed,
-            Self::CollinearPoints { .. }
+            Self::CoincidentPoints
+            | Self::CollinearPoints { .. }
+            | Self::NearlySingular
             | Self::NoPerpendicular
             | Self::Parallel { .. }
             | Self::ShortChord { .. }
@@ -531,10 +533,10 @@ mod tests {
     #[test]
     fn geom_causes_have_their_class_whatever_their_status() {
         crate::error::tests::assert_kind_of_cause(&[
-            (GeomFailure::CoincidentPoints, ErrorKind::Failed),
+            (GeomFailure::CoincidentPoints, ErrorKind::Degenerate),
             (GeomFailure::Failed("x"), ErrorKind::Failed),
             (GeomFailure::Missing("x"), ErrorKind::Missing),
-            (GeomFailure::NearlySingular, ErrorKind::Failed),
+            (GeomFailure::NearlySingular, ErrorKind::Degenerate),
         ]);
     }
 
@@ -560,7 +562,15 @@ mod tests {
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
-            assert_eq!(typed.kind(), before.kind(), "{failure:?}");
+            // the circle's coincident and nearly collinear points are degenerate, as its
+            // collinear points are; every other cause keeps the status's class
+            let kind = match failure {
+                GeomFailure::CoincidentPoints | GeomFailure::NearlySingular => {
+                    ErrorKind::Degenerate
+                }
+                _ => before.kind(),
+            };
+            assert_eq!(typed.kind(), kind, "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
