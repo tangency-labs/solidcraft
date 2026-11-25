@@ -546,7 +546,13 @@ impl ProceduralBlend {
         let chamfer_held = match (&input.chamfer, order, input.law) {
             (Some(c), 0, None) => {
                 c.validate()?;
-                c.holds(input.offsets)
+                // a chamfer of setbacks has no ball: its stations take the setbacks
+                // themselves (`station_r`), which its offsets slot holds
+                if c.is_setbacks() {
+                    input.offsets == c.setbacks()
+                } else {
+                    c.holds(input.offsets)
+                }
             }
             (None, 1..=MAX_ORDER, _) => true,
             _ => false,

@@ -876,6 +876,9 @@ pub enum GnLaw<'a> {
     },
     /// Equal setbacks measured at the wedge of the two current feet.
     EqualSetback(f64),
+    /// No ball: setbacks held at every station, each foot a straight line of its size (the
+    /// system's `r`) from the leader, in the plane square to it (#13710).
+    Setbacks,
 }
 
 impl<'a> GnLaw<'a> {
@@ -895,9 +898,15 @@ impl<'a> GnLaw<'a> {
     #[must_use]
     pub const fn equal_setback(&self) -> Option<f64> {
         match *self {
-            Self::Curve { .. } => None,
             Self::EqualSetback(distance) => Some(distance),
+            Self::Curve { .. } | Self::Setbacks => None,
         }
+    }
+
+    /// Whether the station is one of setbacks held at every station (no ball).
+    #[must_use]
+    pub const fn is_setbacks(&self) -> bool {
+        matches!(self, Self::Setbacks)
     }
 }
 
@@ -1048,6 +1057,7 @@ fn system<'a>(
     side: [f64; 2],
     law: Option<&'a Ser<Ivl>>,
     equal_setback: Option<f64>,
+    setbacks: bool,
 ) -> GnSystem<'a, Ivl> {
     let [p0, p1] = p;
     GnSystem {
@@ -1059,6 +1069,7 @@ fn system<'a>(
         hold: false,
         law,
         equal_setback,
+        setbacks,
     }
 }
 
@@ -2139,6 +2150,7 @@ fn enclose_over_cells(
     let tr = Trunc::new(order_s, n)?;
     // a ball whose radius varies: its law over the span (0d43b4c)
     let equal_setback = law.and_then(GnLaw::equal_setback);
+    let setbacks = law.is_some_and(GnLaw::is_setbacks);
     let law_r = match law {
         Some(law @ GnLaw::Curve { .. }) => {
             Some(gn_try!(law_series_over(law, s, order_s), Inner::Unproved))
@@ -2260,7 +2272,16 @@ fn enclose_over_cells(
         let sxc = xm.map(|x| Ser::constant(Ivl::from(x)));
         let (sg, _) = gn_try!(
             gn_evaluate(
-                &system(&pc, &leader, &tangent, r, side, law_r, equal_setback),
+                &system(
+                    &pc,
+                    &leader,
+                    &tangent,
+                    r,
+                    side,
+                    law_r,
+                    equal_setback,
+                    setbacks
+                ),
                 &sxc,
                 point
             ),
@@ -2279,7 +2300,16 @@ fn enclose_over_cells(
         let sxb = bx_.map(Ser::constant);
         let jac = gn_try!(
             gn_jacobian(
-                &system(&pb, &leader, &tangent, r, side, law_r, equal_setback),
+                &system(
+                    &pb,
+                    &leader,
+                    &tangent,
+                    r,
+                    side,
+                    law_r,
+                    equal_setback,
+                    setbacks
+                ),
                 &sxb
             ),
             Inner::Unproved
@@ -2370,7 +2400,16 @@ fn enclose_over_cells(
         };
         let sxc = xc.map(|x| Ser::constant(Ivl::from(x)));
         let Ok((sgc, _)) = gn_evaluate(
-            &system(&pc, &leader, &tangent, r, side, law_r, equal_setback),
+            &system(
+                &pc,
+                &leader,
+                &tangent,
+                r,
+                side,
+                law_r,
+                equal_setback,
+                setbacks,
+            ),
             &sxc,
             point,
         ) else {
@@ -2381,7 +2420,16 @@ fn enclose_over_cells(
         };
         let sxb = bx_.map(Ser::constant);
         let Ok(jac) = gn_jacobian(
-            &system(&pb, &leader, &tangent, r, side, law_r, equal_setback),
+            &system(
+                &pb,
+                &leader,
+                &tangent,
+                r,
+                side,
+                law_r,
+                equal_setback,
+                setbacks,
+            ),
             &sxb,
         ) else {
             break;
@@ -2427,7 +2475,16 @@ fn enclose_over_cells(
         partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), lk),
         Inner::Unproved
     );
-    let sysk = system(&pk, &leader, &tangent, r, side, law_r, equal_setback);
+    let sysk = system(
+        &pk,
+        &leader,
+        &tangent,
+        r,
+        side,
+        law_r,
+        equal_setback,
+        setbacks,
+    );
     let mut sx = bx_.map(Ser::constant);
     // the highest power of eps solved for (the section's jets of order n are the face
     // curve's)
@@ -2737,6 +2794,7 @@ fn piece_enclosures(
             StationOptions {
                 law: mid_r.as_ref(),
                 equal_setback: law.and_then(GnLaw::equal_setback),
+                setbacks: law.is_some_and(GnLaw::is_setbacks),
                 ..StationOptions::default()
             }
         )
@@ -4836,6 +4894,7 @@ pub fn gn_certify_span_reusing(
                 StationOptions {
                     law: end_r.as_ref(),
                     equal_setback: law.and_then(GnLaw::equal_setback),
+                    setbacks: law.is_some_and(GnLaw::is_setbacks),
                     ..StationOptions::default()
                 },
             )

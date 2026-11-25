@@ -659,7 +659,7 @@ fn recertify_in_frame(
             let r0 = curve.evaluate_point(first)?.x;
             [r0, r0]
         }
-        None => d.offsets,
+        None => super::section::station_r(d.offsets, d.chamfer),
     };
     let tr = Trunc::new(
         if d.law.is_some() { 2 } else { 1 },
@@ -1171,7 +1171,7 @@ fn spans_of_definition(
             let r0 = curve.evaluate_point(first)?.x;
             [r0, r0]
         }
-        None => d.offsets,
+        None => super::section::station_r(d.offsets, d.chamfer),
     };
     let tr = Trunc::new(
         if d.law.is_some() { 2 } else { 1 },

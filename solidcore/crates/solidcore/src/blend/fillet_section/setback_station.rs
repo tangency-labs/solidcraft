@@ -470,6 +470,84 @@ mod tests {
         }
     }
 
+    /// The hemisphere rim's stations as the Gn station system solves them in its setbacks
+    /// mode ([`GnSystem::setbacks`](super::super::station::GnSystem::setbacks), the system
+    /// the definition, the certificate and recertify solve): the flat foot is `(3/5) C(s)` and
+    /// the ball's `(4.9/5) C(s) + (3 sqrt(11) / 10) z`, so each foot's s-series is
+    /// a fixed multiple of the leader's own (to order 4), whatever the leader's parametrisation.
+    #[test]
+    fn the_station_system_s_setbacks_mode_gives_the_rim_s_feet_and_their_series() {
+        use crate::blend::fillet_section::series::Trunc;
+        use crate::blend::fillet_section::station::{
+            gn_solve_station_with, leader_series, StationOptions,
+        };
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        let k = Kernel::default();
+        let (fl, bl) = (flat(), ball(&k));
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            R,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let (lo, hi) = (
+            leader.natural_interval().min(),
+            leader.natural_interval().max(),
+        );
+        let height = 3.0 * 11.0_f64.sqrt() / 10.0;
+        // (the series hold order 5 in s; the leader's tangent takes one more)
+        let order = 4;
+        let tr = Trunc::new(order, 0).unwrap();
+        for frac in [0.2, 0.5, 0.8] {
+            let s = lo + frac * (hi - lo);
+            let c = leader.evaluate_point(s).unwrap();
+            let out = Vec3::new(c.x, c.y, 0.0) * (1.0 / R);
+            let feet = [out * 3.0, out * 4.9 + Vec3::Z * height];
+            // seeds near the feet, not on them
+            let [a, b] = [uv_of(&k, &fl, feet[0]), uv_of(&k, &bl, feet[1])];
+            let seed = [a.x + 1e-3, a.y - 1e-3, b.x + 1e-3, b.y + 1e-3];
+            let opts = StationOptions {
+                setbacks: true,
+                ..StationOptions::default()
+            };
+            let (st, _) = gn_solve_station_with(
+                &k,
+                [&fl, &bl],
+                &leader,
+                s,
+                seed,
+                [2.0, 1.0],
+                [1.0, 1.0],
+                tr,
+                1e-12,
+                opts,
+            );
+            let st = st.unwrap().0;
+            let (l, _) = leader_series(&leader, s, tr).unwrap();
+            for (foot, (scale, lift)) in st.f.iter().zip([(0.6, 0.0), (0.98, height)]) {
+                for i in 0..=order {
+                    for (j, (fj, lj)) in foot.a.iter().zip(&l.a).enumerate() {
+                        let lc = lj.at(i, 0);
+                        let want = scale * lc + if i == 0 && j == 2 { lift } else { 0.0 };
+                        let got = fj.at(i, 0);
+                        assert!(
+                            (got - want).abs() <= 1e-9 * (1.0 + lc.abs()),
+                            "s {s}, order {i}, coordinate {j}: {got} vs {want}"
+                        );
+                    }
+                }
+            }
+            // the station's point is the edge's (no ball)
+            let [vx, vy, vz] = st.v.a.each_ref().map(|c| c.at(0, 0));
+            assert!(close(Point3::new(vx, vy, vz), c, 1e-12), "{:?}", st.v);
+        }
+    }
+
     /// A chord on the hemisphere rim, a right angle with one circle of curvature `k = 1/5`:
     /// equal setbacks d put the feet `c = sqrt(2 d² − k d³)` apart.
     #[test]
