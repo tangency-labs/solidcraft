@@ -820,3 +820,14 @@ fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
 }
+
+/// A draft direction of no length is refused as an argument before any face is picked, even with
+/// a point that would pick no face: the direction is the first thing wrong.
+#[test]
+fn a_draft_with_no_neutral_normal_is_refused_before_its_pick() {
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let z = [0.0, 0.0, 1.0];
+    for (normal, pull) in [([0.0; 3], z), (z, [0.0; 3])] {
+        assert_eq!(draft(&b, &[[50.0, 50.0, 50.0]], TOL, [0.0; 3], normal, pull, 0.1).err(), Some(Error::Argument));
+    }
+}
