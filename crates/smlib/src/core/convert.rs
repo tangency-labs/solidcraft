@@ -14,7 +14,8 @@
 //! A face whose surface is not a B-spline kind (an offset) exports a B-spline in its place, as
 //! `FlatFromBrep` does, but fitted within half the face's own tolerance rather than half the
 //! body's largest (#21926): an implicit offset gets the kernel's certified net, proved within it
-//! at every parameter; any other kind `SmSurface::ApproximateSurface`'s fit, checked at samples.
+//! at every parameter, where that net has no `C0` knot inside it; any other surface
+//! `SmSurface::ApproximateSurface`'s fit, checked at samples.
 //!
 //! [`from_arrays`] also runs the capi's `PutEnclosingShellsFirst` ([`put_enclosing_shells_first`],
 //! an addition to SmuConvert): a bounded region of several shells starts its list at the shell
@@ -781,9 +782,17 @@ fn face_approx_tol(b: &Brep, f: FaceId, xsect: f64) -> Result<f64> {
 /// without this face's NURBS: the face's tolerance in the record cannot be raised to cover a
 /// coarser fit (the record caps it at the body's), so a fit outside it would be a record whose
 /// face is not where it says.
+///
+/// A certified net with a full-multiplicity interior knot ([`has_interior_c0_knot`]) is not
+/// written either: it is fitted instead. There the base is only `C0` in its parameter (a
+/// revolution's circle at its quarter knots) though tangent continuous, and the net keeps the
+/// knot `C0`. Its certificate bounds the net's distance from the offset, not its normal, so the
+/// net can turn its normal at that knot. An offset of the written face (a thicken of an offset
+/// sheet: an emboss's slab) then meets a knot it cannot prove tangent continuous and refuses the
+/// face as creased, though the face is smooth.
 fn approximate_face_surface(k: &Kernel, surface: &Surface, tol: f64) -> Result<Surface> {
     match solidcore_ops::offset::certified_offset_net(k, surface, tol) {
-        Ok(Some((net, bound))) if bound <= tol => return Ok(net),
+        Ok(Some((net, bound))) if bound <= tol && !has_interior_c0_knot(k, &net)? => return Ok(net),
         Err(e) if e.is_unported_or_cancelled() => return Err(sc("certified_offset_net")(e)),
         Ok(_) | Err(_) => {}
     }
@@ -792,6 +801,23 @@ fn approximate_face_surface(k: &Kernel, surface: &Surface, tol: f64) -> Result<S
         .map_err(sc("SmSurface::ApproximateSurface"))?
         .surface
         .ok_or_else(|| bad("a face surface SMLib could not convert to a B-spline"))
+}
+
+/// Whether `net`, a B-spline, has an interior knot of multiplicity its degree or more in either
+/// direction, where it is only `C0` in its parameter. A surface with no NURB has none.
+fn has_interior_c0_knot(k: &Kernel, net: &Surface) -> Result<bool> {
+    let Some(nurb) = bspline_surface_part(k, net)?.and_then(|part| part.gw_nurb()) else {
+        return Ok(false);
+    };
+    let (p, q) = nurb.degrees();
+    let c0 = |knots: &[f64], deg: usize| {
+        let (Some(&lo), Some(&hi)) = (knots.get(deg), knots.len().checked_sub(deg + 1).and_then(|i| knots.get(i))) else {
+            return false;
+        };
+        let interior: Vec<f64> = knots.iter().copied().filter(|&x| x > lo && x < hi).collect();
+        deg > 0 && interior.chunk_by(|a, b| a == b).any(|run| run.len() >= deg)
+    };
+    Ok(c0(nurb.u_knots(), p) || c0(nurb.v_knots(), q))
 }
 
 /// The shells in `SmBrepData::FromBrep`'s order: the regions, the infinite one first, each
