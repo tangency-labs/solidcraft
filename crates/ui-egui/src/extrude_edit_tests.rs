@@ -837,19 +837,23 @@ fn with_extent_all_a_negative_kept_distance_keeps_its_side() {
     assert!((depth - 30.0).abs() < 0.05, "{depth}");
 }
 
-/// The side of the sketch the arrow's tip is on: 1 along the normal, -1 against it.
-fn arrow_side(h: &mut Harness) -> f64 {
-    let tip = crate::scenario::handle_at("arrow").expect("the arrow");
+/// The side of the sketch an arrow's tip is on: 1 along the normal, -1 against it. A tip as near
+/// one side as the other has no side, and fails.
+fn arrow_side(h: &mut Harness, handle: &str) -> f64 {
+    let tip = crate::scenario::handle_at(handle).expect("the arrow");
     let mut screen = |at: f64| {
         let p = h.call("ui.at", on_arrow(h, at));
         egui::pos2(p["result"][0].as_f64().unwrap() as f32, p["result"][1].as_f64().unwrap() as f32)
     };
-    let (ahead, behind) = (screen(5.0), screen(-5.0));
-    if tip.distance(ahead) < tip.distance(behind) { 1.0 } else { -1.0 }
+    let (ahead, behind) = (tip.distance(screen(5.0)), tip.distance(screen(-5.0)));
+    assert!((ahead - behind).abs() > 1.0, "{handle}'s tip is on neither side: {ahead} {behind}");
+    if ahead < behind { 1.0 } else { -1.0 }
 }
 
 /// With All the arrow goes to the side the extrude goes to (#21844): a negative kept Distance
-/// cuts below the sketch, and the arrow points there, with either Direction of one side.
+/// cuts below the sketch, and the arrow points there, with either Direction of one side. With
+/// Symmetric the cut goes both ways, and the tip that carries the value box stays on the kept
+/// Distance's side, as before All.
 #[test]
 fn with_extent_all_the_arrow_points_where_the_extrude_goes() {
     for (params, side) in [
@@ -857,12 +861,30 @@ fn with_extent_all_the_arrow_points_where_the_extrude_goes() {
         (json!({"distance":"10 mm"}), 1.0),
         (json!({"distance":"-10 mm","direction":"negative"}), 1.0),
         (json!({"distance":"10 mm","direction":"negative"}), -1.0),
+        (json!({"distance":"-10 mm","direction":"symmetric"}), -1.0),
     ] {
         let mut h = open_cut(params.clone());
-        assert_eq!(arrow_side(&mut h), side, "{params}: the Distance's arrow");
+        assert_eq!(arrow_side(&mut h, "arrow"), side, "{params}: the Distance's arrow");
         set_all(&mut h, true);
-        assert_eq!(arrow_side(&mut h), side, "{params}: with All, on the same side");
+        assert_eq!(arrow_side(&mut h, "arrow"), side, "{params}: with All, on the same side");
     }
+}
+
+/// Two Sides with All and a negative kept Distance (#21844): the first side goes through below
+/// the sketch, and the model sends the second side the other way, above it. Distance 2's arrow
+/// points there too.
+#[test]
+fn with_extent_all_the_second_arrow_points_where_the_second_side_goes() {
+    let mut h = open_cut(json!({"distance":"-10 mm","distance2":"3 mm"}));
+    assert_eq!((arrow_side(&mut h, "arrow"), arrow_side(&mut h, "arrow2")), (-1.0, -1.0), "entered: Distance 2 stays below");
+    set_all(&mut h, true);
+    assert_eq!(arrow_side(&mut h, "arrow"), -1.0, "with All the first side goes through below");
+    assert_eq!(arrow_side(&mut h, "arrow2"), 1.0, "with All Distance 2 goes above, where the model puts it");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    // 30 mm of box below the sketch and 3 mm above it: the second side is above.
+    let depth = (16000.0 - volume(&h, "Main")) / (std::f64::consts::PI * 4.0);
+    assert!((depth - 33.0).abs() < 0.05, "{depth}");
 }
 
 /// With value stepping on, the box that names the extent is an empty box: Up and Down have no

@@ -219,6 +219,7 @@ pub use eval::revolve_extent;
 pub use eval::revolve_extent_for_handle;
 pub use eval::revolve_extent_with_convention;
 pub use eval::same_extrude_from_face;
+pub use eval::second_side;
 pub use eval::select_profiles;
 pub use eval::sketch_hole_direction;
 pub use eval::sketch_line_plane;
