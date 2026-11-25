@@ -1450,9 +1450,11 @@ impl KicadPaths {
     /// never the board's.
     fn libraries(&self) -> Vec<std::path::PathBuf> {
         let mut folders: Vec<std::path::PathBuf> = self.library.iter().cloned().collect();
-        let named = std::env::vars().chain(self.configured.iter().cloned());
+        // `vars_os`: an unrelated variable that is not Unicode must not panic an import.
+        let shell = std::env::vars_os().filter_map(|(name, value)| Some((name.into_string().ok()?, std::path::PathBuf::from(value))));
+        let configured = self.configured.iter().map(|(name, value)| (name.clone(), std::path::PathBuf::from(value)));
         folders.extend(
-            named.filter(|(name, value)| is_kicad_3dmodel_variable(name) && !value.is_empty()).map(|(_, value)| std::path::PathBuf::from(value)),
+            shell.chain(configured).filter(|(name, value)| is_kicad_3dmodel_variable(name) && !value.as_os_str().is_empty()).map(|(_, value)| value),
         );
         folders.dedup();
         folders

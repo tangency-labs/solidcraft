@@ -1048,11 +1048,16 @@ pub fn read_in_library(path: &str, libraries: &[std::path::PathBuf], extensions:
     if cfg!(target_arch = "wasm32") || remote(path).is_some() || (cfg!(windows) && windows_refusal(path).is_some()) {
         return None;
     }
-    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str())?;
+    let resolved = resolve(std::path::Path::new(path)).ok()?;
+    // Judged on the resolved path: a link named like a model that leads to another kind of file,
+    // or to a network or device location, is not served.
+    if cfg!(windows) && !local_drive_path(&resolved) {
+        return None;
+    }
+    let extension = resolved.extension().and_then(|e| e.to_str())?;
     if !extensions.iter().any(|x| x.eq_ignore_ascii_case(extension)) {
         return None;
     }
-    let resolved = resolve(std::path::Path::new(path)).ok()?;
     if !libraries.iter().filter_map(|l| canonical(l)).any(|l| resolved.starts_with(&l)) {
         return None;
     }
@@ -1232,6 +1237,7 @@ mod tests {
         std::fs::write(library.join("a.txt"), "text").unwrap();
         std::fs::write(out.join("b.wrl"), "elsewhere").unwrap();
         std::os::unix::fs::symlink(out.join("b.wrl"), library.join("link.wrl")).unwrap();
+        std::os::unix::fs::symlink(library.join("a.txt"), library.join("text.wrl")).unwrap();
         let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
         let libraries = [library.clone()];
         let read = |p: &str| read_in_library(p, &libraries, &["wrl", "STEP"], 64);
@@ -1241,7 +1247,9 @@ mod tests {
             assert_eq!(read(&a).unwrap().unwrap(), b"model");
             // The scope is back after the read.
             assert!(super::read(&a, 64).is_err());
-            for refused in [library.join("a.txt"), out.join("b.wrl"), library.join("link.wrl"), library.join("../out/b.wrl")] {
+            for refused in
+                [library.join("a.txt"), out.join("b.wrl"), library.join("link.wrl"), library.join("text.wrl"), library.join("../out/b.wrl")]
+            {
                 assert!(read(&s(refused.clone())).is_none(), "{}", refused.display());
             }
             assert!(read_in_library(&s(library.join("a.wrl")), &[], &["wrl"], 64).is_none(), "no library, nothing served");
