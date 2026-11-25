@@ -184,6 +184,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
 
+/// The most regions one trace takes: the most points `canvas.to_sketch` accepts in `at`.
+const MAX_TRACE_POINTS: usize = 64;
+
 /// The card's hint as shown: the message of `hint`, with the number of shapes picked in Trace Region.
 pub(crate) fn hint_text(panel: &crate::browser::CanvasPanel) -> String {
     if panel.trace && panel.picked_both {
@@ -245,7 +248,12 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2, add: bool) ->
     }
     let point = [local.x, local.y];
     if panel.trace {
-        // Ctrl+click adds one more region; a plain click picks that one alone.
+        // Ctrl+click adds one more region (up to what `canvas.to_sketch` takes); a plain click picks
+        // that one alone.
+        if add && panel.picked_both && panel.points.len() >= MAX_TRACE_POINTS {
+            app.set_status(solidcraft_ui_text::format("browser.trace_limit", &[("max", &MAX_TRACE_POINTS.to_string())]), true);
+            return true;
+        }
         if !add || !panel.picked_both {
             panel.points.clear();
         }
@@ -396,6 +404,12 @@ mod tests {
         assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), false));
         let picked = points(&h);
         assert!(picked.len() == 1 && (picked[0][0] - b.0).abs() < 1e-3, "{picked:?}");
+        // At the limit, Ctrl+click is refused with the selection kept; a plain click still replaces it.
+        h.app.tree.canvas_panel.as_mut().unwrap().points = vec![[0.0, 0.0]; super::MAX_TRACE_POINTS];
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), true));
+        assert_eq!(points(&h).len(), super::MAX_TRACE_POINTS);
+        assert!(super::click(&mut h.app, &proj, screen(a.0, a.1), false));
+        assert_eq!(points(&h).len(), 1);
         // A click off the image adds nothing, even with Ctrl.
         assert!(!super::click(&mut h.app, &proj, screen(c.center.x + 500.0, c.center.y), true));
         assert_eq!(points(&h).len(), 1);
