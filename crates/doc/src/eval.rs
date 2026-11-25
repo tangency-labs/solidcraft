@@ -2841,6 +2841,12 @@ impl PlacementReads {
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
             // A construction point is kept in its own component's frame: the sketch reads where
             // that component is placed (#12075).
+            L::Plane { name } if Plane::named(name).is_none() => match doc.find_feature(name) {
+                Some(plane) => {
+                    self.components.insert(plane.component);
+                }
+                None => self.all = true,
+            },
             L::ConstructionPoint { name } => match doc.find_feature(name) {
                 Some(point) => {
                     self.components.insert(point.component);
@@ -3210,6 +3216,10 @@ impl Feature {
                 let mut read = Reads::default();
                 for link in &sketch.links {
                     link_reads(st, &link.source, &mut read)?;
+                }
+                // A face held by a 3D constraint is read even without a projected curve.
+                for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                    link_reads(st, &plane.source, &mut read)?;
                 }
                 read.bodies.sort_unstable();
                 read.bodies.dedup();
@@ -4078,6 +4088,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
             for link in &sketch.links {
                 reads.link(doc, st, &link.source);
+            }
+            // The face's placement can move independently of the sketch's component.
+            for plane in sketch.wire_constraints.iter().filter_map(|c| c.kind.model_plane()) {
+                reads.link(doc, st, &plane.source);
             }
         }
         // Each end is read as a sketch on a face is: in the frame it was capped in, its member
@@ -15531,11 +15545,16 @@ fn eval_sketch(
         // A sketch that reads no geometry (a fixed plane, no projections) needs no other
         // component's bodies moved into its frame: placing every body of a large
         // assembly again is what made each sketch edit as slow as the design is big.
-        None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
+        None if !plane_reads_geometry(plane)
+            && sketch.links.is_empty()
+            && !sketch.wire_constraints.iter().any(|c| c.kind.model_plane().is_some()) =>
+        {
+            std::borrow::Cow::Borrowed(st)
+        }
         None => state_in_frame(doc, st, f.component)?,
     };
     // A further placement a link reads is placed in its frame too (#9957).
-    let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let named = sketch.linked_bodies();
     let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
         _ if named.is_empty() => fst,
         Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),

@@ -48,6 +48,7 @@ pub mod cap;
 pub mod cell_grid;
 pub mod check;
 pub mod conic_projection;
+pub mod constraint;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
