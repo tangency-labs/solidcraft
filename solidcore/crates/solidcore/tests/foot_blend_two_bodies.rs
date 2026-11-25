@@ -1,11 +1,24 @@
 //! A weld bead between two separate bodies (#15130): `FootBlend::of_faces` reads each foot's
-//! side from the other face's outward normal along a joint curve, and
-//! `FootBlend::toes_on_bodies` checks each toe on its own body's face. A plate standing on a
-//! plate (T joint), a plate lapped on a plate and a rod standing on a plate, each two bodies,
-//! 6 mm legs: the flat bead's volume is the closed form, its edges lie in the joint's corner,
-//! and both bodies are the same after, in their file bytes and in memory. A toe in a notch of
-//! the base is refused with the leg that fits; two plates butted flush meet in no corner; a
-//! joint off one of the faces is refused.
+//! side from its own face (the side along which the face holds a step from the root) and
+//! refuses faces that do not meet in an inside corner, and `FootBlend::toes_on_bodies`
+//! proves the strip from the root to each toe on its own body's face over the whole joint. A
+//! plate standing on a plate (T joint), a plate lapped on a plate, a rod standing on a plate
+//! and a plate standing on a pocket's floor (a face whose outer use runs against its surface),
+//! each two bodies, 6 mm legs: the flat bead's volume is the closed form, its edges lie in
+//! the joint's corner, and both bodies are the same after, in their file bytes and in memory.
+//! A toe in a notch of the base, and a hole in the base between the stations, are refused
+//! with the leg that fits; two plates butted flush, and a face that leaves the joint away
+//! from the corner, meet in no corner; a joint off one of the faces, or over a hole in it, and
+//! the same face twice are refused.
+//!
+//! The tolerances: a bead's edges lie within [`WELD_FIT_TOLERANCE`] of the exact toes and
+//! root (its section face is fitted to it); the plates' beads are planes, on which the
+//! volume's Gauss-Kronrod rule is exact, so their volume is held to the accuracy asked
+//! (relative); the rod's bead's section face is within the fit tolerance of the exact cone, so
+//! its volume is within that tolerance times the face's area (Pappus) and the accuracy asked.
+//! A leg's fit is the largest leg that holds, less the halving's bracket `1e-7 (1 + hi)`, and
+//! at most the face's zone tolerance (`1e-5`, a toe within it of the boundary is on the face)
+//! or the strip's margin (the fit tolerance, at the toe) past the distance to the boundary.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
@@ -27,6 +40,20 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
 
 const LEG: f64 = 6.0;
+
+/// How far a bead's edges may lie from the exact toes and root: the fit tolerance.
+const SLACK: f64 = WELD_FIT_TOLERANCE;
+
+/// The volume's accuracy asked, relative.
+const ACCURACY: f64 = 1e-9;
+
+/// The halving's bracket on a leg's fit near `leg` (`FootBlend::toes_on_bodies`).
+fn bracket(leg: f64) -> f64 {
+    1e-7 * (1.0 + leg)
+}
+
+/// The face's zone tolerance: a toe within it of the face's boundary is on the face.
+const ZONE: f64 = 1e-5;
 
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
@@ -152,11 +179,14 @@ fn a_plate_standing_on_a_plate_gets_its_bead_in_the_corner() {
         (&web, side),
         (&base, top),
         &joint,
-        |p| (38.95..=45.05).contains(&p.x) && (9.95..=16.05).contains(&p.z),
-        1e-9,
+        |p| {
+            (39.0 - SLACK..=45.0 + SLACK).contains(&p.x)
+                && (10.0 - SLACK..=16.0 + SLACK).contains(&p.z)
+        },
+        ACCURACY,
     );
     assert!(inside, "the bead left the corner");
-    assert!((v - 1800.0).abs() <= 1e-6 * 1800.0, "{v}");
+    assert!((v - 1800.0).abs() <= ACCURACY * 1800.0, "{v}");
 }
 
 #[test]
@@ -172,11 +202,14 @@ fn a_plate_lapped_on_a_plate_gets_its_bead_in_the_corner() {
         (&upper, front),
         (&lower, top),
         &joint,
-        |p| (33.95..=40.05).contains(&p.y) && (9.95..=16.05).contains(&p.z),
-        1e-9,
+        |p| {
+            (34.0 - SLACK..=40.0 + SLACK).contains(&p.y)
+                && (10.0 - SLACK..=16.0 + SLACK).contains(&p.z)
+        },
+        ACCURACY,
     );
     assert!(inside, "the bead left the corner");
-    assert!((v - 1800.0).abs() <= 1e-6 * 1800.0, "{v}");
+    assert!((v - 1800.0).abs() <= ACCURACY * 1800.0, "{v}");
 }
 
 /// The rod's foot is a closed joint: the bead runs round it in one piece of the foot blend
@@ -196,19 +229,24 @@ fn a_rod_standing_on_a_plate_gets_its_bead_round_its_foot() {
         &joint,
         |p| {
             let r = ((p.x - 50.0).powi(2) + (p.y - 50.0).powi(2)).sqrt();
-            (14.95..=21.05).contains(&r) && (9.95..=16.05).contains(&p.z)
+            (15.0 - SLACK..=21.0 + SLACK).contains(&r)
+                && (10.0 - SLACK..=16.0 + SLACK).contains(&p.z)
         },
         1e-6,
     );
     assert!(inside, "the bead left the corner");
-    let pappus = 18.0 * 2.0 * std::f64::consts::PI * 17.0;
-    assert!((v - pappus).abs() <= 1e-4 * pappus, "{v} against {pappus}");
+    let tau = 2.0 * std::f64::consts::PI;
+    let pappus = 18.0 * tau * 17.0;
+    // the section face: the hypotenuse, 6 sqrt 2, swept round its middle's radius 18
+    let face = 6.0 * 2.0_f64.sqrt() * tau * 18.0;
+    let bound = WELD_FIT_TOLERANCE * face + 1e-6 * pappus;
+    assert!((v - pappus).abs() <= bound, "{v} against {pappus}, {bound}");
 }
 
 /// A notch cut through the base behind the web (x from 20 to 30, y from 40 to 60): a leg of
 /// 20 along the base puts the toes in it, off the base's top but on its plane. Refused,
-/// naming the base's top, with the largest leg whose toes stay on it, 15 (to the notch's
-/// side at x = 30), which passes; both bodies unchanged.
+/// naming no face (two bodies), with the largest leg whose toes stay on it, 15 (to the
+/// notch's side at x = 30), which passes; both bodies unchanged.
 #[test]
 fn a_toe_in_a_notch_of_the_other_body_s_face_is_refused_with_the_leg_that_fits() {
     use solidcore::boolean::api_brep::boolean_difference;
@@ -227,7 +265,11 @@ fn a_toe_in_a_notch_of_the_other_body_s_face_is_refused_with_the_leg_that_fits()
     assert!(format!("{err:?}").contains("LegPastFace"), "{err:?}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(fit.size > 14.9 && fit.size <= 15.0 + 1e-3, "{}", fit.size);
+    assert!(
+        fit.size >= 15.0 - bracket(15.0) && fit.size <= 15.0 + ZONE + SLACK,
+        "{}",
+        fit.size
+    );
     blend
         .toes_on_bodies(&k, [&web, &base], [LEG, fit.size], &[])
         .unwrap();
@@ -264,6 +306,137 @@ fn a_joint_off_one_of_the_faces_is_refused() {
     assert!(
         matches!(&got, Err(SolidError::InvalidInput { .. }))
             && format!("{got:?}").contains("does not lie on both faces"),
+        "{got:?}"
+    );
+}
+
+/// A web 10 thick standing on a pocket's floor: a base 100 by 100, 10 thick, with a pocket
+/// 60 by 60, 5 deep (its floor at z = 5, x and y from 20 to 80), the web at x = 45 over the
+/// pocket's length. The floor is the cutter's face, its outer use against its surface: the
+/// face's outward normal is the surface's turned. Read unturned, the web's foot would head
+/// into the floor's material and the corner be refused. The bead is 18 by 60.
+#[test]
+fn a_plate_standing_on_a_pocket_floor_gets_its_bead_in_the_corner() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::edgeuse::p1::faceuse_orientation;
+    use solidcore::topology::face::p2::outer_faceuse;
+    let mut k = kernel();
+    let base = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
+    let cutter = block(&mut k, [20.0, 20.0, 5.0], [60.0, 60.0, 6.0]);
+    let base = boolean_difference(&mut k, base, cutter).unwrap();
+    let web = block(&mut k, [45.0, 20.0, 5.0], [10.0, 60.0, 30.0]);
+    let side = face_at(&k, &web, [45.0, 50.0, 5.0], [45.0, 20.0, 20.0]);
+    let floor = face_at(&k, &base, [50.0, 20.0, 5.0], [20.0, 50.0, 5.0]);
+    let fu = outer_faceuse(&base, floor).unwrap().unwrap();
+    assert_eq!(
+        faceuse_orientation(&base, fu).unwrap(),
+        OrientType::Opposite,
+        "the floor's outer use runs with its surface: not the case this test is for"
+    );
+    let joint = line([45.0, 20.0, 5.0], [45.0, 80.0, 5.0]);
+    let (v, inside) = bead(
+        &mut k,
+        (&web, side),
+        (&base, floor),
+        &joint,
+        |p| {
+            (39.0 - SLACK..=45.0 + SLACK).contains(&p.x)
+                && (5.0 - SLACK..=11.0 + SLACK).contains(&p.z)
+        },
+        ACCURACY,
+    );
+    assert!(inside, "the bead left the corner");
+    assert!((v - 1080.0).abs() <= ACCURACY * 1080.0, "{v}");
+}
+
+/// A hole through the base (x from 40 to 44, y from 41 to 49) under the bead's strip on it,
+/// between the stations (every 10 along the joint) where the toes and the sides are read:
+/// the toes at x = 39 are on the base's top and the root beside it, but the strip runs over
+/// the hole. Refused by the strip's proof, naming no face (two bodies), with the largest leg
+/// whose strip stays on the top: 1, to the hole's side at x = 44; that leg passes.
+#[test]
+fn a_hole_under_the_strip_between_the_stations_is_refused_with_the_leg_that_fits() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    let mut k = kernel();
+    let (web, side, base, _) = tee(&mut k);
+    let hole = block(&mut k, [40.0, 41.0, -1.0], [4.0, 8.0, 12.0]);
+    let base = boolean_difference(&mut k, base, hole).unwrap();
+    let top = face_at(&k, &base, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
+    let before = state(&k, &web, &base);
+    let blend = FootBlend::of_faces(&k, &web, side, &base, top, &joint).unwrap();
+    let err = blend
+        .toes_on_bodies(&k, [&web, &base], [LEG, LEG], &[])
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let debug = format!("{err:?}");
+    assert!(
+        debug.contains("LegPastFace") && debug.contains("face: None"),
+        "{debug}"
+    );
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(
+        fit.size >= 1.0 - bracket(1.0) && fit.size <= 1.0 + ZONE + SLACK,
+        "{}",
+        fit.size
+    );
+    blend
+        .toes_on_bodies(&k, [&web, &base], [LEG, fit.size], &[])
+        .unwrap();
+    assert!(state(&k, &web, &base) == before, "a part changed");
+}
+
+/// The hole under the web's foot (x from 40 to 50, y from 40 to 60): the joint crosses it,
+/// so the base's top holds neither side of the root there.
+#[test]
+fn a_joint_over_a_hole_in_one_of_the_faces_is_refused() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    let mut k = kernel();
+    let (web, side, base, _) = tee(&mut k);
+    let hole = block(&mut k, [40.0, 40.0, -1.0], [10.0, 20.0, 12.0]);
+    let base = boolean_difference(&mut k, base, hole).unwrap();
+    let top = face_at(&k, &base, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
+    let got = FootBlend::of_faces(&k, &web, side, &base, top, &joint);
+    assert!(
+        matches!(&got, Err(SolidError::InvalidInput { .. }))
+            && format!("{got:?}").contains("does not lie on both faces"),
+        "{got:?}"
+    );
+}
+
+/// A block hanging beside the base (x from 100 to 110, z from -40 to 10), its face at x =
+/// 100 meeting the base's top along the top's edge: that face leaves the joint downward, away
+/// from the top's outer side, so the two faces meet in an outside corner (the base's own edge
+/// continued), not an inside one.
+#[test]
+fn a_face_leaving_the_joint_away_from_the_corner_is_refused() {
+    let mut k = kernel();
+    let base = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
+    let hang = block(&mut k, [100.0, 0.0, -40.0], [10.0, 100.0, 50.0]);
+    let face = face_at(&k, &hang, [100.0, 50.0, 10.0], [100.0, 0.0, -15.0]);
+    let top = face_at(&k, &base, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = line([100.0, 0.0, 10.0], [100.0, 100.0, 10.0]);
+    let got = FootBlend::of_faces(&k, &hang, face, &base, top, &joint);
+    assert!(
+        matches!(&got, Err(SolidError::InvalidInput { .. }))
+            && format!("{got:?}").contains("inside corner"),
+        "{got:?}"
+    );
+}
+
+/// The base's top as both faces.
+#[test]
+fn the_same_face_twice_is_refused() {
+    let mut k = kernel();
+    let (_, _, base, top) = tee(&mut k);
+    let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
+    let got = FootBlend::of_faces(&k, &base, top, &base, top, &joint);
+    assert!(
+        matches!(&got, Err(SolidError::InvalidInput { .. }))
+            && format!("{got:?}").contains("the same face twice"),
         "{got:?}"
     );
 }

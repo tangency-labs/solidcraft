@@ -107,6 +107,9 @@ pub struct FootBlend {
     pub sides: [FootSide; 2],
     /// Whether the joint closes on itself (its start vertex is its end vertex).
     pub closed: bool,
+    /// Whether the supports' faces are of two bodies ([`FootBlend::of_faces`]): a face id
+    /// alone then does not say whose face it is, so refusals name no face.
+    bodies: bool,
 }
 
 /// One station of a foot blend: the root and the two feet, with each foot's surface
@@ -357,25 +360,33 @@ impl FootBlend {
     }
 
     /// The foot blend between `face1` of `body1` and `face2` of `body2`, two bodies it only
-    /// reads, along `joint`: a piece of the line where the two faces meet (as
-    /// [`crate::intersect::api_intersectors::intersect_faces_read_only`] gives it), over its
-    /// own interval. The faces' surfaces are the supports, in that order. Each foot heads across
-    /// its face towards the other face's outer side: support `i`'s side is the sign of
-    /// `(n_i x e') . m_j` at the middle of the joint, `n_i` its surface's normal, `e'` the
-    /// joint's tangent and `m_j` the other face's outward normal (out of its material). The
-    /// faces meet in an inside corner all along: read at 11 stations, its ends included, each
-    /// foot heads to the other face's outer side, past the angle zero. A joint whose two ends meet is closed, as
-    /// an edge with one vertex is ([`FootBlend::of_edge`]).
+    /// reads, along `joint`: a piece of the line where the two faces meet (as the faces'
+    /// intersection gives it, `intersect_faces` on read-only copies of the bodies), over its
+    /// own interval. The faces' surfaces are the supports, in that order.
+    ///
+    /// Each foot's side is read from its own face: the side `s` of `s (n_i x e')` (`n_i` its
+    /// surface's normal, `e'` the joint's tangent) along which the face holds the point
+    /// a step of the bead's fit tolerance from the root, at the middle of the joint. Where the face holds both (the
+    /// joint runs inside it), the side heading to the other face's outer side, `(n_i x e') .
+    /// m_j > 0` (`m_j` that face's outward normal, out of its material); where it holds
+    /// neither, the joint is not on the face. Read at 11 stations, its ends included: each
+    /// face holds its side's step, and each foot heads to the other face's outer side past
+    /// the angle zero (an inside corner). Sampled, the quick refusals: the strip from the
+    /// root to each toe is proved on its face by [`FootBlend::toes_on_bodies`], and the rise
+    /// between the stations by [`FootBlend::prove_feet`]. A joint whose two ends meet (to
+    /// the faces' tolerance) is closed, as an edge with one vertex is ([`FootBlend::of_edge`]).
     ///
     /// (not upstream, #15130: a bead between two separate bodies; [`FootBlend::of_edge`] reads
     /// the sides from one edge's binormals, which two bodies do not share.)
     ///
     /// # Errors
     ///
-    /// Native invalid input for a joint with no B-spline form in its own parameter, a face
-    /// with no surface or no outer side (material on both sides of it), a joint that does not
-    /// lie on both surfaces, and faces that do not meet in an inside corner all along (an
-    /// outside or a tangent stretch); those of the evaluations.
+    /// Native invalid input for the same face of the same body twice, a joint with no
+    /// B-spline form in its own parameter, a face with no surface, no face use or no outer
+    /// side (its outer face use not on the void: material on both sides), a joint that does
+    /// not lie on both faces (off a surface, or neither side of it on the face), a face that
+    /// does not hold its side's step all along, and faces that do not meet in an inside
+    /// corner all along (an outside or a tangent stretch); those of the evaluations.
     pub fn of_faces(
         k: &Kernel,
         body1: &Brep,
@@ -384,21 +395,43 @@ impl FootBlend {
         face2: FaceId,
         joint: &Curve,
     ) -> Result<Self> {
+        if std::ptr::eq(body1, body2) && face1 == face2 {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the same face twice: a joint lies between two faces",
+            ));
+        }
         let leader = leader_of(joint)?;
         let interval = joint.natural_interval();
-        let tol = body1.tolerance().max(body2.tolerance()).max(1e-9);
         let supports = [(body1, face1), (body2, face2)];
+        // the joint is read at the faces' own tolerances: the faces' intersection is fitted at
+        // its first face's ([`crate::intersect::api_intersectors::intersect_faces`])
+        let mut tol = 1e-9_f64;
         let mut surfaces = Vec::new();
         let mut outward = [1.0_f64; 2];
         for ((body, face), out) in supports.iter().zip(outward.iter_mut()) {
+            tol = tol
+                .max(body.tolerance())
+                .max(crate::topology::face::p2::tolerance(body, *face)?);
             let surface = body
                 .face(*face)?
                 .surface
                 .clone()
                 .ok_or_else(|| SolidError::invalid_input(OP, "a face with no surface"))?;
-            let fu = crate::topology::face::p2::outer_faceuse(body, *face)?.ok_or_else(|| {
-                SolidError::invalid_input(OP, "a face with no outer side (material on both sides)")
-            })?;
+            let fu = crate::topology::face::p2::outer_faceuse(body, *face)?
+                .ok_or_else(|| SolidError::invalid_input(OP, "a face with no face use"))?;
+            // `outer_faceuse` gives the mate where the upward use is not on the void, without
+            // asking whether the mate is: material on both sides leaves the face no outer side
+            let on_void = match body.faceuse(fu)?.shell {
+                Some(shell) => body.shell(shell)?.region == body.infinite_region(),
+                None => false,
+            };
+            if !on_void {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a face with no outer side (material on both sides)",
+                ));
+            }
             if eu1::faceuse_orientation(body, fu)?
                 != crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
             {
@@ -409,6 +442,7 @@ impl FootBlend {
         let [s1, s2] = <[Surface; 2]>::try_from(surfaces)
             .map_err(|_| defect("two faces gave other than two surfaces"))?;
         let mut blend = Self::from_parts(leader, interval, [Some(s1), Some(s2)], [1.0, 1.0])?;
+        blend.bodies = !std::ptr::eq(body1, body2);
         // the leader's form runs as the joint: the same points at the same parameters
         for t in [interval.min(), interval.evaluate(0.5), interval.max()] {
             let p = joint.evaluate_point(k, t)?;
@@ -419,15 +453,18 @@ impl FootBlend {
                 ));
             }
         }
-        let mut domains = Vec::new();
+        let mut frames = Vec::new();
         for side in &blend.sides {
-            domains.push(side.surface.natural_uv_domain_with_nurb(k)?);
+            let domain = side.surface.natural_uv_domain_with_nurb(k)?;
+            let periods = periods_of(k, &side.surface, &domain)?;
+            frames.push((domain, periods));
         }
-        // `n_i x e'` for each support at `t`, and each face's outward normal there
-        let read = |t: f64| -> Result<[(Vec3, Vec3); 2]> {
+        // at `t`: the root, and for each support the root's parameters on it, `n_i x e'` and
+        // the face's outward normal
+        let read = |t: f64| -> Result<Reading> {
             let (root, tangent) = blend.root_at(k, t)?;
-            let mut out = [(Vec3::ZERO, Vec3::ZERO); 2];
-            for (i, (side, domain)) in blend.sides.iter().zip(&domains).enumerate() {
+            let mut out = [(Point2::new(0.0, 0.0), Vec3::ZERO, Vec3::ZERO); 2];
+            for (i, (side, (domain, _))) in blend.sides.iter().zip(&frames).enumerate() {
                 let uv = dropped(k, &side.surface, domain, root, None)?
                     .filter(|&uv| {
                         side.surface
@@ -441,22 +478,79 @@ impl FootBlend {
                     SolidError::invalid_input(OP, "a face with no normal on the joint")
                 })?;
                 if let (Some(slot), Some(&o)) = (out.get_mut(i), outward.get(i)) {
-                    *slot = (n.cross(tangent), n * o);
+                    *slot = (uv, n.cross(tangent), n * o);
                 }
             }
-            Ok(out)
+            Ok((root, out))
         };
-        let [(a1, m1), (a2, m2)] = read(interval.evaluate(0.5))?;
-        let sides = [a1.dot(m2).signum(), a2.dot(m1).signum()];
-        // an inside corner all along: each foot heads to the other face's outer side, the
-        // sine of that heading read against the angle zero; an outside or tangent stretch
-        // would bury the bead in a part or close it through the joint
-        for i in 0..=10 {
-            let [(a1, m1), (a2, m2)] = read(interval.evaluate(f64::from(i) / 10.0))?;
-            let rise = |a: Vec3, m: Vec3, side: f64| -> Result<f64> {
-                Ok(side * a.unitize()?.dot(m.unitize()?))
+        // whether support `i`'s face holds the point of its surface `SIDE_STEP` from `root`
+        // along `dir` (`uv` the root's parameters there)
+        let held = |i: usize, root: Point3, uv: Point2, dir: Vec3| -> Result<bool> {
+            let (Some(side), Some((domain, periods)), Some(&(body, face))) =
+                (blend.sides.get(i), frames.get(i), supports.get(i))
+            else {
+                return Ok(false);
             };
-            let [o1, o2] = sides;
+            let Ok(step) = dir.unitize() else {
+                return Ok(false);
+            };
+            let point = root + step * SIDE_STEP;
+            let Some(q) = dropped(k, &side.surface, domain, point, Some(uv))? else {
+                return Ok(false);
+            };
+            // the drop stops at the surface's domain: a step past its rim lands back on the
+            // rim (on the face's edge, held), so the step must be where it was dropped from
+            // (a curved surface leaves it far nearer than half the step)
+            if side.surface.evaluate_point(k, q)?.distance(point) > 0.5 * SIDE_STEP {
+                return Ok(false);
+            }
+            face_holds(
+                k,
+                body,
+                face,
+                &side.surface,
+                domain,
+                *periods,
+                wrapped(domain, *periods, q),
+            )
+        };
+        // each side from its face at the middle of the joint
+        let (root, [(u1, a1, m1), (u2, a2, m2)]) = read(interval.evaluate(0.5))?;
+        let mut sides = [1.0_f64; 2];
+        for (i, ((uv, a, other), side)) in [(u1, a1, m2), (u2, a2, m1)]
+            .into_iter()
+            .zip(sides.iter_mut())
+            .enumerate()
+        {
+            *side = match (held(i, root, uv, a)?, held(i, root, uv, a * -1.0)?) {
+                (true, false) => 1.0,
+                (false, true) => -1.0,
+                // the joint runs inside the face: the foot heads to the other face's outer side
+                (true, true) => a.dot(other).signum(),
+                (false, false) => {
+                    return Err(SolidError::invalid_input(
+                        OP,
+                        "a joint that does not lie on both faces",
+                    ))
+                }
+            };
+        }
+        // all along: each face holds its side's step, and each foot heads to the other face's
+        // outer side, the sine of that heading read against the angle zero; an outside or
+        // tangent stretch would bury the bead in a part or close it through the joint
+        let [o1, o2] = sides;
+        let rise = |a: Vec3, m: Vec3, side: f64| -> Result<f64> {
+            Ok(side * a.unitize()?.dot(m.unitize()?))
+        };
+        for j in 0..=10 {
+            let (root, [(u1, a1, m1), (u2, a2, m2)]) =
+                read(interval.evaluate(f64::from(j) / 10.0))?;
+            if !held(0, root, u1, a1 * o1)? || !held(1, root, u2, a2 * o2)? {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a face that does not leave the joint on its side all along",
+                ));
+            }
             if rise(a1, m2, o1)? <= EFF_ZERO_RAD || rise(a2, m1, o2)? <= EFF_ZERO_RAD {
                 return Err(SolidError::invalid_input(
                     OP,
@@ -532,6 +626,7 @@ impl FootBlend {
                 },
             ],
             closed: false,
+            bodies: false,
         })
     }
 
@@ -684,10 +779,12 @@ impl FootBlend {
                 let at = self.root_at_or_none(t);
                 match kind {
                     MissKind::NoToe => {
+                        // a face id alone does not say which of two bodies it is a face of
                         let face = self
                             .sides
                             .get(side)
                             .and_then(|s| s.face)
+                            .filter(|_| !self.bodies)
                             .map(crate::error::TargetFace::of_target);
                         let f = Failure::new(
                             OP,
@@ -972,25 +1069,45 @@ impl FootBlend {
         legs: [f64; 2],
         within: &[[f64; 2]],
     ) -> Result<()> {
-        self.toes_on_bodies(k, [target, target], legs, within)
+        self.toes_held(k, [target, target], legs, within, false)
     }
 
-    /// [`FootBlend::toes_on_faces`] with each support's face on its own body: support `i`'s
-    /// face is a face of `targets[i]`, as [`FootBlend::of_faces`] makes them (two bodies, or
-    /// the same one twice). Both are only read.
+    /// [`FootBlend::toes_on_faces`] with each support's face on its own body (support `i`'s
+    /// face a face of `targets[i]`, as [`FootBlend::of_faces`] makes them: two bodies, or the
+    /// same one twice), and the strip from the root to each toe **proved** on its face over
+    /// the whole joint (`FootBlend::strip_off_face`), not only the toes at the stations:
+    /// the face's own boundary does not cross it and one point of it is on the face. Both
+    /// bodies are only read.
     ///
     /// (not upstream, #15130: a bead between two separate bodies.)
     ///
     /// # Errors
     ///
-    /// Those of [`FootBlend::toes_on_faces`], the smallest leg a body builds being that of the
-    /// body the toe is off.
+    /// Those of [`FootBlend::toes_on_faces`], and a station with no toe refused (as the build
+    /// refuses it) rather than skipped; the strip's refusal the same as a toe's (at the
+    /// point of the face's boundary found in it), each leg tried for the fit checked so too,
+    /// the smallest leg a body builds being that of the body the toe is off. Where the faces
+    /// are of two bodies the refusal names no face (a face id does not say whose): its point
+    /// is the toe's, or the boundary's, on the support refused.
     pub fn toes_on_bodies(
         &self,
         k: &Kernel,
         targets: [&Brep; 2],
         legs: [f64; 2],
         within: &[[f64; 2]],
+    ) -> Result<()> {
+        self.toes_held(k, targets, legs, within, true)
+    }
+
+    /// [`FootBlend::toes_on_faces`] on `targets`, with the strips proved where `prove`
+    /// ([`FootBlend::toes_on_bodies`]).
+    fn toes_held(
+        &self,
+        k: &Kernel,
+        targets: [&Brep; 2],
+        legs: [f64; 2],
+        within: &[[f64; 2]],
+        prove: bool,
     ) -> Result<()> {
         check_legs(legs)?;
         // shortcut: a tapered or rounded end is checked at the span's full legs, so one whose
@@ -1018,8 +1135,11 @@ impl FootBlend {
         let mut off: Option<(usize, Point3)> = None;
         let mut near: Option<FootStation> = None;
         'stations: for &t in &ts {
-            let Ok(s) = self.try_station(k, t, legs, near.as_ref())? else {
-                continue;
+            let s = match self.try_station(k, t, legs, near.as_ref())? {
+                Ok(s) => s,
+                // two bodies: a station with no toe is refused here, not left to the build
+                Err(miss) if prove => return Err(self.miss_error(miss, None).into_error()),
+                Err(_) => continue,
             };
             for (i, side) in self.sides.iter().enumerate() {
                 let (Some(face), Some(&uv), Some(&foot)) = (side.face, s.uv.get(i), s.feet.get(i))
@@ -1032,6 +1152,20 @@ impl FootBlend {
                 }
             }
             near = Some(s);
+        }
+        // the strips over the whole joint, once the stations' toes hold
+        if prove && off.is_none() {
+            for (i, side) in self.sides.iter().enumerate() {
+                let (Some(face), Some(&target), Some(&z)) =
+                    (side.face, targets.get(i), legs.get(i))
+                else {
+                    continue;
+                };
+                if let Some(at) = self.strip_off_face(k, i, target, face, z)? {
+                    off = Some((i, at));
+                    break;
+                }
+            }
         }
         let Some((i, foot)) = off else {
             return Ok(());
@@ -1067,7 +1201,12 @@ impl FootBlend {
                 }
                 near = Some(s);
             }
-            Ok(true)
+            match targets.get(i) {
+                Some(&target) if prove => {
+                    Ok(self.strip_off_face(k, i, target, face, leg)?.is_none())
+                }
+                _ => Ok(true),
+            }
         };
         // of the leg found, not of the leg asked: a face far shorter than the leg asked still
         // gets its fit
@@ -1090,6 +1229,9 @@ impl FootBlend {
             lo = 0.0;
         }
         let edge = self.edge.map(TargetEdge::of_target);
+        // a face id alone does not say which of two bodies it is a face of
+        let [first, second] = targets;
+        let face = face.filter(|_| std::ptr::eq(first, second));
         Err(Failure::new(
             OP,
             BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::LegPastFace),
@@ -1102,6 +1244,365 @@ impl FootBlend {
         })
         .with_fit(Fit::new(lo, FitMeasure::Leg, edge))
         .into_error())
+    }
+}
+
+/// The margin of the strip's proof (`FootBlend::strip_off_face`): the bead's fit tolerance
+/// ([`WELD_FIT_TOLERANCE`]), the least the bead is made to, or an eighth of the leg where
+/// that is less (so the proof's band is never empty).
+fn strip_margin(z: f64) -> f64 {
+    WELD_FIT_TOLERANCE.min(0.125 * z)
+}
+
+/// The most pairs of a boundary edge's piece and a piece of the joint
+/// [`FootBlend::strip_off_face`] looks at for one face before it refuses the strip as not
+/// proved: far past what a face's edges take (a few per edge where it is far from the joint,
+/// some hundreds along a curved edge on the root).
+const STRIP_PAIRS: usize = 1 << 18;
+
+/// The least `|v|` over an enclosure `v` (each component's least magnitude), rounded down.
+fn ivl_least(v: crate::blend::fillet_section::series::V3<Ivl>) -> f64 {
+    let m = [v.x.mig(), v.y.mig(), v.z.mig()];
+    (m.iter().map(|c| c * c).sum::<f64>()).sqrt() * (1.0 - 4.0 * f64::EPSILON)
+}
+
+/// The parameter range `[a, b]` of `curve` (`knots` its B-spline form's) cut at the knots
+/// inside it, and each part into pieces no longer than `reach` along the curve (by the
+/// polygon through nine of its points; at most 4096 pieces a part).
+///
+/// # Errors
+///
+/// Those of the evaluations.
+fn pieces_of(
+    k: &Kernel,
+    curve: &Curve,
+    knots: &[f64],
+    a: f64,
+    b: f64,
+    reach: f64,
+) -> Result<Vec<[f64; 2]>> {
+    let mut cuts = vec![a];
+    for &u in knots {
+        if u > a && u < b && cuts.last().is_some_and(|&l| u > l) {
+            cuts.push(u);
+        }
+    }
+    cuts.push(b);
+    let mut out = Vec::new();
+    for w in cuts.windows(2) {
+        let &[p, q] = w else { continue };
+        if q <= p {
+            continue;
+        }
+        let mut length = 0.0;
+        let mut prev = curve.evaluate_point(k, p)?;
+        for j in 1..=8 {
+            let x = curve.evaluate_point(k, p + (q - p) * f64::from(j) / 8.0)?;
+            length += prev.distance(x);
+            prev = x;
+        }
+        let count = (length / reach).ceil().clamp(1.0, 4096.0) as usize;
+        for j in 0..count {
+            out.push([
+                p + (q - p) * j as f64 / count as f64,
+                p + (q - p) * (j + 1) as f64 / count as f64,
+            ]);
+        }
+    }
+    Ok(out)
+}
+
+/// What [`FootBlend::strip_off_face`] found for a pair of an edge's piece and a joint's.
+enum StripPair {
+    /// No point of the edge's piece is in the strip's band from the joint's piece.
+    Clear,
+    /// A point of the edge's piece is proved in the band: the face's boundary crosses it.
+    Off,
+    /// Neither, yet: halve.
+    Split,
+}
+
+impl FootBlend {
+    /// Whether the strip of support `i` at the leg `z`, from the root to the toe over the
+    /// whole joint, lies on `face` of `target`: `None` where it is **proved** to, else a point
+    /// where it is not or the proof stopped (the strip refused).
+    ///
+    /// The band is the points `P` of the station planes `(P − e(t))·e′(t) = 0` with `t` over
+    /// the joint, less [`strip_margin`] (`η`, along the joint) from an open joint's ends, and
+    /// `|P − e(t)|` from `η` to `z − η`: the strip less a margin of the bead's fit tolerance
+    /// at the root, at the toe and at the ends, where the face may end (the face's own edge on
+    /// the root, its side at a square end) or the toe lie on its boundary. Two parts:
+    ///
+    /// - one point of the band is on the face: the foot at half the leg at the middle of the
+    ///   joint, classified on it (trims included);
+    /// - no edge of the face's boundary (a seam, used twice by the face, is not its boundary;
+    ///   an edge with no curve, a pole, neither) has a point in the band: each edge's
+    ///   parameter and the joint's cut into pieces no longer than the leg, each pair cleared
+    ///   in intervals ([`crate::blend::fillet_section::certificate::curve_derivs_over_about`],
+    ///   rounded outward), else halved. A pair is cleared where every point of the edge's
+    ///   piece is farther than the leg from the joint's piece, or in no station plane of it
+    ///   (`(c − e)·e′` keeps its sign), or the joint's piece is in an end's margin; else where
+    ///   the station's parameter `t*(τ)` of each point `c(τ)` of the edge's piece is the only
+    ///   root in the joint's piece (interval Newton on `g = (c − e)·e′`, `g_t = (c − e)·e″ −
+    ///   |e′|²` of one sign, its image inside the piece) and, by the mean value form about the
+    ///   piece's middle, `w = c(τ) − e(t*(τ))` with `w′ = c′ − e′ (c′·e′)/(|e′|² − w·e″)`, the
+    ///   point is nearer the root than `η`, farther than `z − η`, or (a plane support, whose
+    ///   strip is the ray along the side) on the side away from the face's, `w·s (n × e′) <
+    ///   0`; or `t*` is in an end's margin.
+    ///
+    /// The band's points on the strip are one connected piece (one point at each `t` and
+    /// distance, [`FootBlend::prove_chain`]), on the face's surface: with no boundary in it and
+    /// one point on the face, all of it is on the face. An edge of the face in the band but on
+    /// another sheet of a curved support is refused too (a pair not cleared): conservative.
+    ///
+    /// # Errors
+    ///
+    /// A defect for a support that is not one; those of the topology, the evaluations and the
+    /// enclosures.
+    fn strip_off_face(
+        &self,
+        k: &Kernel,
+        i: usize,
+        target: &Brep,
+        face: FaceId,
+        z: f64,
+    ) -> Result<Option<Point3>> {
+        use crate::blend::fillet_section::certificate::{
+            curve_derivs_over, curve_derivs_over_about, NurbsCurve,
+        };
+        use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
+        use crate::surface::surface::SurfaceKind;
+        let Some(side) = self.sides.get(i) else {
+            return Err(defect(
+                "a strip was asked of a support the foot blend does not have",
+            ));
+        };
+        let eta = strip_margin(z);
+        let (lo, hi) = (self.interval.min(), self.interval.max());
+        let domain = side.surface.natural_uv_domain_with_nurb(k)?;
+        let periods = periods_of(k, &side.surface, &domain)?;
+        // one point of the band on the face: the foot at half the leg at the middle
+        let (root, tangent) = self.root_at(k, self.interval.evaluate(0.5))?;
+        let root_uv = match self.foot(k, i, root, tangent, 0.5 * z, None)? {
+            Ok((p, uv, r)) => {
+                let uv = wrapped(&domain, periods, uv);
+                if !face_holds(k, target, face, &side.surface, &domain, periods, uv)? {
+                    return Ok(Some(p));
+                }
+                r
+            }
+            Err(_) => return Ok(Some(root)),
+        };
+        // a plane support's side, `s (n × e′)` as `n` times the side: its strip is the ray
+        // along it
+        let across = match side.surface.kind() {
+            SurfaceKind::Plane(_) => normal_at(k, &side.surface, root_uv)?
+                .map(|n| n * side.side)
+                .map(|n| V3 {
+                    x: Ivl::from(n.x),
+                    y: Ivl::from(n.y),
+                    z: Ivl::from(n.z),
+                }),
+            _ => None,
+        };
+        let joint = NurbsCurve::of(&self.leader)?;
+        let (joint_knots, _) = self.leader.knots(None)?;
+        let joint_pieces = pieces_of(k, &self.curve, &joint_knots, lo, hi, z)?;
+        // an open joint's ends' margins, in its parameter: `η` over the joint's top speed
+        let speed = curve_derivs_over(&joint, Ivl::new(lo, hi), 1, None)?
+            .get(1)
+            .map(|d| ivl_norm(*d))
+            .ok_or_else(|| {
+                defect("the leader's derivatives over its own interval came back without the first")
+            })?;
+        let margin = if self.closed || !(speed.is_finite() && speed > 0.0) {
+            0.0
+        } else {
+            eta / speed
+        };
+        let in_margin = |t: Ivl| margin > 0.0 && (t.hi <= lo + margin || t.lo >= hi - margin);
+        // the face's boundary edges, each with how many uses it has in the face's loops
+        let mut edges: Vec<(EdgeId, usize)> = Vec::new();
+        for l in crate::topology::face::p2::loops(target, face, false, None)? {
+            for eu in crate::topology::loopuse::loop_edgeuses(target, l)? {
+                let Some(e) = eu1::edge(target, eu)? else {
+                    continue;
+                };
+                match edges.iter_mut().find(|(f, _)| *f == e) {
+                    Some((_, uses)) => *uses += 1,
+                    None => edges.push((e, 1)),
+                }
+            }
+        }
+        let mut pairs = 0_usize;
+        for (e, uses) in edges {
+            // a seam: the face on both sides of it
+            if uses > 1 {
+                continue;
+            }
+            let Some(curve) = edge::curve(target, e)? else {
+                continue;
+            };
+            let form = leader_of(curve)?;
+            let cn = NurbsCurve::of(&form)?;
+            let (knots, _) = form.knots(None)?;
+            let range = edge::interval(target, e)?;
+            // one pair of an edge's piece and a joint's piece
+            let pair = |ep: [f64; 2], jp: [f64; 2]| -> Result<StripPair> {
+                let [ta, tb] = jp;
+                let [ua, ub] = ep;
+                let um = 0.5 * (ua + ub);
+                let o = curve.evaluate_point(k, um)?;
+                let about = [o.x, o.y, o.z];
+                let over = curve_derivs_over_about(&cn, Ivl::new(ua, ub), 1, None, about)?;
+                let along = curve_derivs_over_about(&joint, Ivl::new(ta, tb), 1, None, about)?;
+                let (Some(&c), Some(&c1), Some(&j), Some(&d)) =
+                    (over.first(), over.get(1), along.first(), along.get(1))
+                else {
+                    return Err(defect(
+                        "a curve's derivatives over a piece of its own range came back short",
+                    ));
+                };
+                let w = v_sub(c, j);
+                if ivl_least(w) > z || ivl_norm(w) < eta || in_margin(Ivl::new(ta, tb)) {
+                    return Ok(StripPair::Clear);
+                }
+                let g = idot(w, d);
+                if g.lo > 0.0 || g.hi < 0.0 {
+                    return Ok(StripPair::Clear);
+                }
+                let one_sign = |x: Ivl| x.lo > 0.0 || x.hi < 0.0;
+                // interval Newton on g in t about the joint's piece's middle, for every τ: on
+                // the piece, then on it widened by half on each side (within the joint), for a
+                // root next to the piece's end; the roots in the wider piece hold those in it
+                let width = tb - ta;
+                let wide = [(ta - 0.5 * width).max(lo), (tb + 0.5 * width).min(hi)];
+                let mut found = None;
+                for [sa, sb] in [jp, wide] {
+                    let over_t = curve_derivs_over_about(&joint, Ivl::new(sa, sb), 2, None, about)?;
+                    let (Some(&js), Some(&ds), Some(&dds)) =
+                        (over_t.first(), over_t.get(1), over_t.get(2))
+                    else {
+                        return Err(defect("the leader's derivatives over a piece of its own interval came back short"));
+                    };
+                    let gt = idot(v_sub(c, js), dds) - idot(ds, ds);
+                    if !one_sign(gt) {
+                        continue;
+                    }
+                    let sm = 0.5 * (sa + sb);
+                    let at = curve_derivs_over_about(&joint, Ivl::from(sm), 1, None, about)?;
+                    let (Some(&jm), Some(&dm)) = (at.first(), at.get(1)) else {
+                        return Err(defect("the leader's derivatives at a parameter of its own interval came back short"));
+                    };
+                    let n = Ivl::from(sm) - idot(v_sub(c, jm), dm) / gt;
+                    let ts = Ivl::new(n.lo.max(sa), n.hi.min(sb));
+                    // no root in the piece, or all of them in an end's margin
+                    if ts.lo > ts.hi || ts.lo.is_nan() || ts.hi.is_nan() || in_margin(ts) {
+                        return Ok(StripPair::Clear);
+                    }
+                    // a root for every τ of the piece, the only one: the image inside it
+                    if n.lo > sa && n.hi < sb {
+                        found = Some((sm, gt, jm, dm, ts));
+                        break;
+                    }
+                }
+                let Some((tm, gt, jm, dm, ts)) = found else {
+                    return Ok(StripPair::Split);
+                };
+                // at the roots: w about the edge's piece's middle, its rate along the edge
+                let mid = curve_derivs_over_about(&cn, Ivl::from(um), 0, None, about)?;
+                let Some(&cm) = mid.first() else {
+                    return Err(defect(
+                        "a curve's point at a parameter of its own range came back short",
+                    ));
+                };
+                let nm = Ivl::from(tm) - idot(v_sub(cm, jm), dm) / gt;
+                let tsm = Ivl::new(nm.lo.max(ts.lo), nm.hi.min(ts.hi));
+                if tsm.lo > tsm.hi || tsm.lo.is_nan() || tsm.hi.is_nan() {
+                    return Err(defect("interval Newton lost the root at the piece's middle, which every point of the piece has"));
+                }
+                let at_root = curve_derivs_over_about(&joint, tsm, 0, None, about)?;
+                let roots = curve_derivs_over_about(&joint, ts, 2, None, about)?;
+                let (Some(&jr), Some(&js), Some(&ds), Some(&dds)) =
+                    (at_root.first(), roots.first(), roots.get(1), roots.get(2))
+                else {
+                    return Err(defect(
+                        "the leader's derivatives over a piece of its own interval came back short",
+                    ));
+                };
+                let gts = idot(v_sub(c, js), dds) - idot(ds, ds);
+                if !one_sign(gts) {
+                    return Ok(StripPair::Split);
+                }
+                let rate = idot(c1, ds) / (Ivl::from(0.0) - gts);
+                let wc = v_add(
+                    v_sub(cm, jr),
+                    v_scale(
+                        v_sub(c1, v_scale(ds, rate)),
+                        Ivl::new(ua, ub) - Ivl::from(um),
+                    ),
+                );
+                let (least, most) = (ivl_least(wc), ivl_norm(wc));
+                if most < eta || least > z - eta {
+                    return Ok(StripPair::Clear);
+                }
+                let sigma = across.map(|n| idot(wc, icross(n, ds)));
+                if sigma.is_some_and(|s| s.hi < 0.0) {
+                    return Ok(StripPair::Clear);
+                }
+                let inside = margin <= 0.0 || (ts.lo > lo + margin && ts.hi < hi - margin);
+                if least > eta && most < z - eta && inside && sigma.is_none_or(|s| s.lo > 0.0) {
+                    return Ok(StripPair::Off);
+                }
+                Ok(StripPair::Split)
+            };
+            let mut work: Vec<([f64; 2], [f64; 2])> = Vec::new();
+            for ep in pieces_of(k, curve, &knots, range.min(), range.max(), z)? {
+                for &jp in &joint_pieces {
+                    work.push((ep, jp));
+                }
+            }
+            while let Some((ep, jp)) = work.pop() {
+                pairs += 1;
+                let [ua, ub] = ep;
+                let [ta, tb] = jp;
+                let here = || curve.evaluate_point(k, 0.5 * (ua + ub));
+                if pairs > STRIP_PAIRS {
+                    return Ok(Some(here()?));
+                }
+                match pair(ep, jp)? {
+                    StripPair::Clear => {}
+                    StripPair::Off => return Ok(Some(here()?)),
+                    StripPair::Split => {
+                        // the longer piece halved; pieces down to rounding are not proved
+                        let edge_length = curve
+                            .evaluate_point(k, ua)?
+                            .distance(curve.evaluate_point(k, ub)?);
+                        let joint_length = self
+                            .curve
+                            .evaluate_point(k, ta)?
+                            .distance(self.curve.evaluate_point(k, tb)?);
+                        let tiny = |a: f64, b: f64| b - a <= 1e-12 * (1.0 + a.abs().max(b.abs()));
+                        if edge_length >= joint_length {
+                            if tiny(ua, ub) {
+                                return Ok(Some(here()?));
+                            }
+                            let m = 0.5 * (ua + ub);
+                            work.push(([ua, m], jp));
+                            work.push(([m, ub], jp));
+                        } else {
+                            if tiny(ta, tb) {
+                                return Ok(Some(here()?));
+                            }
+                            let m = 0.5 * (ta + tb);
+                            work.push((ep, [ta, m]));
+                            work.push((ep, [m, tb]));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1222,6 +1723,16 @@ fn newton(
 /// (Newton converges quadratically, so that costs a step or two); this tolerance sets how
 /// many stations the face between them needs, which is where the time goes.
 pub const WELD_FIT_TOLERANCE: f64 = 0.01;
+
+/// How far from the root [`FootBlend::of_faces`] steps along a side to read whether the face
+/// holds it: the bead's fit tolerance, the least the bead is made to, and a thousand times a
+/// face's zone tolerance (`1e-5`), within which a point next to the face's boundary
+/// classifies as on it either side.
+const SIDE_STEP: f64 = WELD_FIT_TOLERANCE;
+
+/// What [`FootBlend::of_faces`] reads at a parameter of the joint: the root, and for each
+/// support the root's parameters on it, `n_i x e'` and the face's outward normal.
+type Reading = (Point3, [(Point2, Vec3, Vec3); 2]);
 
 /// The most times [`FootBlend::section_face`] doubles its stations.
 const REFINEMENTS: usize = 9;
