@@ -21,7 +21,9 @@ no plugin code.
 The app implements `PluginHost` and defines command policy, approval and transaction history.
 `authorize_file_path` applies caller scope to each complete file path, in addition to folder
 grants. Its default denies hidden child names unless a more specific approved folder grant
-covers them; an app may override it to enforce its explicit scope policy.
+covers them; an app may override it to enforce its explicit scope policy. `shows_hidden` says
+which granted folders reach hidden names (their grant says `hidden`), and `home_files` which files
+of the home folder the plugin may read (`permissions.home_files`, once allowed).
 
 The [WIT](wit/plugin.wit) declares `craft:plugin@0.2.0`, world `command-plugin`: the
 capability `commands@0.2` (`CAPABILITIES`). A manifest lists the capabilities it needs

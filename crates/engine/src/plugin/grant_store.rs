@@ -8,7 +8,7 @@
 //! large, names no valid plugin id or holds more than an installation can approve is ignored: the
 //! plugin then runs with nothing granted.
 
-use super::{COMMAND_GROUPS, Grants, MAX_APPROVED_FUEL, MAX_MEMORY_MIB, valid_id};
+use super::{COMMAND_GROUPS, Grants, MAX_APPROVED_FUEL, MAX_MEMORY_MIB, MAX_PICKED_FOLDERS, valid_id};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -17,8 +17,9 @@ use std::time::SystemTime;
 pub const FOLDER: &str = ".grants";
 /// The most records read, as many as preferences keep.
 pub const MAX_RECORDS: usize = 256;
-/// The largest record read.
-const MAX_RECORD_BYTES: u64 = 64 << 10;
+/// The largest record read or written: room for every folder `valid_record` accepts at its
+/// longest path, escaped (160 folders of 4096 bytes).
+const MAX_RECORD_BYTES: u64 = 2 << 20;
 /// The most folder entries looked at while reading the store.
 const MAX_ENTRIES: usize = 1024;
 
@@ -37,11 +38,13 @@ pub fn valid_record(grants: &Grants) -> bool {
         && grants.command_groups.iter().all(|group| COMMAND_GROUPS.contains(&group.as_str()))
         && grants.fuel.is_none_or(|fuel| (1..=MAX_APPROVED_FUEL).contains(&fuel))
         && grants.memory_mib.is_none_or(|memory| (1..=MAX_MEMORY_MIB).contains(&memory))
-        && grants.folders.len() <= 32
+        // Folders chosen at install, one per grant, and the ones the user picked later for a
+        // `picked` grant, each folder once (`validate_grants` tells them apart by the manifest).
+        && grants.folders.len() <= 32 + 2 * MAX_PICKED_FOLDERS
         && grants.folders.iter().all(|grant| {
             let path = grant.folder.to_string_lossy();
             valid_id(&grant.name)
-                && names.insert(&grant.name)
+                && names.insert((&grant.name, &grant.folder))
                 && (grant.read || grant.write)
                 && grant.folder.is_absolute()
                 && path.len() <= 4096
@@ -100,6 +103,10 @@ pub fn write(plugins: &Path, id: &str, grants: &Grants) -> Result<(), String> {
     let mut grants = grants.clone();
     grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     let bytes = serde_json::to_vec_pretty(&grants).map_err(|e| e.to_string())?;
+    // A record too large to read back would lose the plugin's approvals at the next start.
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
+        return Err(format!("`{id}`: its approvals are too large to keep"));
+    }
     let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default();
     let staging = dir.join(format!(".{id}-{}-{stamp}.tmp", std::process::id()));
     let written = std::fs::OpenOptions::new()

@@ -4,8 +4,8 @@ use crate::{EngineError, Result, Session};
 pub use craft_plugin::ui;
 pub use craft_plugin::{
     API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
-    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog,
-    shader, swatches, theme, valid_id,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, MAX_PICKED_FOLDERS, Manifest, RuntimeManifest, UiSlot, check_input,
+    conditions, dialog, shader, swatches, theme, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -71,6 +71,10 @@ pub struct Grants {
     /// `input_folder`), approved at install.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub input_folder: bool,
+    /// The package may read the files in the home folder its manifest names in
+    /// `permissions.home_files`, approved at install as a whole. Bound to `package_hash`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub home_files: bool,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -98,6 +102,12 @@ pub struct AppState {
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
+    /// The run's granted folders whose grant says `hidden`: names starting with a dot are
+    /// reachable inside them (a Git repository's `.git`). Set by the host for that run alone.
+    pub hidden_folders: Vec<PathBuf>,
+    /// The home folder's files the run may read (`permissions.home_files`), by the manifest's name
+    /// and full path, once the user allowed them. Set by the host for that run alone.
+    pub home_files: Vec<(String, PathBuf)>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
@@ -529,6 +539,16 @@ fn run_package(
         let mut scratch = session.scratch();
         panels::register_package(&mut scratch, &package)?;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
+        scratch.plugin_state.hidden_folders = grants
+            .folders
+            .iter()
+            .filter(|grant| rt.permissions.files.iter().any(|asked| asked.name == grant.name && asked.hidden))
+            .map(|grant| grant.folder.clone())
+            .collect();
+        scratch.plugin_state.home_files = match solidcraft_io::vfs::home_folder() {
+            Some(home) if grants.home_files => rt.permissions.home_files.iter().map(|name| (name.clone(), home.join(name))).collect(),
+            _ => Vec::new(),
+        };
         scratch.plugin_state.file_grants = grants.folders;
         // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
         scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
@@ -612,7 +632,7 @@ mod panels;
 pub use panels::{PanelPackage, PanelSnapshot, sync_panels};
 pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
-pub use package::{remove, store_grants, validate_grants};
+pub use package::{approve_picked_folder, picked_folder_refusal, remove, store_grants, validate_grants};
 
 pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
 pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
@@ -873,7 +893,13 @@ impl PluginHost for SolidCraftHost {
             let allowed = if write { scope.check_new(&path.to_string_lossy()) } else { scope.check(&path.to_string_lossy()) };
             return allowed.map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
-        grant_covers(&self.session.plugin_state.file_grants, path, write)
+        grant_covers_showing(&self.session.plugin_state.file_grants, &self.session.plugin_state.hidden_folders, path, write)
+    }
+    fn shows_hidden(&self, folder: &Path) -> bool {
+        self.session.plugin_state.hidden_folders.iter().any(|shown| shown == folder)
+    }
+    fn home_files(&self) -> Vec<(String, PathBuf)> {
+        self.session.plugin_state.home_files.clone()
     }
     fn log(&mut self, message: &str) {
         if let Some(s) = self.transaction.as_mut() {
@@ -898,13 +924,21 @@ pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::
 /// The approved root and its ancestors are explicit, even in AppData or a hidden folder.
 /// Inspect only names beneath the most specific grant for this operation.
 fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
-    let relative = grants
+    grant_covers_showing(grants, &[], path, write)
+}
+
+/// [`grant_covers`], where hidden names are reachable inside the folders `shown` lists (their
+/// grant says `hidden`).
+fn grant_covers_showing(grants: &[FileGrant], shown: &[PathBuf], path: &Path, write: bool) -> craft_plugin::Result<()> {
+    let (folder, relative) = grants
         .iter()
         .filter(|grant| if write { grant.write } else { grant.read })
-        .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
-        .max_by_key(|(depth, _)| *depth)
-        .map(|(_, relative)| relative)
+        .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (&grant.folder, relative)))
+        .max_by_key(|(folder, _)| folder.components().count())
         .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
+    if shown.contains(folder) {
+        return Ok(());
+    }
     if relative.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
         name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))

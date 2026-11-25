@@ -27,6 +27,9 @@ pub(crate) struct Ask {
     pub(crate) grants: solidcraft_engine::plugin::Grants,
     /// A downloaded update of an installed plugin (`plugin_updates`).
     pub(crate) update: bool,
+    /// Folder grants whose folders the user picks in the plugin's forms (`picked`): the ones
+    /// picked for an earlier version are shown, never asked.
+    pub(crate) picked: std::collections::BTreeSet<String>,
 }
 
 /// Whether this build installs plugins: the browser has no plugins folder.
@@ -63,14 +66,27 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
         .and_then(Value::as_str)
         .and_then(|_| plugin.get("id").and_then(Value::as_str))
         .and_then(|id| app.session.plugin_state.grants.get(id));
+    let asked_folders = permissions.and_then(|p| p.get("files")).and_then(Value::as_array).into_iter().flatten();
+    let picked = |folder: &&Value| folder.get("picked").and_then(Value::as_bool).unwrap_or(false);
+    // Folders the user picked for an earlier version stay approved, as far as this one asks.
+    let kept_picks: Vec<solidcraft_engine::plugin::FileGrant> = asked_folders
+        .clone()
+        .filter(picked)
+        .flat_map(|folder| {
+            let (name, read, write) = (text(folder, "name"), flag(folder, "read"), flag(folder, "write"));
+            stored
+                .into_iter()
+                .flat_map(|grants| grants.folders.iter())
+                .filter(move |previous| previous.name == name && (!read || previous.read) && (!write || previous.write))
+                .map(move |previous| solidcraft_engine::plugin::FileGrant { read, write, ..previous.clone() })
+                .collect::<Vec<_>>()
+        })
+        .collect();
     let grants = solidcraft_engine::plugin::Grants {
         package_hash: None,
         command_groups: list(permissions.and_then(|p| p.get("command_groups"))).into_iter().collect(),
-        folders: permissions
-            .and_then(|p| p.get("files"))
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
+        folders: asked_folders
+            .filter(|folder| !picked(folder))
             .map(|folder| {
                 let mut grant = solidcraft_engine::plugin::FileGrant {
                     name: text(folder, "name"),
@@ -86,10 +102,13 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
                 }
                 grant
             })
+            .chain(kept_picks)
             .collect(),
         fuel: fuel_request(&plugin, app.preferences.plugin_max_fuel),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
+        // The home folder's files are listed by name above, and Install allows them as a whole.
+        home_files: permissions.and_then(|p| p.get("home_files")).and_then(Value::as_array).is_some_and(|files| !files.is_empty()),
     };
     let update = match crate::plugin_updates::prepare(app, &path, &plugin) {
         None => false,
@@ -100,10 +119,11 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
             return;
         }
     };
+    let picked = picked_names(&plugin).into_iter().collect();
     // These are editable starting values, not grants for the new package. Install validates
     // every folder on its worker, including a stored folder that has since disappeared.
     app.plugin_install.generation = app.plugin_install.generation.wrapping_add(1);
-    app.plugin_install.ask = Some(Ask { path, plugin, grants, update });
+    app.plugin_install.ask = Some(Ask { path, plugin, grants, update, picked });
 }
 
 fn browse_folder(app: &mut SolveApp, name: String) {
@@ -112,6 +132,7 @@ fn browse_folder(app: &mut SolveApp, name: String) {
         if app.plugin_install.generation == generation
             && let Some(path) = path
             && let Some(ask) = app.plugin_install.ask.as_mut()
+            && !ask.picked.contains(&name)
             && let Some(grant) = ask.grants.folders.iter_mut().find(|grant| grant.name == name)
         {
             grant.folder = path.into();
@@ -134,6 +155,45 @@ pub(crate) fn fuel_request(plugin: &Value, ceiling: u64) -> Option<u64> {
 
 fn text(plugin: &Value, key: &str) -> String {
     plugin.get(key).and_then(Value::as_str).unwrap_or_default().to_string()
+}
+fn flag(value: &Value, key: &str) -> bool {
+    value.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+/// The folder grants whose folders the user picks in the plugin's forms (`picked`): never asked
+/// at install, and the ones picked before are shown as they are.
+fn picked_names(plugin: &Value) -> Vec<String> {
+    let files = plugin.pointer("/permissions/files").and_then(Value::as_array).into_iter().flatten();
+    files.filter(|folder| flag(folder, "picked")).map(|folder| text(folder, "name")).collect()
+}
+/// Where an entry shows up, one line each (with its widget hint): its menus and ribbon tabs, by
+/// command only, or a step the plugin opens itself (`listed: false`: in no menu or ribbon, whatever
+/// its slots say; they only name its form).
+fn placement_lines(app: &SolveApp, entry: &solidcraft_engine::plugin::Entry) -> Vec<(&'static str, String)> {
+    if !entry.listed {
+        return vec![("plugin_entry_step", tr("prefs.plugin_slot_step").to_string())];
+    }
+    if entry.slots.is_empty() {
+        return vec![("plugin_entry_command", tr("prefs.plugin_slot_command").to_string())];
+    }
+    let line = |slot: &solidcraft_engine::plugin::UiSlot| {
+        let (key, name) = match slot {
+            solidcraft_engine::plugin::UiSlot::Menu { name } => {
+                let name = match crate::plugin_slots::menu_name(name) {
+                    Some("File") => tr("ui.file"),
+                    Some("Help") => tr("ui.help"),
+                    _ => tr("ui.plugins"),
+                };
+                ("prefs.plugin_slot_menu", name.to_string())
+            }
+            solidcraft_engine::plugin::UiSlot::Ribbon { name } => (
+                "prefs.plugin_slot_ribbon",
+                // A tab the app doesn't have: the entry goes in the Plugins group.
+                crate::plugin_slots::ribbon_name(name).map_or_else(|| tr("ui.plugins").to_string(), |tab| crate::toolbar::ribbon_label(app, tab)),
+            ),
+        };
+        ("plugin_entry_slot", format(key, &[("name", &name)]))
+    };
+    entry.slots.iter().map(line).collect()
 }
 fn list(value: Option<&Value>) -> Vec<String> {
     value.and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()
@@ -158,7 +218,18 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",
         });
-        lines.push(format("prefs.plugin_folder", &[("name", name), ("access", access)]));
+        let key = match (flag(folder, "picked"), flag(folder, "hidden")) {
+            (true, true) => "plugin_install.picked_folders_hidden",
+            (true, false) => "plugin_install.picked_folders",
+            (false, true) => "plugin_install.folder_hidden",
+            (false, false) => "prefs.plugin_folder",
+        };
+        lines.push(format(key, &[("name", name), ("access", access)]));
+    }
+    let home_files = list(permissions.and_then(|p| p.get("home_files")));
+    if !home_files.is_empty() {
+        let files = home_files.iter().map(|file| std::format!("~/{file}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.home_files", &[("files", &files)]));
     }
     let opens = list(plugin.get("opens"));
     if !opens.is_empty() {
@@ -259,6 +330,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
                 }
                 for grant in &mut ask.grants.folders {
+                    if ask.picked.contains(&grant.name) {
+                        let fixed = std::format!("{}: {}", grant.name, grant.folder.display());
+                        ui.push_id((&grant.name, &grant.folder), |ui| ui_kit::text(ui, &fixed, ui_kit::Text::Hint("plugin_picked_folder")));
+                        continue;
+                    }
                     let access = tr(match (grant.read, grant.write) {
                         (true, true) => "prefs.plugin_folder_read_write",
                         (false, true) => "prefs.plugin_folder_write",
@@ -278,7 +354,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                     grant.folder = path.into();
                 }
-                if !ask.grants.folders.is_empty() {
+                if ask.grants.folders.iter().any(|grant| !ask.picked.contains(&grant.name)) {
                     ui_kit::text(ui, tr("prefs.plugin_folder_note"), ui_kit::Text::Hint("plugin_folder"));
                 }
                 let entries: Vec<solidcraft_engine::plugin::Entry> =
@@ -288,27 +364,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 for entry in &entries {
                     ui_kit::text(ui, &entry.name, ui_kit::Text::Hint("plugin_entry"));
-                    for slot in &entry.slots {
-                        let (key, name) = match slot {
-                            solidcraft_engine::plugin::UiSlot::Menu { name } => {
-                                let name = match crate::plugin_slots::menu_name(name) {
-                                    Some("File") => tr("ui.file"),
-                                    Some("Help") => tr("ui.help"),
-                                    _ => tr("ui.plugins"),
-                                };
-                                ("prefs.plugin_slot_menu", name.to_string())
-                            }
-                            solidcraft_engine::plugin::UiSlot::Ribbon { name } => (
-                                "prefs.plugin_slot_ribbon",
-                                // A tab the app doesn't have: the entry goes in the Plugins group.
-                                crate::plugin_slots::ribbon_name(name)
-                                    .map_or_else(|| tr("ui.plugins").to_string(), |tab| crate::toolbar::ribbon_label(app, tab)),
-                            ),
-                        };
-                        ui_kit::text(ui, &format(key, &[("name", &name)]), ui_kit::Text::Hint("plugin_entry_slot"));
-                    }
-                    if entry.slots.is_empty() {
-                        ui_kit::text(ui, tr("prefs.plugin_slot_command"), ui_kit::Text::Hint("plugin_entry_command"));
+                    for (hint, line) in placement_lines(app, entry) {
+                        ui_kit::text(ui, &line, ui_kit::Text::Hint(hint));
                     }
                 }
                 if let Some(replaces) = &replaces {
@@ -349,7 +406,7 @@ pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder,"home_files":ask.grants.home_files}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
@@ -442,6 +499,41 @@ mod tests {
                 "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_lists_folders_picked_later_and_home_files_and_asks_no_folder_for_them() {
+        crate::i18n::install();
+        let permissions = json!({"files":[
+            {"name":"repositories","read":true,"write":true,"picked":true,"hidden":true},
+            {"name":"cache","read":true,"write":true,"hidden":true}
+        ],"home_files":[".gitconfig",".git-credentials"]});
+        assert_eq!(
+            permission_lines(&json!({"permissions": permissions})),
+            [
+                "repositories: folders you pick with Browse… in its forms (read and write, hidden files too, such as .git)",
+                "cache (read and write, hidden files too)",
+                "Reading these files in your home folder, never changing them: ~/.gitconfig, ~/.git-credentials",
+            ]
+        );
+        let mut h = crate::scenario::Harness::new();
+        described(&mut h.app, "git.zip".into(), json!({"name": "Git", "version": "1", "permissions": permissions}));
+        let ask = h.app.plugin_install.ask.as_ref().unwrap();
+        assert!(ask.grants.home_files, "Install allows the home files the review lists");
+        let asked: Vec<&str> = ask.grants.folders.iter().map(|grant| grant.name.as_str()).collect();
+        assert_eq!(asked, ["cache"], "a picked grant asks for no folder at install");
+    }
+
+    #[test]
+    fn plugin_install_says_a_step_the_plugin_opens_itself_is_in_no_menu() {
+        crate::i18n::install();
+        let h = crate::scenario::Harness::new();
+        let entry = |value: Value| serde_json::from_value::<solidcraft_engine::plugin::Entry>(value).unwrap();
+        let slots = json!([{"kind": "menu", "name": "Sign in"}]);
+        let lines = |value: Value| -> Vec<String> { placement_lines(&h.app, &entry(value)).into_iter().map(|(_, line)| line).collect() };
+        assert_eq!(lines(json!({"name": "token", "listed": false, "slots": slots})), ["A step the plugin opens itself, in no menu"]);
+        assert_eq!(lines(json!({"name": "save", "slots": slots})), ["Menu: Plugins (unrecognized menus appear under Plugins)"]);
+        assert_eq!(lines(json!({"name": "run"})), ["Available by command"]);
     }
 
     #[test]

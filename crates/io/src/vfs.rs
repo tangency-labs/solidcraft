@@ -270,6 +270,11 @@ fn canonical(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     std::fs::canonicalize(dir).ok()
 }
 
+/// The user's home folder, resolved: where a plugin's `permissions.home_files` are.
+pub fn home_folder() -> Option<std::path::PathBuf> {
+    home_dir()
+}
+
 /// The user's home folder, resolved.
 fn home_dir() -> Option<std::path::PathBuf> {
     let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };

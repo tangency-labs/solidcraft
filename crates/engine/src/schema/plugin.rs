@@ -464,6 +464,10 @@ pub struct InstallApproval {
     /// manifest asks for `input_folder`.
     #[serde(default)]
     pub input_folder: bool,
+    /// Let the plugin read the files in the home folder its manifest names in
+    /// `permissions.home_files`; only when it names some.
+    #[serde(default)]
+    pub home_files: bool,
 }
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -487,6 +491,7 @@ impl From<InstallApproval> for crate::plugin::Grants {
             fuel: approve.fuel,
             memory_mib: approve.memory_mib,
             input_folder: approve.input_folder,
+            home_files: approve.home_files,
         }
     }
 }

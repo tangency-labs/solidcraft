@@ -178,6 +178,9 @@ pub(crate) enum Kind {
         /// `format` is `directory`: when the host has a folder picker, a Browse button fills
         /// this field. Without one, including the browser build, the field stays a text box.
         directory: bool,
+        /// `x-solidcraft-grant`: the plugin's folder grant (`picked` in its manifest) a folder
+        /// picked with Browse… is approved for.
+        grant: Option<String>,
     },
     /// Geometry picked in the viewport: what it takes, how many, and whether it sends body names
     /// (a `bodies` or `body_ids` list) rather than selection references.
@@ -191,6 +194,8 @@ pub(crate) enum Kind {
 
 /// The annotation that makes an array property a selection field.
 pub(crate) const SELECTION_KEY: &str = "x-solidcraft-selection";
+/// A directory field's folder grant: Browse… approves the picked folder for it.
+pub(crate) const GRANT_KEY: &str = "x-solidcraft-grant";
 
 /// What a selection field may take (`"accept"` in [`SELECTION_KEY`]), and the pick kind each is.
 /// Sketch points and curves are picked with their sketch: ids repeat from one sketch to the next.
@@ -278,7 +283,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         ("boolean", false) => &[],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
         ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
-        ("string", false) => &["minLength", "maxLength", "format"],
+        ("string", false) => &["minLength", "maxLength", "format", GRANT_KEY],
         _ => return None,
     };
     const ANNOTATIONS: &[&str] = &[
@@ -375,7 +380,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             let length = |k: &str| p.get(k).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
             let input = Input::Text(default.and_then(Value::as_str).unwrap_or_default().to_owned());
             let directory = p.get("format").and_then(Value::as_str).is_some_and(|format| format.trim() == "directory");
-            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength"), directory }, input)
+            let grant = p.get(GRANT_KEY).and_then(Value::as_str).filter(|_| directory).map(str::to_owned);
+            (Kind::Text { min_length: length("minLength"), max_length: length("maxLength"), directory, grant }, input)
         }
         _ => return None,
     };
@@ -821,7 +827,7 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
     }
     let mut buttons = Vec::new();
     for plugin in app.plugin_menu.listed.iter().filter(|p| shown(app, p)) {
-        for entry in &plugin.entries {
+        for entry in plugin.entries.iter().filter(|entry| entry.listed) {
             let title = command_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
@@ -889,14 +895,17 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
+        // A form the plugin opens itself (`listed: false`) has no row; the others keep their index.
         let entries: Vec<FileRow> = plugin
             .entries
             .iter()
             .enumerate()
+            .filter(|(_, entry)| entry.listed)
             .map(|(e, entry)| item(format!("entry:{p}:{e}"), format!("{}…", command_title(plugin, entry)), true))
             .collect();
         match <[FileRow; 1]>::try_from(entries) {
             Ok([one]) => rows.push(one),
+            Err(entries) if entries.is_empty() => {}
             Err(entries) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: entries }),
         }
     }
@@ -2264,7 +2273,39 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
 }
 
 /// Write a picked folder into that dialog's directory field. A missing picker answers nothing.
+/// A field naming one of the plugin's `picked` grants approves the folder for it first: picking
+/// it in the app's own folder picker is the user's approval (typing a path is not).
 fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
+    let Some(dialog) = app.plugin_menu.dialogs.iter().find(|dialog| dialog.id == id) else { return };
+    let grant =
+        dialog.fields.as_ref().and_then(|fields| fields.iter().find(|(field, _)| field.key == key)).and_then(|(field, _)| match &field.kind {
+            Kind::Text { directory: true, grant, .. } => grant.clone(),
+            _ => None,
+        });
+    let plugin = dialog.plugin.id.clone();
+    let path = match grant {
+        Some(grant) => {
+            // The app's approvals live in its preferences: the session's copy is refreshed from them.
+            app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
+            // The reason alone ("pick a folder inside your home folder…"), not the error's kind.
+            let reason = |error: solidcraft_engine::EngineError| match error.host_error() {
+                Some(solidcraft_engine::plugin::HostError::PermissionDenied { permission: why }) => why.clone(),
+                Some(solidcraft_engine::plugin::HostError::InvalidInput { reason: why, .. }) => why.clone(),
+                _ => error.to_string(),
+            };
+            let approved = solidcraft_engine::plugin::approve_picked_folder(&mut app.session, &plugin, &grant, std::path::Path::new(&path))
+                .map_err(reason)
+                .and_then(|approved| crate::plugins::persist_grants(app).map(|()| approved));
+            match approved {
+                Ok(approved) => approved.to_string_lossy().into_owned(),
+                Err(error) => {
+                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_folder_refused", &[("error", &error)]), true);
+                    return;
+                }
+            }
+        }
+        None => path,
+    };
     let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|dialog| dialog.id == id) else { return };
     let Some(fields) = dialog.fields.as_mut() else { return };
     let Some((field, input)) = fields.iter_mut().find(|(field, _)| field.key == key) else { return };

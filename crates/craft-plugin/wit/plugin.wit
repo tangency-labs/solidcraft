@@ -86,8 +86,21 @@ interface control {
 }
 interface files {
     use types.{plugin-error};
+    // `path` is relative to the grant's folder. In a grant whose folders the user picks
+    // (`picked`), it is a full path inside one of them, as the form gave it. The grant "~" reads
+    // the home folder's files the manifest names in `permissions.home_files`, and only those.
+    // A file in a granted folder, up to 1 MiB (`read-part` reads a larger one in pieces).
     read-file: func(grant: string, path: string) -> result<list<u8>, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of the file from `offset`; fewer at its end.
+    read-part: func(grant: string, path: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // The names in a folder of the grant ("" is the grant's own folder), sorted; a sub-folder's
+    // name ends with "/". Links are left out, and hidden names unless the grant says `hidden`.
+    // A folder that is not there has none.
+    list-folder: func(grant: string, path: string) -> result<list<string>, plugin-error>;
+    // Writes and removals take effect when the run is accepted, in the order they were asked for.
     write-file: func(grant: string, path: string, data: list<u8>) -> result<_, plugin-error>;
+    // Removes a file (never a folder). A file that is not there is no error.
+    remove-file: func(grant: string, path: string) -> result<_, plugin-error>;
 }
 interface clock {
     now: func() -> u64;

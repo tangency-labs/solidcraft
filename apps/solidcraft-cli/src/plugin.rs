@@ -435,6 +435,8 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         fuel: wanted.fuel,
         memory_mib: wanted.memory_mib,
         input_folder: wanted.input_folder,
+        // A test case never reads the user's own files.
+        home_files: false,
     };
     solidcraft_engine::plugin::validate_grants(manifest, &grants).map_err(|e| format!("grants: {e}"))?;
     // Only a grant the app accepts is seeded from its fixture.
