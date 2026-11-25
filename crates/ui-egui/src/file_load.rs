@@ -2211,6 +2211,10 @@ mod tests {
                 images: Default::default(),
                 swatches: Default::default(),
                 shaders: Vec::new(),
+                tints: Vec::new(),
+                panels: Vec::new(),
+                shader_settings: Default::default(),
+                pictures: Vec::new(),
             }];
             h.app.plugin_menu.loaded = true;
             crate::plugin_menu::open_entry(&mut h.app, 0, 0);

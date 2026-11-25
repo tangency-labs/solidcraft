@@ -11,13 +11,13 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_doc::drawing::thread_lines::ThreadStroke;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, Source, Visibility};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
+use solidcraft_kernel::hlr::{self, Source, Visibility};
 
 use super::ShownSet;
 use super::exact::{self, Fallback, PreparedBodies};
