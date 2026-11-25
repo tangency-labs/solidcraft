@@ -848,7 +848,7 @@ mod tests {
         let (disc, square) = (std::f64::consts::PI * 15.0f64.powi(2), 900.0);
         let a = areas(&s, &r);
         assert_eq!(a.len(), 2, "{a:?}");
-        assert!((a[0] - square).abs() < square * 0.05 && (a[1] - disc).abs() < disc * 0.05, "{a:?}");
+        assert!((a[0] - disc).abs() < disc * 0.05 && (a[1] - square).abs() < square * 0.05, "{a:?}");
         // The same point twice, or a point in each shade of the disc, is still one region.
         let r = s.execute("canvas.to_sketch", &json!({"at": [at(75.0, 50.0), at(75.0, 50.0), at(50.0, 50.0)], "tolerance": 0})).unwrap();
         assert_eq!((r["outlines"].as_u64(), r["holes"].as_u64()), (Some(1), Some(0)), "{r}");
