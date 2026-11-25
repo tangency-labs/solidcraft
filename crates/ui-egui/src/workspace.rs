@@ -786,7 +786,13 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"] },
+    // Pipe Route sits in the Create menu: a group shows at most four buttons.
+    Section {
+        tab: "WELDMENTS",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset", "route.create"],
+    },
     Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member", "frame.trim"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
@@ -1801,6 +1807,7 @@ mod tests {
         assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
         assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"]);
+        assert_eq!(create.get(n).map(|c| c.id), Some("route.create"), "Pipe Route is in the Weldments Create menu");
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
 
         let mut h = crate::scenario::Harness::new();

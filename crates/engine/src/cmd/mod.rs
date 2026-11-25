@@ -235,6 +235,8 @@ pub(crate) use render::render_saved_job_refusal;
 pub(crate) use render::render_started;
 pub(crate) use render_ui::batch_request;
 mod render_ui;
+pub(crate) mod route;
+pub(crate) mod route_plan;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -652,6 +654,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
+    v.extend(route::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
