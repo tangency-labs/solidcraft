@@ -682,6 +682,7 @@ struct WorldCache {
     doc: Arc<Document>,
     model: Arc<solidcraft_doc::ModelState>,
     pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pending_poses: Option<Vec<solidcraft_doc::joints::PlacedPose>>,
     drag_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     active_component: u64,
     active_occurrence_path: Option<Vec<u64>>,
@@ -699,10 +700,14 @@ struct WorldCache {
 pub(crate) type BodyFrames = Arc<Vec<(String, String, solidcraft_doc::Mat)>>;
 
 impl WorldCache {
+    /// Whether this placed model is still the one `session` shows for `model`: the same design and
+    /// model, by identity, with the same pending moves, pending poses and active placement.
+    /// Whatever the placed model is made from has to be compared here, or a stale one is shown.
     fn matches(&self, session: &Session, model: &Arc<solidcraft_doc::ModelState>) -> bool {
         Arc::ptr_eq(&self.doc, &session.doc)
             && Arc::ptr_eq(&self.model, model)
             && self.pending_moves == session.pending_moves
+            && self.pending_poses == session.pending_poses
             && &self.drag_moves == session.drag_moves()
             && self.active_component == session.active_component
             && self.active_occurrence_path == session.active_occurrence_path
@@ -952,6 +957,14 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// The poses shown in place of the design's own (`Assembly::poses`) for the copies that
+    /// flexible occurrences of linked subassemblies have of their parts: display only, as an
+    /// entry of `pending_moves` is for an occurrence. Such a copy is no occurrence, so no move
+    /// can show it. A dialog that previews a motion takes them from the copy of the design it
+    /// solved on, and puts `None` back when it closes. `None` shows the design's own and costs
+    /// nothing. Not saved, no undo step, and not handed to a [`Session::scratch`] copy, which
+    /// solves and shows its own design.
+    pub pending_poses: Option<Vec<solidcraft_doc::joints::PlacedPose>>,
     /// The design as a configuration row last put it or took it in (`config.activate`,
     /// `config.update_from_design`), with the session's document id: what
     /// `config.update_from_design` compares the design with to name the changes the table has no
@@ -1460,6 +1473,7 @@ impl Session {
             active_occurrence_path: None,
             pending_moves: Default::default(),
             exploded: Default::default(),
+            pending_poses: None,
             config_baseline: None,
             row_models: Vec::new(),
             drag_preview: None,
@@ -2115,7 +2129,9 @@ impl Session {
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
         let drag = self.drag_moves();
-        // A drag's frame places its occurrences over any move not captured yet.
+        // The design as it is shown: the poses a previewed motion shows (`pending_poses`) in
+        // place of the design's own (`placed_document`), and the occurrence positions not
+        // captured yet, with a drag's frame over them.
         let dragged;
         let moves = if drag.is_empty() {
             &self.pending_moves
@@ -2123,16 +2139,22 @@ impl Session {
             dragged = self.pending_moves.iter().chain(drag).map(|(o, m)| (*o, *m)).collect();
             &dragged
         };
-        let w = solidcraft_doc::world_state_moved_reusing(&self.doc, &st, moves, &mut reuse);
+        let shown = self.pending_poses.is_some().then(|| self.placed_document());
+        let source = match &shown {
+            Some(shown) => shown.as_ref(),
+            None => self.doc.as_ref(),
+        };
+        let w = solidcraft_doc::world_state_moved_reusing(source, &st, moves, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
-        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(w, moves)).map(Arc::new);
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(source, w, moves)).map(Arc::new);
         if let Ok(mut c) = self.world_cache.lock() {
             *c = Some(WorldCache {
                 doc: self.doc.clone(),
                 model: st,
                 pending_moves: self.pending_moves.clone(),
+                pending_poses: self.pending_poses.clone(),
                 drag_moves: drag.clone(),
                 active_component: self.active_component,
                 active_occurrence_path: self.active_occurrence_path.clone(),
@@ -2191,12 +2213,13 @@ impl Session {
     /// ([`Session::feature_path`]), as a move from there.
     fn sketch_copies(
         &self,
+        doc: &solidcraft_doc::Document,
         mut w: solidcraft_doc::ModelState,
         moves: &std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     ) -> solidcraft_doc::ModelState {
         let mut owners: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
         for sketch in &w.sketches {
-            if let Some(f) = self.doc.feature(sketch.feature)
+            if let Some(f) = doc.feature(sketch.feature)
                 && f.component != 0
             {
                 owners.entry(f.component).or_default().push(sketch.feature);
@@ -2206,7 +2229,7 @@ impl Session {
             return w;
         }
         let mut of: std::collections::BTreeMap<u64, Vec<(Vec<u64>, solidcraft_doc::Mat)>> = std::collections::BTreeMap::new();
-        for (component, path, m) in self.doc.placements_moved(moves) {
+        for (component, path, m) in doc.placements_moved(moves) {
             if owners.contains_key(&component) {
                 of.entry(component).or_default().push((path, m));
             }
@@ -3095,6 +3118,8 @@ impl Session {
         }
         let mut mapped = if outermost {
             frames::forget_picks();
+            // A pick a feature would keep must be on a body that stands as its design has it.
+            frames::refuse_posed_picks(self, spec.id, params)?;
             frames::to_local(self, spec.id, params)?
         } else {
             None
@@ -3160,6 +3185,22 @@ impl Session {
             Ok(r) => Ok(r),
             Err(EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(EngineError::BadParams { cmd: spec.id.to_string(), msg }),
             Err(e) => Err(e),
+        };
+        // What a link keeps for its linked design's own is that design's to change. A command
+        // that put something of this design into it is refused, whichever command it was: the
+        // design goes back to what it was, as after any other error.
+        let r = match r {
+            Ok(done) if outermost && spec.undoable && self.replacements == replacements && !Arc::ptr_eq(&self.doc, &before.doc) => {
+                match cmd::kept_changed(&before.doc, &self.doc) {
+                    Some(why) => {
+                        // Where new geometry goes is not in the design: it goes back here.
+                        (self.active_component, self.active_occurrence_path) = active_before.clone();
+                        Err(EngineError::BadParams { cmd: spec.id.to_string(), msg: why })
+                    }
+                    None => Ok(done),
+                }
+            }
+            r => r,
         };
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
@@ -3571,6 +3612,8 @@ impl Session {
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
             exploded: self.exploded.clone(),
+            // A copy solves and shows its own design, not the poses this one only shows.
+            pending_poses: None,
             config_baseline: self.config_baseline.clone(),
             row_models: self.row_models.clone(),
             drag_preview: None,

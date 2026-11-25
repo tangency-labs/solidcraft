@@ -240,6 +240,7 @@ pub use eval::to_end_is_flat;
 pub use eval::with_placed_copies;
 pub use eval::world_body_paths;
 pub use eval::world_state;
+pub use eval::world_state_as_designed;
 pub use eval::world_state_moved_reusing;
 pub use eval::world_state_reusing;
 pub use expr::Expr;

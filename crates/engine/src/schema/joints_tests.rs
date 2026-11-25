@@ -74,7 +74,7 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
-    assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "from", "joints", "occurrence", "point", "quiet", "z"]);
+    assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "from", "joints", "occurrence", "path", "point", "quiet", "z"]);
     assert_keys(input_schema_for::<MotionLinkParams>(), &["a", "b", "ia", "ib", "link", "offset", "quiet", "ratio"]);
     assert_keys(input_schema_for::<GearParams>(), &["a", "b", "internal", "link", "quiet", "ra", "rb", "reverse"]);
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);

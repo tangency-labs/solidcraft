@@ -37,6 +37,9 @@ use crate::viewport::Proj;
 #[derive(Clone, Debug)]
 pub struct Drag {
     occurrence: u64,
+    /// The placement grabbed, when the occurrence is inside a linked subassembly: the
+    /// occurrences from the top of the assembly down to it. Empty for any other occurrence.
+    path: Vec<u64>,
     /// The point grabbed, in the occurrence's own coordinates.
     local: Vec3,
     /// The plane the pointer moves the point in: through where it was grabbed, facing the view.
@@ -159,6 +162,27 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some((body, at)) = crate::occurrence_drag::grabbed_face(app, proj, p) else { return false };
     let s = &app.session;
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
+    // A part inside a linked subassembly has no joint of its own: the joints its subassembly's
+    // occurrence has move it, the copy grabbed and no other. It is asked for by its placement.
+    if s.doc.link_keeping_occurrence(occurrence).is_some() {
+        let st = s.model.state();
+        let Some(path) = s.doc.body_frames_with_source(&st).into_iter().find(|(world, ..)| *world == body).map(|(_, _, _, path, _)| path) else {
+            return false;
+        };
+        if path.last() != Some(&occurrence) || joints::motion_axes(&s.doc, &st, occurrence, &path).is_empty() {
+            return false;
+        }
+        let Some(local) = s.doc.path_placement(&path).and_then(|(_, world)| mat_inverse(&world)).map(|inv| apply_point(&inv, at)) else {
+            return false;
+        };
+        let normal = proj.ray(p).1;
+        // The face under the pointer is not lit from here on (#5137): gone now rather than when
+        // the frame gets to it, so the drag's first frame is already drawn by moving the part.
+        app.viewport.hover = None;
+        app.viewport.joint_drag =
+            Some(Drag { occurrence, path, local, origin: at, normal, pivot: None, pointer: at, frames: Frames::Applied { pushed: false } });
+        return true;
+    }
     if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
         return false;
     }
@@ -191,7 +215,7 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     // The face under the pointer is not lit from here on (#5137): gone now rather than when the
     // frame gets to it, so the drag's first frame is already drawn by moving the bodies.
     app.viewport.hover = None;
-    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, pivot, pointer: at, frames });
+    app.viewport.joint_drag = Some(Drag { occurrence, path: Vec::new(), local, origin: at, normal, pivot, pointer: at, frames });
     true
 }
 
@@ -251,14 +275,27 @@ fn aim(d: &Drag, world: &Mat, target: Vec3) -> Option<Aim> {
 }
 
 /// `joint.reach`'s parameters for a frame of a drag: the occurrence's point now at `at` (world)
-/// goes where `aim` says.
-fn reach_params(occurrence: u64, at: Vec3, aim: Aim) -> Value {
+/// goes where `aim` says. `path` names the copy of it, when it is inside a linked subassembly.
+fn reach_params(occurrence: u64, path: &[u64], at: Vec3, aim: Aim) -> Value {
     let mut params =
         json!({"occurrence": occurrence, "at": [at.x, at.y, at.z], "point": [aim.to.x, aim.to.y, aim.to.z], "quiet": true, "continuous": true});
+    if !path.is_empty() {
+        params["path"] = json!(path);
+    }
     if let Some(z) = aim.z {
         params["z"] = json!([z.x, z.y, z.z]);
     }
     params
+}
+
+/// Where the drag's occurrence is shown in `doc`: its placement, when it is inside a linked
+/// subassembly, or the occurrence's own transform.
+fn world_of(doc: &Document, occurrence: u64, path: &[u64]) -> Mat {
+    if path.is_empty() {
+        joints::occurrence_world(doc, occurrence)
+    } else {
+        doc.path_placement(path).map_or_else(|| joints::occurrence_world(doc, occurrence), |(_, world)| world)
+    }
 }
 
 /// Reach for the point under `p`: solved on the drag's copy of the design and shown, or, with
@@ -277,8 +314,8 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let target = o + dir * ((d.origin - o).dot(d.normal) / facing);
     if facing.abs() >= 1e-9 && target.is_finite() {
         let world = match &d.frames {
-            Frames::Shown(sh) => joints::occurrence_world(&sh.pose, d.occurrence),
-            Frames::Applied { .. } => joints::occurrence_world(&app.session.doc, d.occurrence),
+            Frames::Shown(sh) => world_of(&sh.pose, d.occurrence, &d.path),
+            Frames::Applied { .. } => world_of(&app.session.doc, d.occurrence, &d.path),
         };
         let aimed = aim(&d, &world, target);
         if d.pivot.is_some() {
@@ -286,8 +323,8 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         }
         if let Some(aimed) = aimed {
             match &mut d.frames {
-                Frames::Shown(sh) => show(app, d.occurrence, d.local, sh, aimed),
-                Frames::Applied { pushed } => *pushed = apply(app, reach_params(d.occurrence, apply_point(&world, d.local), aimed), *pushed),
+                Frames::Shown(sh) => show(app, d.occurrence, &d.path, d.local, sh, aimed),
+                Frames::Applied { pushed } => *pushed = apply(app, reach_params(d.occurrence, &d.path, apply_point(&world, d.local), aimed), *pushed),
             }
         }
     }
@@ -295,9 +332,9 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
 }
 
 /// Solve one frame on the drag's copy of the design and show it.
-fn show(app: &mut SolveApp, occurrence: u64, local: Vec3, sh: &mut Shown, aim: Aim) {
+fn show(app: &mut SolveApp, occurrence: u64, path: &[u64], local: Vec3, sh: &mut Shown, aim: Aim) {
     let start = values(&sh.pose);
-    let reach = joints::Reach { occurrence, point: local, to: aim.to, axis: aim.z.map(|z| (Vec3::Z, z)), joints: None };
+    let reach = joints::Reach { occurrence, path: path.to_vec(), point: local, to: aim.to, axis: aim.z.map(|z| (Vec3::Z, z)), joints: None };
     // A reach that can't move (a limit, a loop) leaves the pose where it was.
     let reached = solidcraft_engine::cmd::reach_preview(&mut sh.pose, &app.session.model.state(), &reach, &mut sh.carry);
     sh.last = Some((start, aim));
@@ -353,15 +390,15 @@ pub fn end(app: &mut SolveApp) {
     let Some(d) = app.viewport.joint_drag.take() else { return };
     app.session.drag_preview = None;
     app.viewport.joint_motions = None;
+    let at = apply_point(&world_of(&app.session.doc, d.occurrence, &d.path), d.local);
     let Frames::Shown(sh) = d.frames else { return };
     let Some((_, aim)) = sh.last else { return };
     if !Arc::ptr_eq(&sh.design, &app.session.doc) {
         return;
     }
-    let at = apply_point(&joints::occurrence_world(&app.session.doc, d.occurrence), d.local);
-    let shown = joints::occurrence_world(&sh.pose, d.occurrence);
+    let shown = world_of(&sh.pose, d.occurrence, &d.path);
     let there = Aim { to: apply_point(&shown, d.local), z: aim.z.and_then(|_| apply_vector(&shown, Vec3::Z).normalized()) };
-    let mut params = reach_params(d.occurrence, at, there);
+    let mut params = reach_params(d.occurrence, &d.path, at, there);
     let from = solidcraft_engine::cmd::reach_from(&sh.design, &values(&sh.pose));
     if from.as_array().is_some_and(|f| !f.is_empty()) {
         params["from"] = from;
@@ -769,7 +806,7 @@ mod tests {
         let mut drag = h.app.viewport.joint_drag.take().unwrap();
         let local = drag.local;
         let super::Frames::Shown(sh) = &mut drag.frames else { panic!("a scratch drag") };
-        super::show(&mut h.app, 0, local, sh, super::Aim { to: Vec3::ZERO, z: None });
+        super::show(&mut h.app, 0, &[], local, sh, super::Aim { to: Vec3::ZERO, z: None });
         h.app.viewport.joint_drag = Some(drag);
         let failed = read_pose(&mut h);
         assert!(failed["pose"].is_null(), "{failed}");
@@ -779,7 +816,7 @@ mod tests {
         let (occurrence, local) = (drag.occurrence, drag.local);
         let super::Frames::Shown(sh) = &mut drag.frames else { panic!("a scratch drag") };
         let there = apply_point(&joints::occurrence_world(&sh.pose, occurrence), local);
-        super::show(&mut h.app, occurrence, local, sh, super::Aim { to: there, z: None });
+        super::show(&mut h.app, occurrence, &[], local, sh, super::Aim { to: there, z: None });
         h.app.viewport.joint_drag = Some(drag);
         let recovered = read_pose(&mut h);
         assert!(recovered["error"].is_null(), "{recovered}");

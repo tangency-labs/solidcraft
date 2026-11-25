@@ -7,6 +7,10 @@
 //! bodies, and Break Link keeps the bodies and forgets the file. The bodies' faces are named after the names
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
+//!
+//! A link keeps the components of a linked design that has some as components inside the linked
+//! one (a linked subassembly), and each occurrence of it is rigid or flexible
+//! (`component_link_tree`).
 
 use solidcraft_geom::prelude::*;
 use std::hash::{Hash, Hasher};
@@ -24,19 +28,26 @@ use super::design_link::{
 use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
-    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkSource, LinksParams, LinksResult, RelinkParams, RelinkResult,
-    ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinkModeParams, LinkModeResult, LinkSource, LinksParams, LinksResult, RelinkParams,
+    RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
 mod extract;
+#[path = "component_link_tree.rs"]
+mod tree;
 
 #[cfg(test)]
 #[path = "component_relink_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod relink_tests;
+
+#[cfg(test)]
+#[path = "component_link_tree_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tree_tests;
 
 const INSERT_DESIGN_CONTRACT: TypedContract<InsertDesignParams> = TypedContract::new();
 const UPDATE_LINKS_CONTRACT: TypedContract<UpdateLinksParams> = TypedContract::new();
@@ -46,6 +57,7 @@ const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
 const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
 const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+const LINK_MODE_CONTRACT: TypedContract<LinkModeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
@@ -61,7 +73,19 @@ pub static COMMANDS: &[CommandSpec] = &[
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
          matrix?: [12 or 16 numbers] (row-major 3x4 or 4x4, its translation column numbers or length expressions) or to_matrix?: [12 or 16 numbers]; \
          tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); \
-         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available",
+         reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file and configuration when available; \
+         structure?: bool (default false: every body goes into the one new component, whatever components the design has; true: a \
+         design with components of its own (an assembly) comes in as a subassembly: its components and their occurrences are kept as \
+         components inside the new one, each with its part properties, and stay where that design has them, so it moves as one \
+         (rigid; a joint made here to one of its components moves the whole of it) → subcomponents); \
+         flexible?: bool (default false: rigid; true: the components are kept as with `structure`, and this occurrence is flexible: \
+         the design's own joints are joints here too, on \
+         this occurrence's own copy of its components, named as there or `<occurrence>: <name>` where the name is taken, so \
+         joint.drive moves them; each occurrence is rigid or flexible on its own and has its own pose; also with reuse; a design \
+         without joints stays rigid) → joints; with reuse and a link to the file there already → occurrence, component, and \
+         warnings when `structure` is not how that link keeps the design (component.link_mode changes a link); a design with more \
+         components than a link keeps (5000, or 20000 occurrences) is refused with `structure: true`, and with `flexible` alone \
+         comes in as one component, with a warning",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
         .icon("update")
@@ -81,7 +105,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); structure?: bool (default: as the link is; true keeps the design's own components as components inside the linked one, as component.insert_design does, false puts every body into the linked component itself; with occurrence it is for a link made new, one that is there stays as it is); flexible?: bool (default: each occurrence as it is; see component.insert_design; with occurrence: that occurrence, which comes rigid without it, since its joints and its pose were its old design's; a joint of this design that is on an occurrence inside it stays where it is, as a frame on the occurrence, and is named in warnings); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+    ),
+    CommandSpec::new("component.link_mode", "Change Link Mode", crate::checked!("component.link_mode", link_mode))
+        .icon("chain")
+        .contract(&LINK_MODE_CONTRACT)
+        .output(output_schema_for::<LinkModeResult>)
+        .params(
+        "component: id or name of a linked component; occurrence?: id or name of one of its occurrences, to make that one flexible or rigid \
+         (default: every occurrence); structure?: bool (keep the linked design's own components as components inside it; default: as \
+         the link is); flexible?: bool (true: the linked design's joints are joints here too, on that occurrence's own copy of its \
+         components, so they move by them there and two occurrences can stand in different poses; false: rigid, it moves as one and \
+         shows the design as it was saved, which needs no reading of the design; default: each occurrence as it is; needs structure) \
+         — changes how the link keeps its design, reading the design again except to make an occurrence rigid, as one undo step → \
+         component, structure, flexible (the flexible occurrences, by id), subcomponents, joints (the design's joints each flexible \
+         occurrence has; 0 when none is flexible), warnings (also when the design has no components to keep, or no joints, so nothing is flexible)",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -111,8 +149,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ReplaceWithLinkResult>)
         .params(
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
-         (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
-         component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+         (its link here, one that holds the design in one component first, else a new linked component) → each component's history goes \
+         and its placements become placements of the linked component; refused when its bodies are not the same as the link's; returns \
+         component, name, replaced and warnings",
     ),
     CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
         .icon("chain")
@@ -122,9 +161,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step` or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
-         reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
-         unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
-         can't be reached",
+         reads it again; null when not found or the link is older than this record), structure (whether the link keeps the linked \
+         design's components as components inside the linked one), flexible (its flexible occurrences, by id), then host (the \
+         network location); state (missing, unreadable, not_allowed: a network location not allowed or outside the folders this \
+         agent may use) and reason when the file can't be reached",
     ),
 ];
 
@@ -585,7 +625,7 @@ fn left_out_bodies(link: &DesignLink, from: Option<&str>, flat: bool, validation
 /// ([`source_bodies`]), with the link's naming rule; `flat` as there.
 fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool, validation: solidcraft_kernel::Validation) -> Result<LeftOut> {
     let bytes = read_link(file, from, false)?;
-    let ((_, feature, ..), _) = source_bodies(file, &bytes, link, flat, validation)?;
+    let ((_, feature, ..), _, _) = source_bodies(file, &bytes, link, flat, validation, false, false)?;
     let changed = link.file_sha256.as_deref().is_some_and(|kept| kept != DesignLink::file_digest(&bytes));
     Ok((feature, Vec::new(), changed, Vec::new()))
 }
@@ -593,8 +633,8 @@ fn left_out_step(link: &DesignLink, file: &Path, from: Option<&str>, flat: bool,
 /// [`left_out_bodies`]' read of the design at `file`, for a design opened from `from`.
 fn read_once(file: &Path, from: Option<&str>, configuration: Option<SelectedConfiguration>, validation: solidcraft_kernel::Validation) -> ReadOnce {
     let bytes = read_link(file, from, false).map_err(|e| e.to_string())?;
-    let ((_, feature, faces, _, _, meshes), _) =
-        design_bodies_reusing(&Source::File(file.to_path_buf()), &bytes, configuration, validation, true).map_err(|e| e.to_string())?;
+    let ((_, feature, faces, _, _, meshes), _, _) =
+        design_bodies_reusing(&Source::File(file.to_path_buf()), &bytes, configuration, validation, false, false, true).map_err(|e| e.to_string())?;
     let solidcraft_io::StepFeature { name, kind, body_names, invisible, warnings, import } = feature;
     Ok((name, kind, body_names, invisible, warnings, import, faces, DesignLink::file_digest(&bytes), meshes))
 }
@@ -745,6 +785,38 @@ fn configuration_id(bytes: &[u8], key: Option<RowKey<'_>>) -> Result<Option<Sele
         .ok_or_else(|| EngineError::Other(format!("configuration `{key}` does not exist in the source design")))
 }
 
+/// The solid bodies of the design at `file`, in `configuration`, evaluated under `validation`, as an Import feature, with the design's
+/// structure when `structure` asks for it ([`session_bodies`]) and the digest of the bytes read, which the link keeps
+/// ([`DesignLink::file_sha256`], #9739).
+fn linked_bodies_read(
+    file: &Path,
+    own: Option<&str>,
+    configuration: Option<SelectedConfiguration>,
+    validation: solidcraft_kernel::Validation,
+    structure: bool,
+    joints: bool,
+) -> Result<(Linked, tree::SourceTree, String)> {
+    let bytes = read_link(file, own, false)?;
+    let (linked, source, _images) = design_bodies(&Source::File(file.to_path_buf()), &bytes, configuration, validation, structure, joints)?;
+    Ok((linked, source, DesignLink::file_digest(&bytes)))
+}
+
+/// How a command's `structure` and `flexible` say a link keeps its design: `default` for what
+/// is left out. A link that keeps no components has no placements for the design's joints.
+fn keep_param(p: &Value, default: tree::Keep, cmd: &str) -> Result<tree::Keep> {
+    let flag = |key: &str| match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(on)) => Ok(Some(*on)),
+        Some(_) => Err(bad(cmd, format!("`{key}` must be true or false"))),
+    };
+    let structure = flag("structure")?.unwrap_or(default.structure());
+    match (structure, flag("flexible")?) {
+        (false, Some(true)) => Err(bad(cmd, "`flexible` needs the design's components (`structure: true`)")),
+        (false, _) => Ok(tree::Keep { structure: false, flexible: None, ..default }),
+        (true, flexible) => Ok(tree::Keep { structure: true, flexible, ..default }),
+    }
+}
+
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
 /// size the file had then, paired with a generation bumped on every save invalidation so an
 /// overlapping read cannot repopulate a stale entry. Bounded, oldest first out.
@@ -804,9 +876,11 @@ fn source_bodies(
     link: &DesignLink,
     flat: bool,
     validation: solidcraft_kernel::Validation,
-) -> Result<(Linked, LinkedImages)> {
+    structure: bool,
+    joints: bool,
+) -> Result<(Linked, tree::SourceTree, LinkedImages)> {
     let Some(names) = &link.step_names else {
-        return design_bodies(&Source::File(file.to_path_buf()), bytes, selected_configuration(link), validation);
+        return design_bodies(&Source::File(file.to_path_buf()), bytes, selected_configuration(link), validation, structure, joints);
     };
     let names = solidcraft_io::StepNames::parse(names).ok_or_else(|| EngineError::Other("invalid linked STEP naming policy".into()))?;
     let shown = file.to_string_lossy();
@@ -818,14 +892,28 @@ fn source_bodies(
         *skip = if flat { Vec::new() } else { super::file::import::step_skip(&feature.import) };
     }
     remember_read(file, None, digest(bytes), &feature, &[], &[], &Default::default(), &[]);
-    Ok(((feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()), (Vec::new(), Vec::new())))
+    Ok((
+        (feature.name.clone(), feature, Vec::new(), Default::default(), Vec::new(), Vec::new()),
+        tree::SourceTree::default(),
+        (Vec::new(), Vec::new()),
+    ))
 }
 
 /// Read a link's source again by what read it: the importer plugin it names (which writes the design
 /// the bodies come from), else the built-in reader. The link keeps the version of the plugin that
 /// read it last. `bytes` are the source file's own, whose digest decides when it was read last.
-fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &DesignLink) -> Result<(Linked, LinkedImages)> {
-    let Some(importer) = &link.importer else { return source_bodies(file, bytes, link, step_import_flat(&s.doc, link), s.validation()) };
+fn linked_bodies(
+    s: &mut Session,
+    comp: u64,
+    file: &Path,
+    bytes: &[u8],
+    link: &DesignLink,
+    structure: bool,
+    joints: bool,
+) -> Result<(Linked, tree::SourceTree, LinkedImages)> {
+    let Some(importer) = &link.importer else {
+        return source_bodies(file, bytes, link, step_import_flat(&s.doc, link), s.validation(), structure, joints);
+    };
     if let Some(why) = importer_file_refusal(s, file) {
         return Err(EngineError::Other(why));
     }
@@ -842,14 +930,15 @@ fn linked_bodies(s: &mut Session, comp: u64, file: &Path, bytes: &[u8], link: &D
         }
     };
     let made = crate::plugin::import_design_bytes(s, &slot, &file.to_string_lossy(), &options).map_err(|e| other_version(s, e))?;
-    let (mut read, images) = design_bodies(&Source::File(file.to_path_buf()), &made.design, None, s.validation())?;
+    // An importer's file keeps no components (Insert Design refuses `structure` for one).
+    let (mut read, source, images) = design_bodies(&Source::File(file.to_path_buf()), &made.design, None, s.validation(), false, false)?;
     // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
     remember_read(file, None, digest(bytes), &read.1, &read.2, &read.4, &read.3, &read.5);
     read.1.warnings.extend(made.notes);
     if let Some(kept) = s.doc_mut().links.get_mut(&comp).and_then(|l| l.importer.as_mut()) {
         kept.version = Some(made.version);
     }
-    Ok((read, images))
+    Ok((read, source, images))
 }
 
 /// The installed, enabled importer a link names, to read its file again: one of the plugin the
@@ -934,16 +1023,19 @@ impl Source {
     }
 }
 
-/// The solid bodies of `bytes`, the design `source` names, as an Import feature, and its canvases
-/// and decals ([`design_images`]). The model the file keeps is its evaluation when this build saved
-/// it for exactly that design, as when it is opened.
+/// The solid bodies of `bytes`, the design `source` names, as an Import feature, with the design's
+/// structure when `structure` asks for it ([`session_bodies`]) and its canvases and decals
+/// ([`design_images`]). The model the file keeps is its evaluation when this build saved it for
+/// exactly that design, as when it is opened.
 fn design_bodies(
     source: &Source,
     bytes: &[u8],
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
-) -> Result<(Linked, LinkedImages)> {
-    design_bodies_reusing(source, bytes, configuration, validation, false)
+    structure: bool,
+    joints: bool,
+) -> Result<(Linked, tree::SourceTree, LinkedImages)> {
+    design_bodies_reusing(source, bytes, configuration, validation, structure, joints, false)
 }
 
 /// The local store's key for the evaluation of `bytes`, the linked design at `file`
@@ -968,8 +1060,10 @@ fn design_bodies_reusing(
     bytes: &[u8],
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
+    structure: bool,
+    joints: bool,
     reuse: bool,
-) -> Result<(Linked, LinkedImages)> {
+) -> Result<(Linked, tree::SourceTree, LinkedImages)> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = source.shown();
@@ -1023,12 +1117,12 @@ fn design_bodies_reusing(
         // Its scratch evaluation cannot use the saved geometry of another row.
         part.execute("config.activate", &json!({"row": selected.row})).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     }
-    let (name, feature, faces, metadata, properties, meshes) = session_bodies(&part, &shown)?;
+    let ((name, feature, faces, metadata, properties, meshes), source_tree) = session_bodies(&part, &shown, structure, joints)?;
     if let Some(file) = source.file() {
         remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata, &meshes);
     }
     let images = design_images(&part, &shown);
-    Ok(((name, feature, faces, metadata, properties, meshes), images))
+    Ok(((name, feature, faces, metadata, properties, meshes), source_tree, images))
 }
 
 /// The canvases and decals of `part`, the design saved as `shown`, each where the design shows
@@ -1081,26 +1175,62 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
     (images, warnings)
 }
 
-/// The solid bodies of `part`, the design saved as `shown`, as an Import feature, and its mesh
-/// bodies, which a Mesh Import feature beside it holds (#20050).
-fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
+/// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
+///
+/// With `structure`, a design that places components also gives its structure
+/// ([`tree::SourceTree`]): the feature then holds the bodies of each component's first placement
+/// only, where the design has them, and the link shows the component's other placements itself
+/// ([`tree::sync`]). Without it, or for a design without components, the structure is empty and
+/// the feature holds every body the design shows, each placement of a component a body of its own.
+///
+/// With `joints` too, the structure has the design's joints, for a link one of whose
+/// occurrences is flexible ([`tree::SourceTree::with_joints`]): they cost a solve of the design,
+/// which a link that is rigid throughout has no use for.
+fn session_bodies(part: &Session, shown: &str, structure: bool, joints: bool) -> Result<(Linked, tree::SourceTree)> {
     let name = part.doc.name.clone();
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
     }
-    let world = part.world_state()?;
-    let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh()).map(|b| b.name.clone()).collect();
+    let mut source = match (structure, joints) {
+        (false, _) => tree::SourceTree::default(),
+        (true, false) => tree::SourceTree::of(&part.doc),
+        (true, true) => tree::SourceTree::of(&part.doc).with_joints(&part.doc, &part.model.state()),
+    };
+    // A subassembly's bodies are taken where the design has them, each in its component's own
+    // frame: a flexible subassembly inside that design is as its own design was saved, not in
+    // the pose it stands in there, which the frames below do not know.
+    let world = if source.is_empty() {
+        part.world_state()?
+    } else {
+        std::sync::Arc::new(solidcraft_doc::world_state_as_designed(&part.doc, &part.model.state())?)
+    };
+    // Each body the design shows, by the name it is shown under: its component, and whether
+    // this is that component's first placement (where a body keeps its own name).
+    let mut owners: std::collections::HashMap<String, (u64, bool)> = std::collections::HashMap::new();
+    if !source.is_empty() {
+        let mut first: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for (shown_as, _, component, path, _) in part.doc.body_frames_with_source(&part.model.state()) {
+            let primary = *first.entry(component).or_insert_with(|| part.doc.first_path(component)) == path;
+            owners.insert(shown_as, (component, primary));
+        }
+    }
+    let linked = |b: &solidcraft_doc::ModelBody| source.is_empty() || owners.get(&b.name).is_some_and(|(_, primary)| *primary);
+    let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh() && linked(b)).map(|b| b.name.clone()).collect();
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
     }
     let step = solidcraft_io::export(&part.doc.painted_for_link(&world), &solids, solidcraft_io::Format::Step, &name)
         .map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
     let mut feature = solidcraft_io::step_import_feature(&step, shown).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let meshes: Vec<MeshData> = world.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
+    let meshes: Vec<MeshData> =
+        world.bodies.iter().filter(|b| b.body.is_mesh() && linked(b)).map(|b| super::file::mesh_data(&part.doc, b, &b.mesh())).collect();
     // The STEP text keeps no face names: carry the design's own, so references into the linked
     // bodies follow them as they do inside the design (#3330).
     let faces = solidcraft_doc::naming::carried_face_names(&world, &feature.import.bodies);
     let mut sources = Vec::new();
+    // The inverse of each component's first placement in the design: it takes a body from where
+    // the feature builds it into its component's frame.
+    let mut frames: std::collections::BTreeMap<u64, solidcraft_doc::Mat> = std::collections::BTreeMap::new();
     let mut properties = feature
         .import
         .bodies
@@ -1109,7 +1239,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
         .map(|(read, carried)| {
             // STEP can split a source body into several lumps. Match its carried source
             // face names rather than assuming source and imported body orders agree.
-            let source = world
+            let source_body = world
                 .bodies
                 .iter()
                 .find(|b| b.name == read.name)
@@ -1127,6 +1257,22 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                         .map(|(_, b)| b)
                 })
                 .ok_or_else(|| EngineError::Other(format!("{shown}: cannot match linked body {} to its source properties", read.name)))?;
+            if !source.is_empty() {
+                // Another placement of the same body is of the same component.
+                let component = owners.get(&source_body.name).map_or(0, |(component, _)| *component);
+                let frame = match frames.get(&component) {
+                    Some(frame) => *frame,
+                    None => {
+                        let placed = if component == 0 { solidcraft_doc::IDENTITY } else { part.doc.component_transform(component) };
+                        let frame = solidcraft_doc::mat_inverse(&placed)
+                            .ok_or_else(|| EngineError::Other(format!("{shown}: the placement of linked body {} can't be inverted", read.name)))?;
+                        frames.insert(component, frame);
+                        frame
+                    }
+                };
+                source.bodies.push((component, frame));
+            }
+            let source = source_body;
             sources.push(source);
             let key = source.definition_name();
             let material = part.doc.body_material(key);
@@ -1169,7 +1315,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
                 .push(format!("cosmetic threads on {} are not linked because the source body was split into several bodies", source.name));
         }
     }
-    Ok((name, feature, faces, part.doc.metadata.clone(), properties, meshes))
+    Ok(((name, feature, faces, part.doc.metadata.clone(), properties, meshes), source))
 }
 
 fn material_fingerprint(doc: &Document, material: &str) -> Result<Option<String>> {
@@ -1674,6 +1820,8 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
     Ok((transform, None))
 }
 
+/// `component.insert_design`: links a design file in as a new component, or with `reuse` as one
+/// more occurrence of a component already linked to that file, when there is one.
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
@@ -1735,6 +1883,19 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(bytes) => configuration_id(bytes, selection).map_err(|e| bad(cmd, e.to_string()))?,
         None => None,
     };
+    // A design comes in as one component, as it did before links kept components, unless the
+    // call asks for its components (`structure`) or for a flexible occurrence, which needs them.
+    let asked_flexible = matches!(p.get("flexible"), Some(Value::Bool(true)));
+    let keep = keep_param(p, if asked_flexible { tree::Keep::STRUCTURE } else { tree::Keep::ONE_COMPONENT }, cmd)?;
+    let structure = keep.structure();
+    if structure && importer.is_some() {
+        return Err(bad(cmd, "`structure` and `flexible` keep a design's components; a file an importer plugin reads comes in as one component"));
+    }
+    if p.get("parent").is_some()
+        && let Some(why) = kept_component_refusal(s, component_key(s, p, "parent", cmd)?)
+    {
+        return Err(bad(cmd, why));
+    }
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
         // A design in memory has no file to be found by: every link to a file is another design.
         let existing = match &source {
@@ -1763,7 +1924,44 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
             {
                 o.expressed_moves.push(expressed);
             }
-            return reply(cmd, InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component }, param_warnings: Vec::new() });
+            // The link keeps its design as it does: how this call asks for it changes nothing
+            // of that, and says so.
+            let keeps = s.doc.links.get(&component).is_some_and(|link| link.tree.is_some());
+            let mut warnings: Vec<String> = Vec::new();
+            if let Some(asked) = p.get("structure").and_then(Value::as_bool).filter(|asked| *asked != keeps) {
+                let (how, other) =
+                    if keeps { ("with its components kept", "in one component") } else { ("in one component", "with its components kept") };
+                warnings.push(format!(
+                    "the design is linked {how} already, and this occurrence is one more of that link: `structure: {asked}` ({other}) is not applied (component.link_mode changes a link)"
+                ));
+            }
+            // The new occurrence is rigid unless asked for flexible: then it gets the design's
+            // joints for itself, which the link reads its design again for.
+            let mut joints = None;
+            if keep.flexible == Some(true) {
+                let link = s.doc.links.get(&component).cloned().filter(|link| link.tree.is_some());
+                let link = link.ok_or_else(|| bad(cmd, "`flexible` needs the design's components, and the link to that design keeps it in one component (component.link_mode with `structure: true` changes that)"))?;
+                // Its joints are read from the design again, which takes the whole link to that
+                // reading: a design changed since the link last read it would change every other
+                // occurrence of it too, which only Update Links does.
+                let file = resolve(s.path.as_deref(), &link.path);
+                let now = DesignLink::file_digest(&read_link(&file, s.path.as_deref(), false)?);
+                if link.file_sha256.as_deref().is_some_and(|read| read != now) {
+                    return Err(bad(
+                        cmd,
+                        "the linked design has changed since this design last read it: Update Links (component.update_links) first, then insert the flexible occurrence",
+                    ));
+                }
+                let mine = tree::Keep { structure: true, flexible: Some(true), occurrence: Some(occurrence) };
+                let (_, _, told, kept) = take_design(s, component, &link, &resolve(s.path.as_deref(), &link.path), configuration, mine, false, cmd)?;
+                warnings.extend(told);
+                joints = (kept.joints > 0 && flexible_occurrences(s, component).contains(&occurrence)).then_some(kept.joints);
+                super::joints::resolve(s);
+            }
+            return reply(
+                cmd,
+                InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component, joints, warnings }, param_warnings: Vec::new() },
+            );
         }
     }
     let bytes = match selected_bytes {
@@ -1797,8 +1995,16 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         None => (None, None),
     };
     let design_bytes = produced.as_ref().map_or(bytes.as_slice(), |(design, _)| design.as_slice());
-    let ((design_name, mut sf, faces, metadata, properties, meshes), (images, image_warnings)) =
-        design_bodies(&source, design_bytes, configuration, s.validation())?;
+    let mut taken = design_bodies(&source, design_bytes, configuration, s.validation(), structure, keep.flexible == Some(true))?;
+    // A design with more components than a link keeps comes in as one component, as every
+    // design did before links kept components, unless the call asks for them by name.
+    let mut too_large = false;
+    if structure && p.get("structure").is_none() && tree::too_large(&taken.1) {
+        taken = design_bodies(&source, design_bytes, configuration, s.validation(), false, false)?;
+        too_large = true;
+    }
+    let (keep, structure) = if too_large { (tree::Keep { structure: false, flexible: None, occurrence: None }, false) } else { (keep, structure) };
+    let ((design_name, mut sf, faces, metadata, properties, meshes), source_tree, (images, image_warnings)) = taken;
     if let Some((_, notes)) = produced {
         // What `design_bodies` remembers is keyed by the bytes it read: for this link, the file's.
         if let Some(file) = source.file() {
@@ -1843,23 +2049,35 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Source::File(file) => (stored(s.path.as_deref(), file), file.to_string_lossy().into_owned()),
         Source::Session { .. } => (String::new(), String::new()),
     };
-    s.doc_mut().links.insert(
-        comp,
-        DesignLink {
-            path: link_path,
-            feature: id,
-            configuration: configuration.map(|c| c.row),
-            configuration_identity: configuration.and_then(|c| c.identity),
-            inherited: Vec::new(),
-            inherited_metadata: metadata,
-            file_sha256: Some(read),
-            step_names: None,
-            importer: record,
-        },
-    );
+    // A link that keeps the design's structure says so from the start, also while the design
+    // has no components yet: it takes them up when the design gets some.
+    let link = DesignLink {
+        path: link_path,
+        feature: id,
+        configuration: configuration.map(|c| c.row),
+        configuration_identity: configuration.and_then(|c| c.identity),
+        inherited: Vec::new(),
+        inherited_metadata: metadata,
+        file_sha256: Some(read),
+        step_names: None,
+        importer: record,
+        tree: structure.then(solidcraft_doc::LinkTree::default),
+    };
+    s.doc_mut().links.insert(comp, link);
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
+    }
+    let mut warnings = sf.warnings;
+    if too_large {
+        warnings.push(format!(
+            "{name}: the linked design has more components than a link keeps, so all its bodies are in this one component (`structure: false`)"
+        ));
+    }
+    // The design's own components, as components inside the new one.
+    let kept = if structure { tree::sync(s, comp, id, &source_tree, keep, None, &mut warnings)? } else { tree::Synced::default() };
+    if keep.flexible == Some(true) && flexible_occurrences(s, comp).is_empty() {
+        warnings.push("the linked design has no joints to carry: the occurrence is rigid".to_string());
     }
     inherit_properties(s, comp, &properties)?;
     add_design_images(s, comp, &name, images)?;
@@ -1874,7 +2092,9 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         path,
         created_bodies: bodies.clone(),
         bodies,
-        warnings: sf.warnings,
+        warnings,
+        subcomponents: (kept.components > 0).then_some(kept.components),
+        joints: (kept.joints > 0).then_some(kept.joints),
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
 }
@@ -1895,6 +2115,126 @@ pub(super) fn insert_importer(s: &Session, p: &Value, given: &str) -> Result<Opt
 /// The options a link keeps: none (null) when an importer was given none.
 fn linked_options(options: &Value) -> &Value {
     if options.as_object().is_some_and(|o| o.is_empty()) { &Value::Null } else { options }
+}
+
+/// Why component `component` can't be changed here, or anything put into it: it is one a link
+/// keeps for a component of its linked design, which that design decides. `None` for any other.
+pub(crate) fn kept_component_refusal(s: &Session, component: u64) -> Option<String> {
+    let top = s.doc.link_keeping_component(component)?;
+    let name = |id: u64| s.doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
+    Some(format!(
+        "{} is a component of the linked subassembly {}: change it in that design (Open Linked Design), or use Break Link (component.break_link) first",
+        name(component),
+        name(top)
+    ))
+}
+
+/// What a command put inside what a link keeps for its linked design, as the words to refuse it
+/// with: a feature in a component the link keeps (a sketch moved there, a body copied there, a
+/// part activated by a sketch on its face), a body taken from or given to one, or a component
+/// made inside one. `before` is the design as the command found it: what was there already is
+/// not the command's doing. `None` when there is nothing, which is every command in a design
+/// without linked subassemblies at the cost of one look at its links.
+///
+/// Asked once, after a command has run, so that no way into a kept component needs a check of
+/// its own: Update Links removes a component the linked design no longer has, and with it what
+/// is in it.
+pub(crate) fn kept_changed(before: &solidcraft_doc::Document, after: &solidcraft_doc::Document) -> Option<String> {
+    use std::collections::HashMap;
+    let kept: HashMap<u64, u64> = after
+        .links
+        .iter()
+        .filter_map(|(top, link)| Some((*top, link.tree.as_ref()?)))
+        .flat_map(|(top, tree)| tree.components.values().map(move |c| (*c, top)))
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    let name = |id: u64| after.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
+    let refusal = |what: String, component: u64| {
+        let top = kept.get(&component).copied().unwrap_or_default();
+        format!(
+            "{what} {}, a component of the linked subassembly {}: change it in that design (Open Linked Design), or use Break Link (component.break_link) first",
+            name(component),
+            name(top)
+        )
+    };
+    let was: HashMap<u64, &solidcraft_doc::Feature> = before.features.iter().map(|f| (f.id, f)).collect();
+    for f in &after.features {
+        let old = was.get(&f.id).copied();
+        let new = old.map(|old| old.component) != Some(f.component);
+        if new && kept.contains_key(&f.component) {
+            return Some(refusal(format!("{} would be in", f.name), f.component));
+        }
+        if let FeatureKind::BodyTransfer { bodies, from, to, .. } = &f.kind {
+            // A transfer that was there, moving the same bodies between the same components, is
+            // not the command's doing. One the command made is, and so is one it gave other
+            // bodies or another component (`timeline.edit`).
+            let same = match old.map(|old| &old.kind) {
+                Some(FeatureKind::BodyTransfer { bodies: b, from: f0, to: t0, .. }) => b == bodies && f0 == from && t0 == to,
+                _ => false,
+            };
+            if !same && let Some(component) = [*from, *to].into_iter().find(|c| kept.contains_key(c)) {
+                return Some(refusal("a body would be moved out of or into".to_string(), component));
+            }
+        }
+    }
+    let parents: HashMap<u64, u64> = before.components.iter().map(|c| (c.id, c.parent)).collect();
+    for c in after.components.iter().filter(|c| kept.contains_key(&c.parent) && !kept.contains_key(&c.id)) {
+        if parents.get(&c.id) != Some(&c.parent) {
+            return Some(refusal(format!("{} would be inside", c.name), c.parent));
+        }
+    }
+    None
+}
+
+/// Why occurrence `occurrence` can't be copied, grounded or moved on its own: it is one a link
+/// keeps for an occurrence of its linked design. `None` for any other.
+pub(crate) fn kept_occurrence_refusal(s: &Session, occurrence: u64) -> Option<String> {
+    let top = s.doc.link_keeping_occurrence(occurrence)?;
+    let top = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    let name = s.doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.name.clone()).unwrap_or_default();
+    Some(format!(
+        "{name} is inside the linked subassembly {top}, which places it: change it in that design (Open Linked Design), or use Break Link (component.break_link) first"
+    ))
+}
+
+/// Why joint `joint` can't be deleted or changed here: a flexible occurrence of a linked
+/// subassembly has it from its linked design. `None` for any other joint.
+pub(crate) fn linked_joint_refusal(s: &Session, joint: u64) -> Option<String> {
+    let (top, _) = s
+        .doc
+        .links
+        .iter()
+        .find(|(_, link)| link.tree.as_ref().is_some_and(|tree| tree.flexible.values().any(|joints| joints.values().any(|j| *j == joint))))?;
+    let top = s.doc.components.iter().find(|c| c.id == *top).map(|c| c.name.clone()).unwrap_or_default();
+    let name = s.doc.assembly.joints.iter().find(|j| j.id == joint).map(|j| j.name.clone()).unwrap_or_default();
+    Some(format!("joint {name} is the linked subassembly {top}'s own: change it in that design, or make the occurrence rigid (component.link_mode)"))
+}
+
+/// Why a motion link between joints `a` and `b` can't be made, changed or deleted here: both
+/// are joints one flexible occurrence of a linked subassembly has from its linked design, which
+/// couples them or leaves them free. `None` for any other pair.
+pub(crate) fn linked_coupling_refusal(s: &Session, a: u64, b: u64) -> Option<String> {
+    let own = |joints: &std::collections::BTreeMap<u64, u64>| joints.values().any(|j| *j == a) && joints.values().any(|j| *j == b);
+    let (top, _) = s.doc.links.iter().find(|(_, link)| link.tree.as_ref().is_some_and(|tree| tree.flexible.values().any(own)))?;
+    let top = s.doc.components.iter().find(|c| c.id == *top).map(|c| c.name.clone()).unwrap_or_default();
+    Some(format!(
+        "both joints are the linked subassembly {top}'s own, in one occurrence of it: that design says how they move together. Change it there, then use Update Links"
+    ))
+}
+
+/// Why component `component` can't go to a design file of its own: a flexible occurrence of a
+/// linked subassembly is inside it, whose joints and pose would not go with it. `None` otherwise.
+pub(super) fn flexible_inside_refusal(s: &Session, component: u64) -> Option<String> {
+    let flexible: std::collections::BTreeSet<u64> =
+        s.doc.links.values().filter_map(|link| link.tree.as_ref()).flat_map(|tree| tree.flexible.keys().copied()).collect();
+    let inside =
+        s.doc.occurrences.iter().find(|o| flexible.contains(&o.id) && (o.parent == component || s.doc.component_within(o.parent, component)))?;
+    Some(format!(
+        "{} is a flexible occurrence of a linked subassembly: make it rigid (component.link_mode) first, since its joints and its pose stay in this design",
+        inside.name
+    ))
 }
 
 /// The linked design's canvases and decals ([`design_images`]) added to its new component
@@ -1918,6 +2258,9 @@ fn add_design_images(s: &mut Session, comp: u64, component: &str, images: Vec<so
     Ok(())
 }
 
+/// `component.update_links`: reads the linked designs again and takes in what changed: the
+/// bodies, the names of their faces, the properties they inherit and, for a link that keeps its
+/// design's components, where the design has them and what it calls them.
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.update_links";
     let only = match (p.get("component"), p.get("components")) {
@@ -1971,6 +2314,10 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The link keeps what it read, so opening this design again knows whether the file
         // changed while it was closed (#9739).
         let read = DesignLink::file_digest(&bytes);
+        // A link that keeps the design's components follows where the design places them and
+        // what it calls them too: the same bodies say nothing about that, only the same file does.
+        let keep = tree::Keep::of(link.tree.as_ref());
+        let structured = keep.structure();
         let same_bytes = link.file_sha256.as_deref() == Some(read.as_str());
         if !same_bytes && let Some(kept) = s.doc_mut().links.get_mut(&comp) {
             kept.file_sha256 = Some(read);
@@ -1986,7 +2333,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let kept_faces = s
             .doc
             .feature(link.feature)
-            .filter(|_| link.step_names.is_some() || (!link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some())))
+            .filter(|_| link.step_names.is_some() || !structured || same_bytes)
+            .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
             let meshes = link_meshes(s, comp, link.feature);
@@ -2005,8 +2353,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             read_components.push(comp);
             continue;
         }
-        let (_, sf, faces, metadata, properties, meshes) = match linked_bodies(s, comp, &file, &bytes, &link) {
-            Ok((read, _)) => read,
+        // The design's joints are read only for a link one of whose occurrences is flexible.
+        let flexible = link.tree.as_ref().is_some_and(|tree| !tree.flexible.is_empty());
+        // What a link could not keep (too much of it, or components that contain each other)
+        // is found before anything of this design changes, as a file that can't be read is.
+        let read =
+            linked_bodies(s, comp, &file, &bytes, &link, structured, flexible).and_then(|read| tree::fits(s, comp, &read.1, keep).map(|()| read));
+        let ((_, sf, faces, metadata, properties, meshes), source, _) = match read {
+            Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
@@ -2022,10 +2376,12 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let (took, kept_metadata) = inherit_metadata(s, comp, &metadata);
         warnings.extend(kept_metadata);
         let took = set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)? || took;
-        let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
+        let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if **step == *old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
-            if inherit_properties(s, comp, &properties)? || took {
+            // The same bodies: the design may still place, name or count its parts differently.
+            let moved = structured && tree::sync(s, comp, link.feature, &source, keep, None, &mut warnings)?.changed;
+            if inherit_properties(s, comp, &properties)? || took || moved {
                 updated.push(cname)
             } else {
                 unchanged.push(cname)
@@ -2048,6 +2404,9 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         // The old names are read as the new ones were: a STEP link's own naming (source_bodies).
         let naming = link.step_names.as_deref().and_then(solidcraft_io::StepNames::parse).unwrap_or_default();
         let before = s.model.result(link.feature).map(|r| r.state.clone());
+        // The model before the link's bodies are replaced: a joint that stays where it is when the
+        // link starts to keep components was found on these bodies, as in `take_design`.
+        let as_it_was = s.model.state();
         if let Some(f) = s.doc_mut().feature_mut(link.feature) {
             if !same {
                 // Bodies keep their names where the design still has as many, also when it lists
@@ -2089,6 +2448,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             warnings.extend(s.doc_mut().rebind_linked_faces(link.feature, &before, &after));
             s.refresh();
         }
+        let changed = (structured && tree::sync(s, comp, link.feature, &source, keep, Some(as_it_was.as_ref()), &mut warnings)?.changed) || changed;
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed {
             updated.push(cname)
@@ -2393,90 +2753,12 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }
+    // How the link keeps the design: as it does now, unless told otherwise.
+    let keep = keep_param(p, tree::Keep::of(link.tree.as_ref()), cmd)?;
     if let Some(occurrence) = lone_placement(s, p, comp, cmd)? {
-        return relink_placement(s, comp, &link, occurrence, given, &file, configuration);
+        return relink_placement(s, comp, &link, occurrence, given, &file, configuration, keep);
     }
-    // Read/evaluate the candidate before changing anything. Session::execute owns the single
-    // undo step and restores both the document and evaluated state on any later failure.
-    let ((source_name, sf, faces, metadata, properties, meshes), _) =
-        design_bodies(&Source::File(file.clone()), &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
-    let read = DesignLink::file_digest(&bytes);
-    let source_names = sf.body_names.clone();
-    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
-        || link_meshes(s, comp, link.feature) != meshes.as_slice();
-    let path = stored(s.path.as_deref(), &file);
-    let mut warnings = sf.warnings;
-    if geometry_changed
-        && s.doc
-            .assembly
-            .joints
-            .iter()
-            .any(|j| s.doc.occurrences.iter().any(|o| o.component == comp && (j.a.occurrence == o.id || j.b.occurrence == o.id)))
-    {
-        warnings.push("the linked geometry changed; check this component's joints, even when the solver reports no error".to_string());
-    }
-    let mut inherited = link.inherited.clone();
-    let mut removed = Vec::new();
-    if let Some(f) = s.doc_mut().feature_mut(link.feature) {
-        // Both modes start as Relink always did; `sync` renames the bodies below.
-        if f.body_names.len() != sf.body_names.len() {
-            if f.body_names.is_empty() {
-                f.body_names = sf.body_names;
-            } else {
-                let old_step = match &f.kind {
-                    FeatureKind::Import { step, .. } => step.as_ref(),
-                    _ => "",
-                };
-                let (next_names, next_inherited, gone) = realign_changed_body_count(
-                    old_step,
-                    &file.display().to_string(),
-                    solidcraft_io::StepNames::default(),
-                    &f.body_names,
-                    &inherited,
-                    &sf.body_names,
-                );
-                f.body_names = next_names;
-                inherited = next_inherited;
-                removed = gone;
-            }
-        } else if let FeatureKind::Import { step, .. } = &f.kind
-            && !same_import_source(&f.kind, &sf.kind)
-            && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
-        {
-            // The names, and what the link last took from each body, stay with their bodies (#21371).
-            f.body_names = reordered(&f.body_names, &order);
-            if inherited.len() == order.len() {
-                inherited = reordered(&inherited, &order);
-            }
-        }
-        f.kind = sf.kind;
-        f.link_faces = faces;
-    }
-    remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
-    let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
-    set_link_meshes(s, comp, link.feature, &cname, &file.display().to_string(), meshes)?;
-    s.doc_mut().links.insert(
-        comp,
-        DesignLink {
-            path: file.to_string_lossy().into_owned(),
-            file_sha256: Some(read),
-            configuration: configuration.map(|c| c.row),
-            configuration_identity: configuration.and_then(|c| c.identity),
-            inherited,
-            ..link.clone()
-        },
-    );
-    s.refresh();
-    if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
-        return Err(bad(cmd, error));
-    }
-    if sync {
-        sync_names(s, comp, link.feature, &source_name, &source_names, &mut warnings);
-    }
-    inherit_properties(s, comp, &properties)?;
-    let (_, kept) = inherit_metadata(s, comp, &metadata);
-    warnings.extend(kept);
-    s.refresh();
+    let (path, geometry_changed, mut warnings, _) = take_design(s, comp, &link, &file, configuration, keep, sync, cmd)?;
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.
     let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
@@ -2566,6 +2848,8 @@ fn lone_placement(s: &Session, p: &Value, comp: u64, cmd: &str) -> Result<Option
 /// One placement of `comp` comes to show the design at `file` instead: as a placement of a
 /// component already linked to it, or of a new one under the same parent. The placement keeps
 /// its id, position and grounding, so its joints stay; they are moved to the new bodies' faces.
+/// A new link keeps its design as `keep` says.
+#[allow(clippy::too_many_arguments)]
 fn relink_placement(
     s: &mut Session,
     comp: u64,
@@ -2574,6 +2858,7 @@ fn relink_placement(
     given: &str,
     file: &Path,
     configuration: Option<SelectedConfiguration>,
+    keep: tree::Keep,
 ) -> Result<Value> {
     let cmd = "component.relink";
     if same_link_source(s, link, file) && selected_configuration(link) == configuration {
@@ -2581,9 +2866,45 @@ fn relink_placement(
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
+    // A joint of this design on an occurrence inside this one is on an occurrence the old link
+    // keeps, which the new design does not have: it stays where it is, as a frame on this
+    // occurrence, and is named so its face can be picked again.
+    let mut warnings: Vec<String> = Vec::new();
+    let own: std::collections::BTreeSet<u64> = s
+        .doc
+        .links
+        .get(&comp)
+        .and_then(|link| link.tree.as_ref())
+        .and_then(|tree| tree.flexible.get(&occurrence))
+        .map(|joints| joints.values().copied().collect())
+        .unwrap_or_default();
+    let frozen: Vec<(u64, bool, solidcraft_doc::joints::JointOrigin)> = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| !own.contains(&j.id))
+        .flat_map(|j| [(j.id, false, &j.a), (j.id, true, &j.b)])
+        .filter(|(_, _, side)| side.occurrence == occurrence && !side.inside.is_empty())
+        .filter_map(|(id, second, side)| {
+            let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &old, side).ok()?;
+            Some((id, second, solidcraft_doc::joints::JointOrigin::new(occurrence, solidcraft_doc::joints::frame_snap(&frame))))
+        })
+        .collect();
+    // A link made for it keeps its design's components as this placement's link did; one that
+    // is there stays as it is. The placement comes rigid unless asked for flexible: the joints
+    // and the pose it had for itself were its old design's.
+    let there =
+        s.doc.links.values().any(|other| {
+            selected_configuration(other) == configuration && link_target(&resolve(s.path.as_deref(), &other.path)) == link_target(file)
+        });
+    let mut insert = json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)});
+    if !there {
+        insert["structure"] = json!(keep.structure());
+    }
     // A pattern or mirror of this placement can stop working: the reply names each feature that does.
     let failing_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect();
-    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
+    let made = insert_design(s, &insert)?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
@@ -2593,7 +2914,7 @@ fn relink_placement(
         (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind) || link_meshes(s, comp, link.feature) != link_meshes(s, linked, feature),
         _ => true,
     };
-    let mut warnings: Vec<String> = made["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_string)).collect();
+    warnings.extend(made["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_string)));
     if geometry_changed && s.doc.assembly.joints.iter().any(|j| j.a.occurrence == occurrence || j.b.occurrence == occurrence) {
         warnings.push("the linked geometry changed; check this placement's joints, even when the solver reports no error".to_string());
     }
@@ -2606,6 +2927,22 @@ fn relink_placement(
         o.component = linked;
         o.name = name;
     }
+    let gone = tree::forget_placement(d, comp, occurrence);
+    let mut kept_in_place: Vec<String> = Vec::new();
+    for (id, second, side) in frozen {
+        let Some(j) = d.assembly.joints.iter_mut().find(|j| j.id == id) else { continue };
+        *(if second { &mut j.b } else { &mut j.a }) = side;
+        if !kept_in_place.contains(&j.name) {
+            kept_in_place.push(j.name.clone());
+        }
+    }
+    if !kept_in_place.is_empty() {
+        warnings.push(format!(
+            "joint {} was on a component inside this occurrence as it was: it stays where it is, as a frame on the occurrence. Pick its face again on the new design's component",
+            kept_in_place.join(", ")
+        ));
+    }
+    s.visibility.hidden_joints.retain(|h| !gone.contains(h));
     if s.active_occurrence_path.as_ref().is_some_and(|path| path.contains(&occurrence)) {
         s.active_component = 0;
         s.active_occurrence_path = None;
@@ -2613,6 +2950,24 @@ fn relink_placement(
     s.refresh();
     extract::rename_joint_faces(s, &old, feature, &std::collections::BTreeSet::from([occurrence]));
     s.refresh();
+    // Flexible, when asked: the new design's joints, for this occurrence.
+    if keep.flexible == Some(true) {
+        match s.doc.links.get(&linked).cloned().filter(|link| link.tree.is_some()) {
+            Some(new) => {
+                let mine = tree::Keep { structure: true, flexible: Some(true), occurrence: Some(occurrence) };
+                let (_, _, told, _) = take_design(s, linked, &new, file, configuration, mine, false, cmd)?;
+                warnings.extend(told);
+                if !flexible_occurrences(s, linked).contains(&occurrence) {
+                    warnings.push("the design has no joints to carry: the occurrence is rigid".to_string());
+                }
+                super::joints::resolve(s);
+            }
+            None => warnings.push(
+                "`flexible` needs the design's components, and the link to that design keeps it in one component: the occurrence is rigid"
+                    .to_string(),
+            ),
+        }
+    }
     warnings.extend(
         s.model
             .results
@@ -2639,9 +2994,242 @@ fn relink_placement(
     )
 }
 
+/// The occurrences of linked component `component` that are flexible, by id.
+fn flexible_occurrences(s: &Session, component: u64) -> Vec<u64> {
+    let tree = s.doc.links.get(&component).and_then(|link| link.tree.as_ref());
+    tree.map(|tree| tree.flexible.keys().copied().collect()).unwrap_or_default()
+}
+
+/// Occurrence `to` was made as a copy of occurrence `from`: a copy of a flexible occurrence of a
+/// linked subassembly is flexible too, in the same pose, with joints of its own.
+pub(crate) fn copied_occurrence(s: &mut Session, from: u64, to: u64) -> Result<()> {
+    let flexible =
+        |d: &solidcraft_doc::Document| d.links.values().filter_map(|link| link.tree.as_ref()).any(|tree| tree.flexible.contains_key(&from));
+    if !flexible(&s.doc) {
+        return Ok(());
+    }
+    tree::copy_placement(s.doc_mut(), from, to)
+}
+
+/// `component.link_mode`: the link reads its design again and keeps it as told.
+fn link_mode(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.link_mode";
+    let comp = component_key(s, p, "component", cmd)?;
+    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    if !matches!(s.doc.feature(link.feature), Some(f) if f.component == comp && matches!(f.kind, FeatureKind::Import { .. })) {
+        return Err(bad(cmd, "the linked bodies are gone; break the link or insert the design again"));
+    }
+    let was = tree::Keep::of(link.tree.as_ref());
+    // One occurrence of the component, or every one.
+    let occurrence = match p.get("occurrence") {
+        None => None,
+        Some(given) => {
+            let key = match given {
+                Value::Number(n) => n.to_string(),
+                Value::String(name) => name.clone(),
+                _ => return Err(bad(cmd, "`occurrence` must be an id or name")),
+            };
+            let found = s.doc.occurrences.iter().find(|o| o.component == comp && (o.id.to_string() == key || o.name == key)).map(|o| o.id);
+            Some(found.ok_or_else(|| bad(cmd, format!("no occurrence `{key}` of that component")))?)
+        }
+    };
+    let keep = keep_param(p, tree::Keep { occurrence, ..was }, cmd)?;
+    let rigid = matches!(p.get("flexible"), Some(Value::Bool(false)));
+    if occurrence.is_some() && !keep.structure() {
+        return Err(bad(
+            cmd,
+            "`occurrence` is for a link that keeps its design's components (`structure`): this one keeps the design in one component",
+        ));
+    }
+    if occurrence.is_some() && keep.flexible.is_none() {
+        return Err(bad(cmd, "`occurrence` needs `flexible`: true or false for that occurrence"));
+    }
+    // Rigid again, with nothing else asked: the occurrence gives up its joints and its pose,
+    // which needs nothing of the linked design, also when its file is not there. A link that
+    // keeps its design in one component has rigid occurrences only, and stays as it is.
+    if rigid && keep.structure() == was.structure() {
+        let gone: Vec<u64> = flexible_occurrences(s, comp).into_iter().filter(|o| occurrence.is_none_or(|one| one == *o)).collect();
+        for o in gone {
+            let joints = tree::forget_placement(s.doc_mut(), comp, o);
+            s.visibility.hidden_joints.retain(|h| !joints.contains(h));
+        }
+        let tree = s.doc.links.get(&comp).and_then(|link| link.tree.as_ref());
+        let subcomponents = tree.map_or(0, |tree| tree.components.len());
+        let joints = tree.and_then(|tree| tree.flexible.values().map(std::collections::BTreeMap::len).max()).unwrap_or(0);
+        super::joints::resolve(s);
+        return reply(
+            cmd,
+            LinkModeResult {
+                component: comp,
+                structure: keep.structure(),
+                flexible: flexible_occurrences(s, comp),
+                subcomponents,
+                joints,
+                warnings: Vec::new(),
+                param_warnings: Vec::new(),
+            },
+        );
+    }
+    link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, e.to_string()))?;
+    let file = resolve(s.path.as_deref(), &link.path);
+    let (_, _, mut warnings, kept) = take_design(s, comp, &link, &file, selected_configuration(&link), keep, false, cmd)?;
+    // Asked to keep the design's components, and it has none: nothing shows that, so it is
+    // said. The link is set to keep them all the same, for when the design has some.
+    if matches!(p.get("structure"), Some(Value::Bool(true))) && kept.components == 0 {
+        warnings.push("the linked design has no components of its own to keep: it stays one component until it has some".to_string());
+    }
+    // An occurrence is flexible by the joints it has from the linked design.
+    if keep.flexible == Some(true) && flexible_occurrences(s, comp).is_empty() {
+        warnings.push("the linked design has no joints to carry: every occurrence is rigid".to_string());
+    }
+    // The occurrences made flexible stand where the design's joints put them.
+    let sol = super::joints::resolve(s);
+    warnings.extend(sol.errors.iter().chain(&sol.conflicts).map(|(_, name, why)| format!("joint {name}: {why}")));
+    reply(
+        cmd,
+        LinkModeResult {
+            component: comp,
+            structure: keep.structure(),
+            flexible: flexible_occurrences(s, comp),
+            subcomponents: kept.components,
+            joints: kept.joints,
+            warnings,
+            param_warnings: Vec::new(),
+        },
+    )
+}
+
+/// Linked component `comp` takes the design at `file`, kept as `keep` says: its bodies replace
+/// the link's, and the components and joints the link keeps follow. Returns the file as the
+/// link stores it, whether the geometry changed, what to tell and what the link now keeps.
+#[allow(clippy::too_many_arguments)]
+fn take_design(
+    s: &mut Session,
+    comp: u64,
+    link: &DesignLink,
+    file: &Path,
+    configuration: Option<SelectedConfiguration>,
+    keep: tree::Keep,
+    sync: bool,
+    cmd: &str,
+) -> Result<(String, bool, Vec<String>, tree::Synced)> {
+    let structure = keep.structure();
+    // Read/evaluate the candidate before changing anything. Session::execute owns the single
+    // undo step and restores both the document and evaluated state on any later failure.
+    let joints = !keep.flexible_in(&s.doc, comp).is_empty();
+    let ((source_name, sf, faces, metadata, properties, meshes), source, read) =
+        linked_bodies_read(file, s.path.as_deref(), configuration, s.validation(), structure, joints).map_err(|e| bad(cmd, e.to_string()))?;
+    let source_names = sf.body_names.clone();
+    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
+        || link_meshes(s, comp, link.feature) != meshes.as_slice();
+    let path = stored(s.path.as_deref(), file);
+    let mut warnings = sf.warnings;
+    if structure || link.tree.is_some() {
+        tree::fits(s, comp, &source, keep).map_err(|e| bad(cmd, e.to_string()))?;
+    }
+    // The joints of this design on the component or on an occurrence the link keeps inside it.
+    // A flexible occurrence's own joints are its design's, written again below.
+    let own_holds: std::collections::BTreeSet<u64> =
+        link.tree.iter().flat_map(|tree| tree.flexible.values()).flat_map(|joints| joints.values().copied()).collect();
+    let kept: std::collections::BTreeSet<u64> = link
+        .tree
+        .iter()
+        .flat_map(|tree| tree.occurrences.values().copied())
+        .chain(s.doc.occurrences.iter().filter(|o| o.component == comp).map(|o| o.id))
+        .collect();
+    let on_link = |side: &solidcraft_doc::joints::JointOrigin| side.occurrences().any(|occurrence| kept.contains(&occurrence));
+    if geometry_changed && s.doc.assembly.joints.iter().any(|j| !own_holds.contains(&j.id) && (on_link(&j.a) || on_link(&j.b))) {
+        warnings.push("the linked geometry changed; check this component's joints, even when the solver reports no error".to_string());
+    }
+    // The model before the link's bodies are replaced: a joint that stays where it is when the
+    // link starts to keep components was found on these bodies ([`tree::sync`]).
+    let as_it_was = s.model.state();
+    let mut inherited = link.inherited.clone();
+    let mut removed = Vec::new();
+    if let Some(f) = s.doc_mut().feature_mut(link.feature) {
+        // Both name modes start as Relink always did; `sync` renames the bodies below.
+        if f.body_names.len() != sf.body_names.len() {
+            if f.body_names.is_empty() {
+                f.body_names = sf.body_names;
+            } else {
+                let old_step = match &f.kind {
+                    FeatureKind::Import { step, .. } => step.as_ref(),
+                    _ => "",
+                };
+                let (next_names, next_inherited, gone) = realign_changed_body_count(
+                    old_step,
+                    &file.display().to_string(),
+                    solidcraft_io::StepNames::default(),
+                    &f.body_names,
+                    &inherited,
+                    &sf.body_names,
+                );
+                f.body_names = next_names;
+                inherited = next_inherited;
+                removed = gone;
+            }
+        } else if let FeatureKind::Import { step, .. } = &f.kind
+            && !same_import_source(&f.kind, &sf.kind)
+            && let Some(order) = moved_bodies(step, &file.display().to_string(), solidcraft_io::StepNames::default(), &sf.body_names)
+        {
+            // The names, and what the link last took from each body, stay with their bodies (#21371).
+            f.body_names = reordered(&f.body_names, &order);
+            if inherited.len() == order.len() {
+                inherited = reordered(&inherited, &order);
+            }
+        }
+        f.kind = sf.kind;
+        f.link_faces = faces;
+    }
+    remove_stale_body_properties(s.doc_mut(), link.feature, &removed);
+    let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    set_link_meshes(s, comp, link.feature, &cname, &file.to_string_lossy(), meshes)?;
+    s.doc_mut().links.insert(
+        comp,
+        DesignLink {
+            path: file.to_string_lossy().into_owned(),
+            file_sha256: Some(read),
+            configuration: configuration.map(|c| c.row),
+            configuration_identity: configuration.and_then(|c| c.identity),
+            inherited,
+            ..link.clone()
+        },
+    );
+    s.refresh();
+    if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
+        return Err(bad(cmd, error));
+    }
+    // The components and joints the link keeps follow the new design; a link told to keep
+    // none gives up the ones it had (the read gave no structure then).
+    let kept = if structure || link.tree.is_some() {
+        tree::sync(s, comp, link.feature, &source, keep, Some(as_it_was.as_ref()), &mut warnings)?
+    } else {
+        tree::Synced::default()
+    };
+    if sync {
+        sync_names(s, comp, link.feature, &source_name, &source_names, &mut warnings);
+    }
+    inherit_properties(s, comp, &properties)?;
+    let (_, kept_metadata) = inherit_metadata(s, comp, &metadata);
+    warnings.extend(kept_metadata);
+    s.refresh();
+    Ok((path, geometry_changed, warnings, kept))
+}
+
+/// `component.break_link`: the component keeps its bodies and forgets the design file. The
+/// joints and poses its flexible occurrences had for themselves go with the link.
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
     let comp = component_key(s, p, "component", cmd)?;
+    // A flexible occurrence's joints and its pose are on its own copy of the linked design's
+    // parts. Without the link those parts are the component's own, the same in each of its
+    // occurrences: every occurrence shows them as the design was saved.
+    let flexible: Vec<u64> =
+        s.doc.links.get(&comp).and_then(|link| link.tree.as_ref()).map(|tree| tree.flexible.keys().copied().collect()).unwrap_or_default();
+    for occurrence in flexible {
+        let joints = tree::forget_placement(s.doc_mut(), comp, occurrence);
+        s.visibility.hidden_joints.retain(|h| !joints.contains(h));
+    }
     let link = s.doc_mut().links.remove(&comp).ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
     let path = stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path));
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
@@ -2691,6 +3279,8 @@ fn importer_needs(importer: &solidcraft_doc::LinkImporter, status: &crate::plugi
     Some(format!("importer plugin `{plugin}`{version} is needed to read this file again, but it is {problem}{installed}"))
 }
 
+/// `component.links`: every linked component with its design file, whether the file is there and
+/// still what this design last read, and how the link keeps the design.
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
     let mut observations = Vec::new();
     let links: Vec<LinkInfo> = s
@@ -2711,6 +3301,8 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                     file: String::new(),
                     found: None,
                     changed: None,
+                    structure: l.tree.is_some(),
+                    flexible: flexible_occurrences(s, *c),
                     state: None,
                     reason: None,
                 };
@@ -2733,6 +3325,8 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         file: shown,
                         found: None,
                         changed: None,
+                        structure: l.tree.is_some(),
+                        flexible: flexible_occurrences(s, *c),
                         state: Some(LinkState::NotAllowed),
                         reason: importer_file_refusal(s, &file),
                     }
@@ -2768,6 +3362,8 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         file: shown,
                         found,
                         changed,
+                        structure: l.tree.is_some(),
+                        flexible: flexible_occurrences(s, *c),
                         state,
                         reason,
                     }

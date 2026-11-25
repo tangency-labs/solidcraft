@@ -132,7 +132,14 @@ fn drag_frames_settle_where_the_reach_does_and_leave_out_the_report() {
     let mut s = arm(false, 10.0);
     run(&mut s, "joint.limits", json!({"joint": "Elbow", "min": -30, "max": 30}));
     let st = s.model.state();
-    let r = Reach { occurrence: occ(&s, "Fore"), point: Vec3::new(100.0, 0.0, 0.0), to: Vec3::new(50.0, 50.0, 0.0), axis: None, joints: None };
+    let r = Reach {
+        occurrence: occ(&s, "Fore"),
+        point: Vec3::new(100.0, 0.0, 0.0),
+        to: Vec3::new(50.0, 50.0, 0.0),
+        axis: None,
+        joints: None,
+        path: Vec::new(),
+    };
     let told = full(&s.doc, &st, &r).unwrap();
     assert!(!told.limits.is_empty(), "{told:?}");
     let mut carry = solidcraft_doc::joints::FrameCarry::default();
@@ -185,6 +192,7 @@ fn a_hinge_follows_a_pointer_far_from_its_axis_frame_by_frame() {
         to: Vec3::new(60.0 * degrees.to_radians().cos(), 60.0 * degrees.to_radians().sin(), 0.0),
         axis: None,
         joints: None,
+        path: Vec::new(),
     };
     let angle = |doc: &solidcraft_doc::Document| doc.assembly.joints.iter().find(|j| j.name == "Shoulder").map_or(0.0, |j| j.values[0]).to_degrees();
     let mut pose = (*s.doc).clone();
@@ -226,7 +234,7 @@ fn a_frame_cut_at_a_limit_ends_on_it_and_the_other_values_go_on() {
     let value = |doc: &solidcraft_doc::Document, joint: &str| doc.assembly.joints.iter().find(|j| j.name == joint).map_or(f64::NAN, |j| j.values[0]);
     // Which way along X the slider's value falls toward its limit at 0: the way a reach to +10
     // could not go.
-    let probe = Reach { occurrence: table, point: Vec3::ZERO, to: Vec3::new(10.0, 0.0, 0.0), axis: None, joints: None };
+    let probe = Reach { occurrence: table, point: Vec3::ZERO, to: Vec3::new(10.0, 0.0, 0.0), axis: None, joints: None, path: Vec::new() };
     let rose = solidcraft_doc::joints::reach(&s.doc, &st, &probe).is_ok_and(|told| told.values.values().any(|q| q.first().is_some_and(|v| *v > 5.0)));
     let toward_zero = if rose { -1.0 } else { 1.0 };
     let (mut short, mut frozen) = (Vec::new(), Vec::new());
@@ -242,7 +250,7 @@ fn a_frame_cut_at_a_limit_ends_on_it_and_the_other_values_go_on() {
         for frame in 0..24 {
             let y = if frame < 12 { 40.0 } else { 80.0 };
             let to = Vec3::new(toward_zero * (25.0 + 0.01 * f64::from(k)), y, 0.0);
-            let r = Reach { occurrence: table, point: Vec3::ZERO, to, axis: None, joints: None };
+            let r = Reach { occurrence: table, point: Vec3::ZERO, to, axis: None, joints: None, path: Vec::new() };
             super::reach_preview(&mut pose, &st, &r, &mut carry).unwrap();
         }
         if value(&pose, "X") != 0.0 {
@@ -305,7 +313,7 @@ fn a_reach_held_at_a_limit_settles_quickly() {
     let at = Vec3::new(-36.672, -2.706, 14.855);
     for k in [1.0, 2.0] {
         let to = Vec3::new(at.x, at.y + 2.0 * k, at.z + 1.5 * k);
-        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None };
+        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None, path: Vec::new() };
         let st = s.model.state();
         let first = solidcraft_doc::joints::reach(&s.doc, &st, &ask).unwrap_or_default();
         // A tenth of the 200 000 placements one solve may spend; the crawl spent all of them.
@@ -623,7 +631,7 @@ fn a_drag_frame_past_a_limit_on_a_closed_loop_ends_on_the_limit() {
     for angle in [-6.0_f64, -40.0, -40.0] {
         let a = start + angle.to_radians();
         let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
-        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None, path: Vec::new() };
         assert!(super::reach_preview(&mut pose, &st, &r, &mut carry).is_ok());
     }
     let value = pose.assembly.joints.iter().find(|j| j.name == "Rocker").map_or(0.0, |j| j.values[0]).to_degrees();
@@ -648,7 +656,7 @@ fn a_reach_from_the_last_frames_start_ends_where_the_frames_showed() {
         let a = start + angle.to_radians();
         let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
         let before = pose.assembly.joints.iter().map(|j| (j.id, j.values.clone())).collect();
-        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None, path: Vec::new() };
         assert!(super::reach_preview(&mut pose, &s.model.state(), &r, &mut carry).is_ok());
         last = Some((before, to));
     }

@@ -3680,6 +3680,12 @@ mod importers {
         assert!(refused.contains("configuration"), "{refused}");
         let refused = s.execute("component.insert_design", &json!({"path": "part.sc", "options": {}})).unwrap_err().to_string();
         assert!(refused.contains("options"), "{refused}");
+        // An importer's file has no components of its own to keep: it comes in as one component.
+        assert!(s.doc.links[&comp].tree.is_none());
+        for keep in [json!({"path": file, "structure": true}), json!({"path": file, "flexible": true})] {
+            let refused = s.execute("component.insert_design", &keep).unwrap_err().to_string();
+            assert!(refused.contains("one component"), "{refused}");
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

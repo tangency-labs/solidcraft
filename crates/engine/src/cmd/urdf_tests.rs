@@ -839,7 +839,7 @@ pub(super) fn fan(kinds: &[&str]) -> Session {
 pub(super) fn link(s: &mut Session, a: &str, b: &str, ratio: f64, offset: f64) {
     let id = |s: &Session, n: &str| s.doc.assembly.joints.iter().find(|j| j.name == n).map_or(0, |j| j.id);
     let (a, b) = (id(s, a), id(s, b));
-    s.doc_mut().assembly.links.push(joints::MotionLink { a, ia: 0, b, ib: 0, ratio, offset, coupling: None, lift: Vec::new() });
+    s.doc_mut().assembly.links.push(joints::MotionLink { a, ia: 0, b, ib: 0, ratio, offset, coupling: None, lift: Vec::new(), carried_cam: false });
 }
 
 fn mimic_package(s: &Session) -> UrdfPackage {
@@ -959,7 +959,17 @@ fn a_driver_that_closes_a_loop_leaves_the_follower_free_and_warns() {
     );
     let id = s.doc.assembly.joints.iter().find(|j| j.name == "Closing").map_or(0, |j| j.id);
     let j1 = s.doc.assembly.joints.iter().find(|j| j.name == "J1").map_or(0, |j| j.id);
-    s.doc_mut().assembly.links.push(joints::MotionLink { a: id, ia: 0, b: j1, ib: 0, ratio: 2.0, offset: 0.0, coupling: None, lift: Vec::new() });
+    s.doc_mut().assembly.links.push(joints::MotionLink {
+        a: id,
+        ia: 0,
+        b: j1,
+        ib: 0,
+        ratio: 2.0,
+        offset: 0.0,
+        coupling: None,
+        lift: Vec::new(),
+        carried_cam: false,
+    });
     let p = mimic_package(&s);
     assert!(!p.xml.contains("<mimic"), "{}", p.xml);
     assert!(p.warnings.iter().any(|w| w.contains("J1") && w.contains("free")), "{:?}", p.warnings);
