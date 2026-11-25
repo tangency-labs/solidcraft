@@ -542,7 +542,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
         }
-        Kind::SketchIntersect { bodies, projection_link } => {
+        Kind::SketchIntersect { bodies, projection_link, construction } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
@@ -553,8 +553,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
-        Kind::SketchProject { bodies, projection_link } => {
+        Kind::SketchProject { bodies, projection_link, construction } => {
             let response =
                 ui_kit::row(ui, solidcraft_ui_text::tr("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
             crate::scenario::publish_handle("project:link-tools", response.rect.center());
@@ -569,6 +570,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
         Kind::SketchModify(k) => {
             let two_parallel_lines = crate::sketch_modify_ui::picks_two_parallel_lines(app, &d.inputs);
