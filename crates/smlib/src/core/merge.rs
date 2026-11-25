@@ -25,18 +25,7 @@ pub(crate) fn stitch(body: &Body, tolerance: f64) -> Result<(Body, bool)> {
     if body.kernel_left_unfinished() {
         return Err(Error::Internal("SmBrep::StitchFaces: the body was left unfinished by an earlier panic".into()));
     }
-    ops_as("SmBrep::StitchFaces", &[("brep", body)], refused, || solidcore_ops::stitch::stitch(body.copy()?, tolerance))
-}
-
-/// A refusal of solidcore-ops' stitch as the capi's: a kernel status as that status, a gluing
-/// that would open the solid as not supported (`SMLIB_ERR_UNSUPPORTED`), the rest as any
-/// solidcore-ops call's ([`super::call::error`]).
-fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
-    match e {
-        solidcore_ops::Error::Status(code) => Error::Status(code),
-        solidcore_ops::Error::Unsupported(_) => Error::Unsupported,
-        e => super::call::error(call, e, detail),
-    }
+    ops_as("SmBrep::StitchFaces", &[("brep", body)], super::blend::refused, || solidcore_ops::stitch::stitch(body.copy()?, tolerance))
 }
 
 /// `smlib_merge_faces`: `SmBrep::RemoveTopologicalEdgesAndVertices` on a copy of `body`, keeping
