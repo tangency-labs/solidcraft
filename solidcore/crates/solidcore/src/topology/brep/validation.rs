@@ -28,9 +28,9 @@ mod wide_vertices;
 
 pub use assert_valid::{
     assert_valid, assert_valid_scoped, check_brep, check_brep_full, check_brep_scoped,
-    check_brep_with_keys,
-    check_brep_with_keys_scoped, curve_assert_valid, validate_and_update_tolerances, BrepCheck,
-    CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
+    check_brep_with_keys, check_brep_with_keys_scoped, curve_assert_valid,
+    validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
+    ValidityScope,
 };
 pub(crate) use pointers::validate_geometry;
 pub(crate) use pointers::GROWTH_PAST_RATIO;
