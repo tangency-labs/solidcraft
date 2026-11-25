@@ -1921,25 +1921,26 @@ fn refit_raising_trim(
 /// returned is `B / 2`, which `SetUVTrimCurve` doubles): the tightest tolerance the proof
 /// gives. It adds no margin for the edge curve's evaluation rounding: the tolerance it leaves
 /// is above upstream's, which counts none either, so it uncovers nothing upstream covers. A
-/// lowering below upstream's raise is what must not uncover it, hence the rounding check
-/// there (`lowered_covers_rounding`). The bound is the whole bisection's wherever it is above half the tolerance (to its
-/// piece and depth limits, not stopped at `upstream`), so a loose enclosure is tightened as
-/// far as it goes before the edge is raised to it; it is still a proved bound.
+/// raise below upstream's is what must not uncover it, hence the rounding counted there
+/// ([`rounding_cover`]). The bound is the whole bisection's wherever it is above half the
+/// tolerance (to its piece and depth limits, not stopped at `upstream`), so a loose enclosure
+/// is tightened as far as it goes before the edge is raised to it; it is still a proved bound.
 ///
 /// A `B` up to twice `upstream` (#20912) raises the edge to what covers its trims by proof,
-/// with no margin on top: the tolerance left is the largest of the current tolerance, `B`, the
-/// proved distance of every other UV trim of the edge, and the edge curve's proved distance to
-/// the surface of every other face of the edge that holds no trim (`other_trims_bound`). The
-/// B-rep check accepts an edge whose trims lie within its tolerance; upstream's factor 2 is a
-/// margin over a sampled distance, which a proved bound does not need. A trim set without a
-/// raise (read from a file, or attached by an operation that does not raise) may be covered by
+/// with no margin on top but the edge curve's evaluation rounding (`sqrt 3` times its
+/// [`Curve::point_error_bound`], [`evaluation_rounding`]): the tolerance left is the largest of
+/// the current tolerance and, each plus that rounding ([`rounding_cover`]), `B`, the proved
+/// distance of every other UV trim of the edge, and the edge curve's proved distance to the
+/// surface of every other face of the edge that holds no trim (`other_trims_bound`). The B-rep
+/// check accepts an edge whose trims lie within its tolerance; upstream's factor 2 is a margin
+/// over a sampled distance, which a proved bound does not need. A trim set without a raise
+/// (read from a file, or attached by an operation that does not raise) may be covered by
 /// upstream's larger raise only, and a smaller raise must not uncover it: it is covered by
 /// raising to its proved distance, also where upstream's raise leaves it uncovered (#20906).
-/// Where one of them is not enclosed, the tolerance left does not cover `B` plus the edge
-/// curve's evaluation rounding (`lowered_covers_rounding`), or an other trim's bound is past
-/// the B-rep check's limit, the raise is upstream's. The tolerance left is at least `B` (and
-/// at least each other bound), up to that limit (past it, `2 * upstream`, below `B`: the
-/// unproved fallback below).
+/// Where one of them is not enclosed, the rounding is not bounded, or the tolerance left is
+/// past the B-rep check's limit, the raise is upstream's. The tolerance left is at least `B`
+/// (and at least each other bound) plus the rounding, up to that limit (past it, `2 *
+/// upstream`, below `B`: the unproved fallback below).
 ///
 /// A `B` above twice `upstream` raises the edge only where the B-rep check accepts the
 /// tolerance it leaves ([`within_edge_tolerance_limit`]); past that, upstream's raise. A bound
@@ -1997,60 +1998,81 @@ pub(crate) fn trim_raise_distance(
         return Ok(0.5 * raise_by);
     }
     // #20912: a `B` within twice upstream's distance raises the edge to what covers its trims
-    // by proof, not to twice a distance: `B` itself, kept at the tolerance where that already
-    // covers it, and raised further to the proved distance of each other trim of the edge
-    // (and of the edge curve to each face of the edge that holds no trim) where that is
-    // larger. The check accepts an edge whose trims lie within its tolerance (Test #4);
+    // by proof, not to twice a distance: `B` itself (plus the edge curve's evaluation
+    // rounding, below), kept at the tolerance where that already covers it, and raised
+    // further to the proved distance of each other trim of the edge (and of the edge curve
+    // to each face of the edge that holds no trim) where that is larger. The check accepts an edge whose trims lie within its tolerance (Test #4);
     // upstream's factor 2 is a margin over a sampled distance, which a proved bound does not
     // need. A trim set without a raise (read from a file, or attached by an operation that
     // does not raise) and covered by no tolerance before is covered after the raise (#20906),
     // where upstream's raise to `2 * upstream` leaves it uncovered.
-    let lowered = tol.max(raise_by);
-    // The tolerance must also cover what an evaluation of the edge curve can observe: `B` plus
-    // the evaluation's own rounding where the curve lies (`sqrt 3` times
+    // The tolerance must also cover what an evaluation of the edge curve can observe: each
+    // proved distance plus the evaluation's own rounding where the curve lies (`sqrt 3` times
     // [`Curve::point_error_bound`] at its interval's ends, the larger: a line's grows with its
-    // parameter). Where that rounding is not bounded, or the tolerance does not cover it (a
-    // curve far from the origin for its bound), the raise is upstream's.
-    if !lowered_covers_rounding(b, e, raise_by, lowered)? {
+    // parameter), so the raise is to that sum, rounded up ([`rounding_cover`]). Where that
+    // rounding is not bounded, the raise is upstream's.
+    let Some(rounding) = evaluation_rounding(b, e)? else {
         return Ok(upstream);
-    }
+    };
+    let lowered = tol.max(rounding_cover(raise_by, rounding));
     // A raise below upstream's must still leave the edge covering its other trims: a trim set
     // without a raise may be covered by upstream's larger raise only, and the smaller one must
-    // not uncover it. Each other trim's proved distance is covered by raising to it; where one
-    // is not enclosed, or is past the B-rep check's limit, the raise is upstream's.
-    let target = match other_trims_bound(k, b, eu, fit, lowered)? {
-        Some(others) if others <= lowered => lowered,
-        Some(others) if within_edge_tolerance_limit(b, others) => others,
-        _ => return Ok(upstream),
+    // not uncover it. Each other trim's proved distance is covered as `B` is, by raising to it
+    // plus the rounding; where one is not enclosed, the raise is upstream's. (The bisection may
+    // stop at any bound `lowered` already covers with the rounding: `within`, rounded down.)
+    let within =
+        (lowered * (1.0 - 4.0 * f64::EPSILON) - rounding * (1.0 + 2.0 * f64::EPSILON)).max(0.0);
+    let target = match other_trims_bound(k, b, eu, fit, within)? {
+        Some(others) => lowered.max(rounding_cover(others, rounding)),
+        None => return Ok(upstream),
     };
+    // (a raise the B-rep check refuses as an edge tolerance is upstream's, as above)
+    if !target.is_finite() || (target > tol && !within_edge_tolerance_limit(b, target)) {
+        return Ok(upstream);
+    }
     // (doubled by `SetUVTrimCurve` back to `target`, exactly, as above; a `target` equal to
     // the tolerance raises nothing)
     Ok(0.5 * target)
 }
 
-/// Not upstream (#18166): whether the tolerance `lowered` covers the proved distance `bound`
-/// plus the evaluation rounding of `e`'s curve (`sqrt 3` times the larger
-/// [`Curve::point_error_bound`] at its interval's ends, rounded up), as
-/// [`trim_raise_distance`] requires of a lowering; `false` without a curve or a bound.
+/// Not upstream (#18166): the evaluation rounding of `e`'s curve where it lies, `sqrt 3`
+/// times the larger [`Curve::point_error_bound`] at its interval's ends (a line's grows with
+/// its parameter), rounded up; `None` without a curve or a bound.
 ///
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id.
-fn lowered_covers_rounding(b: &Brep, e: EdgeId, bound: f64, lowered: f64) -> Result<bool> {
+fn evaluation_rounding(b: &Brep, e: EdgeId) -> Result<Option<f64>> {
     let rec = b.edge(e)?;
     let Some(curve) = rec.curve.as_ref() else {
-        return Ok(false);
+        return Ok(None);
     };
     let (Some(e0), Some(e1)) = (
         curve.point_error_bound(rec.interval.min()),
         curve.point_error_bound(rec.interval.max()),
     ) else {
-        return Ok(false);
+        return Ok(None);
     };
-    // (each of the sum's two roundings and the product's is at most one `EPSILON` relative:
-    // `4 EPSILON` covers them, rounding the total up)
-    let need = (bound + e0.max(e1) * 3.0_f64.sqrt()) * (1.0 + 4.0 * f64::EPSILON);
-    Ok(need.is_finite() && need <= lowered)
+    // (the product's rounding is at most one `EPSILON` relative)
+    let r = e0.max(e1) * 3.0_f64.sqrt() * (1.0 + f64::EPSILON);
+    Ok(r.is_finite().then_some(r))
+}
+
+/// Not upstream (#18166, #20912): the tolerance that covers the proved distance `bound` plus
+/// the evaluation rounding `rounding` ([`evaluation_rounding`]), rounded up: the sum's
+/// rounding is at most one `EPSILON` relative, and `4 EPSILON` covers it and the product's.
+fn rounding_cover(bound: f64, rounding: f64) -> f64 {
+    (bound + rounding) * (1.0 + 4.0 * f64::EPSILON)
+}
+
+/// Not upstream (#18166): whether the tolerance `lowered` covers the proved distance `bound`
+/// plus the evaluation rounding of `e`'s curve ([`rounding_cover`]); `false` without a curve
+/// or a bound.
+#[cfg(test)]
+fn lowered_covers_rounding(b: &Brep, e: EdgeId, bound: f64, lowered: f64) -> Result<bool> {
+    Ok(evaluation_rounding(b, e)?
+        .map(|r| rounding_cover(bound, r))
+        .is_some_and(|need| need.is_finite() && need <= lowered))
 }
 
 /// Not upstream (#18166): whether `tolerance` is one the B-rep check accepts for an edge of
@@ -4055,16 +4077,16 @@ mod tests {
                 }
             }
             let worst = trims.iter().fold(0.0_f64, |w, t| w.max(t.2));
+            let rounding = evaluation_rounding(&b, *e).unwrap().unwrap();
             for (x, trim, own) in &trims {
                 let raise = trim_raise_distance(&k, &mut b, *x, trim, *own).unwrap();
                 // (what `SetUVTrimCurve` leaves: the tolerance, raised to twice the distance)
                 let left = tol.max(2.0 * raise);
                 assert!(left >= worst, "{e:?}: {left:e} below {worst:e}");
-                assert!(
-                    left <= tol.max(worst),
-                    "{e:?}: {left:e} past {:e}",
-                    tol.max(worst)
-                );
+                // (the bound plus the evaluation rounding, rounded up: at most that, up to the
+                // bisection stopping at a bound the tolerance already covers)
+                let most = tol.max(rounding_cover(worst, rounding));
+                assert!(left <= most, "{e:?}: {left:e} past {most:e}");
                 if *own > 0.5 * tol {
                     past_half += 1;
                     assert!(left < 2.0 * own, "{e:?}: {left:e}, 2 B = {:e}", 2.0 * own);
@@ -4075,14 +4097,51 @@ mod tests {
         assert!(past_half > 0, "no trim past half the tolerance");
     }
 
+    /// #20912: an edge whose tolerance is below its trim's proved distance `B` is raised to
+    /// `B` plus the edge curve's evaluation rounding, not to twice upstream's distance (given as
+    /// `B`, which upstream doubles): each sphere edge's trim, moved 3e-7 in `u` or `v` (about 2e-5
+    /// on the surface, past the edge's tolerance of 1e-5), leaves the edge covering its bound and
+    /// the rounding, and below `2 B`.
+    #[test]
+    fn an_edge_below_its_trim_s_bound_is_raised_to_the_bound_plus_rounding() {
+        let (k, mut b, edges) = sphere_edges(Point3::new(0.0, 0.0, 0.0));
+        assert!(!edges.is_empty());
+        for (e, eu, trim) in &edges {
+            let tol = b.edge(*e).unwrap().tolerance;
+            let fit = fit_tolerance(&k, &mut b, *e).unwrap();
+            // (moved within the surface's domain: a trim moved out of it past a boundary the
+            // edge lies on has its image unbounded there)
+            let (moved, own) = [[3e-7, 0.0], [-3e-7, 0.0], [0.0, 3e-7], [0.0, -3e-7]]
+                .into_iter()
+                .find_map(|[du, dv]| {
+                    let shift = Axis2Placement::new(Vec3::new(du, dv, 0.0), Vec3::X, Vec3::Y);
+                    let mut moved = trim.clone();
+                    moved.transform(&k, &shift, None).unwrap();
+                    let own =
+                        trim_deviation_bound(&k, &b, *eu, &moved, fit, [0.0, f64::INFINITY], None)
+                            .unwrap()?;
+                    own.is_finite().then_some((moved, own))
+                })
+                .unwrap();
+            assert!(own > tol && own < 1e-4, "{e:?}: B = {own:e}");
+            let raise = trim_raise_distance(&k, &mut b, *eu, &moved, own).unwrap();
+            let left = tol.max(2.0 * raise);
+            assert!(
+                lowered_covers_rounding(&b, *e, own, left).unwrap(),
+                "{e:?}: {left:e} does not cover {own:e} and the rounding"
+            );
+            assert!(left < 2.0 * own, "{e:?}: {left:e}, 2 B = {:e}", 2.0 * own);
+        }
+    }
+
     /// #18166: a lowering must cover the evaluation's rounding where the edge lies. gen1157's
     /// proved bound `B = 7.392e-6`, lowered to `2 B`, covers it at the origin; 8e8 away the
     /// edge curves' evaluation rounding (`sqrt 3` times their point error bound there, about
-    /// 4e-5) is more than `2 B` leaves over `B`. There [`trim_raise_distance`] keeps
-    /// upstream's raise for an edge whose bound leaves the rounding uncovered, and lowers
-    /// only where it is covered. The check is of the edge where the raise is made: gen1157
-    /// itself is lowered at the origin, where it passes, and then moved 8e8 away, which this
-    /// guard does not see (a lowering carried across a later move: #19910).
+    /// 4e-5) is more than `2 B` leaves over `B`. There [`trim_raise_distance`] raises an edge
+    /// to its bound plus that rounding (#20912), so every far edge covers both, and none keeps
+    /// upstream's raise (given as 1, far above them). The check is of the edge where the raise
+    /// is made: gen1157 itself is lowered at the origin, where it passes, and then moved 8e8
+    /// away, which this guard does not see (a lowering carried across a later move: #19910).
     #[test]
     fn a_lowering_covers_the_evaluation_rounding_where_the_edge_lies() {
         let (b_proved, lowered) = (7.392e-6, 1.4784e-5);
@@ -4093,19 +4152,22 @@ mod tests {
         }
         let (k, mut far, far_edges) = sphere_edges(FAR);
         assert_eq!(far_edges.len(), edges.len());
-        let mut kept = 0;
         for (e, eu, trim) in &far_edges {
             assert!(!lowered_covers_rounding(&far, *e, b_proved, lowered).unwrap());
+            let tol = far.edge(*e).unwrap().tolerance;
+            let fit = fit_tolerance(&k, &mut far, *e).unwrap();
+            let own = trim_deviation_bound(&k, &far, *eu, trim, fit, [0.0, f64::INFINITY], None)
+                .unwrap()
+                .unwrap();
             let raise = trim_raise_distance(&k, &mut far, *eu, trim, 1.0).unwrap();
-            if raise == 1.0 {
-                kept += 1;
-            } else {
-                // (a lowering far away: its tolerance covers the bound and the rounding)
-                let tol = far.edge(*e).unwrap().tolerance;
-                assert!(lowered_covers_rounding(&far, *e, raise, tol.max(2.0 * raise)).unwrap());
-            }
+            assert!(raise < 1.0, "{e:?}: upstream's raise kept");
+            // (a raise far away: the tolerance it leaves covers the bound and the rounding)
+            let left = tol.max(2.0 * raise);
+            assert!(
+                lowered_covers_rounding(&far, *e, own, left).unwrap(),
+                "{e:?}: {left:e} does not cover {own:e} and the rounding"
+            );
         }
-        assert!(kept > 0, "the rounding check keeps no far raise");
     }
 
     #[test]
