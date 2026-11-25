@@ -6794,53 +6794,150 @@ fn apply_traced_with(
     Ok(())
 }
 
+/// The exact box of a B-rep body, or `None` for a mesh or unmeasurable body.
+fn join_tool_bounds(body: &Body) -> Option<solidcraft_geom::Aabb3> {
+    if body.is_mesh() {
+        return None;
+    }
+    let b = body.exact_bounds().ok()?;
+    (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then_some(b)
+}
+
+/// Union `base` with `others` (all in `base`'s frame), batching multiple operands in one kernel
+/// call and falling back to sequential `flush_join::join_bodies` on error. When `try_apart` is
+/// set, bodies whose boxes do not meet are joined directly without intersection work.
+fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result<Traced> {
+    // Each union keeps the lineage of what it joins, so the joined body's faces keep
+    // their names (the tool's new faces are named by their roles).
+    let union = |a: &Traced, b: &Traced| -> Result<Traced> {
+        #[cfg(test)]
+        cost_tests::count(|c| c.join_unions += 1);
+        let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
+        Ok(Traced::step(u, &[a, b]))
+    };
+    match others {
+        [] => Ok(base.clone()),
+        [one] => union(base, one),
+        _ => {
+            let operands: Vec<&Traced> = std::iter::once(base).chain(others).collect();
+            // Bodies that are all apart need no intersection work: they are one body of several
+            // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+            if try_apart && let Some(acc) = union_all_apart(&operands) {
+                return Ok(acc);
+            }
+            // The kernel's union pairs the tools with each other before the target. Fins whose
+            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
+            // the target one at a time, each tool's overlap with the others already lies inside.
+            // Falling back to pairwise `union` also preserves `flush_join::join_bodies` retry.
+            #[cfg(test)]
+            cost_tests::count(|c| c.join_unions += 1);
+            match union_all(&operands) {
+                Ok(acc) => Ok(acc),
+                Err(e) => others.iter().try_fold(base.clone(), |acc, other| union(&acc, other)).map_err(|_| e),
+            }
+        }
+    }
+}
+
+/// Tools deferred to be unioned into one live target body in a single batched call.
+struct PendingJoin {
+    keep: String,
+    /// Queued tools in the feature's tool frame, each with its cached exact bounds (if computed).
+    tools: Vec<(Traced, Option<solidcraft_geom::Aabb3>)>,
+    /// True while every queued tool missed all live targets (so all operands may be apart).
+    all_missed: bool,
+}
+
+/// Whether `tool` (in the feature's tool frame) meets any tool already queued in `batch`.
+/// Used after `tool` misses the target's base body so chains of touching tools are never missed.
+fn tool_meets_pending(target_size: f64, tool: &Traced, tool_box: &mut Option<Option<solidcraft_geom::Aabb3>>, batch: &PendingJoin) -> Result<bool> {
+    let tb = *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body));
+    let tool_size = tool.body.size();
+    let tool_tol = tool.body.record().tolerance;
+    for (queued, qb) in &batch.tools {
+        if let (Some(tb), Some(qb)) = (tb, *qb) {
+            let reach = target_size.max(tool_size).max(queued.body.size());
+            let margin = (reach * 1e-3).max(1e-4) + 2.0 * (tool_tol + queued.body.record().tolerance);
+            if margin.is_finite() && !tb.inflated(margin).meets(&qb) {
+                continue;
+            }
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.contact_tests += 1);
+        if queued.body.meets(&tool.body)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Apply one deferred batch of tools to its target body.
+fn flush_pending_join(state: &mut ModelState, batch: PendingJoin) -> Result<()> {
+    let Some(base) = state.body(&batch.keep).map(ModelBody::traced) else { return Ok(()) };
+    // The tools go into the kept body's frame, where it is shown (#3383).
+    let into_keep = tool_frame(&batch.keep);
+    let placed = batch.tools.iter().map(|(tool, _)| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
+    let acc = join_union_batch(&base, &placed, batch.all_missed)?;
+    if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == batch.keep) {
+        *mb = mb.remade(acc);
+    }
+    Ok(())
+}
+
 /// Join `tools` into the bodies at `target_idx`: each tool joins every target it meets into one
 /// body, kept under the first one's name; a tool that meets none joins the first target as a
 /// separate piece. A sheet metal body keeps its own identity: only the first body met may be
 /// one. The names of the bodies the tools went into.
 fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Vec<String>> {
     let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
-    // Each union keeps the lineage of what it joins, so the joined body's faces keep
-    // their names (the tool's new faces are named by their roles).
-    let union = |a: &Traced, b: &Traced| -> Result<Traced> {
-        let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
-        Ok(Traced::step(u, &[a, b]))
-    };
+    if live.is_empty() || tools.is_empty() {
+        return Ok(Vec::new());
+    }
     // One target takes every tool, whichever it meets: the result is the union of all of
     // them in one kernel call, checked once.
-    if let [keep] = live.as_slice()
-        && tools.len() > 1
-    {
+    if let [keep] = live.as_slice() {
         let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(Vec::new()) };
         // The tools go into the kept body's frame, where it is shown (#3383).
         let into_keep = tool_frame(keep);
-        let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
-        let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-        // Bodies that are all apart need no intersection work: they are one body of several
-        // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
-        let acc = match union_all_apart(&operands) {
-            Some(acc) => acc,
-            // The kernel's union pairs the tools with each other before the target. Fins whose
-            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
-            // the target one at a time, each tool's overlap with the others already lies inside.
-            None => match union_all(&operands) {
-                Ok(acc) => acc,
-                Err(e) => tools.iter().try_fold(base.clone(), |acc, tool| union(&acc, tool)).map_err(|_| e)?,
-            },
-        };
+        let placed = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
+        let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
         return Ok(vec![keep.clone()]);
     }
     let mut joined = Vec::new();
-    for tool in &tools {
+    let mut pending: Vec<PendingJoin> = Vec::new();
+    let mut rest = tools.into_iter();
+    while let Some(tool) = rest.next() {
+        // Once bridging merges all remaining targets into one, the rest need no contact tests
+        // and can be batched into that sole target in one call.
+        if let [keep] = live.as_slice() {
+            let mut batch_tools = Vec::new();
+            if let Some(pos) = pending.iter().position(|p| p.keep == *keep) {
+                batch_tools.extend(pending.remove(pos).tools.into_iter().map(|(t, _)| t));
+            }
+            batch_tools.push(tool);
+            batch_tools.extend(rest);
+            let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(joined) };
+            let into_keep = tool_frame(keep);
+            let placed = batch_tools.iter().map(|t| tool_in(t, into_keep)).collect::<Result<Vec<_>>>()?;
+            let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
+            if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
+                *mb = mb.remade(acc);
+            }
+            if !joined.contains(keep) {
+                joined.push(keep.clone());
+            }
+            break;
+        }
         let mut met: Vec<String> = Vec::new();
+        let mut tool_box: Option<Option<solidcraft_geom::Aabb3>> = None;
         // Which bodies the tool meets picks the one it joins and those joined with it. A single
         // body takes the tool whether it meets it or not, so it is not asked: the test meshes
         // the body finely, and that took longer than the join itself on a part of a few hundred
         // faces.
-        for name in live.iter().filter(|_| live.len() > 1) {
+        for name in &live {
             let Some(mb) = state.body(name) else { continue };
             let sheet = state.surface_sheets.iter().any(|s| &s.body == name);
             if mb.body.is_mesh() || (!met.is_empty() && sheet) {
@@ -6849,14 +6946,43 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             #[cfg(test)]
             cost_tests::count(|c| c.contact_tests += 1);
             // Each body is met where it is shown: the tool goes into its frame (#3383).
-            if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
+            let mut hit = mb.body.meets(&tool_in(&tool, tool_frame(name))?.body)?;
+            if !hit && let Some(batch) = pending.iter().find(|p| p.keep == *name) {
+                hit = tool_meets_pending(mb.body.size(), &tool, &mut tool_box, batch)?;
+            }
+            if hit {
                 met.push(name.clone());
             }
         }
         let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(joined) };
+        if state.body(&keep).is_none() {
+            continue;
+        }
+        if !joined.contains(&keep) {
+            joined.push(keep.clone());
+        }
+        if met.len() <= 1 {
+            let missed = met.is_empty();
+            let bounds = if !rest.as_slice().is_empty() { *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body)) } else { None };
+            if let Some(batch) = pending.iter_mut().find(|p| p.keep == keep) {
+                batch.all_missed &= missed;
+                batch.tools.push((tool, bounds));
+            } else {
+                pending.push(PendingJoin { keep, tools: vec![(tool, bounds)], all_missed: missed });
+            }
+            continue;
+        }
+        // This tool bridges two or more targets: union `keep`, its queued tools, this tool, and
+        // every absorbed target (with its queued tools) in one batched call.
         let Some(base) = state.body(&keep).map(ModelBody::traced) else { continue };
         let into_keep = tool_frame(&keep);
-        let mut acc = union(&base, &tool_in(tool, into_keep)?)?;
+        let mut operands = Vec::new();
+        if let Some(pos) = pending.iter().position(|p| p.keep == keep) {
+            for (queued, _) in pending.remove(pos).tools {
+                operands.push(tool_in(&queued, into_keep)?);
+            }
+        }
+        operands.push(tool_in(&tool, into_keep)?);
         for name in met.iter().skip(1) {
             if let Some(b) = state.body(name) {
                 // A body placed differently from the one kept joins it where it is shown.
@@ -6865,9 +6991,15 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
                     None => Some(crate::IDENTITY),
                 };
                 let m = from.map(|from| crate::mat_mul(&into_keep.unwrap_or(crate::IDENTITY), &from)).filter(|m| !crate::is_identity(m));
-                acc = union(&acc, &tool_in(&b.traced(), m)?)?;
+                operands.push(tool_in(&b.traced(), m)?);
+            }
+            if let Some(pos) = pending.iter().position(|p| p.keep == *name) {
+                for (queued, _) in pending.remove(pos).tools {
+                    operands.push(tool_in(&queued, into_keep)?);
+                }
             }
         }
+        let acc = join_union_batch(&base, &operands, false)?;
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
             *mb = mb.remade(acc);
@@ -6877,9 +7009,9 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             t.body = keep.clone();
         }
         live.retain(|n| !absorbed.contains(n));
-        if !joined.contains(&keep) {
-            joined.push(keep);
-        }
+    }
+    for batch in pending {
+        flush_pending_join(state, batch)?;
     }
     Ok(joined)
 }
