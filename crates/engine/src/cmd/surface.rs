@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_extrude")
         .contract(&SURFACE_EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr (unless `to`); to?: [x,y,z] (To Object: end at the face, vertex or point there; a curved or slanted face trims the walls where they meet its surface); to_offset?: expr (how far past `to`; a flat face square to the extrusion or a point only); direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr (unless `to`); to?: [x,y,z] (To Object: end at the face, vertex or point there; a curved or slanted face trims the walls where they meet its surface); to_offset?: expr (how far past `to`; a flat face square to the extrusion or a point only); direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; taper?: expr (angle the walls lean by, the profile being the section at the start; positive: outward, so the far end is larger; closed profiles and closed loops of curves only, a profile's holes leaning the other way, as on solid.extrude's solid, whose side walls these are; one side only, not with `to`); corner?: preserve_curvature|tangent|round (how the taper closes a sharp corner, as solid.extrude); name?, body_name? (a surface body: walls only, no caps)"),
     CommandSpec::new("surface.revolve", "Surface Revolve", crate::checked!("surface.revolve", surface_revolve)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
@@ -338,8 +338,8 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let extent = extent_param(s, p, cmd)?;
-    if extent.through_all || extent.taper.is_some() || extent.from.is_some() {
-        return Err(bad(cmd, "not supported yet: through all, from an object, or a taper"));
+    if extent.through_all || extent.from.is_some() {
+        return Err(bad(cmd, "not supported yet: through all or from an object"));
     }
     add_feature(s, p, FeatureKind::SurfaceExtrude { sketch: SketchId(sketch), profiles, curves, extent })
 }
@@ -1025,6 +1025,90 @@ mod tests {
         run(&mut s, "solid.extrude", json!({"sketch": "R", "distance": 3, "body_name": "Solid"}));
         assert!((volume(&s, "Walls") - volume(&s, "Solid")).abs() < 1e-9);
         assert!((volume(&s, "Walls") - 180.0).abs() < 1e-9);
+    }
+
+    /// Surface Extrude with a taper (#10129): the walls of a closed profile lean by the angle and
+    /// have no caps, the side walls of the solid Extrude with the same taper. A square of side
+    /// a over a height h at α: four trapezoids, 4 (a + h tan α) h / cos α. A circle of radius r:
+    /// a cone's frustum, π (2 r + h tan α) h / cos α. Open curves have no inside to lean from.
+    #[test]
+    fn surface_extrude_taper_leans_the_walls_of_closed_profiles() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let bounds = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().bbox;
+        let (h, alpha) = (10.0, 10f64.to_radians());
+        let grow = h * alpha.tan();
+        let reply = run(&mut s, "surface.extrude", json!({"sketch": "R", "distance": 10, "taper": "10 deg", "body_name": "Walls"}));
+        assert!(reply["warning"].is_null(), "{reply}");
+        let st = s.world_state().unwrap();
+        let walls = &st.body("Walls").unwrap().body;
+        assert!(walls.is_surface() && walls.face_count() == 4);
+        assert_eq!(walls.open_edge_count().unwrap(), 8);
+        let want = 4.0 * (20.0 + grow) * h / alpha.cos();
+        assert!((area(&s, "Walls") - want).abs() < want * 1e-9, "{} vs {want}", area(&s, "Walls"));
+        // The loop at the far end is the square grown by h tan α on every side.
+        let bb = bounds(&s, "Walls");
+        assert!((bb.min.x + grow).abs() < 1e-9 && (bb.max.y - 20.0 - grow).abs() < 1e-9 && (bb.max.z - h).abs() < 1e-9, "{bb:?}");
+        // The solid Extrude of the same profile and taper has these walls and two caps.
+        run(&mut s, "solid.extrude", json!({"sketch": "R", "distance": 10, "taper": "10 deg", "operation": "new", "body_name": "Solid"}));
+        let caps = 400.0 + (20.0 + 2.0 * grow).powi(2);
+        assert!((area(&s, "Solid") - caps - want).abs() < want * 1e-9, "{} vs {want}", area(&s, "Solid") - caps);
+        // Flipped, leaning in, from 3 above the sketch: the square as drawn at z = 3, smaller at -7.
+        run(
+            &mut s,
+            "surface.extrude",
+            json!({"sketch": "R", "distance": 10, "direction": "negative", "start_offset": "3 mm", "taper": "-10 deg", "body_name": "Down"}),
+        );
+        let want_down = 4.0 * (20.0 - grow) * h / alpha.cos();
+        assert!((area(&s, "Down") - want_down).abs() < want_down * 1e-9, "{} vs {want_down}", area(&s, "Down"));
+        let bb = bounds(&s, "Down");
+        assert!((bb.max.z - 3.0).abs() < 1e-9 && (bb.min.z + 7.0).abs() < 1e-9 && bb.min.x.abs() < 1e-9, "{bb:?}");
+        // A taper of 0 is the straight sheet.
+        run(&mut s, "surface.extrude", json!({"sketch": "R", "distance": 10, "taper": "0 deg", "body_name": "Straight"}));
+        assert!((area(&s, "Straight") - 800.0).abs() < 1e-9);
+        // It is saved with the feature: a reopened design builds the same walls.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "Walls") - want).abs() < want * 1e-9);
+
+        // A closed loop picked as curves leans the same way: a circle of radius 5 grows into a
+        // cone's frustum. An open chain is refused, saying what a taper needs.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        let circle =
+            run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["created"]["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.line", json!({"points": [[70, 0], [80, 0], [80, 10]], "ids": ["a", "b"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "curves": [circle], "distance": 10, "taper": "10 deg", "body_name": "Cone"}));
+        let want_cone = PI * (10.0 + grow) * h / alpha.cos();
+        assert!((area(&s, "Cone") - want_cone).abs() < want_cone * 1e-3, "{} vs {want_cone}", area(&s, "Cone"));
+        assert!((bounds(&s, "Cone").max.x - 55.0 - grow).abs() < 1e-6);
+        let open = s.execute("surface.extrude", &json!({"sketch": "C", "curves": ["a", "b"], "distance": 10, "taper": "10 deg"})).unwrap_err();
+        assert!(open.to_string().contains("a taper needs a closed profile"), "{open}");
+        // The same curves without a taper still make their two walls.
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "curves": ["a", "b"], "distance": 10, "body_name": "Bent"}));
+        assert!((area(&s, "Bent") - 200.0).abs() < 1e-9);
+
+        // Not built yet with a taper, and refused saying so: two sides, symmetric, To Object.
+        for extent in [json!({"distance": 10, "distance2": 5}), json!({"distance": 10, "direction": "symmetric"}), json!({"to": [0, 0, 10]})] {
+            let mut p = extent;
+            p["sketch"] = json!("R");
+            p["taper"] = json!("10 deg");
+            let e = s.execute("surface.extrude", &p).unwrap_err();
+            assert!(e.to_string().contains("not supported yet"), "{p}: {e}");
+        }
+        // A taper that closes the square to a point ends there, as the solid's pyramid does: four
+        // triangles on a base of 20, the apex 10 / tan 80° up and 10 / sin 80° along each slope.
+        run(&mut s, "surface.extrude", json!({"sketch": "R", "distance": 10, "taper": "-80 deg", "body_name": "Pyramid"}));
+        let steep = 80f64.to_radians();
+        let want_pyramid = 4.0 * 0.5 * 20.0 * 10.0 / steep.sin();
+        assert!((area(&s, "Pyramid") - want_pyramid).abs() < want_pyramid * 1e-9, "{} vs {want_pyramid}", area(&s, "Pyramid"));
+        assert!((bounds(&s, "Pyramid").max.z - 10.0 / steep.tan()).abs() < 1e-9);
+        // What the solid refuses is refused: a cone closing before the far end. And a taper that is no angle.
+        assert!(s.execute("surface.extrude", &json!({"sketch": "C", "curves": [circle], "distance": 10, "taper": "-60 deg"})).is_err());
+        assert!(s.execute("surface.extrude", &json!({"sketch": "R", "distance": 10, "taper": "5 mm"})).is_err());
+        assert!(s.execute("surface.extrude", &json!({"sketch": "R", "distance": 10, "taper": "10 deg", "corner": "sharp"})).is_err());
     }
 
     /// Open results still succeed, but the reply and timeline say how many boundaries remain.

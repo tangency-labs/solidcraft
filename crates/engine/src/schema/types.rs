@@ -873,6 +873,30 @@ impl JsonSchema for ConventionParam {
     }
 }
 
+/// How a taper closes a sharp corner, as `extent_param` reads it (serde, case-sensitive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftCornerParam(pub solidcraft_kernel::DraftCorner);
+
+impl<'de> Deserialize<'de> for DraftCornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?)
+            .map(DraftCornerParam)
+            .map_err(|_| D::Error::custom("must be preserve_curvature, tangent or round"))
+    }
+}
+
+impl JsonSchema for DraftCornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DraftCorner".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["preserve_curvature", "tangent", "round"],
+            "How a taper closes the gap its offset opens at a sharp corner of the profile. preserve_curvature: each wall continues as itself (a line's plane, an arc's cone) until it meets its neighbour. tangent: each continues straight along its end tangent. round: an arc about the corner. Without it, a profile of lines and arcs preserves curvature and one with another curve at a corner takes tangent, and the feature's warning says so.",
+        )
+    }
+}
+
 /// A thin wall's side, as `ThinSide::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThinSideParam(pub ThinSide);
