@@ -26,7 +26,7 @@ fn sample(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
             out.push(f64::from(crate::status::kind_slot(
                 &up_err,
                 solidcore::error::upstream_status(&up_err).unwrap_or(-1),
-            )))
+            )));
         }
         Err(_) => out.push(-1.0),
     }

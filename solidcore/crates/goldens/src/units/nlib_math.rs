@@ -293,9 +293,9 @@ fn rust_err(e: &SolidError) -> Output {
     }
     match e {
         e if nlib_number(e).is_some() => {
-            Output::kernel(&e, format!("nlib_{}", nlib_number(e).unwrap_or_default()))
+            Output::kernel(e, format!("nlib_{}", nlib_number(e).unwrap_or_default()))
         }
-        other => Output::kernel(&other, format!("rust: {other}")),
+        other => Output::kernel(other, format!("rust: {other}")),
     }
 }
 

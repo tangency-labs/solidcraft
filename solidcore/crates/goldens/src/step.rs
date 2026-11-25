@@ -150,7 +150,7 @@ fn status<T>(r: &Result<T, SolidError>, notes: &mut Vec<String>) -> Result<f64, 
         Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
         // a failure in solidcore's terms: its upstream status
         Err(e @ SolidError::Failed(_)) => Ok(f64::from(crate::status::kind_slot(
-            &e,
+            e,
             e.sm_status().unwrap_or(solidcore::error::SM_ERR),
         ))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {

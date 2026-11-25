@@ -779,7 +779,7 @@ impl solidcore::intersect::point_class::ClassGeometry<H> for Objects<'_> {
 /// A Rust error as the case outcome: deferred for [`SolidError::Unported`], else an
 /// error no C++ output has (a visible failure).
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 /// The replayed model of a `point_classify` case whose point is on a UV trim (`at.mode`

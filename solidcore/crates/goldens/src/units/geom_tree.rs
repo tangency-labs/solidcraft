@@ -527,7 +527,7 @@ fn run_subdiv_rust(
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 // ---- generation -------------------------------------------------------

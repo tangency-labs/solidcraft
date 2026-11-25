@@ -3491,7 +3491,7 @@ pub(super) fn run_rust_script_counted(
                     o.pop();
                     o.push(match e {
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {
-                            f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)))
+                            f64::from(crate::status::kind_slot(e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)))
                         }
                         _ => NULL_DEREF,
                     });

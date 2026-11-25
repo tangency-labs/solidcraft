@@ -50,7 +50,7 @@ pub(crate) fn put_trim_curve(
                 o.push(f64::from(crate::status::kind_slot(
                     &up_err,
                     solidcore::error::upstream_status(&up_err).unwrap_or(-1),
-                )))
+                )));
             }
             Err(e) => return Err(e),
         }

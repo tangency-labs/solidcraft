@@ -414,7 +414,7 @@ pub(super) fn rust_err(e: &SolidError) -> Output {
     }
     match status_of(e) {
         Some(st) => Output::new().values("status", vec![st]),
-        None => Output::kernel(&e, format!("rust: {e}")),
+        None => Output::kernel(e, format!("rust: {e}")),
     }
 }
 
