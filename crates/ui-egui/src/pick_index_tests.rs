@@ -28,6 +28,31 @@ fn only_an_outline_pick_builds_the_display_outline_index() {
     assert!(std::sync::Arc::ptr_eq(&outlines, &indexes.for_edges(&mesh).unwrap()));
 }
 
+/// The index of a mesh a hover may meet is made on the worker: nothing over [`super::AT_ONCE`]
+/// is built in the frame that first asks for it, while a near-trivial mesh still answers at
+/// once. Hovering a part on grid100 used to pay 0.4–9.5 ms a mesh, on the window thread.
+#[test]
+fn a_large_mesh_is_indexed_on_the_worker_and_a_small_one_in_the_frame() {
+    use solidcore_record::Vec3;
+    let positions = vec![Vec3::ZERO, Vec3::X, Vec3::Y];
+    let small = std::sync::Arc::new(solidcraft_engine::geom::Mesh { positions: positions.clone(), triangles: vec![[0, 1, 2]], ..Default::default() });
+    let large =
+        std::sync::Arc::new(solidcraft_engine::geom::Mesh { positions, triangles: vec![[0, 1, 2]; 4 * super::AT_ONCE], ..Default::default() });
+    let indexes = super::PickIndexes::default();
+    assert!(indexes.of(&small).is_some(), "a small mesh is indexed in the frame that asks");
+    let gate = indexes.gate();
+    gate.set_closed(true);
+    assert!(indexes.of(&large).is_none(), "the large mesh's index is made on the worker, not here");
+    assert_eq!(indexes.pending(), 1, "one index is being made");
+    gate.set_closed(false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while indexes.of(&large).is_none() {
+        assert!(std::time::Instant::now() < deadline, "the worker's index arrived");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(indexes.pending(), 0);
+}
+
 /// Overlapping bodies with flat and curved faces, filleted edges and seams.
 fn assembly() -> SolveApp {
     let mut s = solidcraft_engine::Session::default();

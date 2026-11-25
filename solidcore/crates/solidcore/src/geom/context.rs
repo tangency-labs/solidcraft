@@ -162,6 +162,28 @@ const MARK_IO: usize = 3;
 /// An installed notify callback, or none (what a [`NotifyLease`] carries).
 pub type BoxedCallback = Option<Box<dyn NotifyCallback>>;
 
+/// One call to each installed observer. Owner links and notifications share their order.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum CallbackEvent {
+    Notify(
+        object::NotifyOperation,
+        object::ObjectRef,
+        [Option<object::ObjectRef>; 3],
+    ),
+    OwnerLink(ObjectKey, Option<object::ObjectRef>),
+}
+
+impl CallbackEvent {
+    fn send(self, callback: &mut dyn NotifyCallback) {
+        match self {
+            Self::Notify(operation, caller, [a, b, c]) => {
+                let _status = callback.execute(operation, caller, a, b, c);
+            }
+            Self::OwnerLink(object, owner) => callback.owner_link(object, owner),
+        }
+    }
+}
+
 /// Receiver of topology-change notifications (`SmNotifyCallback`).
 pub trait NotifyCallback: std::fmt::Debug + Send {
     /// `SmNotifyCallback::Execute`: called once for every [`object::notify`] of an
@@ -227,6 +249,8 @@ pub struct Context {
     user_notify_callback: Option<Box<dyn NotifyCallback>>,
     /// `m_pSysNotifyCallBack`.
     sys_notify_callback: Option<Box<dyn NotifyCallback>>,
+    /// Calls awaiting the outcome of an atomic edit, lent alongside the callbacks.
+    pending_notifications: Option<Vec<CallbackEvent>>,
     /// This context's notification identity domain (`Context::geometry_key`,
     /// `Context::brep_serial`), lent with the callbacks ([`NotifyLease`]).
     identities: IdentityDomain,
@@ -341,6 +365,7 @@ impl IdentitySlot {
 pub struct NotifyLease {
     user: BoxedCallback,
     sys: BoxedCallback,
+    pending: Option<Vec<CallbackEvent>>,
     identities: IdentityDomain,
 }
 
@@ -499,7 +524,15 @@ impl Context {
         k: &mut Kernel,
         action: impl FnOnce(&mut Kernel, &mut Context) -> T,
     ) -> Result<T> {
-        let mut notifications = k.context.metadata_copy();
+        Self::with_lent_notifications(k, k.context.metadata_copy(), action)
+    }
+
+    /// Lend the callbacks to the given stand-in, returning them on unwind as well.
+    pub(crate) fn with_lent_notifications<T>(
+        k: &mut Kernel,
+        mut notifications: Self,
+        action: impl FnOnce(&mut Kernel, &mut Self) -> T,
+    ) -> Result<T> {
         notifications.install_lease(k.context.lend_notify()?);
         let mut scope = NotificationScope {
             kernel: k,
@@ -544,6 +577,7 @@ impl Context {
             zone_tol_3d: self.zone_tol_3d,
             user_notify_callback: None,
             sys_notify_callback: None,
+            pending_notifications: None,
             identities: IdentityDomain::new(),
         }
     }
@@ -563,6 +597,7 @@ impl Context {
             zone_tol_3d: tol::size_estimate_to_zone_tol_3d(model_size_estimate),
             user_notify_callback: None,
             sys_notify_callback: None,
+            pending_notifications: None,
             identities: IdentityDomain::new(),
         }
     }
@@ -618,6 +653,43 @@ impl Context {
         self.sys_notify_callback = callback;
     }
 
+    pub(super) fn notify_observers(&mut self, event: CallbackEvent) {
+        if let Some(pending) = &mut self.pending_notifications {
+            pending.push(event);
+            return;
+        }
+        if let Some(user) = self.user_notify_callback_mut() {
+            event.send(user);
+        }
+        if let Some(system) = self.sys_notify_callback_mut() {
+            event.send(system);
+        }
+    }
+
+    /// Run an atomic edit with its usual identity domain, topology records and attributes.
+    /// Publish its observer calls in order only after it commits. A refused or unwound
+    /// edit discards its calls and returns the enclosing notification scope, if any.
+    pub(crate) fn with_committed_notifications<T>(
+        k: &mut Kernel,
+        edit: impl FnOnce(&mut Kernel) -> Result<T>,
+    ) -> Result<T> {
+        use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+        if k.context.user_notify_callback.is_none() && k.context.sys_notify_callback.is_none() {
+            return edit(k);
+        }
+        let outer = k.context.pending_notifications.replace(Vec::new());
+        let outcome = catch_unwind(AssertUnwindSafe(|| edit(k)));
+        let events = std::mem::replace(&mut k.context.pending_notifications, outer);
+        let value = match outcome {
+            Ok(result) => result?,
+            Err(panic) => resume_unwind(panic),
+        };
+        for event in events.into_iter().flatten() {
+            k.context.notify_observers(event);
+        }
+        Ok(value)
+    }
+
     /// Takes the user and the system notify callbacks out with this context's identity
     /// domain, leaving no callbacks and a fresh domain, so that a caller can lend them to
     /// another context for a while ([`Context::restore_notify_lease`]; no upstream
@@ -662,6 +734,7 @@ impl Context {
         NotifyLease {
             user: self.user_notify_callback.take(),
             sys: self.sys_notify_callback.take(),
+            pending: self.pending_notifications.take(),
             identities: core::mem::replace(&mut self.identities, IdentityDomain::new()),
         }
     }
@@ -672,6 +745,7 @@ impl Context {
     pub(crate) fn install_lease(&mut self, lease: NotifyLease) {
         self.user_notify_callback = lease.user;
         self.sys_notify_callback = lease.sys;
+        self.pending_notifications = lease.pending;
         self.identities = lease.identities;
     }
 

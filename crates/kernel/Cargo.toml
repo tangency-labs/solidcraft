@@ -13,6 +13,7 @@ solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-kernel-api = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
@@ -25,6 +26,7 @@ web-time = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { workspace = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }

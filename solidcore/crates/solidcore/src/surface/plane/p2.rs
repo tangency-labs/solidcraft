@@ -81,7 +81,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_WARNING};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
@@ -98,7 +98,7 @@ use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZO
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
@@ -138,12 +138,9 @@ impl PlaneIntersectWarning {
     #[must_use]
     pub fn into_error(self) -> SolidError {
         match self {
-            Self::NearlySingular => Failure::new(
-                OP_PP,
-                SurfaceFailure::Failed("the planes' line is nearly singular to solve for"),
-            )
-            .with_status(SM_ERR_WARNING)
-            .into_error(),
+            Self::NearlySingular => {
+                SolidError::surface(OP_PP, SurfaceFailure::PlanesLineNearlySingular)
+            }
         }
     }
 }
@@ -315,19 +312,34 @@ impl Plane {
             if !(s.x == 1.0 && s.y == 1.0 && s.z == 1.0) {
                 // scaling must be isotropic
                 if !are_same(s.x, s.y) || !are_same(s.x, s.z) {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP_XFORM,
-                        "a plane cannot be scaled non-uniformly",
+                        SurfaceFailure::ScaleNotUniform,
+                    ));
+                }
+                // a zero scale collapses the plane to a point, a non-finite one leaves no
+                // net: the caller's scale, not a plane the transform lost
+                if s.x == 0.0 || !s.x.is_finite() {
+                    return Err(SolidError::surface(
+                        OP_XFORM,
+                        SurfaceFailure::ScaleNotUniform,
                     ));
                 }
             }
         }
 
         // check transformed m_pNurb for planarity and gen transformed Plane parameters
-        let nurb = self
-            .base
-            .gw_nurb()
-            .ok_or_else(|| SolidError::surface_missing(OP_XFORM, "the plane's NURB"))?;
+        let Some(nurb) = self.base.gw_nurb() else {
+            return Err(Failure::new(
+                OP_XFORM,
+                SurfaceFailure::Defect {
+                    why: "the plane's NURB is missing after the B-spline transform above \
+                          succeeded, which fails without a NURB",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
+        };
         let bss = BSplineSurface::from_nurb(nurb.clone(), true);
         let mut plane = None;
         for tol_scale in [1.0, 10.0, 100.0, 1000.0] {
@@ -336,9 +348,45 @@ impl Plane {
                 break;
             }
         }
+        // The test evaluates the tangents (the evaluation refuses them below the surface's
+        // derivative limit), measures them and their cross product (the normal) only above
+        // the kernel's zero squared, and a square that overflows has no angle: a scale that
+        // takes them there leaves a plane the test cannot see, which is the scale's, not the
+        // kernel's.
+        if plane.is_none() {
+            let at = bss.natural_uv_domain().evaluate(0.0, 0.0);
+            let unmeasurable = Failure::new(OP_XFORM, SurfaceFailure::PlaneTangentUnmeasurable);
+            match evaluate_1st_derivatives(k, &bss, at, Side::Left, Side::Left) {
+                Ok((_, du, dv)) => {
+                    if [du, dv, du.cross(dv)].iter().any(|d| {
+                        let length_squared = d.length_squared();
+                        !(length_squared > EFF_ZERO_SQ && length_squared.is_finite())
+                    }) {
+                        return Err(unmeasurable.into_error());
+                    }
+                }
+                // main swallowed the evaluation's error and failed with `SM_ERR`: only an
+                // unported call, a cancellation or a missing preparation goes out as itself
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
+                    | SolidError::PreparationRequired { .. }),
+                ) => return Err(e),
+                Err(e) => return Err(unmeasurable.caused_by(e).into_error()),
+            }
+        }
         // Something wrong here if scaling a plane does not produce a plane.
         let plane = plane.ok_or_else(|| {
-            SolidError::surface_failed(OP_XFORM, "the transformed NURB is not a plane")
+            SolidError::surface(
+                OP_XFORM,
+                SurfaceFailure::Defect {
+                    why: "the plane's bilinear NURB, moved rigidly and scaled uniformly by a \
+                          finite, non-zero factor, with tangents the test measures (all \
+                          checked above), no longer tests as a plane at 1000 times the \
+                          tolerance, though such a transform keeps every net planar",
+                },
+            )
         })?;
 
         // save the transformed plane parameters
@@ -365,9 +413,9 @@ impl Plane {
 
         // Make sure trim domain in inside of natural domain
         if !trim_domain.is_contained_by(&natural_domain, EFF_ZERO_PARAM) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TRIM,
-                "the trim domain is not inside the natural domain",
+                SurfaceFailure::TrimDomainOutside,
             ));
         }
 
@@ -603,8 +651,10 @@ impl Plane {
         // Force XAxis and YAxis to be nicely perpendicular
         if x_axis.dot(y_axis).abs() > EFF_ZERO {
             y_axis = x_axis.cross(y_axis).cross(x_axis);
-            y_axis = y_axis.unitize().map_err(|_| {
-                SolidError::surface_failed(OP_NURB, "the y axis is parallel to the x axis")
+            y_axis = y_axis.unitize().map_err(|e| {
+                Failure::new(OP_NURB, SurfaceFailure::NurbAxesParallel)
+                    .caused_by(e)
+                    .into_error()
             })?;
         }
 
@@ -668,12 +718,18 @@ impl Plane {
         let b = self
             .base_with_nurb()?
             .calculate_bounding_box(k, uv_domain, &req)?;
-        let mut bbox = b
-            .normal
-            .ok_or_else(|| SolidError::surface_missing(OP_PP, "the plane's bounding box"))?;
-        let mut pbox = b
-            .pseudo
-            .ok_or_else(|| SolidError::surface_missing(OP_PP, "the plane's pseudo box"))?;
+        let (Some(mut bbox), Some(mut pbox)) = (b.normal, b.pseudo) else {
+            return Err(Failure::new(
+                OP_PP,
+                SurfaceFailure::Defect {
+                    why: "the B-spline bounding box routine, asked for the normal and pseudo \
+                          boxes, returned without one, though it returns every box it is asked \
+                          for",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error());
+        };
         // When asked, expand the normal and pseudo boxes by the zone tolerance
         bbox.expand_absolute(zone_tolerance(owner)?);
         pbox.expand_absolute(zone_tolerance(owner)?);
@@ -794,9 +850,9 @@ impl Plane {
         // Arrive here when planes are not parallel.
 
         // unitize lineDir and set OriginCross = avg(midPoint1, midPoint2)
-        let line_dir = line_dir.unitize().map_err(|_| {
-            SolidError::surface_failed(OP_PP, "the planes' line direction is the zero vector")
-        })?;
+        // (its squared length is at least 1e-16 past the parallel test above, so the unit
+        // vector exists)
+        let line_dir = line_dir.unitize_or_z();
         let origin_cross = if this_bounded && !other_bounded {
             origin_this
         } else if !this_bounded && other_bounded {
@@ -1774,6 +1830,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_WARNING;
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {
         let dx = 40.0 * shear;
@@ -1816,8 +1873,51 @@ mod tests {
     fn transform_rejects_anisotropic_scale() {
         let k = &Kernel::default();
         let mut p = rect();
-        let r = p.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 1.0, 1.0)));
-        assert!(r.is_err());
+        let e = p
+            .transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 1.0, 1.0)))
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        // a uniform zero scale collapses the plane: the caller's scale too, not a defect
+        let e = rect()
+            .transform(k, &Axis2Placement::IDENTITY, Some(Vec3::ZERO))
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert!(!e.is_defect());
+        // a uniform scale that takes the tangents below the surface's derivative limit (the
+        // evaluation's error is the cause) or past the largest square leaves a plane the
+        // planarity test cannot measure: degenerate, not a defect
+        for factor in [1e-13, 1e-9, 1e-200, 1e200] {
+            let e = rect()
+                .transform(
+                    k,
+                    &Axis2Placement::IDENTITY,
+                    Some(Vec3::new(factor, factor, factor)),
+                )
+                .unwrap_err();
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{factor:e}");
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::PlaneTangentUnmeasurable),
+                "{factor:e}: {e:?}"
+            );
+            // the evaluation's refusal of tangents below the derivative limit is the cause;
+            // tangents of 1e-9 evaluate but their normal's square is below the kernel's zero
+            // squared, and huge ones evaluate with squares that overflow
+            assert_eq!(e.cause().is_some(), factor < 1e-10, "{factor:e}: {e:?}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::Degenerate, "{factor:e}");
+            assert!(!e.is_defect(), "{factor:e}");
+        }
+        // tangents of 1e-5, whose normal's square is 1e-20, still scale
+        let mut q = rect();
+        q.transform(
+            k,
+            &Axis2Placement::IDENTITY,
+            Some(Vec3::new(1e-5, 1e-5, 1e-5)),
+        )
+        .unwrap();
         let mut q = rect();
         q.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
@@ -1828,9 +1928,14 @@ mod tests {
     #[test]
     fn trim_with_domain_checks_containment() {
         let mut p = rect();
-        assert!(p
+        let e = p
             .trim_with_domain(&Extent2d::from_bounds(-6.0, 0.0, 1.0, 1.0))
-            .is_err());
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::TrimDomainOutside)
+        );
         p.trim_with_domain(&Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0))
             .unwrap();
         assert_eq!(
@@ -1979,7 +2084,10 @@ mod tests {
         assert_eq!(e.operation(), OP_PP);
         assert_eq!(e.entity(), None);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
-        assert!(e.surface_failure().is_some());
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::PlanesLineNearlySingular)
+        );
         assert!(e.is_status_answer());
         assert!(ignored(Err::<(), _>(e)).unwrap().is_none());
 
@@ -2340,29 +2448,33 @@ mod tests {
         assert!(Plane::read_from_db(&mut db, 30).is_err());
     }
 
-    /// The plane's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The plane's failures keep the operation, status and entity of the bare `Upstream`
+    /// statuses they replace (a sample); their class is the cause's.
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_XFORM,
-                SurfaceFailure::Failed("a plane cannot be scaled non-uniformly"),
+                SurfaceFailure::ScaleNotUniform,
                 crate::error::SM_ERR,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_PP,
-                SurfaceFailure::Missing("the plane's bounding box"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::PlanesLineNearlySingular,
+                SM_ERR_WARNING,
+                ErrorKind::Failed,
             ),
             (
                 OP_TRIM,
-                SurfaceFailure::Failed("the trim domain is not inside the natural domain"),
+                SurfaceFailure::TrimDomainOutside,
                 crate::error::SM_ERR,
+                ErrorKind::OutsideDomain,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -2371,7 +2483,7 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());

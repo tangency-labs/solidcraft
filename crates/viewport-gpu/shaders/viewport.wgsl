@@ -44,6 +44,19 @@ fn reversed() -> bool {
     return u.depth.x > 0.5;
 }
 
+/// The depth steps a pipeline's surfaces are pushed away from the eye (negative: toward it) with
+/// reversed depth, each 2⁻²³ of the vertex's own depth (`face_push` in view.rs). The GPU's
+/// constant bias in a float buffer counts steps at the triangle's largest depth instead, so a
+/// long triangle (one cut by the near plane, which is then 1) went back by a share of the depth
+/// range where it was near the eye: millimetres, and a face behind it showed through (#21024).
+override FACE_PUSH: f32 = 0.0;
+
+/// Clip position `c` pushed by [`FACE_PUSH`]: its depth scaled, so every point of a triangle
+/// goes back by steps of its own depth (as `pushed` does for a depth a shader writes).
+fn face_pushed(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.xy, c.z * (1.0 - FACE_PUSH * 1.1920929e-7), c.w);
+}
+
 /// Clip-space depth measured the usual way (0 at the near plane, w at the far one), whichever
 /// way the depth buffer runs.
 fn near_z(c: vec4<f32>) -> f32 {
@@ -203,7 +216,7 @@ fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     let e = palette_entry(c);
     let m = motion_of(e);
     let p = placed_by(m, local);
-    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
     o.n = turned_by(m, n);
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y & 255u);
@@ -231,7 +244,7 @@ fn vs_tri_inst(
     let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
     var o: TOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.n = turned_by(m, pn);
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y & 255u);
@@ -265,7 +278,7 @@ fn vs_tri_inst_flat(
     let e = palette_entry(c);
     let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
     o.rp = wp - u.eye.xyz;
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y & 255u);
@@ -515,10 +528,21 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) { return cap_color(i); }
-    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
+    // Under surface analysis a selected face shows the selection tint (the one-body highlight's
+    // own pass draws it over the analysis); with every shown body selected, every face does.
+    if (u.ana.x > 0.5 && length(i.n) > 0.5 && u.sel.w < 0.5) {
         return analysis(i, k);
     }
-    let c = lit(i, occlusion(i));
+    // Every shown body is selected: an exact copy of what the highlight pipeline's one-body tint
+    // computes (`fs_hl_selected`: `lit_color(i, 1.0, vec4(u.sel.rgb, i.c.a), false)`), so the two
+    // tints agree instead of merely looking similar. One uniform, no per-body highlight entry.
+    // A branch on a uniform, not `select()`, which would light every fragment twice.
+    var c: vec4<f32>;
+    if (u.sel.w > 0.5) {
+        c = lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
+    } else {
+        c = lit(i, occlusion(i));
+    }
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
     // about 1.5 px wide, on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
@@ -1178,7 +1202,7 @@ fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;
-    o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
+    o.pos = face_pushed(vec4<f32>(base.xy + off / half * base.w, z, base.w));
     let col = palette(c);
     o.c = vec4<f32>(col.rgb, col.a * (wa / wd));
     o.wp = select(pa, pb, t > 0.5);

@@ -34,8 +34,20 @@ pub struct CloudPickHit {
     pub ray_dist: f64,
 }
 
+/// Whether a `view.pick` call picks point-cloud points: `clouds` when given, otherwise only when
+/// it names `cloud_radius` or `point_px`. A call written before clouds could be picked names none
+/// of them and keeps its answer: a ray through a cloud still meets the body behind it.
+pub fn clouds_requested(p: &serde_json::Value) -> std::result::Result<bool, String> {
+    use serde_json::Value;
+    match p.get("clouds") {
+        Some(Value::Bool(b)) => Ok(*b),
+        None | Some(Value::Null) => Ok(["cloud_radius", "point_px"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()))),
+        Some(_) => Err("view.pick: `clouds` must be true or false".to_string()),
+    }
+}
+
 /// Whether `p` is kept by every active section plane.
-fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
+pub fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
     planes.iter().all(|c| c.keeps(p, SECTION_EPS))
 }
 
