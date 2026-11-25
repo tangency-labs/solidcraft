@@ -419,6 +419,22 @@ pub fn display_for(app: &SolveApp, id: &str) -> Option<String> {
     effective(app, id).map(|key| crate::ui_kit::chord_label(&key))
 }
 
+/// The key a sketch shape's menu shows beside `id` (#22247): a family's key starts the variant
+/// used last ([`variant_for_key`]), so that variant shows it, and the family's first command,
+/// which the key belongs to, shows none while it starts another. Elsewhere, as [`display_for`].
+pub fn display_starting(app: &SolveApp, id: &'static str) -> Option<String> {
+    if let Some(first) = crate::sketch_families::family(id).and_then(|f| f.commands.first().copied()) {
+        let started = variant_for_key(app, first);
+        if id == first && started != first {
+            return None;
+        }
+        if id != first && started == id && effective(app, id).is_none() {
+            return display_for(app, first);
+        }
+    }
+    display_for(app, id)
+}
+
 /// Commands bound to `key` now.
 pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
     command_specs().into_iter().filter(|c| keys_for_spec(app, c).contains(&key)).map(|c| c.id).collect()

@@ -1047,3 +1047,31 @@ fn undo_does_not_bring_back_a_chain_ended_with_esc() {
     assert!(chain.pts[0].1.is_none(), "a new chain, from the click, not the old one's point: {:?}", chain.pts);
     assert_eq!(lines(&h).len(), 1, "only the first segment is left");
 }
+
+/// #22247: a shape's key starts the variant used last (#4308), and its menu says so. After a
+/// 2-point circle, C starts 2-Point Circle, and the Circle menu shows C beside that row, not
+/// beside Center Diameter Circle. A variant with a key of its own keeps it, and then the family's
+/// key starts its first command again, shown there.
+#[test]
+fn a_shape_menu_shows_the_key_beside_the_variant_it_starts() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    let key = |h: &Harness, id: &'static str| crate::keymap::display_starting(&h.app, id);
+    let c = crate::keymap::display_for(&h.app, "sketch.circle.center");
+    assert!(c.is_some(), "Center Diameter Circle has the family's key");
+    assert_eq!(key(&h, "sketch.circle.center"), c, "before any other circle, the key is beside the first");
+    assert_eq!(key(&h, "sketch.circle.two_point"), None);
+    h.app.preferences.sketch_variants.remember("sketch.circle.two_point");
+    assert_eq!(key(&h, "sketch.circle.center"), None, "C no longer starts Center Diameter Circle");
+    assert_eq!(key(&h, "sketch.circle.two_point"), c, "C starts 2-Point Circle, and its row says so");
+    assert_eq!(key(&h, "sketch.circle.three_point"), None);
+    press(&mut h, c.as_deref().unwrap_or("C"));
+    assert_eq!(tool(&h), Some("sketch.circle.two_point"), "the key starts the row it is shown beside");
+    // Given a key of its own, 2-Point Circle shows that one, and C is Center Diameter's again.
+    h.app.keymap.custom.insert("sketch.circle.two_point".into(), vec!["Shift+C".into()]);
+    assert_eq!(key(&h, "sketch.circle.center"), c);
+    assert_eq!(key(&h, "sketch.circle.two_point"), crate::keymap::display_for(&h.app, "sketch.circle.two_point"));
+    // Commands outside the shape families show their own key, as before.
+    assert_eq!(key(&h, "sketch.line"), crate::keymap::display_for(&h.app, "sketch.line"));
+}

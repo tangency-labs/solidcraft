@@ -2527,7 +2527,7 @@ impl RowData {
         } else {
             dropdown_checkable(app, c.id).then(|| persistent_pressed(app, c.id))
         };
-        let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
+        let shortcut = crate::keymap::display_starting(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
             coming_soon(app, c).then(|| app.tr("ui.drawing_ribbon.planned"))
@@ -2596,7 +2596,7 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
             let info = c.info(&app.session);
             (
                 app.tr_command(c.id, info.label).to_string(),
-                crate::keymap::display_for(app, c.id).unwrap_or_default(),
+                crate::keymap::display_starting(app, c.id).unwrap_or_default(),
                 info.icon,
                 dropdown_checkable(app, c.id),
             )
