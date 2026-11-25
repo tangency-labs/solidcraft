@@ -44,8 +44,9 @@ impl Document {
 
     /// Remove component `root` with every component inside it, the features made in them, their
     /// occurrences, the joints, motion links, joint origins, contact sets, motion keys and
-    /// exploded moves that refer to those occurrences, the bodies' component assignments, and the
-    /// components' standard-part, link, appearance and configuration records.
+    /// exploded moves that refer to those occurrences, the bodies' component assignments, materials
+    /// and appearances, and the components' standard-part, link, appearance and configuration
+    /// records.
     ///
     /// Refused (nothing changes) for the design itself, an unknown component, or a tree that
     /// supplies a body transfer recorded outside it.
@@ -69,6 +70,8 @@ impl Document {
             ));
         }
         let features: Vec<u64> = self.features.iter().filter(|f| inside.contains(&f.component)).map(|f| f.id).collect();
+        let feature_bodies: Vec<(u64, Vec<String>)> =
+            self.features.iter().filter(|f| !f.body_names.is_empty()).map(|f| (f.id, f.body_names.clone())).collect();
         let deleted = if features.is_empty() { Vec::new() } else { self.delete_features(&features)? };
 
         let occurrences: BTreeSet<u64> =
@@ -86,9 +89,30 @@ impl Document {
             .collect();
         let joints = self.remove_occurrences(&occurrences);
 
-        let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
+        let mut bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
+        let surviving: BTreeSet<String> =
+            self.features.iter().flat_map(|f| f.body_names.iter().cloned()).chain(self.body_components.keys().cloned()).collect();
+        {
+            let deleted_ids: BTreeSet<u64> = deleted.iter().copied().collect();
+            for (id, names) in feature_bodies {
+                if deleted_ids.contains(&id) {
+                    for name in names {
+                        if !name.is_empty() && !surviving.contains(&name) {
+                            bodies.insert(name);
+                        }
+                    }
+                }
+            }
+        }
         self.body_offsets.retain(|name, _| !bodies.contains(name));
+        let gone = |name: &str| bodies.contains(name) && !surviving.contains(name);
+        self.materials.retain(|name, _| !gone(name));
+        self.appearances.bodies.retain(|name, _| !gone(name));
+        self.appearances.faces.retain(|face| !gone(&face.body));
+        self.collision_shapes.retain(|name, _| !gone(name));
+        self.print_faces.retain(|name, _| !gone(name));
+        self.plastic.assigned.retain(|name, _| !gone(name));
         // A kept component sat under the tree it was made in: it moves up to the component the
         // removed root sat in, which is left (read before the root goes).
         let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);

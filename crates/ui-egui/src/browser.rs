@@ -201,7 +201,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
-use crate::context_menu::Target;
+use crate::context_menu::{Target, isolate_bodies_item};
 use crate::ui_kit::Item;
 use solidcraft_theme::Tokens;
 
@@ -612,7 +612,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({ "key": format!("{scope}/g{id}") })),
     ]);
     if g.folder == "bodies" {
-        v.push(Item::action("ui.isolate", "Isolate", "body").with(json!({ "bodies": group_bodies(app, id) })));
+        v.push(isolate_bodies_item(app, &group_bodies(app, id)));
     }
     v
 }
@@ -2938,7 +2938,9 @@ impl Entry {
             key: f.id.to_string(),
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
-            patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
+            // A sketch's patterns and projections fold under it.
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
+                .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -3676,7 +3678,9 @@ fn entry_row(
         acts.menu = Some((p, t));
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
-        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden);
+        let dim = !visible || parent_hidden;
+        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
+        crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
     }
     if built_open && built_key.is_some() {
         features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
