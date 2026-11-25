@@ -86,7 +86,8 @@ pub struct Plugin {
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
-    /// The images its entries name, read from the package (`plugin_images`): each relative path
+    pub ribbon_groups: Vec<solidcraft_engine::plugin::RibbonGroup>,
+    /// The images its entries and ribbon groups name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
     pub(crate) swatches: crate::plugin_images::Swatches,
@@ -169,6 +170,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         disabled: false,
         groups: Default::default(),
         entries: Vec::new(),
+        ribbon_groups: Vec::new(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
@@ -265,9 +267,10 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
+        plugin.ribbon_groups = runtime.ribbon_groups;
         plugin.groups = runtime.permissions.command_groups;
     }
-    plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.images = crate::plugin_images::load_with_groups(dir, &plugin.id, &plugin.entries, &plugin.ribbon_groups);
     plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
@@ -640,6 +643,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
                 }
             }
             if job.command == "plugin.remove" {
+                crate::plugin_menu::forget_options(app, id);
                 #[cfg(not(target_arch = "wasm32"))]
                 crate::plugin_shaders::drop_pictures(app, id);
                 app.preferences.disabled_plugins.remove(id);
@@ -722,19 +726,24 @@ pub(crate) fn offload_control(
 fn remove_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((id, name)) = app.prefs_window.plugin_remove.clone() else { return };
     let title = solidcraft_ui_text::format("prefs.plugin_remove_title", &[("name", &name)]);
+    let data_label = app.tr("prefs.plugin_remove_user_data").to_owned();
     let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("plugin_remove"), "delete", &title)
         .tone(crate::ui_kit::Tone::Danger)
         .actions(app.tr("prefs.plugin_remove"), app.tr("prefs.plugin_cancel"), None)
         .selected(crate::ui_kit::Action::Cancel)
         .show(ctx, true, |ui| {
             ui.add(egui::Label::new(app.tr("prefs.plugin_remove_note")).wrap());
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            let response = crate::ui_kit::checkbox(ui, &data_label, &mut app.prefs_window.plugin_remove_user_data);
+            crate::scenario::publish_target("prefs:plugin:remove_user_data", response.rect);
         });
     if closed || action == crate::ui_kit::Action::Cancel {
         app.prefs_window.plugin_remove = None;
     }
     if action == crate::ui_kit::Action::Ok {
         app.prefs_window.plugin_remove = None;
-        if let Err(error) = start_package(app, "plugin.remove", serde_json::json!({"id":id}), PackageAction::Remove) {
+        let params = serde_json::json!({"id":id,"remove_user_data":app.prefs_window.plugin_remove_user_data});
+        if let Err(error) = start_package(app, "plugin.remove", params, PackageAction::Remove) {
             app.set_status(error, true);
         }
         ctx.request_repaint();
@@ -1046,6 +1055,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
     if remove.clicked() {
+        app.prefs_window.plugin_remove_user_data = false;
         app.prefs_window.plugin_remove = Some((plugin.id.clone(), plugin.name.clone()));
     }
     crate::scenario::publish_rect(&format!("prefs:plugin:{}:card", plugin.id), response.rect);
@@ -1316,6 +1326,15 @@ mod tests {
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
         }
+        assert!(!h.app.prefs_window.plugin_remove_user_data, "keep user data by default");
+        assert!(crate::scenario::handle_at("prefs:plugin:remove_user_data").is_some(), "the confirmation offers data removal");
+        capture_page(&mut h.app, &root, "plugin-remove-confirm-keep.png");
+        // Return to the interaction context after rendering the review image.
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &root, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &root, "prefs:plugin:remove_user_data");
+        assert!(h.app.prefs_window.plugin_remove_user_data);
         capture_page(&mut h.app, &root, "plugin-remove-confirm.png");
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
@@ -1330,11 +1349,46 @@ mod tests {
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
         }
+        assert!(!h.app.prefs_window.plugin_remove_user_data, "a fresh confirmation defaults to keep");
         click_page(&mut h.app, &ctx, &root, "dialog:ok");
         // Closing Preferences cannot cancel an already confirmed filesystem mutation.
         crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
         tick(&mut h.app, &ctx, true);
         assert!(!root.join("workshop-helper").exists() && h.app.preferences.plugin_grants.is_empty());
+    }
+
+    #[test]
+    fn plugins_remove_confirmation_deletes_user_settings_only_when_checked() {
+        use serde_json::json;
+        for remove_data in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            let root = h.dir.join("installed");
+            let settings = h.dir.join("settings");
+            h.app.session.plugin_state.plugins_dir = Some(root.clone());
+            h.app.session.plugin_state.user.user_settings_dir = Some(settings.clone());
+            let path = package(&h, "workshop-helper");
+            hand_install(&path, &root, "workshop-helper");
+            let store = solidcraft_engine::plugin::user_storage::Data::from([("hinge".into(), json!(42))]);
+            solidcraft_engine::plugin::user_storage::save(&settings, "workshop-helper", &store).unwrap();
+            let ctx = crate::fonts::test_context();
+            crate::prefs::control(&mut h.app, &json!({"open":"Plugins"})).unwrap();
+            for _ in 0..3 {
+                page_frame(&mut h.app, &ctx, &root, vec![]);
+            }
+            click_page(&mut h.app, &ctx, &root, "prefs:plugin:workshop-helper:remove");
+            for _ in 0..3 {
+                page_frame(&mut h.app, &ctx, &root, vec![]);
+            }
+            assert!(!h.app.prefs_window.plugin_remove_user_data);
+            if remove_data {
+                click_page(&mut h.app, &ctx, &root, "prefs:plugin:remove_user_data");
+            }
+            click_page(&mut h.app, &ctx, &root, "dialog:ok");
+            tick(&mut h.app, &ctx, true);
+            assert!(!root.join("workshop-helper").exists());
+            let data = solidcraft_engine::plugin::user_storage::load(&settings, "workshop-helper").unwrap();
+            assert_eq!(data.is_empty(), remove_data);
+        }
     }
 
     #[test]
@@ -1375,7 +1429,7 @@ mod tests {
         let (request, denied) = crate::control::ControlRequest::new(
             "engine.execute",
             json!({
-                "command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[]
+                "command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false},"allow_paths":[]
             }),
         );
         assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
@@ -1385,15 +1439,17 @@ mod tests {
         let (request, removed) = crate::control::ControlRequest::new(
             "command",
             json!({
-                "command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[h.dir]
+                "command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false},"allow_paths":[h.dir]
             }),
         );
         assert!(request.ticket.take());
         let ticket = request.ticket.clone();
         assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
         assert!(matches!(ticket.cancel(), solidcraft_control::Cancel::Running));
-        let (concurrent, refused) =
-            crate::control::ControlRequest::new("engine.execute", json!({"command":"plugin.remove","params":{"id":"controlled-plugin"}}));
+        let (concurrent, refused) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false}}),
+        );
         assert!(offload_control(&mut h.app, &h.ctx, concurrent).is_none());
         assert_eq!(refused.recv().unwrap()["ok"], false);
         let revision = h.app.session.revision + 1;
@@ -1590,7 +1646,7 @@ mod tests {
         let path = package(&h, "workshop-helper");
         hand_install(&path, &root, "workshop-helper");
         crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]}}})).unwrap();
-        start_package(&mut h.app, "plugin.remove", json!({"id":"workshop-helper"}), PackageAction::Remove).unwrap();
+        start_package(&mut h.app, "plugin.remove", json!({"id":"workshop-helper","remove_user_data":false}), PackageAction::Remove).unwrap();
         crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":[]}}})).unwrap();
         let before = h.app.session.plugin_state.grants.clone();
         tick(&mut h.app, &h.ctx, true);
@@ -2301,6 +2357,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: Vec::new(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
             shaders: Vec::new(),
