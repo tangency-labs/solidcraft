@@ -851,14 +851,17 @@ fn post_foot_blends_check_clearance_when_the_rail_coordinate_rounds() {
 #[test]
 fn post_foot_blends_do_not_report_a_fit_below_section_resolution() {
     all_fixes();
-    for (kind, zone) in [(Blend::Chamfer, 1.0), (Blend::Round, 3.0)] {
+    for (kind, zone, requests) in [
+        (Blend::Chamfer, 1.0, [6.0, 9.0]),
+        (Blend::Round, 1.0, [8.5, 9.0]),
+    ] {
         // The plate still has exact supports. Its coarse B-rep zone puts the
         // 5 mm cross section below the preparation's resolution for this kind.
         let body = post_foot(true);
         body.kernel().set_tolerance(zone);
         let picks = post_foot_edges(&body);
         let before = body.to_record().unwrap().0;
-        for asked in [6.0, 9.0] {
+        for asked in requests {
             let result = blend(&body, kind, &picks, &[asked], &[], Corners::Filled);
             match (kind, result) {
                 (
@@ -890,7 +893,13 @@ fn post_foot_blends_do_not_report_a_fit_below_section_resolution() {
                     assert!(picks.contains(&edge));
                     assert!((turn - PI / 2.0).abs() < 1e-12);
                     assert_eq!(tolerance, zone);
-                    assert!((smallest - zone / (std::f64::consts::SQRT_2 - 1.0)).abs() < 1e-12);
+                    // At a right angle the chord is sqrt(2) times the section
+                    // radius. The minimum width is eight zones plus the
+                    // kernel's one-part-per-million construction margin.
+                    let chord_limit = 8.0 * zone * 1.000_001 / std::f64::consts::SQRT_2;
+                    let sagitta_limit = zone / (std::f64::consts::SQRT_2 - 1.0);
+                    assert!((smallest - chord_limit.max(sagitta_limit)).abs() < 1e-12);
+                    assert!(5.0 < smallest && smallest < asked);
                 }
                 (_, other) => panic!("{kind:?} with zone {zone}, {asked} mm: {other:?}"),
             }
