@@ -42,7 +42,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
-    "brep_ray_classifies_current_trims",
 ];
 
 /// SolidCraft's fixes.

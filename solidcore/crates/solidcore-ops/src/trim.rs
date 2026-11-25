@@ -41,7 +41,7 @@ use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::face_internal_point;
 use solidcore::topology::brep::p10::merge_curves_on_surface;
-use solidcore::topology::brep::p2::is_sheet;
+use solidcore::topology::brep::p2::is_sheets;
 use solidcore::topology::brep::p3::{
     brep_copy, brep_copy_mapped, edit_brep, with_kernel_callbacks,
 };
@@ -270,7 +270,7 @@ pub fn split_face_by_curves(
 ///
 /// # Errors
 /// [`Error::Argument`] for an empty or excessive pick list, nonfinite coordinates, the same
-/// operand twice, or an operand that is not a sheet; [`Error::CurveDoesNotCut`] when the
+/// operand twice, or an operand that is not one or more sheets; [`Error::CurveDoesNotCut`] when the
 /// intersection does not separate the target; [`Error::Unsupported`] for an ambiguous pick;
 /// the kernel's errors.
 pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body> {
@@ -295,14 +295,14 @@ pub fn trim_sheet(body: &Body, sheet: &Body, points: &[[f64; 3]]) -> Result<Body
         run_on("trim_sheet", &[("brep", body), ("sheet", sheet)], |k| {
             let mut a = {
                 let b = body.lock();
-                if !is_sheet(k, &b)? {
+                if !is_sheets(k, &b)? {
                     return Ok(Err(Error::Argument));
                 }
                 brep_copy(k, &b)?
             };
             let mut t = {
                 let b = sheet.lock();
-                if !is_sheet(k, &b)? {
+                if !is_sheets(k, &b)? {
                     return Ok(Err(Error::Argument));
                 }
                 brep_copy(k, &b)?

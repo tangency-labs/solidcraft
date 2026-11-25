@@ -111,6 +111,10 @@ pub struct ModelBody {
     /// one of the bodies a feature works on unless the feature names it (not by `*`, nor by
     /// naming none).
     pub envelope: bool,
+    /// A surface body by what made it, whether or not its shells close: a Surface workspace
+    /// operation's result (a full turn of a closed profile is a closed sheet, not a solid). Stitch
+    /// makes a solid of it. False for bodies whose kind follows their shells ([`Body::is_surface`]).
+    pub sheet: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
     bytes: usize,
@@ -206,6 +210,7 @@ impl ModelBody {
             component: self.component,
             transferred: self.transferred,
             imported: self.imported.clone(),
+            sheet: self.sheet,
             ..ModelBody::new(self.name.clone(), body, self.feature)
         });
         if let Some(key) = key
@@ -248,6 +253,7 @@ impl ModelBody {
             split_from: None,
             imported: None,
             envelope: false,
+            sheet: false,
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
@@ -290,16 +296,23 @@ impl ModelBody {
         (frame.normal().dot(exact.normal()) >= 1.0 - 1e-9 && (frame.origin - exact.origin).dot(exact.normal()).abs() <= tol).then_some(frame)
     }
 
-    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
+    /// A surface body: one a Surface workspace operation made ([`ModelBody::sheet`]), closed or
+    /// not, or one some shell of which does not close ([`Body::is_surface`]), worked out once.
     pub fn is_surface(&self) -> bool {
-        !self.body.is_mesh() && self.is_open()
+        !self.body.is_mesh() && (self.is_closed_sheet() || self.is_open())
+    }
+
+    /// A surface body whose shells all close (a full turn of a closed profile): no solid until
+    /// Stitch makes it one.
+    pub fn is_closed_sheet(&self) -> bool {
+        self.sheet && !self.body.is_mesh() && !self.is_open()
     }
 
     /// The body encloses a volume: a solid whose shells all close ([`ModelBody::is_surface`]),
     /// or a mesh body every side of which two triangles share ([`Body::is_closed_mesh`]).
     /// Worked out once.
     pub fn is_closed(&self) -> bool {
-        !self.is_open()
+        !self.is_open() && !self.is_closed_sheet()
     }
 
     fn is_open(&self) -> bool {
@@ -1447,6 +1460,46 @@ impl ModelState {
     }
 }
 
+/// The role of each face of `split` (Split Face's result, `from` the face of the body before
+/// each came from) that is a piece of one of the faces `picked`: which side of the tool it lies
+/// on (`+`/`-` of a plane or a tool face, `in`/`out` of a closed sketch curve, `left`/`right` of
+/// an open one), and with several sketch curves each curve's side by its number (`in:2`, a piece
+/// inside the second; `out`, outside every closed one). `None` for every other face, and for a
+/// piece whose side the tool can't tell: it is told apart by the faces around it, as before.
+fn split_piece_roles(split: &kernel::Body, from: &[usize], picked: &[usize], tool: &kernel::SplitTool) -> Vec<Option<String>> {
+    let pieces: Vec<usize> = (0..from.len()).filter(|i| from.get(*i).is_some_and(|f| picked.contains(f))).collect();
+    let mut roles = vec![None; from.len()];
+    let Ok(sides) = kernel::split_piece_sides(split, &pieces, tool) else { return roles };
+    let many = sides.fields.len() > 1;
+    for (face, of) in pieces.iter().zip(&sides.sides) {
+        let mut parts: Vec<String> = Vec::new();
+        let mut known = true;
+        for (k, (kind, side)) in sides.fields.iter().zip(of).enumerate() {
+            let Some(first) = *side else {
+                known = false;
+                break;
+            };
+            let word = match (kind, first) {
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, true) => "+",
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, false) => "-",
+                (kernel::FieldKind::Loop, true) => "in",
+                (kernel::FieldKind::Loop, false) if many => continue,
+                (kernel::FieldKind::Loop, false) => "out",
+                (kernel::FieldKind::Curve, true) => "left",
+                (kernel::FieldKind::Curve, false) => "right",
+            };
+            parts.push(if many { format!("{word}:{}", k + 1) } else { word.to_string() });
+        }
+        if !known {
+            continue;
+        }
+        if let Some(slot) = roles.get_mut(*face) {
+            *slot = Some(if parts.is_empty() { "out".to_string() } else { parts.join(".") });
+        }
+    }
+    roles
+}
+
 /// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
 /// made or changed.
 fn made_body_key(key: u64, name: &str) -> u64 {
@@ -2505,7 +2558,7 @@ fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeS
 /// definition that is a construction's name may take one too many, never one too few: the
 /// other construction geometry no longer goes into every feature's key.
 fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
-    if !doc.features.iter().any(|f| f.kind.is_construction()) {
+    if matches!(f.kind, FeatureKind::Import { .. }) || !doc.features.iter().any(|f| f.kind.is_construction()) {
         return 0;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2885,7 +2938,6 @@ impl EvalKey {
         shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
-        geo: u64,
     ) -> EvalKey {
         // A frame member is built turned by the Rotate steps after it.
         let local = fingerprint(doc, 0, f, vals, false, steps)
@@ -2896,8 +2948,18 @@ impl EvalKey {
         let whole = cache_key(f, fp, local, ctx, st);
         let reads = f.reads(doc, st).map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
+            if read.import {
+                // An import reads only the file or records it holds (`local`), the context
+                // without the design's components (`shared`: units, rules, validation and heal
+                // mode), and its feature id. Unrelated earlier features, components, the body
+                // counter and threads do not invalidate it; body-name collisions with `st` are
+                // checked when replaying [`ImportChange`].
+                "import-reads".hash(&mut h);
+                own_inputs(doc, vals, f, local, shared, steps, &mut h);
+                return (h.finish(), read);
+            }
             "reads".hash(&mut h);
-            own_inputs(doc, vals, f, local, ctx, geo, steps, &mut h);
+            own_inputs(doc, vals, f, local, ctx, steps, &mut h);
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
@@ -2924,10 +2986,12 @@ impl EvalKey {
             serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
             (h.finish(), read)
         });
-        let relative = reads.as_ref().map(|(_, read)| {
+        // An import's key of what it reads holds whatever bodies come before it already
+        // ([`ImportChange`]): it has no relative form of its own.
+        let relative = reads.as_ref().filter(|(_, read)| !read.import).map(|(_, read)| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             "relative".hash(&mut h);
-            own_inputs(doc, vals, f, local, shared, geo, steps, &mut h);
+            own_inputs(doc, vals, f, local, shared, steps, &mut h);
             // Its own component and those it lies in, not every component of the design: a
             // component deleted or added elsewhere changes nothing it reads.
             let mut c = f.component;
@@ -2980,27 +3044,10 @@ fn depth_digest(st: &ModelState) -> u64 {
 /// A feature's own inputs, for the keys of what it reads ([`EvalKey`]): its definition and
 /// placement (`local`), the document context, its id, the definitions a pattern replays and a
 /// sketch's stored solve.
-#[allow(clippy::too_many_arguments)]
-fn own_inputs(
-    doc: &Document,
-    vals: &BTreeMap<String, Value>,
-    f: &Feature,
-    local: u64,
-    ctx: u64,
-    geo: u64,
-    steps: &ImportDigests,
-    h: &mut impl Hasher,
-) {
+fn own_inputs(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, local: u64, ctx: u64, steps: &ImportDigests, h: &mut impl Hasher) {
     local.hash(h);
     ctx.hash(h);
     f.id.hash(h);
-    // An import reads the file it names and nothing of the model, so it keeps its result
-    // while the features before it are the same: a part that moves leaves the file
-    // unread (#17310). The features' own inputs, without where they are placed, are in
-    // the key: a change to them (a new length) reads the file again.
-    if matches!(f.kind, FeatureKind::Import { .. }) {
-        geo.hash(h);
-    }
     // A pattern replays its features' definitions.
     if let FeatureKind::Pattern { features, .. } = &f.kind {
         for id in features {
@@ -3018,11 +3065,13 @@ fn own_inputs(
 }
 
 /// What a feature reads of the model besides every body's name and component: bodies by index,
-/// sketches by feature id.
+/// sketches by feature id, or an independent import whose only model dependency is avoiding
+/// body-name collisions on replay.
 #[derive(Clone, Debug, Default)]
 struct Reads {
     bodies: Vec<usize>,
     sketches: Vec<u64>,
+    import: bool,
 }
 
 /// A primitive or a coil of its own section: tools from numbers alone. A coil sweeping a
@@ -3150,10 +3199,21 @@ impl Feature {
         let blend = matches!(self.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
         // A fillet or chamfer finds its edges by name on its own body alone.
         let faces_by_name = self.face_names.iter().any(|n| !n.is_empty());
+        if faces_by_name || (!blend && !by_name(self)) {
+            return None;
+        }
+        // An import reads only the file or records it holds and nothing of the model's geometry,
+        // sheets, body counter, or threads: it appends its own bodies and linked cosmetic threads,
+        // avoiding body-name collisions with earlier bodies (checked when replaying
+        // [`ImportChange`]). An empty import without records may fail based on `doc.links`, so
+        // leave it uncached.
+        if let FeatureKind::Import { step, records, .. } = &self.kind {
+            return (!(records.is_none() && step.is_empty())).then(|| Reads { import: true, ..Reads::default() });
+        }
         // A sheet's record (its surfaces, bends, cuts and pockets) is not carried by a replayed
         // change, only its body: with sheets in the design, every feature is evaluated again
         // (#6748, as the flat model's sheets were).
-        if !st.surface_sheets.is_empty() || faces_by_name || (!blend && !by_name(self)) {
+        if !st.surface_sheets.is_empty() {
             return None;
         }
         let named = |names: &[String]| -> Option<Vec<usize>> {
@@ -3177,19 +3237,14 @@ impl Feature {
                 _ => named(targets),
             }
         };
-        let bodies = |bodies| Some(Reads { bodies, sketches: Vec::new() });
+        let bodies = |bodies| Some(Reads { bodies, sketches: Vec::new(), import: false });
         let sketch = |s: &crate::SketchId| {
             let own = doc.feature(s.0).is_some_and(|x| x.component == self.component);
-            own.then(|| Reads { bodies: Vec::new(), sketches: vec![s.0] })
+            own.then(|| Reads { bodies: Vec::new(), sketches: vec![s.0], import: false })
         };
         match &self.kind {
             // A cylinder placed by reference edges reads the faces they lie on.
             k if numeric_tool(k) && hole_references(self).is_empty() => bodies(operated(feature_op(self))?),
-            // An import reads the file it names (in its own fingerprint) and nothing of the
-            // model: its bodies are its own, and their names follow the names the model
-            // already has (in the key of what it reads). A part that moves elsewhere in the
-            // timeline leaves it as it was, and the file is not read again (#17310).
-            FeatureKind::Import { .. } => Some(Reads::default()),
             FeatureKind::Pattern { bodies: copied, pattern, .. } if !copied.is_empty() && fixed_pattern(pattern) => {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
@@ -3251,10 +3306,20 @@ impl Feature {
     }
 }
 
-/// What a feature changed of the model (see [`ModelState::change_from`]): the bodies after it,
-/// the sketch it solved and the body counter.
+/// What a feature changed of the model (see [`ModelState::change_from`]).
 #[derive(Clone, Debug)]
-struct Change {
+enum Change {
+    /// A feature that reads a known slice of the model and may keep, replace, or add bodies.
+    Model(Box<ModelChange>),
+    /// An independent import: appends its own bodies and linked cosmetic threads without touching
+    /// earlier state, valid on any state that satisfies its body-name collision invariants.
+    Import(ImportChange),
+}
+
+/// What a non-import feature changed of the model: the bodies after it, the sketch it solved and
+/// the body counter.
+#[derive(Clone, Debug)]
+struct ModelChange {
     bodies: Arc<[Changed]>,
     sketch: Option<Arc<SolvedSketch>>,
     body_counter: usize,
@@ -3292,6 +3357,18 @@ enum Fate {
     Removed,
 }
 
+/// What an independent [`FeatureKind::Import`] appended to the model.
+#[derive(Clone, Debug)]
+struct ImportChange {
+    bodies: Arc<[ModelBody]>,
+    threads: Arc<[ThreadInfo]>,
+    /// Predecessor names (`base`, `base (2)`..`base (i-1)`) that were present in the state before
+    /// the import for any appended body named `base (i)` (`i >= 2`). Replaying onto another state
+    /// yields the exact same names iff none of `bodies`'s names exist there and every name in
+    /// `blocked` still exists there.
+    blocked: Arc<[String]>,
+}
+
 #[derive(Clone, Debug)]
 enum Changed {
     /// The body at this index before the feature, as it was.
@@ -3303,16 +3380,82 @@ enum Changed {
 impl Change {
     /// What the bodies it made cost.
     fn retained_bytes(&self) -> usize {
-        let made: usize = self
-            .bodies
-            .iter()
-            .map(|b| match b {
-                Changed::Made(b) => b.body.retained_bytes(),
-                Changed::Kept(_) => 0,
-            })
-            .sum();
-        made + self.bodies.len() * 64 + self.sketch.as_ref().map_or(0, |s| s.retained_bytes())
+        match self {
+            Change::Model(c) => {
+                let made: usize = c
+                    .bodies
+                    .iter()
+                    .map(|b| match b {
+                        Changed::Made(b) => b.body.retained_bytes(),
+                        Changed::Kept(_) => 0,
+                    })
+                    .sum();
+                made + c.bodies.len() * 64 + c.sketch.as_ref().map_or(0, |s| s.retained_bytes())
+            }
+            Change::Import(c) => {
+                let made: usize = c.bodies.iter().map(|b| b.body.retained_bytes()).sum();
+                made + c.bodies.len() * 64 + c.threads.len() * 128 + c.blocked.iter().map(|s| s.len() + 24).sum::<usize>()
+            }
+        }
     }
+
+    /// Whether every body this change made carries the key [`ModelState::stamp`] gives it under
+    /// `key`.
+    fn made_bodies_stamped(&self, key: u64) -> bool {
+        match self {
+            Change::Model(c) => c.bodies.iter().all(|b| match b {
+                Changed::Made(b) => b.key == made_body_key(key, &b.name),
+                Changed::Kept(_) => true,
+            }),
+            Change::Import(c) => c.bodies.iter().all(|b| b.key == made_body_key(key, &b.name)),
+        }
+    }
+
+    /// The same change whatever the bodies the feature did not read, when it can be told so.
+    fn relative(&self) -> Option<&Arc<Relative>> {
+        match self {
+            Change::Model(c) => c.relative.as_ref(),
+            Change::Import(_) => None,
+        }
+    }
+}
+
+/// If `name` has the form `"{base} ({i})"` as [`BodyNames::unique`] makes it (`i >= 2`, canonical
+/// decimal digits, non-empty `base`), returns `(base, i)`.
+fn split_unique_suffix(name: &str) -> Option<(&str, usize)> {
+    let rest = name.strip_suffix(')')?;
+    let (base, num) = rest.rsplit_once(" (")?;
+    if base.is_empty() || num.is_empty() || num.starts_with('0') || !num.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let i: usize = num.parse().ok()?;
+    (i >= 2).then_some((base, i))
+}
+
+/// Names in `before.bodies` that are strict predecessors (`base` or `base (2)`..`base (i-1)`) of
+/// any body name `base (i)` (`i >= 2`) in `made`.
+fn import_blocked_names(before: &ModelState, made: &[ModelBody]) -> Arc<[String]> {
+    let mut max_suffix: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for b in made {
+        if let Some((base, i)) = split_unique_suffix(&b.name) {
+            let entry = max_suffix.entry(base).or_insert(0);
+            *entry = (*entry).max(i);
+        }
+    }
+    if max_suffix.is_empty() {
+        return Arc::from([]);
+    }
+    let mut blocked: Vec<String> = Vec::new();
+    for b in &before.bodies {
+        let is_predecessor = max_suffix.contains_key(b.name.as_str())
+            || split_unique_suffix(&b.name).is_some_and(|(base, j)| max_suffix.get(base).is_some_and(|&max_i| j < max_i));
+        if is_predecessor {
+            blocked.push(b.name.clone());
+        }
+    }
+    blocked.sort();
+    blocked.dedup();
+    blocked.into()
 }
 
 impl Relative {
@@ -3418,11 +3561,55 @@ fn names_alone(b: &ModelBody, f: &Feature) -> bool {
 }
 
 impl ModelState {
+    /// How an independent Import feature `feature` took `before` to this state: only appending its
+    /// own bodies and cosmetic threads, leaving the rest of `before` untouched.
+    fn import_change_from(&self, before: &ModelState, feature: u64) -> Option<Change> {
+        let same_rest = self.surface_sheets == before.surface_sheets
+            && self.sketches.len() == before.sketches.len()
+            && self.sketches.iter().zip(&before.sketches).all(|(a, b)| Arc::ptr_eq(a, b))
+            && self.sketch_keys == before.sketch_keys
+            && self.construct == before.construct
+            && self.frame_members.len() == before.frame_members.len()
+            && self.body_counter == before.body_counter
+            && self.blend_edges == before.blend_edges
+            && self.fitted == before.fitted
+            && self.tapered.keys().eq(before.tapered.keys())
+            && self.kept_separate == before.kept_separate
+            && self.pattern_left_out == before.pattern_left_out
+            && self.named_faces == before.named_faces
+            && self.cut_extents.len() == before.cut_extents.len();
+        if !same_rest || self.bodies.len() < before.bodies.len() || self.threads.len() < before.threads.len() {
+            return None;
+        }
+        let (prefix, added_bodies) = self.bodies.split_at(before.bodies.len());
+        if !prefix.iter().zip(&before.bodies).all(|(a, b)| a.name == b.name && a.key == b.key && a.body.same(&b.body)) {
+            return None;
+        }
+        if !added_bodies.iter().all(|b| b.feature == feature) {
+            return None;
+        }
+        let (thread_prefix, added_threads) = self.threads.split_at(before.threads.len());
+        if thread_prefix != before.threads.as_slice() || !added_threads.iter().all(|t| t.feature == feature) {
+            return None;
+        }
+        if !before.bodies.is_empty() && !added_bodies.is_empty() {
+            let existing: std::collections::HashSet<&str> = before.bodies.iter().map(|b| b.name.as_str()).collect();
+            if added_bodies.iter().any(|b| existing.contains(b.name.as_str())) {
+                return None;
+            }
+        }
+        let blocked = import_blocked_names(before, added_bodies);
+        Some(Change::Import(ImportChange { bodies: Arc::from(added_bodies.to_vec()), threads: Arc::from(added_threads.to_vec()), blocked }))
+    }
+
     /// How feature `feature`, which read the bodies `read` of `before`, took it to this state
     /// (not stamped yet); `None` when it changed anything else: a body it did not read, a sketch
     /// other than its own, the construction, threads or blend records.
     fn change_from(&self, before: &ModelState, f: &Feature, read: &Reads) -> Option<Change> {
         let feature = f.id;
+        if read.import {
+            return self.import_change_from(before, feature);
+        }
         let (kept, sketch) = match self.sketches.split_last() {
             Some((last, rest)) if last.feature == feature => (rest, Some(last.clone())),
             _ => (self.sketches.as_slice(), None),
@@ -3462,23 +3649,46 @@ impl ModelState {
             }
         }
         let only_read = untouched.iter().enumerate().all(|(j, u)| *u || read.bodies.contains(&j));
-        only_read.then(|| Change {
-            bodies: bodies.into(),
-            sketch,
-            body_counter: self.body_counter,
-            blend: self.blend_edges.get(&feature).cloned(),
-            fitted: self.fitted.get(&feature).cloned(),
-            tapered: self.tapered.get(&feature).cloned(),
-            kept_separate: self.kept_separate.get(&feature).copied(),
-            pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
-            named_faces: self.named_faces.get(&feature).cloned(),
-            relative: Relative::of(before, self, f, read).map(Arc::new),
+        only_read.then(|| {
+            Change::Model(Box::new(ModelChange {
+                bodies: bodies.into(),
+                sketch,
+                body_counter: self.body_counter,
+                blend: self.blend_edges.get(&feature).cloned(),
+                fitted: self.fitted.get(&feature).cloned(),
+                tapered: self.tapered.get(&feature).cloned(),
+                kept_separate: self.kept_separate.get(&feature).copied(),
+                pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
+                named_faces: self.named_faces.get(&feature).cloned(),
+                relative: Relative::of(before, self, f, read).map(Arc::new),
+            }))
         })
     }
 
     /// This state with `change` (feature `feature`'s) made to it: its bodies, those it kept taken
     /// from here; `None` when this state does not line up with it.
     fn with_change(&self, change: &Change, feature: u64) -> Option<ModelState> {
+        let change = match change {
+            Change::Import(imp) => {
+                if !self.bodies.is_empty() && (!imp.bodies.is_empty() || !imp.blocked.is_empty()) {
+                    let existing: std::collections::HashSet<&str> = self.bodies.iter().map(|b| b.name.as_str()).collect();
+                    if imp.bodies.iter().any(|b| existing.contains(b.name.as_str()))
+                        || imp.blocked.iter().any(|name| !existing.contains(name.as_str()))
+                    {
+                        return None;
+                    }
+                } else if !imp.blocked.is_empty() {
+                    return None;
+                }
+                let mut bodies = Vec::with_capacity(self.bodies.len() + imp.bodies.len());
+                bodies.extend(self.bodies.iter().map(|b| ModelBody { made: crate::lineage::Made::Before, ..b.clone() }));
+                bodies.extend(imp.bodies.iter().cloned());
+                let mut threads = self.threads.clone();
+                threads.extend(imp.threads.iter().cloned());
+                return Some(ModelState { bodies, threads, ..self.clone() });
+            }
+            Change::Model(c) => c,
+        };
         let bodies = change
             .bodies
             .iter()
@@ -3495,6 +3705,10 @@ impl ModelState {
     /// after them; `None` when it has none, or this state lacks a body it read or holds a name it
     /// made.
     fn with_relative(&self, change: &Change, feature: u64) -> Option<ModelState> {
+        // An import's change holds whatever bodies come before it already ([`ImportChange`]).
+        let Change::Model(change) = change else {
+            return None;
+        };
         let relative = change.relative.as_deref()?;
         let fates: std::collections::HashMap<&str, &Fate> = relative.read.iter().map(|(n, fate)| (n.as_str(), fate)).collect();
         let mut found = 0;
@@ -3522,7 +3736,7 @@ impl ModelState {
     }
 
     /// This state with `bodies` and the rest of `change` (feature `feature`'s) made to it.
-    fn with_changed_bodies(&self, change: &Change, feature: u64, bodies: Vec<ModelBody>, body_counter: usize) -> ModelState {
+    fn with_changed_bodies(&self, change: &ModelChange, feature: u64, bodies: Vec<ModelBody>, body_counter: usize) -> ModelState {
         let mut sketches = self.sketches.clone();
         if let Some(s) = &change.sketch {
             sketches.retain(|s| s.feature != feature);
@@ -4034,10 +4248,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // A plane taken from a face, or tool faces used as they are (#9305), is moved from the
         // tool's frame into the body's.
-        FeatureKind::Split { body, tool: Some(tool), tool_plane, tool_sheet, .. } if *tool_plane || !tool_sheet.is_extended() => {
+        FeatureKind::Split { body, tool: Some(tool), tool_plane, tool_sheet, tool_bodies, .. } if *tool_plane || !tool_sheet.is_extended() => {
             frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
             reads.placed_body(st, body);
             reads.placed_body(st, &tool.body);
+            // So are the other surface bodies that cut with it (#13303).
+            for b in tool_bodies {
+                reads.placed_body(st, b);
+            }
         }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
@@ -4051,6 +4269,8 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
+        // A surface extrude To Next runs into whichever body is in its way, wherever it is placed.
+        FeatureKind::SurfaceExtrude { to_next: true, .. } => reads.all = true,
         // Copies meet the bodies they change where those are placed relative to their source's
         // tools' frame, whatever the pattern's own placement (#14271).
         FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
@@ -4803,11 +5023,6 @@ impl Model {
         // read once: the context, the fingerprints and the model's record agree
         let heal = kernel::heals_tolerance_defects();
         self.heal_off = !heal;
-        // The features' own inputs, without where they are placed: a part that moves leaves them
-        // as they were. An import keeps its result while they are the same, so a move of a part
-        // does not read the file again (#17310). Only a design with an import needs the digest.
-        let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
-        let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared_ctx = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
@@ -4847,7 +5062,6 @@ impl Model {
                 out.truncate(s.out_len);
                 reuse = s.reuse;
                 prev_fp = s.prev_fp;
-                geo = s.geo;
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
@@ -4862,8 +5076,6 @@ impl Model {
                     continue 'pass;
                 }
                 let (reuse_in, prev_fp_in) = (reuse, prev_fp);
-                // The digest of the features before this one, for an import's key (#17310).
-                let geo_in = geo;
                 if let Some(r) = out.last()
                     && let Some(e) = &r.error
                 {
@@ -4889,11 +5101,6 @@ impl Model {
                 let cancelled = watched.step(i);
                 let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
                 prev_fp = fp;
-                if with_import {
-                    // This feature's own inputs, without where it is placed: the digest of the
-                    // features before an import says whether the model around it changed (#17310).
-                    geo ^= fingerprint(doc, 0, f, &vals, rolled_back, &self.import_digests);
-                }
                 let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
                 if let Some(pose) = pose {
                     poses.insert(f.id, pose);
@@ -4990,7 +5197,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, geo_in);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -5188,7 +5395,6 @@ impl Model {
                         out_len: out.len(),
                         reuse: reuse_in,
                         prev_fp: prev_fp_in,
-                        geo: geo_in,
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
@@ -5243,7 +5449,7 @@ impl Model {
                 };
                 // A change that holds whatever the bodies it did not read is known by the key
                 // without them, and so are the bodies it made.
-                let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative.is_some()));
+                let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative().is_some()));
                 let stamp_key = match (reads, relative) {
                     (Some(_), Some(k)) => k,
                     (Some((k, _)), None) if cached.is_some() || change.is_some() => *k,
@@ -6386,7 +6592,7 @@ thread_local! {
 fn joined_into<'d>(doc: &'d Document, state: &ModelState, f: &Feature, name: &str) -> Option<&'d str> {
     let mut now: Option<&'d str> = None;
     for g in doc.features.iter().take_while(|g| g.id != f.id).filter(|g| !g.suppressed) {
-        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false } = &g.kind
+        if let FeatureKind::Combine { target, tools, operation: Operation::Join | Operation::NewBody, keep_tools: false, .. } = &g.kind
             && tools.iter().any(|t| t.0.as_str() == now.unwrap_or(name))
         {
             now = Some(target.0.as_str());
@@ -6482,6 +6688,12 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
 }
 
 /// Suggest one nearby body without changing the default component scope or running a boolean.
+/// A boolean or other solid-only step refused on a closed surface body (#21969): its shells
+/// close, but a surface operation made it, so it is no solid until Stitch makes it one.
+pub(crate) fn closed_sheet_refusal(name: &str) -> DocError {
+    DocError::Invalid(format!("{name} is a surface body: Stitch it into a solid first."))
+}
+
 fn empty_boolean_targets(doc: &Document, state: &ModelState, f: &Feature, tools: &[Traced], default_targets: bool) -> DocError {
     let plain = "there is no body to cut or intersect";
     if !default_targets {
@@ -6648,6 +6860,9 @@ fn apply_traced_with(
                         continue;
                     }
                 }
+                if b.is_closed_sheet() {
+                    return Err(closed_sheet_refusal(&b.name));
+                }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
                     "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
@@ -6794,53 +7009,150 @@ fn apply_traced_with(
     Ok(())
 }
 
+/// The exact box of a B-rep body, or `None` for a mesh or unmeasurable body.
+fn join_tool_bounds(body: &Body) -> Option<solidcraft_geom::Aabb3> {
+    if body.is_mesh() {
+        return None;
+    }
+    let b = body.exact_bounds().ok()?;
+    (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then_some(b)
+}
+
+/// Union `base` with `others` (all in `base`'s frame), batching multiple operands in one kernel
+/// call and falling back to sequential `flush_join::join_bodies` on error. When `try_apart` is
+/// set, bodies whose boxes do not meet are joined directly without intersection work.
+fn join_union_batch(base: &Traced, others: &[Traced], try_apart: bool) -> Result<Traced> {
+    // Each union keeps the lineage of what it joins, so the joined body's faces keep
+    // their names (the tool's new faces are named by their roles).
+    let union = |a: &Traced, b: &Traced| -> Result<Traced> {
+        #[cfg(test)]
+        cost_tests::count(|c| c.join_unions += 1);
+        let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
+        Ok(Traced::step(u, &[a, b]))
+    };
+    match others {
+        [] => Ok(base.clone()),
+        [one] => union(base, one),
+        _ => {
+            let operands: Vec<&Traced> = std::iter::once(base).chain(others).collect();
+            // Bodies that are all apart need no intersection work: they are one body of several
+            // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
+            if try_apart && let Some(acc) = union_all_apart(&operands) {
+                return Ok(acc);
+            }
+            // The kernel's union pairs the tools with each other before the target. Fins whose
+            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
+            // the target one at a time, each tool's overlap with the others already lies inside.
+            // Falling back to pairwise `union` also preserves `flush_join::join_bodies` retry.
+            #[cfg(test)]
+            cost_tests::count(|c| c.join_unions += 1);
+            match union_all(&operands) {
+                Ok(acc) => Ok(acc),
+                Err(e) => others.iter().try_fold(base.clone(), |acc, other| union(&acc, other)).map_err(|_| e),
+            }
+        }
+    }
+}
+
+/// Tools deferred to be unioned into one live target body in a single batched call.
+struct PendingJoin {
+    keep: String,
+    /// Queued tools in the feature's tool frame, each with its cached exact bounds (if computed).
+    tools: Vec<(Traced, Option<solidcraft_geom::Aabb3>)>,
+    /// True while every queued tool missed all live targets (so all operands may be apart).
+    all_missed: bool,
+}
+
+/// Whether `tool` (in the feature's tool frame) meets any tool already queued in `batch`.
+/// Used after `tool` misses the target's base body so chains of touching tools are never missed.
+fn tool_meets_pending(target_size: f64, tool: &Traced, tool_box: &mut Option<Option<solidcraft_geom::Aabb3>>, batch: &PendingJoin) -> Result<bool> {
+    let tb = *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body));
+    let tool_size = tool.body.size();
+    let tool_tol = tool.body.record().tolerance;
+    for (queued, qb) in &batch.tools {
+        if let (Some(tb), Some(qb)) = (tb, *qb) {
+            let reach = target_size.max(tool_size).max(queued.body.size());
+            let margin = (reach * 1e-3).max(1e-4) + 2.0 * (tool_tol + queued.body.record().tolerance);
+            if margin.is_finite() && !tb.inflated(margin).meets(&qb) {
+                continue;
+            }
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.contact_tests += 1);
+        if queued.body.meets(&tool.body)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Apply one deferred batch of tools to its target body.
+fn flush_pending_join(state: &mut ModelState, batch: PendingJoin) -> Result<()> {
+    let Some(base) = state.body(&batch.keep).map(ModelBody::traced) else { return Ok(()) };
+    // The tools go into the kept body's frame, where it is shown (#3383).
+    let into_keep = tool_frame(&batch.keep);
+    let placed = batch.tools.iter().map(|(tool, _)| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
+    let acc = join_union_batch(&base, &placed, batch.all_missed)?;
+    if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == batch.keep) {
+        *mb = mb.remade(acc);
+    }
+    Ok(())
+}
+
 /// Join `tools` into the bodies at `target_idx`: each tool joins every target it meets into one
 /// body, kept under the first one's name; a tool that meets none joins the first target as a
 /// separate piece. A sheet metal body keeps its own identity: only the first body met may be
 /// one. The names of the bodies the tools went into.
 fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Result<Vec<String>> {
     let mut live: Vec<String> = target_idx.iter().filter_map(|i| state.bodies.get(*i).map(|b| b.name.clone())).collect();
-    // Each union keeps the lineage of what it joins, so the joined body's faces keep
-    // their names (the tool's new faces are named by their roles).
-    let union = |a: &Traced, b: &Traced| -> Result<Traced> {
-        let u = crate::flush_join::join_bodies(&a.body, &b.body, "join produced nothing")?;
-        Ok(Traced::step(u, &[a, b]))
-    };
+    if live.is_empty() || tools.is_empty() {
+        return Ok(Vec::new());
+    }
     // One target takes every tool, whichever it meets: the result is the union of all of
     // them in one kernel call, checked once.
-    if let [keep] = live.as_slice()
-        && tools.len() > 1
-    {
+    if let [keep] = live.as_slice() {
         let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(Vec::new()) };
         // The tools go into the kept body's frame, where it is shown (#3383).
         let into_keep = tool_frame(keep);
-        let tools = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
-        let operands: Vec<&Traced> = std::iter::once(&base).chain(&tools).collect();
-        // Bodies that are all apart need no intersection work: they are one body of several
-        // pieces as they stand (#3455: joining 64 separate pegs took the kernel's union 4.5 s).
-        let acc = match union_all_apart(&operands) {
-            Some(acc) => acc,
-            // The kernel's union pairs the tools with each other before the target. Fins whose
-            // ends meet only inside a hub then meet in slivers it cannot resolve (#15913); into
-            // the target one at a time, each tool's overlap with the others already lies inside.
-            None => match union_all(&operands) {
-                Ok(acc) => acc,
-                Err(e) => tools.iter().try_fold(base.clone(), |acc, tool| union(&acc, tool)).map_err(|_| e)?,
-            },
-        };
+        let placed = tools.iter().map(|tool| tool_in(tool, into_keep)).collect::<Result<Vec<_>>>()?;
+        let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
             *mb = mb.remade(acc);
         }
         return Ok(vec![keep.clone()]);
     }
     let mut joined = Vec::new();
-    for tool in &tools {
+    let mut pending: Vec<PendingJoin> = Vec::new();
+    let mut rest = tools.into_iter();
+    while let Some(tool) = rest.next() {
+        // Once bridging merges all remaining targets into one, the rest need no contact tests
+        // and can be batched into that sole target in one call.
+        if let [keep] = live.as_slice() {
+            let mut batch_tools = Vec::new();
+            if let Some(pos) = pending.iter().position(|p| p.keep == *keep) {
+                batch_tools.extend(pending.remove(pos).tools.into_iter().map(|(t, _)| t));
+            }
+            batch_tools.push(tool);
+            batch_tools.extend(rest);
+            let Some(base) = state.body(keep).map(ModelBody::traced) else { return Ok(joined) };
+            let into_keep = tool_frame(keep);
+            let placed = batch_tools.iter().map(|t| tool_in(t, into_keep)).collect::<Result<Vec<_>>>()?;
+            let acc = join_union_batch(&base, &placed, placed.len() > 1)?;
+            if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == *keep) {
+                *mb = mb.remade(acc);
+            }
+            if !joined.contains(keep) {
+                joined.push(keep.clone());
+            }
+            break;
+        }
         let mut met: Vec<String> = Vec::new();
+        let mut tool_box: Option<Option<solidcraft_geom::Aabb3>> = None;
         // Which bodies the tool meets picks the one it joins and those joined with it. A single
         // body takes the tool whether it meets it or not, so it is not asked: the test meshes
         // the body finely, and that took longer than the join itself on a part of a few hundred
         // faces.
-        for name in live.iter().filter(|_| live.len() > 1) {
+        for name in &live {
             let Some(mb) = state.body(name) else { continue };
             let sheet = state.surface_sheets.iter().any(|s| &s.body == name);
             if mb.body.is_mesh() || (!met.is_empty() && sheet) {
@@ -6849,14 +7161,43 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             #[cfg(test)]
             cost_tests::count(|c| c.contact_tests += 1);
             // Each body is met where it is shown: the tool goes into its frame (#3383).
-            if mb.body.meets(&tool_in(tool, tool_frame(name))?.body)? {
+            let mut hit = mb.body.meets(&tool_in(&tool, tool_frame(name))?.body)?;
+            if !hit && let Some(batch) = pending.iter().find(|p| p.keep == *name) {
+                hit = tool_meets_pending(mb.body.size(), &tool, &mut tool_box, batch)?;
+            }
+            if hit {
                 met.push(name.clone());
             }
         }
         let Some(keep) = met.first().or(live.first()).cloned() else { return Ok(joined) };
+        if state.body(&keep).is_none() {
+            continue;
+        }
+        if !joined.contains(&keep) {
+            joined.push(keep.clone());
+        }
+        if met.len() <= 1 {
+            let missed = met.is_empty();
+            let bounds = if !rest.as_slice().is_empty() { *tool_box.get_or_insert_with(|| join_tool_bounds(&tool.body)) } else { None };
+            if let Some(batch) = pending.iter_mut().find(|p| p.keep == keep) {
+                batch.all_missed &= missed;
+                batch.tools.push((tool, bounds));
+            } else {
+                pending.push(PendingJoin { keep, tools: vec![(tool, bounds)], all_missed: missed });
+            }
+            continue;
+        }
+        // This tool bridges two or more targets: union `keep`, its queued tools, this tool, and
+        // every absorbed target (with its queued tools) in one batched call.
         let Some(base) = state.body(&keep).map(ModelBody::traced) else { continue };
         let into_keep = tool_frame(&keep);
-        let mut acc = union(&base, &tool_in(tool, into_keep)?)?;
+        let mut operands = Vec::new();
+        if let Some(pos) = pending.iter().position(|p| p.keep == keep) {
+            for (queued, _) in pending.remove(pos).tools {
+                operands.push(tool_in(&queued, into_keep)?);
+            }
+        }
+        operands.push(tool_in(&tool, into_keep)?);
         for name in met.iter().skip(1) {
             if let Some(b) = state.body(name) {
                 // A body placed differently from the one kept joins it where it is shown.
@@ -6865,9 +7206,15 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
                     None => Some(crate::IDENTITY),
                 };
                 let m = from.map(|from| crate::mat_mul(&into_keep.unwrap_or(crate::IDENTITY), &from)).filter(|m| !crate::is_identity(m));
-                acc = union(&acc, &tool_in(&b.traced(), m)?)?;
+                operands.push(tool_in(&b.traced(), m)?);
+            }
+            if let Some(pos) = pending.iter().position(|p| p.keep == *name) {
+                for (queued, _) in pending.remove(pos).tools {
+                    operands.push(tool_in(&queued, into_keep)?);
+                }
             }
         }
+        let acc = join_union_batch(&base, &operands, false)?;
         let absorbed: std::collections::BTreeSet<String> = met.into_iter().skip(1).collect();
         if let Some(mb) = state.bodies.iter_mut().find(|b| b.name == keep) {
             *mb = mb.remade(acc);
@@ -6877,9 +7224,9 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
             t.body = keep.clone();
         }
         live.retain(|n| !absorbed.contains(n));
-        if !joined.contains(&keep) {
-            joined.push(keep);
-        }
+    }
+    for batch in pending {
+        flush_pending_join(state, batch)?;
     }
     Ok(joined)
 }
@@ -7664,18 +8011,27 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
             }
             continue;
         };
-        let hit = trusted_edge_name(f, i, p)
-            .and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok())
-            .ok_or_else(|| DocError::reselect(stored.as_str()))?;
-        if let Some(note) = hit.note(stored) {
-            notes.push(note);
-        }
         // The body changed since the pick: the pick may now sit at an end of the edge.
         let moved = f.edge_refs.get(i).is_some_and(|r| {
             let now = mb.mesh().bounds();
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
+        let named = trusted_edge_name(f, i, p);
+        let Some(hit) = named.and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok()) else {
+            // #21997: the saved whole closed edge can now exist as the pieces a whole-turn
+            // revolve join's turned seam split it into. Every piece is blended, as a pick made
+            // today stores one name per piece.
+            let Some(pieces) = named.and_then(|n| crate::name_lookup::recover_split_closed_edge(mb, n, p)) else {
+                return Err(DocError::reselect(stored.as_str()));
+            };
+            out.extend(pieces.iter().map(|hit| if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point }));
+            notes.push(format!("the saved edge `{stored}` now exists as {} pieces; every piece is blended", pieces.len()));
+            continue;
+        };
+        if let Some(note) = hit.note(stored) {
+            notes.push(note);
+        }
         out.push(if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point });
     }
     if out.is_empty() {
@@ -8719,6 +9075,7 @@ struct HoleReach {
     size: f64,
     top: f64,
     above: Vec<(Body, f64)>,
+    full_run_on: bool,
     exits: bool,
     bore_end: f64,
 }
@@ -8779,8 +9136,8 @@ fn hole_reach(
     // The entry face may slant across the axis: it then rises above the entry point within the
     // tools' reach, and the tools must start clear of all of it, or a wedge of it is left over the
     // low side (#20045).
-    let top = top + entry_face_rise(st, position, &plane, wide);
-    let (top, above) = hole_run_on(st, &plane, wide, top);
+    let column_top = top + entry_face_rise(st, position, &plane, wide);
+    let (top, above) = hole_run_on(st, &plane, wide, column_top);
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),
@@ -8809,7 +9166,7 @@ fn hole_reach(
         },
         None => bottom,
     };
-    Ok(HoleReach { size, top, above, exits, bore_end })
+    Ok(HoleReach { size, top, above, full_run_on: top == column_top, exits, bore_end })
 }
 
 /// How far a planar face the hole enters by at `position` rises above `plane` (the hole's frame
@@ -8848,7 +9205,7 @@ fn hole_tools_reaching(
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     #[cfg(test)]
     cost_tests::count(|c| c.hole_tools += 1);
-    let HoleReach { size, top, ref above, exits, bore_end } = *reach;
+    let HoleReach { size, top, ref above, full_run_on, exits, bore_end } = *reach;
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
     let bottom = match depth {
@@ -8961,11 +9318,18 @@ fn hole_tools_reaching(
     // whole cylinder stays its reach (it takes a drill that meets one panel and nothing else of
     // the sheet).
     let mut kept = Vec::with_capacity(tools.len());
-    for (mut tool, mut prism) in tools {
-        for (piece, low) in above {
+    for (tool_index, (mut tool, mut prism)) in tools.into_iter().enumerate() {
+        for (piece_index, (piece, low)) in above.iter().enumerate() {
             // Best effort: where the kernel cannot answer, the tool stays as it was before.
-            if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
-                continue;
+            // The first (widest) tool contains the entire column above the face when nothing
+            // shortened its run-on. Each piece is already an intersection with that column.
+            // After a cut, some of a later piece might already have been removed.
+            if !(tool_index == 0 && piece_index == 0 && full_run_on) {
+                #[cfg(test)]
+                cost_tests::count(|c| c.run_on_probes += 1);
+                if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
+                    continue;
+                }
             }
             let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
@@ -10379,8 +10743,8 @@ pub(crate) fn kernel_rail_fit(fit: crate::RailFit) -> kernel::RailFit {
 /// A sweep's or a loft's guide rails as polylines in the feature's frame, each a chain of its sketch's curves
 /// (planar or 3D) from the end nearest `start` (the start of the path, the loft's first section).
 pub(crate) fn rail_polylines(doc: &Document, st: &ModelState, rails: &[crate::SweepRail], consumer: u64, start: Vec3) -> Result<Vec<Vec<Vec3>>> {
-    if rails.len() > 2 {
-        return Err(DocError::Invalid("a sweep or a loft takes one or two guide rails".into()));
+    if rails.len() > kernel::MAX_LOFT_RAILS {
+        return Err(DocError::Invalid(format!("a loft takes 1…{} guide rails (a sweep one or two)", kernel::MAX_LOFT_RAILS)));
     }
     rails
         .iter()
@@ -14433,6 +14797,7 @@ fn eval_feature_kind(
         | FeatureKind::SurfaceMatch { .. }
         | FeatureKind::SurfaceFair { .. }
         | FeatureKind::SurfaceOffset { .. }
+        | FeatureKind::SurfaceMidsurface { .. }
         | FeatureKind::SurfaceRuled { .. }
         | FeatureKind::SurfaceUntrim { .. } => surface::eval(doc, vals, f, st, warning),
         FeatureKind::Emboss { .. }
@@ -14728,6 +15093,22 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::Dome { face, height, shape, reverse, body } => {
+            let h = val(vals, height, Kind::Length)?;
+            let i = body_at(st, body, &[face.0])?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let index =
+                crate::appearance::face_index_at(&mb, face.0).ok_or_else(|| DocError::Invalid("the dome's face is not on the body".into()))?;
+            let shape = match shape {
+                crate::DomeShape::Elliptical => kernel::DomeShape::Elliptical,
+                crate::DomeShape::Spherical => kernel::DomeShape::Spherical,
+            };
+            let nb = Traced::step(kernel::dome(&mb.body, index, h, shape, *reverse)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = mb.remade(nb);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, f.component, Some(st))?;
@@ -14797,8 +15178,8 @@ fn eval_feature_kind(
             });
             Ok(())
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
-            if tools.is_empty() || tools.len() > 64 || cells.is_empty() || cells.len() > 1000 {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
+            if tools.is_empty() || tools.len() + planes.len() > 64 || cells.is_empty() || cells.len() > 1000 {
                 return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
             }
             let tb: Vec<ModelBody> =
@@ -14807,6 +15188,34 @@ fn eval_feature_kind(
             if tb.iter().any(|b| b.body.is_mesh() || b.body.is_surface()) {
                 return Err(DocError::Invalid("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported".into()));
             }
+            // A plane tool cuts space like an infinite plane: a cell lies on the side of it its point
+            // is on. The region a plane and the bodies close off may hold no body at all (the
+            // bore of an open tube), so with planes the cells are cut from a box (exact) that
+            // covers every tool and cell point with a margin; a cell that reaches that box is
+            // not enclosed.
+            let mut cut_planes: Vec<Plane> = Vec::new();
+            for pr in planes {
+                // A construction plane of another component is stored in that component's frame.
+                cut_planes.push(doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, pr)?, 0, f.component, Some(&*st))?);
+            }
+            let universe = match cells.first() {
+                Some(first) if !cut_planes.is_empty() => {
+                    let (mut lo, mut hi) = (first.0, first.0);
+                    for c in cells {
+                        lo = lo.min(c.0);
+                        hi = hi.max(c.0);
+                    }
+                    for b in &tb {
+                        let bb = b.body.exact_bounds()?;
+                        lo = lo.min(bb.min);
+                        hi = hi.max(bb.max);
+                    }
+                    let margin = (hi - lo).len() * 0.5 + 1.0;
+                    let pad = Vec3::new(margin, margin, margin);
+                    Some((kernel::box_solid(lo - pad, hi + pad)?, lo, hi, margin))
+                }
+                _ => None,
+            };
             let mut made = Vec::new();
             for p in cells {
                 // The cell: inside the tools that hold the point, outside the others.
@@ -14827,12 +15236,49 @@ fn eval_feature_kind(
                         Some(a) => kernel::boolean(&a.body, &b.body, BoolOp::Intersect)?.map(|r| Traced::step(r, &[&a, &b.traced()])),
                     };
                 }
-                let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                let mut cell = match (acc, &universe) {
+                    (Some(a), _) => a,
+                    (None, Some((u, ..))) => Traced { body: u.clone(), lineage: None, recipe: None },
+                    (None, None) => {
+                        return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                    }
                 };
+                for pl in &cut_planes {
+                    let side = pl.height(p.0);
+                    if side.abs() <= 1e-7 * (1.0 + cell.body.size()) {
+                        return Err(DocError::Invalid("Boundary Fill cell points must be away from tool planes".into()));
+                    }
+                    cell = half_traced(&cell, pl, side > 0.0)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
+                }
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
                     cell = Traced::step(cut, &[&cell, &b.traced()]);
+                }
+                if let Some((_, lo, hi, margin)) = &universe {
+                    // The planes can split a cell's region in pieces: the cell is the one holding the point.
+                    let lumps = cell.body.lumps()?;
+                    let lineages = crate::lineage::Lineage::lumps(&cell.body, cell.lineage.as_ref(), &lumps);
+                    let mut picked = None;
+                    for (lump, lineage) in lumps.into_iter().zip(lineages) {
+                        if matches!(lump.classify_point(p.0), Ok(kernel::PointClass::Inside)) {
+                            picked = Some(Traced { body: lump, lineage, recipe: None });
+                            break;
+                        }
+                    }
+                    cell = picked.ok_or_else(|| DocError::Invalid(format!("the point {p:?} is not inside a cell the tools and planes enclose")))?;
+                    let bb = cell.body.exact_bounds()?;
+                    let reach = *margin * 0.5;
+                    if bb.min.x < lo.x - reach
+                        || bb.min.y < lo.y - reach
+                        || bb.min.z < lo.z - reach
+                        || bb.max.x > hi.x + reach
+                        || bb.max.y > hi.y + reach
+                        || bb.max.z > hi.z + reach
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "the point {p:?} is in a region the tools and planes leave open: no enclosed cell there"
+                        )));
+                    }
                 }
                 if cell.body.is_surface() {
                     return Err(DocError::Invalid("Boundary Fill did not produce a closed solid cell".into()));
@@ -14855,12 +15301,12 @@ fn eval_feature_kind(
                     picked.push(fi);
                 }
             }
-            let nb = match (tool, sketch) {
+            let split_tool = match (tool, sketch) {
                 (Some(t), _) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Face { body: &tb.body, face })?
+                    kernel::SplitTool::Face { body: &tb.body, face }
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
@@ -14879,20 +15325,19 @@ fn eval_feature_kind(
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves, along: None })?
+                    kernel::SplitTool::Curves { plane: ss.plane, curves, along: None }
                 }
-                (None, None) => {
-                    let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Plane(pl))?
-                }
+                (None, None) => kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?),
             };
-            let nb = Traced::step(nb, &[&mb.traced()]);
+            let (nb, from) = kernel::split_faces_with_map(&mb.body, &picked, &split_tool)?;
+            let pieces = split_piece_roles(&nb, &from, &picked, &split_tool);
+            let nb = Traced::step(nb, &[&mb.traced()]).with_pieces(pieces);
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = mb.remade(nb);
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, tool_sheet, tool_faces, tool_bodies, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -14936,8 +15381,15 @@ fn eval_feature_kind(
                                 .ok_or_else(|| DocError::Invalid(format!("the component holding `{body}` has a singular placement")))?;
                             Ok(kernel::transform_matrix(&tb.body, crate::mat_mul(&inverse, &source))?)
                         };
-                        let parts = match tool_sheet {
-                            crate::SplitSheet::Extended => kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?,
+                        // The pieces keep the planar roles of the faces they share with the body (#565).
+                        let traced = |parts: Vec<kernel::Body>| {
+                            parts
+                                .into_iter()
+                                .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
+                                .collect::<Result<Vec<_>>>()
+                        };
+                        match tool_sheet {
+                            crate::SplitSheet::Extended => traced(kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?)?,
                             // The picked faces as they are, never extended (#9305).
                             crate::SplitSheet::Faces => {
                                 let faces = tool_faces
@@ -14947,22 +15399,71 @@ fn eval_feature_kind(
                                             .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at a tool point", t.body)))
                                     })
                                     .collect::<Result<Vec<_>>>()?;
-                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                                traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
                             // Every face of a surface body as it is (#9305).
-                            crate::SplitSheet::Body => {
+                            crate::SplitSheet::Body if tool_bodies.is_empty() => {
                                 if !tb.body.is_surface() {
                                     return Err(DocError::Invalid(format!("`{}` is not a surface body, so it cannot split as a whole", t.body)));
                                 }
                                 let faces: Vec<usize> = (0..tb.body.face_count()).collect();
-                                kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?
+                                traced(kernel::split_body_by_faces(&mb.body, &sheet(tb)?, face, &faces)?)?
                             }
-                        };
-                        // The pieces keep the planar roles of the faces they share with the body (#565).
-                        parts
-                            .into_iter()
-                            .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
-                            .collect::<Result<Vec<_>>>()?
+                            // Several surface bodies, each whole and as it is (#13303): each in turn
+                            // cuts the pieces it crosses into closed solids and leaves the others,
+                            // and each must cut one. The tool face gives the first body's sides,
+                            // the first face each other body's.
+                            crate::SplitSheet::Body => {
+                                let names: Vec<&crate::BodyName> = std::iter::once(&t.body).chain(tool_bodies).collect();
+                                // A further placement's body (`Sheet (Part:2)`) is not in the model,
+                                // which holds a component's first placement only: it is placed where
+                                // its occurrence puts it, in the body's frame, as a combine's tool
+                                // is (#20040).
+                                let missing: Vec<&str> = names.iter().map(|n| n.0.as_str()).filter(|n| st.body(n).is_none()).collect();
+                                let placed = if missing.is_empty() {
+                                    ModelState::default()
+                                } else {
+                                    with_placed_copies(doc, st, std::borrow::Cow::Owned(ModelState::default()), &body_world(doc, &mb), &missing)
+                                        .into_owned()
+                                };
+                                let mut pieces = vec![input.clone()];
+                                for (k, name) in names.iter().enumerate() {
+                                    if names.get(..k).is_some_and(|before| before.contains(name)) {
+                                        return Err(DocError::Invalid(format!("`{name}` is a splitting tool twice")));
+                                    }
+                                    if *name == body {
+                                        return Err(DocError::Invalid(format!("`{body}` cannot split itself")));
+                                    }
+                                    let (tool, in_frame) = match st.body(name) {
+                                        Some(b) => (b, false),
+                                        None => (placed.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?, true),
+                                    };
+                                    if !tool.body.is_surface() {
+                                        return Err(DocError::Invalid(format!("`{name}` is not a surface body, so it cannot split as a whole")));
+                                    }
+                                    let side = if k == 0 { face } else { 0 };
+                                    let tool = if in_frame { tool.body.clone() } else { sheet(tool)? };
+                                    let mut next = Vec::with_capacity(pieces.len() + 1);
+                                    let mut cut = false;
+                                    for piece in pieces {
+                                        match kernel::split_body_by_sheet_where_it_cuts(&piece.body, &tool, side)? {
+                                            Some(parts) => {
+                                                cut = true;
+                                                for part in parts {
+                                                    next.push(piece.then(part.with_preserved_planar_sources(&piece.body)?));
+                                                }
+                                            }
+                                            None => next.push(piece),
+                                        }
+                                    }
+                                    if !cut {
+                                        return Err(DocError::Invalid(format!("`{name}` does not cut `{body}` through")));
+                                    }
+                                    pieces = next;
+                                }
+                                pieces
+                            }
+                        }
                     }
                 }
                 None => {
@@ -15273,10 +15774,18 @@ fn eval_feature_kind(
             let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
             apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
             if tools.iter().any(|t| t == target) {
                 return Err(DocError::Invalid("a body cannot be combined with itself".into()));
             }
+            // A cut's clearance (#3774): each tool is grown by it before it cuts.
+            let offset = match offset {
+                Some(_) if *operation != Operation::Cut => {
+                    return Err(DocError::Invalid("an offset is only for a cut".into()));
+                }
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
+            };
             // Each body is kept in its own component's frame: a tool placed differently from the
             // target is moved into the target's frame, so it is combined where it is shown (#3383).
             // A tool placed exactly as the target is left as it is.
@@ -15356,6 +15865,9 @@ fn eval_feature_kind(
                     let surface =
                         std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| b.is_surface()));
                     if let Some(name) = surface {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
                         )));
@@ -15363,6 +15875,9 @@ fn eval_feature_kind(
                 }
                 Operation::Cut => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
                         )));
@@ -15370,6 +15885,9 @@ fn eval_feature_kind(
                 }
                 Operation::Intersect => {
                     if let Some(name) = tools.iter().find(|n| st.body(n).or_else(|| placed.body(n)).is_some_and(|b| !b.is_closed())) {
+                        if st.body(name).or_else(|| placed.body(name)).is_some_and(ModelBody::is_closed_sheet) {
+                            return Err(closed_sheet_refusal(name));
+                        }
                         return Err(DocError::Invalid(format!(
                             "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
                         )));
@@ -15377,6 +15895,47 @@ fn eval_feature_kind(
                 }
                 _ => {}
             }
+            // The grown copies cut; the tool bodies stay as they are.
+            let tb = if offset == 0.0 {
+                tb
+            } else {
+                let round = match (offset_edges, offset_radius) {
+                    (crate::OffsetEdges::Sharp, None) => None,
+                    (crate::OffsetEdges::Sharp, Some(_)) => {
+                        return Err(DocError::Invalid("a rounding radius is only for an offset with round edges".into()));
+                    }
+                    (crate::OffsetEdges::Round, None) => Some(offset.abs()),
+                    (crate::OffsetEdges::Round, Some(e)) => Some(val(vals, e, Kind::Length)?),
+                };
+                // Each picked face goes to the tool it lies on (exactly: its nearest face).
+                let mut picked: Vec<Vec<Vec3>> = vec![Vec::new(); tb.len()];
+                for p in offset_faces.iter().map(|p| p.0) {
+                    let nearest = tb
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, t)| t.body.nearest_face(p).map(|(d, _)| (d, i, t.body.size())))
+                        .min_by(|a, b| a.0.total_cmp(&b.0));
+                    match nearest {
+                        Some((d, i, size)) if d <= size * 1e-3 + 1e-6 => {
+                            if let Some(slot) = picked.get_mut(i) {
+                                slot.push(p);
+                            }
+                        }
+                        _ => return Err(DocError::Invalid(format!("no tool face at ({:.3}, {:.3}, {:.3}) to offset", p.x, p.y, p.z))),
+                    }
+                }
+                tb.into_iter()
+                    .zip(picked)
+                    .map(|(t, at)| match (offset_faces.is_empty(), at.is_empty()) {
+                        // Faces are picked, none of this tool's: it cuts as it is.
+                        (false, true) => Ok(t),
+                        (all, _) => {
+                            let faces = if all { None } else { Some(at.as_slice()) };
+                            Ok(Traced::step(kernel::offset_tool(&t.body, faces, offset, round)?, &[&t]))
+                        }
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
@@ -17510,15 +18069,22 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     let plane = &square_to_axes(plane);
     let mut parts = Vec::new();
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
-        let Some(part) = part else { continue };
-        // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
-        let section = Some("section".to_string());
-        let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
-        parts.push(Traced::step(part, &[input, &tool]));
+        if let Some(part) = half_traced(input, plane, positive)? {
+            parts.push(part);
+        }
     }
     Ok(parts)
+}
+
+/// The part of `input` on one side of a plane (`None` when nothing is there), with its history.
+fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let section = Some("section".to_string());
+    let caps = if positive { [section, None] } else { [None, section] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
 /// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat

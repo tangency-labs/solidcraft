@@ -78,6 +78,12 @@ or a law r(t).
   at each pair of support feet. The local tangent planes give the radius from their wedge and
   the requested distance. As the normals approach those of an adjacent planar strip, both
   constructions give the same radius and the same end chord.
+  A second chamfer kind, setbacks held at every station (each foot a straight line of its size
+  from the edge, in the plane square to it), is defined but not built: its record
+  (`ChamferKindRecord::Setbacks`, its radius `RadiusRecord::Edge`, the edge as its leader) is
+  refused when read. Its station, and the definitions it is built under (where stations
+  cross, which root is the foot, ends and corners), are in
+  `blend::fillet_section::setback_station`.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points.
