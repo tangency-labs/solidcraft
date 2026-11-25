@@ -3132,9 +3132,9 @@ mod drafts {
     /// prism's 6 faces, 12 edges and 8 vertices, the foot's ends at x = +-2.5.
     #[test]
     fn a_short_wall_drafted_short_of_where_its_sides_converge() {
-        all_fixes();
         // atan(1/8), the double nearest it
         const EIGHTH: f64 = 0.124_354_994_546_761_44;
+        all_fixes();
         let mut points = CONVERGING_TOP.to_vec();
         points.extend([
             [-15.0, 0.0, 0.0],
@@ -3156,9 +3156,9 @@ mod drafts {
     /// edge. V = 4 [15 Y^2 - Y^3/3] from 10 to 15 = 13000/3; 6 faces, 11 edges, 7 vertices.
     #[test]
     fn a_short_wall_drafted_onto_where_its_sides_converge() {
-        all_fixes();
         // atan(1/4), the double nearest it
         const QUARTER: f64 = 0.244_978_663_126_864_14;
+        all_fixes();
         let mut points = CONVERGING_TOP.to_vec();
         points.extend([[-15.0, 0.0, 0.0], [15.0, 0.0, 0.0], [0.0, 15.0, 0.0]]);
         assert!(draft_the_short_wall(
@@ -3177,9 +3177,9 @@ mod drafts {
     /// V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
     #[test]
     fn a_short_wall_drafted_past_where_its_sides_converge() {
-        all_fixes();
         // atan(1/2), the double nearest it
         const HALF: f64 = 0.463_647_609_000_806_1;
+        all_fixes();
         let mut points = CONVERGING_TOP.to_vec();
         points.extend([
             [-15.0, 0.0, 0.0],
@@ -3215,6 +3215,61 @@ mod drafts {
             [6, 12, 8],
             &points
         ));
+    }
+
+    /// #1126's flip takes plane neighbours only: with the right side an arc about
+    /// (0, -5, 0) through (15, 0) and (5, 10) instead of a line, drafting the short wall
+    /// by atan(1/2) is refused, as before the flip, by a typed refusal (the arc's
+    /// cylinder tops out at y = 5 sqrt(10) - 5, short of the wall's foot at y = 15, so
+    /// the wall's loop gap on that side has no certified closure).
+    #[test]
+    fn a_short_wall_drafted_past_a_curved_side_is_refused() {
+        use crate::sweep::Curve;
+        const HALF: f64 = 0.463_647_609_000_806_1;
+        all_fixes();
+        let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+            start: [a[0], a[1], 0.0],
+            end: [b[0], b[1], 0.0],
+        };
+        let profile = vec![
+            line([-15.0, 0.0], [15.0, 0.0]),
+            Curve::Arc {
+                center: [0.0, -5.0, 0.0],
+                axis: Z,
+                reference: [1.0, 0.0, 0.0],
+                // sqrt(250), atan(1/3), atan(3): the doubles nearest them
+                radius: 15.811_388_300_841_896,
+                start: 0.321_750_554_396_642_2,
+                end: 1.249_045_772_398_254_4,
+            },
+            line([5.0, 10.0], [-5.0, 10.0]),
+            line([-5.0, 10.0], [-15.0, 0.0]),
+        ];
+        let b = crate::sweep::extrude(
+            &profile,
+            Z,
+            20.0,
+            0.0,
+            crate::sweep::DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let o = order(&b);
+        let wall = face(&b, &o, |bx| {
+            (bx.min().y - 10.0).abs() < 1e-9 && (bx.max().y - 10.0).abs() < 1e-9
+        });
+        let got = draft(&b, &o, &[wall], [0.0, 0.0, 20.0], Z, Z, HALF);
+        println!("#1126 curved side: {got:?}");
+        assert!(
+            matches!(
+                got,
+                Err(Error::OffsetRefused {
+                    why: crate::OffsetRefusal::LoopGapUncertified,
+                    ..
+                })
+            ),
+            "{got:?}"
+        );
     }
 }
 
