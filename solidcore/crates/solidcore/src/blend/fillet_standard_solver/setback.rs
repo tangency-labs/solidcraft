@@ -139,6 +139,12 @@ impl SetbackFs {
     /// The solver's run-time type.
     pub const TYPE: i64 = SETBACK_FS_TYPE;
 
+    /// The solver's kind: [`FilletSolverType::Setbacks`].
+    #[must_use]
+    pub const fn solver_type(&self) -> FilletSolverType {
+        FilletSolverType::Setbacks
+    }
+
     /// The solver of the edge of `edgeuse` chamfered by `setbacks` (along the edge use's face
     /// and its radial's): the edge use and its radial, the edge's curve and interval, the
     /// offsets' orientations as the variable-radius solver finds them (`sm_SectorSides` at
@@ -883,7 +889,7 @@ impl FilletSolverOps for SetbackFs {
     }
 
     fn solver_type(&self) -> Result<FilletSolverType> {
-        Ok(FilletSolverType::Setbacks)
+        Ok(SetbackFs::solver_type(self))
     }
 
     fn setback_mut(&mut self) -> Option<&mut SetbackFs> {
