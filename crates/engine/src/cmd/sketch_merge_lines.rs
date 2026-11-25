@@ -14,7 +14,7 @@ use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_geom::prelude::*;
-use solidcraft_kernel::services::affine;
+use solidcraft_kernel::affine;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, coincident_points, edit};
