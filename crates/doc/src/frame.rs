@@ -19,7 +19,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_kernel::services::prism::tapered_flange_ends;
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};
@@ -35,6 +34,12 @@ pub mod sizes;
 pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
+
+/// Is `v` a finite length within [`MAX_PROFILE_SIZE`] either way: a coordinate of a member's
+/// `locate`, or an offset from its anchor, the engine takes.
+pub fn within_profile_size(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_PROFILE_SIZE
+}
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
 /// are radii smaller than this but not 0.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
@@ -350,8 +355,8 @@ impl crate::walk::Walk for ProfileSpec {
 
 pub use crate::eval::frame_member::{
     LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
-    is_member_wire, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies,
-    overlap_parent, section_view,
+    is_member_wire, located_point, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross,
+    members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
 pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
@@ -1146,6 +1151,17 @@ pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
+/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
+/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
+/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
+/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
+/// non-finite input gives a non-finite answer, never a panic.
+fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
+    let change = inside / 2.0 * slope.to_radians().tan();
+    (thickness - change, thickness + change)
 }
 
 /// Group placements as flat views of the same feature: same id, component, profile, pinned

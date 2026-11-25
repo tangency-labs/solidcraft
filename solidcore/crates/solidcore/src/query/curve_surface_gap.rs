@@ -3805,6 +3805,172 @@ pub(crate) fn structured_trim_image_gap_bound(
     })
 }
 
+/// Not upstream (#19910): how much farther the image of a UV trim on its surface can lie from
+/// its curve after a move than `‖A‖` times the distance [`trim_image_gap_bound_within`] proves
+/// before it, where `A x = L x + o` is the affine map of `m` ([`Axis2Placement::matrix`]
+/// layout, `L` its upper 3x3 block, `o` its last column) and `‖A‖` is
+/// [`affine_linear_norm_upper`] of `m`. `before` and `after` are `(surface, curve, trim)` of
+/// the pair before and after the move, both over `range`.
+///
+/// The bound is `δc + δs + slack + residual`, rounded up:
+/// - `δc` is the largest distance from a control point of the curve's data after the move to
+///   `A` of the matching one before (enclosed), and `δs` the same for the surface's net;
+/// - `slack` is the curve's own slack after the move and `residual` its net's distance to the
+///   surface ([`bisection_residual`]).
+///
+/// Why it holds: the data before and after have the same degrees, knots and weights (checked
+/// bit for bit), so at every parameter they share their rational basis, which is non-negative
+/// with sum `1` for positive weights. A point of the data after the move is then within the
+/// largest control point distance of `A` of the point before (`A` is affine). The trims are
+/// the same data and lie within the net's knot range (their control points do), so the net is
+/// evaluated by that basis and not continued past its ends. For any correspondence `t -> w(t)`,
+/// `|c1(t) - n1(w)| <= δc + ‖A‖ |c0(t) - n0(w)| + δs` and the curve and surface after the
+/// move are within `slack` and `residual` of their data. The proof before bounds
+/// `|c0(t) - n0(w)|` for its correspondence by its bound, whose other terms are not negative.
+///
+/// `None` where the pair has no exact data before or after ([`TrimPair::of`]), the data's
+/// structure differs, a weight is not positive, the trim changed, the net is an offset's or
+/// the trim is not within its knots, or a term is not finite.
+///
+/// [`Axis2Placement::matrix`]: crate::geom::axis2_placement::Axis2Placement::matrix
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn moved_pair_room(
+    k: &Kernel,
+    before: (&Surface, &Curve, &Curve),
+    after: (&Surface, &Curve, &Curve),
+    range: [f64; 2],
+    m: [[f64; 4]; 4],
+) -> Result<Option<f64>> {
+    let (s0, c0, w0) = before;
+    let (s1, c1, w1) = after;
+    let Some(p0) = TrimPair::of(k, s0, c0, w0, range)? else {
+        return Ok(None);
+    };
+    let Some(p1) = TrimPair::of(k, s1, c1, w1, range)? else {
+        return Ok(None);
+    };
+    if p0.wn != p1.wn || p0.net.offset.is_some() || p1.net.offset.is_some() {
+        return Ok(None);
+    }
+    let (a0, a1) = (&p0.cn, &p1.cn);
+    if a0.p != a1.p || a0.n != a1.n || a0.u != a1.u {
+        return Ok(None);
+    }
+    let (n0, n1) = (&p0.net.net, &p1.net.net);
+    if n0.p != n1.p || n0.q != n1.q || n0.nu != n1.nu || n0.nv != n1.nv || n0.u != n1.u {
+        return Ok(None);
+    }
+    if n0.v != n1.v || !trim_within_knots(&p1.wn, n1) {
+        return Ok(None);
+    }
+    let Some(count) = n0.nu.checked_mul(n0.nv) else {
+        return Ok(None);
+    };
+    let (Some(dc), Some(ds)) = (
+        moved_points_room(&a0.pw, &a1.pw, a0.n, m),
+        moved_points_room(&n0.pw, &n1.pw, count, m),
+    ) else {
+        return Ok(None);
+    };
+    let Some(residual) = bisection_residual(s1, &p1.net) else {
+        return Ok(None);
+    };
+    let room = Ivl::from(dc) + Ivl::from(ds) + Ivl::from(p1.c_slack) + Ivl::from(residual);
+    Ok(room.hi.is_finite().then_some(room.hi))
+}
+
+/// Not upstream (#19910): an upper bound on the spectral norm of the upper 3x3 block `L` of
+/// `m` ([`moved_pair_room`]): `‖L‖² = λmax(LᵀL) <= 1 + ‖LᵀL - I‖`, and the spectral norm of
+/// the symmetric `LᵀL - I` is at most its Frobenius norm, enclosed. `None` unless finite.
+pub(crate) fn affine_linear_norm_upper(m: [[f64; 4]; 4]) -> Option<f64> {
+    let [[a, b, c, _], [d, e, f, _], [g, h, i, _], _] = m;
+    let col = |x: f64, y: f64, z: f64| V3 {
+        x: Ivl::from(x),
+        y: Ivl::from(y),
+        z: Ivl::from(z),
+    };
+    let (x, y, z) = (col(a, d, g), col(b, e, h), col(c, f, i));
+    let one = Ivl::from(1.0);
+    let sq = |v: Ivl| {
+        let m = Ivl::from(v.mag());
+        m * m
+    };
+    let diagonal = sq(dot(x, x) - one) + sq(dot(y, y) - one) + sq(dot(z, z) - one);
+    let off = sq(dot(x, y)) + sq(dot(x, z)) + sq(dot(y, z));
+    let frobenius = (diagonal + Ivl::from(2.0) * off).sqrt();
+    let norm = (one + Ivl::from(frobenius.hi)).sqrt().hi;
+    norm.is_finite().then_some(norm)
+}
+
+/// The largest distance from a homogeneous control point of `after` to the affine map of `m`
+/// ([`moved_pair_room`]) of the matching one of `before`, enclosed; `None` unless both hold
+/// `count` points with equal positive weights and every distance is finite.
+fn moved_points_room(before: &[f64], after: &[f64], count: usize, m: [[f64; 4]; 4]) -> Option<f64> {
+    let [r0, r1, r2, _] = m;
+    let row = |r: [f64; 4], p: V3<Ivl>| {
+        let [a, b, c, o] = r;
+        Ivl::from(a) * p.x + Ivl::from(b) * p.y + Ivl::from(c) * p.z + Ivl::from(o)
+    };
+    if before.len() != count.checked_mul(4)? || after.len() != before.len() {
+        return None;
+    }
+    let mut worst = 0.0_f64;
+    for (q0, q1) in before.chunks_exact(4).zip(after.chunks_exact(4)) {
+        let (&[x0, y0, z0, w0], &[x1, y1, z1, w1]) = (q0, q1) else {
+            return None;
+        };
+        // (the same weights give the same rational basis before and after)
+        if w0.to_bits() != w1.to_bits() {
+            return None;
+        }
+        let p0 = point_of([x0, y0, z0, w0])?;
+        let p1 = point_of([x1, y1, z1, w1])?;
+        let moved = V3 {
+            x: row(r0, p0),
+            y: row(r1, p0),
+            z: row(r2, p0),
+        };
+        worst = worst.max(norm_upper(minus(p1, moved))?);
+    }
+    Some(worst)
+}
+
+/// Whether every control point of the trim data `wn` lies within the knot range of `net` in
+/// `u` and `v` (enclosed), so the trim's image is evaluated within the net's knots
+/// ([`moved_pair_room`]).
+fn trim_within_knots(wn: &NurbsCurve, net: &Nurbs) -> bool {
+    let (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) = (
+        net.u.get(net.p),
+        net.u.get(net.nu),
+        net.v.get(net.q),
+        net.v.get(net.nv),
+    ) else {
+        return false;
+    };
+    // (`lo <= x / w <= hi` for a positive weight `w` is `lo w <= x <= hi w`, decided exactly: a
+    // trim on the net's edge, as a sphere's seam trims are, lies on it, where an enclosed
+    // quotient may round past it)
+    let within = |x: f64, w: f64, lo: f64, hi: f64| {
+        use crate::geom::expansion::{product, sign, sub};
+        let (Some(l), Some(h)) = (product(lo, w), product(hi, w)) else {
+            return false;
+        };
+        sign(&sub(&[x], &l)) >= 0 && sign(&sub(&h, &[x])) >= 0
+    };
+    wn.pw.chunks_exact(4).all(|q| {
+        let &[x, y, _, w] = q else {
+            return false;
+        };
+        [x, y, w, u0, u1, v0, v1].iter().all(|c| c.is_finite())
+            && w > 0.0
+            && within(x, w, u0, u1)
+            && within(y, w, v0, v1)
+    })
+}
+
 /// [`trim_image_gap_bound_up_to`] for a caller that also takes any bound at most `enough` as
 /// it comes: a piece whose bound (with the curve's slack) is at most `enough` is not cut
 /// further. The bound is still a proved bound, but where it is at most `enough` it may be any

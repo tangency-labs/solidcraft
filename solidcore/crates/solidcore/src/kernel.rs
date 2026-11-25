@@ -153,6 +153,14 @@ pub struct Caches {
     /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
     /// flag on the body it checks. Crate-private: not a kernel option.
     pub(crate) hold_trim_raise: bool,
+    /// Not upstream (tangency-labs/solidcore#3399): whether a UV trim built now that would
+    /// raise its edge's tolerance is fitted again, tighter, before it does
+    /// (`topology::edgeuse::p3::refit_raising_trim`). Set only while a boolean's cleanup tests
+    /// whether two faces cover each other without growing a tolerance
+    /// (`topology::edge::is_topological_without_growth`), and builds their trims to measure
+    /// their domains. A [`Cell`] so that test can set it through the `&Kernel` it takes.
+    /// Crate-private: not a kernel option.
+    pub(crate) refit_raising_trims: Cell<bool>,
 }
 
 impl Default for Caches {
@@ -161,6 +169,7 @@ impl Default for Caches {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
+            refit_raising_trims: Cell::new(false),
         }
     }
 }
@@ -172,6 +181,7 @@ impl Caches {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
             hold_trim_raise: self.hold_trim_raise,
+            refit_raising_trims: Cell::new(self.refit_raising_trims.get()),
             ..Self::default()
         };
     }
@@ -214,6 +224,7 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    face_intersections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
 }
@@ -451,6 +462,16 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
+    /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
+    /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
+    /// faces near each other's plane, the spans of a curved face's control net. Not the
+    /// fork's.
+    #[must_use]
+    pub fn face_intersections(&self) -> u64 {
+        self.face_intersections.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -495,6 +516,7 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.face_intersections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
     }
@@ -521,6 +543,12 @@ impl WorkCounters {
     pub(crate) fn add_trim_deviation_bound(&self) {
         self.trim_deviation_bounds
             .set(self.trim_deviation_bounds.get().saturating_add(1));
+    }
+
+    /// Counts one pair of faces intersected.
+    pub(crate) fn add_face_intersection(&self) {
+        self.face_intersections
+            .set(self.face_intersections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
@@ -992,7 +1020,7 @@ pub struct Kernel {
     pub upstream_ub_passed: Vec<&'static str>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
-    /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
+    /// the surface value (`true` by default; a caller sets it), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
     /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
@@ -1092,12 +1120,6 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
-    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
-    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
-    /// caches, which call through the same seam.
-    #[cfg(feature = "wr57-replay")]
-    pub replay: crate::surface::surface::replay::ReplaySeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1147,7 +1169,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             upstream_ub_passed: Vec::new(),
-            memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
+            memoize_curve_caches: true,
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
@@ -1171,8 +1193,6 @@ impl Kernel {
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
             strip_probe: Arc::default(),
-            #[cfg(feature = "wr57-replay")]
-            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 

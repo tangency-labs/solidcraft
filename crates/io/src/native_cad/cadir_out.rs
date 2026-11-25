@@ -13,7 +13,7 @@
 //! placement that is not a rigid one (a mirror, or a number that is not finite), the bodies are
 //! written where the design shows them, all in that root definition.
 //!
-//! Each body: its exact B-rep ([`solidcore_cadir::write_body`], from the body's record), and the
+//! Each body: its exact B-rep ([`solidcraft_kernel::write_cadir`], from the body's record), and the
 //! mesh the design is drawn with at the export's quality ([`crate::display_mesh_at`]) as a
 //! tessellation of it, so the writer writes SolidCraft's mesh rather than meshing again. A mesh
 //! body has the mesh alone, as is every body of an export asked for meshes only
@@ -1119,12 +1119,12 @@ impl<'a> Builder<'a> {
 
     /// `geometry`'s exact shape written as body `name` under `prefix`, once the writer takes it
     /// ([`Writes::admit`]).
-    fn brep(&mut self, geometry: &solidcraft_kernel::Body, prefix: &str, name: &str) -> Result<solidcore_cadir::Written, String> {
+    fn brep(&mut self, geometry: &solidcraft_kernel::Body, prefix: &str, name: &str) -> Result<solidcraft_kernel::CadirWritten, String> {
         let record = solidcraft_kernel::brep_record(geometry).map_err(|e| e.to_string())?;
         let tolerance = record.tolerance;
         if let Some(admit) = self.writes.admit {
             let mut alone = CadIr::empty();
-            solidcore_cadir::write_body(&mut alone.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
+            solidcraft_kernel::write_cadir(&mut alone.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
             if let Some(t) = PositiveLength::new(tolerance) {
                 alone.tolerances.linear = t;
             }
@@ -1134,7 +1134,7 @@ impl<'a> Builder<'a> {
             alone.finalize();
             admit(&alone).map_err(|e| format!("cadmpeg's {} writer cannot write it yet ({e})", self.writes.label))?;
         }
-        let w = solidcore_cadir::write_body(&mut self.ir.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
+        let w = solidcraft_kernel::write_cadir(&mut self.ir.model, &record, prefix, Some(name)).map_err(|e| e.to_string())?;
         if tolerance.is_finite() && tolerance > 0.0 {
             self.tolerance = Some(self.tolerance.map_or(tolerance, |t| t.max(tolerance)));
         }

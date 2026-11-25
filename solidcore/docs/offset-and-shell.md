@@ -186,8 +186,15 @@ unbuilt result was non-manifold.
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second
 fundamental forms' homogeneous coefficients. Since A_u × A_v carries a factor w, the bracket
 X′⁴ − d X′ H′ + d² w² K′ of the same sign is what is bounded, four times deg w lower in each
-parameter. Each patch's bound is subdivided into quarters on an explicit stack, at most
-`MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
+parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′². The forms are built with
+the patch moved to its own frame, which leaves them unchanged, and carry a running error bound
+through their construction and every quartering (`bernstein::Bounded`), so their rounding follows
+the patch's size, not its distance from the origin. The bound starts from each patch's net as the
+Bezier decomposition computed it; the decomposition's own rounding is not counted. A patch is
+certified when the coefficients' ranges, widened by that bound, keep it above 0, and a form that
+is not finite certifies nothing. Each patch's bound is subdivided into quarters on an explicit
+stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold
+once the face's own partials prove it in interval arithmetic (otherwise it is subdivided), and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
 
@@ -278,6 +285,20 @@ branches, multiple attachments, cavity-shell branches, and infeasibility without
 plane pair still require the general arrangement and cavity rule. This event does not complete
 S3–S5 or change the existing refusal for exactly meeting planes.
 
+The executive also takes out a face whose offset is empty because its neighbours' offsets
+overtake it (a face eliminated by the offset, one of the changes of topology a shell meets
+[6]), for one shape so far
+(`offset_executive/empty_lens.rs`): a face of one loop of two edges (a lens, such as a notch's
+ceiling where it breaks out through a curved wall), each edge shared with one other face, its
+two vertices of those three faces only. Its offset is bounded by the two curves its neighbours'
+offsets cut on it, which meet at the offsets of its two vertices; where neither curve's trim
+found a neighbour's offset at either end (both ends are drops of their vertices,
+`TrimmedEdge::unreached`, `offset_geometry_creation.rs`), the two curves do not meet within the
+faces' extensions and the region between them is empty. The lens's offset faces are deleted
+and its two edges' offsets on the neighbours mated across it, as a collapsed round's are: the
+neighbours' offsets meet directly where the lens was, the edges between them at its two
+vertices running on into each other along one curve.
+
 ### 5.2 Mitres and the reach, as they run today
 
 ![A convex edge between faces F and G with sector angle α. Each face's offset by d is drawn; F's offset is extended past F's edge until it meets G's offset at M. The reach r from the edge to M's foot is marked, and one more d past it.](offset-and-shell/mitre-reach.svg)
@@ -304,8 +325,8 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
 - **The mitre** (`OffsetGeometryCreation::mate_edges`, `offset_geometry_creation.rs`) intersects
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
-  edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
-  the two surfaces is replaced by that curve.
+  edge uses. A marched piece lying on an exact line or conic of the two surfaces is replaced by
+  that curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
