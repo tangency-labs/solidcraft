@@ -819,6 +819,7 @@ fn convert_rule(rv: &crate::sheet::RuleValues) -> crate::ConvertRule {
         corner_relief_size: rv.corner_relief,
         relief_width: rv.relief_width,
         relief_depth: rv.relief_depth,
+        bend_relief: rv.bend_relief_shape,
     }
 }
 
@@ -1305,9 +1306,19 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
-            if surface_flange_sheet(st, body, f, edges).is_some() =>
-        {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            height_from,
+            corner_relief_shape,
+            corner_relief,
+            bend_relief_shape,
+        } if surface_flange_sheet(st, body, f, edges).is_some() => {
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1382,6 +1393,14 @@ pub(super) fn sheet_eval(
                         },
                     )),
                 };
+            // The bend relief these flanges ask for in place of the rule's, at their bends' free ends.
+            let own_bend = match bend_relief_shape {
+                Some(name) => Some(
+                    sheet::BendReliefShape::parse(name)
+                        .ok_or_else(|| DocError::Invalid(format!("unknown bend relief shape `{name}` (rectangular, obround or tear)")))?,
+                ),
+                None => None,
+            };
             let n0 = sk.sheet.panels.len();
             let several = picks.len() > 1;
             // Each edge's error names it, among several.
@@ -1406,6 +1425,9 @@ pub(super) fn sheet_eval(
                     for &joint in &joints {
                         sk.corner_reliefs.push((joint, relief, size, order));
                     }
+                }
+                if let Some(shape) = own_bend {
+                    sk.bend_reliefs.extend(joints.iter().map(|&joint| (joint, shape)));
                 }
                 made.push(joints);
             }
