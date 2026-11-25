@@ -1188,12 +1188,16 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
 /// A group menu's row height.
 pub const ROW_H: f32 = 30.0;
 
-/// A list row's pin centre, in from the row's right edge; its ⋯ sits this far left of the pin.
-const PIN_INSET: f32 = 13.0;
+/// The centre of a list row's last button (its ⋯, or its pin with `MenuStyle::row_pin`), in from
+/// the row's right edge; with a pin, the ⋯ sits [`MORE_GAP`] left of it.
+const MORE_INSET: f32 = 13.0;
 const MORE_GAP: f32 = 12.0;
 const ROW_BUTTON: f32 = 20.0;
-/// What a list row keeps clear at its end for the ⋯ and the pin.
-const ROW_END: f32 = PIN_INSET + ROW_BUTTON + MORE_GAP + 4.0;
+
+/// What a list row keeps clear at its end for its buttons.
+fn row_end(row_pin: bool) -> f32 {
+    MORE_INSET + if row_pin { ROW_BUTTON + MORE_GAP } else { ROW_BUTTON / 2.0 } + 4.0
+}
 
 /// What a click on a group menu's row or grid icon asks for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1248,13 +1252,15 @@ pub struct MenuStyle<'a> {
     pub focus: egui::Id,
     /// Each entry's centre, under each of these prefixes followed by its id.
     pub entry: &'a [&'a str],
-    /// An entry's pin, a hot grid icon, and what the search points out.
+    /// A grid icon's pin, a hot grid icon, and what the search points out.
     pub pin: &'a str,
-    /// A list row's ⋯ beside its pin (opens the row's menu, as a right-click does) and its hover text.
+    /// A list row's ⋯ (opens the row's menu, as a right-click does) and its hover text.
     pub more: &'a str,
     pub more_tip: &'a str,
     pub hot: &'a str,
     pub reveal: &'a str,
+    /// A list row also shows a hover pin beside its ⋯ (the layout before #11853).
+    pub row_pin: bool,
 }
 
 impl MenuStyle<'_> {
@@ -1287,8 +1293,9 @@ pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     ui.add_space(4.0);
 }
 
-/// The widest menu row, at least 200, including space for a checkmark beside icon-bearing entries.
-pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str, &'a str, &'a str, bool)>) -> f32 {
+/// The widest menu row, at least 200, including space for a checkmark beside icon-bearing entries
+/// and for a pin when `row_pin` ([`MenuStyle::row_pin`]).
+pub fn menu_width<'a>(ui: &egui::Ui, row_pin: bool, entries: impl IntoIterator<Item = (&'a str, &'a str, &'a str, bool)>) -> f32 {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_button);
     entries
@@ -1301,7 +1308,7 @@ pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str,
                 ui.painter().layout_no_wrap(shortcut.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0
             };
             let check = crate::MenuItem::trailing_check_width(icon.into(), checkable);
-            6.0 + 20.0 + 8.0 + label + key + ROW_END + 4.0 + check
+            6.0 + 20.0 + 8.0 + label + key + row_end(row_pin) + 4.0 + check
         })
         .fold(200.0, f32::max)
 }
@@ -1358,7 +1365,7 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
 }
 
 /// One command row of a group's menu: icon, label and shortcut, with the hover background under
-/// the pointer or keyboard focus (like every menu), and a pin at its end. `revealed` is the pulse
+/// the pointer or keyboard focus (like every menu), and a ⋯ at its end. `revealed` is the pulse
 /// strength when the search points this row out (#7287). Returns what was chosen, with the row's
 /// response (for the app's drags and tips).
 pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Option<f32>, style: &MenuStyle) -> (Option<MenuAction>, egui::Response) {
@@ -1375,13 +1382,15 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     if resp.drag_started() {
         resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
     }
-    // The pin at the row's end (above the row, so it takes its own clicks).
-    let pr = Rect::from_center_size(pos2(rect.right() - PIN_INSET, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
-    let pin = ui.interact(pr, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click());
-    // Its ⋯ beside the pin: the entry's menu, as a right-click on the row opens it.
-    let mr = Rect::from_center_size(pos2(pr.left() - MORE_GAP, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
+    // The ⋯ at the row's end (above the row, so it takes its own clicks): the entry's menu, as a
+    // right-click on the row opens it. Pinning is there, in place of a pin button (#11853), unless
+    // `row_pin` puts the pin back at the end with the ⋯ beside it.
+    let end = Rect::from_center_size(pos2(rect.right() - MORE_INSET, rect.center().y), vec2(ROW_BUTTON, ROW_BUTTON));
+    let pin = style.row_pin.then(|| (end, ui.interact(end, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click())));
+    let mr = if style.row_pin { end.translate(vec2(-(ROW_BUTTON + MORE_GAP), 0.0)) } else { end };
     let more = ui.interact(mr, ui.scope_id().with(("dropdown_more", entry.id)), Sense::click());
-    let pointer_on = (resp.hovered() || pin.hovered() || more.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
+    let pin_hovered = pin.as_ref().is_some_and(|(_, r)| r.hovered());
+    let pointer_on = (resp.hovered() || pin_hovered || more.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     // A checkable row announces its on/off state, since its label no longer says it.
     resp.widget_info(|| match entry.checked {
         Some(on) => egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && entry.enabled, on, entry.label),
@@ -1396,7 +1405,7 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     row.checked = entry.checked;
     row.highlighted = hot || revealed.is_some();
     row.shortcut = entry.shortcut;
-    row.paint(ui, rect, &resp, ROW_END);
+    row.paint(ui, rect, &resp, row_end(style.row_pin));
     if let Some(strength) = revealed {
         paint_reveal(ui.painter(), rect, &style.accent, strength, false);
         solidcraft_ui_registry::publish_rect(style.reveal, rect);
@@ -1409,11 +1418,13 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     }
     let p = ui.painter();
     if pointer_on || resp.has_focus() {
-        if pin.hovered() {
-            p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
+        if let Some((pr, _)) = pin {
+            if pin_hovered {
+                p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
+            }
+            crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
+            solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
         }
-        crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
-        solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
         if more.hovered() {
             p.rect_filled(mr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
         }
@@ -1422,15 +1433,17 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
         }
         solidcraft_ui_registry::publish_handle(&handle(style.more, entry.id), mr.center());
     }
-    let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
     // The menu's rect from the last pass: tips sit beside it, never over its rows (#10481).
     let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(rect);
-    if pin.clicked() {
-        return (Some(MenuAction::TogglePin), resp);
+    if let Some((_, pin)) = &pin {
+        if pin.clicked() {
+            return (Some(MenuAction::TogglePin), resp);
+        }
+        let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
+        menu_tip(ui, menu, pin, |ui| {
+            ui.label(tip);
+        });
     }
-    menu_tip(ui, menu, &pin, |ui| {
-        ui.label(tip);
-    });
     menu_tip(ui, menu, &more, |ui| {
         ui.label(style.more_tip);
     });
@@ -1766,7 +1779,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
     if resp.drag_started() {
         resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
     }
-    // The pin in the corner, as at a list row's end. It takes clicks (above the cell) only once
+    // The pin in the corner. It takes clicks (above the cell) only once
     // the pointer has rested on the icon for PIN_DELAY: until then a click anywhere runs the
     // command, so a quick click near the corner never pins or unpins it by accident.
     let pr = Rect::from_min_size(pos2(rect.right() - 15.0, rect.top()), vec2(15.0, 15.0));

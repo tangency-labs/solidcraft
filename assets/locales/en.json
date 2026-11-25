@@ -7272,7 +7272,7 @@
   "ui.ribbon_exit": "Exit",
   "ui.ribbon_labels": "Show text under ribbon icons",
   "ui.ribbon_menus_skip_pinned": "Leave pinned commands out of the drop-down menus",
-  "ui.ribbon_pin_footer": "Pinned commands show on the ribbon. Hover a row to pin or unpin it.",
+  "ui.ribbon_pin_footer": "Pinned commands show on the ribbon. Pin or unpin one from its ⋯ menu.",
   "ui.ribbon_workspace": "Workspace",
   "ui.right": "Right",
   "ui.right_click_confirms": "Right-click confirms dialog inputs",

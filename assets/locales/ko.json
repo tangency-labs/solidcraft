@@ -6138,7 +6138,7 @@
   "ui.rib_extend_ends": "끝 연장",
   "ui.ribbon_exit": "종료",
   "ui.ribbon_labels": "리본 아이콘 아래에 텍스트 표시",
-  "ui.ribbon_pin_footer": "고정된 명령은 리본에 표시됩니다. 행 위에 마우스를 올려 고정하거나 해제하세요.",
+  "ui.ribbon_pin_footer": "고정된 명령은 리본에 표시됩니다. 명령의 ⋯ 메뉴에서 고정하거나 해제하세요.",
   "ui.ribbon_workspace": "작업 공간",
   "ui.right": "우측면",
   "ui.right_click_confirms": "오른쪽 클릭으로 대화 상자 입력 확인",

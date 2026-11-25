@@ -501,6 +501,7 @@ fn menu_style() -> MenuStyle<'static> {
         more_tip: "More",
         hot: "t:hot:",
         reveal: "t:reveal",
+        row_pin: false,
     }
 }
 
@@ -513,11 +514,12 @@ struct MenuRig {
     ctx: egui::Context,
     grid: bool,
     time: std::cell::Cell<f64>,
+    row_pin: std::cell::Cell<bool>,
 }
 
 impl MenuRig {
     fn new(grid: bool) -> MenuRig {
-        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0) };
+        let rig = MenuRig { ctx: crate::test_support::context(), grid, time: std::cell::Cell::new(0.0), row_pin: std::cell::Cell::new(false) };
         rig.frame(Vec::new(), 0.0);
         rig
     }
@@ -533,7 +535,7 @@ impl MenuRig {
             ..Default::default()
         };
         let entries = [entry("m.on", true), entry("m.off", false)];
-        let style = menu_style();
+        let style = MenuStyle { row_pin: self.row_pin.get(), ..menu_style() };
         let mut chosen = Vec::new();
         crate::test_support::raw_frame(&self.ctx, input, |ui| {
             if self.grid {
@@ -565,7 +567,8 @@ impl MenuRig {
 }
 
 /// A row or grid icon is hot under the pointer, runs its command when clicked, opens its menu on
-/// a right-click, runs nothing when disabled, and pins or unpins from its pin.
+/// a right-click, runs nothing when disabled; a grid icon pins or unpins from its pin, a row
+/// opens its menu from its ⋯.
 #[test]
 fn a_menu_entry_returns_what_was_chosen() {
     for grid in [false, true] {
@@ -577,14 +580,49 @@ fn a_menu_entry_returns_what_was_chosen() {
         let chosen = rig.press(on, egui::PointerButton::Secondary, 0.0);
         assert!(matches!(chosen.as_slice(), [(id, MenuAction::Menu(_))] if id == "m.on"), "grid {grid}: {chosen:?}");
         assert_eq!(rig.press(rig.at("t:entry:m.off"), egui::PointerButton::Primary, 0.0), Vec::new(), "grid {grid}: a disabled entry runs nothing");
+        if !grid {
+            rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+            let chosen = rig.press(rig.at("t:more:m.on"), egui::PointerButton::Primary, 0.0);
+            assert!(matches!(chosen.as_slice(), [(id, MenuAction::More(_))] if id == "m.on"), "{chosen:?}");
+            continue;
+        }
         // A grid icon's pin takes clicks once the pointer has rested on the icon.
-        let wait = if grid { PIN_DELAY + 0.1 } else { 0.0 };
-        rig.press(on, egui::PointerButton::Primary, wait);
-        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.press(on, egui::PointerButton::Primary, PIN_DELAY + 0.1);
+        rig.frame(vec![egui::Event::PointerMoved(on)], PIN_DELAY + 0.1);
         let pin = rig.at("t:pin:m.on");
         let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
-        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)], "grid {grid}");
+        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
     }
+}
+
+/// A list row has no pin of its own (#11853): its ⋯ sits at the row's end, where the pin was.
+#[test]
+fn a_list_row_shows_its_more_button_at_its_end_and_no_pin() {
+    let rig = MenuRig::new(false);
+    let on = rig.at("t:entry:m.on");
+    for wait in [0.0, 2.0] {
+        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+        assert!(solidcraft_ui_registry::handle_at("t:pin:m.on").is_none(), "a row publishes no pin, even after a rest");
+        // MenuRig rows are 220 wide; the entry handle is the row's centre.
+        assert_eq!(rig.at("t:more:m.on"), pos2(on.x + 110.0 - MORE_INSET, on.y), "the ⋯ is at the row's end");
+    }
+}
+
+/// With `row_pin` a list row shows its pin at its end and the ⋯ beside it, as before #11853, and
+/// the pin pins or unpins.
+#[test]
+fn a_list_row_with_row_pin_shows_a_pin_that_toggles() {
+    let rig = MenuRig::new(false);
+    rig.row_pin.set(true);
+    let on = rig.at("t:entry:m.on");
+    rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+    rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+    let pin = rig.at("t:pin:m.on");
+    assert_eq!(pin, pos2(on.x + 110.0 - MORE_INSET, on.y), "the pin is at the row's end");
+    assert_eq!(rig.at("t:more:m.on"), pin - vec2(ROW_BUTTON + MORE_GAP, 0.0), "the ⋯ sits beside the pin");
+    let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
+    assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
 }
 
 impl RowRig {

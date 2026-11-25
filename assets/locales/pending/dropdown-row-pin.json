@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.dropdown_row_pin": "Pin button on drop-down rows",
+    "prefs.dropdown_row_pin_note": "Show a pin beside each drop-down row's ⋯ menu button, as before. Off: pin and unpin a command from its ⋯ menu."
+  },
+  "ar": {
+    "prefs.dropdown_row_pin": "زر التثبيت في صفوف القوائم المنسدلة",
+    "prefs.dropdown_row_pin_note": "إظهار زر تثبيت بجانب زر القائمة ⋯ في كل صف من القائمة المنسدلة، كما في السابق. عند الإيقاف: ثبّت الأمر أو ألغِ تثبيته من قائمة ⋯ الخاصة به."
+  },
+  "he": {
+    "prefs.dropdown_row_pin": "לחצן הצמדה בשורות של תפריטים נפתחים",
+    "prefs.dropdown_row_pin_note": "הצגת לחצן הצמדה ליד לחצן התפריט ⋯ בכל שורה של תפריט נפתח, כמו קודם. כשהאפשרות כבויה: מצמידים פקודה או מבטלים את הצמדתה מתפריט ⋯ שלה."
+  },
+  "ja": {
+    "prefs.dropdown_row_pin": "ドロップダウンの行にピン留めボタンを表示",
+    "prefs.dropdown_row_pin_note": "以前のように、ドロップダウンの各行の ⋯ メニューボタンの横にピンを表示します。オフ: コマンドの ⋯ メニューからピン留めや解除をします。"
+  },
+  "vi": {
+    "prefs.dropdown_row_pin": "Nút ghim trên các hàng của menu thả xuống",
+    "prefs.dropdown_row_pin_note": "Hiện nút ghim bên cạnh nút menu ⋯ của mỗi hàng trong menu thả xuống, như trước đây. Tắt: ghim hoặc bỏ ghim một lệnh từ menu ⋯ của lệnh đó."
+  },
+  "zh": {
+    "prefs.dropdown_row_pin": "在下拉菜单行上显示固定按钮",
+    "prefs.dropdown_row_pin_note": "像以前一样，在每个下拉菜单行的 ⋯ 菜单按钮旁显示固定按钮。关闭时：从命令的 ⋯ 菜单中固定或取消固定。"
+  }
+}

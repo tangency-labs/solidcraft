@@ -58,6 +58,7 @@ const PROFILE_KEYS: &[&str] = &[
     "design_views_as_tabs",
     "dialog_buttons",
     "direct_interaction",
+    "dropdown_row_pin",
     "escape_twice_finishes_sketch",
     "free_orbit",
     "free_orbit_key",

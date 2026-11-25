@@ -2515,6 +2515,7 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
         more_tip: solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"),
         hot: "dropdown_hot:",
         reveal: "ribbon:reveal",
+        row_pin: app.preferences.dropdown_row_pin,
     }
 }
 
@@ -2618,7 +2619,11 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
             )
         })
         .collect();
-    ribbon::menu_width(ui, rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)))
+    ribbon::menu_width(
+        ui,
+        app.preferences.dropdown_row_pin,
+        rows.iter().map(|(label, key, icon, checkable)| (label.as_str(), key.as_str(), *icon, *checkable)),
+    )
 }
 
 /// A panel drop-down drawn as a grid of large icons (the `ribbon_icon_grid` preference, #4739):
@@ -5033,11 +5038,12 @@ mod dropdown_tests {
     /// Pin to Toolbar, Remove from Toolbar and Pin to Shortcuts act on that command.
     #[test]
     fn a_right_click_in_the_drop_down_pins_and_unpins() {
-        for grid in [false, true] {
+        for (grid, row_pin) in [(false, false), (false, true), (true, false)] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":1600,"height":1000}));
             h.app.preferences.ribbon_icon_grid = grid;
+            h.app.preferences.dropdown_row_pin = row_pin;
             let pick = |h: &mut crate::scenario::Harness, item: &str| {
                 h.frames(4);
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
@@ -5054,8 +5060,9 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
-            // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
+            // The pin shown on the pointed-at icon, or row with dropdown_row_pin, pins it and again
+            // unpins it. A grid icon's pin takes clicks only after the pointer has rested on it for
+            // ribbon::PIN_DELAY. A row without the preference has no pin (#11853): its ⋯ menu does it.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
@@ -5065,10 +5072,19 @@ mod dropdown_tests {
                     assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
                     h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
                 }
-                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                if grid || row_pin {
+                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                } else {
+                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
+                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                    h.frames(3);
+                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
+                }
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
-                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}, row pin {row_pin}");
             }
             assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
         }
