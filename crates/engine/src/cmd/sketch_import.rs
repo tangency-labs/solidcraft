@@ -545,7 +545,7 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     // The merged points against the spline points that stand for them, and the spline against
     // the straight lines between its points: the kernel bounds both.
     let pieces: Vec<[[f64; 3]; 4]> = solidcraft_sketch::fit_beziers(&spline).iter().map(|piece| piece.map(|c| [c.x, c.y, 0.0])).collect();
-    let fit = solidcore_ops::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
+    let fit = solidcraft_kernel::services::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
 
     let mut created = None;
     if s.active_sketch.is_none() {

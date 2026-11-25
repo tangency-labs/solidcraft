@@ -154,14 +154,14 @@ fn pick_exists(session: &Session, pick: &crate::Sel) -> bool {
                 return false;
             }
             crate::kernel::start();
-            solidcore_ops::pick::stored_face(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
+            solidcraft_kernel::services::pick::stored_face(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
         }),
         Sel::Edge { body, index, point } => state.body(body).is_some_and(|b| {
             if b.body.is_mesh() {
                 return false;
             }
             crate::kernel::start();
-            solidcore_ops::pick::stored_edge(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
+            solidcraft_kernel::services::pick::stored_edge(b.body.record(), *index, [point.x, point.y, point.z]).is_ok_and(|exists| exists)
         }),
         Sel::Profile { sketch, index } => state.sketch(*sketch).is_some_and(|s| s.profiles.get(*index).is_some()),
         Sel::ExternalSketchPoint { sketch, id } => state.sketch(*sketch).is_some_and(|s| s.sketch.point_index(id).is_some()),

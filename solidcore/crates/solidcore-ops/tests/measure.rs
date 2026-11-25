@@ -356,6 +356,155 @@ fn a_ray_through_a_tube_hits_both_sides_nearest_first() {
     );
 }
 
+/// What, the body, the line's point and direction, and the parameters it meets faces at.
+type LineCase = (&'static str, Body, [f64; 3], [f64; 3], Vec<f64>);
+
+/// Where a whole line meets a body's faces, both ways from its point, on each face's exact
+/// surface, in closed form:
+/// - the 10 mm cube at the origin, slanted along (0.6, 0, 0.8) through its centre (5, 5, 5): its
+///   top z = 10 at x = 8.75 and its bottom z = 0 at x = 1.25, parameters -6.25 and 6.25; the
+///   planes x = 0 and x = 10 it meets at z = -1.67 and 11.67, outside their trims;
+/// - the radius-5 cylinder about +Z (z 0..20), along x through (0, 3, 10): its side at x = -4 and
+///   4 (a 3-4-5 triangle), parameters -4 and 4, and neither end;
+/// - the cone of base radius 6 and top radius 2 over height 8, radius 6 - z/2, along x through
+///   (0, 0, 4): its side where the radius is 4, parameters -4 and 4;
+/// - the radius-2 sphere about (1, 2, 3), along z through (1.72, 2.96, 3): 1.2 off its axis
+///   (0.24 times a 3-4-5 triangle), at z = 3 -+ 1.6, parameters -1.6 and 1.6;
+/// - the torus of radii 10 and 2 about +Z, along x through (0, 0, 0): x = -12, -8, 8 and 12;
+/// - the rational B-spline tube of radius 5 (z 0..10), along x through (-20, 3, 4): x = -4 and 4,
+///   parameters 16 and 24.
+///
+/// The cone meets the line on its seam (+x) once. Each point is the line's at its parameter. A
+/// face index past the faces and a direction of no length are refused.
+#[test]
+fn a_line_meets_each_kind_of_face_on_its_exact_surface_both_ways() {
+    all_fixes();
+    let (tube_body, _, _) = tube();
+    let cases: Vec<LineCase> = vec![
+        (
+            "cube",
+            make_box([0.0; 3], [10.0; 3]).unwrap(),
+            [5.0; 3],
+            [0.6, 0.0, 0.8],
+            vec![-6.25, 6.25],
+        ),
+        (
+            "cylinder",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [0.0, 3.0, 10.0],
+            [1.0, 0.0, 0.0],
+            vec![-4.0, 4.0],
+        ),
+        (
+            "cone",
+            solidcore_ops::make_cone([0.0; 3], 6.0, 2.0, 8.0).unwrap(),
+            [0.0, 0.0, 4.0],
+            [1.0, 0.0, 0.0],
+            vec![-4.0, 4.0],
+        ),
+        (
+            "sphere",
+            make_sphere([1.0, 2.0, 3.0], 2.0).unwrap(),
+            [1.72, 2.96, 3.0],
+            [0.0, 0.0, 1.0],
+            vec![-1.6, 1.6],
+        ),
+        (
+            "torus",
+            make_torus([0.0; 3], 10.0, 2.0).unwrap(),
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            vec![-12.0, -8.0, 8.0, 12.0],
+        ),
+        (
+            "B-spline tube",
+            tube_body,
+            [-20.0, 3.0, 4.0],
+            [1.0, 0.0, 0.0],
+            vec![16.0, 24.0],
+        ),
+    ];
+    for (what, b, through, direction, expected) in cases {
+        let (record, order) = b.to_record().unwrap();
+        let mut hits = Vec::new();
+        for f in 0..record.faces.len() {
+            hits.extend(b.face_line_hits(&order, f, through, direction).unwrap());
+        }
+        hits.sort_by(|x, y| x.parameter.total_cmp(&y.parameter));
+        let got: Vec<f64> = hits.iter().map(|h| h.parameter).collect();
+        assert_eq!(got.len(), expected.len(), "{what}: {got:?}");
+        for (h, t) in hits.iter().zip(&expected) {
+            assert!(near(h.parameter, *t, 1e-9), "{what}: {got:?}");
+            let on_line = [0, 1, 2].map(|i| through[i] + direction[i] * t);
+            assert!(close(h.point, on_line), "{what}: {h:?}");
+        }
+        assert_eq!(
+            b.face_line_hits(&order, record.faces.len(), through, direction),
+            Err(Error::Argument),
+            "{what}"
+        );
+        assert_eq!(
+            b.face_line_hits(&order, 0, through, [0.0; 3]),
+            Err(Error::Argument),
+            "{what}"
+        );
+    }
+}
+
+/// A line lying on a face is no single place on it: the face leaves it out and answers, it does
+/// not fail (a hole on a cylinder's side drilled along its axis). The radius-5 cylinder about +Z
+/// (z 0..20), along z through its side at (3, 4) and on its seam (+x), at z = 10: its side
+/// holds the whole line, which meets the body only where it leaves through its ends, z = 0 and
+/// z = 20, parameters -10 and 10 (each end face once, on its rim). The 10 mm cube, along x through
+/// (5, 5, 10) on its top: the top holds the line, which meets the body where it crosses x = 0 and
+/// x = 10, parameters -5 and 5. Every face answers; no face fails.
+#[test]
+fn a_line_lying_on_a_face_is_left_out_of_its_hits() {
+    all_fixes();
+    let cases: Vec<LineCase> = vec![
+        (
+            "cylinder side at (3, 4)",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [3.0, 4.0, 10.0],
+            [0.0, 0.0, -1.0],
+            vec![-10.0, 10.0],
+        ),
+        (
+            "cylinder seam",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [5.0, 0.0, 10.0],
+            [0.0, 0.0, 1.0],
+            vec![-10.0, 10.0],
+        ),
+        (
+            "cube top",
+            make_box([0.0; 3], [10.0; 3]).unwrap(),
+            [5.0, 5.0, 10.0],
+            [1.0, 0.0, 0.0],
+            vec![-5.0, 5.0],
+        ),
+    ];
+    for (what, b, through, direction, expected) in cases {
+        let (record, order) = b.to_record().unwrap();
+        let mut hits = Vec::new();
+        for f in 0..record.faces.len() {
+            let found = b.face_line_hits(&order, f, through, direction);
+            let Ok(found) = found else {
+                panic!("{what}: face {f}: {found:?}")
+            };
+            hits.extend(found);
+        }
+        hits.sort_by(|x, y| x.parameter.total_cmp(&y.parameter));
+        let got: Vec<f64> = hits.iter().map(|h| h.parameter).collect();
+        assert_eq!(got.len(), expected.len(), "{what}: {got:?}");
+        for (h, t) in hits.iter().zip(&expected) {
+            assert!(near(h.parameter, *t, 1e-9), "{what}: {got:?}");
+            let on_line = [0, 1, 2].map(|i| through[i] + direction[i] * t);
+            assert!(close(h.point, on_line), "{what}: {h:?}");
+        }
+    }
+}
+
 /// A doubly curved face: a ray along +z through (1.72, 2.96) runs (0.72, 0.96) off the axis of
 /// the radius-2 sphere about (1, 2, 3), 1.2 from it (a 3-4-5 triangle scaled by 0.24), which
 /// leaves sqrt(4 - 1.44) = 1.6 in z: the ray meets the sphere first at z = 3 - 1.6 = 1.4, 11.4
@@ -1011,4 +1160,42 @@ fn edge_points_lie_on_the_circles_of_a_cylinder() {
         assert!(close(c.edge_points(&order, edge, 3).unwrap()[1], middle));
     }
     assert_eq!(rims, 2, "the cylinder's two rims");
+}
+
+/// The line helpers the app's hole start uses: a direction made unit (and refused when it has no
+/// length or a bad coordinate), the nearer of two meetings with ties going ahead, a point along a
+/// line, and a distance measured across a surface.
+#[test]
+fn line_helpers_make_unit_choose_the_nearer_meeting_and_measure_across() {
+    assert_eq!(
+        solidcore_ops::unit_direction([0.0, 0.0, 5.0]),
+        Some([0.0, 0.0, 1.0])
+    );
+    assert_eq!(solidcore_ops::unit_direction([0.0; 3]), None);
+    assert_eq!(solidcore_ops::unit_direction([f64::NAN, 0.0, 1.0]), None);
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(3.0), Some(2.0)),
+        Some(-2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(2.0), Some(2.0)),
+        Some(2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(None, Some(4.0)),
+        Some(-4.0)
+    );
+    assert_eq!(solidcore_ops::nearer_line_meeting(None, None), None);
+    assert_eq!(
+        solidcore_ops::point_along_line([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], -2.0),
+        Some([1.0, 2.0, 1.0])
+    );
+    // Off a surface along its normal (z): only the z gap counts across it; on it, plain distance.
+    let across =
+        solidcore_ops::distance_across_surface([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [3.0, 0.0, 3.0])
+            .unwrap();
+    assert!((across - 2.0).abs() < 1e-12, "{across}");
+    let plain =
+        solidcore_ops::distance_across_surface([0.0; 3], [0.0; 3], [3.0, 4.0, 0.0]).unwrap();
+    assert!((plain - 5.0).abs() < 1e-12, "{plain}");
 }
