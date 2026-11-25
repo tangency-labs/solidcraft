@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.2" schemaVersion="1.0">
+<policyDefinitionResources xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.4" schemaVersion="1.0">
   <displayName>SolidCraft</displayName>
   <description>Settings an organization sets for the people who use SolidCraft on its computers.</description>
   <resources>
@@ -35,6 +35,120 @@ Enabled: SolidCraft shows "Managed by" and this name with a briefcase icon in th
 Disabled or Not configured: SolidCraft shows the name of no organization. While any other SolidCraft policy is set, it shows "Managed by your organization".
 
 This policy only shows a name; it changes no setting. The change applies the next time SolidCraft starts.</string>
+      <string id="DefaultUnits">Units of new designs</string>
+      <string id="DefaultUnits_Explain">The units a new design starts in (Preferences, Design, Units of new designs). Designs that already exist keep their own units.
+
+Enabled: new designs start in the units chosen here, and people cannot change the preference.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="DefaultUnits_mm">Millimeters (mm)</string>
+      <string id="DefaultUnits_cm">Centimeters (cm)</string>
+      <string id="DefaultUnits_m">Meters (m)</string>
+      <string id="DefaultUnits_in">Inches (in)</string>
+      <string id="DefaultUnits_ft">Feet (ft)</string>
+      <string id="Language">Interface language</string>
+      <string id="Language_Explain">The language of SolidCraft's interface (Preferences, General, Language).
+
+Enabled: SolidCraft shows its interface in this language, and people cannot change it. Enter "system" to follow the language of Windows, or the code of a language SolidCraft has, for example en, de, fr, es, pt-BR or zh-TW. Preferences lists the languages. A code SolidCraft does not have counts as not configured.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ReopenDesigns">Reopen designs at start</string>
+      <string id="ReopenDesigns_Explain">Whether SolidCraft reopens the designs that were open when it was last closed (Preferences, General, Saving).
+
+Enabled: SolidCraft reopens them, and people cannot turn this off.
+
+Disabled: SolidCraft starts without reopening them, for example on computers several people share.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ShowDiscordButton">Show the Discord button</string>
+      <string id="ShowDiscordButton_Explain">Whether the application bar shows the button that opens SolidCraft's Discord community (Preferences, General, Community). The Help menu keeps the link.
+
+Enabled: the button shows, and people cannot hide it.
+
+Disabled: the button is hidden.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ShowDonateButton">Show the Donate button</string>
+      <string id="ShowDonateButton_Explain">Whether the application bar shows the button that opens SolidCraft's donation page (Preferences, General, Community). The Help menu keeps the link.
+
+Enabled: the button shows, and people cannot hide it.
+
+Disabled: the button is hidden.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AgentControl">Let AI agents connect</string>
+      <string id="AgentControl_Explain">Whether AI agents may connect to SolidCraft through its control channel (MCP), which listens on a port of this computer only (Preferences, Assistant, Let AI agents connect).
+
+Enabled: the channel is on, and people cannot turn it off.
+
+Disabled: SolidCraft opens no port for agents, not even one named on the command line (--control) or in SOLIDCRAFT_CONTROL_PORT.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AgentTurnLimit">Changes per message</string>
+      <string id="AgentTurnLimit_Explain">The most changes an AI agent in the Assistant chat may make for one message (Preferences, Assistant, Changes per message).
+
+Enabled: enter 1 to 200, or 0 for no limit. People cannot change it.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AiFeatures">Show AI features</string>
+      <string id="AiFeatures_Explain">SolidCraft's AI features: the Assistant button, shortcut, menu entry and chat panel (Preferences, Assistant, Show AI features).
+
+Enabled: the AI features show, and people cannot turn them off.
+
+Disabled: SolidCraft shows no AI features and looks for or starts no AI agent. Agents that connect through the control channel are set by "Let AI agents connect".
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AiPermissions">AI agent permissions</string>
+      <string id="AiPermissions_Explain">How much an AI agent in the Assistant chat may do without asking (Preferences, Assistant, Permissions).
+
+Enabled: every agent has the permissions chosen here, and people cannot change them. An agent's own permissions and the "Always allowed" answers people gave don't apply; they are kept for when the policy is removed.
+
+Ask first: every change to the design, file and destructive action asks first.
+Make edits: modelling commands run; files and destructive actions still ask.
+Do everything: nothing asks.
+
+Disabled or Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="AiPermissions_ask">Ask first</string>
+      <string id="AiPermissions_edits">Make edits</string>
+      <string id="AiPermissions_all">Do everything</string>
+      <string id="AiToolbarButton">Show the Assistant button</string>
+      <string id="AiToolbarButton_Explain">Whether the application bar shows the Assistant button (Preferences, Assistant, Assistant button in the application bar). The shortcut and the View menu entry stay while AI features show.
+
+Enabled: the button shows, and people cannot hide it.
+
+Disabled: the button is hidden.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
+      <string id="ConnectAiApps">Add SolidCraft to AI apps</string>
+      <string id="ConnectAiApps_Explain">Whether SolidCraft adds its MCP server to the AI apps installed on this computer when it starts (Preferences, Assistant, Add SolidCraft to AI apps).
+
+Enabled: SolidCraft adds itself, and people cannot turn this off.
+
+Disabled: SolidCraft adds itself to no AI app and takes out the entries it added before.
+
+Not configured: each person chooses in Preferences.
+
+In Preferences the setting shows as set by the organization. The person's own choice is kept and comes back when the policy is removed. The change applies the next time SolidCraft starts.</string>
     </stringTable>
     <presentationTable>
       <presentation id="CheckForUpdates" />
@@ -44,6 +158,27 @@ This policy only shows a name; it changes no setting. The change applies the nex
           <label>Organization name:</label>
         </textBox>
       </presentation>
+      <presentation id="DefaultUnits">
+        <dropdownList refId="DefaultUnits" noSort="true" defaultItem="0">Units of new designs:</dropdownList>
+      </presentation>
+      <presentation id="Language">
+        <textBox refId="Language">
+          <label>Language code, or system:</label>
+        </textBox>
+      </presentation>
+      <presentation id="ReopenDesigns" />
+      <presentation id="ShowDiscordButton" />
+      <presentation id="ShowDonateButton" />
+      <presentation id="AgentControl" />
+      <presentation id="AgentTurnLimit">
+        <decimalTextBox refId="AgentTurnLimit" defaultValue="24">Changes per message (0: no limit):</decimalTextBox>
+      </presentation>
+      <presentation id="AiFeatures" />
+      <presentation id="AiPermissions">
+        <dropdownList refId="AiPermissions" noSort="true" defaultItem="0">Permissions:</dropdownList>
+      </presentation>
+      <presentation id="AiToolbarButton" />
+      <presentation id="ConnectAiApps" />
     </presentationTable>
   </resources>
 </policyDefinitionResources>

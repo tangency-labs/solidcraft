@@ -19,8 +19,8 @@ pub const MAX_DOCUMENT_BYTES: usize = 16 << 20;
 pub const MAX_BLOB_BYTES: u64 = 256 << 20;
 /// The most bytes of plugin data, all plugins together, in one design: the design file's own limit.
 pub const MAX_TOTAL_BYTES: u64 = 256 << 20;
-/// The most bytes one `storage.get_blob` returns, so its reply stays inside a plugin's 1 MiB.
-pub const MAX_READ_BYTES: u32 = 512 * 1024;
+/// The most bytes one read of a file or of the main document returns (`get-blob`, `get-document`).
+pub const MAX_READ_BYTES: u32 = 1 << 20;
 
 /// The plugin whose run is under way, set by the host for that run alone (never from a design or a
 /// caller's parameters). Only it changes data, and only its own.
@@ -193,6 +193,63 @@ pub fn blob_path(doc: &Document, id: &str, name: &str) -> Option<(String, bool)>
         .into_iter()
         .map(|(folder, cache)| (format!("{folder}{name}"), cache))
         .find(|(path, _)| doc.plugin_data.contains_key(&format!("{id}/{path}")))
+}
+
+/// Part of a plugin's file: the bytes read, whether it is a cache file, and the whole file's size.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BlobBytes {
+    pub data: Vec<u8>,
+    pub cache: bool,
+    pub bytes: u64,
+}
+
+/// `len` bytes of `bytes` from `offset`; none past the end.
+fn part_of(bytes: &[u8], offset: u64, len: u32) -> Vec<u8> {
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(bytes.len());
+    let end = start.saturating_add(len as usize).min(bytes.len());
+    bytes.get(start..end).unwrap_or_default().to_vec()
+}
+
+fn check_len(cmd: &str, len: u32) -> Result<()> {
+    if (1..=MAX_READ_BYTES).contains(&len) { Ok(()) } else { Err(crate::params::bad(cmd, format!("`len` must be 1 to {MAX_READ_BYTES}"))) }
+}
+
+/// Writes the running plugin's file `name` from its bytes, as they are (the `storage` interface's
+/// `put-blob`): a cache file when `cache`; `append` adds them to its end. One name is one file, so
+/// writing it as the other kind moves it, checked with every limit before anything changes. The
+/// file's size.
+pub(crate) fn write_blob(s: &mut Session, name: &str, data: &[u8], cache: bool, append: bool) -> Result<u64> {
+    let caller = writer(s)?;
+    let path = format!("{}{name}", if cache { CACHE } else { BLOBS });
+    let mut bytes = if append {
+        blob_path(&s.doc, &caller.id, name).and_then(|(path, _)| blob(&s.doc, &caller.id, &path)).map(<[u8]>::to_vec).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    bytes.extend_from_slice(data);
+    let other = format!("{}{name}", if cache { BLOBS } else { CACHE });
+    put_replacing(s, &caller, &path, Some(&bytes), Some(&other))?;
+    Ok(bytes.len() as u64)
+}
+
+/// Up to `len` bytes of a plugin's file `name` from `offset` (`get-blob`).
+pub(crate) fn read_blob(s: &Session, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> Result<BlobBytes> {
+    const CMD: &str = "storage.get-blob";
+    let id = reader(s, CMD, plugin)?;
+    check_len(CMD, len)?;
+    let (path, cache) = blob_path(&s.doc, &id, name).ok_or_else(|| crate::params::bad(CMD, format!("{id} keeps no file named {name}")))?;
+    let bytes = blob(&s.doc, &id, &path).unwrap_or_default();
+    Ok(BlobBytes { data: part_of(bytes, offset, len), cache, bytes: bytes.len() as u64 })
+}
+
+/// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset`, and its whole
+/// size; none when it has none (`get-document`).
+pub(crate) fn read_document(s: &Session, plugin: Option<&str>, offset: u64, len: u32) -> Result<(Vec<u8>, u64)> {
+    const CMD: &str = "storage.get-document";
+    let id = reader(s, CMD, plugin)?;
+    check_len(CMD, len)?;
+    let bytes = blob(&s.doc, &id, DATA).unwrap_or_default();
+    Ok((part_of(bytes, offset, len), bytes.len() as u64))
 }
 
 /// The bytes of one of a plugin's files, by its full name (`blobs/<name>` or `cache/<name>`).

@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 
 use super::check::{located, whole};
 use super::types::{not_blank_pattern, present};
+use crate::PickMode;
 
 /// Assistant visibility is UI-owned and takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -23,6 +24,16 @@ pub struct AssistantResult {}
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppBarResetParams {}
+
+/// Validate access to the app-owned editor. Only an interactive start toggles its tray.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppBarCustomizeParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppBarCustomizeResult {
+    pub available: bool,
+}
 
 /// Validated reset request; the connected app applies it to its toolbar preferences.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -627,6 +638,12 @@ marker_params!(
     TimelineRollToParams,
     "Move the history marker right after a feature, or to a number of features from the start, or to the end: the features after it are not built, and the selection is cleared. `timeline.rollback` does the same."
 );
+
+/// `timeline.step_back` and `timeline.step_forward` take no parameters: the marker steps one
+/// feature from where it is now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimelineStepParams {}
 
 /// What `timeline.rollback` and `timeline.roll_to` return.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1555,25 +1572,82 @@ pub struct TimelineRedefined {
     pub param_warnings: Vec<String>,
 }
 
+/// Choose what a click on the model picks while no dialog or tool takes the pick: faces, edges
+/// and vertices; the face's whole body; the feature that made it; the innermost placement or the
+/// top-level component holding it; or sketch geometry only. A window setting: the design, its
+/// history and the selection are untouched.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectModeParams {
+    /// The selection mode.
+    #[serde(deserialize_with = "pick_mode")]
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
+}
+
+/// A selection mode, read by the handler's own reader.
+fn pick_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<PickMode, D::Error> {
+    crate::cmd::pick_mode(&Value::deserialize(d)?).map_err(|e| serde::de::Error::custom(whole(e)))
+}
+
+/// The modes' ids, as one string enum.
+fn pick_mode_schema(_: &mut SchemaGenerator) -> Schema {
+    let ids: Vec<Value> = PickMode::ALL.iter().filter_map(|m| serde_json::to_value(m).ok()).collect();
+    json_schema!({
+        "description": "faces (faces, edges and vertices), bodies, features, parts (the innermost placement), components (the top-level placement) or sketch (sketch curves, points and profiles).",
+        "type": "string",
+        "enum": ids
+    })
+}
+
+/// What `select.mode` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SelectModeResult {
+    /// The selection mode now on.
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
     use super::{
         AssistantParams, CheckpointParams, CheckpointResult, DialogOkParams, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds,
-        MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams,
-        TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
-        TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult,
-        TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
+        MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SelectModeParams, SelectModeResult,
+        SetFields, TimelineComputeAllParams, TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams,
+        TimelineDependentsResult, TimelineEditParams, TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult,
+        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineStepParams, TimelineSuppressParams,
+        TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
         TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineReorderManyParams, TimelineReorderParams,
         TimelineReordered, TimelineReorderedMany, TimelineUngroupParams, TimelineUngrouped,
     };
-    use crate::Session;
     use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    use crate::{PickMode, Session};
+
+    #[test]
+    fn app_bar_customize_has_an_empty_contract_and_typed_reply() {
+        let spec = crate::find_command("ui.appBarCustomize").unwrap();
+        let contract = spec.contract.unwrap();
+        assert!(contract.allowed_keys().is_empty());
+        assert!(contract.check(&json!({})).is_empty());
+        for input in [json!({"open":true}), json!([]), json!(false), json!(5), json!("customize")] {
+            assert!(!contract.check(&input).is_empty(), "{input}");
+        }
+        let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        assert!(session.execute(spec.id, &json!({"open":true})).is_err());
+        let reply = session.execute(spec.id, &json!({})).unwrap();
+        let output = spec.output.unwrap()();
+        assert_eq!(reply, json!({"available":true}));
+        assert!(conforms(output.as_value(), output.as_value(), &reply));
+    }
 
     #[test]
     fn app_bar_reset_has_an_empty_contract_and_a_typed_reply() {
@@ -1597,6 +1671,7 @@ mod tests {
 
     #[test]
     fn schemas_and_the_key_check_agree() {
+        assert_keys(input_schema_for::<super::AppBarCustomizeParams>(), &[]);
         assert_keys(input_schema_for::<super::AppBarResetParams>(), &[]);
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
@@ -1612,6 +1687,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineRenameParams>(), &["feature", "name"]);
         assert_keys(input_schema_for::<TimelineRollbackParams>(), &["feature", "position"]);
         assert_keys(input_schema_for::<TimelineRollToParams>(), &["feature", "position"]);
+        assert_keys(input_schema_for::<TimelineStepParams>(), &[]);
         assert_keys(input_schema_for::<TimelineDependentsParams>(), &["feature"]);
         assert_keys(input_schema_for::<TimelineSuppressParams>(), &["feature", "features", "groups", "suppressed"]);
         assert_keys(input_schema_for::<TimelineEditParams>(), &["feature", "set"]);
@@ -1624,6 +1700,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineReorderParams>(), &["active", "allow_errors", "feature", "position"]);
         assert_keys(input_schema_for::<TimelineReorderManyParams>(), &["active", "allow_errors", "features", "position"]);
         assert_keys(input_schema_for::<TimelineRedefineParams>(), &["command", "feature", "params"]);
+        assert_keys(input_schema_for::<SelectModeParams>(), &["mode"]);
     }
 
     #[test]
@@ -1766,7 +1843,30 @@ mod tests {
             ("timeline.redefine", json!({"feature": true, "command": "solid.box"})),
             ("timeline.redefine", json!({"feature": 1, "command": "solid.nope"})),
             ("timeline.redefine", json!({"feature": 1, "command": "file.save"})),
+            ("select.mode", json!({"mode": "edges"})),
+            ("select.mode", json!({"mode": "Bodies"})),
+            ("select.mode", json!({"mode": 1})),
+            ("select.mode", json!({"mode": null})),
+            ("select.mode", json!({"mode": ["faces"]})),
         ]);
+    }
+
+    #[test]
+    fn select_mode_replies_match_its_output_schema() {
+        let schema = output_schema_for::<SelectModeResult>();
+        let schema = schema.as_value();
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        for mode in PickMode::ALL {
+            let r = s.execute("select.mode", &json!({"mode": mode})).unwrap_or_else(|e| panic!("{e}"));
+            assert!(r.get("param_warnings").is_none(), "{r}");
+            assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        }
+        let r = s.execute("select.mode", &json!({"mode": "parts", "modes": "bodies"})).unwrap_or_else(|e| panic!("{e}"));
+        assert!(r.get("param_warnings").is_some(), "{r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        for bad in [json!({"mode": "edges"}), json!({"mode": 1}), json!({})] {
+            assert!(!conforms(schema, schema, &bad), "{bad}");
+        }
     }
 
     /// Undo, redo, a checkpoint, going back to it and forgetting one, in Warn: each reply matches
@@ -2024,6 +2124,7 @@ mod tests {
             }
         };
         takes(input_schema_for::<TimelineComputeAllParams>(), &[(json!({}), true)]);
+        takes(input_schema_for::<TimelineStepParams>(), &[(json!({}), true), (json!({"position": 1}), false)]);
         takes(
             input_schema_for::<TimelineDeleteParams>(),
             &[

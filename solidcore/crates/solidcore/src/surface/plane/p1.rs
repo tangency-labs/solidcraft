@@ -101,6 +101,8 @@
 
 use std::borrow::Cow;
 
+use crate::blend::fillet_section::interval::Ivl;
+use crate::curve::contact::NativeSupport;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
@@ -1034,9 +1036,9 @@ impl Plane {
             && operation != SolverOperation::Normalize
             && operation != SolverOperation::Intersect
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the operation is neither minimize, normalize nor intersect",
+                SurfaceFailure::OperationNotTaken,
             ));
         }
 
@@ -1193,7 +1195,7 @@ impl Plane {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::surface(
                 OP_LINE,
-                SurfaceFailure::InvalidValue("the line direction is the zero vector"),
+                SurfaceFailure::LineDirectionZero,
             ));
         }
 
@@ -1337,10 +1339,11 @@ impl Plane {
 
             let det = pu.cross(pv).dot(lt);
             if det.abs() < EFF_ZERO {
-                // should never happen, we're in the non-parallel case here.
-                return Err(SolidError::surface_failed(
+                // the angle test above passed, so a direction or a scale too small to solve
+                // with makes the determinant this small
+                return Err(SolidError::surface(
                     OP_LINE,
-                    "the line is parallel to the plane",
+                    SurfaceFailure::LineCrossingSingular,
                 ));
             }
 
@@ -1500,7 +1503,9 @@ impl Plane {
     /// control points are projected and clamped to the domain: the UV B-spline of
     /// those points is exact when no clamp moves a point off its normal line by more
     /// than `approx_tol`, and is kept when `keep_all` or every control point drops
-    /// within `approx_tol`. Everything else is the general `SmSurface::DropCurve`, run
+    /// within `approx_tol`. An analytic ellipse proved strictly inside the UV rectangle
+    /// keeps its unclamped affine projection even when its control hull extends outside.
+    /// Everything else is the general `SmSurface::DropCurve`, run
     /// on the plane with its `owner` (the plane's `m_pOwner`, which a bare [`Plane`]
     /// does not carry: pass the owning [`Surface`]'s [`Surface::owner`]; without the
     /// face tolerance its B-rep records on that surface, which the crate's
@@ -1784,16 +1789,31 @@ impl Plane {
 
             // loop locals
             let mut max_drop_sq = 0.0;
+            let mut ellipse_inside = None;
 
             // for every control point
             for cp in &mut ctrl_pts {
                 let p_3d = *cp;
 
                 // project to infinite plane
-                let mut uv_pnt = self.project_point_to_uv_domain(p_3d);
+                let projected = self.project_point_to_uv_domain(p_3d);
 
-                // clamp control points
-                uv_pnt = uv_domain.clamp_point(uv_pnt);
+                // A tangent-hull control can lie outside a rectangle containing the
+                // complete ellipse. Certify containment only when a clamp would move it.
+                let uv_pnt = if ellipse_inside == Some(true) {
+                    projected
+                } else {
+                    let clamped = uv_domain.clamp_point(projected);
+                    if clamped != projected
+                        && *ellipse_inside.get_or_insert_with(|| {
+                            self.ellipse_projection_inside(curve, interval, uv_domain)
+                        })
+                    {
+                        projected
+                    } else {
+                        clamped
+                    }
+                };
 
                 // save largest control point drop
                 let on_srf_3d = self.evaluate_point_fast(uv_pnt);
@@ -1867,6 +1887,53 @@ impl Plane {
             context,
             face_test,
         )
+    }
+
+    /// The full analytic ellipse's affine UV image lies strictly in the supplied domain.
+    fn ellipse_projection_inside(
+        &self,
+        curve: &Curve,
+        interval: &Extent1d,
+        domain: &Extent2d,
+    ) -> bool {
+        if !matches!(curve.kind(), CurveKind::Ellipse(_))
+            || !interval.is_bounded()
+            || ![interval.min(), interval.max()]
+                .iter()
+                .all(|v| v.is_finite())
+            || interval.min() > interval.max()
+            || !interval.is_contained_by(&curve.natural_interval(), 0.0)
+        {
+            return false;
+        }
+        let Some(support) = NativeSupport::curve(curve, interval) else {
+            return false;
+        };
+        [
+            (
+                self.position.x_axis(),
+                self.uv_scale.x,
+                domain.u_min(),
+                domain.u_max(),
+            ),
+            (
+                self.position.y_axis(),
+                self.uv_scale.y,
+                domain.v_min(),
+                domain.v_max(),
+            ),
+        ]
+        .into_iter()
+        .all(|(axis, scale, lo, hi)| {
+            if ![scale, lo, hi].iter().all(|v| v.is_finite()) || scale == 0.0 {
+                return false;
+            }
+            let direction = [Ivl::from(axis.x), Ivl::from(axis.y), Ivl::from(axis.z)];
+            support
+                .project(self.position.origin(), direction)
+                .map(|projection| projection / Ivl::from(scale))
+                .is_some_and(|uv| uv.is_finite() && lo < uv.lo && uv.hi < hi)
+        })
     }
 
     // ---- coincidence ------------------------------------------------------------------
@@ -2503,6 +2570,23 @@ fn surface_drop_curve<O: SolutionObject>(
     })
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Plane {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            position,
+            anal_uv_domain,
+            uv_scale,
+        } = self;
+        d.tag(0x91A);
+        base.content(d)?;
+        position.content(d)?;
+        anal_uv_domain.content(d)?;
+        uv_scale.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2630,10 +2714,63 @@ mod tests {
             false,
             1e-6,
         );
+        let e = r.err().unwrap();
+        assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(
-            r.err().and_then(|e| e.sm_status()),
-            Some(SM_ERR_INVALID_INPUT)
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineDirectionZero)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+    }
+
+    /// A line square to a plane whose u and v scales are 1e-7 crosses it at a determinant
+    /// of 1e-14, below the kernel's zero: the crossing is singular to solve for, with
+    /// upstream's `SM_ERR`; the fast drop refuses an operation it does not take.
+    #[test]
+    fn a_crossing_too_small_to_solve_and_an_operation_not_taken_are_named() {
+        use crate::geom::global_solver::SolverOperation;
+        use crate::surface::surface::p4::NoObject;
+        let tiny = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1e-7, 1e-7),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        );
+        let e = tiny
+            .global_line_intersect::<NoObject>(
+                &Kernel::default(),
+                NoObject,
+                &tiny.step_uv_domain(),
+                Point3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                None,
+                false,
+                1e-6,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::LineCrossingSingular)
+        );
+        let p = unit_plane();
+        let e = p
+            .drop_point_fast::<NoObject>(
+                &p.step_uv_domain(),
+                SolverOperation::Maximize,
+                Point3::new(1.0, 2.0, 4.0),
+                1e-6,
+                None,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::OperationNotTaken)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]

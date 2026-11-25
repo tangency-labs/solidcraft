@@ -117,7 +117,10 @@ impl Remote {
             method: method.to_string(),
             what: control_pending::describe(method, &params),
             effect: control_pending::effect(method, &params),
-            once: method == "engine.batch",
+            // A lost close/new reply must not close another tab or open a second one.
+            once: method == "engine.batch"
+                || method == "app.quit"
+                || (method == "ui.documents" && params.get("action").and_then(Value::as_str).is_some()),
             params: Self::scoped(params),
         };
         let reply = self.conn.exchange(request, retry_busy)?;
@@ -363,6 +366,16 @@ impl Auto {
 }
 
 impl Backend for Auto {
+    fn batch_backend(&mut self) -> Option<&mut dyn Backend> {
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match (&mut self.remote, &mut self.headless) {
+            (Some(remote), _) => Some(remote),
+            (None, Some(headless)) => Some(headless),
+            (None, None) => None,
+        }
+    }
     fn supports_plugin_tools(&mut self) -> bool {
         if self.remote.is_none() {
             self.look_for_app();

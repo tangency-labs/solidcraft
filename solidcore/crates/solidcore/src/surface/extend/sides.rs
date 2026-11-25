@@ -39,6 +39,7 @@
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::{Continuity, ExtendRefusal, Extended};
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -251,7 +252,12 @@ impl Surface {
                 continue;
             }
             let side = *on.get(at).ok_or_else(|| {
-                SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+                SolidError::surface(
+                    OP,
+                    SurfaceFailure::Defect {
+                        why: "a side of the source's box has no counterpart on the result, though the counterparts are one per side, four, and the loop counts the four sides",
+                    },
+                )
             })?;
             let surface = current.as_ref().map_or(self, |e| &e.surface);
             let dom = surface.natural_uv_domain_with_nurb(k)?;
@@ -314,13 +320,10 @@ impl Surface {
                 measured = o.base_surface();
             }
             if !matches!(measured.kind(), SurfaceKind::ProceduralBlend(_)) {
-                for (done, at) in sides.iter_mut().zip(0..) {
+                for (done, &side) in sides.iter_mut().zip(on.iter()) {
                     if !matches!(done, SideExtension::Extended(_)) {
                         continue;
                     }
-                    let side = *on.get(at).ok_or_else(|| {
-                        SolidError::surface_failed(OP, "the side has no counterpart on the surface")
-                    })?;
                     let across = measured.length_across_side(k, &face, side, super::REL)?;
                     if !across.converged
                         || across.enclosure.lower

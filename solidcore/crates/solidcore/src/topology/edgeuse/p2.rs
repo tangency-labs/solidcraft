@@ -77,6 +77,7 @@
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::Context;
@@ -85,6 +86,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::SolutionEnd;
+use crate::geom::tol::coincidence_reach_3d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -163,6 +165,7 @@ fn ser_as_true(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -194,6 +197,7 @@ pub(crate) fn binormal_ignoring_status(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -430,12 +434,14 @@ fn step_off_into(
     }
 
     // edgeuse locals
-    let f = face(b, eu)?.ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face"))?;
+    // an edge use of a wire has no face to step into: the caller's edge use
+    let f =
+        face(b, eu)?.ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeUseNotOnFace))?;
     let face_rec = b.face(f)?;
     let surface = face_rec
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
     let uv_domain = face_rec.uv_domain;
 
     // evaluate surface at edge point
@@ -476,18 +482,18 @@ fn step_off_into(
         )?;
         let Some(first) = solutions.first() else {
             // stepoffdistance stepped off face UVDomain
-            return Ok(Some(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology(
                 OP,
-                "the stepped-off point does not lie on the face",
+                TopologyFailure::SteppedOffFace,
             )));
         };
         uv_guess = Point2::new(first.param(0)?, first.param(1)?);
 
         // still stepping off face UVDomain
         if !uv_domain.contains_point(uv_guess, 0.0) {
-            return Ok(Some(SolidError::topology_failed(
+            return Ok(Some(SolidError::topology(
                 OP,
-                "the stepped-off point is outside the face's UV domain",
+                TopologyFailure::SteppedOutsideUvDomain,
             )));
         }
     }
@@ -966,8 +972,10 @@ pub struct EdgeuseSide {
 /// `SmEdgeuse::IsEdgeuseSideInSurface(lSmpCount, pOptPeriodicU, pOptPeriodicV,
 /// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
 /// order) onto the face's surface and classifies them against the natural UV domain's
-/// sides (to twice the surface zone tolerance mapped to UV in U and in V; not upstream: a
-/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles";
+/// sides (to the coincidence tolerance of the surface with itself mapped to UV in U and
+/// in V, [`coincidence_reach_3d`]; upstream to twice the surface zone tolerance; not
+/// upstream: a periodic side, a seam, to the edge's own tolerance, docs/booleans.md
+/// "Seams and poles";
 /// nor upstream: a sample that close to two opposite sides lies on the nearer, WR-18540).
 /// A sample off every side answers `true` at once. Otherwise the edge use runs along a
 /// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
@@ -1109,19 +1117,27 @@ pub fn is_edgeuse_side_in_surface(
 
         // Tol  2d mapping of Surface ZoneTol3d (not upstream: a periodic side is a seam,
         // which bounds no material, so the edge runs along it only within the edge's own
-        // tolerance; docs/booleans.md, "Seams and poles")
+        // tolerance; docs/booleans.md, "Seams and poles"; nor upstream: the sample, dropped
+        // onto the surface, lies on another side when the two places coincide, within the
+        // surface's zone tolerance and the contact tolerance, not within upstream's twice
+        // it, the intersection tolerance; docs/booleans.md, "The coincidence rule")
+        let size = edge_point
+            .x
+            .abs()
+            .max(edge_point.y.abs())
+            .max(edge_point.z.abs());
         let side_tol_3d = |periodic: bool| {
             if periodic {
                 edge_tol_3d
             } else {
-                2.0 * surf_zone_tol_3d
+                coincidence_reach_3d(k, surf_zone_tol_3d, surf_zone_tol_3d, size)
             }
         };
         let tol_2d_u = map_to_2d_dir(k, side_tol_3d(periodic_u), uv_drop_point, u_dir, surface)?;
         let tol_2d_v = map_to_2d_dir(k, side_tol_3d(periodic_v), uv_drop_point, v_dir, surface)?;
 
-        // classify sUVPoint - to XSectTol3d numerical tolerances mapped to 2d (diff in U
-        // and V directions)
+        // classify sUVPoint - to those tolerances mapped to 2d (diff in U and V
+        // directions)
         let uv_loc_u = uv_domain.point_boundaries(uv_drop_point, tol_2d_u) & (SS_UMIN | SS_UMAX);
         let uv_loc_v = uv_domain.point_boundaries(uv_drop_point, tol_2d_v) & (SS_VMIN | SS_VMAX);
         // (not upstream, WR-18540: a sample within the band of both opposite sides, where the
@@ -1687,9 +1703,7 @@ mod tests {
         assert_eq!(step_err.upstream_status(), Some(1001));
         assert_eq!(
             step_err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         // Default (`false`): `SER` inside `SmBoolean` falsely classifies the concave
@@ -1704,9 +1718,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         // Without step-off (`step_off_dist == 0.0`), the concave sector still evaluates
@@ -1775,9 +1787,7 @@ mod tests {
         assert_eq!(radial_err.upstream_status(), Some(1001));
         assert_eq!(
             radial_err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
 
         assert!(is_convex_radial_sector(
@@ -1794,9 +1804,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(1001));
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "the stepped-off point does not lie on the face"
-            ))
+            Some(&TopologyFailure::SteppedOffFace)
         );
     }
 
@@ -1864,10 +1872,15 @@ mod tests {
         let uninit_err =
             is_convex_radial_sector(&opt_in_k, &mut b_uninit, concave_eu, 1, false, 0.0)
                 .unwrap_err();
-        assert!(matches!(
-            uninit_err,
-            SolidError::Upstream { code: 1001, .. }
-        ));
+        // the B-spline curve without its NURB, status 1001 kept
+        assert!(
+            uninit_err.upstream_status() == Some(1001)
+                && uninit_err.nurbs_failure()
+                    == Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                        crate::error::nurbs::BSplineFailure::NoNurbsForm
+                    )),
+            "{uninit_err:?}"
+        );
 
         // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007): `Ok(true)`
         // by default, `Err(Upstream { code: 1007 })` under opt-in.
