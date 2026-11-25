@@ -1260,10 +1260,8 @@ impl core::fmt::Display for SurfaceFailure {
             Self::RevolutionAxisDegenerate => f.write_str("the axis of the surface of revolution has no direction"),
             Self::RotationSenseUndefined => f.write_str("the end rows give no sense to turn about the axis"),
             Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
-            // The phrase the site reported before it was named, kept word for word: the
-            // wr57 replay tape (`goldens` `wr57_replay`, `heal.heal_data_p3`) hashes this
-            // error's message as the answer at its substituted calls. The bounds stay in
-            // the fields.
+            // The phrase the site reported before it was named, kept word for word. The
+            // bounds stay in the fields.
             Self::SingularBoundaryNotPole { .. } => f.write_str(
                 "a point of the singular boundary is nearer the test point than the point found: the boundary is not a pole",
             ),
@@ -2392,13 +2390,6 @@ mod tests {
                 Builder::Variant("SurfaceFailure", "OutsideDomain"),
                 Builder::Variant("SurfaceFailure", "OffSurface"),
                 Builder::Method("surface_failed", Some(1)),
-                // the WR-57 replay seam's own constructor of a taped answer (feature
-                // `wr57-replay`), which only the goldens call: not a kernel site
-                Builder::Shared(
-                    "solidcore/src/surface/surface/replay",
-                    "surface_failed",
-                    Some(1),
-                ),
                 Builder::Method("surface_missing", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
