@@ -3631,6 +3631,74 @@ mod tests {
         assert!(!cell_monotone(&k, &patch, &cell, Vec3::new(1.0, 0.0, 0.0)).unwrap());
     }
 
+    /// The face of the offset by `0.5` of [`quarter_cylinder_patch`] (an offset surface: a
+    /// cylinder of radius 1.5 about the z axis over angles 0 to 90 degrees and z 0 to 1)
+    /// trimmed to angles 20 to 70 degrees and z 0.25 to 0.75: two lines along the axis and
+    /// two arcs of radius 1.5.
+    fn offset_cylinder_face() -> (Kernel, Brep, FaceId) {
+        use crate::curve::arc::ArcDefinition;
+        use crate::curve::ellipse::Ellipse;
+        use crate::surface::offset_surface::OffsetSurface;
+        let mut k = Kernel::default();
+        let r = 1.5;
+        let (a0, a1) = (20.0_f64.to_radians(), 70.0_f64.to_radians());
+        let (z0, z1) = (0.25, 0.75);
+        let at = |a: f64, z: f64| Point3::new(r * a.cos(), r * a.sin(), z);
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let line = |p: Point3, q: Point3| {
+            Curve::from(Line::create_line_segment(3, p, q, Some(&interval)).unwrap())
+        };
+        // (an arc from angle `from` to `to` at height `z`, turning about -z when it runs back)
+        let arc = |k: &Kernel, z: f64, from: f64, to: f64| {
+            let def = ArcDefinition {
+                centre: Point3::new(0.0, 0.0, z),
+                axis: Vec3::new(0.0, 0.0, if to > from { 1.0 } else { -1.0 }),
+                reference: Vec3::new(from.cos(), from.sin(), 0.0),
+                radius: r,
+                start: 0.0,
+                end: (to - from).abs(),
+            };
+            Curve::from(Ellipse::arc(k, &def).unwrap())
+        };
+        let curves = vec![
+            arc(&k, z0, a0, a1),
+            line(at(a1, z0), at(a1, z1)),
+            arc(&k, z1, a1, a0),
+            line(at(a0, z1), at(a0, z0)),
+        ];
+        let base = quarter_cylinder_patch(1.0, 1.0);
+        let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
+        let b = trim_surface_with_3d_curves(&mut k, surface, &[4], curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        (k, b, faces[0])
+    }
+
+    /// #21660: an offset face's tight box is its own, in closed form: `x = 1.5 cos a` falls
+    /// and `y = 1.5 sin a` rises with the angle `a` over the face's 20 to 70 degrees, so x
+    /// spans `[1.5 cos 70, 1.5 cos 20]`, y `[1.5 sin 20, 1.5 sin 70]` and z the trim's
+    /// `[0.25, 0.75]`. Its surface runs on past the trim to x and y 1.5, which is not the
+    /// face's: an offset surface has no subpatch whose control points bound a cell.
+    #[test]
+    fn an_offset_faces_tight_box_is_its_trims_not_its_surfaces() {
+        let (k, b, f) = offset_cylinder_face();
+        let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+        let (a0, a1) = (20.0_f64.to_radians(), 70.0_f64.to_radians());
+        let want_min = Point3::new(1.5 * a1.cos(), 1.5 * a0.sin(), 0.25);
+        let want_max = Point3::new(1.5 * a0.cos(), 1.5 * a1.sin(), 0.75);
+        let (lo, hi) = (bx.min(), bx.max());
+        for (got, want) in [
+            (lo.x, want_min.x),
+            (lo.y, want_min.y),
+            (lo.z, want_min.z),
+            (hi.x, want_max.x),
+            (hi.y, want_max.y),
+            (hi.z, want_max.z),
+        ] {
+            assert!((got - want).abs() <= 1e-9, "box {lo:?} {hi:?}, want {want_min:?} {want_max:?}");
+        }
+    }
+
     /// An analytic face (the quarter-cylinder side of a partial cylinder of radius 5 and
     /// height 10, a cone-kind surface whose base is a B-spline) boxes at `[0,5] x [0,5] x
     /// [0,10]`.
