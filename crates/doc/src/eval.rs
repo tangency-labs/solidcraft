@@ -12234,12 +12234,24 @@ fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u
     } else if let Some(migrated) = migrated_copy_placement(doc, mb, path, at) {
         std::borrow::Cow::Owned(migrated)
     } else {
-        return Err(lost());
+        std::borrow::Cow::Borrowed(outer_placement(doc, mb, path).ok_or_else(lost)?)
     };
     let singular = || DocError::Invalid(format!("the placement `{}` was copied from is singular", mb.name));
     let (component, frame, picked) = mirror_copy_frame(doc, own, &effective).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
+}
+
+/// The placement on the way to `path` that shows body `mb`, when `path` itself does not: the
+/// longest of its leading occurrences that leads to the body's component. A copy a mirror or
+/// pattern makes at a placement joins the innermost component around it that is placed once
+/// ([`mirror_copy_frame`]), so placing the part picked there again (a linked part inserted once
+/// more with `reuse`) moves those copies out to a component that placement passes through. A
+/// later pattern or mirror that picked them at the part's placement copies them where they are
+/// now: before, it left them out, and its copies with them.
+fn outer_placement<'p>(doc: &Document, mb: &ModelBody, path: &'p [u64]) -> Option<&'p [u64]> {
+    let owner = doc.model_body_component(mb);
+    (0..path.len()).rev().filter_map(|k| path.get(..k)).find(|outer| doc.path_placement(outer).is_some_and(|(at, _)| at == owner))
 }
 
 /// Follow a pattern or mirror copy whose owning component shifted between an ancestor and a
