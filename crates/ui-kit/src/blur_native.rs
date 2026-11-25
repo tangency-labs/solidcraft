@@ -82,6 +82,7 @@ pub struct State {
     surface_alpha: Option<u8>,
     last_size: Option<[u32; 2]>,
     whole_frame: bool,
+    hook: Option<Arc<HookPipeline>>,
 }
 
 impl Default for State {
@@ -97,6 +98,7 @@ impl Default for State {
             surface_alpha: None,
             last_size: None,
             whole_frame: false,
+            hook: None,
         }
     }
 }
@@ -105,6 +107,7 @@ impl State {
     pub fn install(&mut self, rs: &egui_wgpu::RenderState, split: bool) {
         self.retire();
         self.failure = None;
+        self.hook = None;
         self.host = Some(Host {
             adapter: rs.adapter.clone(),
             device_type: rs.adapter.get_info().device_type,
@@ -223,7 +226,8 @@ impl State {
         let previous = CURRENT.with(|c| c.replace(None));
         let alpha = SURFACE_ALPHA.with(|a| a.replace(self.surface_alpha));
         let scope = Scope { previous, alpha };
-        if self.radius == 0.0 {
+        let radius = self.effective_radius();
+        if radius == 0.0 {
             self.retire();
             return scope;
         }
@@ -250,7 +254,8 @@ impl State {
         let shared = self.active.get_or_insert_with(|| {
             Arc::new(Shared {
                 host: host.clone(),
-                radius: self.radius,
+                hook: self.hook.clone(),
+                radius,
                 tier_cap: self.tier_cap,
                 whole_frame: self.whole_frame,
                 windows: Mutex::new(Windows { base: self.retired, painting: key(egui::ViewportId::ROOT), ..Windows::default() }),
@@ -290,6 +295,222 @@ impl State {
         CURRENT.with(|c| *c.borrow_mut() = Some(Current { shared: shared.clone(), window: id }));
         scope
     }
+
+    /// The blur the frame runs at: the window's, or a panel hook's if that asks for more.
+    fn effective_radius(&self) -> f32 {
+        self.hook.as_ref().map_or(self.radius, |hook| self.radius.max(hook.blur))
+    }
+
+    /// Hands every see-through panel's backdrop to `hook`'s shader instead of the plain blur, or
+    /// back to the blur with `None`. The device's refusal of the pipeline is the error, and the
+    /// panels keep the plain blur then.
+    pub fn set_panel_hook(&mut self, hook: Option<PanelHook>) -> Result<(), String> {
+        self.retire();
+        self.hook = None;
+        let Some(hook) = hook else { return Ok(()) };
+        let Some(host) = &self.host else { return Err("no GPU host".into()) };
+        if validate_radius(hook.blur)? == 0.0 {
+            return Err("a panel hook needs a blur radius above 0".into());
+        }
+        let (built, error) = egui_wgpu::capture_errors(&host.device, || HookPipeline::new(host, &hook));
+        if let Some(error) = error {
+            return Err(error.to_string());
+        }
+        self.hook = Some(Arc::new(built));
+        Ok(())
+    }
+
+    pub fn panel_hook_active(&self) -> bool {
+        self.hook.is_some()
+    }
+
+    /// The hook's frame-wide uniform ([`PANEL_HOOK_GLOBAL_BYTES`]), written before the frame paints.
+    pub fn set_panel_hook_globals(&self, bytes: &[u8]) {
+        if let (Some(host), Some(hook)) = (&self.host, &self.hook)
+            && bytes.len() == PANEL_HOOK_GLOBAL_BYTES
+        {
+            host.queue.write_buffer(&hook.globals, 0, bytes);
+        }
+    }
+}
+
+/// The size of a panel hook's frame-wide uniform (binding 0).
+pub const PANEL_HOOK_GLOBAL_BYTES: usize = 160;
+/// The size of a panel hook's per-panel uniform: rect, corners and state in pixels, then the
+/// blur radius and whether the target is sRGB.
+pub const PANEL_HOOK_PANEL_BYTES: usize = 64;
+/// A panel hook's first texture binding of its own; up to four follow.
+pub const PANEL_HOOK_FIRST_TEXTURE: u32 = 3;
+/// The per-panel uniform's binding; the backdrop as drawn and blurred follow it.
+pub const PANEL_HOOK_PANEL_BINDING: u32 = 7;
+
+/// A shader that draws each see-through panel's backdrop: WGSL with entry points `sc_vertex` and
+/// `sc_fragment` over [`panel_hook_layout`], and its textures' mip levels (straight sRGB RGBA).
+pub struct PanelHook {
+    pub wgsl: String,
+    pub textures: Vec<Vec<([u32; 2], Vec<u8>)>>,
+    /// The blur radius of the blurred backdrop it samples, in pixels.
+    pub blur: f32,
+}
+
+/// The bindings a panel hook's shader reads: the frame uniform, clamp and repeat samplers,
+/// `textures` of its own, then the panel uniform and the backdrop as drawn and blurred.
+pub fn panel_hook_layout(textures: usize) -> Vec<wgpu::BindGroupLayoutEntry> {
+    let uniform = |binding: u32, size: usize| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: std::num::NonZeroU64::new(size as u64),
+        },
+        count: None,
+    };
+    let sampler = |binding: u32| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    };
+    let texture = |binding: u32| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let mut entries = vec![uniform(0, PANEL_HOOK_GLOBAL_BYTES), sampler(1), sampler(2)];
+    entries.extend((0..textures as u32).map(|i| texture(PANEL_HOOK_FIRST_TEXTURE + i)));
+    entries.extend([
+        uniform(PANEL_HOOK_PANEL_BINDING, PANEL_HOOK_PANEL_BYTES),
+        texture(PANEL_HOOK_PANEL_BINDING + 1),
+        texture(PANEL_HOOK_PANEL_BINDING + 2),
+    ]);
+    entries
+}
+
+/// A panel hook ready to draw: its pipeline, its own textures and the frame-wide uniform.
+struct HookPipeline {
+    blur: f32,
+    pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
+    clamp: wgpu::Sampler,
+    repeat: wgpu::Sampler,
+    textures: Vec<wgpu::TextureView>,
+    globals: wgpu::Buffer,
+}
+
+impl HookPipeline {
+    fn new(host: &Host, hook: &PanelHook) -> Self {
+        let device = &host.device;
+        let entries = panel_hook_layout(hook.textures.len());
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("panel hook"), entries: &entries });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("panel hook"),
+            source: wgpu::ShaderSource::Wgsl(hook.wgsl.as_str().into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("panel hook"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("panel hook"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("sc_vertex"), buffers: &[], compilation_options: Default::default() },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("sc_fragment"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: host.format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let sampler = |mode: wgpu::AddressMode| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("panel hook"),
+                address_mode_u: mode,
+                address_mode_v: mode,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                ..Default::default()
+            })
+        };
+        let textures = hook.textures.iter().map(|levels| upload(host, levels)).collect();
+        let globals = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("panel hook frame"),
+            size: PANEL_HOOK_GLOBAL_BYTES as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {
+            blur: hook.blur,
+            pipeline,
+            layout,
+            clamp: sampler(wgpu::AddressMode::ClampToEdge),
+            repeat: sampler(wgpu::AddressMode::Repeat),
+            textures,
+            globals,
+        }
+    }
+
+    /// One panel's uniform and bindings over this window's backdrop pictures.
+    fn binding(&self, device: &wgpu::Device, scene: &wgpu::TextureView, blurred: &wgpu::TextureView) -> Binding {
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("panel hook panel"),
+            size: PANEL_HOOK_PANEL_BYTES as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut entries = vec![
+            wgpu::BindGroupEntry { binding: 0, resource: self.globals.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.clamp) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.repeat) },
+            wgpu::BindGroupEntry { binding: PANEL_HOOK_PANEL_BINDING, resource: uniform.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: PANEL_HOOK_PANEL_BINDING + 1, resource: wgpu::BindingResource::TextureView(scene) },
+            wgpu::BindGroupEntry { binding: PANEL_HOOK_PANEL_BINDING + 2, resource: wgpu::BindingResource::TextureView(blurred) },
+        ];
+        for (i, view) in self.textures.iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry { binding: PANEL_HOOK_FIRST_TEXTURE + i as u32, resource: wgpu::BindingResource::TextureView(view) });
+        }
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("panel hook panel"), layout: &self.layout, entries: &entries });
+        Binding { uniform, group }
+    }
+}
+
+fn upload(host: &Host, levels: &[([u32; 2], Vec<u8>)]) -> wgpu::TextureView {
+    let [w, h] = levels.first().map_or([1, 1], |(size, _)| *size);
+    let texture = host.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("panel hook picture"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: levels.len().max(1) as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (level, ([lw, lh], rgba)) in levels.iter().enumerate() {
+        host.queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * lw), rows_per_image: Some(*lh) },
+            wgpu::Extent3d { width: *lw, height: *lh, depth_or_array_layers: 1 },
+        );
+    }
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// Select production policy or bypass only its software rejection for rendering fixtures.
@@ -334,6 +555,7 @@ pub fn fixture_state(
         surface_alpha: None,
         last_size: None,
         whole_frame: false,
+        hook: None,
     }
 }
 
@@ -376,6 +598,8 @@ pub fn panel_fill(fill: Color32) -> Color32 {
 
 struct Shared {
     host: Host,
+    /// Draws the panels' backdrops in place of the plain blur, when a hook is set.
+    hook: Option<Arc<HookPipeline>>,
     radius: f32,
     tier_cap: usize,
     /// Every marker blurs the whole frame (a fixture's reference), not just its padded region.
@@ -441,6 +665,8 @@ struct Marker {
     rect: Rect,
     corners: egui::CornerRadius,
     snap: bool,
+    /// Hovered, focused and floating, 0 or 1, for a panel hook.
+    state: [f32; 3],
     // Identity only: the paint job owns this callback for the entire frame. Keeping
     // its Arc here would create a Shared -> callback -> Shared ownership cycle.
     callback_id: usize,
@@ -472,6 +698,7 @@ pub(super) fn mark(painter: &Painter, rect: Rect, corners: egui::CornerRadius) -
     if !opacity.is_finite() || opacity < 1.0 || !painter.is_visible() || !rect.is_finite() || !rect.is_positive() {
         return None;
     }
+    let state = panel_state(painter, rect);
     CURRENT.with(|c| {
         let kept = c.borrow();
         let current = kept.as_ref()?;
@@ -490,11 +717,23 @@ pub(super) fn mark(painter: &Painter, rect: Rect, corners: egui::CornerRadius) -
             rect,
             corners,
             snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
+            state,
             callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
         });
         inner.counts.markers_emitted += 1;
         Some(Shape::Callback(callback))
     })
+}
+
+/// Hovered (the pointer is over it, on its layer), focused (the keyboard focus is in it) and
+/// floating (a window or dialog, not a docked panel or bar).
+fn panel_state(painter: &Painter, rect: Rect) -> [f32; 3] {
+    let ctx = painter.ctx();
+    let layer = painter.layer_id();
+    let hovered = ctx.pointer_hover_pos().is_some_and(|at| rect.contains(at) && ctx.layer_id_at(at) == Some(layer));
+    let focused = ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == layer && rect.contains_rect(r.rect));
+    let floating = !matches!(layer.order, egui::Order::Background | egui::Order::Middle);
+    [hovered, focused, floating].map(|on| if on { 1.0 } else { 0.0 })
 }
 
 struct PanelMarker {
@@ -516,6 +755,19 @@ impl CallbackTrait for PanelMarker {
         let Some(slot) = inner.planned.get(self.index).copied().flatten() else { return };
         let Some(gpu) = inner.gpu.as_ref() else { return };
         if gpu.ready_serial != inner.serial {
+            return;
+        }
+        // A modal's backing covers the window: it keeps the plain blur, not a panel's look.
+        let window = info.viewport.area() * info.pixels_per_point * info.pixels_per_point >= 0.9 * (gpu.size[0] as f32 * gpu.size[1] as f32);
+        if let Some(hook) = self.shared.hook.as_ref().filter(|_| !window) {
+            let Some(binding) = gpu.hook_markers.get(slot) else { return };
+            let Some(bytes) = hook_panel_bytes(&marker, info, hook.blur, self.shared.host.format.is_srgb()) else { return };
+            self.shared.host.queue.write_buffer(&binding.uniform, 0, &bytes);
+            pass.set_viewport(0.0, 0.0, gpu.size[0] as f32, gpu.size[1] as f32, 0.0, 1.0);
+            pass.set_pipeline(&hook.pipeline);
+            pass.set_bind_group(0, &binding.group, &[]);
+            pass.draw(0..3, 0..1);
+            inner.counts.markers_drawn += 1;
             return;
         }
         let Some(binding) = gpu.markers.get(slot) else { return };
@@ -554,6 +806,34 @@ impl CallbackTrait for PanelMarker {
     }
 }
 
+/// A panel hook's `ScPanelRect`: the rect and corners in the window's pixels, the state, the blur
+/// radius and whether the target is sRGB.
+fn hook_panel_bytes(marker: &Marker, info: egui::PaintCallbackInfo, blur: f32, srgb: bool) -> Option<[u8; PANEL_HOOK_PANEL_BYTES]> {
+    let r = info.viewport;
+    let ppp = info.pixels_per_point;
+    if !r.is_finite() || !r.is_positive() {
+        return None;
+    }
+    let mut rect = [r.min.x * ppp, r.min.y * ppp, r.max.x * ppp, r.max.y * ppp];
+    if marker.snap {
+        rect = rect.map(f32::round);
+    }
+    let scale = ppp * r.width() / marker.rect.width();
+    let corners = [marker.corners.nw, marker.corners.ne, marker.corners.sw, marker.corners.se].map(|v| f32::from(v) * scale);
+    let [hovered, focused, floating] = marker.state;
+    let srgb = if srgb { 1.0 } else { 0.0 };
+    let values =
+        [rect[0], rect[1], rect[2], rect[3], corners[0], corners[1], corners[2], corners[3], hovered, focused, floating, 0.0, blur, srgb, 0.0, 0.0];
+    if values.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let mut bytes = [0; PANEL_HOOK_PANEL_BYTES];
+    for (out, value) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+        out.copy_from_slice(&value.to_le_bytes());
+    }
+    Some(bytes)
+}
+
 impl Shared {
     /// Make window `id`'s resources fit `size` and `steps`, and give it one binding per marker.
     /// `false` leaves the failure on the window for the capability report. Targets of other
@@ -569,7 +849,8 @@ impl Shared {
             }
             false
         };
-        let Some(bytes) = target_bytes(size, steps, device.limits().max_texture_dimension_2d) else {
+        let snapshot = if self.hook.is_some() { u64::from(size[0]) * u64::from(size[1]) * 4 } else { 0 };
+        let Some(bytes) = target_bytes(size, steps, device.limits().max_texture_dimension_2d).map(|b| b + snapshot) else {
             return fail(windows, "blur target is empty, exceeds device limits or memory budget");
         };
         let current = windows.map.get(&id).and_then(|inner| inner.gpu.as_ref()).is_some_and(|g| g.size == size && g.steps == steps);
@@ -597,7 +878,8 @@ impl Shared {
         if !current {
             inner.gpu = None;
             inner.counts.clear_live();
-            let (gpu, failure) = egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, &mut inner.counts));
+            let (gpu, failure) =
+                egui_wgpu::capture_errors(device, || Gpu::new(device, self.host.format, size, steps, offset, self.hook.is_some(), &mut inner.counts));
             if let Some(error) = failure {
                 log::warn!("blur resources refused: {error}");
                 return fail(windows, "GPU refused blur resources");
@@ -610,7 +892,12 @@ impl Shared {
         let Inner { gpu, counts, .. } = &mut *inner;
         let Some(gpu) = gpu else { return false };
         gpu.ready_serial = serial;
-        let (_, failed) = egui_wgpu::capture_errors(device, || gpu.grow_markers(device, bindings, counts));
+        let (_, failed) = egui_wgpu::capture_errors(device, || {
+            gpu.grow_markers(device, bindings, counts);
+            if let Some(hook) = &self.hook {
+                gpu.grow_hook_markers(device, hook, bindings);
+            }
+        });
         if let Some(error) = failed {
             log::warn!("blur marker resources refused: {error}");
             return fail(windows, "GPU refused blur marker resources");
@@ -717,6 +1004,15 @@ impl FrameCompositor for Shared {
                 if let Ok(mut windows) = self.windows.lock()
                     && let Some(Inner { gpu: Some(gpu), counts, .. }) = windows.map.get_mut(&id)
                 {
+                    if let Some(snapshot) = &gpu.snapshot {
+                        // The hook's shader reads the backdrop from a copy: the panels draw into
+                        // the composition itself.
+                        encoder.copy_texture_to_texture(
+                            gpu.composition.texture.as_image_copy(),
+                            snapshot.texture.as_image_copy(),
+                            wgpu::Extent3d { width: gpu.size[0], height: gpu.size[1], depth_or_array_layers: 1 },
+                        );
+                    }
                     blur_run(encoder, gpu, run, counts);
                 }
             }
@@ -816,7 +1112,7 @@ fn blur_run(encoder: &mut wgpu::CommandEncoder, gpu: &Gpu, run: &Run, counts: &m
 }
 
 struct Target {
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
 struct Binding {
@@ -838,6 +1134,9 @@ struct Gpu {
     chain: Vec<Step>,
     presentation: Binding,
     markers: Vec<Binding>,
+    /// For a panel hook: the composition as it was at the last run, and one binding per marker.
+    snapshot: Option<Target>,
+    hook_markers: Vec<Binding>,
     down: wgpu::RenderPipeline,
     up: wgpu::RenderPipeline,
     panel: wgpu::RenderPipeline,
@@ -907,7 +1206,7 @@ fn attachment_pass(
 }
 
 impl Gpu {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, size: [u32; 2], steps: usize, offset: f32, counts: &mut Counters) -> Self {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, size: [u32; 2], steps: usize, offset: f32, hook: bool, counts: &mut Counters) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("blur bindings"),
             entries: &[
@@ -1004,7 +1303,30 @@ impl Gpu {
             let target = Target::new(device, *dims, wgpu::TextureFormat::Rgba16Float, counts);
             chain.push(Step { target, binding, down: false, level: level as u32, dims: *dims });
         }
-        Self { size, steps, composition, chain, presentation, markers: Vec::new(), down, up, panel, present, layout, sampler, ready_serial: 0 }
+        let snapshot = hook.then(|| Target::new(device, size, format, counts));
+        Self {
+            size,
+            steps,
+            composition,
+            chain,
+            presentation,
+            markers: Vec::new(),
+            snapshot,
+            hook_markers: Vec::new(),
+            down,
+            up,
+            panel,
+            present,
+            layout,
+            sampler,
+            ready_serial: 0,
+        }
+    }
+    fn grow_hook_markers(&mut self, device: &wgpu::Device, hook: &HookPipeline, count: usize) {
+        let (Some(snapshot), Some(last)) = (&self.snapshot, self.chain.last()) else { return };
+        while self.hook_markers.len() < count {
+            self.hook_markers.push(hook.binding(device, &snapshot.view, &last.target.view));
+        }
     }
     fn grow_markers(&mut self, device: &wgpu::Device, count: usize, counts: &mut Counters) {
         let Some(last) = self.chain.last() else { return };
@@ -1023,13 +1345,16 @@ impl Target {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         counts.textures_created += 1;
         counts.live_textures += 1;
         let view = texture.create_view(&Default::default());
-        Self { _texture: texture, view }
+        Self { texture, view }
     }
 }
 impl Binding {

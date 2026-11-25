@@ -279,6 +279,20 @@ branches, multiple attachments, cavity-shell branches, and infeasibility without
 plane pair still require the general arrangement and cavity rule. This event does not complete
 S3–S5 or change the existing refusal for exactly meeting planes.
 
+The executive also takes out a face whose offset is empty because its neighbours' offsets
+overtake it (a face eliminated by the offset, one of the changes of topology a shell meets
+[6]), for one shape so far
+(`offset_executive/empty_lens.rs`): a face of one loop of two edges (a lens, such as a notch's
+ceiling where it breaks out through a curved wall), each edge shared with one other face, its
+two vertices of those three faces only. Its offset is bounded by the two curves its neighbours'
+offsets cut on it, which meet at the offsets of its two vertices; where neither curve's trim
+found a neighbour's offset at either end (both ends are drops of their vertices,
+`TrimmedEdge::unreached`, `offset_geometry_creation.rs`), the two curves do not meet within the
+faces' extensions and the region between them is empty. The lens's offset faces are deleted
+and its two edges' offsets on the neighbours mated across it, as a collapsed round's are: the
+neighbours' offsets meet directly where the lens was, the edges between them at its two
+vertices running on into each other along one curve.
+
 ### 5.2 Mitres and the reach, as they run today
 
 ![A convex edge between faces F and G with sector angle α. Each face's offset by d is drawn; F's offset is extended past F's edge until it meets G's offset at M. The reach r from the edge to M's foot is marked, and one more d past it.](offset-and-shell/mitre-reach.svg)
@@ -305,8 +319,8 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
 - **The mitre** (`OffsetGeometryCreation::mate_edges`, `offset_geometry_creation.rs`) intersects
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
-  edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
-  the two surfaces is replaced by that curve.
+  edge uses. A marched piece lying on an exact line or conic of the two surfaces is replaced by
+  that curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve

@@ -28,6 +28,7 @@
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopsCross`]          | `SM_ERR_BAD_INTERSECTIONS` (WR-345)       |
 //! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
+//! | [`OffsetFailure::ExtendedCurveOffDomain`] | `SM_ERR` (#21743, solidcore-native)    |
 //! | [`OffsetFailure::Missing`]             | `SM_ERR_NULL_POINTER`                     |
 //! | [`OffsetFailure::PastSide`]            | `SM_ERR` (#18564, solidcore-native)       |
 //! | [`OffsetFailure::PeriodicBranchAmbiguous`] | `SM_ERR` (solidcore-native)            |
@@ -240,6 +241,17 @@ pub enum OffsetFailure {
     /// `TrimExtendedEdge` looks for a cut: no trim interval, so the edge is not extended or
     /// mated.
     ExtendedEdgeUntrimmed,
+    /// The UV trim curve `ExtendTrimEdges` extends along an offset edge has the middle of
+    /// its own interval outside the domain of the offset face's extended surface, `outside`
+    /// from it: the curve is in another surface's parameters, so no piece of it lies on the
+    /// extended surface and the edge cannot be extended along it (a lift there would run
+    /// along the domain's boundary, where the surface clamps, not over the curve; #21743).
+    ExtendedCurveOffDomain {
+        /// The edge, of the operation's input, where the handle names one.
+        edge: Option<EdgeId>,
+        /// How far the curve's midpoint lies outside the extended domain, in parameters.
+        outside: f64,
+    },
     /// The offset surface of `face`, offset by `distance`, collapses (onto its spine or past
     /// it: a round offset by its radius or more) in an extended offset, which builds every
     /// face it offsets (only an inset that extends convex edges leaves such a face out and
@@ -843,6 +855,7 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LooseTangentEdge { edge, .. }
+            | Self::ExtendedCurveOffDomain { edge, .. }
             | Self::EdgeHasNoCurve { edge }
             | Self::CurveKindUnsupported { edge, .. }
             | Self::EdgeuseHasNoUvTrim { edge } => edge.map(EntityRef::Edge),
@@ -1042,6 +1055,7 @@ impl OffsetFailure {
             | Self::LoopGapUncertified { .. }
             | Self::LoopsCross { .. }
             | Self::LooseTangentEdge { .. }
+            | Self::ExtendedCurveOffDomain { .. }
             | Self::MoveCollapses { .. }
             | Self::NotCertified { .. }
             | Self::OffsetBaseKindUnsupported { .. }
@@ -1137,6 +1151,7 @@ impl OffsetFailure {
             | Self::LoopGapUncertified { .. }
             | Self::LoopsCross { .. }
             | Self::LooseTangentEdge { .. }
+            | Self::ExtendedCurveOffDomain { .. }
             | Self::Missing(_)
             | Self::MoveCollapses { .. }
             | Self::NotCertified { .. }
@@ -1228,6 +1243,7 @@ impl OffsetFailure {
             | Self::LoopGapPassLimit { .. }
             | Self::LoopGapUncertified { .. }
             | Self::LooseTangentEdge { .. }
+            | Self::ExtendedCurveOffDomain { .. }
             | Self::MoveCollapses { .. }
             | Self::NotCertified { .. }
             | Self::OffsetBaseKindUnsupported { .. }
@@ -1288,6 +1304,7 @@ impl OffsetFailure {
             | Self::LaminaEdgeOtherSide
             | Self::LoopGapUncertified { .. }
             | Self::LooseTangentEdge { .. }
+            | Self::ExtendedCurveOffDomain { .. }
             | Self::OffsetBaseKindUnsupported { .. }
             | Self::PastSide { .. }
             | Self::PeriodicBranchAmbiguous
@@ -1659,6 +1676,13 @@ impl core::fmt::Display for OffsetFailure {
             Self::PeriodicBranchAmbiguous => f.write_str(
                 "more than one surface-surface intersection branch claims the same periodic \
                  boundary event, so the branch through that event is ambiguous",
+            ),
+            Self::ExtendedCurveOffDomain { edge, outside } => write!(
+                f,
+                "the UV curve extended along the offset of {} has its midpoint {outside:e} \
+                 outside the extended surface's domain: it is not in that surface's parameters, \
+                 so the edge is not extended",
+                edge.map_or_else(|| "an edge".to_owned(), |e| format!("edge {}", e.index()))
             ),
             Self::LooseTangentEdge {
                 edge,
@@ -2276,6 +2300,16 @@ mod tests {
                 false,
             ),
             (
+                O::ExtendedCurveOffDomain {
+                    edge: None,
+                    outside: 12.5,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+                false,
+            ),
+            (
                 O::ExtendedEdgeUntrimmed,
                 ErrorKind::Unsupported,
                 false,
@@ -2831,6 +2865,7 @@ mod tests {
                 O::LoopGapUncertified { .. } => "LoopGapUncertified",
                 O::LoopsCross { .. } => "LoopsCross",
                 O::LooseTangentEdge { .. } => "LooseTangentEdge",
+                O::ExtendedCurveOffDomain { .. } => "ExtendedCurveOffDomain",
                 O::Missing(_) => "Missing",
                 O::MoveCollapses { .. } => "MoveCollapses",
                 O::NotCertified { .. } => "NotCertified",
@@ -3110,6 +3145,19 @@ mod tests {
             assert_eq!(e.entity(), entity, "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
         }
+        // a solidcore-native refusal (#21743) replaced no status: it is not an upstream
+        // status, but reports `SM_ERR` to the comparison and names its edge
+        let cause = OffsetFailure::ExtendedCurveOffDomain {
+            edge: Some(edge),
+            outside: 12.5,
+        };
+        assert!(!cause.replaces_upstream_status(), "{cause:?}");
+        assert!(!cause.is_phrase() && !cause.is_defect(), "{cause:?}");
+        let e = SolidError::offset("offset::op", cause);
+        assert_eq!(e.upstream_status(), None, "{cause:?}");
+        assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
+        assert_eq!(e.entity(), Some(EntityRef::Edge(edge)), "{cause:?}");
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{cause:?}");
         // a site that kept another status keeps it through `with_status`
         let e = Failure::new("offset::op", OffsetFailure::FaceHasNoOuterFaceuse { face })
             .with_status(SM_ERR_INVALID_INPUT)
