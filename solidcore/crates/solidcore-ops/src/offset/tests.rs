@@ -3176,7 +3176,6 @@ mod drafts {
     /// 10 (30 15 - 15^2) = 6500/3 + 2250 = 13250/3 (for any t >= 1/4,
     /// V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
     #[test]
-    #[ignore = "fails until #1126 is fixed"]
     fn a_short_wall_drafted_past_where_its_sides_converge() {
         all_fixes();
         // atan(1/2), the double nearest it
@@ -3201,7 +3200,6 @@ mod drafts {
     /// down to the bottom, as at t = 1/2. V = 4500 - 125 / (3 t) = 13375/3; 6 faces,
     /// 12 edges, 8 vertices.
     #[test]
-    #[ignore = "fails until #1126 is fixed"]
     fn a_short_wall_drafted_at_45_degrees_past_where_its_sides_converge() {
         all_fixes();
         let mut points = CONVERGING_TOP.to_vec();
