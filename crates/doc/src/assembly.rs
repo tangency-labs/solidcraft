@@ -375,7 +375,8 @@ impl ExpressedMove {
         // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
         // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
         // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
-        let kept = solidcore_ops::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        let kept = solidcraft_kernel::services::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z])
+            .map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
         apply_vector(&self.frame, d(now.translate, self.at) + kept)
     }
 
@@ -402,7 +403,8 @@ impl ExpressedMove {
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
 
-fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
+/// `p` moved by `m` (as [`FeatureKind::transform_geometry`] moves a feature's planes).
+pub fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
     match p {
         PlaneRef::Custom { plane } => *plane = map_plane(m, plane).unwrap_or(*plane),
         PlaneRef::Placed { origin, x_dir, y_dir } => {

@@ -1378,7 +1378,25 @@ impl Brep {
     /// Those of [`Brep::clone_standing_for_self`] and of the cache copies (a trimmed
     /// surface cache in use).
     pub(crate) fn clone_for_trial(&self) -> Result<Self> {
-        let mut copy = self.clone_standing_for_self()?;
+        self.trial_copy(false)
+    }
+
+    /// [`Brep::clone_for_trial`] with every face surface's definition kept, as
+    /// [`Brep::clone_standing_for_self_keeping_definitions`] keeps it: a copy a query that
+    /// edits its B-reps runs on in place of this B-rep, so that it reads the same faces this
+    /// B-rep has, a round by its definition.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_for_trial`].
+    pub(crate) fn clone_for_trial_keeping_definitions(&self) -> Result<Self> {
+        self.trial_copy(true)
+    }
+
+    /// [`Brep::clone_for_trial`], keeping the face surfaces' definitions when
+    /// `keep_definitions` says so.
+    fn trial_copy(&self, keep_definitions: bool) -> Result<Self> {
+        let mut copy = self.standing_copy(keep_definitions)?;
         let ids: Vec<FaceId> = copy.faces.ids().collect();
         for &id in &ids {
             if let Some(surface) = copy.face_mut(id)?.surface.as_mut() {
@@ -2720,6 +2738,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(again, surface_key);
+    }
+
+    #[test]
+    fn a_trial_copy_keeping_definitions_keeps_every_face_s_definition() {
+        use crate::kernel::Kernel;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::sweep::screw::screw_sweep;
+
+        let mut k = Kernel::default();
+        let points = [
+            Vec3::new(4.1, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.9),
+            Vec3::new(4.1, 0.0, 0.9),
+        ];
+        let profile: Vec<Curve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let b = screw_sweep(&mut k, &profile, Vec3::ZERO, Vec3::Z, 1.5, 2.0, 1.5e-4).unwrap();
+        let defined = |b: &Brep| -> Vec<FaceId> {
+            b.faces()
+                .iter()
+                .filter(|(_, f)| {
+                    f.surface
+                        .as_ref()
+                        .is_some_and(|s| s.procedural_definition().is_some())
+                })
+                .map(|(id, _)| id)
+                .collect()
+        };
+        let kept = defined(&b);
+        assert!(!kept.is_empty(), "the thread keeps no definition");
+        assert_eq!(
+            defined(&b.clone_for_trial_keeping_definitions().unwrap()),
+            kept
+        );
+        // the copy without them drops them: the check above tells the two apart
+        assert!(defined(&b.clone_for_trial().unwrap()).is_empty());
     }
 
     #[test]

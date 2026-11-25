@@ -241,6 +241,8 @@ pub struct Documents {
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,
+    /// File > Revert to Saved is asking whether to drop the active design's unsaved changes.
+    pub reverting: bool,
     /// Quitting: the tabs answered so far with Don't Save (`None`: not quitting).
     pub quitting: Option<Vec<usize>>,
     /// The "save changes?" button the arrow keys have picked; Enter gives it.
@@ -274,6 +276,10 @@ pub struct Documents {
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
+    /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
+    /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
+    /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
+    parked_agent_chat: Option<Box<crate::agent_chat::AgentChat>>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -507,6 +513,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     if !presenting {
         crate::select_other::close(app);
     }
+    let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
         crate::select_other::close(app);
@@ -523,7 +530,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.viewport.hover = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
-        crate::agent_chat::leave_document(app);
+        if shared_chat && app.agent_chat.following_document {
+            crate::agent_chat::merge_active_turn_for_switch(app);
+        } else {
+            crate::agent_chat::leave_document(app);
+        }
         app.edit_anchor_hint = None;
     }
     if !presenting {
@@ -547,7 +558,13 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.agent_chat.swap_document(&mut slot.agent_chat);
+    let outgoing_chat = if shared_chat {
+        app.docs.parked_agent_chat.replace(Box::new(slot.agent_chat)).map_or_else(Default::default, |chat| *chat)
+    } else {
+        app.docs.parked_agent_chat = None;
+        app.agent_chat.swap_document(&mut slot.agent_chat);
+        slot.agent_chat
+    };
     let out_rev = app.session.revision;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
@@ -560,7 +577,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         reveals,
-        agent_chat: slot.agent_chat,
+        agent_chat: outgoing_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
@@ -587,6 +604,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
+    // every frame, so it no longer syncs them when the design comes to the front (#21594).
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     if !presenting {
@@ -595,6 +615,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
             pending.view_changed(before, app.session.revision);
         }
         app.jobs_view_changed(before, app.session.revision);
+    }
+    if !presenting && shared_chat {
+        crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
@@ -1865,7 +1888,7 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
         app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
     };
     let Some(index) = index else { return Ok(false) };
-    if app.agent_chat.following_document && index != app.docs.active {
+    if app.agent_chat.following_document && index != app.docs.active && !app.preferences.agent_shared_session {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
     }
     if app.file_picker_busy() {
@@ -1905,7 +1928,7 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
 /// opened while the person is busy in another design). Its view is framed when it is shown.
-pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub(crate) fn open_tab_behind(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -1913,6 +1936,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let mut slot = DocSlot::new(session);
     slot.fit = true;
     app.docs.slots.insert(app.docs.active + 1, Some(slot));
@@ -1920,7 +1944,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -1931,6 +1955,7 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
@@ -1947,8 +1972,12 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
 /// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
-pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
+pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
     if active_is_blank(app) {
+        if let Err(error) = session.plugin_state.publish_user_settings() {
+            app.set_status(error.to_string(), true);
+            return false;
+        }
         let rev = app.session.revision;
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
@@ -2328,6 +2357,12 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
         crate::agent_chat::continue_in_document(app);
         return;
     }
+    if app.preferences.agent_shared_session {
+        crate::agent_chat::leave_document(app);
+        app.docs.parked_agent_chat = None;
+        crate::agent_chat::continue_in_document(app);
+        return;
+    }
     // A chat not asked anything yet (an agent connected at start, say) holds nothing of the old
     // design: it starts over in place, and its agent stays connected.
     if !app.agent_chat.items.iter().any(|i| matches!(i, crate::agent_chat::Item::User { .. })) {
@@ -2341,6 +2376,9 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 
 /// Hidden conversations must also stop when AI is disabled or the application quits.
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_document(&mut app.session, wait);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
     }
@@ -2348,6 +2386,9 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
 
 /// Stop only the hidden conversations whose endpoint permission was revoked.
 pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_endpoint(&mut app.session, id);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }
@@ -2929,19 +2970,18 @@ fn view_tip(view: &DesignView, place: usize) -> String {
 /// and the same colour under it while it is shown.
 fn view_tab<'a>(
     view: &'a DesignView,
+    sketch_mark: bool,
     active: bool,
     on_screen: bool,
     tip: &'a str,
     to_window: Option<u32>,
     window: Option<&'a crate::view_windows::WindowChoice>,
 ) -> crate::app_bar::ViewTab<'a> {
-    let colour = if view.editing.is_some() {
-        solidcraft_theme::Tokens::get().sketch_accent
-    } else {
-        crate::workspace::view_icon_colour(kind_word(view.kind), true)
-    };
+    let sketch_mode = sketch_mark && view.editing.is_some();
+    let colour =
+        if sketch_mode { solidcraft_theme::Tokens::get().sketch_accent } else { crate::workspace::view_icon_colour(kind_word(view.kind), true) };
     crate::app_bar::ViewTab {
-        sketch_mode: view.editing.is_some(),
+        sketch_mode,
         compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
@@ -3028,7 +3068,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             if design == selected {
                 let set = &app.docs.views;
                 let tiles = set.tiles().filter(|_| set.is_tiled());
-                crate::view_windows::strip_views(app)
+                let strip = crate::view_windows::strip_views(app);
+                // The sketch mark on a view tab only tells views apart: with one view, none.
+                let sketch_mark = crate::ui_kit::disambiguates(strip.len());
+                strip
                     .into_iter()
                     .map(|(window, view)| {
                         let elsewhere = (window != current_window).then_some(window);
@@ -3037,7 +3080,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                         (
                             {
                                 let mut view = view.clone();
-                                if view.editing.is_some()
+                                if sketch_mark
+                                    && view.editing.is_some()
                                     && let Some(name) = crate::sketch_view::name(app, view.id)
                                 {
                                     view.name = name;
@@ -3084,12 +3128,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .iter()
         .zip(&view_tips)
         .map(|(views, tips)| {
+            let sketch_mark = crate::ui_kit::disambiguates(views.len());
             views
                 .iter()
                 .zip(tips)
                 .map(|((view, active, on_screen, window), tip)| {
                     let choice = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
-                    view_tab(view, *active, *on_screen, tip, *window, choice)
+                    view_tab(view, sketch_mark, *active, *on_screen, tip, *window, choice)
                 })
                 .collect()
         })
@@ -3405,9 +3450,65 @@ pub enum Answer {
     Cancel,
 }
 
+/// File > Revert to Saved: read the active design again from the file it was opened or saved as.
+/// With unsaved changes it asks first ([`revert_prompt`]), as they cannot be undone afterwards.
+pub fn revert(app: &mut SolveApp) {
+    if app.session.path.is_none() {
+        return;
+    }
+    if app.session.is_dirty() {
+        app.docs.reverting = true;
+    } else {
+        revert_now(app);
+    }
+}
+
+/// Close the active tab without asking and open its file again in its place. The file is checked
+/// first, so a missing or unreadable one leaves the tab and its changes where they were.
+fn revert_now(app: &mut SolveApp) {
+    app.docs.reverting = false;
+    let Some(path) = app.session.path.clone() else { return };
+    if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return;
+    }
+    if let Err(e) = solidcraft_engine::io::vfs::check(&path) {
+        app.set_status(e.to_string(), true);
+        return;
+    }
+    if !solidcraft_engine::io::vfs::is_file(&path) {
+        app.set_status(format!("{path}: the file is not there to revert to"), true);
+        return;
+    }
+    let active = app.docs.active;
+    close(app, active, true);
+    app.open_path_async(&path);
+}
+
+/// The question File > Revert to Saved asks when the design has unsaved changes.
+fn revert_prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.docs.reverting {
+        return;
+    }
+    let name = tabs_info(app).get(app.docs.active).map(|x| x.0.clone()).unwrap_or_default();
+    let question = solidcraft_ui_text::format("document.revert_changes", &[("name", &crate::i18n::tr_name(&name))]);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_revert_prompt"), "status_warning", solidcraft_ui_text::tr("ui.revert_question"))
+        .tone(ui_kit::Tone::Warning)
+        .actions(solidcraft_ui_text::tr("ui.revert"), solidcraft_ui_text::tr("ui.cancel"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &question, ui_kit::Text::Report("question", false));
+        });
+    match action {
+        ui_kit::Action::Ok => revert_now(app),
+        ui_kit::Action::Cancel => app.docs.reverting = false,
+        _ if closed => app.docs.reverting = false,
+        _ => {}
+    }
+}
+
 /// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    revert_prompt(app, ctx);
     quit_step(app);
     // Saved, it asks the Capture Position question first (#9736): that question is the one to
     // answer meanwhile, not this one again.
@@ -3607,6 +3708,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     batch_step(app);
 }
 
+/// Whether a tab is waiting for its save before closing.
+pub(crate) fn saving_to_close(app: &SolveApp) -> bool {
+    app.docs.saving
+}
+
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
     // Save asks the Capture Position question first while a move isn't captured (#9736): the
@@ -3651,20 +3757,6 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
-}
-
-/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
-pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
-    std::iter::once(&app.session)
-        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
-        .map(|session| {
-            // The guard reads only paths and links, never model geometry or undo state.
-            let mut copy = Session::default();
-            copy.doc = session.doc.clone();
-            copy.path = session.path.clone();
-            copy
-        })
-        .collect()
 }
 
 /// Files in any open tab, including linked parts, must not disappear underneath it.
@@ -4883,6 +4975,69 @@ mod tests {
         assert_eq!(design.features.len(), 1);
         control(&mut h.app, &json!({"answer":"cancel"}));
         assert_eq!(h.app.docs.count(), 3, "Cancel keeps the remaining tabs");
+    }
+
+    /// A design saved to a file, then changed in the app and not saved again.
+    fn saved_then_changed(h: &mut crate::scenario::Harness) -> std::path::PathBuf {
+        let file = h.dir.join("revert.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":6})).unwrap();
+        assert!(h.app.session.is_dirty());
+        file
+    }
+
+    #[test]
+    fn revert_to_saved_asks_first_and_then_brings_back_the_saved_design() {
+        let mut h = crate::scenario::Harness::new();
+        let file = saved_then_changed(&mut h);
+        let saved = std::fs::read(&file).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(h.app.docs.reverting, "unsaved changes are asked about, not dropped");
+        assert_eq!(h.app.session.doc.features.len(), 2, "nothing is reloaded before the answer");
+        revert_now(&mut h.app);
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 1, "the sphere added after the save is gone");
+        assert!(!h.app.session.is_dirty() && !h.app.docs.reverting);
+        assert_eq!(h.app.docs.count(), 1, "the tab was replaced, not joined by a second one");
+        assert_eq!(h.app.session.path.as_deref().map(std::path::Path::new), Some(file.as_path()));
+        assert_eq!(std::fs::read(&file).unwrap(), saved, "reverting never writes the file");
+    }
+
+    #[test]
+    fn revert_to_saved_without_changes_reloads_what_another_program_wrote() {
+        let mut h = crate::scenario::Harness::new();
+        let file = h.dir.join("outside.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        // Another copy of the app adds a second feature to the same file.
+        let mut other = Session::default();
+        other.execute("doc.open", &json!({"path":file.to_string_lossy()})).unwrap();
+        other.execute("solid.sphere", &json!({"diameter":9})).unwrap();
+        other.execute("file.save_as", &json!({"path":file.to_string_lossy()})).unwrap();
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting, "nothing to lose, so nothing to ask");
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
+    #[test]
+    fn revert_to_saved_is_refused_without_a_file_and_keeps_changes_when_the_file_is_gone() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        assert!(!crate::toolbar::FileAction::Revert.enabled(&h.app), "a design with no file has nothing to revert to");
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting);
+        let file = saved_then_changed(&mut h);
+        std::fs::remove_file(&file).unwrap();
+        revert_now(&mut h.app);
+        h.settle();
+        let (text, _, error) = h.app.status.clone().expect("a message");
+        assert!(error && text.contains("not there"), "{text}");
+        assert_eq!(h.app.session.doc.features.len(), 3, "the changes are still in the tab");
+        assert_eq!(h.app.docs.count(), 1);
     }
 
     #[test]

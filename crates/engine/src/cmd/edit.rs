@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use solidcore_record::brep::{Loop, OrientedEdge};
 use solidcraft_doc::drawing::{self, Drawing};
 use solidcraft_doc::{Document, Feature, FeatureKind};
 
@@ -18,11 +19,11 @@ use crate::schema::edit::{
     TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
     TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult,
     TimelineReorderManyParams, TimelineReorderParams, TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams,
-    TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
+    TimelineStepParams, TimelineSuppressParams, TimelineSuppressResult, TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectInvertParams,
-    SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
+    EdgeLoopParams, EdgeLoopResult, PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams,
+    SelectFilterResult, SelectInvertParams, SelectItem, SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, PickMode, Result, Sel, Session, Snapshot};
@@ -180,6 +181,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROLL_TO_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
+    CommandSpec::new("timeline.step_back", "Step History Back", crate::checked!("timeline.step_back", step_back))
+        .icon("rollback")
+        .contract(&STEP_BACK_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step back, the marker rolling one feature back (the features after it are rebuilt); at the start of the history the marker stays"),
+    CommandSpec::new("timeline.step_forward", "Step History Forward", crate::checked!("timeline.step_forward", step_forward))
+        .icon("rollback")
+        .contract(&STEP_FORWARD_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: one step forward, the marker rolling one feature forward; at the end of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_start", "Roll History to Start", crate::checked!("timeline.roll_to_start", roll_to_start))
+        .icon("rollback")
+        .contract(&ROLL_TO_START_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the start of the history, every feature rolled back; at the start of the history the marker stays"),
+    CommandSpec::new("timeline.roll_to_end", "Roll History to End", crate::checked!("timeline.roll_to_end", roll_to_end))
+        .icon("rollback")
+        .contract(&ROLL_TO_END_CONTRACT)
+        .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
+        .params("→ marker: the marker to the end of the history, every feature built; at the end of the history the marker stays"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
         .icon("reorder")
         .contract(&REORDER_CONTRACT)
@@ -265,6 +286,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SHARP_EDGES_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("angle_deg?: 1…179 (default 30), body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
+    CommandSpec::new("select.edge_loop", "Select Edge Loop", crate::checked!("select.edge_loop", select_edge_loop))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&EDGE_LOOP_CONTRACT)
+        .output(output_schema_for::<EdgeLoopResult>)
+        .params("body?: world body name and edge?: edge index, together (default: the last selected edge), face?: which of the edge's faces, add?: bool → selects the closed loop of edges of that face that holds the edge (exact topology); without face: a flat face, then one with more than one loop, then the lowest index → selected, face, edges"),
     CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
         .icon("select")
         .key("Ctrl+A")
@@ -291,11 +319,16 @@ const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new()
 const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
+const EDGE_LOOP_CONTRACT: TypedContract<EdgeLoopParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
 const ROLLBACK_CONTRACT: TypedContract<TimelineRollbackParams> = TypedContract::new();
 const ROLL_TO_CONTRACT: TypedContract<TimelineRollToParams> = TypedContract::new();
+const STEP_BACK_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const STEP_FORWARD_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_START_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
+const ROLL_TO_END_CONTRACT: TypedContract<TimelineStepParams> = TypedContract::new();
 const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContract::new();
 const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
@@ -465,7 +498,7 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
-    s.selection.clear();
+    s.clear_selection();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
     if display_only {
         s.refresh_display();
@@ -576,7 +609,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if s.active_component != 0 && !s.doc.components.iter().any(|c| c.id == s.active_component) {
         s.active_component = 0;
     }
-    s.selection.clear();
+    s.clear_selection();
     s.refresh();
     let failing: Vec<FailingFeature> = s
         .model
@@ -1030,6 +1063,46 @@ fn roll_to(s: &mut Session, p: &Value) -> Result<Value> {
     move_marker(s, p, "timeline.roll_to")
 }
 
+/// One step back: what the History bar's Back control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_back(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_back", -1)
+}
+
+/// One step forward: what the History bar's Forward control does, as a command, so it can carry a
+/// keyboard shortcut, which a click-only control cannot.
+fn step_forward(s: &mut Session, _p: &Value) -> Result<Value> {
+    step_marker(s, "timeline.step_forward", 1)
+}
+
+/// The history marker moved `direction` features from where it is now, bounded at either end of
+/// the history: one step of the History bar's Back and Forward controls, as a command. A step at
+/// an end leaves the marker where it is. Like `timeline.roll_to`, it clears the selection.
+fn step_marker(s: &mut Session, cmd: &str, direction: i32) -> Result<Value> {
+    let n = s.doc.features.len();
+    let at = s.doc.marker.unwrap_or(n);
+    let to = if direction < 0 { at.saturating_sub(1) } else { at.saturating_add(1).min(n) };
+    s.doc_mut().marker = match to {
+        k if k < n => Some(k),
+        _ => None,
+    };
+    s.clear_selection();
+    reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
+}
+
+/// To the start of the history: `timeline.roll_to` with `position: 0`, as a command of its own
+/// because a keybinding carries no parameters (the Keymap binds a command id to keys and nothing
+/// else), so no key could reach the start through `timeline.roll_to`.
+fn roll_to_start(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": 0}), "timeline.roll_to_start")
+}
+
+/// To the end of the history: `timeline.roll_to` with `position: "end"`, as a command of its own,
+/// for the same reason.
+fn roll_to_end(s: &mut Session, _p: &Value) -> Result<Value> {
+    move_marker(s, &json!({"position": "end"}), "timeline.roll_to_end")
+}
+
 /// `timeline.rollback` and `timeline.roll_to`, refusing in the name of the one asked for (#4712).
 fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let n = s.doc.features.len();
@@ -1060,7 +1133,7 @@ fn move_marker(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         Some(k) if k < n => Some(k),
         _ => None,
     };
-    s.selection.clear();
+    s.clear_selection();
     reply(cmd, TimelineMarkerResult { marker: s.doc.marker.unwrap_or(n), features: n, param_warnings: Vec::new() })
 }
 
@@ -1672,44 +1745,46 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "edit sketch geometry with the sketch commands"));
     }
-    // New edges for a blend: remember where they sit now (in the model before the feature).
+    // New edges for a blend (or edge points sent by an edit even at the same coordinates, as for
+    // broken references re-picked via #16661): remember where they sit now (in the model before
+    // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
         FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, .. } | FeatureKind::Chamfer { edges: b, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
-        && a != b
+        && (a != b || body != was || sets_path(set, "edges"))
     {
         let before = s.model.state_before(id);
         nf.edge_refs = solidcraft_doc::edge_refs(&before, body, &solidcraft_doc::plain(a));
         nf.edge_names = solidcraft_doc::edge_names_for(&before, body, &solidcraft_doc::plain(a));
     }
-    // New or reordered flange edges: their names now, so each edge's own angle and height stay
-    // with the edge they were given for.
+    // New or reordered flange edges (or edges re-sent at the same coordinates): their names now, so
+    // each edge's own angle and height stay with the edge they were given for.
     if let (FeatureKind::SheetFlange { edges: a, .. }, FeatureKind::SheetFlange { edges: b, .. }) = (&nf.kind, &f.kind) {
         let points = |e: &[solidcraft_doc::FlangeEdge]| e.iter().map(|x| x.point).collect::<Vec<_>>();
-        if points(a) != points(b) {
+        if points(a) != points(b) || sets_path(set, "edges") {
             nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &solidcraft_doc::plain(&points(a)));
         }
     }
-    // New reference edges for a hole (#37): the names of the edges there now.
+    // New reference edges for a hole (#37), or reference edges re-sent: the names of the edges there now.
     if let (FeatureKind::Hole { references: a, position, .. }, FeatureKind::Hole { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
-        if edges(a) != edges(b) {
+        if edges(a) != edges(b) || sets_path(set, "references") {
             nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
         }
     }
-    // New reference edges for a cylinder (#6380): likewise.
+    // New reference edges for a cylinder (#6380), or reference edges re-sent: likewise.
     if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
-        if edges(a) != edges(b) {
+        if edges(a) != edges(b) || sets_path(set, "references") {
             nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
         }
     }
-    // New bend edges for a conversion: the names of the body's edges there now.
+    // New bend edges for a conversion (or bends re-sent): the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. })
     | (FeatureKind::SheetSurfaceConvert { bends: a, body, .. }, FeatureKind::SheetSurfaceConvert { bends: b, body: was, .. })
     | (FeatureKind::SheetRecognize { bends: a, body, .. }, FeatureKind::SheetRecognize { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
-        && (a != b || body != was)
+        && (a != b || body != was || sets_path(set, "bends"))
     {
         nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
     }
@@ -1763,12 +1838,33 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
+    let copy_sources = match &nf.kind {
+        FeatureKind::Pattern { bodies, components, occurrences, .. } if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() => {
+            Some(solidcraft_doc::plain(bodies))
+        }
+        FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
+        _ => None,
+    };
+    let sources_changed = match (&f.kind, &nf.kind) {
+        (FeatureKind::Pattern { bodies: old, .. }, FeatureKind::Pattern { bodies: new, .. })
+        | (FeatureKind::Move { bodies: old, .. }, FeatureKind::Move { bodies: new, .. }) => old != new,
+        _ => false,
+    };
+    let existing_copies: std::collections::HashSet<String> = if copy_sources.is_some() && !sources_changed {
+        s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()
+    } else {
+        std::collections::HashSet::new()
+    };
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
+    }
+    if let Some(sources) = copy_sources {
+        let preserve = (!sources_changed).then_some(&existing_copies);
+        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, preserve, cmd);
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
 }
@@ -1827,9 +1923,21 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
     Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
 }
 
+/// The most items a selection lists: `select.set` refuses more, and Select All lists the shown
+/// bodies up to this many. Above it Select All selects them as a scope
+/// ([`Session::selection_all_bodies`]) instead of a list.
+pub(crate) const MAX_SELECTION: usize = 10_000;
+
+/// Select All's bodies: the shown ones as a list, as always, up to [`MAX_SELECTION`]; `None` when
+/// there are more, for the whole-body scope.
+pub(crate) fn listed_bodies(shown: impl Iterator<Item = Sel>) -> Option<Vec<Sel>> {
+    let listed: Vec<Sel> = shown.take(MAX_SELECTION + 1).collect();
+    (listed.len() <= MAX_SELECTION).then_some(listed)
+}
+
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
-    if items.len() > 10_000 {
+    if items.len() > MAX_SELECTION {
         return Err(bad("select.set", "too many items"));
     }
     let mut sel: Vec<Sel> = Vec::new();
@@ -1853,13 +1961,26 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             && !s.selectable_in_drawing(*drawing, *object)
         {
             let object = solidcraft_doc::ids::encode(*object);
-            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
+            return Err(bad("select.set", format!("the drawing open has no selectable object {object}")));
         }
         sel.push(one);
     }
-    if !bool_(p, "add").unwrap_or(false) {
+    if bool_(p, "add").unwrap_or(false) {
+        if s.all_bodies_selected() {
+            // Adding shown bodies to a whole-body selection changes nothing: the scope stays,
+            // without listing its bodies. Anything else is added to the bodies it covers.
+            if sel.iter().all(|x| matches!(x, Sel::Body { name } if s.body_visible(name))) {
+                s.refresh_display();
+                return reply("select.set", SelectSetResult { selected: s.selected_count()?, param_warnings: Vec::new() });
+            }
+            s.selection = s.selected_items()?;
+        }
+    } else {
         s.selection.clear();
     }
+    // Named items replace the whole-body scope (only once every item checked out, so a refused
+    // select leaves the selection as it was).
+    s.selection_all_bodies = false;
     for x in sel {
         if !s.selection.contains(&x) {
             s.selection.push(x);
@@ -1972,6 +2093,74 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
     select_set(s, &json!({"items": items, "add": add}))
 }
 
+/// `select.edge_loop`: the loop of edges around one of an edge's faces, from the body's exact
+/// topology (#18094). See [`EdgeLoopParams`] for which face gives the loop.
+fn select_edge_loop(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.edge_loop";
+    let request: EdgeLoopParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let (name, edge) = match (request.body, request.edge) {
+        (Some(body), Some(edge)) => (body, edge),
+        (None, None) => s
+            .selection
+            .iter()
+            .rev()
+            .find_map(|x| match x {
+                Sel::Edge { body, index, .. } => Some((body.clone(), *index)),
+                _ => None,
+            })
+            .ok_or_else(|| bad(CMD, "select an edge, or give body and edge"))?,
+        _ => return Err(bad(CMD, "give body and edge together")),
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge loops")));
+    }
+    let wanted = u32::try_from(edge).ok().filter(|_| edge < record.edges.len()).ok_or_else(|| bad(CMD, format!("no edge {edge} of `{name}`")))?;
+    // Each face's loop that runs along the edge (a face holds an edge in one loop; a seam twice in it).
+    let loops: Vec<(usize, &[OrientedEdge])> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(f, face)| {
+            face.loops.iter().find_map(|l| match l {
+                Loop::Edges { edges } if edges.iter().any(|u| u.edge == wanted) => Some((f, edges.as_slice())),
+                _ => None,
+            })
+        })
+        .collect();
+    let chosen = match request.face {
+        Some(face) => {
+            loops.iter().find(|(f, _)| *f == face).ok_or_else(|| bad(CMD, format!("face {face} of `{name}` is not one of edge {edge}'s faces")))?
+        }
+        None => loops
+            .iter()
+            .max_by_key(|(f, _)| {
+                let several_loops = record.faces.get(*f).is_some_and(|face| face.loops.len() > 1);
+                (body.body.planar_face(*f).is_some(), several_loops, std::cmp::Reverse(*f))
+            })
+            .ok_or_else(|| bad(CMD, format!("edge {edge} of `{name}` bounds no face")))?,
+    };
+    let (face, used) = *chosen;
+    let mut edges: Vec<usize> = Vec::new();
+    for u in used {
+        let e = u.edge as usize;
+        if !edges.contains(&e) {
+            edges.push(e);
+        }
+    }
+    drop(state);
+    // With `add`, an edge already selected stays as it is, at the point it was picked: it is the
+    // same body and edge index, so it is not added again at another point.
+    let add = request.add.unwrap_or(false);
+    let picked = |e: usize| s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == name && *index == e));
+    let items: Vec<Value> = edges.iter().filter(|e| !(add && picked(**e))).map(|e| json!({"type": "edge", "body": name, "index": e})).collect();
+    let set = select_set(s, &json!({"items": items, "add": add}))?;
+    let selected = set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize;
+    reply(CMD, EdgeLoopResult { selected, face, edges, param_warnings: Vec::new() })
+}
+
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no
 /// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
 fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1981,6 +2170,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
     if drawing.is_none() && request.sheet.is_some() {
         return Err(bad("select.all", "sheet: only with a drawing open"));
     }
+    let mut whole_bodies = false;
     let all: Vec<Sel> = match (s.active_sketch, drawing) {
         (None, Some(open)) => {
             let d = s.drawing("select.all")?;
@@ -1995,7 +2185,7 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                 .chain(&on.balloons)
                 .chain(&on.notes)
                 .filter(|object| d.has_object(**object))
-                .take(10_001)
+                .take(MAX_SELECTION + 1)
                 .map(|object| Sel::Drawing { drawing: open, object: *object })
                 .collect()
         }
@@ -2013,27 +2203,33 @@ fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
                             .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
                             .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
                     )
-                    .take(10_001)
+                    .take(MAX_SELECTION + 1)
                     .collect()
             }
             None => {
+                // The shown bodies, listed, as on any design; past the cap a list would be refused
+                // (and slow to show), so they are selected as a scope: see
+                // `Session::selection_all_bodies`.
                 let hidden = &s.visibility.hidden_bodies;
-                s.world_state()?
-                    .bodies
-                    .iter()
-                    .filter(|b| !hidden.contains(&b.name))
-                    .take(10_001)
-                    .map(|b| Sel::Body { name: b.name.clone() })
-                    .collect()
+                let st = s.world_state()?;
+                match listed_bodies(st.bodies.iter().filter(|b| !hidden.contains(&b.name)).map(|b| Sel::Body { name: b.name.clone() })) {
+                    Some(listed) => listed,
+                    None => {
+                        whole_bodies = true;
+                        Vec::new()
+                    }
+                }
             }
         },
     };
-    if all.len() > 10_000 {
+    if all.len() > MAX_SELECTION {
         return Err(bad("select.all", "too many items"));
     }
     s.selection = all;
+    s.selection_all_bodies = whole_bodies;
     s.refresh_display();
-    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
+    let selected = s.selected_count()?;
+    reply("select.all", SelectSetResult { selected, param_warnings: Vec::new() })
 }
 
 fn select_mode(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -2051,7 +2247,13 @@ pub(crate) fn pick_mode(v: &Value) -> std::result::Result<PickMode, String> {
 /// body selected together with faces or edges of it is the body they invert in, not a body to
 /// swap for the others. Bodies swap for the other shown bodies. Other items stay as they are.
 fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
-    const MAX: usize = 10_000;
+    const MAX: usize = MAX_SELECTION;
+    // Select All holds every shown body: inverted, nothing shown is left to select.
+    if s.all_bodies_selected() {
+        s.clear_selection();
+        s.refresh_display();
+        return reply("select.invert", SelectSetResult { selected: 0, param_warnings: Vec::new() });
+    }
     let state = s.world_state()?;
     let mut picked_faces: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     let mut picked_edges: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -2109,12 +2311,13 @@ fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
         return Err(bad("select.invert", "too many items"));
     }
     s.selection = sel;
+    s.selection_all_bodies = false;
     s.refresh_display();
     reply("select.invert", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
-    s.selection.clear();
+    s.clear_selection();
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
@@ -2211,7 +2414,7 @@ fn only_constraints_changed(
     })
 }
 
-fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
@@ -2618,6 +2821,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
+                | "sheet.bead"
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
@@ -2630,6 +2834,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.rotate_member"
                 | "frame.gusset"
                 | "frame.member"
+                | "frame.trim"
                 | "frame.plate"
         );
     if !constructor {
@@ -2654,6 +2859,34 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    if let FeatureKind::SurfaceRevolve { faced, stays_surface, .. } = &old.kind
+        && cid == "surface.revolve"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays_surface));
+    }
+    if let FeatureKind::SurfaceLoft { faced, .. } = &old.kind
+        && cid == "surface.loft"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("faced").or_insert_with(|| json!(faced));
+    }
+    // A redefine keeps what the feature's result was (#21969): a surface body where it closes,
+    // or a solid there in a feature saved before `stays_surface`.
+    let stays = match &old.kind {
+        FeatureKind::SurfaceSweep { stays_surface, .. } if cid == "surface.sweep" => Some(*stays_surface),
+        FeatureKind::SurfaceLoft { stays_surface, .. } if cid == "surface.loft" => Some(*stays_surface),
+        FeatureKind::SurfaceOffset { stays_surface, .. } if cid == "surface.offset" => Some(*stays_surface),
+        FeatureKind::SurfaceRuled { stays_surface, .. } if cid == "surface.ruled" => Some(*stays_surface),
+        FeatureKind::SurfaceExtend { stays_surface, .. } if cid == "surface.extend" => Some(*stays_surface),
+        _ => None,
+    };
+    if let Some(stays) = stays
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"
@@ -2819,6 +3052,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             _ => occurrences.clone(),
         };
         trial.doc_mut().remove_occurrences(&removed.into_iter().collect());
+    }
+    if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
+        after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
     }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body

@@ -11,13 +11,13 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_doc::drawing::thread_lines::ThreadStroke;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, Source, Visibility};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
+use solidcraft_kernel::hlr::{self, Source, Visibility};
 
 use super::ShownSet;
 use super::exact::{self, Fallback, PreparedBodies};
@@ -215,7 +215,7 @@ fn lines_with(
     let threads = threads(shown, frame, &out, model_chord_mm);
     let pieces = out.iter().map(|line| line.pieces.len()).chain(threads.iter().map(|thread| thread.pieces.len()));
     if pieces.fold(0usize, usize::saturating_add) > MAX_RECORDS {
-        return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
+        return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: {SIMPLIFY_VIEW}")));
     }
     Ok(Lines { lines: out, threads, covered, model_chord_mm, stats, made })
 }
@@ -274,7 +274,7 @@ fn meshed(
     let join = 2.0 * drawing.eps;
     let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
     let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
-    let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
+    let sampled = hlr::accuracy_on_paper(frame, CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
     let near = |radius: f64| near(model_chord_mm, radius);
     let mut out = Vec::with_capacity(runs.len());
     for (owner, runs) in runs {
@@ -592,11 +592,15 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
     runs
 }
 
+const SIMPLIFY_VIEW: &str = "show fewer parts in the view or use a simpler model";
+
 /// What a refusal of a view's lines says on a drawing, with what to do about it there.
 fn refused(e: Refused) -> String {
     match e {
         Refused::Cancelled => "drawing the view was cancelled".into(),
-        Refused::Work | Refused::Memory => format!("{e}: raise chord_mm, or choose a smaller scale"),
+        Refused::Work | Refused::MeshBuffers(_) | Refused::MeshTriangles(_) | Refused::ViewNodes(_) | Refused::SketchPoints(_) => {
+            format!("{e}: {SIMPLIFY_VIEW}")
+        }
         Refused::EyePlane | Refused::Invalid(_) => e.to_string(),
     }
 }
@@ -608,11 +612,18 @@ mod tests {
     /// A view's lines refused say what happened and what to do on a drawing, never in a DXF's terms.
     #[test]
     fn a_views_refused_lines_say_what_to_do_on_a_drawing() {
-        for e in [Refused::Cancelled, Refused::Work, Refused::Memory, Refused::EyePlane, Refused::Invalid("the model contains invalid coordinates")] {
-            let says = refused(e);
-            assert!(!["DXF", "export", "tolerance", "zoom", "bodies"].iter().any(|word| says.contains(word)), "{says}");
+        for (error, reason) in [
+            (Refused::Work, "the lines take more work than the limit allows"),
+            (Refused::MeshBuffers(512), "the mesh buffers exceed the 512 MiB limit"),
+            (Refused::MeshTriangles(2_000_000), "the meshes contain more than 2000000 triangles before placement"),
+            (Refused::ViewNodes(256), "the projected mesh index exceeds the 256 MiB limit"),
+        ] {
+            assert_eq!(refused(error), format!("{reason}: show fewer parts in the view or use a simpler model"));
         }
-        assert_eq!(refused(Refused::Memory), "the meshes take more memory than the limit allows: raise chord_mm, or choose a smaller scale");
+        assert_eq!(refused(Refused::Cancelled), "drawing the view was cancelled");
+        assert_eq!(refused(Refused::EyePlane), Refused::EyePlane.to_string());
+        let invalid = Refused::Invalid("the model contains invalid coordinates");
+        assert_eq!(refused(invalid), invalid.to_string());
     }
 
     fn lines_of(pieces: Vec<Piece>) -> Lines {

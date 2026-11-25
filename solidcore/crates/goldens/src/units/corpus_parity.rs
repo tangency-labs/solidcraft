@@ -147,8 +147,7 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
             records: &mut records,
             next_key: GEOMETRY_KEYS,
         };
-        let mut breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
-        breps.iter_mut().for_each(crate::tolsub::after_read);
+        let breps = read_part_from_file(k, bytes, FileType::Ascii, &mut env)?.breps;
         return Ok(Read {
             breps,
             attributes,
@@ -164,8 +163,7 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
         records: &mut records,
         next_key: GEOMETRY_KEYS,
     };
-    crate::refit::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
-    crate::tolsub::after_read(&mut b);
+    solidcore::topology::brep::p7::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
     Ok(Read {
         breps: vec![b],
         attributes,
@@ -311,7 +309,7 @@ fn measure_rust(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),
@@ -336,7 +334,7 @@ fn measure_rust_roundtrip(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),
@@ -657,7 +655,7 @@ fn run_side(
 }
 
 /// A case's output, each side measured by `measure` (`measure_isolated` in a child; the
-/// tests measure in process, where [`crate::tolsub`] sees the reads).
+/// tests measure in process).
 fn run_with(case: &Case, measure: &dyn Fn(&str, &str) -> Measured) -> Result<Output, HarnessError> {
     let i: Inputs = case.parse()?;
     let mut out = Output::new();
@@ -729,6 +727,75 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Files with a found sphere, read on the file's sphere NURB and trims:
+    /// - `ss_plane_sph1..4`: the level-2 checks (`check`, `rt_check`) find nothing, and the
+    ///   plane face is the square of side 5, area 25 exactly;
+    /// - `Fillet__sphere_plane.smb`: the sphere of radius 5 between z = +-h (h the file's
+    ///   pole vertices' height) less its cap beyond the plane x = -4, plus the disk of radius
+    ///   3 in that plane, in closed form: the area and the round trip's are within `1e-6`
+    ///   of it.
+    #[test]
+    fn found_sphere_rows_hold_their_closed_forms() {
+        use crate::case::regression_case;
+        use std::f64::consts::PI;
+        for i in 1..=4 {
+            let case = format!("ss_plane_sph{i}.smp");
+            let out = run_in_process(&regression_case(&Runner, &case)).expect("the run");
+            for key in ["check", "rt_check"] {
+                assert_eq!(out.ints[key], [0, 0], "{case}: {key}");
+            }
+            assert_eq!(out.values["area"].get(1), Some(&25.0), "{case}: the plane's area");
+        }
+        let h = 4.980_973_490_458_730_2;
+        let exact = 2.0 * PI * 5.0 * 2.0 * h - 2.0 * PI * 5.0 * 1.0 + PI * 9.0;
+        let case = "Fillet__sphere_plane.smb";
+        let out = run_in_process(&regression_case(&Runner, case)).expect("the run");
+        for key in ["area", "rt_area"] {
+            let area = out.values[key][0];
+            assert!(
+                (area - exact).abs() < 1e-6,
+                "{case}: {key} {area}, closed form {exact}"
+            );
+        }
+    }
+
+    /// `Fillet__sphere_diff_3cylinders.smb` (#20179: the read classifies on the cone face and
+    /// makes five of its missing UV trims, so the area is integrated over them): a certified
+    /// enclosure of the read's total face area (`enclose_face_area_relative`, every rounding
+    /// included, asked `1e-8` wide) holds the row's `area` and `rt_area` each within the
+    /// record's [`ACCURACY`].
+    #[test]
+    fn sphere_diff_3cylinders_area_is_within_its_accuracy() {
+        use crate::case::regression_case;
+        use solidcore::mass::enclosure::enclose_face_area_relative;
+        const CASE: &str = "Fillet__sphere_diff_3cylinders.smb";
+        let out = run_in_process(&regression_case(&Runner, CASE)).expect("the run");
+        let path = crate::case::repo_root()
+            .join(crate::fixtures::UPSTREAM_TEST_FILES)
+            .join("Fillet/sphere_diff_3cylinders.smb");
+        let mut k = crate::runner_kernel();
+        let mut b = crate::own_reader::read_file(&mut k, path.to_str().expect("a path"))
+            .expect("the read")
+            .expect("a B-rep");
+        let faces = bl::faces(&b, None).expect("the faces");
+        let e = enclose_face_area_relative(&k, &mut b, &faces, 1e-8).expect("the enclosure");
+        assert!(
+            e.lo.is_finite() && e.hi.is_finite() && e.lo <= e.hi,
+            "{CASE}: {e:?}"
+        );
+        for key in ["area", "rt_area"] {
+            let v = out.values[key][0];
+            let off = (v - e.lo).abs().max((e.hi - v).abs());
+            // (an infinite `v` would make both sides infinite)
+            assert!(
+                v.is_finite() && off <= ACCURACY * v,
+                "{CASE}: {key} {v} is {off:e} from the enclosure [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
+    }
 
     #[test]
     fn failed_reason_keeps_the_stderr_tail() {
