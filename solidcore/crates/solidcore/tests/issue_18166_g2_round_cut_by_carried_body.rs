@@ -33,7 +33,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "offset_extension_from_base",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
     "offset_extension_as_itself",

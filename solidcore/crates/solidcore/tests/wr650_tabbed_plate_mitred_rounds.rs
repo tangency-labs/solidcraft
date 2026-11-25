@@ -156,7 +156,6 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.offset_analytic_mate_edges = true;

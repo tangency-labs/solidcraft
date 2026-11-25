@@ -47,7 +47,6 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_knife_edge_rounds",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
