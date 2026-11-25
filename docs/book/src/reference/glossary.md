@@ -105,8 +105,8 @@ in full. A near or far value left unset is the pattern's own scale, rotation or 
 
 - **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
   `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,
-  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Near objects and Far objects of Pattern on
-  Face's Near/Far modifiers section.
+  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Measure from and Blend to picks of Pattern on
+  Face's Blend section.
 - **Don't use:** magnet, driver, influence point.
 - **Elsewhere:** attractor point, attractor curve.
 - **For translators:** what draws an effect towards it, not a physical force or a magnet.

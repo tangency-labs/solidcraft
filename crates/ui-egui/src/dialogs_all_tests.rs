@@ -1094,10 +1094,10 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Edge margin"]);
 
-/// Pattern on Face's attractors are its Near/Far modifiers: with no near or far objects picked,
+/// Pattern on Face's attractors are in its Blend section: with no Measure from or Blend to objects picked,
 /// the dialog sends a plain pattern with the main section's scale, rotation and offset; with them,
 /// it sends them as attractors, the near and far values left empty taking the main section's.
-/// Near objects and Far objects take points, edges, faces
+/// Measure from and Blend to take points, edges, faces
 /// and bodies. Two opposite edges of the face, one in each, make the values ramp between them.
 #[test]
 fn face_pattern_attractors_come_from_the_near_far_modifiers() {
@@ -1105,7 +1105,7 @@ fn face_pattern_attractors_come_from_the_near_far_modifiers() {
     let h = fixture();
     let mut d = representative(&h, "solid.pattern.face");
     assert!(!d.inputs.iter().any(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS), "no near or far picks until the section opens");
-    // Opened, as the Near/Far modifiers section does as it unfolds.
+    // Opened, as the Blend section does as it unfolds.
     set_attractor_inputs(&mut d, true);
     for label in [ATTRACTORS, FAR_ATTRACTORS] {
         let pick = d.inputs.iter().find(|i| i.label == label).expect("the near and far picks");
@@ -1125,10 +1125,10 @@ fn face_pattern_attractors_come_from_the_near_far_modifiers() {
     }
     let (_, own) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert_eq!((&own["scale"], &own["rotate"], &own["offset"]), (&json!("1.5"), &json!("10 deg"), &json!("1 mm")), "{own}");
-    // Far objects alone are refused: the values blend from the near ones.
+    // Blend to alone is refused: the values blend from the Measure from objects.
     let far = edge_sel(&h.app.session, Vec3::new(-10.0, 0.0, 5.0)).unwrap();
     d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far.clone()];
-    assert!(apply_commands(&h.app, &d).is_err(), "far objects need near ones");
+    assert!(apply_commands(&h.app, &d).is_err(), "Blend to needs Measure from");
     // Two opposite edges of the face, and a body; Scale far left empty takes the main scale.
     if let Kind::FacePattern(f) = &mut d.kind {
         f.scale_near = "2".into();

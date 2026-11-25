@@ -1,8 +1,8 @@
 //! The Face type of the pattern dialog (`solid.pattern.face`): copies of bodies standing on a
 //! face, on a grid across it, kept clear of the face's edges and of what the Avoid pick holds, each
-//! scaled, rotated and offset from the face by the main section's values. The Near/Far modifiers
-//! section holds the attractors, which change each copy with its distance to them: the Near and
-//! Far objects picks and the near and far values, each left empty the main section's. While
+//! scaled, rotated and offset from the face by the main section's values. The Blend
+//! section holds the attractors, which change each copy with its distance to them: the Measure
+//! from and Blend to picks and the near and far values, each left empty the main section's. While
 //! objects are picked there, they set the copies and the main section's values are greyed out.
 
 use serde_json::{Value, json};
@@ -14,13 +14,13 @@ use crate::dialogs::{Dialog, Kind, form_row, input_rows_range, set_object_accept
 use crate::selection::{self, BODIES, FACES, SelInput, SelectionExt as _, point_value as pt};
 use crate::ui_kit::{self, choice_row, expr_row, hint_row};
 
-/// The pick inputs the attractors go into, drawn in the Near/Far modifiers section while it is
+/// The pick inputs the attractors go into, drawn in the Blend section while it is
 /// open or they hold picks: the near set, and the optional far set the values blend towards.
-pub(crate) const ATTRACTORS: &str = "Near objects";
-pub(crate) const FAR_ATTRACTORS: &str = "Far objects";
+pub(crate) const ATTRACTORS: &str = "Measure from";
+pub(crate) const FAR_ATTRACTORS: &str = "Blend to";
 
 /// The inputs drawn at the top of the dialog; the attractor picks, added after them, are drawn in
-/// the Near/Far modifiers section.
+/// the Blend section.
 pub(crate) const TOP_INPUTS: std::ops::Range<usize> = 0..3;
 
 /// The pick for what no copy may come near.
@@ -34,8 +34,8 @@ pub(crate) const AVOID_PICKS: selection::Accept = selection::VERTICES | selectio
 pub(crate) const ATTRACTOR_PICKS: selection::Accept =
     selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::EDGES | FACES | BODIES;
 
-/// Add or remove the attractor picks: added as the Near/Far modifiers section opens (or a pattern
-/// with attractors is edited), picks going to Near objects first.
+/// Add or remove the attractor picks: added as the Blend section opens (or a pattern
+/// with attractors is edited), picks going to Measure from first.
 pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
     for label in [ATTRACTORS, FAR_ATTRACTORS] {
         set_object_accepting(&mut d.inputs, &mut d.active, label, ATTRACTOR_PICKS, on);
@@ -212,7 +212,7 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     if avoiding {
         enter |= hint_row(ui, "Avoid margin", &mut f.avoid_margin, "none");
     }
-    // Every instance's own scale, rotation and offset; while near or far objects are picked they
+    // Every instance's own scale, rotation and offset; while Measure from or Blend to objects are picked they
     // set these instead, from the values below, so these are greyed out.
     enter |= ui
         .add_enabled_ui(!attracting, |ui| {
@@ -228,7 +228,7 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         ui_kit::checkbox(ui, "Group Instances", &mut f.group);
     });
     let names = app.preferences.origin_plane_names;
-    let shown = ui_kit::section(ui, "face_pattern_near_far", "Near/Far modifiers", attracting, |ui| {
+    let shown = ui_kit::section(ui, "face_pattern_blend", "Blend", attracting, |ui| {
         if !d.inputs.iter().any(|i| i.label == ATTRACTORS) {
             set_attractor_inputs(d, true);
         }
@@ -238,11 +238,11 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         let Kind::FacePattern(f) = &mut d.kind else { return false };
         let mut enter = false;
         if between {
-            ui_kit::status_line(ui, "Instances change from the near objects to the far objects", ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, "Instances blend from one set of objects to the other", ui_kit::StatusTone::Dim);
             enter |= hint_row(ui, "Near distance", &mut f.near, "hold near values within");
             enter |= hint_row(ui, "Far distance", &mut f.far, "hold far values within");
         } else {
-            ui_kit::status_line(ui, "Each instance changes with its distance to the nearest near object", ui_kit::StatusTone::Dim);
+            ui_kit::status_line(ui, "Each instance changes with its distance to the nearest object it is measured from", ui_kit::StatusTone::Dim);
             enter |= hint_row(ui, "Near distance", &mut f.near, "nearest instance");
             enter |= hint_row(ui, "Far distance", &mut f.far, "farthest instance");
         }
@@ -385,12 +385,12 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         }
         p["avoid"] = a;
     }
-    // Near/Far modifiers, while near or far objects are picked.
+    // The Blend section, while Measure from or Blend to objects are picked.
     let (geometry, bodies) = set(ATTRACTORS, &f.saved_geometry, &f.saved_bodies)?;
     let (far_geometry, far_bodies) = set(FAR_ATTRACTORS, &f.saved_far_geometry, &f.saved_far_bodies)?;
     let far_only = geometry.is_empty() && bodies.is_empty();
     if far_only && (!far_geometry.is_empty() || !far_bodies.is_empty()) {
-        return Err("select the near objects as well as the far ones".into());
+        return Err("pick the objects to measure from as well as the ones to blend to".into());
     }
     if !far_only {
         let mut a = json!({});
