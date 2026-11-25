@@ -166,6 +166,10 @@ pub(crate) fn invalidate(app: &mut SolveApp) {
 fn discovered(app: &mut SolveApp, inventory: Inventory) {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if inventory.root.as_deref().is_some_and(Path::is_dir) {
+            let present = |id: &str| inventory.plugins.iter().any(|p| p.id == id) || inventory.skipped.iter().any(|s| s.folder == id);
+            crate::plugin_shaders::drop_pictures_not_in(app, &present);
+        }
         app.plugin_slots.items = inventory.plugins.iter().flat_map(declared).take(8192).collect();
     }
     crate::plugin_workspaces::discovered(app, &inventory.plugins);
@@ -568,6 +572,8 @@ mod tests {
             images: Default::default(),
             declarations: Default::default(),
             swatches: Default::default(),
+            updates: None,
+            themes: Vec::new(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},
@@ -579,6 +585,10 @@ mod tests {
             ]))
             .unwrap(),
             shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
         };
         let items = declared(&plugin);
         assert_eq!(items.len(), 3, "unmapped menus and the Model tab are omitted and repeated placements are deduplicated");
@@ -586,6 +596,35 @@ mod tests {
         assert_eq!(items[1].slot, Slot::Menu("File"));
         assert_eq!(items[2].slot, Slot::Menu("Help"));
         assert_eq!(menu_name("Manufacturing"), None);
+    }
+
+    /// A plugin folder deleted by hand takes the pictures chosen for its backgrounds with it.
+    #[test]
+    fn a_deleted_plugin_folder_drops_its_chosen_pictures() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        let dir = root.join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            r#"{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.2"],"shaders":[{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{"name":"picture","choose":"Picture"}]}]}"#,
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        let picked = h.dir.join("a.png").to_string_lossy().into_owned();
+        for key in ["own/own/picture", "gone/own/picture"] {
+            h.app.preferences.background_shader_pictures.insert(key.into(), picked.clone());
+        }
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        let kept = |h: &crate::scenario::Harness| h.app.preferences.background_shader_pictures.keys().cloned().collect::<Vec<_>>();
+        assert_eq!(kept(&h), ["own/own/picture"], "a plugin that is not installed has no pictures kept; an installed one keeps its");
+        std::fs::remove_dir_all(&dir).unwrap();
+        invalidate(&mut h.app);
+        refresh(&mut h.app);
+        wait_for_discovery(&mut h.app);
+        assert!(kept(&h).is_empty(), "{:?}", kept(&h));
     }
 
     #[test]

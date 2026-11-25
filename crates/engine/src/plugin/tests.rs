@@ -919,6 +919,58 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// A theme-only plugin (`themes@0.1`, no runtime) installs from its `.zip`. A package whose
+    /// theme file is missing, or is not a theme file, does not.
+    #[test]
+    fn a_theme_only_plugin_installs_and_a_bad_theme_file_does_not() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-themes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        let plugin = json!({"id":"tints","name":"Tints","version":"1","capabilities":["themes@0.1"],"themes":[{"id":"night","source":"night.json"}]});
+        let text = serde_json::to_vec(&plugin).unwrap();
+        let theme: &[u8] = br#"{"format":"solidcraft-theme/1","name":"Night","base":"dark"}"#;
+        let not_a_theme: &[u8] = br#"{"name":"Night"}"#;
+        let packages =
+            [("missing.zip", vec![("plugin.json", &text[..])]), ("bad.zip", vec![("plugin.json", &text[..]), ("night.json", not_a_theme)])];
+        for (name, files) in packages {
+            let zip = solidcraft_io::safe_zip::write(&files).unwrap();
+            let path = root.join(name);
+            std::fs::write(&path, zip).unwrap();
+            assert!(s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).is_err(), "{name} is refused");
+        }
+        let zip = solidcraft_io::safe_zip::write(&[("plugin.json", &text[..]), ("night.json", theme)]).unwrap();
+        let path = root.join("good.zip");
+        std::fs::write(&path, zip).unwrap();
+        let dry = s.execute("plugin.install", &json!({"path": path.to_string_lossy(), "dry_run": true})).unwrap();
+        assert_eq!(dry["themes"], json!([{"id":"night","source":"night.json"}]));
+        let installed = s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(installed["id"], "tints");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// `plugin.check` reports a theme file the package lacks under `themes`, with advice about the
+    /// theme list, not about the component.
+    #[test]
+    fn check_reports_a_missing_theme_file_under_themes() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-theme-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut s = Session::default();
+        let plugin = json!({"id":"tints","name":"Tints","version":"1","capabilities":["themes@0.1"],"themes":[{"id":"night","source":"night.json"}]});
+        let text = serde_json::to_vec(&plugin).unwrap();
+        let path = root.join("tints.zip");
+        std::fs::write(&path, solidcraft_io::safe_zip::write(&[("plugin.json", &text[..])]).unwrap()).unwrap();
+        let reply = s.execute("plugin.check", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(reply["ok"], false, "{reply}");
+        let problem = &reply["problems"][0];
+        assert_eq!(problem["field"], "themes", "{reply}");
+        let fix = problem["fix"].as_str().unwrap();
+        assert!(fix.contains("night.json") && !fix.contains("component"), "{fix}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -3931,6 +3983,22 @@ mod install_zip {
         path.to_string_lossy().into_owned()
     }
 
+    /// A package of a plugin that does not ask for themes is reviewed and installed as it always was:
+    /// its review names no theme, and the installed manifest has none.
+    #[test]
+    fn a_plugin_without_themes_reviews_and_installs_as_before() {
+        let (mut s, root) = session("legacy");
+        let path = put(&root, "gears.zip", &gears("0.1.0"));
+        let dry = s.execute("plugin.install", &json!({"path": path, "dry_run": true})).unwrap();
+        assert_eq!(dry["capabilities"], json!(["commands@0.1"]), "{dry}");
+        assert!(dry.get("themes").is_none(), "{dry}");
+        let reply = s.execute("plugin.install", &json!({"path": path, "approval": dry["approval"], "archive": dry["archive"]})).unwrap();
+        assert_eq!(reply["id"], "gears");
+        let installed: Value = serde_json::from_slice(&std::fs::read(root.join("plugins/gears/plugin.json")).unwrap()).unwrap();
+        assert!(installed.get("themes").is_none());
+        assert_eq!(installed["capabilities"], json!(["commands@0.1"]));
+    }
+
     #[test]
     fn invalid_swatches_warn_in_check_and_install_review_but_install_succeeds() {
         let (mut s, root) = session("swatches");
@@ -4031,6 +4099,24 @@ mod install_zip {
         let list = s.execute("plugin.list", &json!({})).unwrap();
         assert_eq!(list["plugins"][0]["manifest"]["shaders"][0]["source"], "dusk.wgsl");
         assert!(root.join("plugins/sky/dusk.wgsl").is_file() && root.join("plugins/sky/stars.png").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_panel_shader_installs_and_is_reported_apart_from_backgrounds() {
+        let (mut s, root) = session("panels");
+        let manifest = json!({"id": "frost", "name": "Frost", "version": "1.0.0", "capabilities": ["shaders@0.2"], "shaders": [
+            {"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 16}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let wgsl = b"fn panel(px: ScPanel) -> vec4<f32> {
+    return vec4<f32>(sc_blurred(px.position).rgb, 0.9);
+}
+";
+        let path = put(&root, "frost.zip", &zip(&[("plugin.json", &text[..]), ("frost.wgsl", &wgsl[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["panel_shaders"], json!(["frost/frost"]));
+        assert!(reply["shaders"].as_array().is_none_or(Vec::is_empty), "not a background: {reply}");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4662,8 +4748,60 @@ fn the_documented_shader_examples_compile() {
             include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
             include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
         ),
+        (
+            "trails",
+            include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
+        ),
     ] {
         let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
         craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
     }
+}
+
+/// The tint example in docs/plugin-examples/accent-sweep parses with its two settings and compiles.
+#[test]
+fn the_documented_tint_example_compiles() {
+    let manifest =
+        craft_plugin::parse_manifest(include_str!("../../../../docs/plugin-examples/accent-sweep/plugin.json").as_bytes(), "accent-sweep").unwrap();
+    assert_eq!(manifest.shaders[0].settings.len(), 2);
+    craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
+}
+
+/// Shader plugins written before pictures could be chosen parse, validate and serialize as they
+/// did: no `choose`, the shipped `file` kept, nothing new in the manifest's JSON.
+#[test]
+fn legacy_shader_manifests_without_a_chosen_texture_are_unchanged() {
+    for (folder, text) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json")),
+        ("panorama", include_str!("../../../../docs/plugin-examples/panorama/plugin.json")),
+    ] {
+        let plugin = craft_plugin::parse_manifest(text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::validate(&plugin.shaders).unwrap();
+        let original: serde_json::Value = serde_json::from_str(text).unwrap();
+        let again = serde_json::to_value(&plugin).unwrap();
+        for (got, want) in again["shaders"].as_array().unwrap().iter().zip(original["shaders"].as_array().unwrap()) {
+            assert_eq!(got.get("textures"), want.get("textures"), "{folder}");
+        }
+        for texture in plugin.shaders.iter().flat_map(|shader| &shader.textures) {
+            assert!(texture.choose.is_none() && texture.file.is_some(), "{folder}");
+        }
+    }
+}
+
+/// A plugin written before `state` existed (the dusk example): no `state` key, so it parses,
+/// validates, serialises without one, and compiles to a module that declares none of the state
+/// bindings.
+#[test]
+fn a_plugin_without_a_state_grid_is_unchanged() {
+    let manifest_text = include_str!("../../../../docs/plugin-examples/dusk/plugin.json");
+    let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), "dusk").unwrap();
+    let shader = &manifest.shaders[0];
+    assert_eq!(shader.state, None);
+    assert!(shader.animated);
+    assert!(!serde_json::to_string(shader).unwrap().contains("state"));
+    craft_plugin::shader::validate(&manifest.shaders).unwrap();
+    let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
+    assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
+    assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
 }

@@ -1407,6 +1407,12 @@ mod tests {
             declarations: runtime.ui.unwrap(),
             swatches: Default::default(),
             shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
+            updates: None,
+            themes: Vec::new(),
         }
     }
 
