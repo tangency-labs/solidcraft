@@ -11,8 +11,10 @@
 use std::f64::consts::{PI, TAU};
 
 use serde_json::Value;
+use solidcore_record::Vec2;
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::affine;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, coincident_points, edit};
@@ -111,16 +113,20 @@ fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<Stri
         return Err(bad(cmd, format!("`{}` has no length", ids.first().map_or("", String::as_str))));
     }
     let dir = along * (1.0 / length);
+    // Across the kept line: a point off it stands a distance along this.
+    let across = Vec2::new(-dir.y, dir.x);
+    // How far `q` stands from the kept line's start along `d`, through the kernel.
+    let distance_along = |d: Vec2, q: Vec2| affine::distance_along([origin.x, origin.y, 0.0], [d.x, d.y, 0.0], [q.x, q.y, 0.0]);
     let mut pieces = Vec::new();
     // The pieces drawn against the kept line's direction.
     let mut reversed = Vec::new();
     for &c in &run {
         let (a, b) = line_ends(c).ok_or_else(|| bad(cmd, "curve"))?;
-        let (qa, qb) = (pos(a)? - origin, pos(b)? - origin);
-        if [qa, qb].iter().any(|q| dir.cross(*q).abs() > ON_LINE) {
+        let (qa, qb) = (pos(a)?, pos(b)?);
+        if [qa, qb].iter().any(|q| distance_along(across, *q).abs() > ON_LINE) {
             return Err(bad(cmd, "these lines don't lie on one straight line"));
         }
-        let (ta, tb) = (qa.dot(dir), qb.dot(dir));
+        let (ta, tb) = (distance_along(dir, qa), distance_along(dir, qb));
         if ta > tb {
             reversed.push(c);
         }
