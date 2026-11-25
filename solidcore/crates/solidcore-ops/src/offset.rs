@@ -484,6 +484,7 @@ pub fn shell(body: &Body, order: &Order, open: &[usize], thickness: f64) -> Resu
 /// facing out; [`Error::NoRoom`] for faces moved in so far that the kernel's room test shows
 /// no material behind them, or a blend that no longer fits; [`Error::Unsupported`] for a blend that cannot be put back as it was;
 /// [`Error::NotExact`] for one that needs a continuation that cannot be made exactly;
+/// [`Error::BlendsNotFollowed`] for either of the last two where the kernel says why;
 /// [`Error::NoEffect`] for a move that moved nothing; the kernel's other refusals.
 pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) -> Result<()> {
     if !distance_ok(distance) || faces.is_empty() {
@@ -518,12 +519,25 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
         }
         let mut exec = OffsetFacesExecutive::new();
         if let Err(e) = exec.offset_faces(k, b, &picked, distance) {
+            // where the kernel says why the blends cannot follow, the refusal says it too
+            let why = exec.reason().trim();
+            let not_followed = |exact: bool, bare: Error| {
+                if why.is_empty() {
+                    bare
+                } else {
+                    Error::BlendsNotFollowed {
+                        exact,
+                        why: why.to_owned(),
+                    }
+                }
+            };
             return Ok(Err(match exec.refusal() {
                 OffsetFacesRefusal::NoRoom => Error::NoRoom,
-                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => {
-                    Error::Unsupported("a blend on a moved face cannot be taken off and put back")
-                }
-                OffsetFacesRefusal::NotExact => Error::NotExact,
+                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
+                    false,
+                    Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
+                ),
+                OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
                 OffsetFacesRefusal::NoEffect => Error::NoEffect,
                 OffsetFacesRefusal::None => status(e, &in_order(order)),
             }));

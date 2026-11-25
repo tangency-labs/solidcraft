@@ -147,6 +147,16 @@ pub enum Error {
     CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
+    /// Faces moved, but the tangent blends on them cannot follow them (taken off, the faces
+    /// moved, put back at their own sizes): `exact` where they would need a continuation that
+    /// cannot be made exactly, else where they cannot be put back as they were; `why` in the
+    /// kernel's words.
+    BlendsNotFollowed {
+        /// Whether the blends need a continuation that cannot be made exactly.
+        exact: bool,
+        /// The kernel's statement of why.
+        why: String,
+    },
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
     /// A frame-stock path or its section the kernel refuses, including the curve index
@@ -519,6 +529,7 @@ impl Error {
             Error::NoEffect => "NoEffect",
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
+            Error::BlendsNotFollowed { .. } => "BlendsNotFollowed",
             Error::Profile(..) => "Profile",
             Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
@@ -1045,6 +1056,14 @@ impl std::fmt::Display for Error {
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
+            Error::BlendsNotFollowed { exact: true, why } => write!(
+                f,
+                "the blends on the moved faces need a continuation that cannot be made exactly: {why}"
+            ),
+            Error::BlendsNotFollowed { exact: false, why } => write!(
+                f,
+                "the blends on the moved faces cannot be taken off and put back: {why}"
+            ),
             Error::Profile(r) => write!(
                 f,
                 "planar profile refused: {}",
