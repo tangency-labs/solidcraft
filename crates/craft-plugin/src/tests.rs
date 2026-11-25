@@ -233,6 +233,74 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn ribbon_groups_parse_in_declared_order_and_are_opt_in() {
+    let runtime = parse(&manifest()).unwrap().runtime.unwrap();
+    assert!(runtime.ribbon_groups.is_empty());
+    assert!(serde_json::to_value(runtime).unwrap().get("ribbon_groups").is_none(), "old manifests keep their serialized shape");
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!(["make", "inspect", "other"]);
+    value["runtime"]["ribbon_groups"] = json!([
+        {"label":"Gears","icon":"icons/gears.svg","entries":["inspect","make"]},
+        {"label":"Other","entries":["other"]}
+    ]);
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    assert_eq!(runtime.ribbon_groups[0].label, "Gears");
+    assert_eq!(runtime.ribbon_groups[0].icon.as_deref(), Some("icons/gears.svg"));
+    assert_eq!(runtime.ribbon_groups[0].entries, ["inspect", "make"]);
+    assert_eq!(runtime.ribbon_groups[1].icon, None);
+    let serialized = serde_json::to_value(&runtime).unwrap();
+    assert_eq!(serialized["ribbon_groups"], value["runtime"]["ribbon_groups"]);
+    value["runtime"] = serialized;
+    assert_eq!(parse(&value).unwrap().runtime.unwrap().ribbon_groups, runtime.ribbon_groups);
+}
+
+#[test]
+fn ribbon_groups_refuse_unknown_entries_empty_groups_and_duplicates() {
+    for (groups, field, message) in [
+        (json!([{"label":"Gears","entries":["missing"]}]), "0.entries", "unknown entry `missing`"),
+        (json!([{"label":"Gears","entries":[]}]), "0.entries", "1..32 distinct entry names"),
+        (json!([{"label":"Gears","entries":["make","make"]}]), "0.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":"More","entries":["make"]}]), "1.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":" Gears ","entries":["inspect"]}]), "1.label", "ribbon group `Gears` is listed twice"),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!(["make", "inspect"]);
+        value["runtime"]["ribbon_groups"] = groups;
+        let error = parse(&value).unwrap_err();
+        assert!(
+            matches!(&error, HostError::InvalidManifest { field: f, reason } if f == &format!("runtime.ribbon_groups.{field}") && reason.contains(message)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn ribbon_groups_refuse_hostile_labels_icons_and_malformed_fields() {
+    for group in [
+        json!({"label":"","entries":["make"]}),
+        json!({"label":"   ","entries":["make"]}),
+        json!({"label":"Gears\n","entries":["make"]}),
+        json!({"label":"x".repeat(81),"entries":["make"]}),
+        json!({"label":"Gears","icon":"../gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"https://example.org/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"gears.png","entries":["make"]}),
+        json!({"label":"Gears","icon":"","entries":["make"]}),
+        json!({"label":"Gears","icon":42,"entries":["make"]}),
+        json!({"label":"Gears","entries":"make"}),
+        json!({"label":"Gears","entries":["make"],"unknown":true}),
+        json!({"label":"Gears"}),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["ribbon_groups"] = json!([group]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{value}");
+    }
+    let mut value = manifest();
+    value["runtime"]["ribbon_groups"] = json!(vec![json!({"label":"Gears","entries":["make"]}); 33]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.ribbon_groups"));
+}
+
+#[test]
 fn declared_property_order_survives_manifest_and_entry_round_trips() {
     let bytes = br#"{"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
         "module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":{

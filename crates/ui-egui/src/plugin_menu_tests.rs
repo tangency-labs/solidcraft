@@ -1969,6 +1969,7 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         approval: String::new(),
         groups: BTreeSet::new(),
         entries,
+        ribbon_groups: Vec::new(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
@@ -1979,6 +1980,124 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         updates: None,
         themes: Vec::new(),
     }
+}
+
+fn grouped_gears() -> Listed {
+    let mut plugin = listed(
+        "gears",
+        vec![
+            entry("spur", "read", json!([{"kind":"menu","name":"Spur Gear"}])),
+            entry("bevel", "read", json!([{"kind":"menu","name":"Bevel Gear"}])),
+            entry("inspect", "read", json!([])),
+        ],
+    );
+    plugin.ribbon_groups = serde_json::from_value(json!([{"label":"Gears","entries":["bevel","spur"]}])).unwrap();
+    plugin
+}
+
+#[test]
+fn declared_ribbon_group_replaces_only_its_entries_and_lists_them_in_order() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![grouped_gears()];
+    let buttons = ribbon_buttons(&app);
+    assert_eq!(buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["plugin_group:gears:0", "plugin_entry:gears:inspect"]);
+    assert_eq!((buttons[0].label.as_str(), buttons[0].icon.as_str()), ("Gears", "prefs_plugins"));
+    let menu = ribbon_group_rows(&app, &buttons[0].id);
+    let items: Vec<_> = menu.iter().filter_map(|r| if let FileRow::Item(i) = r { Some((i.id.as_str(), i.label.as_str())) } else { None }).collect();
+    assert_eq!(items, [("entry:0:1", "Bevel Gear"), ("entry:0:0", "Spur Gear")]);
+    assert_eq!(rows(&app).len(), 4, "the full Plugins menu still contains the plugin submenu");
+    assert!(app.plugin_menu.dialogs.is_empty(), "listing a group runs and opens nothing");
+    app.preferences.disabled_plugins.insert("gears".into());
+    assert!(ribbon_buttons(&app).is_empty());
+    assert!(ribbon_group_rows(&app, &buttons[0].id).is_empty());
+    choose_ribbon(&mut app, "plugin_entry:gears:spur");
+    assert!(app.plugin_menu.dialogs.is_empty(), "disabling applies to grouped entries too");
+}
+
+#[test]
+fn grouped_entries_with_saved_individual_ribbon_pins_keep_their_own_button() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![grouped_gears()];
+    for pin in ["gears.spur", "plugin_entry:gears:spur"] {
+        app.toolbar_custom.load(&json!({"version":4,"panels":{"DESIGN/MODEL/CREATE":[pin]}}));
+        let buttons = ribbon_buttons(&app);
+        assert_eq!(
+            buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+            ["plugin_group:gears:0", "plugin_entry:gears:spur", "plugin_entry:gears:inspect"],
+            "saved pin {pin} keeps its own button"
+        );
+        assert!(choose_ribbon(&mut app, &buttons[1].id));
+        assert_eq!(app.plugin_menu.dialogs.pop().unwrap().entry, "spur");
+    }
+    app.toolbar_custom.panels.clear();
+    assert_eq!(ribbon_buttons(&app).len(), 2, "removing the pin leaves the group and the ungrouped command");
+}
+
+#[test]
+fn multiple_entries_without_ribbon_groups_keep_the_original_buttons() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut plugin = grouped_gears();
+    plugin.ribbon_groups.clear();
+    app.plugin_menu.listed = vec![plugin];
+    let buttons = ribbon_buttons(&app);
+    assert_eq!(
+        buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+        ["plugin_entry:gears:spur", "plugin_entry:gears:bevel", "plugin_entry:gears:inspect"]
+    );
+    assert_eq!(buttons.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(), ["Spur Gear", "Bevel Gear", "inspect"]);
+    assert!(buttons.iter().all(|b| b.icon == "prefs_plugins"));
+    choose_ribbon(&mut app, &buttons[1].id);
+    assert_eq!(app.plugin_menu.dialog().unwrap().entry, "bevel", "the original button still opens its entry directly");
+}
+
+#[test]
+fn ribbon_group_button_and_arrow_open_the_dropdown_and_selection_opens_the_entry_dialog() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width":2400.0,"height":900.0}));
+    h.app.home.open = false;
+    h.app.preferences.ribbon_tabs_only = false;
+    h.app.ui.tab = "MODEL".into();
+    h.app.plugin_menu.listed = vec![grouped_gears()];
+    h.app.plugin_menu.loaded = true;
+    h.frames(3);
+    assert!(crate::scenario::handle_at("button:plugin_entry:gears:spur").is_none());
+    assert!(crate::scenario::handle_at("button:plugin_entry:gears:bevel").is_none());
+    for handle in ["button:plugin_group:gears:0", "family:plugin_group:gears:0"] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(3);
+        assert!(h.app.plugin_menu.open);
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "opening the group opens no command dialog");
+        assert!(h.app.control_held.is_empty(), "opening the group queues no plugin execution");
+        assert!(crate::scenario::handle_at("menu:Bevel Gear").is_some());
+        assert!(crate::scenario::handle_at("menu:Spur Gear").is_some());
+        assert!(crate::scenario::handle_at("menu:inspect").is_none(), "only grouped entries appear");
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.plugin_menu.open, "clicking the same button or arrow closes its menu");
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.plugin_menu.open, "Escape dismisses the shared menu");
+    }
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"menu:Spur Gear"}})).unwrap();
+    assert!(!h.app.plugin_menu.open);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "spur");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().label, "Spur Gear");
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":[100.0,600.0]})).unwrap();
+    assert!(!h.app.plugin_menu.open, "an outside click dismisses the shared menu");
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(2);
+    h.app.preferences.disabled_plugins.insert("gears".into());
+    h.frames(2);
+    assert!(!h.app.plugin_menu.open, "disabling closes the group's menu");
+    assert!(crate::scenario::handle_at("button:plugin_group:gears:0").is_none());
 }
 
 #[test]

@@ -2208,6 +2208,7 @@ mod tests {
                 disabled: false,
                 groups: Default::default(),
                 entries: vec![entry],
+                ribbon_groups: Vec::new(),
                 images: Default::default(),
                 swatches: Default::default(),
                 shaders: Vec::new(),

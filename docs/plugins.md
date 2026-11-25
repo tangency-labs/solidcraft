@@ -367,6 +367,52 @@ Sheet Metal and Weldments. Existing tab visibility and workspace rules still app
 For example, `{"kind":"menu","name":"File"}` places an entry in File;
 `{"kind":"ribbon","name":"Model"}` places it in Model.
 
+### Grouping ribbon buttons
+
+By default, every entry has its own button in the Model tab's **Plugins** group, including a
+plugin with several entries. A plugin can explicitly put selected entries behind one button
+by adding `ribbon_groups` to its `runtime`:
+
+```json
+"runtime": {
+  "module": "gears.wasm",
+  "commands": [],
+  "entries": ["spur", "bevel", "worm", "inspect"],
+  "ribbon_groups": [
+    {
+      "label": "Gears",
+      "icon": "icons/gears.svg",
+      "entries": ["spur", "bevel", "worm"]
+    }
+  ]
+}
+```
+
+This gives one **Gears** ribbon button with a drop-down listing `spur`, `bevel` and `worm` in
+that order, and an individual button for `inspect`. Clicking either the button or its arrow opens
+the menu; choosing an entry opens its usual input dialog. Opening the menu runs no plugin code.
+Menu rows use each entry's usual title and icon. Entries that a user pinned individually to the
+ribbon keep their own button as well as their place in the group menu.
+
+`ribbon_groups` is optional; omitting it or declaring `[]` preserves the existing ribbon
+behaviour. It affects only the Model tab's Plugins buttons: the full Plugins menu, declared
+File/Help items, other ribbon-tab slots and programmatic command ids remain available as before.
+Several groups are allowed and appear in declaration order, followed by individual entries.
+Each group has:
+
+- `label`: 1 to 80 printable characters on one line, with a non-blank label. Surrounding spaces
+  are ignored when displaying the label and checking for duplicate labels.
+- `icon` (optional): a package-relative `.svg` path, following the same path rules, size limit,
+  SVG subset and theme palette as [entry icons](#icons-and-pictures). A missing or
+  invalid SVG falls back to the generic plugin icon; an unsafe or malformed path is refused.
+- `entries`: 1 to 32 names from this plugin's `runtime.entries`, in menu order. Use the local
+  entry name (`spur`), without the plugin id.
+
+At most 32 groups are accepted. Unknown entry names, empty groups, duplicate labels, repeated
+entry names within a group and entries included in more than one group are refused with an
+`invalid_manifest` error naming the field and the problem. Unknown fields in a group are also
+refused. Group icons are optional and do not need a new capability.
+
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off

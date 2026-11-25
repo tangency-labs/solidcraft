@@ -1,4 +1,4 @@
-//! Vector images a plugin package ships: an entry's icon and pictures for a choice's options.
+//! Vector images a plugin package ships: an entry's icon, ribbon group icons and pictures for a choice's options.
 //!
 //! An entry's `input_schema` names them with [`KEY`]: at its top, the command or importer's icon (its ribbon
 //! button, its menu rows and its dialog's header); on a `oneOf` option, that option's picture in
@@ -33,8 +33,20 @@ const MAX_IMAGES: usize = images::MAX_IMAGES;
 
 /// Every image the entries' schemas name, read from the package at `dir`: each relative path
 /// with the icon name it is drawn by. Paths that are not usable are left out.
+#[cfg(test)]
 pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, String> {
+    load_with_groups(dir, plugin_id, entries, &[])
+}
+
+/// Load entry images and explicit ribbon group icons through the same package and SVG checks.
+pub(crate) fn load_with_groups(
+    dir: &Path,
+    plugin_id: &str,
+    entries: &[solidcraft_engine::plugin::Entry],
+    groups: &[solidcraft_engine::plugin::RibbonGroup],
+) -> BTreeMap<String, String> {
     let mut named = Vec::new();
+    named.extend(groups.iter().filter_map(|group| group.icon.clone()));
     for entry in entries {
         named.extend(referenced(&entry.input_schema));
     }
