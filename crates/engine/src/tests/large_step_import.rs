@@ -89,9 +89,9 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
     s.execute("file.insert_step", &json!({"path": path})).unwrap();
     let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
-    // A new length for the box: the import after it is evaluated again on new inputs.
-    let redefine =
-        json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": "first"}});
+    // Changing document units changes the shared evaluation context, forcing the import to
+    // evaluate again on new inputs.
+    let change_units = json!({"units": "in"});
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
     let canceller = {
@@ -103,11 +103,11 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
             progress.cancel();
         })
     };
-    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("timeline.redefine", &redefine));
+    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("document.units", &change_units));
     canceller.join().unwrap();
     let (_, done, total) = progress.work().unwrap();
     assert!(done < total, "the preview's import stopped part way ({done} of {total})");
-    s.execute("timeline.redefine", &redefine).unwrap();
+    s.execute("document.units", &change_units).unwrap();
     let result = &s.model.results[import];
     assert!(result.error.is_none() && !result.skipped, "the design imports in full: {:?}", result.error);
     let _ = std::fs::remove_file(path);

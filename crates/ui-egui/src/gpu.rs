@@ -188,8 +188,31 @@ pub fn install_cpu_picture_renderer() {
 }
 
 fn cpu_picture(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> solidcraft_engine::capture::Picture {
-    let canvas = solidcraft_viewport::render(scene, cam, w as usize, h as usize);
+    // A scene with no backdrop (a parts library card) comes back premultiplied, as from the GPU.
+    let canvas = solidcraft_viewport::render_picture(scene, cam, w as usize, h as usize);
     solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" }
+}
+
+#[cfg(test)]
+mod cpu_picture_tests {
+    /// The CPU stand-in for the GPU (device lost, or no GPU at all) draws a picture with no
+    /// backdrop over transparent pixels, as the GPU does: a part's library card shows no backdrop.
+    #[test]
+    fn a_cpu_picture_with_no_backdrop_is_clear_around_the_part() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 20, "width": 20, "height": 20})).unwrap();
+        let cam = solidcraft_engine::view::home_camera(&s).unwrap();
+        // As a library card draws it (`home::cutout`): no grid or axes.
+        let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+        let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+        let backdrop = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(backdrop.rgba[3], 255, "with a backdrop, every pixel is opaque");
+        scene.transparent = true;
+        let p = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a corner is clear");
+        let centre = (32 * 64 + 32) * 4;
+        assert_eq!(p.rgba[centre + 3], 255, "the part is opaque");
+    }
 }
 
 #[cfg(test)]
@@ -397,28 +420,11 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_viewport_gpu::view::analysis_colors(c)
 }
 
-/// The backends the offscreen tests start, chosen once per test process as the app chooses them
-/// (`apps/solidcraft/src/startup.rs`, `choose_backends`): what `WGPU_BACKEND` names; on Windows one
-/// backend, the first of D3D12, Vulkan and OpenGL with a hardware adapter (else D3D12); elsewhere
-/// wgpu's default. wgpu's default on Windows starts Vulkan, D3D12 and OpenGL together, and tests
-/// starting them side by side hung or crashed the test process inside the Vulkan driver.
+/// The backends the offscreen tests start: the headless ones
+/// (`solidcraft_viewport_gpu::select::native_backends`), as for headless pictures.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_backends() -> wgpu::Backends {
-    static CHOSEN: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
-    *CHOSEN.get_or_init(|| {
-        let default = solidcraft_viewport_gpu::instance_descriptor_from_env().backends;
-        if !cfg!(target_os = "windows") || std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty()) {
-            return default;
-        }
-        let hardware = |backends: wgpu::Backends| {
-            let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-            desc.backends = backends;
-            desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
-            let adapters = pollster::block_on(solidcraft_viewport_gpu::select::start_instance(desc).enumerate_adapters(backends));
-            adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
-        };
-        [wgpu::Backends::DX12, wgpu::Backends::VULKAN, wgpu::Backends::GL].into_iter().find(|b| hardware(*b)).unwrap_or(wgpu::Backends::DX12)
-    })
+    solidcraft_viewport_gpu::select::native_backends()
 }
 
 /// Held while a test starts an instance, adapter or device: starting an instance scans the Vulkan
@@ -755,6 +761,8 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
+        // A preview frame with no session: no whole-body selection.
+        selection_all: false,
         product_lights,
         product,
         upload_error: None,
@@ -784,6 +792,7 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        occlusion: false,
         edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
@@ -1812,20 +1821,15 @@ mod tests {
         assert!(app.viewport.tess_ready.is_none());
     }
 
-    /// The offscreen tests start the backends the app would: on Windows without `WGPU_BACKEND`
-    /// exactly one, from the app's order (D3D12, Vulkan, OpenGL); otherwise wgpu's default.
+    /// The offscreen tests start the headless backends: Metal on macOS, D3D12 and Vulkan on
+    /// Windows, Vulkan elsewhere, never OpenGL.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn offscreen_tests_start_the_backend_the_app_would() {
+    fn offscreen_tests_start_the_headless_backends() {
         use egui_wgpu::wgpu::Backends;
         let chosen = super::offscreen_backends();
-        let env = std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty());
-        if cfg!(target_os = "windows") && !env {
-            assert!([Backends::DX12, Backends::VULKAN, Backends::GL].contains(&chosen), "one backend, not {chosen:?}");
-        } else {
-            assert_eq!(chosen, egui_wgpu::wgpu::InstanceDescriptor::new_without_display_handle_from_env().backends);
-        }
-        assert_eq!(super::offscreen_backends(), chosen, "chosen once per test process");
+        assert_eq!(chosen, solidcraft_viewport_gpu::select::native_backends());
+        assert!(!chosen.contains(Backends::GL), "{chosen:?}");
         // And the offscreen device is made on them (skipped without a GPU adapter).
         if let Some((adapter, _, _)) = super::offscreen_device() {
             let used = Backends::from(adapter.get_info().backend);

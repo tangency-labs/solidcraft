@@ -271,7 +271,10 @@ impl TimelineKind {
     pub(crate) fn of(kind: &FeatureKind) -> Self {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
-            FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. }
+            | FeatureKind::Coil { sketch: Some(sketch), .. } => Self::Profile(*sketch),
             // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
             FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
@@ -346,6 +349,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
@@ -372,6 +376,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Coil { .. } => "coil",
         FeatureKind::SheetPerforate { .. } => "perforate",
         FeatureKind::CellGrid { .. } => "perforate",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::BoundaryFill { .. } => "boundary_fill",
         FeatureKind::Patch { .. } => "surface_patch",
         FeatureKind::Stitch { .. } => "surface_stitch",
@@ -874,6 +879,19 @@ pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<Str
         let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
         Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
     })
+}
+
+/// The window shows a design's results without waiting for SMLib's check of the bodies its last
+/// features keep: the checks end beside the window, and a check that refuses a feature's bodies
+/// fails that feature, as it would have failed had the evaluation waited
+/// ([`solidcraft_engine::Session::set_background_checks`]). A frame is asked for while a check
+/// runs, so its outcome lands within a frame of its end.
+pub(crate) fn tick_feature_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.set_background_checks(true);
+    app.session.settle_feature_checks(false);
+    if app.session.model.checking_features() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
 }
 
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
