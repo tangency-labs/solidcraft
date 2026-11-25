@@ -133,6 +133,8 @@ mod issue_1945_fork_1207_step4;
 mod issue_1980_cliff_overflow_edge_attributes;
 #[path = "../issue_1981_pocket_chamfer_operand_trims.rs"]
 mod issue_1981_pocket_chamfer_operand_trims;
+#[path = "../issue_19829_mixed_classification.rs"]
+mod issue_19829_mixed_classification;
 #[path = "../issue_1999_shallow_crease_round_contacts.rs"]
 mod issue_1999_shallow_crease_round_contacts;
 #[path = "../issue_2020_mitred_put_back_trimmed_at_creases.rs"]

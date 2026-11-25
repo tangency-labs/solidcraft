@@ -300,6 +300,22 @@ impl Harness {
         }
     }
 
+    /// `n` frames, each drawn once the model behind a finished sketch has been worked out on its
+    /// worker: a command waiting for that model (started while the marker rolls back) opens on
+    /// the same frame however fast the worker ran.
+    #[cfg(test)]
+    pub fn frames_after_sketch_refresh(&mut self, n: usize) {
+        for _ in 0..n {
+            let uids: Vec<u64> = self.app.sketch_refreshes.keys().copied().collect();
+            for uid in uids {
+                if let Some(job) = self.app.sketch_refreshes.remove(&uid) {
+                    self.app.sketch_refreshes.insert(uid, job.completed());
+                }
+            }
+            self.frame();
+        }
+    }
+
     /// One frame in which the platform drops `files`, the pointer last seen at `at` (a drop
     /// itself carries no position with winit 0.30).
     pub fn drop_files(&mut self, at: egui::Pos2, files: Vec<egui::DroppedFileHandle>) {
@@ -492,6 +508,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =

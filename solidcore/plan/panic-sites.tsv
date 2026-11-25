@@ -586,6 +586,7 @@ crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_t
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_touch	with_capacity	1	proven	Vec::with_capacity(vertexuses.len())	n = vertexuses.len(), an existing Vec of the same vertexuse handle type
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::crossings_from_touches	int-div	1	proven	get_connected_touches(Some(lp), &crossings).len() as u64 / 2	constant non-zero divisor
 crates/solidcore/src/intersect/curve_class/p8.rs	CurveClassification::natural_bounds	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/intersect/curve_class/witness.rs	tangency_point	swap	1	proven	swap(0, 1)	ends is [_; 2], built just above as [solution.start, solution.end]
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::boundary_start_points	Vec::remove	1	open	remove(kk)	
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::step_size	int-div	1	proven	(l_min + l_max) / 2	constant non-zero divisor
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::trace_curve_2_in	Vec::remove	1	open	remove(0)	

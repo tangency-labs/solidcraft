@@ -680,7 +680,13 @@ fn current_envelope(catalogue: &CatalogueState, state: &LayoutReply, registry: &
 /// v1 writes merely to inspect identities; callers union current live IDs too.
 pub fn current_envelope_snapshot(catalogue: &dyn LayoutCatalogue, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
     match catalogue.state().remembered(&state.layout.workspace) {
-        Some(stored) => stored.project_envelope(registry, &state.layout.workspace),
+        Some(stored) => {
+            let mut envelope = stored.project_envelope(registry, &state.layout.workspace)?;
+            if holds_live_quarantine(&envelope, &state.layout, registry) {
+                restore_quarantine(&mut envelope, registry)?;
+            }
+            Ok(envelope)
+        }
         None => Ok(LayoutEnvelope::new(state.layout.clone())),
     }
 }

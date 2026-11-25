@@ -2764,6 +2764,11 @@ impl core::fmt::Display for BlendFailure {
                 "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
                 self.class()
             ),
+            Self::WeldNotBuilt(WeldGap::ConcaveNotProved) => write!(
+                f,
+                "{}: a concave weld bead is built only on planes and on the outside of cylinders, cones and spheres so far; on this face its arc is not proved to stay off the face",
+                self.class()
+            ),
             Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
                 f,
                 "{}: the exact weld bead is built only along a straight edge between two planes; the bead body builds on any joint",
@@ -2810,7 +2815,8 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for a blend routine that could not continue, as the
     /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`): a phrase
-    /// cause.
+    /// cause. Only tests build it now: no site in the kernel keeps the phrase.
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_failed(operation: &'static str, what: &'static str) -> Self {
@@ -2819,7 +2825,9 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for something a blend routine needs that is not there,
     /// as the phrase says, with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a
-    /// `NULL` pointer): a phrase cause.
+    /// `NULL` pointer): a phrase cause. Only tests build it now: no site in the kernel
+    /// keeps the phrase (#19829).
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_missing(operation: &'static str, what: &'static str) -> Self {
@@ -3187,6 +3195,10 @@ mod tests {
             // a weld bead not built yet: neither a defect nor a refusal
             (
                 BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::ConcaveNotProved),
                 ErrorKind::Unsupported,
             ),
             (

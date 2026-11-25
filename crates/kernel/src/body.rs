@@ -1129,11 +1129,25 @@ impl Body {
         Ok(self.nearest_face_query(p, reach)?.filter(|(d, _)| *d <= reach).map(|(_, face)| face))
     }
 
-    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
-        let Some(form) = self.ops_body() else { return Ok(None) };
+    /// Every face within `reach` of `p`, by its exact distance to the trimmed face, in face
+    /// order. A point on an edge or corner is within reach of each face that meets there. A mesh
+    /// body holds no B-rep face, so none. The kernel also answers the nearest face, and faces it
+    /// could not rule out, past the reach: those are left out here.
+    pub fn faces_within(&self, p: Vec3, reach: f64) -> Result<Vec<(usize, f64)>> {
+        Ok(self.face_distances_near(p, reach)?.into_iter().filter(|(_, d)| *d <= reach).collect())
+    }
+
+    /// The faces the kernel answers a distance for from `p` within `reach`, in face order: every
+    /// face within the reach, and perhaps others past it (the nearest is always answered).
+    fn face_distances_near(&self, p: Vec3, reach: f64) -> Result<Vec<(usize, f64)>> {
+        let Some(form) = self.ops_body() else { return Ok(Vec::new()) };
         let (ops, order) = &*form;
         let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).map_err(|e| KernelError::Failed(format!("face at point: {e}")))?;
-        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0)))
+        Ok(dists.into_iter().enumerate().filter_map(|(f, row)| Some((f, row.first().copied().flatten()?))).collect())
+    }
+
+    fn nearest_face_query(&self, p: Vec3, reach: f64) -> Result<Option<(f64, usize)>> {
+        Ok(self.face_distances_near(p, reach)?.into_iter().map(|(f, d)| (d, f)).min_by(|a, b| a.0.total_cmp(&b.0)))
     }
 
     /// Where the rim of `faces` cuts `outline`, a curve over `interval` lying in the plane through
@@ -1565,7 +1579,7 @@ impl Body {
                 return part;
             }
             if let Ok((lo, hi)) =
-                solidcore_ops::affine::moved_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
+                solidcore_ops::affine::transformed_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
             {
                 return Aabb3 { min: v3(lo), max: v3(hi) };
             }

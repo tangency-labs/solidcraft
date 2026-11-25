@@ -73,6 +73,14 @@ fn defect(why: &'static str) -> SolidError {
 /// The most Newton steps a foot takes.
 const NEWTON_STEPS: usize = 40;
 
+/// The sagitta that fits, as a share of its bound: the bound is open (at it the arc lies along
+/// its support at a toe), so the fit is a thousand-millionth below it. Not the float below, as
+/// the exact bead's is: this bound is read from solved feet, which another start gives to
+/// rounding only, so the float below could be past the bound the build reads at the same
+/// station. A thousand-millionth is chosen, not derived (how far the feet's rounding moves
+/// the bound is not bounded here): far below what a weld is measured to.
+const BELOW_OPEN_BOUND: f64 = 1.0 - 1e-9;
+
 /// The most halvings the search for a leg that fits takes: they take a leg of 1e6 down to well
 /// under the bracket's stop, `1e-7 (1 + hi)` with `hi` its upper end; past a leg of about
 /// `1e-7 * 2^64` they end first.
@@ -913,13 +921,37 @@ impl FootBlend {
     /// concave, `(c / 2) tan((pi - max(beta_i)) / 2)` convex
     /// ([`crate::surface::procedural_blend::bead::sagitta_bound`]), `c` the chord and `beta_i`
     /// the angle at foot `i` between the chord and the face's direction back towards the root
-    /// in the station's plane.
+    /// in the station's plane. The angle at a foot only says that the arc leaves the foot off
+    /// the face: a concave arc is bounded so only on supports where that is proved enough
+    /// ([`FootBlend::concave_unproved`]).
     ///
     /// # Errors
     ///
-    /// Those of the evaluations; a defect where a face's normal is not defined at its foot.
+    /// [`crate::error::blend::WeldGap::ConcaveNotProved`] naming the edge, the face and the
+    /// foot for a concave arc on a support where the bound is not proved; those of the
+    /// evaluations; a defect where a face's normal is not defined at its foot.
     fn station_bound(&self, k: &Kernel, s: &FootStation, sagitta: f64) -> Result<f64> {
         let [a, b] = s.feet;
+        let unproved = if sagitta < 0.0 {
+            self.concave_unproved(k, s)?
+        } else {
+            None
+        };
+        if let Some(i) = unproved {
+            let gap = crate::error::blend::WeldGap::ConcaveNotProved;
+            return Err(Failure::new(OP, BlendFailure::WeldNotBuilt(gap))
+                .or_at(Site {
+                    edge: self.edge.map(TargetEdge::of_target),
+                    face: self
+                        .sides
+                        .get(i)
+                        .and_then(|side| side.face)
+                        .map(crate::error::TargetFace::of_target),
+                    at: s.feet.get(i).copied(),
+                    ..Site::default()
+                })
+                .into_error());
+        }
         let mut toes = [0.0_f64; 2];
         for (i, (toe, other)) in toes.iter_mut().zip([b, a]).enumerate() {
             let (Some(side), Some(&uv), Some(&foot)) =
@@ -938,6 +970,80 @@ impl FootBlend {
             *toe = c.cross(d).length().atan2(c.dot(d));
         }
         Ok(sagitta_bound(b.distance(a), toes, sagitta))
+    }
+
+    /// The first support, if any, on which a concave arc at the station `s` is not proved
+    /// clear of the support by the bound at its feet ([`FootBlend::station_bound`]). The bound
+    /// is enough where, in the station's plane, the support's section from the root to the
+    /// foot lies on the material's side of its own tangent at the foot and the other foot on
+    /// the bead's side of that tangent: below the bound the arc leaves the foot into the
+    /// bead's side, it ends there, and a circle meets a line twice at most, so it stays
+    /// there, off the section. A plane's section is that tangent. On the outside of a
+    /// cylinder, a cone or a sphere the section bounds the convex region the plane cuts
+    /// from the solid inside, which lies on one side of each of its tangents; the other foot
+    /// is checked against the tangent plane at the foot. Any other support is not proved:
+    /// the inside of a cylinder, a cone or a sphere, a torus, a free-form face. There a
+    /// section that curves towards the bead more tightly near the foot than the arc does
+    /// comes back into the arc between the foot and the root, though the arc leaves the foot
+    /// off the face.
+    ///
+    /// The bead's side of a support is the side of its tangent plane at the root on which the
+    /// other foot lies; it is on the outside where neither of the surface's normal
+    /// curvatures along its parameter lines at the foot turns towards that side (on a
+    /// cylinder, a cone and a sphere every normal curvature has one sign).
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn concave_unproved(&self, k: &Kernel, s: &FootStation) -> Result<Option<usize>> {
+        use crate::surface::surface::p2::SurfaceKind;
+        for (i, side) in self.sides.iter().enumerate() {
+            match side.surface.geometry().kind() {
+                SurfaceKind::Plane(_) => continue,
+                SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) => {}
+                _ => return Ok(Some(i)),
+            }
+            let (Some(&uv), Some(&root_uv), Some(&foot), Some(&other)) = (
+                s.uv.get(i),
+                s.root_uv.get(i),
+                s.feet.get(i),
+                s.feet.get(1 - i),
+            ) else {
+                return Ok(Some(i));
+            };
+            // the bead's side at the root, carried to the foot by the surface's own normal
+            let Some(at_root) = normal_at(k, &side.surface, root_uv)? else {
+                return Ok(Some(i));
+            };
+            let towards = if at_root.dot(other - s.root) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            let d = side
+                .surface
+                .evaluate(k, uv, 2, 2, EvaluateFlags::default())?;
+            let (Some(&du), Some(&dv), Some(&duu), Some(&dvv)) = (
+                d.get(1).and_then(|r| r.first()),
+                d.first().and_then(|r| r.get(1)),
+                d.get(2).and_then(|r| r.first()),
+                d.first().and_then(|r| r.get(2)),
+            ) else {
+                return Ok(Some(i));
+            };
+            let Ok(n) = du.cross(dv).unitize() else {
+                return Ok(Some(i));
+            };
+            let n = n * towards;
+            // the normal curvatures along u and along v, towards the bead where positive
+            let (ku, kv) = (duu.dot(n) / du.dot(du), dvv.dot(n) / dv.dot(dv));
+            let rounding = 1e-9 * ku.abs().max(kv.abs());
+            let outside = ku <= rounding && kv <= rounding;
+            if !outside || (other - foot).dot(n) <= 0.0 {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -1031,11 +1137,13 @@ impl FootBlend {
 
     /// The largest sagitta (a magnitude, on `sagitta`'s side) this joint's bead takes with the
     /// legs `legs` over [`FootBlend::check_stations`] of `within`: a hair below the least bound
-    /// over them, as the bound is open. Infinite where no station is made.
+    /// over them, as the bound is open (`BELOW_OPEN_BOUND`). Infinite where no station is made.
     ///
     /// # Errors
     ///
-    /// Those of the evaluations.
+    /// [`crate::error::blend::WeldGap::ConcaveNotProved`] for a concave arc on a support where
+    /// the bound is not proved (any but a plane and the outside of a cylinder, a cone or a
+    /// sphere); those of the evaluations.
     pub fn sagitta_that_fits(
         &self,
         k: &Kernel,
@@ -1045,7 +1153,7 @@ impl FootBlend {
     ) -> Result<f64> {
         let ts = self.check_stations(within)?;
         let bound = self.sagitta_fit(k, &ts, legs, sagitta)?;
-        Ok((bound * (1.0 - 1e-9)).max(0.0))
+        Ok((bound * BELOW_OPEN_BOUND).max(0.0))
     }
 
     /// Checks that each toe lies on its face of `target` at the legs `legs`: at
@@ -1058,7 +1166,8 @@ impl FootBlend {
     /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
     /// toe found off its face, naming the face and the edge, with the largest leg on that side
     /// whose toes stay on the face at those stations (halved down from the leg until the bracket
-    /// is `1e-7 (1 + hi)` wide, `hi` its upper end; 0 where that leg is below the smallest the
+    /// is `1e-7 (1 + hi)` wide, `hi` its upper end, less the face's tolerance, up to which a toe
+    /// past the face's edge still holds; 0 where that leg is below the smallest the
     /// body builds, [`is_radius_supported`]: eight times its tolerance, as no leg on that side
     /// builds then; the other side is not looked at once one is off: its refusal comes once
     /// this size is asked); those of the classification.
@@ -1222,10 +1331,17 @@ impl FootBlend {
                 hi = mid;
             }
         }
-        // a leg below the body's resolution is refused before the toes are read, so a retry at
-        // it would not build: no leg fits
-        let tolerance = targets.get(i).map_or(0.0, |b| b.tolerance());
-        if !is_radius_supported(lo, tolerance) {
+        // a toe holds up to the face's tolerance past its edge: the fit named is that much
+        // less, as the exact bead's (`weld_bead`'s `toes_on_faces`), which puts the toe on the
+        // face itself where the face's edge is square to the toe's travel and no farther past
+        // it than the tolerance elsewhere
+        let target = targets.get(i).copied();
+        if let (Some(face), Some(target)) = (face, target) {
+            lo = (lo - target.face(face)?.tolerance).max(0.0);
+        }
+        // a leg below the body's resolution is refused for its size before the toes are read
+        // (`weld_bead::bead_body`'s first pass), so a retry at it would not build: no leg fits
+        if !is_radius_supported(lo, target.map_or(0.0, |b| b.tolerance())) {
             lo = 0.0;
         }
         let edge = self.edge.map(TargetEdge::of_target);
@@ -1968,8 +2084,9 @@ impl FootBlend {
                 along.sort_by(f64::total_cmp);
                 along.dedup();
                 let bound = self.sagitta_fit(k, &along, legs, sagitta)?;
-                // the bound is open: a sagitta a hair below it builds
-                bound.is_finite().then(|| (bound * (1.0 - 1e-9)).max(0.0))
+                bound
+                    .is_finite()
+                    .then(|| (bound * BELOW_OPEN_BOUND).max(0.0))
             }
             Miss::Foot { .. } => None,
         };
@@ -2877,6 +2994,22 @@ impl FootBlendDefinition {
         }
     }
 
+    /// Whether the definition follows a motion of its net with the scale `scale`: none, or 1
+    /// on every axis within [`crate::math::EFF_ZERO`]. Within, not exactly: `transform_matrix`
+    /// passes a rotation's rows' lengths as the scale, and they are 1 to rounding only (it
+    /// takes rows square to each other within the same `EFF_ZERO` as no shear). Such a scale
+    /// is kept in the motion and replayed on the rebuilt net, so the net is still the
+    /// definition's; it moves a leg by less than a millionth of a millionth of itself, far
+    /// below the rounding [`FootBlendDefinition::recertify`] allows.
+    #[must_use]
+    pub fn follows(scale: Option<Vec3>) -> bool {
+        scale.is_none_or(|s| {
+            [s.x, s.y, s.z]
+                .iter()
+                .all(|c| (c - 1.0).abs() <= crate::math::EFF_ZERO)
+        })
+    }
+
     /// Moves the definition with its net (`Transform`): the motion is kept, to be replayed on
     /// the rebuilt net, as a section blend's is
     /// ([`crate::sweep::section_blend::SectionBlendDefinition::transform`]). The supports and
@@ -2885,16 +3018,17 @@ impl FootBlendDefinition {
     ///
     /// # Errors
     ///
-    /// Native invalid input for a motion that is not rigid (a scale other than 1, a mirror):
-    /// the legs, the sagitta and the bound would no longer be the net's. A face does not ask
-    /// for one ([`crate::surface::procedural_blend::KeptDefinition::follows`] leaves the
-    /// definition behind).
+    /// Native invalid input for a motion that is not rigid ([`Self::follows`]: a scale other
+    /// than 1, a mirror): the legs, the sagitta and the bound would no longer be the net's. A
+    /// face does not ask for one
+    /// ([`crate::surface::procedural_blend::KeptDefinition::follows`] leaves the definition
+    /// behind).
     pub fn transform(
         &mut self,
         rotate_n_move: &crate::geom::axis2_placement::Axis2Placement,
         scale: Option<Vec3>,
     ) -> Result<()> {
-        if scale.is_some_and(|s| s.x != 1.0 || s.y != 1.0 || s.z != 1.0) {
+        if !Self::follows(scale) {
             return Err(SolidError::invalid_input(
                 OP,
                 "a weld bead's definition moves only rigidly",

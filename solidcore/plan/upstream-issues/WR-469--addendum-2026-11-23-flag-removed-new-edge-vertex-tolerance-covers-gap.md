@@ -22,15 +22,12 @@ tests and its name in the `issue_18166` list, and the flag-off run of the #1480 
   grows the eight affected vertices past the step's value.
 - **Defaults:** SolidCraft's preset (`UpstreamFixes::all()`, `crates/smlib/src/core.rs`) had the step on, so the
   app's results do not change. `Kernel::default()` changes.
-- **Goldens:** 38 rows of 2 units move, each by one value. `primitive.api_trim_ops` `gen0072` (the whole body
-  above): one vertex tolerance, 1e-5 -> 1.0736511129039172e-5. `topology.face_p1`: 37 `MoveSeam` rows on
-  `vase_rev.smb` face 0 with made-up face properties (36 `guard_vase_rev_*` crash reproducers and
-  `vase_rev.smb_1_f5_op9`, the same input): the split edge ends 2.095 from its vertex, whose tolerance grows from
-  2.0952 to 4.1903; `RemoveSuspectSplitAtSeamUVTrimCurves` then finds the seam's ends at that vertex and removes
-  its edges' UV trims, so the row's count of UV trims goes 15 -> 2. Status, split counts, surfaces and curves are
-  unchanged. Both bodies fail level 2 (`ValidatePointers`), with or without the step. On the 36 guard rows the step
-  trades level-2 lines: 72 "edge tolerance" and 36 "vertex tolerance too wide" fewer, 72 TrimmingTools U-gap more
-  (the removed trims); every other line is the same (MEASURED).
+- **Goldens:** 1 row of 1 unit moves, by one value: `primitive.api_trim_ops` `gen0072` (the whole body above),
+  one vertex tolerance, 1e-5 -> 1.0736511129039172e-5. `topology.face_p1` does not move. Before #21381 its 37
+  `MoveSeam` rows on `vase_rev.smb` face 0 moved under the step (the UV-trim tally 15 -> 2, a split-edge vertex
+  2.0952 -> 4.1903). Those rows split the surface along a seam the surface does not have; #21381 (UB-138, #21368)
+  drops that seam move, so the split and its edge are gone. With #21381 under this change, answering the step with
+  the tolerance the vertex already had changes no `topology.face_p1` row (MEASURED, all 2569 rows).
 - **Below the goldens' resolution:** `intersect.curve_class_p6` `imprint_face_split_f0` and `_f2` also move, but
   their stored block sums (6e20, the box's huge tolerances) cannot show it: the new vertex 0.059021 past the placed
   line's end had 0.059022494374947436 (1e-6 over its gap) and now has twice its gap, 0.11804298874989479 (MEASURED

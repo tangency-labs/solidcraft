@@ -23,6 +23,7 @@ pub use ao::GroundAo;
 mod clouds;
 mod edges;
 mod gpu_cull;
+mod hiz;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 mod motions;
@@ -1538,6 +1539,10 @@ pub struct Frame {
     /// How far (pixels) an instanced part's edges may stray where drawn: [`EDGE_PX`] for a still
     /// picture, [`EDGE_PX_MOVING`] while the view moves.
     pub edge_px: f32,
+    /// The view is moving: the GPU cull leaves out the placements the last frame's depth hides
+    /// ([`hiz`]). A part that comes into view may be missing for a frame; a still view (false)
+    /// draws every placement in view.
+    pub occlusion: bool,
     /// Supersampling (#1288): draw the frame this many times the viewport's pixels in each
     /// direction and filter it down (1: off). Under 1 the frame is drawn smaller and filtered up
     /// (the product preview past its pixel budget, #1464).
@@ -2832,7 +2837,9 @@ impl Batches {
     /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
     /// frame's passes: here only the see-through looks' placements are, to sort them. A frame
     /// that moves bodies is culled here too, where their motions put the placements, and the GPU
-    /// cull is made again for the next frame that moves nothing.
+    /// cull is made again for the next frame that moves nothing. With `hidden` (the last frame's
+    /// depth pyramid, and whether the depth buffer is 1 at the near plane), it also leaves out the
+    /// placements that frame's depth hides.
     fn cull(
         &mut self,
         device: &wgpu::Device,
@@ -2842,6 +2849,7 @@ impl Batches {
         size: [f32; 2],
         motions: &Motions,
         edge_px: f32,
+        hidden: Option<(&hiz::Hiz, bool)>,
     ) {
         self.cull_blocks(vp, motions);
         if std::mem::take(&mut self.gpu_cull_stale) {
@@ -2875,7 +2883,7 @@ impl Batches {
         }
         let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
         if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
-            g.run(queue, encoder, vp, size, changed, &self.instanced, indirect, self.edges.as_mut());
+            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut());
             return;
         }
         if changed && let Some(indirect) = self.indirect.as_mut() {
@@ -2883,6 +2891,16 @@ impl Batches {
         }
         if edges_changed && let Some(edges) = self.edges.as_mut() {
             edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
+        }
+    }
+
+    /// Move the GPU cull's statistics along on a frame that draws no scene ([`Batches::cull`
+    /// runs none when the picture is reused): what an earlier frame copied is read, and the last
+    /// cull's counts are copied if the readback was busy when it made them, so a still view's
+    /// counts are the last cull's rather than an older frame's.
+    fn advance_cull_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
+            g.advance_stats(encoder, indirect, self.edges.as_mut());
         }
     }
 
@@ -3280,6 +3298,17 @@ pub struct Renderer {
     /// Most memory (bytes) an offscreen frame may take ([`frame_bytes`]): [`SS_BUDGET`], halved
     /// below each frame the device refused (out of video memory, #7296).
     frame_budget: u64,
+    /// The depth pyramid's pipelines (made the first time a frame can use them; `None` with
+    /// `hiz_failed` where the device cannot build them or refused its memory), the pyramid of the
+    /// last frame drawn, how many pyramids have been made, the picture it belongs to, and how
+    /// many frames drawn.
+    hiz_kernel: Option<hiz::Kernel>,
+    hiz_failed: bool,
+    hiz: Option<hiz::Hiz>,
+    hiz_generation: u64,
+    /// The picture slot the pyramid was built for (a pyramid is one picture's depth).
+    hiz_slot: u64,
+    frames: u64,
     /// The device refused memory for a frame or its see-through targets ([`DrawStats::lowered`]).
     lowered: bool,
     /// Reversed depth drawn into the window's pass: egui clears its depth to 1, which is the near
@@ -3352,6 +3381,8 @@ struct Supersampled {
     /// The resolved colour (when `color` is multisampled).
     resolve: Option<wgpu::TextureView>,
     depth: Option<wgpu::TextureView>,
+    /// Its depth aspect, read by the depth pyramid ([`hiz`]).
+    depth_read: Option<wgpu::TextureView>,
     /// The single-sampled colour, for the filter.
     bind: wgpu::BindGroup,
 }
@@ -4406,6 +4437,12 @@ impl Renderer {
                 stats: DrawStatsHandle::default(),
                 no_cache: false,
                 frame_budget: SS_BUDGET,
+                hiz_kernel: None,
+                hiz_failed: false,
+                hiz: None,
+                hiz_generation: 0,
+                hiz_slot: 0,
+                frames: 0,
                 lowered: false,
                 image: image.join(),
                 image_bgl,
@@ -4865,6 +4902,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
         format!("{ground:?}").hash(&mut h);
     }
     cb.edge_px.to_bits().hash(&mut h);
+    cb.occlusion.hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -5015,6 +5053,9 @@ impl Renderer {
             }
             // The scene isn't drawn again: `paint`'s blit (and that filter) is all this frame draws.
             res.pic.ss_stats = DrawStats { draw_calls: u32::from(filter), ..DrawStats::default() };
+            // No cull runs, so its statistics would wait for the next one: bring back what an
+            // earlier frame copied, and copy the last cull's if the readback was busy then.
+            res.pic.model.advance_cull_stats(encoder);
             return;
         }
         res.pic.cached = None;
@@ -5105,7 +5146,21 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px);
+        // The frame of its own this one is drawn into, made before the cull: only a frame drawn
+        // into one may leave out what the last frame hid, and whether one can be made (a
+        // supersampling gain too small, or the device's refusal) is known only once it is asked
+        // for. A frame drawn straight into the window's pass leaves nothing out.
+        let own = res.own_frame(device, encoder, cb, see_through);
+        // While the view moves, the placements the last frame drawn hid are left out: only with
+        // the pyramid that frame built (`frames` counts the frames drawn so far), for the picture
+        // it was built from, and by a frame drawn into a frame of its own.
+        let reversed = res.target.reversed_depth();
+        let hidden = res
+            .hiz
+            .as_ref()
+            .filter(|h| cb.occlusion && own.is_some() && h.vp.is_some() && h.built_in == res.frames && res.hiz_slot == res.pic_slot)
+            .map(|h| (h, reversed));
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden);
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
         let ground_visible = ground.is_some_and(|ground| ground.visible_from(cb.back));
@@ -5185,8 +5240,15 @@ impl Renderer {
             }
         }
         res.clouds.prepare(device, queue, &res.cloud_pipes, &cb.clouds);
-        res.pic.ss_ready = (isolated || cb.ssaa != 1.0 || see_through || res.window_differs()) && res.supersample(device, encoder, cb, see_through);
-        res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none()).then_some(key);
+        res.pic.ss_ready = own.is_some();
+        if let Some(size) = own {
+            res.draw_own_frame(encoder, cb, size, see_through);
+        }
+        res.frames += 1;
+        res.build_depth_pyramid(device, queue, encoder, cb);
+        // A picture drawn with occlusion is not cached: an identical frame would reuse it before
+        // the cull could draw a placement the previous pyramid hid.
+        res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none() && !cb.occlusion).then_some(key);
     }
 
     /// Draw the frame into `pass` within `viewport` (x, y, width, height in physical pixels):
@@ -5787,10 +5849,65 @@ impl Renderer {
         self.pic.cached = Some(CachedPicture { _view: view, bind });
     }
 
-    /// Draw the frame supersampled (`cb.ssaa` times the viewport's pixels each way, within the
-    /// device's texture limit and the memory budget) into textures of the viewport's kind.
-    /// `false` when it cannot be (too small a gain, a zero-sized viewport): drawn as usual.
-    fn supersample(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, cb: &Frame, see_through: bool) -> bool {
+    /// Build the depth pyramid ([`hiz`]) from the frame just drawn into its own frame, for the
+    /// next frame's cull to leave out what it hides while the view moves: only for a model
+    /// culled on the GPU, and where the device builds the pyramid.
+    fn build_depth_pyramid(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, cb: &Frame) {
+        if !self.pic.ss_ready || cb.product || self.hiz_failed || self.pic.model.gpu_cull.is_none() {
+            return;
+        }
+        let Some((size, depth)) = self.pic.ss.as_ref().and_then(|ss| Some((ss.size, ss.depth_read.clone()?))) else { return };
+        let samples = self.target.samples.max(1);
+        let made = self.hiz_kernel.as_ref().is_none_or(|k| k.samples() != samples);
+        if made {
+            self.hiz_kernel = hiz::Kernel::new(device, samples);
+            self.hiz_failed = self.hiz_kernel.is_none();
+            self.hiz = None;
+        }
+        let Some(kernel) = &self.hiz_kernel else { return };
+        // The frame just drawn had no kernel when it chose its store operation
+        // (`draw_own_frame` discards depth without one), so its depth is gone: build from the
+        // next frame's stored depth instead.
+        if made {
+            return;
+        }
+        // A pyramid per frame size; a new frame of the same size is a new depth texture.
+        if self.hiz.as_ref().is_none_or(|h| h.frame != size || !h.reads(&depth)) {
+            self.hiz_generation += 1;
+            match allocated(device, || hiz::Hiz::new(device, kernel, &depth, size, self.hiz_generation)) {
+                Ok(hiz) => self.hiz = Some(hiz),
+                Err(e) => {
+                    log::warn!("hidden placements are drawn while the view moves: the GPU refused the depth pyramid: {e}");
+                    self.hiz = None;
+                    self.hiz_failed = true;
+                    return;
+                }
+            }
+        }
+        let reversed = self.target.reversed_depth();
+        // The matrix the frame was drawn with, not the one before the turn: the cull passes this
+        // view to the shader as `prev_vp` and converts each corner's depth with the same
+        // reversed-depth flag the pyramid stored its depths with. The plain `view_proj` here put
+        // the two the other way round on a reversed depth buffer (every frame drawn on Metal),
+        // and `hidden` compared a turned depth with an unturned one: placements in the near half
+        // of the depth range were left out, and the set oscillated as the pyramid changed.
+        let drawn_with = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed);
+        if let Some(h) = self.hiz.as_mut() {
+            h.build(queue, kernel, encoder, drawn_with, reversed, self.frames);
+        }
+        self.hiz_slot = self.pic_slot;
+    }
+
+    /// The frame of its own this one is drawn into, made ready and cleared, if it needs one:
+    /// supersampled (`cb.ssaa` times the viewport's pixels each way, within the device's texture
+    /// limit and the memory budget), for the see-through surfaces' order-independent transparency,
+    /// or for a window pass of another kind ([`Self::window_differs`]). Its size in pixels.
+    /// `None` when the frame is drawn straight into the window's pass: it needs no frame of its
+    /// own, gains too little from supersampling to be worth one, or the device refused it.
+    ///
+    /// Made before the cull, which must know whether the frame has one of its own: a frame drawn
+    /// straight into the window's pass leaves nothing out ([`hiz`]).
+    fn own_frame(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, cb: &Frame, see_through: bool) -> Option<[u32; 2]> {
         // Supersampled when asked (and worth it); else, for order-independent transparency, at
         // the viewport's own size.
         let max = self.max_texture.max(1);
@@ -5816,7 +5933,7 @@ impl Renderer {
             });
             let Some((size, filtered)) = frame else {
                 self.pic.ss = None;
-                return false;
+                return None;
             };
             if self.pic.ss.as_ref().is_some_and(|ss| ss.size == size) {
                 drawn = Some((size, filtered));
@@ -5845,7 +5962,7 @@ impl Renderer {
                 }
             }
         }
-        let Some((size, filtered)) = drawn else { return false };
+        let (size, filtered) = drawn?;
         self.pic.ss_scaled = filtered;
         if see_through && self.pic.oit_targets.as_ref().is_none_or(|t| t.size != size) {
             self.pic.oit_targets = None;
@@ -5866,11 +5983,20 @@ impl Renderer {
                 None => {}
             }
         }
-        let Some(ss) = &self.pic.ss else { return false };
+        self.pic.ss.as_ref()?;
+        Some(size)
+    }
+
+    /// Draw `cb` into the frame [`Renderer::own_frame`] made, of `size` pixels: the model with its
+    /// see-through surfaces (order-independent transparency, where the device takes it), and what
+    /// is drawn over them.
+    fn draw_own_frame(&mut self, encoder: &mut wgpu::CommandEncoder, cb: &Frame, size: [u32; 2], see_through: bool) {
+        let Some(ss) = &self.pic.ss else { return };
         let depth_format = self.target.depth;
         let stencil = depth_format.is_some_and(|f| f.has_stencil_aspect());
         // The depth is kept for the passes after the first when there are see-through surfaces.
-        let keep = if see_through { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard };
+        // And for the depth pyramid built from it ([`hiz`]).
+        let keep = if see_through || self.hiz_kernel.is_some() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard };
         let pass = |encoder: &mut wgpu::CommandEncoder, first: bool| {
             let load = |clear| if first { wgpu::LoadOp::Clear(clear) } else { wgpu::LoadOp::Load };
             encoder
@@ -5904,7 +6030,7 @@ impl Renderer {
             }
             drop(first);
             self.pic.ss_stats = tally.stats();
-            return true;
+            return;
         };
         {
             let mut first = pass(encoder, true);
@@ -5921,6 +6047,14 @@ impl Renderer {
             self.draw(cb, &mut over, Phase::AfterSeeThrough, &tally);
         }
         self.pic.ss_stats = tally.stats();
+    }
+
+    /// [`Renderer::own_frame`] and [`Renderer::draw_own_frame`] in one go: `false` when the frame
+    /// cannot be drawn into one of its own (too small a gain, a zero-sized viewport, a refusal),
+    /// and is drawn as usual.
+    fn supersample(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, cb: &Frame, see_through: bool) -> bool {
+        let Some(size) = self.own_frame(device, encoder, cb, see_through) else { return false };
+        self.draw_own_frame(encoder, cb, size, see_through);
         true
     }
 
@@ -5956,7 +6090,23 @@ impl Renderer {
         } else {
             (texture("sc_ssaa", t.format, 1, sampled), None)
         };
-        let depth = t.depth.map(|f| texture("sc_ssaa_depth", f, samples, wgpu::TextureUsages::RENDER_ATTACHMENT));
+        // Its depth is read too, for the depth pyramid ([`hiz`]): through a view of its depth aspect.
+        let depth_texture = t.depth.map(|f| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("sc_ssaa_depth"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format: f,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        });
+        let depth = depth_texture.as_ref().map(|d| d.create_view(&Default::default()));
+        let depth_read = depth_texture
+            .as_ref()
+            .map(|d| d.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() }));
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_ssaa"),
             layout: &self.ss_bgl,
@@ -5965,7 +6115,7 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
             ],
         });
-        Supersampled { size, color, resolve, depth, bind }
+        Supersampled { size, color, resolve, depth, depth_read, bind }
     }
 }
 
@@ -6183,7 +6333,10 @@ mod tests {
     #[test]
     fn refused_scene_upload_keeps_the_previous_picture_and_retries() {
         use super::*;
-        let Ok((adapter, _, _)) = crate::open_headless(crate::test_env::policy()) else { return };
+        // An adapter of its own, not the shared device's: on OpenGL the devices of one adapter share
+        // its EGL context, and this one beside the shared device left the other tests' pictures
+        // blank (#10232).
+        let Some((adapter, _)) = crate::select::pick(crate::test_env::policy()) else { return };
         // Above the renderer's own buffers (its viewport uniform is 2080 bytes), below the index buffer refused.
         let limits = wgpu::Limits { max_buffer_size: 3072, ..wgpu::Limits::downlevel_defaults() };
         let Ok((device, queue)) =
@@ -6700,6 +6853,7 @@ mod tests {
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
             edge_px: crate::view::EDGE_PX,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa: 1.0,
         }
@@ -6984,7 +7138,10 @@ mod glass_tests {
         // validation pipeline, naga cannot emit compute GLSL below 4.30, and request_device fails
         // as Device(Lost) (#15410). The test draws nothing indirect.
         descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-        let instance = wgpu::Instance::new(descriptor);
+        let instance = crate::select::start_instance(descriptor);
+        // Never dropped: NVIDIA's driver deadlocks when one thread drops an EGL context while
+        // another test's thread destroys a Vulkan device (#10232).
+        std::mem::forget(instance.clone());
         let policy = crate::test_env::policy();
         let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
             eprintln!("skipped: no OpenGL adapter qualifies under {}", policy.name());
@@ -7424,6 +7581,7 @@ mod glass_tests {
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
             edge_px: crate::view::EDGE_PX,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
@@ -7634,6 +7792,7 @@ mod glass_tests {
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
             edge_px: crate::view::EDGE_PX,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa,
         }
@@ -8272,6 +8431,78 @@ mod glass_tests {
                 red(&render_frame(&mut r, &device, &queue, &frame, false)) && r.frame_budget == budget && r.pic.ss.as_ref().map(|ss| ss.size) == size
             );
         }
+    }
+
+    /// A frame drawn straight into the window's pass — a supersampling gain too small for a frame
+    /// of its own (1.1×) — leaves nothing out even though the frames before it built the depth
+    /// pyramid: no pyramid is bound for it. The offscreen frame before it does bind one.
+    #[test]
+    fn a_frame_drawn_straight_into_the_window_binds_no_depth_pyramid() {
+        use super::*;
+        use solidcore_record::Vec3;
+        use std::sync::Arc;
+        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
+        if !gpu_cull::supported(&device) || hiz::Kernel::new(&device, 1).is_none() {
+            return;
+        }
+        let depth = crate::depth_format(&device, true);
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false, edges: false };
+        let mut r = Renderer::new(&device, target, None);
+        let scene = || {
+            let mesh = solidcore_tess::Mesh {
+                positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+                normals: vec![Vec3::Z; 4],
+                triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+                tri_face: vec![0; 4],
+                ..Default::default()
+            };
+            let mut part = InstancedMesh {
+                key: 1,
+                tris: Arc::new(SharedTris::new(&mesh)),
+                instances: Vec::new(),
+                look: InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+                edges: None,
+            };
+            // One placement behind the other, so the last frame's depth has something to hide.
+            for z in [-30.0, -210.0] {
+                part.place([[1.0, 0.0, 0.0, -5.0], [0.0, 1.0, 0.0, -5.0], [0.0, 0.0, 1.0, z]], PaletteIndex(0));
+            }
+            GpuScene { instanced: vec![part], ..GpuScene::default() }
+        };
+        // The view frame's own projection and its turned depth, as the frame that built the
+        // pyramid had them.
+        let moving = |r: &mut Renderer, ssaa: f32, turn: f32| -> ([[f32; 4]; 4], Option<[f32; 4]>) {
+            let mut frame = test_frame(scene(), ssaa);
+            frame.occlusion = true;
+            frame.view_proj[3][0] += turn;
+            let (vp, turned) = (frame.view_proj, frame.turned_depth);
+            render_frame(r, &device, &queue, &frame, true);
+            (vp, turned)
+        };
+        let bound = |r: &Renderer| r.pic.model.gpu_cull.as_ref().is_some_and(|g| g.pyramid_bound());
+        // The first frame makes the pyramid's pipelines, the second stores its depth and builds
+        // the pyramid from it, and the third culls against it.
+        moving(&mut r, 2.0, 0.0);
+        moving(&mut r, 2.0, 0.05);
+        let (built_with, turned) = moving(&mut r, 2.0, 0.1);
+        assert!(r.hiz.as_ref().is_some_and(|h| h.vp.is_some()), "the moving frames built the pyramid");
+        // The pyramid stores the view its frame was drawn with — the turned one on a reversed
+        // depth buffer — because the cull turns the box's depths back with that same flag. Stored
+        // unturned, near and far came out in opposite conventions and near geometry popped.
+        let reversed = r.target.reversed_depth();
+        let drawn_with = gpu_view_proj_turned(built_with, turned, reversed);
+        assert_eq!(r.hiz.as_ref().and_then(|h| h.vp), Some(drawn_with), "the pyramid stores the view the frame was drawn with");
+        if reversed {
+            assert_ne!(drawn_with, built_with, "on a reversed buffer the drawn view is not the plain one, so this test means something");
+        }
+        assert!(bound(&r), "a frame drawn into a frame of its own culls against the pyramid");
+        // 1.1× is under the 1.25× worth supersampling: drawn straight into the window's pass,
+        // where the pyramid must leave nothing out.
+        moving(&mut r, 1.1, 0.15);
+        assert!(!r.pic.ss_ready, "1.1× makes no frame of its own");
+        assert!(!bound(&r), "a frame drawn straight into the window's pass binds no depth pyramid");
     }
 
     /// A multisampled scene is resolved into textures nothing else writes. Direct3D 12 needs such a
