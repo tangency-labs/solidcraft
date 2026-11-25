@@ -1,13 +1,15 @@
 # Goldens rows moved by retiring `brep_ray_classifies_current_trims` (WR-732, #18934)
 
-Measured against `main` at f957c05f33: each row the retirement moves, its first moved value
+Measured against `main` at c00b2c6962: each row the retirement moves, its first moved value
 (main's, then this branch's), how many values of the row move, and why (below the table; the
 WR-732 addendum of 2026-11-23 has the change itself).
 
-55 rows.
+57 rows.
 
 | Unit | Case | First moved value (old → new) | Values | Why |
 |---|---|---|---|---|
+| `blend.feature_executive` | `fillet_each_fillet1019` | `values.base_geometry.blocks[1][0]`: 100.39631497429602 → 100.39631497420498 | 6 | comparator |
+| `blend.feature_executive` | `single_face_fillet1019_3` | `values.base_geometry.blocks[1][0]`: 100.39631497429602 → 100.39631497420498 | 6 | comparator |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-bottle-e8-r0.1` | `values.mass_properties[0]`: 33.092189853151744 → 33.0921897026184 | 2 | integration |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1` | `values.mass_properties[0]`: 38227.381745950406 → 38227.38173952555 | 10 | fillet |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` | `values.mass_properties[0]`: 38192.70239711213 → 38192.70239068727 | 10 | fillet |
@@ -48,7 +50,7 @@ WR-732 addendum of 2026-11-23 has the change itself).
 | `heal.stitch_p2` | `cov_cube5_do_sf` | `values.out.blocks[0][0]`: 549.6003810251179 → 549.6003855097586 | 3 | stitch |
 | `heal.stitch_p2` | `cov_cube_gap_at_edge_tol_nest` | `values.out.blocks[0][0]`: 394.000439427135 → 394.00039863469743 | 3 | stitch |
 | `topology.brep_cutting` | `gen0049` | `values.geometry.blocks[2][0]`: 85.31300971292144 → 85.31300973382875 | 3 | comparator |
-| `topology.brep_cutting` | `gen0050` | `values.geometry.blocks[2][0]`: 770.8042090096001 → 770.8046558279254 | 3 | gen0050 |
+| `topology.brep_cutting` | `gen0050` | `values.geometry.blocks[2][0]`: 770.8042376225555 → 770.8046844408807 | 3 | gen0050 |
 | `topology.brep_p10` | `gen0026` | `values.dbls.blocks[1][0]`: 147.61687130409413 → 147.61687134896425 | 9 | comparator |
 | `topology.brep_p10` | `gen0298` | `values.dbls.blocks[3][0]`: 6430.013034132512 → 7276.125376729277 | 6 | gen0298 |
 | `topology.face_p3` | `own_reader_sphere_diff_3cylinders_uv_trim_f0` | `values.out.blocks[2][0]`: 196.0 → 200.0 | 6 | read |
@@ -84,4 +86,4 @@ Why:
 - **gen0298** (`Shell/problemShell16.smb`, `zone_tol -1`, `scale -1`): four tolerances roughly double; vertex 4 now
   covers its edge 11's end at 171.2, which its old tolerance did not.
 - **comparator**: moves within the goldens' comparator; the line is written again from the run because
-  `certify::trim_tolerance` replays it bit for bit.
+  `certify::trim_tolerance` or `wr450_rows` replays it bit for bit.
