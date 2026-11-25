@@ -2058,3 +2058,87 @@ fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
         }
     }
 }
+
+/// A lune half a turn wide (a half sphere whose rim is a meridian circle) is as wide as the
+/// other half, so its width says nothing of which half it is: the face is the half on the loop's
+/// left in (u, v), whichever way the loop runs, wherever it starts and wherever the seam lies,
+/// across it included.
+#[test]
+fn a_half_sphere_lune_is_the_half_on_its_loops_left() {
+    let r = 1.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let meridian = |a: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [a.cos(), a.sin(), 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let half = FRAC_PI_2;
+    for centre in [0.0, 0.3, std::f64::consts::PI, -1.0, 6.2] {
+        let (a, b) = (meridian(centre - half), meridian(centre + half));
+        // Up a meridian the face is on the side of lower angle, down one on the side of higher.
+        let loops = [
+            (
+                "up b, down a",
+                centre,
+                vec![
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "up a, down b",
+                centre + std::f64::consts::PI,
+                vec![
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "from b's middle",
+                centre,
+                vec![
+                    (&b, [0., FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&b, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+            (
+                "from a's middle",
+                centre + std::f64::consts::PI,
+                vec![
+                    (&a, [0., FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&a, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+        ];
+        for (name, middle, lune) in loops {
+            let [u, v] = form::extent(&sphere, &[lune], 1e-9)
+                .unwrap()
+                .expect("an extent");
+            assert!(
+                (u[1] - u[0] - std::f64::consts::PI).abs() < 1e-9,
+                "centre {centre}, {name}: {u:?}"
+            );
+            let off = (0.5 * (u[0] + u[1]) - middle).rem_euclid(TAU);
+            assert!(
+                off.min(TAU - off) < 1e-9,
+                "centre {centre}, {name}: {u:?}, middle {middle} expected"
+            );
+            assert!(
+                (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+                "centre {centre}, {name}: {v:?}"
+            );
+        }
+    }
+}
