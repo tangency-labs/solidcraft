@@ -303,6 +303,15 @@ pub fn split_edge_status(split: solidcore::topology::brep::p9::SplitEdgeOutput) 
     }
 }
 
+/// The upstream status number the goldens record for `SetProperties` and `GetNextPoint`:
+/// the outcome's own status (`SM_SUCCESS` 1000, `SM_ERR` 1001, ..., or the number an
+/// `Other` keeps), so the recorded rows stay as they are. The golden re-bless (#21874)
+/// replaces this conversion with the typed value.
+#[must_use]
+pub fn point_outcome_status(o: solidcore::intersect::surface_drop_lib::p2::PointOutcome) -> i32 {
+    o.status()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{blend_status, float_bits};
