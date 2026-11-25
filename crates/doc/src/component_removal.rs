@@ -91,12 +91,8 @@ impl Document {
 
         let mut bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
-        let surviving: BTreeSet<String> = self
-            .features
-            .iter()
-            .flat_map(|f| f.body_names.iter().cloned())
-            .chain(self.body_components.keys().cloned())
-            .collect();
+        let surviving: BTreeSet<String> =
+            self.features.iter().flat_map(|f| f.body_names.iter().cloned()).chain(self.body_components.keys().cloned()).collect();
         {
             let deleted_ids: BTreeSet<u64> = deleted.iter().copied().collect();
             for (id, names) in feature_bodies {
