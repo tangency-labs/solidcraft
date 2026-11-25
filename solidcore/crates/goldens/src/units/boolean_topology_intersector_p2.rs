@@ -1078,7 +1078,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &solidcore::kernel::Kernel::default();
+        let k = &crate::runner_kernel();
         let i: Inputs = case.parse()?;
         run_rust(k, &i)
     }
@@ -1148,7 +1148,7 @@ mod tests {
         let cases = Runner.cases(&ctx).expect("cases");
         let case = cases.iter().find(|c| c.name == "gen0433").expect("gen0433");
         let i: Inputs = case.parse().expect("inputs");
-        let k = solidcore::kernel::Kernel::default();
+        let k = crate::runner_kernel();
         let Ok(p) = super::super::boolean_topology_intersector_p1::prepare(&k, &i) else {
             panic!("gen0433 prepares");
         };

@@ -1,6 +1,6 @@
 {
   "ar": {
-    "ui.sketch_use_fixed_plane_explained": "يُنشئ «استخدام مستوى ثابت» المخطط على المستوى الحالي لهذا الوجه. ولن يتبع التعديلات اللاحقة على الوجه."
+    "ui.sketch_use_fixed_plane_explained": "يُنشئ «استخدام مستوى ثابت» الرسم على المستوى الحالي لهذا الوجه. ولن يتبع التعديلات اللاحقة على الوجه."
   },
   "de": {
     "ui.sketch_use_fixed_plane_explained": "„Use fixed plane“ legt die Skizze auf die aktuelle Ebene dieser Fläche. Sie folgt späteren Änderungen der Fläche nicht."
