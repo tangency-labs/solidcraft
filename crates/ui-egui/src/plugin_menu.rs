@@ -1015,27 +1015,45 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
     for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
-        let entries: Vec<FileRow> = plugin
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(e, entry)| {
-                FileRow::Item(FileItem {
-                    id: format!("entry:{p}:{e}"),
-                    label: format!("{}…", command_title(plugin, entry)),
-                    key: String::new(),
-                    // Keep the menu's unillustrated rows for entries without an annotation.
-                    icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
-                        command_icon(plugin, entry).to_owned()
-                    } else {
-                        String::new()
-                    },
-                    enabled: true,
-                })
+        let row = |e: usize, entry: &solidcraft_engine::plugin::Entry| {
+            FileRow::Item(FileItem {
+                id: format!("entry:{p}:{e}"),
+                label: format!("{}…", command_title(plugin, entry)),
+                key: String::new(),
+                // Keep the menu's unillustrated rows for entries without an annotation.
+                icon: if entry.input_schema.get(crate::plugin_images::KEY).is_some() {
+                    command_icon(plugin, entry).to_owned()
+                } else {
+                    String::new()
+                },
+                enabled: true,
             })
-            .collect();
+        };
+        // Like the ribbon, the declared groups come first, each a nested submenu named after the
+        // group with its entries in the group's order; entries in no group follow, flat.
+        let mut entries: Vec<FileRow> = Vec::new();
+        for group in &plugin.ribbon_groups {
+            let rows: Vec<FileRow> = group
+                .entries
+                .iter()
+                .filter_map(|name| plugin.entries.iter().enumerate().find(|(_, entry)| entry.name == *name))
+                .map(|(e, entry)| row(e, entry))
+                .collect();
+            if !rows.is_empty() {
+                entries.push(FileRow::Sub { label: group.label.trim().to_owned(), rows });
+            }
+        }
+        entries.extend(
+            plugin
+                .entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| !plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name)))
+                .map(|(e, entry)| row(e, entry)),
+        );
         match <[FileRow; 1]>::try_from(entries) {
-            Ok([one]) => rows.push(one),
+            Ok([one @ FileRow::Item(_)]) => rows.push(one),
+            Ok([one]) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: vec![one] }),
             Err(entries) => rows.push(FileRow::Sub { label: plugin.name.clone(), rows: entries }),
         }
     }

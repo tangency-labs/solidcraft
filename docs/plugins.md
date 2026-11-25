@@ -394,9 +394,16 @@ the menu; choosing an entry opens its usual input dialog. Opening the menu runs 
 Menu rows use each entry's usual title and icon. Entries that a user pinned individually to the
 ribbon keep their own button as well as their place in the group menu.
 
-`ribbon_groups` is optional; omitting it or declaring `[]` preserves the existing ribbon
-behaviour. It affects only the Model tab's Plugins buttons: the full Plugins menu, declared
-File/Help items, other ribbon-tab slots and programmatic command ids remain available as before.
+The Plugins menu (the one the ribbon's **Plugins** group label opens) follows the same groups:
+in the plugin's submenu, each group is a nested submenu with the group's label and its entries in
+the group's order, for example **Gears > Spur Gear…, Bevel Gear…, Worm Gear…**. Groups come first, in
+declaration order, and entries in no group stay listed flat after them. There is no separate
+setting: `ribbon_groups` is the one way to declare groups.
+
+`ribbon_groups` is optional; omitting it or declaring `[]` preserves the existing ribbon and
+menu behaviour. It affects only the Model tab's Plugins buttons and the grouping inside each
+plugin's Plugins submenu: every entry stays in the Plugins menu, and declared File/Help items,
+other ribbon-tab slots and programmatic command ids remain available as before.
 Several groups are allowed and appear in declaration order, followed by individual entries.
 Each group has:
 
