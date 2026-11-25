@@ -395,11 +395,12 @@ fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Opt
 /// (#21997: a whole-turn revolve join's turned seam does): the saved name then answers to the
 /// numbered edges between its faces (`…~1`, `…~2`). Every such piece is returned when they join
 /// end to end, through the vertices they share in the B-rep, into the one closed curve the saved
-/// edge was, and the reference's point lies on one of them, measured on its exact curve: the
-/// pieces together are that edge, as a pick made today stores one name per piece of it. Pieces
-/// that do not close again (a later feature took part of the curve), a point on none of them, or
-/// numbered edges that each close on their own (several whole edges between the same faces), and
-/// the name asks to be picked again.
+/// edge was, every edge between the name's faces belongs to that curve, and the reference's
+/// point lies on one of them, measured on its exact curve: the pieces together are that edge, as
+/// a pick made today stores one name per piece of it. Pieces that do not close again (a later
+/// feature took part of the curve), a point on none of them, or another edge between the same
+/// faces outside that curve (a second intersection, split or whole), and the name asks to be
+/// picked again.
 pub(crate) fn recover_split_closed_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<Vec<EdgeHit>> {
     if b.body.is_mesh() || !near.is_finite() {
         return None;
@@ -440,8 +441,9 @@ pub(crate) fn recover_split_closed_edge(b: &ModelBody, name: &str, near: Vec3) -
             }
         }
     }
-    // The one closed curve the saved edge was: more than one piece, and every vertex of it the
-    // end of exactly two of them.
+    // The one closed curve the saved edge was: more than one piece, every vertex of it the end
+    // of exactly two of them, and no edge between the same faces outside it: another such curve
+    // makes the name ambiguous, and it asks to be picked again.
     if pieces.len() < 2 {
         return None;
     }
@@ -450,9 +452,16 @@ pub(crate) fn recover_split_closed_edge(b: &ModelBody, name: &str, near: Vec3) -
     if !ends.chunk_by(|a, b| a == b).all(|group| group.len() == 2) {
         return None;
     }
+    if cands.iter().any(|i| !pieces.contains(i)) {
+        return None;
+    }
+    // The reference's own point names one piece only: at a vertex two pieces share it, and every
+    // piece then takes its own middle, so the blend receives each piece as its own pick.
+    let on: Vec<bool> = pieces.iter().map(|&i| on_curve(i)).collect();
+    let named_by_pick = on.iter().filter(|on| **on).count() == 1;
     let mut hits = Vec::new();
-    for &i in &pieces {
-        let on_point = on_curve(i);
+    for (&i, on_curve_it) in pieces.iter().zip(&on) {
+        let on_point = *on_curve_it && named_by_pick;
         let point = if on_point { near } else { solidcraft_kernel::edge_middle(&b.body, i).ok().flatten()? };
         hits.push(EdgeHit { edge: i, point, verified: false, on_point });
     }
