@@ -245,7 +245,27 @@ pub fn is_sheet(k: &mut Kernel, b: &Brep) -> Result<bool> {
     if brep_shells(k, b)?.len() != 1 {
         return Ok(false);
     }
+    sheet_edges(b)
+}
 
+/// (Not upstream) [`is_sheet`] for a body of one or more separate sheets: only the infinite
+/// region (no solid one, whose shells would count too), at least one shell, at least one edge,
+/// and every edge lamina or manifold. A surface made from several profiles at once (a surface
+/// extrude of four circles) is one body of four sheets, each a shell of the infinite region.
+///
+/// # Errors
+///
+/// Those of `SmBrep::GetShells` ([`p1::shells`], the mark lock);
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn is_sheets(k: &mut Kernel, b: &Brep) -> Result<bool> {
+    if brep_regions(b)?.len() != 1 || brep_shells(k, b)?.is_empty() {
+        return Ok(false);
+    }
+    sheet_edges(b)
+}
+
+/// [`is_sheet`]'s edge clause: at least one edge, and every edge lamina or manifold.
+fn sheet_edges(b: &Brep) -> Result<bool> {
     // sheets have edges that are all manifold or lamina
     let edges = brep_edges(b)?;
     if edges.is_empty() {

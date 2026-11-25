@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.navigator_turn_around": "Show the Turn Around button on the axes navigator",
+    "prefs.navigator_turn_around_help": "Show a button that turns the view 180° around its vertical axis, keeping the same side up. Turn this off to restore the previous navigator layout.",
+    "ui.navigator_turn_around": "Turn around 180°"
+  },
+  "ar": {
+    "prefs.navigator_turn_around": "إظهار زر الاستدارة في أداة التنقل بالمحاور",
+    "prefs.navigator_turn_around_help": "إظهار زر يدير العرض 180° حول محوره الرأسي مع إبقاء الجانب نفسه إلى الأعلى. عطّل هذا الخيار لاستعادة تخطيط أداة التنقل السابق.",
+    "ui.navigator_turn_around": "استدارة 180°"
+  },
+  "he": {
+    "prefs.navigator_turn_around": "הצגת לחצן סיבוב לאחור בנווט הצירים",
+    "prefs.navigator_turn_around_help": "הצגת לחצן שמסובב את התצוגה ב־180° סביב הציר האנכי שלה, תוך שמירה על אותו צד כלפי מעלה. יש לכבות אפשרות זו כדי לשחזר את פריסת הנווט הקודמת.",
+    "ui.navigator_turn_around": "סיבוב לאחור ב־180°"
+  },
+  "ja": {
+    "prefs.navigator_turn_around": "軸ナビゲーターに反転ボタンを表示",
+    "prefs.navigator_turn_around_help": "上下を保ったまま、ビューの垂直軸を中心に180°回転するボタンを表示します。オフにすると以前のナビゲーター配置に戻ります。",
+    "ui.navigator_turn_around": "180°反転"
+  },
+  "vi": {
+    "prefs.navigator_turn_around": "Hiện nút Quay ngược trên bộ điều hướng trục",
+    "prefs.navigator_turn_around_help": "Hiện nút xoay góc nhìn 180° quanh trục đứng của nó, giữ nguyên phía hướng lên. Tắt tùy chọn này để khôi phục bố cục bộ điều hướng trước đây.",
+    "ui.navigator_turn_around": "Quay ngược 180°"
+  },
+  "zh": {
+    "prefs.navigator_turn_around": "在坐标轴导航器上显示转向按钮",
+    "prefs.navigator_turn_around_help": "显示一个将视图绕其垂直轴旋转180°的按钮，同时保持原来的朝上方向。关闭此选项可恢复之前的导航器布局。",
+    "ui.navigator_turn_around": "转向180°"
+  },
+  "de": {
+    "prefs.navigator_turn_around": "Schaltfläche zum Umdrehen am Achsennavigator anzeigen",
+    "prefs.navigator_turn_around_help": "Zeigt eine Schaltfläche, die die Ansicht um 180° um ihre senkrechte Achse dreht und dabei dieselbe Seite oben hält. Ausschalten stellt die bisherige Anordnung des Navigators wieder her.",
+    "ui.navigator_turn_around": "Um 180° umdrehen"
+  },
+  "ko": {
+    "prefs.navigator_turn_around": "축 탐색기에 뒤돌리기 버튼 표시",
+    "prefs.navigator_turn_around_help": "위쪽 방향을 유지하면서 뷰의 수직축을 중심으로 180° 회전하는 버튼을 표시합니다. 이 옵션을 끄면 이전 탐색기 배치로 돌아갑니다.",
+    "ui.navigator_turn_around": "180° 뒤돌리기"
+  }
+}
