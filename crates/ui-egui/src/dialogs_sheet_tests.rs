@@ -2567,7 +2567,7 @@ fn shop_check_button_is_on_the_sheet_metal_tab() {
 fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     let mut h = shop_check_on(0.6);
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sheet(Sm::ShopCheck { .. }))));
-    assert!(!h.app.dialog.as_ref().is_some_and(|d| d.kind.previews()), "a computed panel, nothing to preview");
+    assert!(!h.app.dialog.as_ref().is_some_and(|d| d.previews()), "a computed panel, nothing to preview");
     let texts = shop_check_texts(&mut h);
     assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
