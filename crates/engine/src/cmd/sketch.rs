@@ -5495,7 +5495,7 @@ fn seg2_to_record_curve(seg: &solidcore_record::Seg2) -> Option<(solidcore_recor
 }
 
 /// Compute the model-space detach offset along the exact curve `ci` starting at endpoint `pi`,
-/// capped at half the curve's real arc length via `solidcore_ops::curve`.
+/// capped at half the curve's real arc length via `solidcraft_kernel::services::curve`.
 fn real_curve_detach_offset(sk: &Sketch, ci: usize, pi: usize, target_mm: f64) -> Option<Vec2> {
     let pos = sk.point(pi)?;
     let pieces: Vec<(solidcore_record::brep::Curve, Option<[f64; 2]>)> = if let Some(segs) = sk.exact_segs(ci) {
@@ -5511,7 +5511,7 @@ fn real_curve_detach_offset(sk: &Sketch, ci: usize, pi: usize, target_mm: f64) -
     let mut lengths = Vec::new();
     let mut total = 0.0;
     for (curve, ivl) in &pieces {
-        let len = solidcore_ops::curve::arc_length(curve, *ivl).ok()?;
+        let len = solidcraft_kernel::services::curve::arc_length(curve, *ivl).ok()?;
         lengths.push(len);
         total += len;
     }
@@ -5520,11 +5520,11 @@ fn real_curve_detach_offset(sk: &Sketch, ci: usize, pi: usize, target_mm: f64) -
     }
     let first_pt = pieces
         .first()
-        .and_then(|(c, ivl)| solidcore_ops::curve::point_at_arc_length(c, *ivl, false, 0.0).ok())
+        .and_then(|(c, ivl)| solidcraft_kernel::services::curve::point_at_arc_length(c, *ivl, false, 0.0).ok())
         .map(|s| Vec2::new(s.point[0], s.point[1]))?;
     let last_pt = pieces
         .last()
-        .and_then(|(c, ivl)| solidcore_ops::curve::point_at_arc_length(c, *ivl, true, 0.0).ok())
+        .and_then(|(c, ivl)| solidcraft_kernel::services::curve::point_at_arc_length(c, *ivl, true, 0.0).ok())
         .map(|s| Vec2::new(s.point[0], s.point[1]))?;
     let from_end = last_pt.dist(pos) < first_pt.dist(pos);
     let mut remaining = target_mm.min(total * 0.5);
@@ -5534,7 +5534,7 @@ fn real_curve_detach_offset(sk: &Sketch, ci: usize, pi: usize, target_mm: f64) -
         let is_last = step + 1 == order.len();
         if remaining <= len || is_last {
             let (curve, ivl) = pieces.get(idx)?;
-            let sample = solidcore_ops::curve::point_at_arc_length(curve, *ivl, from_end, remaining.min(len)).ok()?;
+            let sample = solidcraft_kernel::services::curve::point_at_arc_length(curve, *ivl, from_end, remaining.min(len)).ok()?;
             return Some(Vec2::new(sample.point[0] - pos.x, sample.point[1] - pos.y));
         }
         remaining -= len;
