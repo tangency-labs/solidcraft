@@ -6,7 +6,7 @@
 //!
 //! Nothing here computes: every answer is the kernel's, its numbers copied field by field.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use solidcore::hlr as k;
 use solidcore_convert::{record_seg2, record_vec3, vec3};
 use solidcore_record::brep::{Brep, Loop, Surface};
@@ -17,32 +17,15 @@ pub use k::{
     Visibility, Workers, MAX_COORDINATE, MAX_ITEMS, MAX_THREADS, MAX_TRIM_SAMPLES,
 };
 
-/// How exactly a drawn curve stands for its source.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CurveAccuracy {
-    /// An analytic representation without fitting; not a certificate about the source or
-    /// topology.
-    Analytic,
-    /// A producer-established bound, not merely a requested fitting tolerance.
-    Bounded {
-        /// The bound (mm).
-        max_deviation_mm: f64,
-    },
-    /// A deviation measured at samples only, with no bound between them. Zero remains sampled.
-    Sampled {
-        /// The largest deviation measured (mm).
-        max_sample_deviation_mm: f64,
-    },
-}
+/// How exactly a drawn curve stands for its source: the record's data type
+/// ([`solidcore_record::CurveAccuracy`]).
+pub use solidcore_record::CurveAccuracy;
 
-impl CurveAccuracy {
-    /// The same accuracy for the curve scaled by `factor` (above 0): a deviation scales with it,
-    /// and an analytic curve stays analytic ([`k::CurveAccuracy::scaled`]).
-    #[must_use]
-    pub fn scaled(self, factor: f64) -> CurveAccuracy {
-        accuracy(kernel_accuracy(self).scaled(factor))
-    }
+/// The same accuracy for a curve scaled by `factor` (above 0): a deviation scales with it, and
+/// an analytic curve stays analytic ([`k::CurveAccuracy::scaled`]).
+#[must_use]
+pub fn scaled(accuracy: CurveAccuracy, factor: f64) -> CurveAccuracy {
+    self::accuracy(kernel_accuracy(accuracy).scaled(factor))
 }
 
 fn kernel_accuracy(a: CurveAccuracy) -> k::CurveAccuracy {
@@ -614,5 +597,48 @@ mod tests {
         // A small round on a large body: the corners lie on their labels' spheres, which a fit
         // to samples of patches this far from the body's centre would not find.
         rounded_box_outline(1000., 1.);
+    }
+
+    /// A deviation scales with the curve; an analytic curve stays analytic and a sampled zero
+    /// stays sampled.
+    #[test]
+    fn accuracy_scales_with_the_curve() {
+        assert_eq!(
+            scaled(CurveAccuracy::Analytic, 0.5),
+            CurveAccuracy::Analytic
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Sampled {
+                    max_sample_deviation_mm: 0.01
+                },
+                3.0
+            ),
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm: 0.03
+            }
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Bounded {
+                    max_deviation_mm: 0.01
+                },
+                2.0
+            ),
+            CurveAccuracy::Bounded {
+                max_deviation_mm: 0.02
+            }
+        );
+        assert_eq!(
+            scaled(
+                CurveAccuracy::Sampled {
+                    max_sample_deviation_mm: 0.0
+                },
+                5.0
+            ),
+            CurveAccuracy::Sampled {
+                max_sample_deviation_mm: 0.0
+            }
+        );
     }
 }
