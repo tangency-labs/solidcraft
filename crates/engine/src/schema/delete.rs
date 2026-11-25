@@ -236,6 +236,12 @@ pub struct SelectionDeleteResult {
     /// A drawing's delete: the ids of the notes that went, with their views or on their own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the manual centre marks that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_marks: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the manual centre lines that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_lines: Option<Vec<String>>,
     /// A drawing's delete: the ids of the sketches that went with their views.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketches: Option<Vec<String>>,
