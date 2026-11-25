@@ -458,6 +458,7 @@ fn linux_software_policy_finds_opengl_llvmpipe_without_vulkan_icd() {
         .args(["gpu", "--policy", "software"])
         .env("VK_DRIVER_FILES", "/nonexistent")
         .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .env_remove("WGPU_BACKEND")
         .output()
         .unwrap();
     if !o.status.success() {
