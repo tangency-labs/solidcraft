@@ -25,6 +25,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
+use solidcore::surface::ball_patch::{BallPatch, ON_SPHERE_REL_TOL};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::api_files::write_brep_to_file;
@@ -2008,8 +2009,33 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
                     });
                     pieces.push(law);
                 }
-                // (the copy keeps the zone's ball patch, not the corner definition beside it)
-                None if surface_kind_name(s) == "ball-patch" => zones += 1,
+                // (the copy keeps the zone's ball patch, not the corner definition beside it):
+                // the ball of one of the law's dips, its net on that ball's sphere
+                None if surface_kind_name(s) == "ball-patch" => {
+                    let SurfaceKind::BallPatch(bp) = s.kind() else {
+                        panic!("{radii:?} from {from:?}: a ball patch named so is one");
+                    };
+                    let (centre, radius) = (bp.centre(), bp.radius());
+                    let dip_ball = (1..radii.len() - 1).any(|i| {
+                        let ball = piece_round.from
+                            + piece_round.along * corners[i]
+                            + piece_round.inward * radii[i];
+                        radii[i] < radii[i - 1]
+                            && radii[i] < radii[i + 1]
+                            && centre.distance(ball) < 1e-6
+                            && (radius - radii[i]).abs() < 1e-6
+                    });
+                    assert!(
+                        dip_ball,
+                        "{radii:?} from {from:?}: a zone on ({centre:?}, {radius})"
+                    );
+                    assert!(
+                        BallPatch::is_on_sphere(bp.net(), centre, radius, ON_SPHERE_REL_TOL)
+                            .unwrap(),
+                        "{radii:?} from {from:?}: a zone's net off its sphere"
+                    );
+                    zones += 1;
+                }
                 _ => panic!("{radii:?} from {from:?}: {:?}", surface_kind_name(s)),
             }
         }
