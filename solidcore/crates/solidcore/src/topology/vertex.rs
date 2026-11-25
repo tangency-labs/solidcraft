@@ -1706,7 +1706,7 @@ pub(crate) fn carry_far_edge_ends(
             let Ok(p) = curve.evaluate_point(k, t) else {
                 continue;
             };
-            let reach = certified_end_distance(k, &curve, t, at).unwrap_or(at.distance(p));
+            let reach = certified_end_distance(k, &curve, t, at).unwrap_or_else(|| at.distance(p));
             if reach > tol {
                 if let Some(slot) = far.get_mut(i) {
                     *slot = true;
