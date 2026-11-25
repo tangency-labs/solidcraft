@@ -1354,8 +1354,7 @@ fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, P
     use crate::geom::vector3d::Point3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::procedural_blend::BlendDefinitionInput;
-    let mut kk = k();
-    kk.fixes.fillet_round_as_definition = true;
+    let kk = k();
     let (l, r) = (10.0, 2.0);
     let bilinear =
         |p: [Point3; 4]| BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap();
@@ -1649,6 +1648,62 @@ fn an_equal_area_gn_section_continues_over_its_thumbweights_proved_enclosure() {
     // a constant thumbweight is its own
     let (kk, pb) = round_blend(2, true);
     assert!(recertify_with_thumbweight(&kk, &pb).unwrap().1.is_none());
+}
+
+/// An ask along a blend's spine whose span's certificate spent its work budget is passed on
+/// as an error, as a cancellation is (work given up is never another ask's result); a span
+/// that failed with a plain status, or is not proved, is an ask that does not work (`None`).
+/// The certificate's budget is not reachable through `span_of_definition` today, so the
+/// ask's decision is tested on the span's result.
+#[test]
+fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
+    use super::blend::span_of_ask;
+    use crate::blend::fillet_section::recertify::DefinitionSpan;
+    use crate::error::blend::BlendFailure;
+    let span = |certified: f64| DefinitionSpan {
+        homog: Vec::new(),
+        weights: Vec::new(),
+        certified,
+        ld: 0,
+        stations: Vec::new(),
+    };
+    let feet = |_: &DefinitionSpan| Ok(true);
+    let budget = SolidError::blend(
+        "t",
+        BlendFailure::NotCertified {
+            halvings: 1,
+            stations: 2,
+        },
+    );
+    assert!(budget.upstream_status().is_some());
+    assert_eq!(
+        span_of_ask(Err(budget.clone()), feet).err(),
+        Some(budget),
+        "a certificate past its budget is passed on"
+    );
+    let cancelled = SolidError::cancelled("t");
+    assert_eq!(
+        span_of_ask(Err(cancelled.clone()), feet).err(),
+        Some(cancelled)
+    );
+    // a plain status failure, an invalid input and an unproved span: no ask
+    let failed = SolidError::blend("t", BlendFailure::Failed("x"));
+    assert!(failed.upstream_status().is_some() && !failed.is_unported_or_cancelled());
+    assert!(matches!(span_of_ask(Err(failed), feet), Ok(None)));
+    let invalid = SolidError::invalid_input("t", "x");
+    assert!(matches!(span_of_ask(Err(invalid), feet), Ok(None)));
+    assert!(matches!(
+        span_of_ask(Ok(span(f64::INFINITY)), feet),
+        Ok(None)
+    ));
+    assert!(matches!(
+        span_of_ask(Ok(span(1e-9)), |_| Ok(false)),
+        Ok(None)
+    ));
+    let ran = span_of_ask(Ok(span(1e-9)), feet)
+        .unwrap()
+        .expect("the span");
+    assert_eq!(ran.certified, 1e-9);
 }
 
 #[test]
@@ -3342,6 +3397,103 @@ fn a_distance_the_stored_net_cannot_resolve_is_refused_naming_the_reachable_leng
         .unwrap_or_else(|err| panic!("the named {named:e}: {err:?}"))
         .expect("extended");
     meets(&e, named);
+}
+
+/// The second patch of the generated offset executive case gen0522, a polynomial
+/// surface about 1e-6 across. Its first ruled side would end near -1e14 for a reach
+/// of 5e7. Normalising that knot vector would merge the patch's own u knots.
+#[test]
+fn a_ruled_extension_that_would_merge_source_knots_names_a_distance_that_works() {
+    let kk = k();
+    let [x, y, z] = [
+        2.009227715334107e-7,
+        8.538757715081911e-7,
+        -7.006783908209526e-7,
+    ];
+    let row = |u: f64| {
+        [0.0, 1.0]
+            .into_iter()
+            .map(|v| {
+                [
+                    x + 1e-6 * u,
+                    y + 1e-6 * v,
+                    z + 1e-6 * (0.125 * u * v + 0.0625 * u * u),
+                    1.0,
+                ]
+            })
+            .collect()
+    };
+    let s = spline(
+        &[row(0.0), row(0.5), row(1.0)],
+        2,
+        1,
+        &[-4.0, -4.0, -4.0, -2.0, -2.0, -2.0],
+        &[-2.0, -2.0, -0.5, -0.5],
+        false,
+    );
+    let SurfaceKind::BSpline(form) = s.kind() else {
+        panic!("the source must be a B-spline");
+    };
+    let source = form.gw_nurb().unwrap();
+    let d = 5e7;
+
+    // The single-side call names a reach on that side.
+    let one =
+        |reach| s.extended_by_distance(&kk, &dom(&s), BoxSide::UMin, Continuity::Ruled, reach);
+    let err = one(d).expect_err("the extension would merge source knots");
+    let SolidError::ExtendRefused {
+        refusal: ExtendRefusal::NotExact,
+        distance: Some(named),
+        ..
+    } = err
+    else {
+        panic!("expected a typed refusal with a usable distance: {err:?}");
+    };
+    assert!(named > 0.0 && named < d, "{named:e}");
+    let grown = one(named)
+        .unwrap()
+        .expect("the named distance extends the side");
+    meets(&grown, named);
+    let SurfaceKind::BSpline(form) = grown.surface.kind() else {
+        panic!("the extension must be a B-spline");
+    };
+    assert!(keeps(source, form.gw_nurb().unwrap(), BoxSide::UMin).unwrap());
+
+    // A distance from the first side is not necessarily usable on every requested side.
+    let all =
+        |reach| s.extended_sides_keeping_parameters(&kk, &BoxSide::ALL, Continuity::Ruled, reach);
+    let err = all(d).expect_err("the requested distance cannot extend all sides");
+    let SolidError::ExtendRefused {
+        refusal: ExtendRefusal::NotExact,
+        distance: Some(named),
+        ..
+    } = err
+    else {
+        panic!("expected a typed refusal with a distance for all sides: {err:?}");
+    };
+    assert!(named > 0.0 && named < d, "{named:e}");
+    let grown = all(named).unwrap_or_else(|err| panic!("the named {named:e}: {err:?}"));
+    assert_eq!(grown.source, 0.0);
+    assert!(
+        grown
+            .sides
+            .iter()
+            .all(|side| matches!(side, SideExtension::Extended(_))),
+        "{:?}",
+        grown.sides
+    );
+    let SurfaceKind::BSpline(form) = grown.surface.kind() else {
+        panic!("the extension must be a B-spline");
+    };
+    let out = form.gw_nurb().unwrap();
+    assert_eq!(&out.u_knots()[3..7], &[-4.0, -4.0, -2.0, -2.0]);
+    assert_eq!(&out.v_knots()[2..4], &[-2.0, -0.5]);
+    let bits = |p: &CPoint| [p.x, p.y, p.z, p.w].map(f64::to_bits);
+    for (i, row) in source.cpts().iter().enumerate() {
+        for (j, p) in row.iter().enumerate() {
+            assert_eq!(bits(p), bits(&out.cpt(i + 2, j + 1).unwrap()));
+        }
+    }
 }
 
 /// (#3093, jyviko's review of #3177) A degree 1 piece over `[0, 10]` (the issue's extrusion,

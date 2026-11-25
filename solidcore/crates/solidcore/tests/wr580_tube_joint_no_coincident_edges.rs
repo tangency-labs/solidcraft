@@ -13,8 +13,7 @@
 //! `SmApiCreateCylinder` (seam at its frame's +X) turned about Z to put the seam where the
 //! bench's circle starts, about Y onto the axis, and moved to the base, as the
 //! `boolean.api_brep` fixture `issue_1519_bench_tubes.json` does on both sides. The union
-//! is run both with `proto_edge_splits_at_captured_vertices` (WR-579, #1517) set, as the
-//! fork had it, and without it.
+//! runs with WR-579's split (#1517), as the fork has it.
 //!
 //! Expected: `Imprint` takes the seat's end circle as the curve's edge on the cap (the
 //! two whole curves proved within tolerance on their control points), and the union is
@@ -191,7 +190,7 @@ fn surface_distances(p: Point3) -> [f64; 6] {
     out
 }
 
-/// The union with WR-579 set to `split`.
+/// The union.
 struct Joint {
     /// Its level-2 check's failure lines.
     lines: Vec<String>,
@@ -204,10 +203,9 @@ struct Joint {
     worst_vertex: f64,
 }
 
-/// The union with WR-579 set to `split`, or what went wrong.
-fn join(split: bool) -> Result<Joint, String> {
+/// The union, or what went wrong.
+fn join() -> Result<Joint, String> {
     let mut k = Kernel::default();
-    k.fixes.proto_edge_splits_at_captured_vertices = split;
     let top = TOP.build(&mut k);
     let seat = SEAT.build(&mut k);
     let mut r = boolean_union(&mut k, top, seat).map_err(|e| format!("union: {e:?}"))?;
@@ -249,36 +247,26 @@ fn wr580_tube_joint_no_coincident_edges() {
     let overlap = overlap_volume(2000);
     assert!((overlap - overlap_volume(1000)).abs() < 0.01);
     let want = TOP.volume() + SEAT.volume() - overlap;
-    for split in [true, false] {
-        let j = join(split).unwrap();
-        // exactly nothing: no coincident edges (`SmFace` tests 33 and 34) and no other report
-        assert!(
-            j.lines.is_empty(),
-            "WR-579 {split}: the check fails: {:?}",
-            j.lines
-        );
-        // The two tubes less their overlap (about 6870 mm³ of 1.03e6). The joint's
-        // intersection curves lie within the zone tolerance 1e-5 of their surfaces and the
-        // faces they bound span under 1e4 mm², which moves the volume by under 0.1 mm³: the
-        // slack. Either tube alone, or both without their overlap, is thousands of mm³ off.
-        assert!(
-            (j.volume - want).abs() < 0.1,
-            "WR-579 {split}: volume {} vs {want}",
-            j.volume
-        );
-        // One face per bounding surface (each tube's side and two end caps; each tube's cap
-        // at the joint keeps a part outside the other tube), and V - E + F = 2 for the one
-        // closed solid of genus 0 (8 - 12 + 6); a tube alone has 3 faces, 3 edges, 2 vertices.
-        assert_eq!(
-            j.counts,
-            [6, 12, 8],
-            "WR-579 {split}: faces, edges, vertices"
-        );
-        // every vertex lies within its tolerance of two of the six surfaces
-        assert!(
-            j.worst_vertex <= 0.0,
-            "WR-579 {split}: a vertex lies {} past its tolerance off its second surface",
-            j.worst_vertex
-        );
-    }
+    let j = join().unwrap();
+    // exactly nothing: no coincident edges (`SmFace` tests 33 and 34) and no other report
+    assert!(j.lines.is_empty(), "the check fails: {:?}", j.lines);
+    // The two tubes less their overlap (about 6870 mm³ of 1.03e6). The joint's
+    // intersection curves lie within the zone tolerance 1e-5 of their surfaces and the
+    // faces they bound span under 1e4 mm², which moves the volume by under 0.1 mm³: the
+    // slack. Either tube alone, or both without their overlap, is thousands of mm³ off.
+    assert!(
+        (j.volume - want).abs() < 0.1,
+        "volume {} vs {want}",
+        j.volume
+    );
+    // One face per bounding surface (each tube's side and two end caps; each tube's cap
+    // at the joint keeps a part outside the other tube), and V - E + F = 2 for the one
+    // closed solid of genus 0 (8 - 12 + 6); a tube alone has 3 faces, 3 edges, 2 vertices.
+    assert_eq!(j.counts, [6, 12, 8], "faces, edges, vertices");
+    // every vertex lies within its tolerance of two of the six surfaces
+    assert!(
+        j.worst_vertex <= 0.0,
+        "a vertex lies {} past its tolerance off its second surface",
+        j.worst_vertex
+    );
 }

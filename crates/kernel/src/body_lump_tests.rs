@@ -342,3 +342,39 @@ fn point_lies_on_face_answers_through_solidcore() {
     assert_eq!(found, 1);
     assert_eq!(body.point_lies_on_face(99, Vec3::ZERO, 1e-6).unwrap(), None);
 }
+
+/// A ball of radius 5 less everything above z = 3: its sphere faces end at the circle of radius 4
+/// there. The contour seen along (0.8, -0.6, 0), the circle of radius 5 in the plane of x = (0.6, 0.8,
+/// 0) and z, meets that rim where 5 sin t = 3: at asin 0.6 and pi less it, away from the rim's
+/// vertex. A whole ball's faces have no rim, and a mesh body has no exact form.
+#[test]
+fn outline_cuts_answer_through_solidcore() {
+    // The query itself is tested in solidcore-ops (`tests/measure.rs`); this is the wrapper.
+    use std::f64::consts::{PI, TAU};
+    let above = box_solid(Vec3::new(-10.0, -10.0, 3.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let cut = boolean(&sphere(Vec3::ZERO, 5.0).unwrap(), &above, BoolOp::Cut).unwrap().unwrap();
+    let on_sphere = |b: &Body| -> Vec<usize> {
+        (0..b.record().faces.len()).filter(|f| matches!(crate::face_surface(b, *f), Some(crate::FaceSurface::Sphere { .. }))).collect()
+    };
+    let (x, y) = (Vec3::new(0.6, 0.8, 0.0), Vec3::Z);
+    let contour = Curve::Circle { frame: brep::Frame { origin: Vec3::ZERO.into(), x_axis: x.into(), y_axis: y.into() }, radius: 5.0 };
+    let normal = x.cross(y);
+    let mut cuts = cut.outline_cuts(&on_sphere(&cut), &contour, [0.0, TAU], Vec3::ZERO, normal).unwrap();
+    cuts.sort_by(f64::total_cmp);
+    let low = 0.6f64.asin();
+    assert!(cuts.len() == 2 && (cuts[0] - low).abs() < 1e-9 && (cuts[1] - (PI - low)).abs() < 1e-9, "{cuts:?}");
+    let ball = sphere(Vec3::ZERO, 5.0).unwrap();
+    assert_eq!(ball.outline_cuts(&on_sphere(&ball), &contour, [0.0, TAU], Vec3::ZERO, normal).unwrap(), Vec::<f64>::new());
+    let p = [Vec3::ZERO, Vec3::X * 10.0, Vec3::Y * 10.0, Vec3::Z * 10.0];
+    let mesh = crate::mesh_body(&p, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    assert!(mesh.outline_cuts(&[0], &contour, [0.0, TAU], Vec3::ZERO, normal).is_err());
+}
+
+/// solidcore-ops' calls on a body run with the kernel's fix set: by the time a body has its
+/// solidcore-ops form, the session has been told the fixes the modelling runs with.
+#[test]
+fn a_bodys_solidcore_ops_form_runs_with_the_kernels_fixes() {
+    let body = crate::build::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    assert!(body.ops_body().is_some());
+    assert_eq!(solidcore_ops::session::fixes(), crate::smlib_trace::fixes());
+}

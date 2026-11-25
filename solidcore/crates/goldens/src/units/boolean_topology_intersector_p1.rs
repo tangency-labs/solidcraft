@@ -1742,6 +1742,15 @@ impl IntersectorBrep<H> for Two {
             &vertexuse_ref,
         )
     }
+    fn vertex_update_edge_intervals(&mut self, k: &Kernel, vertex: H) -> solidcore::Result<()> {
+        if vertex.kind != K_VERTEX {
+            return Err(invalid("not a vertex handle"));
+        }
+        let b = self.brep_m(vertex)?;
+        with_edit_env(b, |b, env| {
+            solidcore::topology::brep::p1::update_vertex_edge_intervals(k, b, env, vid(vertex))
+        })
+    }
     fn set_topology_tolerance(
         &mut self,
         _k: &Kernel,
@@ -2268,7 +2277,7 @@ impl TopologyObjects<H> for Two {
         let bi = brep.b;
         let mut cache = BrepCache::new(BREP_TYPE)?;
         cache.build_trees(
-            &Kernel::default(),
+            &crate::runner_kernel(),
             CacheSource::Brep(b),
             |o| match o {
                 CacheObject::Vertex(v) => hd(bi, K_VERTEX, v.index()),
@@ -3056,7 +3065,7 @@ trait NormalOrZero {
 
 impl NormalOrZero for Surface {
     fn evaluate_normal_or_zero(&self, uv: Point2) -> Vec3 {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         // a small finite-difference normal: enough to offset a test point off the surface
         let h = 1e-3;
         let (Ok(p), Ok(pu), Ok(pv)) = (
@@ -3079,7 +3088,7 @@ impl NormalOrZero for Surface {
 // ---- the script, C++ side ---------------------------------------------------------------
 
 /// The imported B-reps, their counts and the resolved script of a case.
-struct Prepared {
+pub(super) struct Prepared {
     two: Two,
     ops: Vec<ROp>,
     /// The first unrunnable op (index, name), when the script was cut there.
@@ -3097,7 +3106,7 @@ fn put_cut(o: &mut Vec<f64>, cut: Option<&(usize, String)>) {
 /// `target->MergeBrep(other, NULL, NULL, FALSE)`: `topology::brep::p3::merge_brep`.
 fn merge_primary(target: &mut Brep, other: &mut Brep) -> Result<(), HarnessError> {
     use solidcore::topology::brep::p3 as bp3;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let serial = bp3::notify_serial(&mut k.context, other)
         .map_err(|e| harness(format!("merge: {e}")))?;
     let source_key = move |e| bp3::topology_ref(serial, e);
@@ -3123,7 +3132,7 @@ pub(super) fn own_breps(
     b: Option<&BrepIn>,
 ) -> Result<Result<BrepPair, Output>, HarnessError> {
     use crate::own_builder::{build_any, build_status, Built, Conventions};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut one = |src: &BrepIn, which: &str| -> Result<Result<Brep, Output>, HarnessError> {
         let src: super::topology_edgeuse_p1::BrepIn = serde_json::to_value(src)
             .and_then(serde_json::from_value)
@@ -3157,7 +3166,7 @@ pub(super) type BrepPair = (Brep, Option<Brep>);
 /// Builds the case's B-reps with the Rust kernel ([`own_breps`]) and resolves the
 /// script; `Err(Ok(output))` is the output reported when the B-reps cannot be built or an
 /// op cannot be resolved.
-fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
+pub(super) fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let (mut brep_a, mut brep_b) = match own_breps(&i.brep_a, i.brep_b.as_ref()) {
         Ok(Ok(x)) => x,
         Ok(Err(o)) => return Err(Box::new(Ok(o))),
@@ -3199,7 +3208,7 @@ fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Output, Harnes
 // ---- the script, Rust side --------------------------------------------------------------
 
 /// A failure of the Rust side: an error to report or an unported callee.
-enum Fail {
+pub(super) enum Fail {
     Solid(SolidError),
     Harness(HarnessError),
 }
@@ -3283,10 +3292,19 @@ fn reason_code(r: Reason) -> f64 {
 
 /// The Rust side's record and, per op run, where its output starts in the record (its
 /// code; for the ops that report one, the status follows).
-#[allow(clippy::too_many_lines)]
 fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fail> {
+    run_rust_script_counted(i, p).map(|(o, marks, _)| (o, marks))
+}
+
+/// [`run_rust_script`], with the script's kernel's count of curved intersection pieces
+/// certified to run along a face edge (`WorkCounters::curved_edge_runs`, WR-305).
+#[allow(clippy::too_many_lines)]
+pub(super) fn run_rust_script_counted(
+    i: &Inputs,
+    p: Prepared,
+) -> Result<(Vec<f64>, Vec<usize>, u64), Fail> {
     let Prepared { mut two, ops, cut } = p;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let hb = two.breps[1].as_ref().map(|_| brep_h(1));
     let mut ti: TopologyIntersector<H> = if i.ctor == 0 {
         TopologyIntersector::new(Some(brep_h(0)), hb, i.approx, i.ang)
@@ -3795,7 +3813,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
     }
     let _ = registered;
     put_cut(&mut o, cut.as_ref());
-    Ok((o, marks))
+    Ok((o, marks, k.work_counters.curved_edge_runs()))
 }
 
 // ---- part 2's ops (unit boolean.topology_intersector_p2), Rust side -----------------------
@@ -4216,7 +4234,7 @@ pub(super) fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
 /// case. For coverage censuses.
 #[cfg(test)]
 pub(super) fn rust_op_statuses(i: &Inputs) -> Option<Vec<(f64, f64, f64)>> {
-    let k = &Kernel::default();
+    let k = &crate::runner_kernel();
     let p = prepare(k, i).ok()?;
     let (o, marks) = run_rust_script(i, p).ok()?;
     Some(
@@ -4710,7 +4728,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         let i: Inputs = case.parse()?;
         run_rust(k, &i)
     }
@@ -5466,7 +5484,7 @@ mod glue_tests {
     use solidcore::topology::proto_topology::p3::BrepGlue;
 
     fn two_boxes() -> (Kernel, Two) {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
         let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
         (k, Two::new(a, Some(b)))

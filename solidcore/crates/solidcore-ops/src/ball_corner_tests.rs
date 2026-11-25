@@ -23,7 +23,7 @@
 //! - Its volume estimate lies in its certified enclosure (`mass::enclosure::enclose_volume`,
 //!   asked for at most 1e-6 V wide for the cylinders, 1e-5 V for the spheres). The corner
 //!   has no closed form to check it against. The enclosure narrows to the width asked unless
-//!   its cell budget runs out, which is asserted not to happen (`cells < CELL_BUDGET`). So the
+//!   its cell budget runs out, which is asserted not to happen (`stop == EnclosureStop::Reached`). So the
 //!   width met is the one asked, and V lies inside it. The cylinders certify 1e-6 V in 2224
 //!   cells (15140-corner3b). At 1e-6 V the spheres run out at 131073 cells, mostly strips at
 //!   the gaps between faces: the sharp body at 1.05e-6 V, the rounded one at 5.57e-6 V. At
@@ -36,7 +36,7 @@
 
 use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
-use solidcore::mass::enclosure::{enclose_volume, CELL_BUDGET};
+use solidcore::mass::enclosure::{enclose_volume, EnclosureStop};
 use solidcore::query::api_queries::edge_closest_point;
 
 use crate::blend::{blend, Blend, Corners};
@@ -62,13 +62,12 @@ fn edge_at(body: &Body, p: [f64; 3]) -> usize {
 fn rounds_through_certified_ball_corners(body: &Body, edges: &[usize], rel_width: f64) {
     let sharp = body.volume(1e-8).unwrap();
 
-    let before = session::work_counters(solidcore::kernel::WorkCounters::ball_certified_roots);
-    blend(body, Blend::Round, edges, &[1.0], &[], Corners::Filled).unwrap();
-    let after = session::work_counters(solidcore::kernel::WorkCounters::ball_certified_roots);
-    assert!(
-        after > before,
-        "no ball corner's centre was solved ({before} -> {after})"
+    let (rounded, roots) = session::counted(
+        solidcore::kernel::WorkCounters::ball_certified_roots,
+        || blend(body, Blend::Round, edges, &[1.0], &[], Corners::Filled),
     );
+    rounded.unwrap();
+    assert!(roots > 0, "no ball corner's centre was solved");
 
     assert!(body.check(CheckLevel::All).unwrap().is_valid());
     let v = body.volume(1e-8).unwrap();
@@ -81,10 +80,12 @@ fn rounds_through_certified_ball_corners(body: &Body, edges: &[usize], rel_width
     .unwrap()
     .unwrap();
     // the width asked was met, not budgeted out
-    assert!(
-        e.counts.cells < CELL_BUDGET,
-        "the enclosure ran out of cells ({} of {CELL_BUDGET})",
-        e.counts.cells
+    assert_eq!(
+        e.stop,
+        EnclosureStop::Reached,
+        "the enclosure ran out of cells ({}): stop was {:?}",
+        e.counts.cells,
+        e.stop
     );
     assert!(
         e.width() <= width,
