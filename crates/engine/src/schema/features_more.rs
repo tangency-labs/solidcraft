@@ -330,6 +330,11 @@ pub struct CoilParams {
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]
     pub start_angle: Option<AngleExpr>,
+    /// The cone angle from the axis, between -80° and 80°: the radius grows by `pitch · tan(taper)`
+    /// each turn, so the coil follows a cone and a thread can taper. Negative narrows it. The coil
+    /// must stay clear of its axis to the last turn. Default: 0, a cylinder. Works with `sketch`.
+    #[serde(default)]
+    pub taper: Option<AngleExpr>,
     /// Turn clockwise about the selected axis without changing axial propagation. Default: false.
     #[serde(default)]
     pub clockwise: Option<bool>,

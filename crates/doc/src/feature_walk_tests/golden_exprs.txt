@@ -314,7 +314,8 @@ coil
     Revolutions = coil.turns (Unitless)
     Section size = coil.section_size (Length)
     Start angle = coil.start_angle (Angle)
-  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z
+    Taper angle = coil.taper (Angle)
+  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.taper, coil.x, coil.y, coil.z
 coil_profile
   inputs:
     Pitch = coil_profile.pitch (Length)

@@ -5396,7 +5396,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.boundary_fill") => &["remove_tools"],
         Some("solid.thread") => &["modeled"],
         Some("solid.move") => &["copy"],
-        Some("solid.coil") => &["section", "section_position", "start_angle", "clockwise", "reversed"],
+        Some("solid.coil") => &["section", "section_position", "start_angle", "taper", "clockwise", "reversed"],
         _ => &[],
     }
 }
@@ -9378,6 +9378,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             section,
             position,
             start_angle,
+            taper,
             clockwise,
             end_cut,
             operation,
@@ -9468,6 +9469,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(a) = start_angle {
                 d.extra.insert("start_angle".into(), json!(a.to_string()));
             }
+            // The coil's own taper, or none: a value the dialog remembered from an earlier coil
+            // must not turn an untouched edit of an untapered coil into a tapered one.
+            match taper {
+                Some(a) => d.extra.insert("taper".into(), json!(a.to_string())),
+                None => d.extra.remove("taper"),
+            };
             if *clockwise {
                 d.extra.insert("clockwise".into(), json!(true));
             }

@@ -165,6 +165,10 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(a) = &start_angle {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
+    let taper = expr(p, "taper");
+    if let Some(a) = &taper {
+        check_expr(s, a, Kind::Angle, cmd, "taper")?;
+    }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
     let end_cut = match str_(p, "end_cut").map(str::to_ascii_lowercase).as_deref() {
         None | Some("axial") => solidcraft_doc::CoilEndCut::Axial,
@@ -189,6 +193,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             section,
             position,
             start_angle,
+            taper,
             clockwise,
             end_cut,
             operation,

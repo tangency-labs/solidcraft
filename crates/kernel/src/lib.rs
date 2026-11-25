@@ -349,6 +349,7 @@ pub use helix::loft_to_point_with_rails;
 pub use helix::sweep_helix;
 pub use helix::sweep_helix_mesh;
 pub use helix::sweep_helix_radial;
+pub use helix::sweep_helix_tapered;
 pub use iges_in::MAX_IGES_BYTES;
 pub use iges_in::iges_import;
 pub use iges_in::iges_native_system;

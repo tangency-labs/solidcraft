@@ -434,6 +434,34 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     }
 }
 
+/// #4735: the Coil dialog remembers the taper it last applied, but editing a coil that has none
+/// shows none: confirming the edit must not turn it into a tapered coil.
+#[test]
+fn editing_an_untapered_coil_does_not_pick_up_a_remembered_taper() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    for (field, value) in [("diameter", "40"), ("revolutions", "3"), ("pitch", "8"), ("section_size", "3")] {
+        type_into(&mut h, field, value);
+    }
+    h.app.dialog.as_mut().unwrap().extra.insert("taper".into(), json!("5 deg"));
+    h.frames(2);
+    ok(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), 1, "the tapered coil was made");
+    // A coil without a taper, edited while the dialog still remembers the first one's.
+    h.app.run("solid.coil", json!({"diameter": 40, "revolutions": 3, "pitch": 8, "section_size": 3, "base": [100, 0, 0]})).unwrap();
+    let plain = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    h.app.edit_feature(plain);
+    h.frames(3);
+    assert!(!h.app.dialog.as_ref().unwrap().extra.contains_key("taper"), "the edit shows no taper");
+    ok(&mut h);
+    match h.app.session.doc.feature(plain).map(|f| &f.kind) {
+        Some(FeatureKind::Coil { taper, .. }) => assert!(taper.is_none(), "{taper:?}"),
+        other => panic!("not a coil: {other:?}"),
+    }
+}
+
 #[test]
 fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
     let mut h = design("mm");

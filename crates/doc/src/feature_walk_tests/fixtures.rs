@@ -160,7 +160,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("align", json!({"type": "align", "bodies": ["B"], "from": o, "to": o})),
         (
             "coil",
-            json!({"type": "coil", "base": ["coil.x", "coil.y", "coil.z"], "diameter": "coil.diameter", "pitch": "coil.pitch", "turns": "coil.turns", "section_size": "coil.section_size", "start_angle": "coil.start_angle"}),
+            json!({"type": "coil", "base": ["coil.x", "coil.y", "coil.z"], "diameter": "coil.diameter", "pitch": "coil.pitch", "turns": "coil.turns", "section_size": "coil.section_size", "start_angle": "coil.start_angle", "taper": "coil.taper"}),
         ),
         (
             "coil_profile",

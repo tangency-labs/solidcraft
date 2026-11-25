@@ -10256,6 +10256,7 @@ fn feature_tools_with_constructor(
             section,
             position,
             start_angle,
+            taper,
             clockwise,
             end_cut,
             sketch,
@@ -10337,6 +10338,12 @@ fn feature_tools_with_constructor(
             let k = if *reversed { -k } else { k };
             let p = val(vals, pitch, Kind::Length)?;
             let n = val(vals, turns, Kind::Unitless)?;
+            // The cone angle: the kernel turns it into the coil's radial growth and refuses one
+            // that leaves its range or takes the coil through its axis (#4735).
+            let taper = match taper {
+                Some(e) => val(vals, e, Kind::Angle)?,
+                None => 0.0,
+            };
             if sketch.is_some()
                 && (diameter.is_some()
                     || section_size.is_some()
@@ -10366,7 +10373,7 @@ fn feature_tools_with_constructor(
                 let axis = if *clockwise { -k } else { k };
                 // Clockwise changes rotation; negating pitch keeps the chosen propagation direction.
                 let pitch = if *clockwise { -p } else { p };
-                return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
+                return Ok(unnamed(vec![kernel::sweep_helix_tapered(&ss.plane, region, *base, axis, pitch, n, taper)?]));
             }
             let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
             let section_size = section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
@@ -10408,7 +10415,7 @@ fn feature_tools_with_constructor(
                 }
             };
             let region = Region2 { outer, holes: Vec::new() };
-            let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
+            let coil = Traced::unnamed(kernel::sweep_helix_tapered(&plane, &region, *base, axis, pitch, n, taper)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {

@@ -47,6 +47,40 @@ pub fn sweep_helix_radial(
     crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law, continuous_flanks)
 }
 
+/// The widest cone angle (from the axis) a coil may take: its tangent stays bounded.
+const MAX_COIL_TAPER: f64 = 80.0 * std::f64::consts::PI / 180.0;
+
+/// [`sweep_helix`] on a cone (#4735): the profile moves `|pitch| · tan(taper)` further from the
+/// axis each turn, `taper` in radians from the axis (negative narrows the coil) within ±80°. A
+/// zero taper is the plain sweep. The profile must stay clear of the axis to the last turn: a
+/// section that the narrowing carries through it is refused, whatever profile it is.
+pub fn sweep_helix_tapered(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64, taper: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_helix_tapered");
+    if !(taper.is_finite() && taper.abs() <= MAX_COIL_TAPER) {
+        return Err(KernelError::Invalid("a coil's taper must be between -80 and 80 degrees".into()));
+    }
+    if taper == 0.0 {
+        return sweep_helix(plane, region, axis_origin, axis, pitch, turns);
+    }
+    let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
+    let growth = pitch.abs() * taper.tan();
+    // How near the profile comes to the axis, sampled along its segments.
+    let nearest = profile
+        .lp
+        .segs
+        .iter()
+        .flat_map(|s| (0..=8).map(move |i| s.point_at(i as f64 / 8.0)))
+        .map(|q| {
+            let v = plane.to_world(q) - axis_origin;
+            (v - k * k.dot(v)).len()
+        })
+        .fold(f64::INFINITY, f64::min);
+    if nearest + growth.min(0.0) * turns <= 0.0 {
+        return Err(KernelError::Invalid("the taper takes the coil through its axis before its last turn".into()));
+    }
+    sweep_helix_radial(plane, region, axis_origin, axis, pitch, turns, &[(0.0, 0.0), (turns, growth * turns)], true)
+}
+
 /// A helical sweep's axis and profile (the region's outer loop), checked: finite turns and
 /// pitch, an area, and a profile that clears itself after one turn.
 fn helix_profile(
@@ -196,6 +230,46 @@ mod tests {
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
+    }
+
+    /// solidcraft#4735: a coil whose radius grows at a constant rate per turn. Pappus with the
+    /// section's area 4π and its centre at 20 + 0.7·t mm, t = 0…3 turns (8 mm pitch, 5 degrees):
+    /// the volumes are fixed numbers worked out by hand, 4986.09 and 4488.73 mm³; a zero taper is
+    /// the plain coil's 4738.1.
+    #[test]
+    fn a_tapered_coil_follows_a_cone() {
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let region = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
+        for (deg, want) in [(5.0_f64, 4986.09), (-5.0, 4488.73), (0.0, 4738.1)] {
+            let b = sweep_helix_tapered(&pl, &region, Vec3::ZERO, Vec3::Z, 8.0, 3.0, deg.to_radians()).unwrap();
+            let v = crate::measure(&b).unwrap().volume;
+            assert!((v - want).abs() / want < 1e-3, "{deg} deg: {v} vs {want}");
+        }
+    }
+
+    /// A taper outside ±80 degrees, a non-finite one, and a narrowing that carries the section
+    /// through the axis are refused, with a profile of any kind.
+    #[test]
+    fn a_taper_out_of_range_or_through_the_axis_is_refused() {
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        // A circle of radius 1 at 20 mm: 45 degrees closes in by 8 mm a turn, 24 mm over 3 turns.
+        let circle = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 1.0), holes: vec![] };
+        let square = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(19.0, -1.0), Vec2::new(21.0, -1.0), Vec2::new(21.0, 1.0), Vec2::new(19.0, 1.0)]),
+            holes: vec![],
+        };
+        for region in [&circle, &square] {
+            let narrowing = (-45.0_f64).to_radians();
+            let e = sweep_helix_tapered(&pl, region, Vec3::ZERO, Vec3::Z, 8.0, 3.0, narrowing).unwrap_err().to_string();
+            assert!(e.contains("axis"), "{e}");
+            for bad in [85.0_f64.to_radians(), -85.0_f64.to_radians(), f64::NAN, f64::INFINITY, 1e308] {
+                let e = sweep_helix_tapered(&pl, region, Vec3::ZERO, Vec3::Z, 8.0, 3.0, bad).unwrap_err().to_string();
+                assert!(e.contains("80"), "{bad}: {e}");
+            }
+            // Widening by the same angle is fine, and so is a narrowing that stays clear.
+            assert!(sweep_helix_tapered(&pl, region, Vec3::ZERO, Vec3::Z, 8.0, 3.0, 45.0_f64.to_radians()).is_ok());
+            assert!(sweep_helix_tapered(&pl, region, Vec3::ZERO, Vec3::Z, 8.0, 3.0, (-5.0_f64).to_radians()).is_ok());
+        }
     }
 
     #[test]

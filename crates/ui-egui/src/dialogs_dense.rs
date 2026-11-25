@@ -1041,7 +1041,17 @@ fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Valu
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    enter
+    let mut taper = extra.get("taper").and_then(Value::as_str).unwrap_or_default().to_string();
+    let before = taper.clone();
+    let enter_taper = hint_row(ui, "Taper angle", &mut taper, "0 deg");
+    if taper != before {
+        if taper.trim().is_empty() {
+            extra.remove("taper");
+        } else {
+            extra.insert("taper".into(), json!(taper));
+        }
+    }
+    enter || enter_taper
 }
 
 /// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps

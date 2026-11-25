@@ -122,6 +122,7 @@ fn schemas_and_the_key_check_agree() {
             "section_size",
             "sketch",
             "start_angle",
+            "taper",
             "targets",
             "turns",
         ],
