@@ -8,7 +8,8 @@ use crate::utils::Lazy;
 use smol_str::SmolStr;
 use windows_sys::Win32::System::SystemServices::{LANG_JAPANESE, LANG_KOREAN};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetKeyState, GetKeyboardLayout, MapVirtualKeyExW, ToUnicodeEx, MAPVK_VK_TO_VSC_EX, VIRTUAL_KEY,
+    GetAsyncKeyState, GetKeyState, GetKeyboardLayout, MapVirtualKeyExW, ToUnicodeEx,
+    MAPVK_VK_TO_VSC_EX, VIRTUAL_KEY,
     VK_ACCEPT, VK_ADD, VK_APPS, VK_ATTN, VK_BACK, VK_BROWSER_BACK, VK_BROWSER_FAVORITES,
     VK_BROWSER_FORWARD, VK_BROWSER_HOME, VK_BROWSER_REFRESH, VK_BROWSER_SEARCH, VK_BROWSER_STOP,
     VK_CANCEL, VK_CAPITAL, VK_CLEAR, VK_CONTROL, VK_CONVERT, VK_CRSEL, VK_DECIMAL, VK_DELETE,
@@ -50,6 +51,12 @@ pub(crate) static LAYOUT_CACHE: Lazy<Mutex<LayoutCache>> =
 
 fn key_pressed(vkey: VIRTUAL_KEY) -> bool {
     unsafe { (GetKeyState(vkey as i32) & (1 << 15)) == (1 << 15) }
+}
+
+// SolidCraft: physical/async key state for unfocused windows and focus gain, where the thread's
+// synchronous `GetKeyState` table has not received `WM_KEYDOWN` from another application (#20352).
+fn async_key_pressed(vkey: VIRTUAL_KEY) -> bool {
+    unsafe { GetAsyncKeyState(vkey as i32) < 0 }
 }
 
 const NUMPAD_VKEYS: [VIRTUAL_KEY; 16] = [
@@ -273,13 +280,22 @@ impl LayoutCache {
     }
 
     pub fn get_agnostic_mods(&mut self) -> ModifiersState {
+        self.agnostic_mods_with(key_pressed)
+    }
+
+    /// SolidCraft: live modifier state via `GetAsyncKeyState`, preserving AltGr filtering (#20352).
+    pub fn get_agnostic_mods_async(&mut self) -> ModifiersState {
+        self.agnostic_mods_with(async_key_pressed)
+    }
+
+    fn agnostic_mods_with(&mut self, pressed: impl Fn(VIRTUAL_KEY) -> bool) -> ModifiersState {
         let (_, layout) = self.get_current_layout();
-        let filter_out_altgr = layout.has_alt_graph && key_pressed(VK_RMENU);
+        let filter_out_altgr = layout.has_alt_graph && pressed(VK_RMENU);
         let mut mods = ModifiersState::empty();
-        mods.set(ModifiersState::SHIFT, key_pressed(VK_SHIFT));
-        mods.set(ModifiersState::CONTROL, key_pressed(VK_CONTROL) && !filter_out_altgr);
-        mods.set(ModifiersState::ALT, key_pressed(VK_MENU) && !filter_out_altgr);
-        mods.set(ModifiersState::SUPER, key_pressed(VK_LWIN) || key_pressed(VK_RWIN));
+        mods.set(ModifiersState::SHIFT, pressed(VK_SHIFT));
+        mods.set(ModifiersState::CONTROL, pressed(VK_CONTROL) && !filter_out_altgr);
+        mods.set(ModifiersState::ALT, pressed(VK_MENU) && !filter_out_altgr);
+        mods.set(ModifiersState::SUPER, pressed(VK_LWIN) || pressed(VK_RWIN));
         mods
     }
 

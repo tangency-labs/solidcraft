@@ -59,6 +59,14 @@ mod drag_layer;
 #[path = "viewport_joint_motions.rs"]
 pub(crate) mod joint_motions;
 
+/// Active middle, right, or extra mouse-button navigation drag state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ButtonNav {
+    pub button: crate::prefs::NavButton,
+    pub mode: Option<NavMode>,
+    pub focused: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {
     Orbit,
@@ -374,8 +382,10 @@ pub struct ViewportState {
     /// Where the pointer was when Zoom Mode began: the zoom stays on what was under it.
     pub(crate) nav_toggle_at: Option<Pos2>,
     /// The mode the middle or right drag under way started with, kept until its button is
-    /// released when `nav_drag_keeps_mode` is on (#9557).
-    pub(crate) button_nav: Option<(crate::prefs::NavButton, Option<NavMode>)>,
+    /// released when `nav_drag_keeps_mode` is on (#9557). While the drag began on an unfocused
+    /// window (`focused == false`), modifiers may arrive on the focus-gaining frame (#20352),
+    /// so the mode is resolved again once the window has focus.
+    pub(crate) button_nav: Option<ButtonNav>,
     /// What a click would pick now (after the active command's filter).
     pub hover: Option<Hit>,
     /// The centre of the circle or arc of the sketch being edited whose edge was hovered last

@@ -878,7 +878,7 @@ struct ViewMotion {
     modifier_nav: Option<(crate::viewport::NavMode, egui::Pos2)>,
     nav_toggle: Option<crate::viewport::NavMode>,
     nav_toggle_at: Option<egui::Pos2>,
-    button_nav: Option<(crate::prefs::NavButton, Option<crate::viewport::NavMode>)>,
+    button_nav: Option<crate::viewport::ButtonNav>,
     right_drag: bool,
     orbit_pivot: Option<solidcore_record::Vec3>,
     orbit_pivot_at: Option<egui::Pos2>,

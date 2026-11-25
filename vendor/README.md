@@ -292,3 +292,11 @@ SolidCraft changes:
   message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
   factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
   `LineDelta`. The registration is undone when the event loop drops.
+- `src/platform_impl/windows/keyboard_layout.rs`, `window_state.rs`, `event_loop.rs`
+  (`get_agnostic_mods_async`, `effective_modifiers`): while unfocused or gaining focus, read
+  modifier keys with `GetAsyncKeyState` (keeping AltGr filtering) and hold any pre-focus
+  modifiers in `WindowState::inherited_modifiers` until the thread's synchronous `GetKeyState`
+  observes them or the key is physically released. Clicking into an unfocused window while holding
+  Ctrl/Shift/Alt from another application otherwise saw stale `GetKeyState == 0` until the
+  modifier was released and pressed again (#20352). Test:
+  `effective_modifiers_tracks_unfocused_and_inherited_keys` (Windows).

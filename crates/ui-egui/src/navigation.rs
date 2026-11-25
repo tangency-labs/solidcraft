@@ -1148,7 +1148,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         .map(|pointer| (*pointer, crate::prefs::NavButton::of_pointer(*pointer)))
         .find(|(pointer, nav)| {
             ui.input(|i| i.pointer.button_down(*pointer) && !i.pointer.could_any_button_be_click())
-                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == *nav))
+                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|held| held.button == *nav))
         })
         .map(|(_, nav)| nav);
     let side_drag = right_drag || extra_drag.is_some();
@@ -1169,17 +1169,29 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     let press_in_view = ui
         .input(|input| input.pointer.press_origin())
         .is_some_and(|at| input_rect.contains(at) && !on_control(at) && !crate::shell::covered(app, at));
-    let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
+    let captured =
+        button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|held| held.button == button));
     let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
     // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
-    // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
-    // frame, as before.
+    // doesn't turn the rest into a pan (#9557). If the press began while the window was unfocused,
+    // wait until focus arrives to lock the mode so modifiers held before clicking into the window
+    // still take effect (#20352). Off in Preferences, the keys held decide on every frame, as before.
+    let focused = ui.input(|i| i.focused);
     let button_mode = match button {
         Some(b) if dragging && app.viewport.axis_drag.is_none() => {
-            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
-            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
-            app.viewport.button_nav = Some((b, mode));
+            let previous = app.viewport.button_nav.filter(|held| held.button == b);
+            let kept = previous.filter(|held| held.focused && app.preferences.nav_drag_keeps_mode);
+            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |held| held.mode);
+            if previous.is_some_and(|held| held.mode != mode) {
+                app.viewport.orbit_pivot = None;
+                app.viewport.orbit_pivot_at = None;
+                app.viewport.orbit_mark = None;
+                app.viewport.orbit_from = None;
+                app.viewport.orbit_free = None;
+            }
+            app.viewport.button_nav =
+                Some(crate::viewport::ButtonNav { button: b, mode, focused: previous.is_some_and(|held| held.focused) || focused });
             mode
         }
         Some(_) => None,
@@ -5358,6 +5370,165 @@ mod view_key_tests {
                     assert!(close(&moved, &seen_moved), "{what}: a 4 by 3 move after the press went to {moved:?}, not {seen_moved:?}");
                 }
             }
+        }
+    }
+
+    /// Holding Ctrl (or Shift) before middle-dragging into an unfocused SolidCraft window in
+    /// SolidWorks navigation must pan (or zoom) immediately rather than orbiting (#20352), both
+    /// when modifiers arrive while hovering unfocused and when focus + modifiers arrive one frame
+    /// after the press. Once focused, `nav_drag_keeps_mode` still locks the mode (#9557).
+    #[test]
+    fn solidworks_unfocused_window_modifier_middle_drag_pans_and_zooms() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+        let run_frame = |h: &mut crate::scenario::Harness, time: &mut f64, events: Vec<Event>, focused: bool| {
+            *time = time.max(h.ctx.input(|i| i.time)) + 1.0 / 60.0;
+            let mut raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))),
+                time: Some(*time),
+                focused,
+                events,
+                ..Default::default()
+            };
+            crate::window_chrome::release_stale_input(&h.ctx, &mut raw);
+            h.app.raw_input_hook(&mut raw);
+            let app = &mut h.app;
+            let mut out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let setup = || {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+            h.app.preferences.nav_drag_keeps_mode = true;
+            h.call("ui.view", serde_json::json!({"view": "front"}));
+            h.frames(2);
+            let time = h.ctx.input(|i| i.time);
+            let at = h.app.viewport.rect.unwrap().center();
+            (h, time, at)
+        };
+        let ctrl = Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+
+        // Case 1: Ctrl reported while hovering unfocused, then middle-press gains focus without a
+        // duplicate ModifiersChanged event.
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(ctrl), Event::PointerMoved(at)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: ctrl }],
+                true,
+            );
+            for i in 1..=6 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 6.0 * i as f32))], true);
+            }
+            let mid = h.app.cam;
+            assert!((mid.yaw - start.yaw).abs() < 1e-9 && (mid.pitch - start.pitch).abs() < 1e-9, "case 1 must pan, not orbit: {mid:?}");
+            assert!(mid.target.dist(start.target) > 1e-3, "case 1 must move the camera target");
+            // Releasing Ctrl partway through still keeps panning once focused (#9557).
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(Modifiers::NONE)], true);
+            for i in 7..=12 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 6.0 * i as f32))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 1 keeps pan after Ctrl release: {end:?}");
+            assert!(end.target.dist(mid.target) > 1e-3, "case 1 continues panning");
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at + vec2(120.0, 72.0), button: PointerButton::Middle, pressed: false, modifiers: Modifiers::NONE }],
+                true,
+            );
+        }
+
+        // Case 2: Middle-press arrives while unfocused (stale NONE modifiers), then focus + Ctrl
+        // arrive on the following frame as the drag moves.
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![
+                    Event::PointerMoved(at),
+                    Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE },
+                ],
+                false,
+            );
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::ModifiersChanged(ctrl), Event::PointerMoved(at + vec2(12.0, 8.0))],
+                true,
+            );
+            for i in 2..=6 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(12.0 * i as f32, 8.0 * i as f32))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 2 must pan, not orbit: {end:?}");
+            assert!(end.target.dist(start.target) > 1e-3, "case 2 must pan the camera");
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at + vec2(72.0, 48.0), button: PointerButton::Middle, pressed: false, modifiers: ctrl }],
+                true,
+            );
+        }
+
+        // Case 3: Shift+middle zoom into an unfocused window (press-before-focus).
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![
+                    Event::PointerMoved(at),
+                    Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE },
+                ],
+                false,
+            );
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at + vec2(0.0, 40.0))],
+                true,
+            );
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 3 must zoom, not orbit: {end:?}");
+            assert!((end.distance - start.distance).abs() > 1e-3, "case 3 must change camera distance");
+        }
+
+        // Case 4: Regression guard — a plain middle orbit begun while focused stays orbit even if
+        // Ctrl is pressed partway through (#9557).
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(Modifiers::NONE), Event::PointerMoved(at)], true);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE }],
+                true,
+            );
+            for i in 1..=4 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 0.0))], true);
+            }
+            let mid = h.app.cam;
+            assert!((mid.yaw - start.yaw).abs() > 1e-3, "focused plain middle drag orbits");
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(ctrl)], true);
+            for i in 5..=8 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 0.0))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - mid.yaw).abs() > 1e-3, "focused orbit keeps orbiting after Ctrl is pressed");
         }
     }
 }

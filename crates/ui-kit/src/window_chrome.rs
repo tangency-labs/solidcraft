@@ -248,6 +248,20 @@ pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) 
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct StaleInput {
+    buttons: [bool; 3],
+}
+
+fn button_index(button: PointerButton) -> Option<usize> {
+    match button {
+        PointerButton::Primary => Some(0),
+        PointerButton::Secondary => Some(1),
+        PointerButton::Middle => Some(2),
+        _ => None,
+    }
+}
+
 fn stale_input_id() -> Id {
     Id::unique("window-chrome-stale-input")
 }
@@ -255,7 +269,7 @@ fn stale_input_id() -> Id {
 /// Note that a native dialog (a file picker) just closed: the OS may have kept a button release
 /// or a modifier release for itself, so [`release_stale_input`] lets go of what is still held.
 pub fn mark_input_stale(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(stale_input_id(), true));
+    ctx.data_mut(|d| d.insert_temp(stale_input_id(), StaleInput { buttons: [true; 3] }));
 }
 
 /// Let go of a pointer button whose release the app never received, before the frame's own
@@ -288,29 +302,78 @@ pub fn release_stale_input_with_tracked_buttons(ctx: &egui::Context, raw: &mut e
 fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput, release_buttons: bool) {
     let last_lost = raw.events.iter().rposition(|e| matches!(e, egui::Event::WindowFocused(false)));
     let regained = raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(true)));
-    let marked = ctx.data(|d| d.get_temp::<bool>(stale_input_id())).unwrap_or(false);
-    // Focus ends the frame lost: recover when it is back. Otherwise recover now: at the loss when
-    // the batch also regains focus (later events, a fresh press among them, stay as they are), or
-    // at the start of the frame for a marked dialog.
-    let at = match last_lost {
-        Some(_) if !raw.focused => {
-            mark_input_stale(ctx);
+    let stale = ctx.data(|d| d.get_temp::<StaleInput>(stale_input_id()));
+    let (was_focused, current_modifiers) = ctx.input(|i| (i.focused, i.modifiers));
+    // Focus loss already cleared egui's modifiers; any non-empty modifiers present while unfocused
+    // arrived after that loss (for example Ctrl held while moving into an unfocused window) and
+    // must survive focus return, or the platform will not resend them until the key is re-pressed.
+    let clear_modifiers = was_focused || current_modifiers.is_none();
+    // Focus ends the frame lost: record which buttons were held at loss so a fresh press while
+    // unfocused is not mistaken for a stale one when focus returns. Otherwise recover now: at the
+    // loss when the batch also regains focus (later events, a fresh press among them, stay as they
+    // are), or at the start of the frame for a marked dialog or returned focus.
+    let (at, stale_buttons) = match last_lost {
+        Some(lost) if !raw.focused => {
+            let mut buttons = [false; 3];
+            for (idx, b) in BUTTONS.into_iter().enumerate() {
+                buttons[idx] = ctx.input(|i| i.pointer.button_down(b));
+            }
+            for (index, event) in raw.events.iter().enumerate() {
+                if let egui::Event::PointerButton { button, pressed, .. } = event
+                    && let Some(idx) = button_index(*button)
+                {
+                    buttons[idx] = if index <= lost { *pressed } else { false };
+                }
+            }
+            ctx.data_mut(|d| d.insert_temp(stale_input_id(), StaleInput { buttons }));
             return;
         }
-        Some(i) => i + 1,
-        None if raw.focused && marked => 0,
+        Some(i) => {
+            let mut buttons = [false; 3];
+            for (idx, b) in BUTTONS.into_iter().enumerate() {
+                buttons[idx] = ctx.input(|input| input.pointer.button_down(b));
+            }
+            for event in raw.events.iter().take(i + 1) {
+                if let egui::Event::PointerButton { button, pressed, .. } = event
+                    && let Some(idx) = button_index(*button)
+                {
+                    buttons[idx] = *pressed;
+                }
+            }
+            (i + 1, buttons)
+        }
+        None if raw.focused && stale.is_some() => (0, stale.map_or([false; 3], |s| s.buttons)),
         None => {
-            if regained {
+            if !raw.focused
+                && let Some(mut s) = stale
+            {
+                let mut changed = false;
+                for event in &raw.events {
+                    if let egui::Event::PointerButton { button, .. } = event
+                        && let Some(idx) = button_index(*button)
+                        && s.buttons[idx]
+                    {
+                        s.buttons[idx] = false;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    ctx.data_mut(|d| d.insert_temp(stale_input_id(), s));
+                }
+            }
+            if regained && clear_modifiers {
                 raw.events.insert(0, egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
             return;
         }
     };
-    ctx.data_mut(|d| d.remove_temp::<bool>(stale_input_id()));
+    ctx.data_mut(|d| d.remove_temp::<StaleInput>(stale_input_id()));
     let (pos, modifiers) = ctx.input(|i| (i.pointer.latest_pos().or(i.pointer.interact_pos()).unwrap_or(Pos2::ZERO), i.modifiers));
-    let held: Vec<PointerButton> = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle]
+    let held: Vec<PointerButton> = BUTTONS
         .into_iter()
-        .filter(|b| release_buttons && ctx.input(|i| i.pointer.button_down(*b)))
+        .enumerate()
+        .filter(|&(idx, b)| release_buttons && stale_buttons[idx] && (last_lost.is_some() || ctx.input(|i| i.pointer.button_down(b))))
+        .map(|(_, b)| b)
         .collect();
     let mut recovery = Vec::new();
     if !held.is_empty() {
@@ -321,7 +384,9 @@ fn recover_after_focus(ctx: &egui::Context, raw: &mut egui::RawInput, release_bu
         recovery.extend(held.into_iter().map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers }));
         recovery.push(egui::Event::PointerGone);
     }
-    recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    if last_lost.is_some() || clear_modifiers {
+        recovery.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+    }
     raw.events.splice(at..at, recovery);
 }
 
@@ -1417,5 +1482,60 @@ mod tests {
         assert!(reapplies(&run(vec![Event::PointerMoved(pos2(5.0, 5.0))])), "pointer back in the window");
         assert!(!reapplies(&run(vec![Event::PointerMoved(pos2(6.0, 6.0))])), "an ordinary move changes nothing");
         assert!(!reapplies(&run(vec![Event::WindowFocused(false)])), "focus lost");
+    }
+
+    #[test]
+    fn modifiers_reported_while_unfocused_survive_focus_return() {
+        let ctrl = egui::Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+        let at = pos2(80.0, 90.0);
+        for tracked in [false, true] {
+            let ctx = crate::test_support::context();
+            let mut time = 0.0;
+            let mut frame = |events: Vec<Event>, focused: bool| {
+                time += 0.05;
+                let mut raw = RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                    time: Some(time),
+                    focused,
+                    events,
+                    ..Default::default()
+                };
+                if tracked {
+                    release_stale_input_with_tracked_buttons(&ctx, &mut raw);
+                } else {
+                    release_stale_input(&ctx, &mut raw);
+                }
+                ctx.run_ui(raw, |_| {}).textures_delta.clear();
+            };
+            frame(vec![Event::WindowFocused(true)], true);
+            frame(vec![Event::WindowFocused(false)], false);
+            assert!(ctx.input(|i| !i.focused && i.modifiers.is_none()));
+            // Hovering over the unfocused window while holding Ctrl updates egui's modifiers.
+            frame(vec![Event::ModifiersChanged(ctrl), Event::PointerMoved(at)], false);
+            assert!(ctx.input(|i| !i.focused && i.modifiers.ctrl));
+            // Clicking into the window regains focus without a duplicate ModifiersChanged.
+            frame(
+                vec![Event::WindowFocused(true), Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: ctrl }],
+                true,
+            );
+            assert!(ctx.input(|i| i.focused && i.modifiers.ctrl), "tracked={tracked}: Ctrl must stay held");
+            assert!(ctx.input(|i| i.pointer.middle_down()), "tracked={tracked}: fresh middle press stays held");
+        }
+    }
+
+    #[test]
+    fn a_fresh_button_press_while_unfocused_is_not_released_when_focus_arrives() {
+        let mut h = Hooked::new();
+        let at = pos2(80.0, 90.0);
+        h.frame(vec![Event::WindowFocused(true), Event::PointerMoved(at)], true, |_| {});
+        h.frame(vec![Event::WindowFocused(false)], false, |_| {});
+        // User presses the middle button while the window is still unfocused.
+        h.frame(vec![Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Default::default() }], false, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.middle_down()));
+        // Focus and held modifiers arrive on the following frame.
+        let ctrl = egui::Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+        h.frame(vec![Event::WindowFocused(true), Event::ModifiersChanged(ctrl)], true, |_| {});
+        assert!(h.ctx.input(|i| i.pointer.middle_down()), "fresh unfocused press must not be killed on focus gain");
+        assert!(h.ctx.input(|i| i.modifiers.ctrl), "modifiers arriving with focus must apply");
     }
 }
