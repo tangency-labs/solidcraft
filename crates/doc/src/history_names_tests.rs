@@ -430,9 +430,9 @@ fn piece_overlap_and_resuffixed_lookup_survive_adjacent_neighbour_changes() {
     assert_eq!(piece_overlap(&split, 1, &stored), Some((2, 5)));
     assert_eq!(unique_resuffixed_on_body(&split, &stored), None);
 
-    // Whole face with zero surviving neighbours (#11731) -> refused.
+    // Whole face (unqualified again, #11731) -> refused even if some neighbours remain.
     let whole_unrelated = qualify(named(&["side", "other"]), &[(0, 1)]);
-    assert_eq!(piece_overlap(&whole_unrelated, 0, &stored), Some((0, 5)));
+    assert_eq!(piece_overlap(&whole_unrelated, 0, &stored), None);
     assert_eq!(unique_resuffixed_on_body(&whole_unrelated, &stored), None);
 
     // Numbered pieces carry no neighbour identity -> refused.

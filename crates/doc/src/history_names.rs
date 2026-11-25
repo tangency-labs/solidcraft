@@ -760,7 +760,7 @@ pub(crate) fn piece_overlap(names: &Names, index: usize, name: &str) -> Option<(
     let canonical = crate::persistent_name::written_now(name);
     let today = crate::persistent_name::written_now(face);
     let ((name_core, at), (current, here)) = (instance_suffix(&canonical), instance_suffix(&today));
-    if at != here || !name_core.ends_with(']') {
+    if at != here || !name_core.ends_with(']') || !current.ends_with(']') {
         return None;
     }
     let (stem, around) = crate::piece_names::piece_parts(name_core)?;
