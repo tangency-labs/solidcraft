@@ -270,12 +270,27 @@ impl ModelBody {
     /// body's measure depends on nothing else, so the bill of materials and the physical
     /// properties weigh it once however often they are asked. `None` when it can't be measured.
     pub fn volume(&self) -> Option<f64> {
+        if let Some((measured, Ok(m))) = self.measured.get()
+            && measured.same(&self.body)
+        {
+            return Some(m.volume);
+        }
         let measure = || kernel::measure_mass(&self.body).ok().map(|m| m.volume);
         match self.volume.get_or_init(|| (self.body.clone(), measure())) {
             (measured, v) if measured.same(&self.body) => *v,
             // The body was replaced in this cell's holder since: measure it again.
             _ => measure(),
         }
+    }
+
+    /// Whether [`ModelBody::volume`] is already cached for the current body.
+    pub(crate) fn has_cached_volume(&self) -> bool {
+        self.volume.get().is_some_and(|(b, _)| b.same(&self.body)) || self.measured.get().is_some_and(|(b, r)| b.same(&self.body) && r.is_ok())
+    }
+
+    /// Whether [`ModelBody::measure`] is already cached for the current body.
+    pub fn has_cached_measure(&self) -> bool {
+        self.measured.get().is_some_and(|(b, _)| b.same(&self.body))
     }
 
     /// Whether a feature `f` that names no bodies works on this one: a body of its component
@@ -1849,7 +1864,9 @@ impl ModelState {
     /// Prepare reference picking geometry and the GPU plan/highlight mesh at exactly the
     /// requested quality. The first viewport frame then consumes initialized caches only.
     pub fn warm_display_at(&self, quality: crate::display_quality::DisplayQuality, go_on: impl Fn() -> bool + Sync) {
-        kernel::for_each_on_threads(&self.bodies, 16, |body| {
+        let plan_ready = |b: &ModelBody| b.plan_mesh.get(quality.index()).is_none_or(|cell| cell.get().is_some());
+        let cold: Vec<_> = self.bodies.iter().filter(|b| b.mesh.get().is_none() || !plan_ready(b)).collect();
+        kernel::for_each_on_threads(&cold, 16, |body| {
             if go_on() {
                 let _ = body.mesh();
             }

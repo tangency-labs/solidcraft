@@ -1192,3 +1192,67 @@ fn a_numberings_suppressed_parts_option_is_saved_only_when_true() {
     let older = json!({"source": 0, "levels": "all", "items": []});
     assert_eq!(serde_json::from_value::<ItemNumbers>(older).unwrap(), off);
 }
+
+/// Parallel volume warming in [`list`] and [`Tree::component`] produces bit-for-bit identical
+/// row masses and total assembly mass compared to sequential per-body measurement.
+#[test]
+fn parallel_bom_mass_matches_sequential_body_volumes_bit_for_bit() {
+    let mut doc = Document::default();
+    let (sub, _) = add(&mut doc, "Subassembly", 0);
+    let (ref_comp, _) = add(&mut doc, "Fixture", 0);
+    typed(&mut doc, ref_comp, Reference);
+    boxed(&mut doc, ref_comp, false);
+
+    for i in 0..16u32 {
+        let parent = if i % 4 == 0 { sub } else { 0 };
+        let (comp, _) = add(&mut doc, &format!("Part {i:02}"), parent);
+        let len = 5.0 + f64::from(i);
+        let kind = serde_json::from_value(json!({
+            "type": "box",
+            "corner": [f64::from(i) * 20.0, 0, 0],
+            "length": format!("{len}"),
+            "width": "10",
+            "height": "4"
+        }))
+        .unwrap();
+        let fid = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(fid).unwrap().component = comp;
+        if i % 3 == 0 {
+            place(&mut doc, comp, parent);
+        }
+    }
+
+    // Cold model: bom::list warms body volumes in parallel.
+    let mut par_model = crate::Model::new();
+    par_model.evaluate(&doc);
+    let par_state = par_model.state();
+    let mut par_tree = Tree::new(&doc, &par_state);
+    let par_bom = list(&mut par_tree, &Request { mass: true, view: View::AllLevels, ..Request::default() }).unwrap();
+    let par_comp = par_tree.component(0).unwrap();
+
+    // Separate fresh model: warm every body volume strictly sequentially first, then run bom::list.
+    let mut seq_model = crate::Model::new();
+    seq_model.evaluate(&doc);
+    let seq_state = seq_model.state();
+    for b in &seq_state.bodies {
+        let _ = b.volume();
+    }
+    let mut seq_tree = Tree::new(&doc, &seq_state);
+    let seq_bom = list(&mut seq_tree, &Request { mass: true, view: View::AllLevels, ..Request::default() }).unwrap();
+    let seq_comp = seq_tree.component(0).unwrap();
+
+    let mass_bits = |m: Mass| match m {
+        Mass::Grams(g) => Some(g.to_bits()),
+        _ => None,
+    };
+    assert_eq!(par_bom.rows_deep().len(), seq_bom.rows_deep().len());
+    for ((pi, pr), (si, sr)) in par_bom.rows_deep().into_iter().zip(seq_bom.rows_deep()) {
+        assert_eq!(pi, si);
+        assert_eq!(pr.names, sr.names);
+        assert_eq!(mass_bits(pr.mass), mass_bits(sr.mass), "row {:?} mass mismatch", pr.names);
+    }
+    assert_eq!(mass_bits(par_bom.total.mass), mass_bits(seq_bom.total.mass));
+    assert!(matches!(par_bom.total.mass, Mass::Grams(g) if g > 0.0));
+    assert_eq!(mass_bits(par_comp.0), mass_bits(seq_comp.0));
+    assert_eq!(par_comp.1, seq_comp.1);
+}

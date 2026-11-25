@@ -721,6 +721,48 @@ impl<'a> Tree<'a> {
         Ok(names)
     }
 
+    /// Measure the volumes of every uncached body reachable from `seeds` in parallel so that
+    /// [`Tree::weigh`] reads warm caches in deterministic tree order.
+    fn warm_volumes(&self, seeds: &[(u64, Holds)]) {
+        let mut visited: HashSet<(u64, Holds)> = HashSet::new();
+        let mut stack: Vec<(u64, Holds, usize)> = Vec::new();
+        for &(id, holds) in seeds {
+            if !self.weighed.contains_key(&(id, holds)) && visited.insert((id, holds)) {
+                stack.push((id, holds, 0));
+            }
+        }
+        let mut seen_bodies: HashSet<usize> = HashSet::new();
+        let mut cold: Vec<&ModelBody> = Vec::new();
+        while let Some((id, holds, depth)) = stack.pop() {
+            if depth > MAX_PLACEMENT_DEPTH {
+                continue;
+            }
+            if holds == Holds::Own {
+                for &body in self.own_bodies(id) {
+                    if !body.has_cached_volume() && seen_bodies.insert(std::ptr::from_ref(body) as usize) {
+                        cold.push(body);
+                    }
+                }
+            } else {
+                if !self.weighed.contains_key(&(id, Holds::Own)) && visited.insert((id, Holds::Own)) {
+                    stack.push((id, Holds::Own, depth));
+                }
+                for child in self.adding(id, holds) {
+                    if !self.weighed.contains_key(&(child.component, holds)) && visited.insert((child.component, holds)) {
+                        stack.push((child.component, holds, depth + 1));
+                    }
+                }
+            }
+        }
+        if cold.len() > 1 {
+            solidcraft_kernel::for_each_on_threads(&cold, 16, |body| {
+                if !solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+                    let _ = body.volume();
+                }
+            });
+        }
+    }
+
     /// Each row's mass, and its children's.
     fn weigh_rows(&mut self, rows: &mut [Row]) -> Result<()> {
         for row in rows {
@@ -962,6 +1004,7 @@ impl Tree<'_> {
         if id != 0 && !self.components.contains_key(&id) {
             return Err(DocError::Unknown(format!("component {id}")));
         }
+        self.warm_volumes(&[(id, Holds::All)]);
         let mass = agree(&[self.weigh(id, Holds::All, 0)?]);
         Ok((mass, self.made_of(id, Holds::All, 0)?))
     }
@@ -1002,6 +1045,13 @@ pub fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Result<Bo
     }
     tree.name_materials(&mut bom.rows)?;
     if request.mass {
+        let mut seeds: Vec<(u64, Holds)> = vec![(request.source, Holds::All)];
+        for (_, row) in bom.rows_deep() {
+            for &c in &row.components {
+                seeds.push((c, row.stands_for));
+            }
+        }
+        tree.warm_volumes(&seeds);
         tree.weigh_rows(&mut bom.rows)?;
         // After the rows, so what their definitions weigh is kept: only what no row holds (the
         // assembly's own bodies) is measured again.

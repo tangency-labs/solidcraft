@@ -189,6 +189,9 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// SMLib mass properties `(volume, area, centroid)` measured on first use and shared by clones
+    /// because they share the record; reset on rigid moves because the centroid moves.
+    pub(crate) mass: std::sync::Arc<std::sync::Mutex<Option<(f64, f64, Vec3)>>>,
     /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
     /// because they share the record.
     pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
@@ -750,6 +753,7 @@ impl Body {
             outline: std::sync::Arc::default(),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            mass: std::sync::Arc::new(std::sync::Mutex::new(None)),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
@@ -1518,9 +1522,10 @@ impl Body {
             smlib: std::sync::Arc::default(),
             ops: std::sync::Arc::default(),
             outline: std::sync::Arc::default(),
-            // A rigid motion keeps the size and the volume.
+            // A rigid motion keeps the size and the volume; the centroid and exact bounds move.
             size: self.size,
             volume: self.volume.clone(),
+            mass: std::sync::Arc::new(std::sync::Mutex::new(None)),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh: None,
             color: self.color,
@@ -1635,6 +1640,11 @@ impl Body {
             }
         }
         record_outline(&self.record)
+    }
+
+    /// Whether [`Body::exact_bounds`] is already cached for this body.
+    pub(crate) fn has_cached_bounds(&self) -> bool {
+        self.is_mesh() || self.bounds.lock().ok().is_some_and(|g| g.is_some())
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's

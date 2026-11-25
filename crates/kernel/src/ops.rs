@@ -106,10 +106,15 @@ pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
         if any_two_meet(&vertex_boxes) {
             return Ok(None);
         }
-        let mut boxes = Vec::with_capacity(bodies.len());
-        for b in bodies {
-            boxes.push(b.exact_bounds()?.inflated(2.0 * b.record().tolerance));
-        }
+        let cold = bodies.iter().filter(|b| !b.has_cached_bounds()).count();
+        let boxes: Vec<solidcraft_geom::Aabb3> = if cold > 1 {
+            crate::par::map_on_threads(bodies, 16, |b| b.exact_bounds().map(|bb| bb.inflated(2.0 * b.record().tolerance)))
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(KernelError::Internal("parallel bounds worker failed".into()))))
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            bodies.iter().map(|b| b.exact_bounds().map(|bb| bb.inflated(2.0 * b.record().tolerance))).collect::<Result<Vec<_>>>()?
+        };
         if any_two_meet(&boxes) {
             return Ok(None);
         }
