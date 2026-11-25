@@ -1405,6 +1405,7 @@ fn hostile_params_never_panic() {
                                         || matches!(
                                             id,
                                             "file.export_3mf"
+                                                | "file.export_mjcf"
                                                 | "file.export_obj"
                                                 | "file.export_sdf"
                                                 | "file.export_step"

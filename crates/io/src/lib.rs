@@ -1,6 +1,6 @@
 //! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` still opens); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
-//! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
+//! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]) and MJCF ([`mjcf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
 //! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD, E57 and XYZ files as point
 //! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
@@ -83,6 +83,7 @@ mod legacy_dir;
 pub mod library;
 pub mod library_files;
 pub mod limits;
+pub mod mjcf;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
@@ -262,6 +263,7 @@ pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
 mod obj;
+pub use mjcf::{MjcfPackage, mjcf};
 pub use obj::read_obj;
 pub use sdf::SdfDecal;
 pub use sdf::SdfOptions;
@@ -907,6 +909,9 @@ pub enum Format {
     /// A Gazebo model folder of the design ([`sdf_model`]): `model.config`, `model.sdf`, meshes
     /// and decal images; written by the engine, since it is several files.
     Sdf,
+    /// A MuJoCo model of the assembly with its mesh files ([`mjcf()`]); written by the engine,
+    /// since it is several files.
+    Mjcf,
     /// OpenUSD: `.usda` text, `.usdc` (or `.usd`) binary, or a `.usdz` package, chosen by the
     /// file's extension ([`usd_from_design`]); written from the design, which holds the
     /// components and looks.
@@ -934,6 +939,8 @@ impl Format {
             "urdf" => Format::Urdf,
             "glb" => Format::Glb,
             "sdf" => Format::Sdf,
+            // By name only: `.xml` is any XML, which an exporter plugin may claim.
+            "mjcf" => Format::Mjcf,
             "usd" | "usda" | "usdc" | "usdz" => Format::Usd,
             "3dm" => Format::Rhino,
             "fcstd" => Format::FreeCad,
@@ -1835,6 +1842,7 @@ pub fn export_with_parts_noted(
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
         Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
+        Format::Mjcf => return Err(IoError::Format("mjcf (an assembly package; use file.export)".into())),
         Format::Usd => return Err(IoError::Format("usd (the file's extension picks its encoding; use file.export)".into())),
         Format::Rhino => return Err(IoError::Format("3dm (written from the design by cadmpeg; use file.export)".into())),
         Format::FreeCad => return Err(IoError::Invalid(native_cad::FREECAD_REFUSED.into())),

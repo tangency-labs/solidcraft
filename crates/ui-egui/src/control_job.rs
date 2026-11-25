@@ -120,6 +120,7 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
+    "file.export_mjcf",
     "file.export_obj",
     "file.export_sdf",
     "file.export_step",
