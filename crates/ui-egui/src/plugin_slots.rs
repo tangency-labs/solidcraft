@@ -27,7 +27,7 @@ pub(crate) struct Item {
     pub slot: Slot,
     /// An importer chooses its own file, so it needs no open design.
     pub importer: bool,
-    /// The command's icon: its own from the package, else the generic plugin icon.
+    /// The entry's icon: its own from the package, else the generic plugin icon.
     pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -441,7 +441,7 @@ impl RibbonGroup {
                     run: &entry.command,
                     label: &entry.entry,
                     name: &entry.label,
-                    icon: "prefs_plugins",
+                    icon: &entry.icon,
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
                     planned: false,
                     enabled: true,
@@ -461,15 +461,7 @@ impl RibbonGroup {
             more: self
                 .entries
                 .iter()
-                .map(|e| ribbon::MoreRow {
-                    id: &e.command,
-                    label: &e.label,
-                    icon: "prefs_plugins",
-                    shortcut: "",
-                    enabled: true,
-                    checked: None,
-                    hint: None,
-                })
+                .map(|e| ribbon::MoreRow { id: &e.command, label: &e.label, icon: &e.icon, shortcut: "", enabled: true, checked: None, hint: None })
                 .collect(),
         }
     }
@@ -570,6 +562,8 @@ mod tests {
             groups: Default::default(),
             images: Default::default(),
             swatches: Default::default(),
+            updates: None,
+            themes: Vec::new(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},

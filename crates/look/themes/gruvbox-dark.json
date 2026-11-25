@@ -4,6 +4,7 @@
   "format": "solidcraft-theme/1",
   "name": "Gruvbox Dark",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "app_bar": "#1d2021",
     "toolbar": "#282828",
