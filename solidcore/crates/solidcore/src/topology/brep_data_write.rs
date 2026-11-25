@@ -1218,7 +1218,7 @@ pub fn write_brep_to_file(
 ) -> Result<Vec<u8>> {
     // (the attribute pointers FromBrep collects; the file is written without them)
     let mut attributes = Vec::new();
-    let mut data = BrepData::from_brep(b, env, &mut attributes)?;
+    let mut data = BrepData::from_brep(k, b, env, &mut attributes)?;
     data.write_to_file_with_nurbs(k, file_type)
 }
 
@@ -1240,6 +1240,113 @@ const NO_EDGEUSE_MATE: &str =
     "an edge use has no mate, though making an edge use makes its mate with it";
 const NO_EDGEUSE_LOOPUSE: &str =
     "a loop edge use has no loop use, though an edge use not on a wire is made on its loop use";
+
+/// The tolerances [`BrepData::from_brep_with`] writes in place of the held ones: for each
+/// edge and vertex whose end-checked trim-cover raise still holds
+/// ([`Brep::trim_cover_raises`]), the tolerance from before the raise, while
+/// - a vertex is no tighter than any edge at it as written (an edge whose raise no longer
+///   holds is written as it is, and the vertex stays above it), and
+/// - every UV trim the read of the written file end checks at those tolerances
+///   (`sm_CheckUVTrimCurve`, `check_uv_trim_curve_at`) is kept as at the held ones: a
+///   trim set after the read (a replaced trim, one made by a later fit) whose ends need the
+///   raise keeps its edge and that edge's vertices raised, so the read does not delete it.
+///
+/// Each failing trim takes at least one entry out, so the loop runs at most once per entry
+/// and once more.
+fn written_tolerances(
+    k: &Kernel,
+    b: &Brep,
+    unraise: bool,
+) -> Result<(BTreeMap<EdgeId, f64>, BTreeMap<VertexId, f64>)> {
+    let raises = b.trim_cover_raises();
+    if !unraise || !raises.end_checked {
+        return Ok((BTreeMap::new(), BTreeMap::new()));
+    }
+    let mut edges = BTreeMap::new();
+    for (&e, &(before, after)) in &raises.edges {
+        if b.edge(e)?.tolerance.to_bits() == after.to_bits() {
+            edges.insert(e, before);
+        }
+    }
+    let mut vertices = BTreeMap::new();
+    for (&v, &(before, after)) in &raises.vertices {
+        if b.vertex(v)?.tolerance.to_bits() == after.to_bits() {
+            vertices.insert(v, before);
+        }
+    }
+    if edges.is_empty() && vertices.is_empty() {
+        return Ok((edges, vertices));
+    }
+    let mut ends = Vec::new();
+    for e in bl::edges(b, None)? {
+        let vs: Vec<VertexId> = crate::topology::vertex::edge_vertices(b, e)?
+            .into_iter()
+            .flatten()
+            .collect();
+        ends.push((e, vs));
+    }
+    let uses = crate::topology::brep::p2::edgeuses(b, None)?;
+    loop {
+        let edge_tolerance = |e: EdgeId| -> Result<f64> {
+            Ok(match edges.get(&e) {
+                Some(&t) => t,
+                None => b.edge(e)?.tolerance,
+            })
+        };
+        let mut floor: BTreeMap<VertexId, f64> = BTreeMap::new();
+        for (e, vs) in &ends {
+            let t = edge_tolerance(*e)?;
+            for &v in vs {
+                let f = floor.entry(v).or_insert(t);
+                if t > *f {
+                    *f = t;
+                }
+            }
+        }
+        let unraised: BTreeMap<VertexId, f64> = vertices
+            .iter()
+            .filter(|(v, &t)| floor.get(v).is_none_or(|&f| t >= f))
+            .map(|(&v, &t)| (v, t))
+            .collect();
+        let vertex_tolerance = |v: VertexId| -> Result<f64> {
+            Ok(match unraised.get(&v) {
+                Some(&t) => t,
+                None => b.vertex(v)?.tolerance,
+            })
+        };
+        let mut drop_edges = Vec::new();
+        let mut drop_vertices = Vec::new();
+        for &eu in &uses {
+            let Some(e) = eu1::edge(b, eu)? else {
+                continue;
+            };
+            let vs = ends
+                .iter()
+                .find(|(x, _)| *x == e)
+                .map(|(_, vs)| vs.as_slice())
+                .unwrap_or_default();
+            if !edges.contains_key(&e) && !vs.iter().any(|v| unraised.contains_key(v)) {
+                continue;
+            }
+            let kept =
+                bl::check_uv_trim_curve_at(k, b, eu, &edge_tolerance, &vertex_tolerance).is_ok();
+            if !kept && bl::check_uv_trim_curve(k, b, eu).is_ok() {
+                drop_edges.push(e);
+                drop_vertices.extend_from_slice(vs);
+            }
+        }
+        let mut dropped = false;
+        for e in drop_edges {
+            dropped |= edges.remove(&e).is_some();
+        }
+        for v in drop_vertices {
+            dropped |= vertices.remove(&v).is_some();
+        }
+        if !dropped {
+            return Ok((edges, unraised));
+        }
+    }
+}
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or
 /// null).
@@ -1311,11 +1418,12 @@ impl BrepData {
     /// notes); [`SolidError::InvalidInput`] for a vertex loop use without vertex; those
     /// of the topology queries and the geometry copies.
     pub fn from_brep(
+        k: &Kernel,
         b: &Brep,
         env: &FromBrepEnv<'_>,
         all_attributes: &mut Vec<AttributeHandle>,
     ) -> Result<Self> {
-        Self::from_brep_with(b, env, all_attributes, true)
+        Self::from_brep_with(k, b, env, all_attributes, true)
     }
 
     /// [`BrepData::from_brep`], writing a tolerance that a B-rep file read's kept-trim
@@ -1335,45 +1443,13 @@ impl BrepData {
     /// [`crate::topology::api_files::rebuild_native`] rebuilds without the cover and
     /// writes the tolerances as they are.
     pub(crate) fn from_brep_with(
+        k: &Kernel,
         b: &Brep,
         env: &FromBrepEnv<'_>,
         all_attributes: &mut Vec<AttributeHandle>,
         unraise: bool,
     ) -> Result<Self> {
-        let raises = b.trim_cover_raises();
-        let written = |raised: Option<&(f64, f64)>, tolerance: f64| match raised {
-            Some(&(before, after))
-                if unraise && raises.end_checked && after.to_bits() == tolerance.to_bits() =>
-            {
-                before
-            }
-            _ => tolerance,
-        };
-        // A vertex goes back to its tolerance from before the raise only while every
-        // edge at it is written no tighter than that: an edge whose raise no longer
-        // holds is written at its own tolerance, and the vertex stays above it.
-        let mut vertex_floor: BTreeMap<VertexId, f64> = BTreeMap::new();
-        if unraise && raises.end_checked && !raises.vertices.is_empty() {
-            for e in bl::edges(b, None)? {
-                let tolerance = written(raises.edges.get(&e), b.edge(e)?.tolerance);
-                for v in crate::topology::vertex::edge_vertices(b, e)?
-                    .into_iter()
-                    .flatten()
-                {
-                    let floor = vertex_floor.entry(v).or_insert(tolerance);
-                    if tolerance > *floor {
-                        *floor = tolerance;
-                    }
-                }
-            }
-        }
-        let written_vertex = |v: VertexId, tolerance: f64| {
-            let unraised = written(raises.vertices.get(&v), tolerance);
-            match vertex_floor.get(&v) {
-                Some(&floor) if unraised < floor => tolerance,
-                _ => unraised,
-            }
-        };
+        let (written_edges, written_vertices) = written_tolerances(k, b, unraise)?;
         let mut attr_map = BTreeSet::new();
         let mut table = AttributeTable {
             store: env.attributes,
@@ -1425,7 +1501,10 @@ impl BrepData {
             map.insert(EntityRef::Vertex(v), i as u64);
             let vertex = b.vertex(v)?;
             let mut vd = VertexData::zeroed();
-            vd.zone_tol_3d = written_vertex(v, vertex.tolerance);
+            vd.zone_tol_3d = written_vertices
+                .get(&v)
+                .copied()
+                .unwrap_or(vertex.tolerance);
             vd.point = vertex.point;
             vd.topology = topology_data(env, &mut table, EntityRef::Vertex(v));
             bd.vertices.push(vd);
@@ -1654,7 +1733,7 @@ impl BrepData {
                 object: curve.clone_for_evaluation()?,
             });
 
-            ed.zone_tol_3d = written(raises.edges.get(&e), edge_rec.tolerance);
+            ed.zone_tol_3d = written_edges.get(&e).copied().unwrap_or(edge_rec.tolerance);
             ed.interval = edge_rec.interval;
             ed.topology = topology_data(env, &mut table, EntityRef::Edge(e));
             bd.edges.push(ed);
@@ -1732,7 +1811,7 @@ mod tests {
             uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
             surface_key: &|_: FaceId| ObjectKey(0),
         };
-        let e = BrepData::from_brep(&b, &env, &mut Vec::new()).unwrap_err();
+        let e = BrepData::from_brep(&Kernel::default(), &b, &env, &mut Vec::new()).unwrap_err();
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::EdgeWithoutEdgeuses),

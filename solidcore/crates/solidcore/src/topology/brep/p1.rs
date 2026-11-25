@@ -1461,7 +1461,25 @@ fn trim_curve_off_end(at_end: bool, to_vertex: bool, distance: f64, tolerance: f
 /// dereferences null (no edge, curve, mate, vertex use, vertex, face or surface);
 /// those of the evaluations.
 pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
-    let _ = k;
+    check_uv_trim_curve_at(k, b, eu, &|e| edge::tolerance(b, e), &|v| {
+        vertex::tolerance(b, v)
+    })
+}
+
+/// [`check_uv_trim_curve`] with the edge and vertex tolerances given by `edge_tolerance`
+/// and `vertex_tolerance` in place of those `b` holds (not upstream: the `.smb` writer asks
+/// whether a read of what it writes keeps the trim, `topology::brep_data_write`).
+///
+/// # Errors
+///
+/// As [`check_uv_trim_curve`], and those of the two tolerance functions.
+pub(crate) fn check_uv_trim_curve_at(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    edge_tolerance: &dyn Fn(EdgeId) -> Result<f64>,
+    vertex_tolerance: &dyn Fn(VertexId) -> Result<f64>,
+) -> Result<()> {
     let Some(trim_crv) = eu1::uv_trim_curve_pointer(b, eu)? else {
         return Ok(());
     };
@@ -1505,8 +1523,8 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     let face_3d_start = surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y))?;
 
     let face_tol = face2::tolerance(b, face)?;
-    let edge_tol = edge::tolerance(b, e)?;
-    let mut vrtx_tol = vertex::tolerance(b, start_vtx)?;
+    let edge_tol = edge_tolerance(e)?;
+    let mut vrtx_tol = vertex_tolerance(start_vtx)?;
 
     let dist_face_vrtx_start = face_3d_start.distance(vrtx_3d_start);
     if dist_face_vrtx_start > face_tol + vrtx_tol {
@@ -1536,7 +1554,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
     let face_3d_end = surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y))?;
-    vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
+    vrtx_tol = vertex_tolerance(end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
     if dist_face_vrtx_end > face_tol + vrtx_tol {

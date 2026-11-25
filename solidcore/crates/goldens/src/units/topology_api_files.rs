@@ -492,7 +492,7 @@ fn write_bytes(
         return api_files::write_brep_to_file(k, Some(b), &env, file_type == FileType::Ascii);
     }
     let mut all = Vec::new();
-    let mut data = BrepData::from_brep(b, &env, &mut all)?;
+    let mut data = BrepData::from_brep(k, b, &env, &mut all)?;
     data.write_to_file_with_nurbs(k, file_type)
 }
 
