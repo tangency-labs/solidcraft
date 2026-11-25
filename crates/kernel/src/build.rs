@@ -5,6 +5,8 @@
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
+pub use solidcore_ops::prism::{symmetric_offset_intervals, symmetric_offset_probe_points};
+
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
@@ -1025,7 +1027,7 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
-/// [`loft`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
@@ -1046,6 +1048,9 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
             pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         }
         return crate::smlib_sweeps::loft(&pieces, first);
+    }
+    if rails.len() > 2 {
+        return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {

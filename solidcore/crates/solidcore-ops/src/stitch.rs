@@ -348,8 +348,8 @@ fn close_onto_shared_edges(
 /// contract: faces left, and a solid in gives a solid.
 ///
 /// # Errors
-/// [`Error::Argument`] for an index past the edges; [`Error::Empty`], [`Error::NotSolid`]; the
-/// kernel's status.
+/// [`Error::Argument`] for an index past the edges; [`Error::Empty`], [`Error::NotSolidBecause`];
+/// the kernel's status.
 // The body is consumed: its B-rep is taken out under the kernel's lock.
 #[allow(clippy::needless_pass_by_value)]
 pub fn merge_faces(body: Body, order: &Order, keep: &[usize]) -> Result<Body> {

@@ -4,7 +4,26 @@
 //!
 //! The `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
-//! those rows apart from the cover.
+//! those rows apart from the cover. WR-732's retirement (#18934) moves
+//! `topology.brep_cutting`'s `gen0050` apart from the cover (edge 8 from 1.03e-3 to 1.48e-3
+//! and its vertices with it, vertex 32 from 5.9e-4 to 1.19e-3), so its entry is deleted. Those
+//! raises are measured, not certified: `certify::trim_tolerance` has no row for this case
+//! (edge 8's trim bound is not enclosed), and its main digest is this branch's file
+//! (`trim_tolerance_main.tsv`), which records the change without proving it.
+//!
+//! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
+//! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
+//! the main hashes this list had for them.
+//!
+//! The `blend.fillet_executive_p3` hashes are of those lines without the
+//! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
+//! value is the line's.
+//!
+//! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
+//! the drop's tolerances is left out) moves the six `sphere_diff_3cylinders` rows here
+//! (`e2-r0.1`, `e5-r0.1`, `e5-r0.5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in their
+//! `mass_properties` only, so their hashes are of the put-back run with that rule;
+//! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -26,137 +45,42 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "source-file-corner_box-edge12",
-        0x8a2128acaedbe455,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e0-r0.5",
-        0x2b3eba4d87b2088b,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e10-r0.5",
-        0x069f4b055f4dce56,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e13-r0.5",
-        0x377572a24e3cbb49,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-degenerate-bottle-e2-r0.5",
-        0xbe487ce95cacb05f,
+        0x8ed04f14a06fc3a2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-degenerate-caps_coons-e5-r0.5",
-        0x4ac78ecf10ab2d13,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e16-r0.5",
-        0xdc5057a5f4a8c951,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e19-r0.5",
-        0x785803ebcbada559,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e27-r0.5",
-        0x204c4332528d0932,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e27-r2.0",
-        0xe461d7063a8b188b,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e29-r2.0",
-        0xad4cf00e6aa49cde,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e30-r0.1",
-        0xfd4b4c41b15a0a04,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e30-r2.0",
-        0x863d33c6d0e4d8f3,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e32-r0.1",
-        0xad919117208d863d,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e32-r2.0",
-        0x087acd20a7add494,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e4-r0.5",
-        0x5292049c78d818df,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e6-r0.5",
-        0x0e6b8563d999c792,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e7-r0.1",
-        0x2ab9d1fc119e5997,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e8-r0.5",
-        0x5bbdc75f38f31b45,
+        0x3373479adc5a7a08,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x6e65691addf04e65,
+        0xa058e2b81484fdde,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x52deff2ba9ad2924,
+        0x96a1c6ee8df74e77,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xe3da2d131dd1ffe0,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "sweep4-bottle-e29-r0.1",
-        0xd146cdf57ddda186,
+        0xe603baa1465a7013,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0xe1177d70bd81d1ea,
+        0x1f3a461f12a7ab77,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0xba147c5f32b51254,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "sweep5-bottle-e29-r1.0",
-        0x070e04ad5b72beb7,
+        0x5f0ec1d272b7bb2f,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0x8d531e5297b35527,
+        0x579757a8a8e473fa,
     ),
     (
         "blend.fillet_removal",
@@ -258,7 +182,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "nurb_fillet_face9",
         0xa31f24e121d64dbc,
     ),
-    ("corpus.parity", "Fillet__bolt.smb", 0x974b48b786170bae),
     (
         "corpus.parity",
         "Fillet__sphere_diff_3cylinders.smb",
@@ -357,7 +280,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "write_bytes_file_revolution_binary",
         0xa150d2288f547d54,
     ),
-    ("topology.brep_cutting", "gen0050", 0x44c8382ce6a9c9a7),
     ("topology.brep_cutting", "gen0068", 0xb157bdeddcc948f6),
     (
         "topology.brep_local_operation",
@@ -564,12 +486,12 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu0",
-        0x5f9c0efd55f2a7ee,
+        0x404e5286ab206093,
     ),
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu18",
-        0xcef4f4be4b337531,
+        0x5836f9ad361c74ac,
     ),
     (
         "topology.edgeuse_p3",
@@ -614,7 +536,7 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "topology.edgeuse_p3",
         "own_reader_sphere_diff_3cylinders_create_eu9",
-        0xcd26483f1ade8591,
+        0x22c0da2401323f52,
     ),
     (
         "topology.edgeuse_p3",

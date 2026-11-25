@@ -10,10 +10,9 @@
 //! | `rolled_rail_turns_back`, `rail_passes_side_edge_end` (crate) | none (solidcore-native) |
 //!
 //! Deviations: the solver is the caller's concrete solver object instead of a
-//! `GetSolverType` cast. A failed variable-radius law evaluation yields its status
-//! code as the radius, as upstream's `SER` inside the `double`
-//! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee and a law refused
-//! past its curve, #2706, still propagate). The gap checks of a multi-neighbour end
+//! `GetSolverType` cast. A failed variable-radius law evaluation is returned as its
+//! error, where upstream's `SER` inside the `double` `SmVariableRadiusFS::GetFilletRadius`
+//! yields its status code (1001, 1007) as the radius (#21908). The gap checks of a multi-neighbour end
 //! face (vertex and side-edge geometry, extended-surface coincidence), the last statements of
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
@@ -26,6 +25,7 @@
 
 use std::collections::BTreeMap;
 
+use super::shape_not_built;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverObject};
@@ -36,6 +36,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
 use crate::blend::fillet_tangent_rollover::planar_section;
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -147,7 +148,8 @@ fn edge_leaves_in_face(
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); [`SolidError::Unported`] from the variable-radius law evaluation.
+/// dereferences them); those of the variable-radius law evaluation
+/// ([`variable_radius_at_vertex`]).
 pub fn find_surface_extension_dist_at_corner(
     target: &Brep,
     fillet_edgeuse: EdgeuseId,
@@ -183,14 +185,13 @@ pub fn find_surface_extension_dist_at_corner(
 
 /// `SmVariableRadiusFS::GetFilletRadius` at the corner end of `fillet_edgeuse`: the law's
 /// radius at the end of the filleted edge that lies on `corner_vertex`, by
-/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw): a failed
-/// law evaluation yields its status code as the radius.
+/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw).
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); those [`FilletLaw::fillet_radius`] propagates: an unported callee,
-/// and the refusal of a law continued past its curve to an unusable radius (the corner may
-/// have narrowed the law to its setback, so the edge's end can be past the law's curve).
+/// dereferences them); those of [`FilletLaw::fillet_radius`], among them the refusal of a
+/// law continued past its curve to an unusable radius (the corner may have narrowed the
+/// law to its setback, so the edge's end can be past the law's curve).
 ///
 /// [`FilletLaw::fillet_radius`]: crate::blend::fillet_executive::p1::FilletLaw::fillet_radius
 pub fn variable_radius_at_vertex(
@@ -1132,14 +1133,14 @@ impl FilletCorner {
                     extend_edge = eu1::edge(target, pick)?;
                     other_side_edgeuse = Some(other);
                 } else {
-                    // Invalid brep topology
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the brep's topology at the corner is not valid",
-                    ));
+                    // Invalid brep topology (upstream): at most three edges, whose side edges
+                    // share no face, as where an edge meeting the vertex twice is in the ring
+                    // once
+                    return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
                 }
             }
         }
+        self.end_face = end_face;
         for &(piece, face) in &ribs {
             pseudo
                 .fillet_edge_mut(piece)?

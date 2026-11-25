@@ -1,23 +1,16 @@
 //! Operations on bodies: booleans, placements and splits by a plane, through SMLib. Bodies apart
 //! from each other join without any intersection work, their records side by side.
 
-use serde::{Deserialize, Serialize};
+use crate::placement::Rigid;
 use solidcore_record::Vec3;
 use solidcore_record::brep::part;
-use solidcraft_geom::brep::placement::Rigid;
 use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{BodyHistory, History};
 use crate::{KernelError, Result, guard};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BoolOp {
-    Union,
-    Cut,
-    Intersect,
-}
+pub use solidcraft_kernel_api::BoolOp;
 
 /// Boolean of two bodies in SMLib. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. A result SMLib's check refuses is an error.
@@ -205,17 +198,18 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
         return placed.with_history(history, &[body]);
     }
     let sources = body.transformed_sources(m)?;
+    let splits = body.transformed_split_lines(&m);
     // A rigid motion the record is sure to move exactly by: moved when first read, so a part
     // placed many times keeps one record until a placement's own geometry is needed.
     if let Some(motion) = Rigid::of_matrix(&m)
         && let Some(lazy) = body.moved_lazily(motion, m)
     {
-        return Ok(lazy.with_face_sources(sources).inherit_regularization_protection(body));
+        return Ok(lazy.with_face_sources(sources).with_split_lines(splits).inherit_regularization_protection(body));
     }
     let exact = match Rigid::of_matrix(&m) {
         // (a body with a blend by its definition is moved by the kernel, the definition with it)
-        Some(motion) => solidcraft_geom::brep::placement::moved(body.record(), &motion),
-        None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
+        Some(motion) => crate::placement::moved(body.record(), &motion),
+        None => crate::placement::mapped(body.record(), &m),
     };
     let (placed, sources, paint) = match exact {
         Some(record) => {
@@ -246,7 +240,7 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
             (placed, sources, paint)
         }
     };
-    Ok(placed.with_color(body.color()).with_paint(paint).with_face_sources(sources).inherit_regularization_protection(body))
+    Ok(placed.with_color(body.color()).with_paint(paint).with_face_sources(sources).with_split_lines(splits).inherit_regularization_protection(body))
 }
 
 /// The face of the operand that face `f` of a moved body is, by the move's history.

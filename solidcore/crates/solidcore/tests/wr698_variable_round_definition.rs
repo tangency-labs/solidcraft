@@ -20,6 +20,7 @@ use solidcore::blend::fillet_executive::p1::FilletLaw;
 use solidcore::blend::fillet_section::section::{ArcSection, GnLawRound, GnSectionFsg};
 use solidcore::blend::fillet_solver::p1::{FilletSolverType, FilletSurfaceGenerator};
 use solidcore::blend::fillet_standard_solver::p2::{law_in_parameter, CircleBall, LawBall};
+use solidcore::error::{blend::BlendFailure, Reason, Result};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::Point3;
 use solidcore::intersect::surface_intersector::p1::TsectPnt;
@@ -160,40 +161,41 @@ struct Round {
 }
 
 /// `Build` with the law, as the circle generator calls it.
-fn build(k: &Kernel) -> Round {
+fn build_with_law(k: &Kernel, law: &BSplineCurve, pts: &[TsectPnt]) -> Result<Round> {
     let [mut r1, mut r2, mut w1, mut w2, mut c] = inputs();
     let (a, b) = (plane_y0(), plane_z0());
-    let (lead, law) = (leader(), law_curve());
-    let pts = points();
+    let lead = leader();
     let mut g = GnSectionFsg::circle(ArcSection {
         approximate_arcs: false,
         ..ArcSection::default()
     });
     let lr = GnLawRound {
         leader: &lead,
-        law: &law,
-        points: &pts,
+        law,
+        points: pts,
         range: None,
     };
-    let s = g
-        .build_given_ball(
-            k,
-            &mut c,
-            [&mut r1, &mut r2],
-            TOL,
-            [&a, &b],
-            [&mut w1, &mut w2],
-            0.0,
-            Some(&lr),
-        )
-        .unwrap();
-    Round {
+    let s = g.build_given_ball(
+        k,
+        &mut c,
+        [&mut r1, &mut r2],
+        TOL,
+        [&a, &b],
+        [&mut w1, &mut w2],
+        0.0,
+        Some(&lr),
+    )?;
+    Ok(Round {
         surface: s,
         bound: g.certified_bound,
         spans: g.certified_spans,
         rail1: r1,
         centre: c,
-    }
+    })
+}
+
+fn build(k: &Kernel) -> Round {
+    build_with_law(k, &law_curve(), &points()).unwrap()
 }
 
 /// How far `p` is off the touch circle at t: (|p - m| - r, (p - m) . m' + r r').
@@ -203,6 +205,30 @@ fn off_circle(t: f64, p: Point3) -> (f64, f64) {
     let dm = Point3::new(1.0, rd, rd);
     let d = p - m;
     (d.length() - rv, d.dot(dm) + rv * rd)
+}
+
+#[test]
+fn a_radius_law_reaching_zero_at_the_last_station_reports_its_radius() {
+    let law = canonical(
+        3,
+        1,
+        &[Point3::new(LAW[0], 0.0, 0.0), Point3::default()],
+        &[2, 2],
+        &[0.0, L],
+    );
+    let pts = points();
+    let ends = [pts[0].clone(), pts[STATIONS].clone()];
+    let error = build_with_law(&kernel(), &law, &ends)
+        .err()
+        .expect("a zero radius is an error even when the rails are being checked");
+    assert!(
+        matches!(
+            error.failure().map(|f| &f.reason),
+            Some(Reason::Blend(BlendFailure::RadiusLawNotPositive { s, radius }))
+                if *s == L && *radius == 0.0
+        ),
+        "{error}"
+    );
 }
 
 #[test]

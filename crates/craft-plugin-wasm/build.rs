@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let namespace = namespace.replace('-', "_");
     let name = name.replace('-', "_");
     let output = format!(
-        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, log, types::{{self, PluginError}}}};\n\
+        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, storage, user_storage, types::{{self, PluginError}}}};\n\
          macro_rules! call_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("aliases.rs"), output)?;
@@ -35,6 +35,91 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    let importer_storage = format!(
+        "mod importer_storage_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"importer-plugin-with-storage\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/source\": super::importer_bindings::{namespace}::{name}::source,\n\
+                     \"{package_name}/design\": super::importer_bindings::{namespace}::{name}::design,\n\
+                     \"{package_name}/evaluate\": super::importer_bindings::{namespace}::{name}::evaluate,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
+                 }},\n\
+             }});\n\
+         }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer_storage.rs"), importer_storage)?;
+    let dialog = format!(
+        "mod importer_dialog_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"importer-dialog-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/source\": super::importer_bindings::{namespace}::{name}::source,\n\
+                     \"{package_name}/design\": super::importer_bindings::{namespace}::{name}::design,\n\
+                     \"{package_name}/evaluate\": super::importer_bindings::{namespace}::{name}::evaluate,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         macro_rules! call_dialog {{ ($guest:expr, $store:expr, $entry:expr, $context:expr) => {{ $guest.{namespace}_{name}_dialog_provider().call_update_fields($store, $entry, $context) }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("dialog.rs"), dialog)?;
+    let folders = format!(
+        "mod folder_bindings {{ wasmtime::component::bindgen!({{ path: \"../craft-plugin/wit\", world: \"folder-reader\", with: {{ \"{package_name}/types\": super::bindings::{namespace}::{name}::types }} }}); }}\n\
+         use folder_bindings::{namespace}::{name}::folders;\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("folders.rs"), folders)?;
+    // An exporter reads the design through the command world's `commands`, so it shares that
+    // world's host state too.
+    let exporter = format!(
+        "mod exporter_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"exporter-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/commands\": super::bindings::{namespace}::{name}::commands,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         macro_rules! call_export {{ ($guest:expr, $store:expr, $slot:expr, $options:expr) => {{ $guest.{namespace}_{name}_formats_provider().call_export_file($store, $slot, $options) }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("exporter.rs"), exporter)?;
+    let panel = format!(
+        "mod panel_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"panel-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/commands\": super::bindings::{namespace}::{name}::commands,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/files\": super::bindings::{namespace}::{name}::files,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/forms\": super::bindings::{namespace}::{name}::forms,\n\
+                     \"{package_name}/design-state\": super::bindings::{namespace}::{name}::design_state,\n\
+                     \"{package_name}/storage\": super::bindings::{namespace}::{name}::storage,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
+                 }},\n\
+             }});\n\
+         }}\n\
+         use panel_bindings::{namespace}::{name}::ui as panel_ui;\n\
+         macro_rules! panel_provider {{ ($guest:expr) => {{ $guest.{namespace}_{name}_ui_provider() }}; }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("panels.rs"), panel)?;
     // Keep the shipped 0.1 WIT frozen. Only the optional export world is additive, generated
     // against its original error type so legacy command/importer bindings remain unchanged.
     let older = "../craft-plugin/wit-0.1/plugin.wit";

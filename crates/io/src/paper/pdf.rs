@@ -17,8 +17,10 @@
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
 //!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
 //!   fills black, even-odd (`f*`). Black on no background, as SVG.
-//! - **Text** is its glyph outlines, filled nonzero (`f`) as SVG fills them, so it looks the same
-//!   without the font and never reflows.
+//! - **Text** is real text by default ([`PdfText::Text`], `text.rs`): each run is set with `Tj` in an
+//!   embedded Type 3 font made of its glyph outlines, with a `ToUnicode` map, so it looks the same,
+//!   never reflows, and a viewer selects, searches and extracts it. With [`PdfText::Outlines`] it is
+//!   its glyph outlines, filled nonzero (`f`) as SVG fills them, and carries no text.
 //! - **Pictures** are image XObjects: their own pixel grid ([`Picture::grid`]) at the resolution the
 //!   caller gives, cropped to the pixels that show, RGB deflated with their alpha as a soft mask
 //!   (left out when every pixel is opaque), placed on the lines' grid so they register, an opacity
@@ -37,6 +39,7 @@
 //!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
 //!   failure is an error. The limit is for uncompressed content, not total export memory.
 
+use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_2;
 use std::io::Write as _;
 
@@ -51,10 +54,20 @@ use solidcraft_geom::paper::{
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
 use solidcraft_geom::prelude::*;
 
+use self::text::{PageFonts, RunText, TextBook};
 use super::TEN_NANOMETRES;
 use super::flatten::{seg, vec};
 use super::png::{BAND_BYTES, PICTURE_DPI, ask};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
+
+mod text;
+
+/// The control points of the cubic that is the parabola from `a` to `b` with control point `c`:
+/// two thirds of the way from each end to `c`. The one place this is worked out, for the lines and
+/// for glyph outlines (`text.rs`).
+fn quadratic_controls(a: Vec2, c: Vec2, b: Vec2) -> (Vec2, Vec2) {
+    (a + (c - a) * (2.0 / 3.0), b + (c - b) * (2.0 / 3.0))
+}
 
 /// How far an arc's cubics may stray from the arc, rounding onto the grid included.
 pub const ARC_TOLERANCE_MM: f64 = 1e-4;
@@ -95,11 +108,24 @@ pub struct PdfOptions {
     /// Ask a viewer to print at actual size, never shrunk to fit (`/PrintScaling /None`; default
     /// false).
     pub actual_size: bool,
+    /// How text is written (default real text).
+    pub text: PdfText,
+}
+
+/// How a sheet PDF carries its text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PdfText {
+    /// Real text in an embedded font, with a `ToUnicode` map: it looks as the outlines do and can be
+    /// selected, searched and copied.
+    #[default]
+    Text,
+    /// Glyph outlines only, as before: the file holds no text.
+    Outlines,
 }
 
 impl Default for PdfOptions {
     fn default() -> Self {
-        Self { title: None, output_time: None, layers: true, actual_size: false }
+        Self { title: None, output_time: None, layers: true, actual_size: false, text: PdfText::Text }
     }
 }
 
@@ -197,6 +223,7 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
     let count = i32::try_from(pages.len()).map_err(|_| IoError::Invalid("too many PDF pages".into()))?;
     pdf.pages(tree).kids(pages.iter().map(|(page, _)| *page)).count(count);
     let (mut used, mut reports) = (0usize, Vec::with_capacity(scenes.len()));
+    let mut book = TextBook::default();
     for (index, ((scene, page), (page_id, contents))) in scenes.iter().zip(sizes).zip(pages).enumerate() {
         // This page alone on the grid, written, then dropped. The grid keeps one group for each of
         // the scene's, in order, so the scene says which of them are painted.
@@ -206,7 +233,20 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
         }
         let groups = scene.groups().iter().zip(&on.groups).filter(|(group, _)| painted(group, draws_pictures)).map(|(_, on)| on);
         let source = pictures.and_then(|p| p.pages.get(index).map(|page| (*page, p.dpi)));
-        let (content, images) = page_content(groups, options.layers.then_some(layers.as_slice()), source, &mut refs, MAX_DRAWING_BYTES - used)?;
+        let mut page_fonts = PageFonts::new();
+        let mut runs = BTreeMap::new();
+        if options.text == PdfText::Text {
+            let painted_groups = scene.groups().iter().filter(|group| painted(group, draws_pictures));
+            for (gi, group) in painted_groups.enumerate() {
+                for (ii, item) in group.items.iter().enumerate() {
+                    let Item::Text(run) = item else { continue };
+                    let font = scene.font(run).ok_or_else(|| IoError::Invalid("the sheet PDF: a run's font is not in the scene".into()))?;
+                    runs.insert((gi, ii), book.set(&mut refs, font, run, &mut page_fonts)?);
+                }
+            }
+        }
+        let (content, images) =
+            page_content(groups, options.layers.then_some(layers.as_slice()), source, Some(&runs), &mut refs, MAX_DRAWING_BYTES - used)?;
         used += content.len() + images.iter().map(Image::bytes).sum::<usize>();
         let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
         let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
@@ -222,6 +262,14 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
                 let mut properties = resources.insert(Name(b"Properties")).dict();
                 for layer in on_page {
                     properties.pair(Name(layer.tag.as_bytes()), layer.reference);
+                }
+            }
+            if !page_fonts.is_empty() {
+                let mut fonts = resources.fonts();
+                for at in page_fonts.keys() {
+                    if let Some((name, reference)) = book.font(*at) {
+                        fonts.pair(Name(name.as_bytes()), reference);
+                    }
                 }
             }
             if !images.is_empty() {
@@ -269,6 +317,7 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
         doc.creation_date(date).modified_date(date);
     }
     drop(doc);
+    book.write(&mut pdf, &mut refs)?;
     for layer in &layers {
         let mut group = pdf.indirect(layer.reference).dict();
         group.pair(Name(b"Type"), Name(b"OCG"));
@@ -365,13 +414,13 @@ fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> 
     // Numbered as a one-page document's, from 6.
     let mut refs = Refs(6);
     let layers = collect_layers(groups.iter().map(|group| group.kind), &mut refs)?;
-    Ok(page_content(groups, Some(&layers), None, &mut refs, max_bytes)?.0)
+    Ok(page_content(groups, Some(&layers), None, None, &mut refs, max_bytes)?.0)
 }
 
 /// [`page_content`] without pictures, for the tests.
 #[cfg(test)]
 fn content_with_limit_and_layers<'a>(groups: impl IntoIterator<Item = &'a GridGroup>, layers: Option<&[Layer]>, max_bytes: usize) -> Result<String> {
-    Ok(page_content(groups, layers, None, &mut Refs(6), max_bytes)?.0)
+    Ok(page_content(groups, layers, None, None, &mut Refs(6), max_bytes)?.0)
 }
 
 /// The content of a page's painted groups ([`painted`]), in paint order, and the pictures it
@@ -380,6 +429,7 @@ fn page_content<'a>(
     groups: impl IntoIterator<Item = &'a GridGroup>,
     layers: Option<&[Layer]>,
     pictures: Option<(&dyn Pictures, f64)>,
+    runs: Option<&BTreeMap<(usize, usize), RunText>>,
     refs: &mut Refs,
     max_bytes: usize,
 ) -> Result<(String, Vec<Image>)> {
@@ -387,7 +437,7 @@ fn page_content<'a>(
     let mut images: Vec<Image> = Vec::new();
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
     let mut active_kind = None;
-    for group in groups {
+    for (gi, group) in groups.into_iter().enumerate() {
         if let Some(layers) = layers {
             let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
             if active_kind != Some(group.kind) {
@@ -423,12 +473,18 @@ fn page_content<'a>(
                     }
                     w.append("f*\n")?;
                 }
-                GridItem::Text { loops, .. } => {
-                    for l in loops {
-                        w.path(l)?;
-                        w.append("h\n")?;
+                GridItem::Text { item, loops } => {
+                    let set = runs.and_then(|runs| runs.get(&(gi, *item)));
+                    if set.is_none_or(|set| set.outlines) {
+                        for l in loops {
+                            w.path(l)?;
+                            w.append("h\n")?;
+                        }
+                        w.append("f\n")?;
                     }
-                    w.append("f\n")?;
+                    if let Some(set) = set {
+                        w.append(&set.content)?;
+                    }
                 }
                 GridItem::Picture { picture, clip, visible } => {
                     let Some((source, dpi)) = pictures else { continue };
@@ -673,9 +729,9 @@ impl Content {
                 }
                 // A parabola is the cubic with its control points two thirds of the way to `c`.
                 Piece::Quadratic { c, to } => {
-                    let (a, c, b) = (vec(at), vec(c), vec(to));
-                    self.near(a + (c - a) * (2.0 / 3.0))?;
-                    self.near(b + (c - b) * (2.0 / 3.0))?;
+                    let (c1, c2) = quadratic_controls(vec(at), vec(c), vec(to));
+                    self.near(c1)?;
+                    self.near(c2)?;
                     self.point(to)?;
                     self.append("c\n")?;
                 }
