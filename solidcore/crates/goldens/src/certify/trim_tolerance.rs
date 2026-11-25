@@ -106,7 +106,9 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `refine_cci_f7_plane_b_uv` edges 26 and 47, each a UV line on a B-spline face) are
 ///   certified by the any-surface line enclosure lowered edges use since #21301. The class is
 ///   read by `kept_trim_rows` for its rows' kept trims (`heal.heal_data_p3`'s two
-///   `r0.02_0.03` `s60` cones, edges 1 and 5, tolerance 1e-5), [`not_enclosed_entries`];
+///   `r0.02_0.03` `s60` cones, edges 1 and 5, tolerance 1e-5) and by
+///   `operand_trim_rows`' `local_operation_bodies_are_certified` for its cases' trims (none
+///   now), [`not_enclosed_entries`];
 ///
 /// The test requires the uncertified edges to be exactly these, so an entry that becomes
 /// certified (or a new failure) shows up.

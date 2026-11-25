@@ -36,6 +36,11 @@
 //!   that face alone.
 //!
 //! A `farther` move fails the test.
+//!
+//! `topology.brep_local_operation`'s bodies carry the whole-body part alone, on the current
+//! kernel with no moved value (`local_operation::local_operation_bodies_are_certified`):
+//! every UV trim proved within its edge's tolerance, and level 2 nothing but the input
+//! model's own lines.
 //! Run: `cargo test --profile goldens -p goldens --lib operand_trim_rows -- --nocapture`.
 
 use solidcore::blend::fillet_section::certificate::curve_derivs_over;
@@ -868,7 +873,9 @@ pub(crate) fn certify_body(
 }
 
 mod local_operation {
-    use crate::units::topology_brep_local_operation::{result_breps, Runner};
+    use solidcore::kernel::Kernel;
+
+    use crate::units::topology_brep_local_operation::{input_brep, result_breps, Runner};
     use crate::UnitDiff;
 
     /// A trim off its edge's tolerance on an edge no moved value touches fails (#19318).
@@ -902,6 +909,198 @@ mod local_operation {
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
         super::certify_body("gen0002", &out, "", b, Some(&mut raw), &[], &[], true);
     }
+
+    /// The `topology.brep_local_operation` cases whose bodies carry a whole-body trim
+    /// certificate ([`local_operation_bodies_are_certified`]).
+    const CASES: [&str; 64] = [
+        "attributed_box_face0_in",
+        "attributed_box_face0_out",
+        "attributed_box_face1_out",
+        "attributed_box_face2_out",
+        "attributed_box_face3_in",
+        "attributed_box_face4_out",
+        "attributed_box_face5_tilt",
+        "box_face0_in",
+        "box_face0_out",
+        "box_face1_out",
+        "box_face2_out",
+        "box_face3_in",
+        "box_face4_out",
+        "box_face5_tilt",
+        "fc0000",
+        "fc0006",
+        "fc0008",
+        "fc0025",
+        "gen0000",
+        "gen0002",
+        "gen0003",
+        "gen0004",
+        "gen0006",
+        "gen0009",
+        "gen0011",
+        "gen0016",
+        "gen0021",
+        "gen0025",
+        "gen0026",
+        "gen0031",
+        "gen0033",
+        "gen0039",
+        "gen0040",
+        "gen0041",
+        "gen0042",
+        "gen0043",
+        "gen0047",
+        "gen0048",
+        "gen0050",
+        "gen0051",
+        "gen0052",
+        "gen0054",
+        "gen0055",
+        "gen0057",
+        "gen0058",
+        "gen0059",
+        "gen0061",
+        "gen0065",
+        "gen0067",
+        "gen0068",
+        "gen0069",
+        "gen0070",
+        "gen0071",
+        "gen0072",
+        "gen0074",
+        "gen0076",
+        "gen0077",
+        "gen0079",
+        "gen0080",
+        "gen0081",
+        "gen0082",
+        "gen0087",
+        "gen0092",
+        "gen0095",
+    ];
+
+    /// Every body [`CASES`] write, on the current kernel: every UV trim is proved within its
+    /// edge's current tolerance, by the kernel's bound
+    /// ([`crate::certify::trim_tolerance::trim_bounds_any_surface`]) or, where that bound is
+    /// over the tolerance, by the mean-value certifier
+    /// ([`crate::trims_on_edges::certify_edgeuse`]), each such trim counted. A trim proved by
+    /// neither is accepted only where its edge is a `not-enclosed` entry of
+    /// `certify/trim_tolerance_open.tsv` (tangency-labs/solidcraft#21987), and every such
+    /// entry of these cases must be reached. The body then passes [`super::certify_body`]
+    /// with no moved value: every trim's certificate holds, and its `check_brep` level 2
+    /// reports no line but the input model's own, figures and all, before the edit
+    /// ([`INPUT_LINES`]).
+    #[test]
+    fn local_operation_bodies_are_certified() {
+        let k = Kernel::default();
+        let unit = Runner.id();
+        let open: std::collections::BTreeSet<(String, String, usize, usize)> =
+            crate::certify::trim_tolerance::not_enclosed_entries()
+                .into_iter()
+                .filter(|(u, c, ..)| u == unit && CASES.contains(&c.as_str()))
+                .collect();
+        let mut open_seen = std::collections::BTreeSet::new();
+        let mut failures = Vec::new();
+        let mut fallback = Vec::new();
+        let mut inputs_with_lines = Vec::new();
+        let (mut bodies, mut trims, mut by_kernel, mut open_trims) = (0, 0, 0, 0);
+        for name in CASES {
+            let case = crate::case::regression_case(&Runner, name);
+            crate::certify::watch_written();
+            let out = Runner.run_rust(&case);
+            let written = crate::certify::take_written();
+            let out = out.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(!written.is_empty(), "{name}: no body written");
+            // the input model's own level 2 lines, figures and all, before the edit
+            let mut read = input_brep(&case).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let input = super::validation::soundness(&mut Kernel::default(), &mut read)
+                .unwrap()
+                .check
+                .lines();
+            if !input.is_empty() {
+                inputs_with_lines.push(format!("{name} ({})", input.len()));
+            }
+            for (bi, mut b) in written.into_iter().enumerate() {
+                bodies += 1;
+                let mut body_open = false;
+                for e in solidcore::topology::brep::p1::edges(&b, None).expect("edges") {
+                    let tol = b.edge(e).expect("edge").tolerance;
+                    let key = (unit.to_string(), name.to_string(), bi, e.index() as usize);
+                    for (eu, bound) in
+                        crate::certify::trim_tolerance::trim_bounds_any_surface(&k, &b, e)
+                    {
+                        trims += 1;
+                        let mean_value = match bound {
+                            Some(x) if x > tol => {
+                                crate::trims_on_edges::certify_edgeuse(&k, &b, eu, tol / 8.0)
+                                    .ok()
+                                    .filter(crate::trims_on_edges::TrimCertificate::holds)
+                            }
+                            _ => None,
+                        };
+                        match (bound, mean_value) {
+                            (Some(x), None) if x <= tol => by_kernel += 1,
+                            (Some(x), Some(c)) => fallback.push(format!(
+                                "{name} body {bi} edge {} use {}: kernel B {x:e} over {tol:e}; \
+                                 proved {:e} by trims_on_edges::certify_edgeuse",
+                                e.index(),
+                                eu.index(),
+                                c.bound
+                            )),
+                            (None, _) if open.contains(&key) => {
+                                open_trims += 1;
+                                body_open = true;
+                                open_seen.insert(key.clone());
+                            }
+                            (x, _) => failures.push(format!(
+                                "{name} body {bi} edge {} use {}: B {x:?} over {tol:e}",
+                                e.index(),
+                                eu.index()
+                            )),
+                        }
+                    }
+                }
+                if !body_open {
+                    super::certify_body(name, &out, "", &mut b, None, &input, &[], false);
+                }
+            }
+        }
+        eprintln!(
+            "local_operation_bodies_are_certified: {} cases, {bodies} bodies, {trims} trims: \
+             {by_kernel} by the kernel's bound, {} by the mean-value certifier, {open_trims} \
+             open; inputs with level 2 lines of their own: {inputs_with_lines:?}; by the \
+             mean-value certifier:\n{}",
+            CASES.len(),
+            fallback.len(),
+            fallback.join("\n")
+        );
+        assert!(
+            failures.is_empty(),
+            "{} failures:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+        assert_eq!(open_seen, open, "not-enclosed entries not reached");
+        assert_eq!(bodies, CASES.len(), "one body per case");
+        assert_eq!(
+            fallback.len(),
+            MEAN_VALUE_CERTIFIED,
+            "trims certified by the mean-value certifier, not the kernel's bound (#22037)"
+        );
+        assert_eq!(inputs_with_lines, INPUT_LINES, "inputs with level 2 lines");
+    }
+
+    /// The trims of [`CASES`]' bodies whose kernel bound is over their edge's tolerance and
+    /// which the mean-value certifier proves instead (#22037): edge 89 of the four `fc`
+    /// cases (bound 6.4e-3, proved 9.0e-7, tolerance 1e-5), and two each of `gen0000`,
+    /// `gen0031`, `gen0041` and `gen0070` (bounds 8.5e-4 to 1.9e-2, proved at most 2.6e-6,
+    /// tolerances 1e-5 and 2e-5). A change in the kernel's enclosure shows here.
+    const MEAN_VALUE_CERTIFIED: usize = 12;
+
+    /// The cases whose input model's `check_brep` level 2 reports lines of its own, with
+    /// their count: `Solids/nurb_fillet.smb`'s B-spline surface discontinuity across a knot
+    /// and three curve kinks at interior knots, which its four `fc` bodies keep.
+    const INPUT_LINES: [&str; 4] = ["fc0000 (4)", "fc0006 (4)", "fc0008 (4)", "fc0025 (4)"];
 }
 
 /// The `blend.feature_executive` rows the copy moves (6: the four `extrusion.smb` rows move

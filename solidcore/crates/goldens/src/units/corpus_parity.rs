@@ -787,8 +787,9 @@ mod tests {
         for key in ["area", "rt_area"] {
             let v = out.values[key][0];
             let off = (v - e.lo).abs().max((e.hi - v).abs());
+            // (an infinite `v` would make both sides infinite)
             assert!(
-                off <= ACCURACY * v,
+                v.is_finite() && off <= ACCURACY * v,
                 "{CASE}: {key} {v} is {off:e} from the enclosure [{}, {}]",
                 e.lo,
                 e.hi

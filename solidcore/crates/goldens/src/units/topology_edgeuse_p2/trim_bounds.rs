@@ -277,7 +277,8 @@ fn encoding(k: &Kernel, c: &Curve) -> Vec<u64> {
 
 /// The file read as the runners read it (`own_reader::read_file`), with every trim on a
 /// found face (a sphere or torus) fetched or made (`get_or_create_uv_trim_curve`), and each
-/// such edge use's [`Gap`].
+/// such edge use's [`Gap`], read once every trim is built (against its edge's final
+/// tolerance).
 fn gaps(name: &str) -> BTreeMap<u32, Gap> {
     use solidcore::query::curve_surface_gap::{curve_uv_gap_bound, curve_uv_gap_lower_bound};
     use solidcore::surface::surface::SurfaceKind;
@@ -313,9 +314,13 @@ fn gaps(name: &str) -> BTreeMap<u32, Gap> {
         .map(|(id, _)| id)
         .filter(|&id| found(&b, id))
         .collect();
+    // every trim first: a build can raise its edge's tolerance, which another use's gap of
+    // the same edge must then be read against
+    for &id in &ids {
+        get_or_create_uv_trim_curve(&k, &mut b, id, false, false, true).unwrap();
+    }
     let mut out = BTreeMap::new();
     for id in ids {
-        get_or_create_uv_trim_curve(&k, &mut b, id, false, false, true).unwrap();
         let (Some(t), owner) = eu1::uv_trim_curve(&b, id).unwrap() else {
             panic!("{name} {id:?}: no trim");
         };

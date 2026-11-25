@@ -136,6 +136,9 @@ fn check(name: &str) {
     let input = load(name);
     let mut k = Kernel::default();
     let mut body = body(&mut k, &input, name);
+    // (the enclosure below measures this copy, the body as built: the check writes edge
+    // curves)
+    let mut measured = body.clone_standing_for_self().expect("copy");
     let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
         .expect("check")
         .lines();
@@ -158,7 +161,7 @@ fn check(name: &str) {
     }
 
     // the integrator's volume of the new body lies in its certified enclosure
-    let e = enclose_volume(&k, &mut body, 1e-7 * volume).expect("enclosure");
+    let e = enclose_volume(&k, &mut measured, 1e-7 * volume).expect("enclosure");
     eprintln!(
         "{name}: volume in [{}, {}] (width {:e}, {:?}), row {volume}",
         e.lo,
