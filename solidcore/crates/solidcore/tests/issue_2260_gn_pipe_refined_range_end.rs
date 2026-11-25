@@ -45,11 +45,9 @@ use solidcore::Kernel;
 
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
-    "analytic_copy_keeps_parameterization",
     "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
     "fillet_patch_keeps_fillet_edges",
@@ -64,7 +62,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
-    "simple_coincidence_crossing_is_point",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",
     "uv_trim_corner_end_points_only",

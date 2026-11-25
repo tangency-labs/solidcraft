@@ -215,6 +215,24 @@ impl Writer {
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that
     /// refers to it.
     pub fn blob(&mut self, bytes: &[u8], extension: &str, compressed: bool) -> Result<Value, FormatError> {
+        self.blob_reusing::<Cursor<&[u8]>>(bytes, extension, compressed, None)
+    }
+
+    /// [`Writer::blob`], copying the part from `reuse` (the container being saved over) exactly as
+    /// it is stored there, its deflated bytes and all, when that holds this content stored the
+    /// way this writer stores it, instead of encoding it again. A part is only copied when it
+    /// holds `bytes`: its entry's name (the content's SHA-256), length, CRC-32 and compression
+    /// match, it is not encrypted, and its stored bytes inflate to exactly `bytes`. So a container
+    /// that changed on disk since it was read, or whose part is damaged or does not hold what its
+    /// name says, is never copied from: that content is encoded instead. Inflating to check costs a
+    /// fraction of deflating again.
+    pub fn blob_reusing<R: Read + Seek>(
+        &mut self,
+        bytes: &[u8],
+        extension: &str,
+        compressed: bool,
+        reuse: Option<&mut Reader<R>>,
+    ) -> Result<Value, FormatError> {
         self.resolved = self
             .resolved
             .checked_add(bytes.len())
@@ -222,8 +240,77 @@ impl Writer {
             .ok_or_else(|| invalid("resolved payloads too large"))?;
         let digest = sha256(bytes);
         let name = format!("blobs/{}.{extension}", hex(&digest));
+        if let Some(reader) = reuse
+            && self.copy_part(reader, &name, bytes, compressed, digest)?
+        {
+            return Ok(Value::String(name));
+        }
         self.part_with_digest(&name, bytes, compressed, Some(digest))?;
         Ok(Value::String(name))
+    }
+
+    /// Copy `name` from `reader` as it is stored there when its entry holds `bytes` stored as
+    /// [`Writer::part_with_digest`] would store them (see [`Writer::blob_reusing`]); `false` when
+    /// it does not, and nothing is written.
+    fn copy_part<R: Read + Seek>(
+        &mut self,
+        reader: &mut Reader<R>,
+        name: &str,
+        bytes: &[u8],
+        compressed: bool,
+        digest: [u8; 32],
+    ) -> Result<bool, FormatError> {
+        if bytes.len() > (self.limits.part_limit)(name) {
+            return Err(invalid("part too large"));
+        }
+        if self.names.contains(name) {
+            return Ok(true);
+        }
+        let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
+        let crc = crc32fast::hash(bytes);
+        {
+            let Ok(mut file) = reader.zip.by_name(name) else { return Ok(false) };
+            if file.encrypted() || file.compression() != method || file.size() != bytes.len() as u64 || file.crc32() != crc {
+                return Ok(false);
+            }
+            if !holds(&mut file, bytes, self.limits.cancelled)? {
+                return Ok(false);
+            }
+        }
+        let Ok(file) = reader.zip.by_name(name) else { return Ok(false) };
+        self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
+        if self.expanded > (self.limits.max_expanded)() || self.names.len() >= self.limits.max_entries {
+            return Err(invalid("package too large"));
+        }
+        if let Some((include, parts)) = &mut self.tracked
+            && include(name)
+        {
+            parts.push(PartDigest { name: name.to_owned(), len: bytes.len() as u64, digest });
+        }
+        self.names.insert(name.to_owned());
+        self.zip.raw_copy_file(file).map_err(invalid)?;
+        Ok(true)
+    }
+}
+
+/// Whether `part` reads back as exactly `bytes`, to its end, which is where its CRC-32 is checked:
+/// a read error or a difference is `false`. Stops on cancel a piece at a time.
+fn holds(part: &mut impl Read, bytes: &[u8], cancelled: Option<fn() -> bool>) -> Result<bool, FormatError> {
+    let mut piece = vec![0u8; 1 << 20];
+    let mut at = 0;
+    loop {
+        if cancelled.is_some_and(|cancelled| cancelled()) {
+            return Err(FormatError::Cancelled);
+        }
+        let Ok(n) = part.read(&mut piece) else { return Ok(false) };
+        if n == 0 {
+            return Ok(at == bytes.len());
+        }
+        let (Some(read), Some(expected)) = (piece.get(..n), bytes.get(at..at + n)) else { return Ok(false) };
+        if read != expected {
+            return Ok(false);
+        }
+        at += n;
     }
 }
 

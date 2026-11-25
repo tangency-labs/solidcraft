@@ -51,6 +51,89 @@ fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
 }
 
 #[test]
+fn edit_form_validates_conditional_root_alternatives_under_the_field_key() {
+    let s = Session::default();
+    let schema = json!({"type":"object","additionalProperties":true,"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}}
+    },"oneOf":[{
+        "type":"object","properties":{
+            "mode":{"type":"boolean"},
+            "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+        }
+    }]});
+    let invalid = json!({"gate":true,"mode":true,"secret":"invalid"});
+    assert!(matches!(check_input(&schema, &invalid), Err(HostError::InvalidInput { field, .. }) if field == "params.secret"));
+    let errors = form_errors(&s, &schema, &invalid);
+    assert!(matches!(errors.get("secret"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })), "{errors:?}");
+    assert!(!errors.contains_key("params"), "{errors:?}");
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":7})).is_empty());
+}
+
+#[test]
+fn edit_form_validates_values_against_an_additional_property_schema() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","properties":{"depth":{"type":"integer"}},"additionalProperties":{"type":"integer"}});
+    assert!(form_errors(&s, &schema, &json!({"depth":2,"operation_id":7})).is_empty());
+    let errors = form_errors(&s, &schema, &json!({"depth":"invalid","operation_id":"invalid"}));
+    assert!(matches!(errors.get("depth"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert!(matches!(errors.get("operation_id"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    schema["additionalProperties"] = json!(false);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":7})).contains_key("operation_id"));
+    schema["additionalProperties"] = json!(true);
+    assert!(form_errors(&s, &schema, &json!({"operation_id":"allowed"})).is_empty());
+}
+
+#[test]
+fn edit_form_keeps_selection_context_in_alternatives_and_ordinary_object_arrays_closed() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    let selection = json!({"targets":[{"type":"body","name":"Stock"}]});
+    let schema = json!({"type":"object","properties":{
+        "targets":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    assert!(check_input(&schema, &selection).is_ok());
+    assert!(form_errors(&s, &schema, &selection).is_empty());
+    let ordinary = json!({"type":"object","properties":{
+        "records":{"oneOf":[{"type":"array","items":{"type":"object"}}]}
+    }});
+    let values = json!({"records":[{"type":"body","name":"Stock"}]});
+    assert!(check_input(&ordinary, &values).is_err());
+    assert!(matches!(form_errors(&s, &ordinary, &values).get("records"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+}
+
+#[test]
+fn edit_form_checks_pick_existence_in_selection_array_alternatives() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Stock"})).unwrap();
+    for composition in ["oneOf", "anyOf"] {
+        let schema = json!({"type":"object","properties":{
+            "enabled":{"type":"boolean"},
+            "picks":{composition:[{"type":"array","items":{"type":"object"}}],"x-solidcraft-selection":{"version":1,"accept":["body"]},
+                "x-solidcraft-visible-when":{"field":"enabled","eq":true}}
+        }});
+        let values = json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]});
+        assert!(check_input(&schema, &values).is_ok());
+        assert!(form_errors(&s, &schema, &values).is_empty(), "{composition}");
+        let deleted = json!({"enabled":true,"picks":[{"type":"body","name":"deleted"}]});
+        assert!(check_input(&schema, &deleted).is_ok());
+        assert!(matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)), "{composition}");
+    }
+    let filtered = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(form_errors(&s, &filtered, &json!({"enabled":true,"picks":[{"type":"body","name":"Stock"}]})).is_empty());
+    assert!(matches!(
+        form_errors(&s, &filtered, &json!({"enabled":false,"picks":[{"type":"body","name":"Stock"}]})).get("picks"),
+        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
+    ));
+}
+
+#[test]
 fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
     use solidcore_record::Vec3;
     let mut s = Session::default();
@@ -758,6 +841,37 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// A 0.41 plugin runs as before, alone and with a background shader added.
+    #[test]
+    fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-041-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        std::fs::create_dir_all(&root).unwrap();
+        let wasm = component("call $box");
+        let shader = b"fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        let mut with_shader = manifest();
+        with_shader["id"] = json!("shaded");
+        with_shader["capabilities"] = json!(["commands@0.1", "shaders@0.1"]);
+        with_shader["shaders"] = json!([{"id": "plain", "name": "Plain", "kind": "background", "source": "plain.wgsl"}]);
+        for (id, plugin) in [("sample", manifest()), ("shaded", with_shader)] {
+            let text = serde_json::to_vec(&plugin).unwrap();
+            let zip = solidcraft_io::safe_zip::write(&[("plugin.json", &text[..]), ("plugin.wasm", &wasm[..]), ("plain.wgsl", &shader[..])]).unwrap();
+            let path = root.join(format!("{id}.zip"));
+            std::fs::write(&path, zip).unwrap();
+            let installed = s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).unwrap();
+            assert_eq!(installed["entries"], json!([format!("{id}.make")]));
+            let folder = root.join("plugins").join(id).to_string_lossy().into_owned();
+            let approval = s.execute("plugin.inspect", &json!({"path": folder})).unwrap()["approval"].clone();
+            let before = s.model.state().bodies.len();
+            s.execute("plugin.run", &json!({"path": folder, "approval": approval, "entry": "make", "params": {}})).unwrap();
+            assert_eq!(s.model.state().bodies.len(), before + 1, "{id} made its box");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -3645,6 +3759,73 @@ mod install_zip {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    fn sky(shader: &[u8], extra: &[(&str, &[u8])]) -> Vec<u8> {
+        let manifest = json!({"id": "sky", "name": "Sky", "version": "1.0.0", "capabilities": ["shaders@0.1"], "shaders": [
+            {"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl", "textures": [{"name": "stars", "file": "stars.png"}]}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", &text[..]), ("dusk.wgsl", shader)];
+        files.extend_from_slice(extra);
+        zip(&files)
+    }
+    const DUSK: &[u8] = b"fn background(px: ScPixel) -> vec4<f32> {
+    return mix(sc.bottom, textureSample(stars, sc_repeat, px.uv), 0.5);
+}
+";
+
+    #[test]
+    fn a_shader_plugin_installs_without_a_runtime() {
+        let (mut s, root) = session("shaders");
+        let path = put(&root, "sky.zip", &sky(DUSK, &[("stars.png", b"png")]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!((reply["shaders"].clone(), reply["entries"].clone()), (json!(["sky/dusk"]), json!([])));
+        let list = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(list["plugins"][0]["manifest"]["shaders"][0]["source"], "dusk.wgsl");
+        assert!(root.join("plugins/sky/dusk.wgsl").is_file() && root.join("plugins/sky/stars.png").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_panel_shader_installs_and_is_reported_apart_from_backgrounds() {
+        let (mut s, root) = session("panels");
+        let manifest = json!({"id": "frost", "name": "Frost", "version": "1.0.0", "capabilities": ["shaders@0.2"], "shaders": [
+            {"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 16}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let wgsl = b"fn panel(px: ScPanel) -> vec4<f32> {
+    return vec4<f32>(sc_blurred(px.position).rgb, 0.9);
+}
+";
+        let path = put(&root, "frost.zip", &zip(&[("plugin.json", &text[..]), ("frost.wgsl", &wgsl[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["panel_shaders"], json!(["frost/frost"]));
+        assert!(reply["shaders"].as_array().is_none_or(Vec::is_empty), "not a background: {reply}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_shader_that_cannot_draw_is_refused_at_install() {
+        let missing_texture = unpack(&sky(DUSK, &[])).unwrap_err();
+        assert_eq!(missing_texture, InstallError::MissingModule("stars.png".into()));
+        let broken = unpack(&sky(
+            b"fn background(px: ScPixel) -> vec4<f32> {
+    return 1.0;
+}
+",
+            &[("stars.png", b"png")],
+        ))
+        .unwrap_err();
+        assert!(broken.to_string().contains("dusk.wgsl: line ") && broken.to_string().contains("vec4<f32>"), "{broken}");
+        let bound = b"@group(0) @binding(7) var<storage, read_write> out: array<u32>;
+fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        assert!(unpack(&sky(bound, &[("stars.png", b"png")])).unwrap_err().to_string().contains("resource `out`"));
+        let text = serde_json::to_vec(&json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"],
+            "shaders": [{"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl"}]}))
+        .unwrap();
+        assert_eq!(unpack(&zip(&[("plugin.json", &text[..])])).unwrap_err(), InstallError::MissingModule("dusk.wgsl".into()));
+    }
+
     #[test]
     fn a_zip_replaced_after_review_is_refused_before_files_or_grants_are_written() {
         let (mut s, root) = session("swapped-after-review");
@@ -4237,4 +4418,73 @@ mod stored_grants {
         assert_eq!(restarted, desktop_grants);
         std::fs::remove_dir_all(plugins).unwrap();
     }
+}
+
+/// The shader examples in docs/plugin-examples parse and compile. The test lives here, not in
+/// craft-plugin, because a shared crate's tests may not read files outside the crate.
+#[test]
+fn the_documented_shader_examples_compile() {
+    for (folder, manifest_text, source) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json"), include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")),
+        (
+            "panorama",
+            include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
+        ),
+        (
+            "trails",
+            include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
+        ),
+    ] {
+        let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
+    }
+}
+
+/// The tint example in docs/plugin-examples/accent-sweep parses with its two settings and compiles.
+#[test]
+fn the_documented_tint_example_compiles() {
+    let manifest =
+        craft_plugin::parse_manifest(include_str!("../../../../docs/plugin-examples/accent-sweep/plugin.json").as_bytes(), "accent-sweep").unwrap();
+    assert_eq!(manifest.shaders[0].settings.len(), 2);
+    craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
+}
+
+/// Shader plugins written before pictures could be chosen parse, validate and serialize as they
+/// did: no `choose`, the shipped `file` kept, nothing new in the manifest's JSON.
+#[test]
+fn legacy_shader_manifests_without_a_chosen_texture_are_unchanged() {
+    for (folder, text) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json")),
+        ("panorama", include_str!("../../../../docs/plugin-examples/panorama/plugin.json")),
+    ] {
+        let plugin = craft_plugin::parse_manifest(text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::validate(&plugin.shaders).unwrap();
+        let original: serde_json::Value = serde_json::from_str(text).unwrap();
+        let again = serde_json::to_value(&plugin).unwrap();
+        for (got, want) in again["shaders"].as_array().unwrap().iter().zip(original["shaders"].as_array().unwrap()) {
+            assert_eq!(got.get("textures"), want.get("textures"), "{folder}");
+        }
+        for texture in plugin.shaders.iter().flat_map(|shader| &shader.textures) {
+            assert!(texture.choose.is_none() && texture.file.is_some(), "{folder}");
+        }
+    }
+}
+
+/// A plugin written before `state` existed (the dusk example): no `state` key, so it parses,
+/// validates, serialises without one, and compiles to a module that declares none of the state
+/// bindings.
+#[test]
+fn a_plugin_without_a_state_grid_is_unchanged() {
+    let manifest_text = include_str!("../../../../docs/plugin-examples/dusk/plugin.json");
+    let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), "dusk").unwrap();
+    let shader = &manifest.shaders[0];
+    assert_eq!(shader.state, None);
+    assert!(shader.animated);
+    assert!(!serde_json::to_string(shader).unwrap().contains("state"));
+    craft_plugin::shader::validate(&manifest.shaders).unwrap();
+    let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
+    assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
+    assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
 }

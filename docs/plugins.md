@@ -133,15 +133,18 @@ notifications.
 
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
-limited by their requested budgets. They may refresh caches or panel data.
+limited by their requested budgets. They may refresh caches.
 Editing, file writes and starting jobs are refused with existing typed permission
 errors. A failure is shown in Preferences › Plugins and never fails the action
 that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
-`ui.set-data` (see Docked panels below).
+A handler cannot refresh its plugin's docked panel yet. It runs on a scratch copy of the
+session, so a `ui.set-data` call it makes does not reach the open panel; only the handler's JSON
+reply is kept (up to the limits above), and no panel reads it. Until the panel contract lands
+(#19516, phase 3 of RFC 0015), give the panel a Refresh button whose entry reads the design and
+calls `ui.set-data`, as the entries a panel runs do (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -803,6 +806,17 @@ bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`comm
 component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
+
+`shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
+wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+
+`shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
+frame, settings sliders for shaders, a `state` grid a background keeps between frames, and background textures the person chooses under the
+plugin's card (`choose`). See [plugin shaders](plugin-shaders.md#tints) and
+[pictures the person chooses](plugin-shaders.md#pictures-the-person-chooses).
+It also adds panel shaders, which draw every see-through panel's background from what is behind
+it. See [plugin panels](plugin-panels.md).
 
 ## Docked panels
 
