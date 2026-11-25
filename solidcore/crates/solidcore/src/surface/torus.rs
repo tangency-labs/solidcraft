@@ -582,7 +582,7 @@ impl Torus {
         minor: f64,
         form: &BSplineSurface,
     ) -> Result<Option<Self>> {
-        let read = match Self::conventions_on(k, &placement, major, form) {
+        let read = match Self::conventions_on(k, &placement, major, minor, form) {
             Ok(Some(read)) => read,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Ok(None) | Err(_) => return Ok(None),
@@ -605,7 +605,8 @@ impl Torus {
     }
 
     /// Not upstream: what [`Self::of_support`] reads off `form` about a support's axis (the
-    /// `placement`'s origin and z) and its tube's centres (at `major` from the axis).
+    /// `placement`'s origin and z) and its tube (of radius `minor`, its centres at `major`
+    /// from the axis).
     ///
     /// - **Which way the sweep runs.** Of the net's two directions, the meridians run along
     ///   the one whose columns stay nearer planes through the axis. Every column of a
@@ -618,15 +619,24 @@ impl Torus {
     ///   start and end on the axis, and then both end rows are points. Equal, the sweep is
     ///   along u, as the recogniser takes it.
     /// - **The sweep's frame and interval**, from the form's end meridians ([`sweep_frame`]),
-    ///   each read on the side of the axis its control point farthest from the axis is on.
+    ///   both read in one row of the net: at the first meridian's control point farthest from
+    ///   the axis, and at the last meridian's point of that row, which is the same point of
+    ///   the tube turned by the sweep, so the two are read on the same side of the tube.
     /// - **Which way round the tube runs.** The first meridian turns about its tube's centre
     ///   from its start to 0.45 of its range; the tube is inside out where that turn is
     ///   against the frame. This is the recogniser's test with the support's centre in place
     ///   of the fitted one. The turn is well fixed on any arc: the two points are a tube's
     ///   radius from the centre and at least 0.45 of the arc apart.
+    /// - **The side of the axis that centre is on.** A spindle torus's tube crosses the axis,
+    ///   and the part of a meridian past the axis lies on the far side from its centre. With
+    ///   `ρ` a point's distance from the axis toward the tube's centre and `h` its height,
+    ///   `(ρ - R)² + h² = r²` gives `ρ² + h² = r² - R² + 2Rρ`: a point of the torus is on its
+    ///   tube centre's side exactly where its distance from the torus's centre, squared, is
+    ///   above `r² - R²`. Every point of a ring torus is. It is read at the meridian's point
+    ///   farthest from the axis (of its start, its end and its point at 0.45).
     ///
     /// `None` where the form is not rational of degree 2 both ways, has no net, or an end
-    /// meridian has no control point off the axis.
+    /// meridian has no point off the axis.
     ///
     /// # Errors
     ///
@@ -635,6 +645,7 @@ impl Torus {
         k: &Kernel,
         placement: &Axis2Placement,
         major: f64,
+        minor: f64,
         form: &BSplineSurface,
     ) -> Result<Option<Conventions>> {
         if form.degree(SurfParamType::U) != 2
@@ -705,7 +716,22 @@ impl Torus {
         let (Some(first), Some(last)) = (all.first(), all.last()) else {
             return Ok(None);
         };
-        let (Some(first_side), Some(last_side)) = (side(first), side(last)) else {
+        // the end meridians' sides, both in the row of the first meridian's farthest point
+        let Some((row, _)) = first
+            .iter()
+            .map(radial)
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.length().total_cmp(&b.length()))
+        else {
+            return Ok(None);
+        };
+        let side_in_row = |column: &[Point3]| -> Option<Vec3> {
+            column
+                .get(row)
+                .map(radial)
+                .and_then(|out| out.unitize().ok())
+        };
+        let (Some(first_side), Some(last_side)) = (side_in_row(first), side_in_row(last)) else {
             return Ok(None);
         };
         let Some((x, y, sweep)) = sweep_frame(
@@ -734,10 +760,29 @@ impl Torus {
             )?
             .curve;
         let interval = generator.natural_interval();
-        let centre = origin + x * major;
-        let from = generator.evaluate_point(interval.min())? - centre;
-        let on = generator.evaluate_point(interval.evaluate(0.45))? - centre;
-        let inside_out = z.dot(from.cross(on).cross(x)) < 0.0;
+        let start = generator.evaluate_point(interval.min())?;
+        let on = generator.evaluate_point(interval.evaluate(0.45))?;
+        let end = generator.evaluate_point(interval.max())?;
+        // the side of the axis the first meridian's tube centre is on: that of the meridian's
+        // point farthest from the axis where that point is on its tube centre's side, the far
+        // side where it lies past the axis (a spindle torus)
+        let Some(far) = [start, on, end]
+            .into_iter()
+            .max_by(|a, b| radial(a).length().total_cmp(&radial(b).length()))
+        else {
+            return Ok(None);
+        };
+        let Ok(out) = radial(&far).unitize() else {
+            return Ok(None);
+        };
+        let reach = far - origin;
+        let toward = if reach.dot(reach) + major * major - minor * minor > 0.0 {
+            out
+        } else {
+            out * -1.0
+        };
+        let centre = origin + toward * major;
+        let inside_out = z.dot((start - centre).cross(on - centre).cross(toward)) < 0.0;
         Ok(Some(Conventions {
             swap_uv,
             inside_out,
@@ -2728,9 +2773,10 @@ mod tests {
     /// torus the recogniser finds in the form, wherever it finds one: quarter, half and whole
     /// sweeps, the tube on the outside, the inside, across the top and whole, the sweep along
     /// u and along v, the tube either way round, at the origin and on a frame off it and
-    /// askew. The same holds for a support that is not the form's own (its frame turned a
-    /// tenth of a radian about the axis, a radius a tenth off), which the caller then
-    /// refuses.
+    /// askew; and a spindle torus (its tube's radius above its major radius), with the arc
+    /// that shows on its tube centre's side and with it past the axis. The same holds for a
+    /// support that is not the form's own (its frame turned a tenth of a radian about the
+    /// axis, a radius a tenth off), which the caller then refuses.
     #[test]
     fn a_support_on_its_form_reads_the_conventions_the_recogniser_finds() {
         let k = Kernel::default();
@@ -2742,20 +2788,22 @@ mod tests {
         };
         let mut compared = 0;
         for frame in [Axis2Placement::IDENTITY, askew] {
-            for dom in [
-                Extent2d::from_bounds(0.0, 0.0, 90.0, 90.0),
-                Extent2d::from_bounds(0.0, -60.0, 30.0, 60.0),
-                Extent2d::from_bounds(0.0, 120.0, 180.0, 240.0),
-                Extent2d::from_bounds(0.0, 30.0, 270.0, 300.0),
-                Extent2d::from_bounds(0.0, 80.0, 60.0, 100.0),
-                Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            for (of_major, of_minor, dom) in [
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 0.0, 90.0, 90.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, -60.0, 30.0, 60.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 120.0, 180.0, 240.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 30.0, 270.0, 300.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 80.0, 60.0, 100.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0)),
+                (1.0, 2.0, Extent2d::from_bounds(0.0, -60.0, 90.0, 60.0)),
+                (1.0, 2.0, Extent2d::from_bounds(0.0, 150.0, 90.0, 210.0)),
             ] {
                 for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
                     let t = Torus::create_canonical(
                         &k,
                         &frame,
-                        10.0,
-                        3.0,
+                        of_major,
+                        of_minor,
                         TorusOptions {
                             swap_uv: swap,
                             inside_out: inside,
@@ -2772,14 +2820,14 @@ mod tests {
                         y * 0.1_f64.cos() - x * 0.1_f64.sin(),
                     );
                     for (own, placement, major, minor) in [
-                        (true, frame, 10.0, 3.0),
-                        (false, turned, 10.0, 3.0),
-                        (false, frame, 10.1, 3.0),
-                        (false, frame, 10.0, 2.9),
+                        (true, frame, of_major, of_minor),
+                        (false, turned, of_major, of_minor),
+                        (false, frame, of_major + 0.1, of_minor),
+                        (false, frame, of_major, of_minor - 0.1),
                     ] {
                         let at = format!(
-                            "{dom:?} swap {swap} inside out {inside}: R {major} r {minor} on \
-                             {placement:?}"
+                            "R {of_major} r {of_minor} over {dom:?} swap {swap} inside out \
+                             {inside}: R {major} r {minor} on {placement:?}"
                         );
                         let mut found = Torus::is_nurb_surface_torus(&k, &form, 1.0)
                             .unwrap()
@@ -2802,15 +2850,23 @@ mod tests {
             }
         }
         // every support that is its form's own was carried both ways and compared
-        assert_eq!(compared, 2 * 6 * 4);
+        assert_eq!(compared, 2 * 8 * 4);
     }
 
     /// A support reads its form's conventions as the form was made, where no torus can be
     /// fitted to the form too: the sweep along u or along v and the tube either way round,
-    /// on tubes that show 2, 0.02 and 0.002 degrees, and on a horn torus whose tube runs from
-    /// the axis round to the axis again (both its end rows are points, so the end columns
-    /// alone would not say which way the sweep runs), at the origin and on a frame off it
-    /// and askew.
+    /// on tubes that show 2, 0.02 and 0.002 degrees; on a horn torus whose tube runs from the
+    /// axis round to the axis again (both its end rows are points, so the end columns alone
+    /// would not say which way the sweep runs); and on a spindle torus (R 1, r 2) whose tube
+    /// shows an arc on its centre's side, an arc past the axis (150 to 210 degrees: every
+    /// point of it lies on the far side from its tube's centre), a short one there, and one
+    /// that crosses the axis; at the origin and on a frame off it and askew.
+    ///
+    /// Where the arc keeps to its tube centre's side the support then stands on its form
+    /// (`AnalyticSupport::build`'s proof passes). A spindle torus's arcs past or across its
+    /// axis are read for their conventions only: the proof refuses the 150 to 210 degree arc
+    /// on the recogniser's route as well, which makes the same torus there
+    /// (`a_support_on_its_form_reads_the_conventions_the_recogniser_finds`).
     #[test]
     fn a_support_reads_its_forms_conventions_off_the_net() {
         let k = Kernel::default();
@@ -2820,22 +2876,20 @@ mod tests {
             let x = (x - z * x.dot(z)).unitize().unwrap();
             Axis2Placement::new(Vec3::new(197.06, 33.35, -56.318), x, z.cross(x))
         };
+        let on = Extent2d::from_bounds;
         for frame in [Axis2Placement::IDENTITY, askew] {
-            for (major, minor, dom) in [
-                (10.0, 3.0, Extent2d::from_bounds(0.0, 179.0, 90.0, 181.0)),
-                (10.0, 3.0, Extent2d::from_bounds(0.0, 89.99, 90.0, 90.01)),
-                (
-                    38.725,
-                    13.725,
-                    Extent2d::from_bounds(0.0, 179.99, 90.0, 180.01),
-                ),
-                (
-                    38.725,
-                    13.725,
-                    Extent2d::from_bounds(0.0, -0.001, 30.0, 0.001),
-                ),
-                (5.0, 5.0, Extent2d::from_bounds(0.0, 180.0, 90.0, 540.0)),
-                (5.0, 5.0, Extent2d::from_bounds(0.0, 180.0, 360.0, 540.0)),
+            // R, r, the part of the torus, and whether the arc keeps to its tube centre's side
+            for (major, minor, dom, on_centre_side) in [
+                (10.0, 3.0, on(0.0, 179.0, 90.0, 181.0), true),
+                (10.0, 3.0, on(0.0, 89.99, 90.0, 90.01), true),
+                (38.725, 13.725, on(0.0, 179.99, 90.0, 180.01), true),
+                (38.725, 13.725, on(0.0, -0.001, 30.0, 0.001), true),
+                (5.0, 5.0, on(0.0, 180.0, 90.0, 540.0), true),
+                (5.0, 5.0, on(0.0, 180.0, 360.0, 540.0), true),
+                (1.0, 2.0, on(0.0, -60.0, 90.0, 60.0), true),
+                (1.0, 2.0, on(0.0, 150.0, 90.0, 210.0), false),
+                (1.0, 2.0, on(0.0, 179.99, 90.0, 180.01), false),
+                (1.0, 2.0, on(0.0, 100.0, 90.0, 140.0), false),
             ] {
                 for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
                     let at = format!(
@@ -2855,7 +2909,8 @@ mod tests {
                         Some(&dom),
                     )
                     .unwrap();
-                    let read = Torus::of_support(&k, frame, major, minor, &plain(&t))
+                    let form = plain(&t);
+                    let read = Torus::of_support(&k, frame, major, minor, &form)
                         .unwrap_or_else(|e| panic!("{at}: {e}"))
                         .unwrap_or_else(|| panic!("{at}: no reading"));
                     assert_eq!((read.base.swap_uv, read.inside_out), (swap, inside), "{at}");
@@ -2864,6 +2919,17 @@ mod tests {
                         (major, minor),
                         "{at}"
                     );
+                    // and the support stands on its form: the kernel's proof passes
+                    if on_centre_side {
+                        let support = crate::surface::implicit::AnalyticSupport::Torus {
+                            placement: frame,
+                            major_radius: major,
+                            minor_radius: minor,
+                        };
+                        support
+                            .build(&k, form)
+                            .unwrap_or_else(|e| panic!("{at}: {e}"));
+                    }
                 }
             }
         }
