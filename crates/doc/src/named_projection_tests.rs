@@ -1359,3 +1359,63 @@ fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_fea
     assert_eq!(crate::naming::face_names(cleat)[hit.face], "F401:+z");
     assert!(crate::name_lookup::locate_face(&state, &face, Vec3::new(25., 100., 10.)).is_none(), "a point on another face finds nothing");
 }
+
+#[test]
+fn model_plane_resolution_places_both_cached_and_uncached_construction_planes() {
+    let mut doc = Document::new("model plane placement");
+    doc.components.push(crate::Component { id: 7, name: "Owner".into(), ..Default::default() });
+    let mut transform = crate::IDENTITY;
+    transform[3][2] = 10.0;
+    doc.occurrences.push(crate::Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Owner".into(),
+        transform,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
+    let built = Plane::new(Vec3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y).unwrap();
+    let id = doc.add_feature(crate::FeatureKind::ConstructionPlane { plane: PlaneRef::Custom { plane: built } }, Some("Shelf")).unwrap();
+    doc.feature_mut(id).unwrap().component = 7;
+    let values = doc.param_values().0;
+    let mut state = ModelState::default();
+    for cached in [false, true] {
+        if cached {
+            state.construct.push(crate::construct::Construct {
+                feature: id,
+                name: "Shelf".into(),
+                geom: crate::construct::ConstructGeom::Plane(built),
+                bodies: Vec::new(),
+            });
+        }
+        let mut target = solidcraft_sketch::ModelPlane {
+            source: LinkSource::Plane { name: "Shelf".into() },
+            face_name: None,
+            resolved: None,
+            resolved_face: None,
+        };
+        crate::project::resolve_model_plane(&doc, &values, &state, &mut target, Some(&(0, crate::IDENTITY))).unwrap();
+        assert_eq!(target.resolved.unwrap().origin, Vec3::new(0.0, 0.0, 15.0));
+    }
+}
+
+#[test]
+fn a_planar_pick_checks_face_trims_before_testing_plane_ambiguity() {
+    use solidcore_record::{Loop2, Region2, Seg2};
+    // An L prism has an X=20 side only for Y>=10. Its supporting plane also
+    // crosses the top's interior at (20,5,10), which belongs to the top alone.
+    let points = [(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (20.0, 10.0), (20.0, 20.0), (0.0, 20.0), (0.0, 0.0)];
+    let outer = Loop2 { segs: points.windows(2).map(|w| Seg2::Line { a: Vec2::new(w[0].0, w[0].1), b: Vec2::new(w[1].0, w[1].1) }).collect() };
+    let body = solidcraft_kernel::extrude_planar_regions(&Plane::XY, &[Region2 { outer, holes: Vec::new() }], 0.0, 10.0).unwrap();
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("L".into(), body, 1));
+    let pick = Vec3::new(20.0, 5.0, 10.0);
+    let (body, name, plane) = crate::project::pick_planar_face(&state, Some("L"), pick).unwrap();
+    assert_eq!(body, "L");
+    assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z.abs() > 1.0 - 1e-9);
+    let (index, _) = crate::naming::face_on_body(&state.bodies[0], &name, pick).unwrap();
+    assert!(solidcraft_kernel::services::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
+    assert!(crate::project::pick_planar_face(&state, Some("L"), Vec3::new(20.0, 15.0, 10.0)).unwrap_err().contains("different planes meet"));
+}
