@@ -3297,10 +3297,9 @@ mod importers {
         std::fs::write(outside.join("real.smp"), b"T").unwrap();
         std::fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(outside.join("real.smp"), &link).unwrap();
-        let reply = s.execute("component.update_links", &json!({})).unwrap();
-        let error = reply["failed"][0]["error"].as_str().unwrap_or_default();
-        assert!(error.contains("outside the design's folder") && !error.contains("Sample Importer"), "{reply}");
-        assert!(reply["updated"].as_array().is_none_or(Vec::is_empty), "{reply}");
+        // Nothing is read, and the plugin (which would trap on this file, naming itself) never runs.
+        let refused = s.execute("component.update_links", &json!({"component": comp})).unwrap_err().to_string();
+        assert!(refused.contains("outside the design's folder") && !refused.contains("Sample Importer"), "{refused}");
         assert!((total_volume(&mut s) - 1000.0).abs() < 1e-6);
         // A folder alias that stays inside the design's folder is read: the file is really there.
         std::os::unix::fs::symlink(inside.join("sub"), inside.join("alias")).unwrap();
