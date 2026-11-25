@@ -4,19 +4,10 @@
 //! composed from solidcore's ports of the same SMLib routines.
 //!
 //! The bounds, the manifold and solid-count tests, point classification, the edge/face gap and
-//! the check are solidcore-ops' ([`solidcore_ops::Body`]); mass properties and area are composed
-//! here. [`check`] fails with "not supported yet" while a test it reaches is unported in
+//! the check, mass properties and area are solidcore-ops' ([`solidcore_ops::Body`]). [`check`] fails with "not supported yet" while a test it reaches is unported in
 //! solidcore.
 
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties_in_box, face_properties};
-use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::query::api_queries::{brep_bounding_box, face_bounding_box};
 use solidcore::topology::brep::p1 as bl;
-use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
-use solidcore::topology::{FaceId, FaceuseId};
-use solidcore::{Kernel, Point3, SolidError, Vec3};
-
 use solidcore_ops::PointLocation;
 use solidcore_ops::check::ValidityScope;
 
@@ -36,127 +27,34 @@ pub(super) fn accuracy(relative_accuracy: f64) -> Result<f64> {
     Ok(relative_accuracy.clamp(1e-8, 1e-1))
 }
 
-fn invalid(why: &'static str) -> SolidError {
-    SolidError::invalid_input(OP, why)
-}
-
 fn finite(v: &[f64]) -> bool {
     v.iter().all(|x| x.is_finite())
 }
 
-/// `faces_area` of `smlib_measure.cpp`: every face counted once (SmApiBrepComputeArea, with the
-/// [1e-8, 1e-1] envelope instead of its [1e-4, 1e-1]), the total area and, when `first` is set,
-/// the area's first moments about `o`. With `only_sheets`, only [`sheet_face`]s (the capi's
-/// `counted`).
-fn faces_area(k: &Kernel, b: &mut solidcore::Brep, accuracy: f64, o: Point3, first: bool, only_sheets: bool) -> solidcore::Result<(f64, Vec3)> {
-    let mut area = 0.0;
-    let mut sum = Vec3::new(0.0, 0.0, 0.0);
-    let flags = if first { PPF_AREA | PPF_AREA_FIRST_MOMENTS } else { PPF_AREA };
-    for f in bl::faces(b, None)? {
-        if only_sheets && !sheet_face(b, f)? {
-            continue;
-        }
-        let size = face_bounding_box(k, b, f, false)?.size();
-        let edge = size.z.max(size.x.max(size.y));
-        let p = face_properties(k, b, f, OrientType::Same, accuracy, o, edge * edge / 100.0, 0.0, flags)?;
-        // The area and its moments share one integrand, so a trim boundary integrated the other
-        // way round flips both.
-        let sign = if p.area < 0.0 { -1.0 } else { 1.0 };
-        area += sign * p.area;
-        if first {
-            sum += p.moments[0] * sign;
-        }
-    }
-    if !area.is_finite() {
-        return Err(invalid("non-finite area"));
-    }
-    Ok((area, sum))
-}
-
-/// `sheet_face`: a face with material on neither side, standing free or hung on a solid (a blend
-/// sheet stitched between two boxes). `SmBrep::ComputePreciseProperties` takes its area only from
-/// faces between a solid region and a void, so such a face is counted on its own.
-fn sheet_face(b: &solidcore::Brep, f: FaceId) -> solidcore::Result<bool> {
-    let void_side = |u: Option<FaceuseId>| -> solidcore::Result<bool> {
-        let Some(u) = u else { return Ok(true) };
-        let Some(shell) = b.faceuse(u)?.shell else { return Ok(true) };
-        let Some(region) = b.shell(shell)?.region else { return Ok(true) };
-        // IsVoid's UNSURE (2) is true in C++: only FALSE is material.
-        Ok(b.region(region)?.is_void() != 0)
-    };
-    let (x, y) = solidcore::topology::face::p2::faceuses(b, f)?;
-    Ok(void_side(x)? && void_side(y)?)
-}
-
-/// `smlib_brep_mass_properties`: `SmBrep::ComputePreciseProperties` directly, as the C API calls
-/// it (not `SmApiBrepComputeMassProperties`: the [1e-8, 1e-1] accuracy envelope, no manifold
-/// refusal, the sum over material regions), the face-by-face area and its centroid for a body
-/// with no material, and moments about the middle of the box moved to the centroid. A body's area
-/// is every face's: the solid's boundary and its sheet faces (fork 9767916).
+/// `smlib_brep_mass_properties`: the mass properties at unit density, summed over the body's
+/// material regions, with the area of its sheet faces counted; a body with no material gives
+/// its faces' area and their centroid, no volume and no inertia. solidcore-ops' estimate
+/// ([`Body::mass_properties`]) at the C API's accuracy, finite and clamped to [1e-8, 1e-1].
 pub(crate) fn mass_properties(body: &Body, relative_accuracy: f64) -> Result<MassProperties> {
     let accuracy = accuracy(relative_accuracy)?;
-    with_body("mass_properties", body, |k, b| {
-        let mut material = false;
-        for r in bl::regions(b, None)? {
-            // IsVoid's UNSURE (2) is true in C++: only FALSE is material.
-            material |= b.region(r)?.is_void() == 0;
-        }
-        // The C API refuses a body with per-entity mass attributes (they would override the unit
-        // density). Bodies here carry none: the attribute store passed in is empty.
-        let store = AttributeStore::default();
-        let attrs = PropertyAttributes { store: &store, key_of: &|_| ObjectKey(0) };
-        // Moments about the middle of the exact box, moved to the centroid below: about the world
-        // origin, a body far from it would lose its inertia to cancellation. The loose box would do
-        // the same: an edge on a circle of large radius stretches it a quarter of the circle away
-        // (#17361). Its size sets the integration's error scale too.
-        let bx = brep_bounding_box(k, b, true)?;
-        let o = bx.mid();
-        if !finite(&[o.x, o.y, o.z]) {
-            return Err(invalid("non-finite box"));
-        }
-        if !material {
-            let (area, first) = faces_area(k, b, accuracy, o, true, false)?;
-            if !(area > 0.0) {
-                return Err(invalid("no area"));
-            }
-            let c = [o.x + first.x / area, o.y + first.y / area, o.z + first.z / area];
-            if !finite(&[area, c[0], c[1], c[2]]) {
-                return Err(invalid("non-finite result"));
-            }
-            return Ok(MassProperties { area, volume: 0.0, centroid: c, moments: [0.0; 3], products: [0.0; 3] });
-        }
-        let p = brep_properties_in_box(k, b, accuracy, o, MassPropertyBehavior { density: 1.0, ..MassPropertyBehavior::default() }, &attrs, &bx)?;
-        let (mass, volume) = (p.mass, p.volume);
-        if !mass.is_finite() || !(mass > 0.0) || !(volume > 0.0) {
-            return Err(invalid("no mass"));
-        }
-        // m[4]: first moments about o; m[7]: (y²+z², z²+x², x²+y²) about o; m[6]: (yz, zx, xy)
-        // about o. Parallel axes from o to the centroid (unit density: mass = volume).
-        let [_, _, _, _, m4, _, m6, m7] = p.moments;
-        let d = [m4.x / mass, m4.y / mass, m4.z / mass];
-        let (sheets, _) = faces_area(k, b, accuracy, o, false, true)?;
-        let r = MassProperties {
-            area: p.area + sheets,
-            volume,
-            centroid: [o.x + d[0], o.y + d[1], o.z + d[2]],
-            moments: [
-                m7.x - mass * (d[1] * d[1] + d[2] * d[2]),
-                m7.y - mass * (d[0] * d[0] + d[2] * d[2]),
-                m7.z - mass * (d[0] * d[0] + d[1] * d[1]),
-            ],
-            products: [m6.x - mass * d[1] * d[2], m6.y - mass * d[2] * d[0], m6.z - mass * d[0] * d[1]],
-        };
-        if !finite(&[r.area, r.volume]) || !finite(&r.centroid) || !finite(&r.moments) || !finite(&r.products) {
-            return Err(invalid("non-finite result"));
-        }
-        Ok(r)
-    })
+    let m = ops_as("mass_properties", &[("brep", body)], measure_error, || body.mass_properties(accuracy))?;
+    Ok(MassProperties { area: m.area, volume: m.volume, centroid: m.centroid, moments: m.moments, products: m.products })
 }
 
-/// `smlib_brep_area`: every face counted once.
+/// `smlib_brep_area`: every face counted once ([`Body::area`]).
 pub(crate) fn area(body: &Body, relative_accuracy: f64) -> Result<f64> {
     let accuracy = accuracy(relative_accuracy)?;
-    with_body("area", body, |k, b| faces_area(k, b, accuracy, Point3::new(0.0, 0.0, 0.0), false, false).map(|(a, _)| a))
+    ops_as("area", &[("brep", body)], measure_error, || body.area(accuracy))
+}
+
+/// solidcore-ops' refusal of a measure as the C API's: a body it cannot measure (no mass, no
+/// area, a result that is not finite) is the input rejected, in the kernel's words; the rest as
+/// any solidcore-ops call's.
+fn measure_error(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    match e {
+        solidcore_ops::Error::Refused { operation, reason } => Error::Rejected { operation, reason },
+        e => super::call::error(call, e, detail),
+    }
 }
 
 /// `smlib_brep_bounds`: `SmBrep::CalculateTightBoundingBox` ([`Body::bounds`]); no box (not

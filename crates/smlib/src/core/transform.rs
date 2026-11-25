@@ -9,12 +9,12 @@
 //! as `(0, 0, 0, 1)`.
 
 use super::Body;
-use super::call::ops_on;
+use super::call::ops_as;
 use crate::{Error, Result};
 
 /// `smlib_brep_copy`: `SmApiBrepCopy`.
 pub(crate) fn copy(body: &Body) -> Result<Body> {
-    ops_on("SmApiBrepCopy", &[("brep", body)], || body.copy())
+    ops_as("SmApiBrepCopy", &[("brep", body)], super::blend::refused, || body.copy())
 }
 
 /// `smlib_brep_transform`: `SmBrep::Transform(matrix, TRUE)` on a copy of `body`. Every entry of
@@ -28,7 +28,7 @@ pub(crate) fn transform(body: &Body, matrix: &[[f64; 4]; 4]) -> Result<Body> {
     for (row, last) in affine.iter_mut().zip([0.0, 0.0, 0.0, 1.0]) {
         row[3] = last;
     }
-    ops_on("SmBrep::Transform", &[("brep", body)], || {
+    ops_as("SmBrep::Transform", &[("brep", body)], super::blend::refused, || {
         let moved = body.copy()?;
         moved.transform(&affine)?;
         Ok(moved)
