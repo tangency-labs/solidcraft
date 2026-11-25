@@ -59,6 +59,7 @@
 //! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
 //! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
 //! | [`Extent3d::span_along`]               | (not upstream) the box's reach along a direction |
+//! | [`Extent3d::meets_ray`]                | (not upstream) whether a forward ray meets the padded box |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -1104,6 +1105,61 @@ impl Extent3d {
         Ok(LineHit::Miss)
     }
 
+    /// (not upstream) Whether the forward ray `origin + t * dir` (`t >= 0`) meets this finite box
+    /// inflated by a conservative margin derived from its diagonal and `tolerance`.
+    ///
+    /// Conservative on non-finite inputs: returns `true` when the box, `origin`, `dir`, or the
+    /// padded bounds are non-finite or when any slab endpoint is `NaN`, so callers using this for
+    /// culling never skip a box prematurely. Returns `false` for an empty box
+    /// (`has_negative_volume`).
+    #[must_use]
+    pub fn meets_ray(&self, origin: Point3, dir: Vec3, tolerance: f64) -> bool {
+        if self.has_negative_volume() {
+            return false;
+        }
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self.min) || !finite(self.max) || !finite(origin) || !finite(dir) {
+            return true;
+        }
+        let tol_pad = if tolerance.is_finite() && tolerance > 0.0 {
+            tolerance * 10.0
+        } else {
+            0.0
+        };
+        let pad = (self.size().length() * 1e-6).max(tol_pad).max(1e-4);
+        if !pad.is_finite() {
+            return true;
+        }
+        let lo = Vec3::new(self.min.x - pad, self.min.y - pad, self.min.z - pad);
+        let hi = Vec3::new(self.max.x + pad, self.max.y + pad, self.max.z + pad);
+        if !finite(lo) || !finite(hi) {
+            return true;
+        }
+        let (mut t_lo, mut t_hi) = (0.0_f64, f64::INFINITY);
+        for (oo, dd, min, max) in [
+            (origin.x, dir.x, lo.x, hi.x),
+            (origin.y, dir.y, lo.y, hi.y),
+            (origin.z, dir.z, lo.z, hi.z),
+        ] {
+            if dd == 0.0 {
+                if !(min..=max).contains(&oo) {
+                    return false;
+                }
+                continue;
+            }
+            let (a, c) = ((min - oo) / dd, (max - oo) / dd);
+            if a.is_nan() || c.is_nan() {
+                return true;
+            }
+            t_lo = t_lo.max(a.min(c));
+            t_hi = t_hi.min(a.max(c));
+            if t_lo > t_hi {
+                return false;
+            }
+        }
+        t_lo <= t_hi
+    }
+
     /// True when `min > max` on some axis (e.g. a fresh extent)
     /// (`HasNegativeVolume`).
     #[must_use]
@@ -1668,5 +1724,23 @@ mod tests {
                 1.0
             ))
         );
+    }
+
+    #[test]
+    fn meets_ray_handles_hits_misses_interior_and_degenerate_boxes() {
+        let b = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        assert!(b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -7.0), 1e-6));
+        assert!(b.meets_ray(p(5.0, 5.0, 5.0), p(1.0, 0.0, 0.0), 1e-6));
+        assert!(b.meets_ray(p(-10.0, -10.0, 5.0), p(1.0, 1.0, 0.0), 1e-6));
+        // Grazing just outside the exact face is still kept within the conservative tolerance pad.
+        assert!(b.meets_ray(p(10.05, 5.0, 50.0), p(0.0, 0.0, -1.0), 0.01));
+        assert!(!b.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, 1.0), 1e-6));
+        assert!(!b.meets_ray(p(25.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(!Extent3d::new().meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        // Non-finite inputs return true conservatively.
+        let nan_box = Extent3d::from_bounds(f64::NAN, 0.0, 0.0, 10.0, 10.0, 10.0);
+        assert!(nan_box.meets_ray(p(5.0, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
+        assert!(b.meets_ray(p(f64::NAN, 5.0, 50.0), p(0.0, 0.0, -1.0), 1e-6));
     }
 }

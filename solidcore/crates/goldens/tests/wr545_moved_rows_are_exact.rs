@@ -48,7 +48,8 @@
 //!   relative, the `4v` one past `1e-9`); the
 //!   volumes (and masses, density 1) are FARTHER by 1.1e-10 and 2.2e-10 (3e-14 and 6e-14
 //!   relative, far inside the `1e-4` accuracy the integration is asked for; main's happened
-//!   to land within 1.6e-12). Their `shell_geometry` (edge intervals and points sampled at
+//!   to land within 1.6e-12). Only the `1e-9` check gates; the direction is measured and
+//!   printed, not pinned. Their `shell_geometry` (edge intervals and points sampled at
 //!   fractions of them) moves because the rounds' edges are now exact arcs and lines,
 //!   parameterised as such; the exact-edge certificate above covers them.
 //!
@@ -252,7 +253,7 @@ fn certify(k: &Kernel, b: &Brep) -> Found {
                 found.rulings += usize::from(ruled);
             } else if eligible && is_line {
                 found.uncertifiable += 1;
-            } else if eligible {
+            } else if eligible && !all_implicit {
                 found.conics_unchanged += 1;
             } else if all_implicit {
                 found.failures.push(format!(
@@ -301,6 +302,16 @@ fn closed_forms(n: f64) -> (f64, f64) {
     let volume = 6000.0 + n * (-90.0 + 22.5 * PI) - (2496.0 + n * (-6.0 + 1.5 * PI));
     (area, volume)
 }
+
+/// The rows where WR-495's exact mate (retired after WR-545) keeps an inner circle whole
+/// instead of main's two arcs, so the body has one vertex fewer (`goldens::wr495_rows`'
+/// `ONE_CIRCLE` proves the counts and that every circle edge is closed). The removed vertex
+/// set main's vertex box, so its bounds cannot be compared one by one. The check is still
+/// derived: removing a vertex can only shrink the box, and the pass moves a remaining vertex
+/// only within the tolerance (its guard `vertex_move_fits`, which this test does not
+/// re-check), so the new box must lie inside main's box grown by the tolerance (checked
+/// one-sided, bound by bound). `wr495_rows`' other two `ONE_CIRCLE` rows are not WR-545 rows.
+const ONE_CIRCLE: [&str; 1] = ["api_shell_cylinder_r5_top_open_tol_1e6"];
 
 /// Main's `shell_mass_properties` of the two `blend.fillet_executive_p3` rows.
 const MAIN_SHELL_MASS: [(&str, f64, [f64; 3]); 2] = [
@@ -419,6 +430,22 @@ fn wr545_moved_rows_replay_and_are_exact() {
                     continue;
                 }
                 bounds += 1;
+                if ONE_CIRCLE.contains(&name) {
+                    // vertices only removed or moved within the tolerance: the box of the
+                    // rest is inside main's grown by it (min bounds 1..4, max bounds 4..7)
+                    let inside = if i < 4 {
+                        new[i] >= old[i] - new[0]
+                    } else {
+                        new[i] <= old[i] + new[0]
+                    };
+                    if !inside {
+                        bad.push(format!(
+                            "{unit}/{name} {key}[{i}]: {} -> {} outside main's box grown by {:e}",
+                            old[i], new[i], new[0]
+                        ));
+                    }
+                    continue;
+                }
                 let moved = (new[i] - old[i]).abs();
                 if !(moved <= new[0]) {
                     bad.push(format!(
@@ -431,8 +458,8 @@ fn wr545_moved_rows_replay_and_are_exact() {
         if let Some(&(_, n, main)) = MAIN_SHELL_MASS.iter().find(|m| m.0 == name) {
             let (area, volume) = closed_forms(n);
             let new = out.values.get("shell_mass_properties").expect("shell mass");
-            // area CLOSER; volume and mass (density 1) FARTHER, inside the accuracy
-            let want = [Some(true), Some(false), Some(false)];
+            // the gate is the closed form within 1e-9; whether each moved closer or
+            // farther is reported only (a move of about 1e-10, not a proven direction)
             for (i, exact) in [area, volume, volume].into_iter().enumerate() {
                 // the closed form's own rounding: a few ulps of a value near 3500
                 let slack = 1e-12;
@@ -448,12 +475,6 @@ fn wr545_moved_rows_replay_and_are_exact() {
                     main[i] - exact,
                     new[i] - exact
                 );
-                if class != want[i] {
-                    bad.push(format!(
-                        "{name} shell_mass_properties[{i}]: {class:?}, pinned {:?}",
-                        want[i]
-                    ));
-                }
             }
         }
     }

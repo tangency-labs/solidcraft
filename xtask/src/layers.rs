@@ -42,6 +42,8 @@ impl Class {
 /// prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
+    // the kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md); solidcore-record only
+    ("kernel-api", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
     ("space-mouse", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
@@ -50,6 +52,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
+    // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
+    ("design-preview", Class::Standalone),
     ("sketch", Class::Layer(1)),
     // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
     ("develop", Class::Layer(1)),
@@ -106,6 +110,7 @@ pub const TABLE: &[(&str, Class)] = &[
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
     // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
     ("ui-kit-gallery", Class::Exempt),
@@ -115,7 +120,9 @@ pub const TABLE: &[(&str, Class)] = &[
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
 /// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"]];
+/// Sketch and sheet development reach solidcore's services through the kernel, its adapter.
+pub const INTRA_LAYER_ORDER: &[&[&str]] =
+    &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"], &["kernel", "sketch"], &["kernel", "develop"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
@@ -499,6 +506,75 @@ pub fn seam_check(crates: &[Crate], allow: &str, public: &str) -> Vec<String> {
     errors
 }
 
+/// The list of crates other than the kernel adapter that still depend on solidcore crates beyond
+/// the record's data types, each with the reason and the step that removes it.
+pub const ADAPTER_LIST: &str = "xtask/kernel-adapter.txt";
+
+/// The SolidCraft crates that are solidcore's adapter to the kernel interface
+/// (docs/design/kernel-layer.md): only they may depend on solidcore crates beyond
+/// `solidcore-record`.
+pub const ADAPTER_CRATES: &[&str] = &["crates/kernel", "crates/smlib"];
+
+/// The solidcore crate every SolidCraft crate may use: the record's data types, the body format.
+const RECORD: &str = "solidcore-record";
+
+/// The adapter rule: a SolidCraft crate reaches solidcore through the kernel adapter
+/// ([`ADAPTER_CRATES`]), taking solidcore's services from `solidcraft_kernel::services`. Any other
+/// crate's dependency, of any kind, on a solidcore crate other than [`RECORD`] must be named in
+/// `allow` (lines `crate-path -> solidcore-crate  reason`; `#` comments). The list only shrinks: a
+/// listed use that is gone is an error too. Returns the messages, sorted.
+pub fn adapter_check(crates: &[Crate], allow: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut listed: Vec<(String, String)> = Vec::new();
+    for (n, line) in allow.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut it = line.splitn(2, " -> ");
+        let (Some(from), Some(rest)) = (it.next(), it.next()) else {
+            errors.push(format!("{ADAPTER_LIST}:{}: expected `crate-path -> solidcore-crate  reason`", n + 1));
+            continue;
+        };
+        let mut parts = rest.split_whitespace();
+        let (Some(to), Some(_reason)) = (parts.next(), parts.next()) else {
+            errors.push(format!("{ADAPTER_LIST}:{}: `{line}` needs a one-line reason after the crate name, naming the step that removes it", n + 1));
+            continue;
+        };
+        listed.push((from.trim().to_owned(), to.to_owned()));
+    }
+    let mut used: Vec<(String, String)> = Vec::new();
+    for c in crates {
+        if is_solidcore_name(&c.name) || c.path.starts_with("solidcore/") || ADAPTER_CRATES.contains(&c.path.as_str()) {
+            continue;
+        }
+        for d in &c.deps {
+            if !(is_solidcore_name(&d.name) || d.from_solidcore) || d.name == RECORD {
+                continue;
+            }
+            let key = (c.path.clone(), d.name.clone());
+            if used.contains(&key) {
+                continue;
+            }
+            used.push(key.clone());
+            if !listed.contains(&key) {
+                errors.push(format!(
+                    "{} ({}) uses solidcore crate `{}` [{:?}]: only the kernel adapter (crates/kernel) may; take it from solidcraft_kernel::services, or the operation from solidcraft_kernel (docs/design/kernel-layer.md)",
+                    c.path, c.name, d.name, d.kind
+                ));
+            }
+        }
+    }
+    for (from, to) in &listed {
+        if !used.contains(&(from.clone(), to.clone())) {
+            errors.push(format!("{ADAPTER_LIST}: `{from} -> {to}` is no longer used; remove it from the list"));
+        }
+    }
+    errors.sort();
+    errors.dedup();
+    errors
+}
+
 /// One rule, one message: solidcore must build from its own tree alone.
 const STANDALONE_RULE: &str = "solidcore must build on its own; see solidcore/docs/layers.md";
 
@@ -833,6 +909,50 @@ mod tests {
         }
         // a solidcore crate with a name this list does not know, found by where it comes from
         assert_eq!(seam_check(&[seam_crate("brand-new-kernel-crate", Normal, true)], "", PUB).len(), 1);
+    }
+
+    fn app_crate(path: &str, dep: &str, kind: DepKind) -> Crate {
+        Crate {
+            name: format!("solidcraft-{}", path.rsplit('/').next().unwrap_or(path)),
+            path: path.into(),
+            deps: vec![Dep { name: dep.into(), kind, workspace: false, from_solidcore: true }],
+        }
+    }
+
+    #[test]
+    fn adapter_direct_ops_use_outside_the_adapter_fails() {
+        for kind in [Normal, Dev, Build] {
+            for dep in ["solidcore-ops", "solidcore-tess", "solidcore-step", "solidcore-cadir", "solidcore"] {
+                let e = adapter_check(&[app_crate("crates/doc", dep, kind)], "");
+                assert_eq!(e.len(), 1, "{dep} {kind:?}");
+                assert!(
+                    e[0].contains("crates/doc") && e[0].contains(&format!("`{dep}`")) && e[0].contains("solidcraft_kernel::services"),
+                    "{}",
+                    e[0]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn adapter_record_and_the_adapter_itself_pass() {
+        assert!(adapter_check(&[app_crate("crates/doc", "solidcore-record", Normal)], "").is_empty());
+        for path in ADAPTER_CRATES {
+            assert!(adapter_check(&[app_crate(path, "solidcore-ops", Normal)], "").is_empty(), "{path}");
+        }
+        assert!(adapter_check(&[app_crate("solidcore/crates/solidcore-ops", "solidcore", Normal)], "").is_empty());
+    }
+
+    #[test]
+    fn adapter_listed_use_passes_and_a_gone_one_must_leave() {
+        let list = "# exceptions\ncrates/viewport -> solidcore-tess  shared display crate\n";
+        assert!(adapter_check(&[app_crate("crates/viewport", "solidcore-tess", Normal)], list).is_empty());
+        // listing one crate does not cover another
+        assert_eq!(adapter_check(&[app_crate("crates/viewport", "solidcore-ops", Normal)], list).len(), 2);
+        let e = adapter_check(&[], list);
+        assert!(e.len() == 1 && e[0].contains("no longer used"), "{e:?}");
+        let e = adapter_check(&[app_crate("crates/viewport", "solidcore-tess", Normal)], "crates/viewport -> solidcore-tess\n");
+        assert!(e.iter().any(|m| m.contains("needs a one-line reason")), "{e:?}");
     }
 
     #[test]

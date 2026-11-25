@@ -572,6 +572,7 @@ crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_t
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::classify_touch	with_capacity	1	proven	Vec::with_capacity(vertexuses.len())	n = vertexuses.len(), an existing Vec of the same vertexuse handle type
 crates/solidcore/src/intersect/curve_class/p4.rs	CurveClassification::crossings_from_touches	int-div	1	proven	get_connected_touches(Some(lp), &crossings).len() as u64 / 2	constant non-zero divisor
 crates/solidcore/src/intersect/curve_class/p8.rs	CurveClassification::natural_bounds	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/intersect/curve_class/witness.rs	tangency_point	swap	1	proven	swap(0, 1)	ends is [_; 2], built just above as [solution.start, solution.end]
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::boundary_start_points	Vec::remove	1	open	remove(kk)	
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::step_size	int-div	1	proven	(l_min + l_max) / 2	constant non-zero divisor
 crates/solidcore/src/intersect/surface_drop_curve.rs	SurfaceDropCurve::trace_curve_2_in	Vec::remove	1	open	remove(0)	
@@ -1129,9 +1130,9 @@ crates/solidcore/src/topology/edge.rs	reset_primary_edgeuse	rotate	1	proven	rota
 crates/solidcore/src/topology/edge.rs	set_orientation	chunks	1	proven	chunks_exact(2)	constant non-zero size
 crates/solidcore/src/topology/edgeuse/p1.rs	edgeuse_last	int-rem	1	proven	(i + list.len() - 1) % list.len()	list_of returns Some only after position() finds i in that list, so len() > 0
 crates/solidcore/src/topology/edgeuse/p1.rs	edgeuse_next	int-rem	1	proven	(i + 1) % list.len()	list_of returns Some only after position() finds i in that list, so len() > 0
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::remove	1	proven	remove(0)	guarded by uv_curves.len() == 2; branches remove at most one curve
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::remove	2	proven	remove(1)	guarded by uv_curves.len() == 2; branches remove at most one curve
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::swap_remove	1	proven	swap_remove(kkk)	kkk comes from uv_curves.iter().enumerate(), with no intervening Vec mutation
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::remove	1	proven	remove(0)	guarded by uv_curves.len() == 2; branches remove at most one curve
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::remove	2	proven	remove(1)	guarded by uv_curves.len() == 2; branches remove at most one curve
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::swap_remove	1	proven	swap_remove(kkk)	kkk comes from uv_curves.iter().enumerate(), with no intervening Vec mutation
 crates/solidcore/src/topology/edgeuse/p3.rs	evaluate_binormal_uv	int-rem	1	proven	steps % 2	constant non-zero divisor
 crates/solidcore/src/topology/edgeuse/p3.rs	longest_drop_run	with_capacity	1	proven	Vec::with_capacity(pieces.len())	pieces.len() counts existing Curve elements, no smaller than (Extent1d, Point3, Point3) via CurveKind::Line
 crates/solidcore/src/topology/edgeuse/p3.rs	longest_drop_run	with_capacity	2	proven	Vec::with_capacity(run_pieces.len())	run_pieces.len() counts existing Curve elements, which contain the BSplineCurve variant inline
