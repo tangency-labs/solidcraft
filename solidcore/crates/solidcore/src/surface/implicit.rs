@@ -1244,7 +1244,12 @@ fn segment_distance_bound(
     }
     let g = 2.0 * d0 * shrink / n_len * shrink;
     let a_norm = 3.0 * amax * grow;
-    if !(g * g * shrink >= 4.0 * a_norm * q_bound * grow) {
+    // (a NaN on either side returns None, as `!(lhs >= rhs)` did)
+    let (lhs, rhs) = (g * g * shrink, 4.0 * a_norm * q_bound * grow);
+    if !matches!(
+        lhs.partial_cmp(&rhs),
+        Some(core::cmp::Ordering::Greater | core::cmp::Ordering::Equal)
+    ) {
         return None;
     }
     let off = 2.0 * q_bound / g * grow;

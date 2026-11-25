@@ -1294,7 +1294,9 @@ impl FilletSession<'_> {
                 // are (#18913: a round past its faces failed `SmBrep` test #61)
                 let recorded = session.objects.target.geometry_owner_keys().clone();
                 let result = session.trim_at_creases(k);
-                let result = result.and(session.normalize_target_owners(&recorded));
+                // (also after an error: the owners are normalised either way)
+                let normalized = session.normalize_target_owners(&recorded);
+                let result = result.and(normalized);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
@@ -1328,7 +1330,8 @@ impl FilletSession<'_> {
         let recorded = self.objects.target.geometry_owner_keys().clone();
         let result = self.merge_fillet_in_place(k);
         // Also after an error.
-        result.and(self.normalize_target_owners(&recorded))
+        let normalized = self.normalize_target_owners(&recorded);
+        result.and(normalized)
     }
 
     /// (not upstream: owners are pointers there) the insertion and the trim at creases
