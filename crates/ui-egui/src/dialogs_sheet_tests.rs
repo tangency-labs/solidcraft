@@ -2377,6 +2377,7 @@ fn press_in_hardware_preview_says_what_the_sheet_cannot_hold() {
         glass_new: false,
         tint_new: true,
         cut_tint: true,
+        replaced_ghost: true,
     };
     let preview = |place: [f64; 3], kind: usize, thread: &str| {
         let (app, mut d) = hardware_dialog_on(Some(place));
