@@ -989,6 +989,54 @@ impl ExtrudeStart {
     }
 }
 
+/// The parts library's card size; the columns follow it (three Small, two Medium, one Large
+/// across), and List shows names only. A saved value this version doesn't know (the first
+/// library's 0 to 3) reads as Medium.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+    List,
+}
+
+impl<'de> Deserialize<'de> for LibrarySize {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(v.as_str().and_then(Self::from_id).unwrap_or_default())
+    }
+}
+
+impl LibrarySize {
+    pub const ALL: [Self; 4] = [Self::Small, Self::Medium, Self::Large, Self::List];
+
+    /// The size as `ui.library` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::List => "list",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    /// The message id of the size's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Small => "parts_library.size_small",
+            Self::Medium => "parts_library.size_medium",
+            Self::Large => "parts_library.size_large",
+            Self::List => "parts_library.size_list",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1331,6 +1379,7 @@ pub struct PrefsWindow {
     /// that a decision was written while it ran, even one that leaves the value as it was.
     pub(crate) grants_revision: u64,
     pub(crate) plugin_remove: Option<(String, String)>,
+    pub(crate) plugin_remove_user_data: bool,
     panel_restore_details: bool,
     panel_restore_retry: bool,
     panel_popup_reset: bool,
@@ -1531,6 +1580,7 @@ impl Snapshot {
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
         app.preferences.view_window_setups = view_window_setups;
+        app.plugin_themes.signature = None;
         crate::plugins::sync_policy(app);
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
@@ -1974,6 +2024,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // followed file (#7573) wins while it is followed and has read completely once.
     follow_theme_file(app, ctx);
     let file = active_theme_file(app);
+    let accepts_accent = accent_accepted(file);
     let custom = crate::theme::prepare_tabs(ctx, file, file.and_then(|f| app.preferences.theme_options.get(&f.id)), || {
         file.map(|f| effective_theme_options(&app.preferences, f).0).unwrap_or_default()
     });
@@ -1988,6 +2039,11 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     sync_window_theme(app, ctx, follows_system);
     if solidcraft_theme::set_logo_accent(app.preferences.logo_accent) {
+        app.styled = false;
+    }
+    // Only a theme that accepts one takes the accent; the preference is kept for when one does.
+    let accent = accepts_accent.then(|| crate::theme::parse_accent(&app.preferences.accent)).flatten();
+    if crate::theme::set_accent(accent) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would
@@ -3017,6 +3073,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         }
         None => {}
     }
+    // An accent is `#rrggbb` or "" (the theme's): anything else is refused, not saved and ignored.
+    if let Some(a) = rest.get("accent") {
+        let a = a.as_str().unwrap_or("#");
+        if !a.is_empty() && crate::theme::parse_accent(a).is_none() {
+            return Err(format!("`accent` must be a colour as #rrggbb, or \"\" for the theme's own (got `{a}`)"));
+        }
+    }
     let export = rest.remove("theme_export").and_then(|v| v.as_bool()).unwrap_or(false);
     let mut new = prepare_preferences(app, &staged, followed_theme(&staged, &follow), &serde_json::Value::Object(rest.clone()))?;
     let stopped_following = !app.prefs_window.follow.path(&app.preferences.theme_follow).is_empty() && follow.path(&new.theme_follow).is_empty();
@@ -3188,19 +3251,24 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
-/// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
-/// the imported ones.
+/// Every theme the Theme list offers, as (id, name): Light and Dark first, then the built-in
+/// and imported theme files together by name, ignoring case (#8637).
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes =
         THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), solidcraft_ui_text::tr_label(label).to_string()));
     // Built-in names are UI labels; a custom theme keeps the name its author gave it.
     let builtins = crate::theme_files::builtin().iter().map(|t| (t.id.clone(), solidcraft_ui_text::tr_label(&t.name).to_string()));
     let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
-    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).collect();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        _ => 2,
+    let plugins = crate::theme_files::plugin_theme_choices().into_iter();
+    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).chain(plugins).collect();
+    choices.sort_by_cached_key(|(id, name)| {
+        let rank = match id.as_str() {
+            "light" => 0,
+            "dark" => 1,
+            _ => 2,
+        };
+        let name = if rank < 2 { String::new() } else { name.to_lowercase() };
+        (rank, name, id.clone())
     });
     choices
 }
@@ -3338,6 +3406,11 @@ fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
     })
 }
 
+/// Whether the Accent preference applies: a theme file with `accepts_accent`, or the built-in Light and Dark.
+fn accent_accepted(file: Option<&crate::theme_files::ThemeFile>) -> bool {
+    file.is_none_or(|f| f.accepts_accent)
+}
+
 /// The single runtime decision used by controls, ui.prefs and renderer activation. It never
 /// changes saved intent or caches accessibility/hardware state in palette tokens.
 pub(crate) fn blur_availability(app: &SolveApp) -> crate::theme_options::Availability {
@@ -3404,7 +3477,7 @@ fn followed_theme<'a>(prefs: &Prefs, follow: &'a crate::theme_files::Follow) -> 
 
 /// Preserve authored definitions; themes predating options retain their complete snapshot export.
 fn export_theme_file(file: &crate::theme_files::ThemeFile) -> serde_json::Value {
-    if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() {
+    if !file.options.is_empty() || !file.overlays.is_empty() || !file.tabs.is_empty() || file.needs_newer() || file.accepts_accent {
         crate::theme_files::export_file(file)
     } else {
         crate::theme_files::export(
@@ -3973,10 +4046,20 @@ fn prepare_preferences(
     {
         return Err("`extrude_start` must be fixed, last_used or custom".into());
     }
+    if let Some(v) = p.get("library_size")
+        && v.as_str().and_then(LibrarySize::from_id).is_none()
+    {
+        return Err("`library_size` must be small, medium, large or list".into());
+    }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))
     {
         return Err("`dimension_input` must be view or window".into());
+    }
+    if let Some(v) = p.get("isolate_others")
+        && !matches!(v.as_str(), Some("hidden" | "transparent" | "wireframe"))
+    {
+        return Err("`isolate_others` must be hidden, transparent or wireframe".into());
     }
     if let Some(value) = p.get("graphics_backend")
         && !value.as_str().is_some_and(|id| GRAPHICS_BACKENDS.contains(&id) || id == app.preferences.graphics_backend)
@@ -4455,6 +4538,27 @@ mod tests {
         assert!(!state.night && state.tone == Some(false));
     }
 
+    /// #8637: Light and Dark stay first; the theme files follow by name, ignoring case, built in
+    /// and imported together, whatever the built-in `order` says.
+    #[test]
+    fn theme_choices_keep_the_modes_first_and_sort_the_files_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz last", "aardvark"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        let choices = theme_choices(&app);
+        let ids: Vec<&str> = choices.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids[..2], ["light", "dark"], "{ids:?}");
+        let names: Vec<String> = choices[2..].iter().map(|(_, name)| name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+        // Built-in names starting with a digit (1-bit) come before it.
+        let first_letter = names.iter().find(|n| n.starts_with(|c: char| c.is_alphabetic()));
+        assert_eq!(first_letter.map(String::as_str), Some("aardvark"), "imported files sort with the built-in ones");
+        assert_eq!(names.last().map(String::as_str), Some("zz last"));
+        assert_eq!(choices.len(), crate::theme_files::builtin().len() + 4);
+    }
+
     #[test]
     fn theme_filter_counts_ignore_only_their_own_group() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -4543,6 +4647,22 @@ mod tests {
             assert_eq!(super::lenient(&saved).length_decimals, 4, "{removed}");
             assert!(serde_json::to_value(&p).unwrap().get(removed).is_none(), "{removed} is not written back");
         }
+    }
+
+    #[test]
+    fn navigator_turn_around_defaults_on_persists_and_resets() {
+        assert!(Prefs::default().navigator_turn_around);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().navigator_turn_around);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(app.preferences.navigator_turn_around);
+        let reply = control(&mut app, &json!({"navigator_turn_around":false})).unwrap();
+        assert_eq!(reply["navigator_turn_around"], false);
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["navigator_turn_around"], false);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.navigator_turn_around);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(app.preferences.navigator_turn_around);
     }
 
     /// #10254: the invert toggle is off by default, persists, and the Navigation page's
@@ -4653,78 +4773,39 @@ mod tests {
     }
 
     #[test]
-    fn document_browser_visibility_defaults_hidden_and_preserves_explicit_choices() {
+    fn the_old_document_browser_settings_load_and_drop_away() {
         use serde_json::json;
+        // Preferences saved by a build with the documents browser: its keys are read past, and the
+        // parts library keeps its own setting (#8206 replaced the browser).
+        let saved = json!({
+            "preferences": {"show_document_browser": true, "library_thumbnail_size": "small", "library_open": true},
+            "document_library": {"root": "/legacy/CAD", "collapsed": false},
+        });
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        assert!(!app.preferences.show_document_browser);
-        for saved in [json!({}), json!({"preferences": {}}), json!({"document_library": {"root": "/legacy/CAD"}})] {
-            app.load_prefs(&saved.to_string());
-            assert!(!app.preferences.show_document_browser);
-        }
-        for collapsed in [true, false] {
-            app.load_prefs(&json!({"preferences": {}, "document_library": {"collapsed": collapsed}}).to_string());
-            assert_eq!(app.preferences.show_document_browser, !collapsed);
-            for visible in [false, true] {
-                app.load_prefs(&json!({"preferences": {"show_document_browser": visible}, "document_library": {"collapsed": collapsed}}).to_string());
-                assert_eq!(app.preferences.show_document_browser, visible, "the canonical preference wins over legacy state");
-                let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-                restored.load_prefs(&app.prefs());
-                assert_eq!(restored.preferences.show_document_browser, visible);
-            }
+        app.load_prefs(&saved.to_string());
+        assert!(app.preferences.library_open, "the parts library's own setting loads");
+        let written: serde_json::Value = serde_json::from_str(&app.prefs()).unwrap();
+        assert!(written.get("document_library").is_none(), "the browser's state is not written back");
+        for key in ["show_document_browser", "library_thumbnail_size"] {
+            assert!(written["preferences"].get(key).is_none(), "{key} is gone");
         }
         super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
-        assert!(!app.preferences.show_document_browser);
+        assert!(!app.preferences.library_open);
     }
 
     #[test]
-    fn document_browser_visibility_checkbox_obeys_cancel_and_ok() {
+    fn parts_library_checkbox_obeys_cancel_and_ok() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         for button in ["cancel", "ok"] {
             h.call("ui.prefs", json!({"open": "Layout"}));
-            h.app.prefs_window.shell.filter = "Show documents".into();
+            h.app.prefs_window.shell.filter = "Show parts library".into();
             h.frames(3);
-            h.step(&json!({"click": {"handle": "prefs:show_document_browser"}})).unwrap();
-            assert!(h.app.preferences.show_document_browser);
+            h.step(&json!({"click": {"handle": "prefs:library_open"}})).unwrap();
+            assert!(h.app.preferences.library_open);
             h.call("ui.prefs", json!({"button": button}));
-            assert_eq!(h.app.preferences.show_document_browser, button == "ok");
+            assert_eq!(h.app.preferences.library_open, button == "ok");
         }
-    }
-
-    #[test]
-    fn library_thumbnail_size_picker_obeys_cancel_and_ok() {
-        use serde_json::json;
-        let mut h = crate::scenario::Harness::new();
-        for button in ["cancel", "ok"] {
-            h.call("ui.prefs", json!({"open": "Layout"}));
-            h.app.prefs_window.shell.filter = "Document browser".into();
-            h.frames(3);
-            h.step(&json!({"click": {"handle": "prefs:document_browser:small"}})).unwrap();
-            assert_eq!(h.app.preferences.library_thumbnail_size, crate::library::ThumbnailSize::Small);
-            h.call("ui.prefs", json!({"button": button}));
-            assert_eq!(
-                h.app.preferences.library_thumbnail_size,
-                if button == "cancel" { crate::library::ThumbnailSize::Large } else { crate::library::ThumbnailSize::Small }
-            );
-        }
-    }
-
-    #[test]
-    fn library_thumbnail_size_defaults_persists_and_resets() {
-        use crate::library::ThumbnailSize;
-        let legacy: super::Prefs = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert_eq!(legacy.library_thumbnail_size, ThumbnailSize::Large);
-        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        for (name, size) in [("small", ThumbnailSize::Small), ("medium", ThumbnailSize::Medium), ("large", ThumbnailSize::Large)] {
-            super::set(&mut app, &serde_json::json!({"library_thumbnail_size": name})).unwrap();
-            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-            restored.load_prefs(&app.prefs());
-            assert_eq!(restored.preferences.library_thumbnail_size, size);
-        }
-        assert!(super::set(&mut app, &serde_json::json!({"library_thumbnail_size": "invalid"})).is_err());
-        app.preferences.library_thumbnail_size = ThumbnailSize::Small;
-        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
-        assert_eq!(app.preferences.library_thumbnail_size, ThumbnailSize::Large);
     }
 
     #[test]
@@ -7577,6 +7658,47 @@ mod tests {
         assert!(has(&h, "dropped"));
         assert_eq!(h.app.docs.count(), tabs, "the drop opened no design");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `ui.prefs` `accent`: taken by a theme that accepts one, kept for one that does not; anything but `#rrggbb` is refused.
+    #[test]
+    fn the_accent_preference_applies_only_to_a_theme_that_accepts_it() {
+        use serde_json::json;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                crate::theme::set_accent(None);
+            }
+        }
+        let _reset = Reset;
+        let pink = egui::Color32::from_rgb(0xec, 0x48, 0x99);
+        let theme = |name: &str, accepts: bool| json!({"format":"solidcraft-theme/1","name":name,"base":"dark","colors":{"accent":"#336699"},"accepts_accent":accepts});
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let out = control(&mut h.app, &json!({"theme_import":theme("Closed",false),"accent":"#ec4899","open":"Interface"}));
+        assert!(out.is_ok(), "{out:?}");
+        h.frames(3);
+        let own = egui::Color32::from_rgb(0x33, 0x66, 0x99);
+        assert_eq!(solidcraft_theme::Tokens::get().accent, own, "a theme that does not accept an accent is unchanged");
+        assert!(crate::scenario::rect_of("prefs:accent:theme").is_some(), "and shows its Accent row, disabled");
+        assert_eq!(h.app.preferences.accent, "#ec4899", "the saved accent is kept");
+        control(&mut h.app, &json!({"theme_import":theme("Open",true)})).unwrap();
+        h.frames(3);
+        assert_eq!(solidcraft_theme::Tokens::get().accent, pink, "a theme that accepts one takes the saved accent");
+        assert!(crate::scenario::rect_of("prefs:accent:theme").is_some(), "and shows the Accent row");
+        assert!(h.app.prefs().contains("\"accent\""), "kept with the preferences");
+        assert!(control(&mut h.app, &json!({"accent": "pink"})).is_err());
+        assert!(control(&mut h.app, &json!({"accent": "#ec489980"})).is_err(), "an accent is opaque");
+        control(&mut h.app, &json!({"accent": ""})).unwrap();
+        h.frames(2);
+        assert_eq!(solidcraft_theme::Tokens::get().accent, own);
+        control(&mut h.app, &json!({"accent": "#ec4899", "theme": "closed"})).unwrap();
+        h.frames(2);
+        assert_eq!(solidcraft_theme::Tokens::get().accent, own, "switching to a theme that does not accept it drops the override");
+        let exported = control(&mut h.app, &json!({"theme": "open", "theme_export": true})).unwrap();
+        assert_eq!(exported["theme_file"]["accepts_accent"], true, "the field is exported");
+        let bad = json!({"format":"solidcraft-theme/1","name":"Bad","base":"dark","accepts_accent":"yes"});
+        assert!(control(&mut h.app, &json!({"theme_import": bad})).is_err(), "the field is a boolean");
     }
 
     #[test]
@@ -10750,6 +10872,59 @@ mod tests {
         h.call("ui.click", json!({"x":axis.x,"y":axis.y}));
         assert!(h.app.cam.back().dist(Vec3::Y) < 1e-6, "original axes retain click-again reversal");
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn custom_navigator_explains_the_missing_body_and_hides_the_hint_once_assigned() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10})).unwrap();
+        h.app.session.mark_saved();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        let history = h.app.session.undo.len();
+        let camera = h.app.cam;
+        let nav = h.app.preferences.nav.clone();
+        let hint = "Close Preferences, right-click the navigator and choose Custom. Pick a body in the view to use it as the navigator.";
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        super::reveal_preference(&mut h, "prefs:navigator");
+        assert!(h.widget(hint).is_none(), "Axes needs no custom body");
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
+        h.call("ui.click", json!({"x": custom.x, "y": custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.widget(hint).is_some(), "Custom explains why it still shows axes without a body");
+
+        h.app.run("view.navigator", json!({"body": "Body1"})).unwrap();
+        h.frames(3);
+        assert!(h.app.view_gizmo.shape.is_some());
+        assert!(h.widget(hint).is_none(), "the assigned body's snapshot needs no missing-body hint");
+        h.app.run("view.navigator", json!({"body": null})).unwrap();
+        h.frames(3);
+        assert!(h.widget(hint).is_some(), "clearing the body restores the hint");
+        assert_eq!(h.app.preferences.nav, nav);
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), history);
+        assert!(!h.app.session.is_dirty());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+
+        // The hinted route remains reachable while Custom has no body and shows axes.
+        h.call("ui.prefs", json!({"open": "Navigation", "navigator_style": "custom"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.app.view_gizmo.shape.is_none());
+        assert_eq!(crate::view_gizmo::style(&h.app), NavigatorStyle::Axes);
+        let fallback = crate::scenario::rect_of("axis_view:outer").unwrap().center();
+        h.call("ui.click", json!({"x": fallback.x, "y": fallback.y, "button": "right"}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewNavigator(_))));
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        assert!(h.app.view_gizmo.shape.is_none(), "opening and cancelling the picker assigns no body");
     }
 
     /// The texts one frame paints.
@@ -14004,6 +14179,7 @@ mod settings_search_tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Turn Around button", crate::prefs::PAGE_NAVIGATION, "prefs:navigator_turn_around"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -14016,8 +14192,20 @@ mod settings_search_tests {
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
-                set_cursor(&h.ctx, matching[0].0);
+                // Axes matches both the navigator's choice and the Turn Around checkbox's label.
+                let expected = if query == "Axes" { 2 } else { 1 };
+                assert_eq!(matching.len(), expected, "{theme}: {query} has the expected indexed settings");
+                let cursor = if query == "Axes" {
+                    assert!(matching.iter().any(|(_, hit)| hit.label == h.app.tr("prefs.navigator_turn_around")));
+                    matching
+                        .iter()
+                        .find(|(_, hit)| hit.label == h.app.tr("prefs.navigation.axes_signed"))
+                        .expect("the signed-axes choice matches Axes")
+                        .0
+                } else {
+                    matching[0].0
+                };
+                set_cursor(&h.ctx, cursor);
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 h.frames(20);

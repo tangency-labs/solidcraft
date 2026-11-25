@@ -69,6 +69,7 @@ use crate::format::{CheckNumbers as _, DRAWING};
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
+pub mod auto_marks;
 pub mod balloon;
 pub mod by_id;
 pub mod centre_line;
@@ -79,6 +80,7 @@ pub mod dimension;
 pub mod fields;
 mod fill;
 pub mod fold;
+pub mod hatch;
 pub mod image;
 pub mod line_maths;
 pub mod measure;

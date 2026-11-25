@@ -53,7 +53,7 @@ fn p(x: f64, y: f64) -> Point2 {
 
 #[test]
 fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
-    use super::import_geometry::chord_coordinates;
+    use super::transform::chord_coordinates;
 
     // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
     assert_eq!(
@@ -2595,8 +2595,8 @@ mod recognition {
     }
 }
 
-mod path_export_regressions {
-    use super::super::path_export::*;
+mod arc_conversion_regressions {
+    use super::super::arc_conversion::*;
     use super::super::profile::Seg2;
     use crate::math::Vec2;
 
@@ -2729,7 +2729,7 @@ mod path_export_regressions {
                 Seg2::Line { a, b },
             ];
             let error =
-                path_shapes(DxfPath::Open(&segs), DxfPathStyle::Exact, encoding).unwrap_err();
+                path_shapes(PlanarPath::Open(&segs), PathStyle::Exact, encoding).unwrap_err();
             assert_eq!(error.piece, Some((1, 2)));
             assert_eq!(error.reason, "line endpoint cannot be encoded");
         }
@@ -2752,7 +2752,7 @@ mod path_export_regressions {
             b: Vec2::new(11.0, 0.0),
         };
         let error =
-            path_shapes(DxfPath::Open(&[far]), DxfPathStyle::Polyline, encoding).unwrap_err();
+            path_shapes(PlanarPath::Open(&[far]), PathStyle::Polyline, encoding).unwrap_err();
         assert_eq!(error.reason, "line endpoint cannot be encoded");
         let off_grid = Seg2::Arc {
             center: Vec2::new(11.0, 0.0),
@@ -2760,8 +2760,8 @@ mod path_export_regressions {
             start: 0.0,
             sweep: 0.5,
         };
-        for style in [DxfPathStyle::Exact, DxfPathStyle::Polyline] {
-            let error = path_shapes(DxfPath::Open(&[off_grid]), style, encoding).unwrap_err();
+        for style in [PathStyle::Exact, PathStyle::Polyline] {
+            let error = path_shapes(PlanarPath::Open(&[off_grid]), style, encoding).unwrap_err();
             assert_eq!(error.reason, "arc centre cannot be encoded");
         }
         // A bulge of 0.00025 is written as 0, and two ends 0.0002 apart as one point: neither arc
@@ -2785,15 +2785,15 @@ mod path_export_regressions {
             sweep: 1.0,
         };
         assert!(matches!(
-            path_shapes(DxfPath::Open(&[flat]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            path_shapes(PlanarPath::Open(&[flat]), PathStyle::Polyline, encoding).unwrap()[..],
             [PathShape::Arc { .. }]
         ));
         assert!(matches!(
-            path_shapes(DxfPath::Open(&[packed]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            path_shapes(PlanarPath::Open(&[packed]), PathStyle::Polyline, encoding).unwrap()[..],
             [PathShape::BulgedPolyline { .. }]
         ));
         assert!(
-            path_shapes(DxfPath::Open(&[short]), DxfPathStyle::Polyline, encoding)
+            path_shapes(PlanarPath::Open(&[short]), PathStyle::Polyline, encoding)
                 .map_or(true, |shapes| matches!(shapes[..], [PathShape::Arc { .. }]))
         );
     }
@@ -2859,7 +2859,7 @@ mod path_export_regressions {
     }
 
     #[test]
-    fn translated_conic_keeps_its_rational_definition_in_public_path_export() {
+    fn translated_conic_keeps_its_rational_definition_in_public_arc_conversion() {
         let c = 2.0_f64.powi(52);
         let w = 0.5_f64.sqrt();
         let a = Vec2::new(c + 4.0, 0.0);
@@ -2887,8 +2887,8 @@ mod path_export_regressions {
                     },
                 ];
                 let shapes = path_shapes(
-                    DxfPath::Open(&segs),
-                    DxfPathStyle::Exact,
+                    PlanarPath::Open(&segs),
+                    PathStyle::Exact,
                     scalar_encoding(Some),
                 )
                 .expect("finite conic must retain its rational definition");

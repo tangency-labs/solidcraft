@@ -65,6 +65,7 @@ mod navigation_menu;
 mod navigation_settings;
 pub mod panel;
 mod panel_host;
+mod part_card;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
@@ -97,6 +98,14 @@ pub mod type_face;
 mod value_focus;
 mod viewport_status;
 mod wheel;
+
+/// The shared rule for chrome that tells views, tiles or windows apart (a tile's header label, an
+/// active-tile or mode marker): it shows only when there is more than one to tell apart. With one
+/// view nothing is drawn; with several, at most a thin neutral marker. New chrome of that kind goes
+/// through this predicate.
+pub fn disambiguates(count: usize) -> bool {
+    count > 1
+}
 
 pub use actions::Button;
 pub use actions::button;
@@ -196,6 +205,7 @@ pub use panel::inspector_header;
 pub use panel::panel_header_hover;
 pub use panel::within;
 pub use panel_host::*;
+pub use part_card::{PartCard, PartCardSize, PartFace, fitted, folder_button, part_card, part_row};
 pub use preferences::*;
 pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
