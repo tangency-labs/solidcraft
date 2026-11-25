@@ -73,6 +73,7 @@ fn rows_find_what_the_session_finds(h: &mut crate::scenario::Harness) {
         let model = app.tree.model.as_ref().unwrap();
         assert_eq!(model.position(&app.session, id), doc.feature_index(id), "{}", feature.name);
         assert_eq!(model.status(app, id), crate::timeline::feature_status(app, id), "{}", feature.name);
+        assert_eq!(model.sketch_state(id), app.session.model.state().sketch(id).map(crate::sketch_state::SketchState::of), "{}", feature.name);
         for placement in &placements {
             let placement = placement.as_ref().map(|(component, path)| (*component, path.as_slice()));
             let made = app.session.feature_bodies(&[id], placement);

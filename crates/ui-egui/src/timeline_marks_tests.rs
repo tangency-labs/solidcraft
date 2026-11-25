@@ -196,9 +196,26 @@ fn a_sketchs_icon_takes_its_states_colour_in_both_histories_and_the_browser() {
             assert_eq!(icon_colours(&shapes, &textures, chip, 14.0..=20.0), vec![colour.to_array()], "{name}: left History, names {names}");
         }
     }
+    // History docked in the browser (#22185).
+    h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+    let (shapes, textures) = fresh_frame(&mut h);
+    for (name, colour) in want {
+        let id = h.app.session.doc.find_feature(name).unwrap().id;
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        assert_eq!(icon_colours(&shapes, &textures, row, 15.5..=16.5), vec![colour.to_array()], "{name}: browser History");
+    }
     // Preference off: every sketch's icon is its artwork again, as before.
     h.app.preferences.sketch_state_icons = false;
-    h.app.preferences.timeline_left = false;
+    let (shapes, textures) = fresh_frame(&mut h);
+    let mut history_rows = Vec::new();
+    for (name, _) in want {
+        let id = h.app.session.doc.find_feature(name).unwrap().id;
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        history_rows.push(icon_colours(&shapes, &textures, row, 15.5..=16.5));
+    }
+    assert!(history_rows.iter().all(|colours| colours.len() > 1), "the sketch artwork, not one ink: {history_rows:?}");
+    assert!(history_rows.windows(2).all(|w| w[0] == w[1]), "every sketch's icon alike");
+    h.app.run("view.history_layout", json!({"dock": "bottom"})).unwrap();
     assert!(crate::sketch_state::SketchStates::of(&h.app).get(h.app.session.doc.find_feature("Guide").unwrap().id).is_none());
     let (shapes, textures) = fresh_frame(&mut h);
     let (mut chips, mut rows) = (Vec::new(), Vec::new());
@@ -251,6 +268,103 @@ fn a_sketch_rows_tooltip_names_its_state() {
         let texts = painted_texts(&mut h);
         assert!(!texts.iter().any(|t| t.contains(gone)), "{handle}: `{gone}` in {texts:?}");
     }
+}
+
+/// #22185: with History docked in the browser, a sketch row in the History folder matches the
+/// Sketches folder's solve-state icon colour and tooltip wording, while preserving warning,
+/// error, suppressed and rolled-back precedence.
+#[test]
+fn a_sketch_row_in_the_browser_history_shows_its_state_and_preserves_precedence() {
+    let mut h = sketch_states_design();
+    let t = solidcraft_theme::Tokens::get();
+    let id_of = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.find_feature(name).unwrap().id;
+    let (guide, reach, fixed) = (id_of(&h, "Guide"), id_of(&h, "Reach"), id_of(&h, "Fixed"));
+    let history_handle = |id: u64| format!("row:browser-feature:c0:{id}");
+    h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+    h.settle();
+
+    // Icon colour for all three solve states in Browser History, and Reach keeps its warning mark.
+    let (shapes, textures) = fresh_frame(&mut h);
+    for (name, id, colour) in [("Guide", guide, t.sketch), ("Fixed", fixed, t.sketch_fixed), ("Reach", reach, t.error)] {
+        let row = crate::scenario::handle_at(&history_handle(id)).unwrap();
+        assert_eq!(icon_colours(&shapes, &textures, row, 15.5..=16.5), vec![colour.to_array()], "{name}: browser History");
+    }
+    assert!(crate::scenario::handle_at("status:warning:Reach").is_some(), "conflicting sketch keeps its warning mark");
+
+    // Tooltip names the solve state for under-defined, fully defined, and conflicting sketches.
+    h.settle();
+    for (handle, want) in [(history_handle(fixed), "Fully constrained"), (history_handle(reach), "Constraints conflict")] {
+        h.step(&json!({"move": {"handle": handle}})).unwrap();
+        h.frames(60);
+        let texts = painted_texts(&mut h);
+        assert!(texts.iter().any(|text| text.contains(want)), "{handle}: no `{want}` in {texts:?}");
+    }
+    h.step(&json!({"move": {"handle": history_handle(guide)}})).unwrap();
+    h.frames(60);
+    let texts = painted_texts(&mut h);
+    assert!(texts.iter().any(|text| text.contains("Under constrained (") && text.contains("degrees of freedom)")), "{texts:?}");
+
+    // Preference off: tooltips drop the solve-state wording while Reach keeps its warning.
+    h.app.preferences.sketch_state_icons = false;
+    for (handle, gone) in [(history_handle(fixed), "Fully constrained"), (history_handle(reach), "Constraints conflict")] {
+        h.step(&json!({"move": [5, 5]})).unwrap();
+        h.frames(5);
+        h.step(&json!({"move": {"handle": handle}})).unwrap();
+        h.frames(60);
+        let texts = painted_texts(&mut h);
+        assert!(!texts.iter().any(|text| text.contains(gone)), "{handle}: `{gone}` in {texts:?}");
+    }
+    h.app.preferences.sketch_state_icons = true;
+
+    // Suppressed sketch: plain artwork and no solve-state tooltip.
+    h.app.run("timeline.suppress", json!({"feature": fixed, "suppressed": true})).unwrap();
+    h.settle();
+    let (shapes, textures) = fresh_frame(&mut h);
+    let row = crate::scenario::handle_at(&history_handle(fixed)).unwrap();
+    assert!(icon_colours(&shapes, &textures, row, 15.5..=16.5).len() > 1, "suppressed sketch keeps plain artwork");
+    h.settle();
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    h.frames(5);
+    h.step(&json!({"move": {"handle": history_handle(fixed)}})).unwrap();
+    h.frames(60);
+    let texts = painted_texts(&mut h);
+    assert!(!texts.iter().any(|text| text.contains("Fully constrained")), "suppressed sketch has no solve-state tip: {texts:?}");
+    h.app.run("timeline.suppress", json!({"feature": fixed, "suppressed": false})).unwrap();
+    h.settle();
+
+    // Rolled-back sketch: plain artwork and no solve-state tooltip.
+    let fixed_index = h.app.session.doc.feature_index(fixed).unwrap();
+    h.app.run("timeline.roll_to", json!({"position": fixed_index})).unwrap();
+    h.settle();
+    let (shapes, textures) = fresh_frame(&mut h);
+    let row = crate::scenario::handle_at(&history_handle(fixed)).unwrap();
+    assert!(icon_colours(&shapes, &textures, row, 15.5..=16.5).len() > 1, "rolled-back sketch keeps plain artwork");
+    h.settle();
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    h.frames(5);
+    h.step(&json!({"move": {"handle": history_handle(fixed)}})).unwrap();
+    h.frames(60);
+    let texts = painted_texts(&mut h);
+    assert!(!texts.iter().any(|text| text.contains("Fully constrained")), "rolled-back sketch has no solve-state tip: {texts:?}");
+    h.app.run("timeline.roll_to", json!({})).unwrap();
+    h.settle();
+
+    // Errored sketch: keeps its error mark, plain artwork, and error-coloured tooltip without stale solve state.
+    let error = "sketch plane is missing";
+    h.app.session.model.results.iter_mut().find(|r| r.id == fixed).unwrap().error = Some(error.into());
+    let (shapes, textures) = fresh_frame(&mut h);
+    let row = crate::scenario::handle_at(&history_handle(fixed)).unwrap();
+    assert!(icon_colours(&shapes, &textures, row, 15.5..=16.5).len() > 1, "errored sketch keeps plain artwork");
+    assert!(crate::scenario::handle_at("status:error:Fixed").is_some(), "errored sketch keeps its error mark");
+    h.frames(2);
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    h.frames(5);
+    h.step(&json!({"move": {"handle": history_handle(fixed)}})).unwrap();
+    h.frames(60);
+    let (colour, cut, _) = painted_as(&mut h, error).expect("errored sketch tooltip shows its error");
+    assert_eq!((colour, cut), (t.error, false), "errored sketch tooltip shows its error in the error colour");
+    let texts = painted_texts(&mut h);
+    assert!(!texts.iter().any(|text| text.contains("Fully constrained")), "errored sketch omits stale solve state: {texts:?}");
 }
 
 /// How the text holding `text` is painted this frame: its colour, whether it is cut short (an

@@ -45,6 +45,8 @@ pub(super) struct Model {
     body_features: Option<BTreeMap<String, Vec<u64>>>,
     /// Where each feature and its result are (built on first use, #14850).
     places: OnceLock<Places>,
+    /// Each solved sketch's state, by its feature id (built on first use, #22185).
+    sketch_states: OnceLock<HashMap<u64, crate::sketch_state::SketchState>>,
     /// The bodies each feature made, by their place in the model's bodies (built on first use).
     made: Option<HashMap<u64, Vec<usize>>>,
     /// The world names of the bodies a feature made ([`Model::feature_bodies`]), by the
@@ -127,6 +129,7 @@ impl Model {
             body_paths_job: None,
             body_features: None,
             places: OnceLock::new(),
+            sketch_states: OnceLock::new(),
             made: None,
             names: HashMap::new(),
         }
@@ -162,6 +165,13 @@ impl Model {
     pub fn status(&self, app: &SolveApp, id: u64) -> Option<Status> {
         let index = self.position(&app.session, id)?;
         crate::timeline::status_at(app, index, || self.result_at(&app.session, index))
+    }
+
+    /// A solved sketch's state ([`crate::sketch_state::SketchState`]), indexed once per model.
+    pub fn sketch_state(&self, id: u64) -> Option<crate::sketch_state::SketchState> {
+        let states =
+            self.sketch_states.get_or_init(|| self.state.sketches.iter().map(|ss| (ss.feature, crate::sketch_state::SketchState::of(ss))).collect());
+        states.get(&id).copied()
     }
 
     /// The worst mark of a component's features (its sketches too in the History layout) and the

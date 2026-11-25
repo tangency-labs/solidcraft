@@ -439,6 +439,19 @@ fn lit_by_selection(app: &SolveApp) -> BTreeSet<u64> {
     lit
 }
 
+/// A sketch's solve state for its Browser History row (#22185): matches the Sketches folder and
+/// timelines, left off while the sketch is suppressed, rolled back, failed, or the preference is
+/// off.
+fn sketch_state(app: &SolveApp, id: u64, is_sketch: bool, dim: bool, status: Option<Status>) -> Option<crate::sketch_state::SketchState> {
+    if !is_sketch || dim || status == Some(Status::Error) || !app.preferences.sketch_state_icons {
+        return None;
+    }
+    match current_model(app) {
+        Some(model) => model.sketch_state(id),
+        None => app.session.model.state().sketch(id).map(crate::sketch_state::SketchState::of),
+    }
+}
+
 /// One feature or sketch row; returns whether its fold arrow was clicked.
 #[allow(clippy::too_many_arguments)]
 fn feature_row(
@@ -489,7 +502,16 @@ fn feature_row(
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
     };
-    let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
+    let sketch_state = sketch_state(app, id, is_sketch, dim, status);
+    let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
+    let icon_ink = sketch_state.and_then(|state| state.ink(&Tokens::get()));
+    let mut status_tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
+    if let (Some(tip), Some(state)) = (status_tip.as_mut(), state_tip.as_deref()) {
+        if !tip.tail.is_empty() {
+            tip.tail.push('\n');
+        }
+        tip.tail.push_str(state);
+    }
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -500,6 +522,8 @@ fn feature_row(
             fold,
             eye,
             icon,
+            icon_ink,
+            tip: state_tip.as_deref(),
             label: &label,
             name: true,
             rename: true,
@@ -509,7 +533,7 @@ fn feature_row(
             action,
             mark,
             status,
-            status_tip: tip.as_ref(),
+            status_tip: status_tip.as_ref(),
             ..Default::default()
         },
     );

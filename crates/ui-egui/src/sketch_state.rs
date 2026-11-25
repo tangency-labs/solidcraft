@@ -1,8 +1,8 @@
-//! A sketch's solve state on its rows (#7245): the History strip, the left History and the
-//! browser's Sketches folder draw the sketch icon in the colour the sketch's own curves take in
-//! that state (under constrained: `sketch`; fully constrained: `sketch_fixed`; constraints
-//! conflict: `error`), and the row's tooltip names the state. An empty sketch keeps its icon as
-//! it is.
+//! A sketch's solve state on its rows (#7245, #22185): the History strip, the left History and
+//! the browser's Sketches and History folders draw the sketch icon in the colour the sketch's own
+//! curves take in that state (under constrained: `sketch`; fully constrained: `sketch_fixed`;
+//! constraints conflict: `error`), and the row's tooltip names the state. An empty sketch keeps
+//! its icon as it is.
 //!
 //! The states come from the solves the model already holds ([`SolvedSketch::report`]): the
 //! History reads them in one pass per frame, the browser when it re-indexes an evaluated model.
