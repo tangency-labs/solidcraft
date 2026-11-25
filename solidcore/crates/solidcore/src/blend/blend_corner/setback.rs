@@ -90,8 +90,8 @@ use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
 use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment_kept, distances, fill_hole_counted,
-    fill_hole_probe, spring_curve, Edge, Face, FaceKind, FacePlane, Fill, FillStats, Probe, Round,
-    SpringCurve,
+    fill_hole_probe, model_rounds, same_round_end, spring_curve, unequal_radii, Edge, Face,
+    FaceKind, FacePlane, Fill, FillStats, Probe, Round, SpringCurve,
 };
 use crate::blend::fillet_corner::p1::{face_by_two_edgeuses, test_g1_continuity};
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner, FilletCornerKind};
@@ -2816,11 +2816,12 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         .all_eus
         .clone()
         .ok_or_else(|| bad_input(OP_FILL, CornerInput::RingNotSet, None))?;
-    let sb = corner.setback.as_ref().ok_or_else(|| {
+    let missing_setback = || {
         corner_input(OP_FILL, CornerInput::EventNotSet, None)
             .with_status(SM_ERR)
             .into_error()
-    })?;
+    };
+    let sb = corner.setback.as_ref().ok_or_else(missing_setback)?;
     if sb.overflows {
         return Ok(Err(SetbackRefusal::no_room(
             "Fillet Error: the rounds beside an edge at a setback corner cross past the room on that edge: the blends are larger than their faces allow",
@@ -2873,13 +2874,41 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             return Ok(Err(refusal));
         }
     }
+    // The mixed-radius planar corner was sized on analytic cylinders. Use the same
+    // boundary rows when the actual sections and tangent fields agree with them.
+    let setbacks = &corner
+        .setback
+        .as_ref()
+        .ok_or_else(missing_setback)?
+        .setbacks;
+    let models = if order == 1 && !curved && unequal_radii(&planes.edges) {
+        model_rounds(&planes.planes, &planes.edges, setbacks).ok()
+    } else {
+        None
+    };
+    let origin = vertex::point(target, vtx)?;
+    let model_ends = models.as_ref().and_then(|models| {
+        let actual = rounds_of(&surfaces, &sides);
+        if models.len() != actual.len()
+            || !models.iter().all(|model| {
+                actual.get(model.index).is_some_and(|real| {
+                    same_round_end(k, &model.round(), real, origin).is_ok_and(|same| same)
+                })
+            })
+        {
+            return None;
+        }
+        Some(models.iter().map(|model| model.round()).collect::<Vec<_>>())
+    });
     let mut stats = FillStats::default();
     // a corner left open derives its face curves from the fill without building it, and
     // does not demand its convexity certificate
     let first = fill_hole_counted(
         k,
         &planes.planes,
-        &rounds_of(&surfaces, &sides),
+        model_ends
+            .as_deref()
+            .unwrap_or(&rounds_of(&surfaces, &sides)),
         order,
         tol,
         !open,
@@ -2989,7 +3018,8 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             }
         }
     };
-    let rounds = rounds_of(&surfaces, &sides);
+    let actual_rounds = rounds_of(&surfaces, &sides);
+    let rounds = model_ends.as_deref().unwrap_or(&actual_rounds);
 
     if fill.patches.len() != 2 * n || fill.face.len() != n {
         return Err(defect(OP_FILL, WHY_FILL_SHAPE));
@@ -3110,7 +3140,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         Some(worst) => Some(keep_definition(
             k,
             &planes.planes,
-            &rounds,
+            rounds,
             order,
             tol,
             convex,
