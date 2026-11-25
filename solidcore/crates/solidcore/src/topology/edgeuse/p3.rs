@@ -1590,6 +1590,9 @@ fn brute_force(
             "L9DBG ii={ii} param={param} nsol={}",
             solutions.as_slice().len()
         );
+        if solutions.as_slice().is_empty() {
+            eprintln!("L9DBG   no solution at ii={ii} param={param}");
+        }
         // when a closest point was found
         if let Some(sol) = solutions.as_slice().first() {
             // get the surface UV Point from the solution array
@@ -1606,6 +1609,9 @@ fn brute_force(
                 pnt.x, pnt.y
             );
             // save the first sample Point and subsequent ones that are far enough apart
+            if points.last().is_some_and(|l| pnt.distance(*l) <= uv_tol) {
+                eprintln!("L9DBG   dropped near-duplicate at ii={ii} param={param}");
+            }
             if points.last().is_none_or(|l| pnt.distance(*l) > uv_tol) {
                 points.push(pnt);
                 params.push(param);
@@ -1625,6 +1631,20 @@ fn brute_force(
                 // (Note, dMaxDev is 0 if ptr is Null.)
                 max_dev = max_dev.max(dev.unwrap_or(0.0));
             }
+        }
+    }
+
+    {
+        let (a, z) = (params.first().copied(), params.last().copied());
+        let flag = a.is_none_or(|a| (a - edge_domain.min()).abs() > 1e-9)
+            || z.is_none_or(|z| (z - edge_domain.max()).abs() > 1e-9);
+        eprintln!(
+            "L9DBG brute_force edge_dom=[{}, {}] sampled=[{a:?}, {z:?}] n={} maxdist={max_dist} tol={edge_tol} uvtol={uv_tol} periods={u_period:?},{v_period:?} face_dom={:?} {}",
+            edge_domain.min(), edge_domain.max(), params.len(), face_domain.size(),
+            if flag { "SHORT" } else { "full" }
+        );
+        if flag {
+            eprintln!("L9DBG   points={points:?} params={params:?}");
         }
     }
 

@@ -140,9 +140,30 @@ pub fn complete_periodic_seams(
     // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
     // on the cut), the pieces end a whole period apart and the record no longer agrees with
     // itself: the same checks refuse that completion too.
-    let Ok((completed, order)) = to_record(&mut kernel, &mut body) else {
+    let rec = to_record(&mut kernel, &mut body);
+    if let Err(e) = &rec {
+        eprintln!("L9DBG to_record failed: {e:?}");
+    }
+    let Ok((completed, order)) = rec else {
         return Ok(None);
     };
+    for (fi, face) in completed.faces.iter().enumerate() {
+        for l in &face.loops {
+            if let Loop::Edges { edges } = l {
+                for u in edges {
+                    let edge = &completed.edges[u.edge as usize];
+                    if let Some(span) = u.pcurve.interval() {
+                        if (span[0] - edge.interval[0]).abs() > 1e-9 || (span[1] - edge.interval[1]).abs() > 1e-9 {
+                            eprintln!("L9DBG mismatch face {fi} edge {} trim {span:?} edge {:?} tol {} curve {}", u.edge, edge.interval, edge.tolerance, match &edge.curve { solidcore_record::brep::Curve::RationalSpline{..} => "rational", _ => "other" });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !passes_import_checks(&completed) {
+        eprintln!("L9DBG completed record fails import checks: {:?} {:?}", crate::record_check::validate(&completed).err(), crate::record_check::agreement(&completed).err());
+    }
     if !passes_import_checks(&completed) {
         return Ok(None);
     }
