@@ -3159,11 +3159,6 @@ impl Session {
         design
     }
 
-    /// [`Self::design_saved_with`] using the session's current save history.
-    pub(crate) fn design_saved(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
-        self.design_saved_with(path, &self.document_history)
-    }
-
     /// Take up a save that ran on `done`, a [`Session::scratch`] copy of this session that
     /// `file.save` or `file.save_as` ran on (on another thread, so the window keeps drawing):
     /// the name the save gave the design, its file, and its saved state, as running the command
