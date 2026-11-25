@@ -47,6 +47,12 @@
 //! - **The walls swept apart (#2404).** A boss's continued walls are swept in a body of their
 //!   own and copied into the sheet; the fork sweeps them in the sheet, and the sweep's stitch
 //!   glued the sheet's own edges to them (`sweep_walls`).
+//! - **Each feature against its own rounds (#22144).** A feature is cut against the sheet faces
+//!   of the rounds that roll on the face its footprint is in (`round_supports`, `reaches`); the
+//!   fork cuts it against every sheet face. With one fillet on chains that share no face, a
+//!   boss beside one chain had its walls continued down through the body into another chain's
+//!   round, where no band reaches it, and the sheet trimmed there did not sew in
+//!   (`RoundNotSewn`, status 1001). Faces joined to no solver's own face are cut as the fork's.
 //! - **The trace.** The fork's `SM_ERR_MESSAGE` naming a reached feature isn't kept: the
 //!   port's kernel has no message channel for a step that goes on.
 //! - **Merging on a face.** The fork's `MergeCurvesOnSurface` takes the face's surface; the
@@ -59,7 +65,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::cliff_overflow::SOLVER_EDGE;
 use super::{invalid, FilletObject, FilletSession};
 use crate::blend::fillet_cliff_overflow::{distance_to_surface, edge_curve, plane_of, Refusal};
-use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomType};
+use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomType, FilletSurfaceStorage};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::error::blend::{BlendFailure, KeepStop, OverflowInput};
@@ -310,6 +316,8 @@ fn upright(k: &Kernel, b: &Brep, f: FaceId, up: Vec3, ang_tol: f64) -> Result<bo
 /// `kf_Feature`: a feature on a face a round rolls on: its footprint (an inner loop of the
 /// face) and its walls.
 struct Feature {
+    /// The face the footprint is an inner loop of.
+    support: FaceId,
     /// Copies of the footprint's edges.
     rim_curves: Vec<Curve>,
     /// A boss (its rim concave), else a cut.
@@ -322,6 +330,65 @@ struct Feature {
     /// A boss whose walls are not upright: its own walls in the target, which the band
     /// reaches only where the round crosses one of them (nothing is continued from it).
     tilted_walls: Vec<FaceId>,
+}
+
+/// Not the fork's (#22144): per sheet face, the faces its round rolls on. A round is the
+/// sheet's faces joined by edges to a solver's own faces, and rolls on the faces that solver's
+/// rails lie on (on every such solver's, where one round holds several). A face joined to no
+/// solver's face is left out.
+fn round_supports(
+    sheet: &Brep,
+    rounds: &[(Vec<FaceId>, Vec<FaceId>)],
+) -> Result<BTreeMap<FaceId, Vec<FaceId>>> {
+    let mut component: BTreeMap<FaceId, usize> = BTreeMap::new();
+    let mut count = 0usize;
+    for start in crate::topology::brep::p1::faces(sheet, None)? {
+        if component.contains_key(&start) {
+            continue;
+        }
+        component.insert(start, count);
+        let mut front = vec![start];
+        while let Some(f) = front.pop() {
+            for e in face::p4::edges(sheet, f, None, false, None)? {
+                for other in edge::faces(sheet, e, None)? {
+                    if let std::collections::btree_map::Entry::Vacant(slot) = component.entry(other)
+                    {
+                        slot.insert(count);
+                        front.push(other);
+                    }
+                }
+            }
+        }
+        count += 1;
+    }
+    let mut rolls_on: BTreeMap<usize, Vec<FaceId>> = BTreeMap::new();
+    for (own, supports) in rounds {
+        for f in own {
+            let Some(&c) = component.get(f) else {
+                continue;
+            };
+            let on = rolls_on.entry(c).or_default();
+            for &s in supports {
+                if !on.contains(&s) {
+                    on.push(s);
+                }
+            }
+        }
+    }
+    Ok(component
+        .into_iter()
+        .filter_map(|(f, c)| rolls_on.get(&c).map(|on| (f, on.clone())))
+        .collect())
+}
+
+/// Whether `sheet_face` can reach a feature on `support`: its round rolls on `support`, or it is
+/// in no solver's round ([`round_supports`]). A feature stands in a round's band only on a face
+/// that round rolls on; a boss's walls continued down through the body meet the rounds of other
+/// chains too, where no band of theirs is (#22144).
+fn reaches(supports: &BTreeMap<FaceId, Vec<FaceId>>, sheet_face: FaceId, support: FaceId) -> bool {
+    supports
+        .get(&sheet_face)
+        .is_none_or(|on| on.contains(&support))
 }
 
 /// The edit-notification reference of a new edge's curve in `b`.
@@ -546,6 +613,20 @@ impl FilletSession<'_> {
         // own edge (a branch's saddle on a pipe), not a feature's footprint
         let mut supports: Vec<FaceId> = Vec::new();
         let mut blended_edges: Vec<EdgeId> = Vec::new();
+        // per solver, its own faces in the sheet and the faces its rails lie on (#22144)
+        let sheet_key = self
+            .objects
+            .intermediate
+            .as_ref()
+            .and_then(Brep::notify_serial)
+            .map(|serial| {
+                crate::topology::brep::p3::topology_ref(
+                    serial,
+                    EntityRef::Brep(crate::topology::BrepId::from_index(0)),
+                )
+                .key
+            });
+        let mut rounds: Vec<(Vec<FaceId>, Vec<FaceId>)> = Vec::new();
         for &solver in &solvers {
             let FilletObject::Solver(id) = solver else {
                 return Err(invalid("object is not a solver"));
@@ -556,8 +637,15 @@ impl FilletSession<'_> {
             let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
             blended_edges
                 .push(eu1::edge(self.objects.target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?);
+            let (mut own, mut rolls_on) = (Vec::new(), Vec::new());
             for &g in &base.fillet_geoms {
                 let geom = self.objects.pseudo.geom(g)?;
+                if let Some(FilletSurfaceStorage::ManagedFace { body, face }) = geom.fillet_surface
+                {
+                    if Some(body.key) == sheet_key {
+                        own.push(face);
+                    }
+                }
                 if geom.fillet_geom_type() != FilletGeomType::Default {
                     continue;
                 }
@@ -569,8 +657,12 @@ impl FilletSession<'_> {
                     if !supports.contains(&f) {
                         supports.push(f);
                     }
+                    if !rolls_on.contains(&f) {
+                        rolls_on.push(f);
+                    }
                 }
             }
+            rounds.push((own, rolls_on));
         }
         let on_tol = 10.0 * tol;
         // A crease off a planar wall is exact; any other is fitted, within a tenth of the
@@ -585,16 +677,19 @@ impl FilletSession<'_> {
         // the owners of the sheet's geometry as built, given back when no feature is kept
         // (#2370)
         let built = geometry_owners(&sheet)?;
-        let result = self.keep_features_on(
-            k,
-            &mut sheet,
-            &supports,
-            &blended_edges,
-            tol,
-            ang_tol,
-            on_tol,
-            crease_tol,
-        );
+        let result = round_supports(&sheet, &rounds).and_then(|reach| {
+            self.keep_features_on(
+                k,
+                &mut sheet,
+                &supports,
+                &reach,
+                &blended_edges,
+                tol,
+                ang_tol,
+                on_tol,
+                crease_tol,
+            )
+        });
         // the sheet stays the session's unless it was sewn in; with no feature kept its
         // geometry is owned as built, for the merge
         if let Ok(false) = result {
@@ -612,6 +707,7 @@ impl FilletSession<'_> {
         k: &mut Kernel,
         sheet: &mut Brep,
         supports: &[FaceId],
+        reach: &BTreeMap<FaceId, Vec<FaceId>>,
         blended_edges: &[EdgeId],
         tol: f64,
         ang_tol: f64,
@@ -682,6 +778,7 @@ impl FilletSession<'_> {
                 }
                 if !boss {
                     features.push(Feature {
+                        support,
                         rim_curves,
                         boss,
                         walls,
@@ -719,6 +816,7 @@ impl FilletSession<'_> {
                     // no plane to continue the walls along: judged below, only if the band
                     // reaches it
                     features.push(Feature {
+                        support,
                         rim_curves,
                         boss,
                         walls: Vec::new(),
@@ -757,6 +855,7 @@ impl FilletSession<'_> {
                 // copied into the sheet with their own topology (`sweep_walls`).
                 let swept = sweep_walls(k, sheet, profile, -up, depth)?;
                 features.push(Feature {
+                    support,
                     rim_curves,
                     boss,
                     walls: swept,
@@ -801,10 +900,9 @@ impl FilletSession<'_> {
                         );
                     }
                 }
-                if sheet_boxes
-                    .iter()
-                    .any(|b| !b.are_disjoint(&rim_box, on_tol))
-                {
+                if sheet_boxes.iter().zip(&sheet_faces).any(|(b, &f)| {
+                    reaches(reach, f, feature.support) && !b.are_disjoint(&rim_box, on_tol)
+                }) {
                     return Err(self.not_upright());
                 }
                 continue;
@@ -828,7 +926,9 @@ impl FilletSession<'_> {
                 let wall_box =
                     crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
                 for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
-                    if sheet_box.are_disjoint(&wall_box, on_tol) {
+                    if sheet_box.are_disjoint(&wall_box, on_tol)
+                        || !reaches(reach, sheet_face, feature.support)
+                    {
                         continue;
                     }
                     let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
@@ -881,7 +981,9 @@ impl FilletSession<'_> {
                     let wall_box =
                         crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
                     for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
-                        if sheet_box.are_disjoint(&wall_box, on_tol) {
+                        if sheet_box.are_disjoint(&wall_box, on_tol)
+                            || !reaches(reach, sheet_face, feature.support)
+                        {
                             continue;
                         }
                         // the surfaces meet over both domains; the band reaches the wall only
