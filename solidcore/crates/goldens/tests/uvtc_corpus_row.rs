@@ -53,13 +53,14 @@ const ACCURACY: f64 = 1e-6;
 /// Each enclosure's width, relative to its value (as `mass_knot_line_moved_rows_are_classified`).
 const WIDTH: f64 = 1e-10;
 
-/// The moved entries: (name, main's value, this branch's value), from the two trees'
-/// `corpus.parity.jsonl` (#21353 does not move this row).
+/// The moved entries: (name, main's value, this branch's value): main's from its
+/// `corpus.parity.jsonl` (after #21825), this branch's from its run. Each run value is
+/// within the goldens' `1e-9` of main's, so the blessed line stays main's.
 const MOVED: [(&str, f64, f64); 4] = [
-    ("area", 38_235.992_697_050_83, 38_235.992_695_772_5),
+    ("area", 38_235.992_646_638_4, 38_235.992_645_315_375),
     ("volume", 169_499.150_354_326_24, 169_499.150_354_326_27),
-    ("rt_area", 38_235.996_596_079_174, 38_235.996_594_800_28),
-    ("rt_volume", 169_499.150_354_326_27, 169_499.150_354_326_3),
+    ("rt_area", 38_235.996_545_666_74, 38_235.996_544_343_16),
+    ("rt_volume", 169_499.150_354_326_3, 169_499.150_354_326_32),
 ];
 /// Each moved entry's class.
 const EXPECTED: [(&str, Side); 4] = [
@@ -175,6 +176,7 @@ fn moved_corpus_entries_are_classified() {
     let mut rt = round_trip(&mut k, &b);
     let mut classes = Vec::new();
     let mut wide = Vec::new();
+    let mut unreproduced = Vec::new();
     for (name, o, n) in MOVED {
         let body = if name.starts_with("rt_") {
             &mut rt
@@ -189,10 +191,12 @@ fn moved_corpus_entries_are_classified() {
             eprintln!("UVTC {name}: the volume enclosure stopped at {:?}", e.stop);
             (run, Bounds { lo: e.lo, hi: e.hi })
         };
-        assert!(
-            values_agree(run, n, None),
-            "{name}: the run's {run} does not reproduce this branch's {n}"
-        );
+        eprintln!("UVTC {name}: run {run:?}");
+        if !values_agree(run, n, None) {
+            unreproduced.push(format!(
+                "{name}: the run's {run:?} is not this branch's {n:?}"
+            ));
+        }
         let class = side(o, n, band.lo, band.hi).unwrap();
         eprintln!(
             "UVTC {class:?} {name}: main {o:e}, now {n:e}, move/value {:e}, enclosure [{:e}, \
@@ -208,6 +212,7 @@ fn moved_corpus_entries_are_classified() {
         }
         classes.push((name, class));
     }
+    assert!(unreproduced.is_empty(), "{unreproduced:#?}");
     assert!(classes.iter().all(|c| c.1 != Side::Farther), "{classes:#?}");
     assert_eq!(classes, EXPECTED.to_vec(), "{classes:#?}");
     assert_eq!(wide, WIDE.to_vec(), "{wide:#?}");

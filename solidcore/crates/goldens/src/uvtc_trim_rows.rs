@@ -29,7 +29,7 @@ use crate::units::{topology_brep_p10, topology_brep_p3, topology_face_p2, topolo
 /// (its read's trims, dumped before its op) move within the golden compare's `1e-9` (each
 /// blessed line is main's), so each replay is checked against the line by that compare, as
 /// every row's is.
-const ROWS: [(&str, &str); 18] = [
+const ROWS: [(&str, &str); 21] = [
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46_gaps"),
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_46_gaps_own"),
@@ -40,7 +40,19 @@ const ROWS: [(&str, &str); 18] = [
     ("topology.face_p3", "Mouse_rebuilt_uv_trim_47_own"),
     (
         "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f10",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f4",
+    ),
+    (
+        "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
+    ),
+    (
+        "topology.face_p3",
+        "own_reader_sphere_diff_3cylinders_uv_trim_f5",
     ),
     (
         "topology.face_p3",
