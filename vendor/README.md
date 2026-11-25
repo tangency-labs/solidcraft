@@ -282,3 +282,13 @@ SolidCraft changes:
   of the window) has no resize borders to keep and is winit's own, as is a maximized one. The
   hit test itself is the app's (`apps/solidcraft/src/native_frame.rs`): nothing of it is in this
   copy.
+- `src/platform_impl/windows/event_loop.rs`, `util.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_touchpad_wheels`): a process-wide switch, off by default, which is winit's own behaviour.
+  Windows sends a precision touchpad's two-finger scroll as the wheel messages a mouse sends, so
+  winit reported it as lines, and in the SolidCraft presets it zoomed (vertical) or did nothing
+  (horizontal) (#15353). On, the event loop thread is registered with
+  `RegisterTouchpadCapableThread` (looked up by name; absent or failing means off), touchpad
+  `WM_POINTER` contacts go to `DefWindowProc` instead of becoming touches, and a touchpad's wheel
+  message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
+  factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
+  `LineDelta`. The registration is undone when the event loop drops.

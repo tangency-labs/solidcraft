@@ -177,13 +177,13 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
-    ("shaders", (0, 1)),
+    ("shaders", (0, 2)),
     ("storage", (0, 1)),
     ("ui", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
-pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1)), ("shaders", (0, 1))];
 /// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
 pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
 /// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
@@ -662,7 +662,7 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
-    /// View backgrounds (`shaders@0.1`); a plugin may ship shaders and no runtime.
+    /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shaders: Vec<shader::Shader>,
 }
@@ -1083,7 +1083,15 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if !manifest.shaders.is_empty() {
         if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
-            return Err(invalid("capabilities", "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.1\"]"));
+            return Err(invalid(
+                "capabilities",
+                "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.2\"] (backgrounds alone may say \"shaders@0.1\")",
+            ));
+        }
+        // Tints and settings came with 0.2: a 0.1 plugin keeps exactly what 0.1 offered.
+        let newer = manifest.shaders.iter().any(|s| s.kind != shader::ShaderKind::Background || !s.settings.is_empty());
+        if newer && !manifest.capabilities.iter().any(|capability| capability == "shaders@0.2") {
+            return Err(invalid("capabilities", "tints and shader settings need \"shaders@0.2\"; update SolidCraft or the plugin"));
         }
         shader::validate(&manifest.shaders)?;
     }

@@ -373,6 +373,23 @@ fn rename_link_body(source: &mut LinkSource, renames: &std::collections::HashMap
     }
 }
 
+/// What a 3D constraint of sketch `id` is resolved against (#10616): the parameter values, the
+/// model before the sketch in the frame its links resolve in, and the sketch's plane.
+pub(super) fn wire_context(
+    s: &Session,
+    id: u64,
+    named: &[&str],
+) -> Option<(std::collections::BTreeMap<String, solidcraft_doc::expr::Value>, solidcraft_doc::ModelState, Plane, (u64, solidcraft_doc::Mat))> {
+    let doc = placed_candidate(s, &s.doc);
+    let (vals, _) = doc.param_values();
+    let before = s.model.state_before(id);
+    let mut bodies = super::sketch_store::read(&doc, id).ok()?.linked_bodies();
+    bodies.extend_from_slice(named);
+    let st = state_for_sketch(s, &doc, id, &before, &bodies).ok()?.into_owned();
+    let plane = sketch_plane(&doc, id, &st).ok()?;
+    Some((vals, st, plane, sketch_frame(s, &doc, id)?))
+}
+
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.
 fn placed_candidate<'a>(s: &Session, doc: &'a Document) -> std::borrow::Cow<'a, Document> {
     if s.pending_moves.is_empty() {
@@ -414,7 +431,9 @@ fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<(u64, solidcraft
 /// edit's solve the other side to keep. A sketch that does not solve that way keeps its stored
 /// geometry, with the links moved.
 pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> Vec<String> {
-    if sk.links.is_empty() {
+    // A 3D sketch's curves may be held to its 2D geometry and to model planes (#10616): their
+    // places are refreshed with the links.
+    if sk.links.is_empty() && sk.wires.is_empty() {
         return Vec::new();
     }
     #[cfg(test)]
@@ -429,7 +448,7 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    let named: Vec<&str> = sk.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let named = sk.linked_bodies();
     let Ok(st) = state_for_sketch(s, &doc, id, &st, &named) else {
         return vec!["lost face attachment; reattach explicitly".into()];
     };
