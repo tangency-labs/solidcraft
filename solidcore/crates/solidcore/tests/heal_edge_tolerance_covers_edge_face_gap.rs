@@ -2511,10 +2511,25 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
 /// rewrote the whole row when the result's tolerances moved. Entry 14's digest and mass are
 /// #18162's since its lazy UV trim raise
 /// ([`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]).
+///
+/// Retiring #18913's four fillet flags moves the results of the entries in
+/// [`MOVED_BY_18913`] (`corner_box` e0, e4, e8 and e9, `open_shell` e5, `bottle` e8 r0.1):
+/// their geometry is no longer main's bit for bit, so each is proved instead by
+/// [`assert_moved_fillet_certified`] (built as on main, valid at Level 2, and its mass,
+/// with main's where [`FILLET_MAIN_MASS`] has it, within the case's accuracy of a certified
+/// enclosure of the exact properties). The other 23 entries keep main's digest and mass.
 #[test]
 fn moved_fillet_rows_keep_main_geometry_and_mass() {
     let mut failures = Vec::new();
     for (i, &(name, edge, radius)) in FILLETS.iter().enumerate() {
+        if MOVED_BY_18913.contains(&i) {
+            let main = FILLET_MAIN_MASS
+                .iter()
+                .find(|(j, _)| *j == i)
+                .map(|(_, m)| *m);
+            assert_moved_fillet_certified(i, name, edge, radius, main);
+            continue;
+        }
         let (digest, mass) = fillet_result(name, edge, radius);
         if digest != FILLET_MAIN[i] {
             failures.push(format!(
@@ -2529,6 +2544,134 @@ fn moved_fillet_rows_keep_main_geometry_and_mass() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The [`FILLETS`] entries whose result retiring #18913's four fillet flags (WR-421/572,
+/// WR-609/610, WR-546, WR-669) moves off main's bits: 0 to 3 (`corner_box` e0, e4, e8, e9),
+/// 7 (`open_shell` e5) and 14 (`bottle` e8 r0.1). MEASURED on the branch: each still builds
+/// (status 0, as on main), the digests move, and the masses of 2, 3 and 14 move in their
+/// last bits (those of 0, 1 and 7 are main's bit for bit).
+const MOVED_BY_18913: [usize; 6] = [0, 1, 2, 3, 7, 14];
+
+/// Proves [`FILLETS`] entry `i`'s result where #18913 moved it off main's bits: the fillet
+/// builds (main's status for it, 0); the result passes `check_brep` at Level 2 with no line;
+/// and its mass properties now, and `main`'s bits where given, are each within the case's
+/// accuracy (1e-4 of its scale: the area, the volume, `R` the box's half diagonal for a
+/// centroid coordinate, `V R^2` for a moment, or the value's own where larger) of every
+/// point of a certified enclosure of the exact properties
+/// (`mass::enclosure::enclose_mass_properties` at a tenth of that accuracy), as
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves entry
+/// 14's lazy-raise move. A result whose mass is within its accuracy of the exact
+/// properties wherever they lie in the enclosure is a valid estimate at the asked accuracy,
+/// so main's values and the new ones both are; a lost, doubled or misplaced round face
+/// moves the area or volume by far more than 1e-4 of them. A sheet (entry 7), which mass
+/// properties refuse as they refuse its input (and main's result: its digest records that
+/// status), has its area certified the same way against `enclose_face_area` over every face.
+fn assert_moved_fillet_certified(
+    i: usize,
+    name: &str,
+    edge: usize,
+    radius: f64,
+    main: Option<[u64; 12]>,
+) {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::mass::integrator::properties::brep_mass_properties_default;
+    use solidcore::math::Vec3;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::topology::brep::p1 as bl;
+    const ACCURACY: f64 = 1e-4;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, false);
+    let e = bl::edges(&b, None).unwrap()[edge];
+    fillet_edges(&mut k, &mut b, &[e], radius, 1, 1, 1.0)
+        .unwrap_or_else(|error| panic!("{i} {name} e{edge} r{radius}: {error:?}"));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{i} {name} e{edge} r{radius}: {lines:#?}");
+    let m = match brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO) {
+        Ok(m) => m,
+        Err(error) => {
+            // A sheet (`open_shell`): mass properties refuse it, as they refuse its input
+            // and main's result (main's digest records that refusal's status), so its area,
+            // every face's, is what is certified.
+            let mut input = read_corpus(&mut Kernel::default(), name, false);
+            let before = brep_mass_properties_default(&k, &mut input, ACCURACY, 1.0, Vec3::ZERO);
+            assert!(
+                main.is_none() && before.as_ref().err() == Some(&error),
+                "{i} {name}: mass {error:?}, input {before:?}"
+            );
+            let area =
+                solidcore::mass::integrator::properties::brep_area(&k, &mut b, ACCURACY).unwrap();
+            let faces = bl::faces(&b, None).unwrap();
+            let x = solidcore::mass::enclosure::enclose_face_area(
+                &k,
+                &mut b,
+                &faces,
+                0.1 * ACCURACY * area,
+            )
+            .unwrap();
+            assert!(
+                x.lo.is_finite() && x.hi.is_finite() && area.is_finite(),
+                "{i}"
+            );
+            let far = (area - x.lo).max(x.hi - area);
+            assert!(
+                far <= ACCURACY * area,
+                "{i} {name}: area {area:e} is up to {far:e} off [{:e}, {:e}]",
+                x.lo,
+                x.hi
+            );
+            return;
+        }
+    };
+    let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
+    for v in [m.centroid, m.inertia, m.products] {
+        now.extend([v.x, v.y, v.z]);
+    }
+    let r = 0.5
+        * calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+            .unwrap()
+            .size()
+            .length();
+    let x =
+        solidcore::mass::enclosure::enclose_mass_properties(&k, &mut b, 0.1 * ACCURACY).unwrap();
+    let vr2 = x.volume.hi * r * r;
+    let band = |j: usize| match j {
+        0 => (x.area, x.area.hi),
+        1 | 2 => (x.volume, x.volume.hi),
+        3..=5 => (x.centroid[j - 3], r),
+        6..=8 => (x.inertia[j - 6], vr2),
+        _ => (x.products[j - 9], vr2),
+    };
+    let mut sets = vec![("now", now)];
+    if let Some(main) = main {
+        sets.push(("main", main.map(f64::from_bits).to_vec()));
+    }
+    for (what, values) in sets {
+        assert_eq!(values.len(), 12, "{i} {what}");
+        for (j, &value) in values.iter().enumerate() {
+            let (band, scale) = band(j);
+            // (`f64::max` skips a NaN, and an infinite value makes `accuracy` infinite:
+            // every input of the comparison must be finite first)
+            assert!(
+                band.lo.is_finite() && band.hi.is_finite() && scale.is_finite(),
+                "{i} {j}: enclosure [{:e}, {:e}] at scale {scale:e} is not finite",
+                band.lo,
+                band.hi
+            );
+            assert!(value.is_finite(), "{i} {j} {what}: {value:e} is not finite");
+            let accuracy = ACCURACY * scale.max(value.abs());
+            // (the farthest the exact value can be)
+            let far = (value - band.lo).max(band.hi - value);
+            assert!(
+                far <= accuracy,
+                "{i} {name} {j} {what}: {value:e} is up to {far:e} off [{:e}, {:e}] (accuracy {accuracy:e})",
+                band.lo,
+                band.hi
+            );
+        }
+    }
 }
 
 /// Feeds `c` rounded to a grid of `2^-44 * scale` (a negative zero fed as zero), or `c`
