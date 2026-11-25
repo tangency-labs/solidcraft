@@ -16,10 +16,10 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
-    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
-    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
+    AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors,
+    SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -422,8 +422,8 @@ pub struct ConeParams {
     /// The direction `height` is measured along: from the base towards the top when `height` is
     /// positive. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// How the cone combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,

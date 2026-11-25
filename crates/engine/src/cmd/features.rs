@@ -2043,15 +2043,7 @@ pub(super) fn point_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Resul
     Ok(Some(out))
 }
 
-/// An axis direction: X|Y|Z or a non-zero `[x, y, z]`; `Z` when it is not given.
-pub(super) fn axis_dir_param(p: &Value, cmd: &str) -> Result<Vec3> {
-    match p.get("axis") {
-        None => Ok(Vec3::Z),
-        Some(v) => axis_dir_form(v).map_err(|why| bad(cmd, why)),
-    }
-}
-
-/// What [`axis_dir_param`] reads a given `axis` as, without the design: X, Y or Z (trimmed, any
+/// What a given `axis` is read as, without the design: X, Y or Z (trimmed, any
 /// case), else a non-zero `[x, y, z]`, normalized.
 pub(crate) fn axis_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str> {
     match v {
@@ -2098,7 +2090,7 @@ pub(crate) fn axis_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::D
 
 /// A cylinder's `axis` (#18822): what [`axis_expr_form`] reads, each component evaluated now
 /// as a number without a unit. Returns the expressions to keep and the direction they give now.
-fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
+pub(crate) fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc::DirExpr, Vec3)> {
     let Some(v) = p.get("axis") else { return Ok((solidcraft_doc::dir_expr(Vec3::Z), Vec3::Z)) };
     let d = axis_expr_form(v).map_err(|why| bad(cmd, why))?;
     let mut now = [0.0; 3];
@@ -2122,6 +2114,73 @@ fn axis_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_doc:
         return Ok((solidcraft_doc::dir_expr(dir), dir));
     }
     Ok((d, dir))
+}
+
+/// What a feature's `direction` (#21932) is read as, without the design: X, Y, Z or a non-zero
+/// `[x, y, z]` of numbers as [`direction_dir_form`] reads them (normalized, saved as numbers), else
+/// `[x, y, z]` (or `{x, y, z}`) whose components are numbers or unitless expressions, kept as
+/// given. Whether those evaluate, and to a direction that isn't zero, needs the design.
+pub(crate) fn direction_expr_form(v: &Value) -> std::result::Result<solidcraft_doc::DirExpr, &'static str> {
+    if let Ok(d) = direction_dir_form(v) {
+        return Ok(solidcraft_doc::dir_expr(d));
+    }
+    let coords: Vec<&Value> = match v {
+        Value::Array(a) if a.len() == 3 => a.iter().collect(),
+        Value::Object(o) => ["x", "y", "z"].iter().filter_map(|k| o.get(*k)).collect(),
+        _ => Vec::new(),
+    };
+    if coords.len() == 3 && coords.iter().all(|c| c.is_number()) {
+        let n: Option<Vec<f64>> = coords.iter().map(|c| c.as_f64().filter(|x| x.is_finite())).collect();
+        return n
+            .and_then(|n| <[f64; 3]>::try_from(n).ok())
+            .and_then(|[x, y, z]| solidcraft_doc::unit_direction(Vec3::new(x, y, z)))
+            .map(solidcraft_doc::dir_expr)
+            .ok_or("`direction` must be a non-zero [x, y, z]");
+    }
+    if coords.len() != 3 {
+        return direction_dir_form(v).map(solidcraft_doc::dir_expr);
+    }
+    let parts: Option<Vec<Expr>> = coords.into_iter().map(|c| expr(&json!({ "v": c }), "v")).collect();
+    parts.and_then(|p| <[Expr; 3]>::try_from(p).ok()).ok_or("`direction` must be [x, y, z] of numbers or unitless expressions such as \"-sin(t)\"")
+}
+
+pub(crate) fn direction_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str> {
+    match v {
+        Value::String(a) => match a.trim().to_ascii_uppercase().as_str() {
+            "X" => Ok(Vec3::X),
+            "Y" => Ok(Vec3::Y),
+            "Z" => Ok(Vec3::Z),
+            _ => Err("`direction` must be [x, y, z]"),
+        },
+        v => vec3(v).and_then(|a| a.normalized()).ok_or("`direction` must be a non-zero [x, y, z]"),
+    }
+}
+
+pub(crate) fn direction_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<(solidcraft_doc::DirExpr, Vec3)>> {
+    let Some(v) = p.get("direction") else { return Ok(None) };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let d = direction_expr_form(v).map_err(|why| bad(cmd, why))?;
+    let mut now = [0.0; 3];
+    for ((slot, e), axis) in now.iter_mut().zip(&d).zip(["x", "y", "z"]) {
+        let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
+            let hint =
+                if s.doc.eval(e, Kind::Length).is_ok() { " (a direction has no unit: divide a length by its unit, as in `n / 1 mm`)" } else { "" };
+            bad(cmd, format!("direction {axis}: {err}{hint}"))
+        })?;
+        if !x.is_finite() {
+            return Err(bad(cmd, format!("direction {axis} is not a finite number")));
+        }
+        *slot = x;
+    }
+    let [x, y, z] = now;
+    let dir = solidcraft_doc::unit_direction(Vec3::new(x, y, z))
+        .ok_or_else(|| bad(cmd, "`direction` is [0, 0, 0] with these parameter values: give a direction that isn't zero"))?;
+    if d.iter().all(|e| solidcraft_doc::expr::references(e).is_empty()) {
+        return Ok(Some((solidcraft_doc::dir_expr(dir), dir)));
+    }
+    Ok(Some((d, dir)))
 }
 
 fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2202,8 +2261,8 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
-    add_feature(s, p, FeatureKind::Cone { base, axis: Dir(axis), radius, top_radius, height, operation: operation(p, cmd)? })
+    let (axis_exprs, _) = axis_expr_param(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::Cone { base, axis: axis_exprs, radius, top_radius, height, operation: operation(p, cmd)? })
 }
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
@@ -4500,33 +4559,28 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     // point in its own frame only (two leaves of a hinge, one turned) is not the one picked, so
     // neither its face nor its body is taken. Read before reference edges move the position.
     let picked = if points.is_none() { picked_bodies(s, position) } else { None };
-    let supplied_direction = p.get("direction").and_then(vec3);
-    // Ordinary sketch-point holes use the sketch normal and ignore this input.
-    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
-        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
-    }
-    let direction = match (supplied_direction, &points) {
-        (None, Some((sp, _, d))) if !sp.single => *d,
-        (d, _) => match d {
-            Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
-            None => {
-                // Into the face the position lies on: against the outward normal of the face
-                // nearest it (planar or curved), as it faces out of its own body. A hole that
-                // names the bodies it drills goes by the face of one of them where one passes
-                // through the position, never that of a body touching it there (#12066).
-                let named = match string_list(cmd, p, "participants")? {
-                    v if v.is_empty() => string_list(cmd, p, "targets")?,
-                    v => v,
-                };
-                let scope: &[String] = match (named.iter().any(|b| b == "*"), &picked) {
-                    (true, _) => &[],
-                    (false, Some(under)) if named.is_empty() => under,
-                    _ => &named,
-                };
-                let st = s.model.state();
-                solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
-            }
-        },
+    let supplied_direction = direction_expr_param(s, p, cmd)?;
+    let (direction_expr, direction) = match (supplied_direction, &points) {
+        (None, Some((sp, _, d))) if !sp.single => (solidcraft_doc::dir_expr(*d), *d),
+        (Some((d_expr, d_vec)), _) => (d_expr, d_vec),
+        (None, _) => {
+            // Into the face the position lies on: against the outward normal of the face
+            // nearest it (planar or curved), as it faces out of its own body. A hole that
+            // names the bodies it drills goes by the face of one of them where one passes
+            // through the position, never that of a body touching it there (#12066).
+            let named = match string_list(cmd, p, "participants")? {
+                v if v.is_empty() => string_list(cmd, p, "targets")?,
+                v => v,
+            };
+            let scope: &[String] = match (named.iter().any(|b| b == "*"), &picked) {
+                (true, _) => &[],
+                (false, Some(under)) if named.is_empty() => under,
+                _ => &named,
+            };
+            let st = s.model.state();
+            let d = solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?;
+            (solidcraft_doc::dir_expr(d), d)
+        }
     };
     // Placed by its reference edges: drilled where their distances put it, which `position`
     // then keeps. The edges must be straight edges at the given points, and cross.
@@ -4676,7 +4730,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Hole {
             position: FacePick(position),
             at,
-            direction: Dir(direction),
+            direction: direction_expr,
             diameter,
             depth,
             hole: kind,

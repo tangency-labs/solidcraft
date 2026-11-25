@@ -19,7 +19,7 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
+    AngleExpr, AxisDirExpr, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
     IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
     TouchingParam, feature_common, present,
 };
@@ -305,8 +305,8 @@ pub struct CoilParams {
     pub base: Option<PointExpr3>,
     /// The direction the helix climbs. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]
     pub start_angle: Option<AngleExpr>,

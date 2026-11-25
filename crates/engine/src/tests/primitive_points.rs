@@ -154,6 +154,34 @@ fn cylinder_axis_constants_short_axes_and_users() {
     assert!(refused.contains("Axis") && !refused.contains("Position"), "{refused}");
 }
 
+/// A cone and a coil's `axis` and a hole's `direction` take unitless expressions and follow
+/// parameters (#21932), matching cylinders (#18822).
+#[test]
+fn cone_coil_hole_axis_and_direction_take_expressions() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 5, "height": 20, "axis": ["0", "-sin(t)", "-cos(t)"], "body_name": "Cone"}));
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"diameter": 20, "revolutions": 2, "pitch": 10, "section_size": 2, "axis": ["0", "-sin(t)", "-cos(t)"], "body_name": "Coil"}),
+    );
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 20, "corner": [-50, -50, -20], "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 0], "diameter": 6, "depth": 10, "direction": ["0", "-sin(t)", "-cos(t)"], "name": "Hole"}));
+    let v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(v["features"][0]["axis"], json!([0.0, "-sin(t)", "-cos(t)"]), "cone keeps axis expr");
+    assert_eq!(v["features"][1]["axis"], json!([0.0, "-sin(t)", "-cos(t)"]), "coil keeps axis expr");
+    assert_eq!(v["features"][3]["direction"], json!([0.0, "-sin(t)", "-cos(t)"]), "hole keeps direction expr");
+
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "0 deg"}));
+    assert!(s.world_state().unwrap().body("Cone").is_some());
+    assert!(s.world_state().unwrap().body("Coil").is_some());
+    assert!(s.world_state().unwrap().body("Block").is_some());
+
+    let refused = s.execute("parameters.delete", &json!({"name": "t"})).unwrap_err().to_string();
+    assert!(refused.contains("Axis") && !refused.contains("Position"), "{refused}");
+}
+
 #[test]
 fn primitive_points_take_expressions() {
     let mut s = Session::default();

@@ -1073,8 +1073,11 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        /// From the bottom to the top: unitless expressions (#21932), so the cone turns as
+        /// the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         #[walk(length = "Radius")]
         radius: Expr,
         #[walk(length = "Top radius")]
@@ -1144,8 +1147,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
         at: Option<PointExpr>,
-        /// Drilling direction (into the material).
-        direction: Dir,
+        /// Drilling direction (into the material): unitless expressions (#21932), so the hole turns
+        /// as the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "neg_z_axis_expr")]
+        #[walk(direction)]
+        direction: DirExpr,
         #[walk(length = "Diameter")]
         diameter: Expr,
         /// Depth to the shoulder; `None` = through all.
@@ -1767,8 +1773,11 @@ pub enum FeatureKind {
         #[serde(with = "point_expr")]
         #[walk(placement)]
         base: PointExpr,
-        #[serde(default = "z_axis")]
-        axis: Dir,
+        /// From the bottom to the top: unitless expressions (#21932), so the coil turns as
+        /// the parameters change; plain numbers for a fixed direction. Normalized when evaluated.
+        #[serde(with = "point_expr", default = "z_axis_expr")]
+        #[walk(direction)]
+        axis: DirExpr,
         /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive
         /// circular or square section below.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3505,6 +3514,10 @@ pub fn unit_direction(v: Vec3) -> Option<Vec3> {
 
 fn z_axis_expr() -> DirExpr {
     dir_expr(Vec3::Z)
+}
+
+fn neg_z_axis_expr() -> DirExpr {
+    dir_expr(-Vec3::Z)
 }
 
 /// Stored as `[x, y, z]`: plain numbers as numbers (as points were before they took
