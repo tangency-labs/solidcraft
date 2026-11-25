@@ -56,13 +56,22 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(view) = app.viewport.rect.filter(|_| depth > 0 && crate::toolbar::design_shown(app)) else { return };
     // The floating shell lays the ribbon over the viewport: sit inside the content area, below it.
     let view = crate::shell::content_rect(app, view);
+    // The content area starts above the ribbon in both layouts: sit under it, not over the tab
+    // row. Floating, the ribbon is a card whose bottom edge is known; docked, it keeps its
+    // reserved height from the top of the view.
+    let top = if matches!(crate::toolbar::shell_layout(app), crate::ui_kit::LayoutMode::Floating) {
+        crate::toolbar::shell_cards(app, view).ribbon.bottom()
+    } else {
+        view.top() + crate::toolbar::reserved_height(app)
+    }
+    .clamp(view.top(), view.bottom());
     let t = solidcraft_theme::Tokens::get();
     let (mut one, mut all) = (false, false);
     Container::new(ctx, Surface::Toast)
         .area(egui::Id::unique("isolation_banner"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::CENTER_TOP)
-        .fixed_pos(egui::pos2(view.center().x, view.top() + 10.0))
+        .fixed_pos(egui::pos2(view.center().x, top + 10.0))
         .show(ctx, |ui| {
             Container::popup_frame(ui.style()).fill(t.panel).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
                 ui.horizontal(|ui| {
