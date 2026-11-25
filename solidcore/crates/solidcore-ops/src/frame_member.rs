@@ -3,7 +3,6 @@
 //! The kernel's [`solidcore::sweep::member`] computes every geometric quantity. This facade
 //! converts the record, guards kernel calls and returns their values or typed refusals.
 
-use solidcore::curve::path::Segment as KSegment;
 use solidcore::sweep::member as km;
 use solidcore_convert as convert;
 use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
@@ -58,31 +57,7 @@ impl Piece {
     /// Its terminal and sweep data, field for field.
     #[must_use]
     pub fn data(&self) -> PieceData {
-        let p = self.0;
-        let segment = match p.segment {
-            KSegment::Line { start, end } => Segment::Line {
-                a: convert::record_vec3(start),
-                b: convert::record_vec3(end),
-            },
-            KSegment::Arc {
-                start,
-                centre,
-                axis,
-                angle,
-            } => Segment::Arc {
-                a: convert::record_vec3(start),
-                center: convert::record_vec3(centre),
-                axis: convert::record_vec3(axis),
-                angle,
-            },
-        };
-        PieceData {
-            a: convert::record_vec3(p.a),
-            b: convert::record_vec3(p.b),
-            t0: convert::record_vec3(p.t0),
-            t1: convert::record_vec3(p.t1),
-            segment,
-        }
+        convert::frame::record_piece(&self.0)
     }
 
     /// The piece whose data is `data`, checked as the kernel checks its own pieces
@@ -93,30 +68,13 @@ impl Piece {
     /// [`Refusal::Line`] or [`Refusal::Arc`] for data no line or arc of the kernel has, or a
     /// guarded kernel-call failure.
     pub fn from_data(data: &PieceData) -> Result<Self, Failure> {
-        let segment = match data.segment {
-            Segment::Line { a, b } => KSegment::Line {
-                start: convert::vec3(a),
-                end: convert::vec3(b),
-            },
-            Segment::Arc {
-                a,
-                center,
-                axis,
-                angle,
-            } => KSegment::Arc {
-                start: convert::vec3(a),
-                centre: convert::vec3(center),
-                axis: convert::vec3(axis),
-                angle,
-            },
-        };
         query(|| {
             km::Piece::from_parts(
                 convert::vec3(data.a),
                 convert::vec3(data.b),
                 convert::vec3(data.t0),
                 convert::vec3(data.t1),
-                segment,
+                convert::frame::segment(&data.segment),
             )
             .map(Piece)
         })

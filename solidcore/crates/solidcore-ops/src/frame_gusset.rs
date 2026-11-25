@@ -2,7 +2,6 @@
 //! and return the kernel's exact outline and extrusion levels. All coordinate
 //! calculations are in `solidcore::prism::gusset`; this layer converts and sequences.
 
-use solidcore::math::Transform;
 use solidcore::prism::gusset as geometry;
 use solidcore_convert as convert;
 use solidcore_record::{Plane, Region2, Seg2, Vec3};
@@ -19,46 +18,49 @@ impl Support {
     /// Its frames, tolerance and material, field for field.
     #[must_use]
     pub fn data(&self) -> SupportData {
-        let f = &self.0;
-        SupportData {
-            frames: SupportFrames {
-                plane: convert::record_plane(&f.plane),
-                source: convert::record_plane(&f.source),
-                to_source: f.to_source.m,
-                to_author: f.to_author.m,
-                tolerance: f.tolerance,
-            },
-            regions: f.regions.iter().map(convert::record_region2).collect(),
-        }
+        convert::frame::record_support(&self.0)
     }
 
     /// The support whose data is `data`: every support's own [`Support::data`] makes that
     /// support again, field for field.
     ///
     /// # Errors
-    /// A support without material, which [`support`] never returns.
+    /// Frames [`support`] refuses (a number not finite, a tolerance not above zero), or a
+    /// support without material, which [`support`] never returns.
     pub fn from_data(data: &SupportData) -> Result<Self> {
+        sound(&data.frames)?;
         if data.regions.is_empty() {
             return Err(refused("gusset support has no material"));
         }
-        Ok(Self(face(&data.frames, &data.regions)))
+        Ok(Self(convert::frame::support_face(
+            &data.frames,
+            &data.regions,
+        )))
     }
 }
 
-/// The kernel's support face of `frames` and `regions`.
-fn face(frames: &SupportFrames, regions: &[Region2]) -> geometry::Face {
-    geometry::Face {
-        plane: convert::plane(&frames.plane),
-        source: convert::plane(&frames.source),
-        regions: regions.iter().map(convert::region2).collect(),
-        to_source: Transform {
-            m: frames.to_source,
-        },
-        to_author: Transform {
-            m: frames.to_author,
-        },
-        tolerance: frames.tolerance,
+/// Refuses frames with a number not finite or a tolerance not above zero: no support is made
+/// on them.
+fn sound(frames: &SupportFrames) -> Result<()> {
+    let SupportFrames {
+        plane,
+        source,
+        to_source,
+        to_author,
+        tolerance,
+    } = frames;
+    let finite = [plane, source]
+        .iter()
+        .flat_map(|p| [p.origin, p.x, p.y])
+        .flat_map(|v| [v.x, v.y, v.z])
+        .chain(to_source.iter().chain(to_author).flatten().copied())
+        .all(f64::is_finite);
+    if !(finite && tolerance.is_finite() && *tolerance > 0.0) {
+        return Err(refused(
+            "gusset support frames need finite numbers and a tolerance above zero",
+        ));
     }
+    Ok(())
 }
 
 fn refused(reason: &'static str) -> Error {
@@ -96,8 +98,10 @@ pub fn support_plane(
 /// holes and joining split faces by the existing exact planar Boolean operation.
 ///
 /// # Errors
-/// Malformed, open or over-budget loops; empty material; the planar Boolean's error.
+/// Frames with a number not finite or a tolerance not above zero; malformed, open or
+/// over-budget loops; empty material; the planar Boolean's error.
 pub fn support(frames: &SupportFrames, faces: &[Vec<Vec<Seg2>>]) -> Result<Support> {
+    sound(frames)?;
     if faces.len() > 4096 {
         return Err(refused("gusset support exceeds the 4096-face limit"));
     }
@@ -162,7 +166,7 @@ pub fn support(frames: &SupportFrames, faces: &[Vec<Vec<Seg2>>]) -> Result<Suppo
     if regions.is_empty() {
         return Err(refused("gusset support has no material"));
     }
-    Ok(Support(face(frames, &regions)))
+    Ok(Support(convert::frame::support_face(frames, &regions)))
 }
 
 /// Construct the plate outline and prove both contact strips fit on their
@@ -177,19 +181,10 @@ pub fn prepare(
     placement: Placement,
 ) -> Result<Prepared> {
     let [a, b] = supports;
-    let dimensions = geometry::Dimensions {
-        leg1: dimensions.leg1,
-        leg2: dimensions.leg2,
-        thickness: dimensions.thickness,
-        relief: dimensions.relief,
-        clip: dimensions.clip,
-        offset: dimensions.offset,
-    };
-    let placement = match placement {
-        Placement::Center => geometry::Placement::Center,
-        Placement::Positive => geometry::Placement::Positive,
-        Placement::Negative => geometry::Placement::Negative,
-    };
+    let (dimensions, placement) = (
+        convert::frame::dimensions(&dimensions),
+        convert::frame::placement(placement),
+    );
     let plan = geometry::plan([&a.0, &b.0], dimensions, placement).map_err(status)?;
     for (support, contact) in [a, b].into_iter().zip(&plan.contacts) {
         let strip = convert::record_region2(&contact.region);
@@ -258,7 +253,7 @@ mod tests {
                 b: corners[(k + 1) % 4],
             })
             .collect();
-        let made = support(&frames, &[vec![square]]).unwrap();
+        let made = support(&frames, &[vec![square.clone()]]).unwrap();
         let data = made.data();
         assert_eq!(data.frames, frames);
         assert_eq!(data.regions.len(), 1);
@@ -268,5 +263,16 @@ mod tests {
             regions: Vec::new(),
         };
         assert!(Support::from_data(&empty).is_err());
+        // a NaN tolerance is refused, making a support or taking one back
+        let nan = SupportFrames {
+            tolerance: f64::NAN,
+            ..frames
+        };
+        assert!(support(&nan, &[vec![square]]).is_err());
+        let bad = SupportData {
+            frames: nan,
+            ..data
+        };
+        assert!(Support::from_data(&bad).is_err());
     }
 }

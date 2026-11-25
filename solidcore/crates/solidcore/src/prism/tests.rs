@@ -3323,6 +3323,7 @@ mod member {
         let m = bar_along_x(-20.0, 80.0, 45.0);
         let again = Member::from_parts(m.frame.clone(), m.dir, m.length, m.lo, m.hi);
         assert_eq!(again, Ok(m.clone()));
+        let frame_of = |x: [f64; 3], y: [f64; 3]| frame([-20.0, 0.0, 0.0], x, y);
         let parts = |dir: Vec3, length: f64, lo: Vec2| {
             Member::from_parts(m.frame.clone(), dir, length, lo, m.hi)
         };
@@ -3342,6 +3343,21 @@ mod member {
         frame.origin[1] = f64::NAN;
         let r = Member::from_parts(frame, m.dir, m.length, m.lo, m.hi);
         assert_eq!(r, Err(Refusal::Degenerate));
+        // a collapsed or skew section frame is refused, by along as by from_parts
+        let mut flat = m.frame.clone();
+        flat.x_axis = [0.0; 3];
+        flat.y_axis = [0.0; 3];
+        let r = Member::from_parts(flat.clone(), m.dir, m.length, m.lo, m.hi);
+        assert_eq!(r, Err(Refusal::Degenerate));
+        let (a, b) = (Point3::new(-20.0, 0.0, 0.0), Point3::new(80.0, 0.0, 0.0));
+        let r = Member::along(flat, a, b, m.lo, m.hi);
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+        let skew = frame_of([0.0, 1.0, 0.0], [0.0, FRAC_1_SQRT_2, FRAC_1_SQRT_2]);
+        let r = Member::along(skew, a, b, m.lo, m.hi);
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
+        let open = Vec2::new(f64::INFINITY, m.hi.y);
+        let r = Member::along(m.frame.clone(), a, b, m.lo, open);
+        assert_eq!(r.unwrap_err(), Refusal::Degenerate);
     }
 
     /// The plane x + z = 150 cuts a 10 × 10 bar along x: its middle line at 150, its corners at
