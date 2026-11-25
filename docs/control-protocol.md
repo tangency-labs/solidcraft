@@ -1270,6 +1270,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)
 - `pan_reverse_y` (default false: vertical scrolling pans the other way)
+- `panel_shader` (string, default empty: none; `plugin-id/shader-id` draws that installed plugin's panel shader under every see-through panel, `shaders@0.2`).
 - `parameters_apply_live` (default true: the Parameters dialog applies an expression when its field is left; false: edits wait for Apply or OK, which set them together in one rebuild and one undo step)
 - `pencil_mode` (web app, default false: a pen tap adds or removes a model or sketch item, a pen double-tap selects its whole body or sketch, and a pen tap in empty space clears the selection; finger touches that start in the view don't click there, and a finger double-tap on a planar face starts a sketch on it)
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)

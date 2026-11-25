@@ -578,6 +578,7 @@ mod tests {
             .unwrap(),
             shaders: Vec::new(),
             tints: Vec::new(),
+            panels: Vec::new(),
             shader_settings: Default::default(),
         };
         let items = declared(&plugin);

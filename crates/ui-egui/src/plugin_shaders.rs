@@ -285,7 +285,7 @@ pub(crate) fn settings(
     shader.setting_values(|id| stored.get(&format!("{key}/{id}")).copied())
 }
 
-fn host_uniforms(
+pub(crate) fn host_uniforms(
     size: [u32; 2],
     time: f32,
     scale: f32,

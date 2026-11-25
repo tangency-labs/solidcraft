@@ -12,6 +12,9 @@ macro_rules! plugins_preferences {
             background_shader: String = String::new(), PAGE_PLUGINS;
             /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
             disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+            /// A plugin's shader for see-through panels' backgrounds, `plugin-id/shader-id` (`shaders@0.2`);
+            /// empty for none.
+            panel_shader: String = String::new(), PAGE_PLUGINS;
             /// Show the global fuel and memory controls on Preferences > Plugins (#18764).
             /// Off keeps advanced controls folded; on exposes the prior always-visible controls.
             plugin_limits_expanded: bool = false, PAGE_PLUGINS;
