@@ -99,11 +99,13 @@ would refuse them.
 Tool calls read, write and delete files only inside the server's folders:
 
 - the folder of the open design (the `--in` design, the design open in the app, or whatever
-  the agent last opened or saved), but only when it lies strictly inside your home folder (or
-  the temporary folder) and not in a hidden folder. Home itself, a folder above it (`/`,
-  `/home`, `/Users`, a drive's root), hidden folders such as `~/.config` and folders elsewhere
-  don't count. Hidden files and folders inside the design's folder (`.env`, `.git`) are out of
-  reach too;
+  the agent last opened or saved), when it lies strictly inside your home folder (or the temporary
+  folder) and not in a hidden folder, or on Windows at least two folders below the root of another
+  local drive (neither your home drive nor the system drive) outside system and hidden folders.
+  Home itself, a folder above it (`/`, `/home`, `/Users`, a drive's root), a top-level folder on
+  another drive, Windows system folders, hidden folders such as `~/.config`, and folders elsewhere
+  don't count. Hidden files and folders inside the design's folder (`.env`, `.git`, `AppData`) are
+  out of reach too;
 - on the same terms, every folder the agent opened or saved a design file in during this
   server's run (`open`, `save`, or `doc.open`, `file.save` and `file.save_as` through `execute`
   or `batch`, with the path given in full) and, headless, every folder a design was open in,
