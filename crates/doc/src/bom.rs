@@ -415,7 +415,11 @@ impl<'a> Tree<'a> {
     /// The structure of `doc` with the bodies of `state`, its evaluated model.
     pub fn new(doc: &'a Document, state: &'a ModelState) -> Tree<'a> {
         let mut children: HashMap<u64, Vec<Placed>> = HashMap::new();
+        let inactive = doc.inactive_pattern_occurrences();
         for (o, bom_type) in doc.occurrences.iter().zip(doc.occurrence_bom_types()) {
+            if inactive.contains(&o.id) {
+                continue;
+            }
             children.entry(o.parent).or_default().push(Placed { occurrence: o.id, member: Member { component: o.component, bom_type } });
         }
         let mut components: HashMap<u64, &Component> = HashMap::new();
@@ -437,6 +441,42 @@ impl<'a> Tree<'a> {
     /// ([`Request::suppressed_parts`]).
     fn switched_off(&self, id: u64) -> bool {
         !self.children.contains_key(&id) && !self.bodies.contains_key(&id) && self.suppressing.contains(&id)
+    }
+
+    /// The row of a design that places nothing but has bodies of its own (a single part, #19883),
+    /// when `request` lists the design: the design is the part. A design that places components
+    /// lists those, as its own bodies belong to no row there.
+    fn design_row(&self, request: &Request) -> Option<Row> {
+        if request.source != 0 || !self.children.is_empty() || self.own_bodies(0).is_empty() {
+            return None;
+        }
+        let member = Member { component: 0, bom_type: BomType::Normal };
+        let metadata = &self.doc.metadata;
+        Some(Row {
+            key: RowKey { parents: Vec::new(), member },
+            item: 1,
+            provisional: true,
+            locked: false,
+            duplicate: false,
+            bom_type: member.bom_type,
+            assembly: false,
+            stands_for: Holds::All,
+            components: vec![0],
+            names: vec![self.doc.name.clone()],
+            part_number: metadata.part_number().unwrap_or_default().to_string(),
+            description: metadata.description().unwrap_or_default().to_string(),
+            revision: metadata.revision().unwrap_or_default().to_string(),
+            properties: BTreeMap::new(),
+            // Filled in by `name_materials`.
+            materials: Vec::new(),
+            statics: Vec::new(),
+            count: 1,
+            each: 1,
+            quantity: quantity::add_up(std::iter::once(self.amounts.get(&0))),
+            members: Vec::new(),
+            mass: Mass::NotAsked,
+            children: Vec::new(),
+        })
     }
 
     /// What a component places.
@@ -935,6 +975,7 @@ pub fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Result<Bo
     // level as it gathers the first.
     let under = if request.view == View::AllLevels { request.group } else { Group::PartNumber };
     let mut rows = tree.level(&listing, &mut paths, &top, request.group, under, &[], 1);
+    rows.extend(tree.design_row(request));
     let numbered = numbers::apply(&mut rows, numbers::saved(tree.doc, request.source, request.view));
     let mut bom = Bom { source: request.source, rows, total: Total::default(), numbered, index: HashMap::new() };
     if members {

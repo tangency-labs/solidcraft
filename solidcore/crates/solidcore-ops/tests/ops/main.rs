@@ -15,6 +15,8 @@
 
 #[path = "../analytic_cv_edit.rs"]
 mod analytic_cv_edit;
+#[path = "../bead.rs"]
+mod bead;
 #[path = "../birail.rs"]
 mod birail;
 #[path = "../blend.rs"]
@@ -79,8 +81,12 @@ mod extend_split_sheet;
 mod face_cvs;
 #[path = "../face_surface_eval.rs"]
 mod face_surface_eval;
+#[path = "../failure_code.rs"]
+mod failure_code;
 #[path = "../fillet_sheets_long_run.rs"]
 mod fillet_sheets_long_run;
+#[path = "../frame_trim.rs"]
+mod frame_trim;
 #[path = "../heal.rs"]
 mod heal;
 #[path = "../issue_2843_round_on_tangent_line.rs"]
@@ -105,6 +111,12 @@ mod issue_2953_drafted_peg;
 mod measure;
 #[path = "../normal_drop.rs"]
 mod normal_drop;
+#[path = "../offset_history.rs"]
+mod offset_history;
+#[path = "../offset_surface.rs"]
+mod offset_surface;
+#[path = "../pick.rs"]
+mod pick;
 #[path = "../pie_slices_off_centre_arc.rs"]
 mod pie_slices_off_centre_arc;
 #[path = "../plane_cv_edit.rs"]

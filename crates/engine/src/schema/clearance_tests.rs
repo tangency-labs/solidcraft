@@ -11,7 +11,10 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ClearanceParams>(), &["against", "bodies", "clearance", "min_volume", "nearest", "skip_within", "tolerance"]);
+    assert_keys(
+        input_schema_for::<ClearanceParams>(),
+        &["against", "bodies", "clearance", "envelopes", "min_volume", "nearest", "skip_within", "tolerance"],
+    );
 }
 
 /// The handler reads the numbers and `skip_within` before the bodies, so each of these fails
@@ -19,6 +22,7 @@ fn schemas_and_the_key_check_agree() {
 #[test]
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
+        ("inspect.clearance", json!({"envelopes": "yes"})),
         ("inspect.clearance", json!({"min_volume": -1})),
         ("inspect.clearance", json!({"min_volume": "x"})),
         ("inspect.clearance", json!({"min_volume": 2e9})),

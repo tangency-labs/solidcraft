@@ -25,6 +25,53 @@ fn bad<T>(why: &str) -> Result<T> {
     Err(SketchError::Invalid(format!("spline knots: {why}")))
 }
 
+/// The Bézier spans of the B-spline of degree `d` with `knots` over `c` (homogeneous points),
+/// in parameter order, over the knot domain `[lo, hi]`: every knot of the domain, its ends too,
+/// inserted until it repeats `d` times (Boehm). The ends matter for an open knot vector: without
+/// them the first span keeps a control point off the curve. A clamped vector's ends already
+/// repeat `d + 1` times, so inserting them there changes nothing. Exact up to rounding.
+fn bezier_spans(knots: &[f64], c: &[HPoint], d: usize, (lo, hi): (f64, f64)) -> Option<Vec<Vec<HPoint>>> {
+    let (mut k, mut c) = (knots.to_vec(), c.to_vec());
+    let mut domain: Vec<f64> = knots.iter().copied().filter(|x| *x >= lo && *x <= hi).collect();
+    domain.dedup();
+    for u in domain {
+        while k.iter().filter(|x| **x == u).count() < d {
+            (k, c) = bspline::insert_knot(d, &k, &c, u).ok()?;
+        }
+    }
+    let mut spans = Vec::new();
+    for i in d..c.len() {
+        if k.get(i)? < k.get(i + 1)? {
+            spans.push(c.get(i - d..=i)?.to_vec());
+        }
+    }
+    Some(spans)
+}
+
+/// The Bézier pieces of the closed control spline of `degree` over `ctrl`: the closed uniform
+/// B-spline with one piece per control point. The wrap takes the first `degree` points again
+/// after the last, so the open uniform knot vector `0, 1, …, n + 2·degree` covers the `n` spans
+/// of one turn over `[degree, n + degree]`. Piece `k` runs over the span starting at knot
+/// `degree + k`, so the pieces join with the spline's own continuity around the closing point.
+/// `None` for fewer than `degree + 1` points.
+pub(crate) fn closed_control_beziers(ctrl: &[Vec2], degree: u8) -> Option<Vec<Vec<Vec2>>> {
+    let d = usize::from(degree);
+    let n = ctrl.len();
+    if d == 0 || n < d + 1 {
+        return None;
+    }
+    let wrapped: Vec<HPoint> = (0..n + d).map(|i| ctrl.get(i % n).map(|p| HPoint { x: p.x, y: p.y, z: 0.0, w: 1.0 })).collect::<Option<_>>()?;
+    let knots: Vec<f64> = (0..=n + 2 * d).map(|i| i as f64).collect();
+    let spans = bezier_spans(&knots, &wrapped, d, (d as f64, (n + d) as f64))?;
+    let mut pieces: Vec<Vec<Vec2>> =
+        spans.iter().map(|span| span.iter().map(|q| q.project().map(|v| Vec2::new(v.x, v.y))).collect::<Option<Vec<_>>>()).collect::<Option<_>>()?;
+    // The last piece ends where the first begins: one point of the curve, reached from its two
+    // ends by different roundings, so the joint is made the same point exactly.
+    let first = *pieces.first()?.first()?;
+    *pieces.last_mut()?.last_mut()? = first;
+    Some(pieces)
+}
+
 impl Nurbs {
     /// The existing fit curve as exact control splines. Chord knots compact its C2 spans;
     /// very ill-conditioned joins retain their original Bezier controls instead.
@@ -118,27 +165,13 @@ impl Nurbs {
         Some(Vec2::new(q.x, q.y))
     }
 
-    /// The Bézier spans of the spline over `p`, homogeneous, in parameter order: every
-    /// interior knot inserted until it repeats `degree` times (Boehm). Exact up to rounding.
+    /// The Bézier spans of the spline over `p`, homogeneous, in parameter order (see
+    /// [`bezier_spans`]).
     fn spans(&self, p: &[Vec2], degree: u8) -> Option<Vec<Vec<HPoint>>> {
         self.check(p.len(), degree).ok()?;
         let d = usize::from(degree);
-        let (mut k, mut c) = (self.knots.clone(), self.homogeneous(p));
         let (lo, hi) = self.domain(p.len(), d)?;
-        let mut interior: Vec<f64> = self.knots.iter().copied().filter(|x| *x > lo && *x < hi).collect();
-        interior.dedup();
-        for u in interior {
-            while k.iter().filter(|x| **x == u).count() < d {
-                (k, c) = bspline::insert_knot(d, &k, &c, u).ok()?;
-            }
-        }
-        let mut spans = Vec::new();
-        for i in d..c.len() {
-            if k.get(i)? < k.get(i + 1)? {
-                spans.push(c.get(i - d..=i)?.to_vec());
-            }
-        }
-        Some(spans)
+        bezier_spans(&self.knots, &self.homogeneous(p), d, (lo, hi))
     }
 
     /// A point or the complete line interval when every control lies on one line

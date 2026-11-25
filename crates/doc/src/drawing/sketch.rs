@@ -20,19 +20,39 @@ const MAX_ENTITIES: usize = MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS;
 const MAX_VALIDATION_WORK: usize = 2_000_000;
 const MAX_STORED_TEXT_BYTES: usize = 4096;
 const MAX_LOCAL_ID_BYTES: usize = 512;
-const AUXILIARY: [&str; 6] = ["links", "patterns", "offsets", "freeform_offsets", "wires", "equations"];
+const AUXILIARY: [&str; 7] = ["links", "patterns", "offsets", "freeform_offsets", "freeform_chain_offsets", "wires", "equations"];
 
-/// Authored sheet geometry. Points and lengths are paper XY millimetres, regardless
-/// of the drawing's display units. The origin is the sheet's lower-left corner,
-/// with x right and y up, not the border corner. No view scale or source path.
+/// What a drawing sketch belongs to. A sheet's sketch is in paper millimetres, from the sheet's
+/// lower-left corner. A view's sketch is in model millimetres in the view's plane, in the plane's
+/// own coordinates (from its basis's origin, as the view's section curves are), and is placed on
+/// paper at the view's scale, so it moves and scales with its view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Owner {
+    Sheet(#[serde(with = "crate::ids")] u64),
+    View(#[serde(with = "crate::ids")] u64),
+}
+
+impl Owner {
+    /// The view it moves with, if any.
+    pub fn view(self) -> Option<u64> {
+        match self {
+            Owner::Sheet(_) => None,
+            Owner::View(view) => Some(view),
+        }
+    }
+}
+
+/// Authored drawing geometry, in its owner's frame ([`Owner`]), regardless of the drawing's
+/// display units. A sheet sketch's origin is the sheet's lower-left corner, with x right and
+/// y up, not the border corner. No source path.
 /// Expressions are retained verbatim; interpreting them is the later read-only store's job.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SheetSketch {
     #[serde(with = "crate::ids")]
     pub id: u64,
-    #[serde(with = "crate::ids")]
-    pub sheet: u64,
+    pub owner: Owner,
     pub name: String,
     pub sketch: Sketch,
 }
@@ -66,9 +86,22 @@ fn identity<'a>(seen: &mut BTreeSet<&'a str>, id: &'a str) -> Result<()> {
 /// Every collection is bounded before serde allocates the typed sketch payload.
 /// A raw JSON Value already exists here; the drawing reader separately caps encoded bytes.
 pub(super) fn check_raw(value: &Value) -> Result<()> {
+    check_raw_bounds(value)?;
+    for record in value.get("sketches").and_then(Value::as_array).into_iter().flatten() {
+        check_raw_support(record)?;
+    }
+    Ok(())
+}
+
+/// Bound the whole drawing's sketches, including any records the reader will set aside.
+pub(super) fn check_raw_bounds(value: &Value) -> Result<()> {
     let Some(records) = value.get("sketches") else { return Ok(()) };
     let records = records.as_array().ok_or_else(|| invalid("sketches must be an array"))?;
     require(records.len() <= MAX_SHEET_SKETCHES, || "too many sheet sketches".into())?;
+    check_raw_records(records)
+}
+
+pub(super) fn check_raw_records<'a>(records: impl IntoIterator<Item = &'a Value>) -> Result<()> {
     let mut total = 0;
     let mut nodes = 0;
     let mut bytes = 0;
@@ -83,9 +116,10 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
             }
         }
         for key in AUXILIARY {
-            if let Some(array) = sketch.get(key) {
-                let array = array.as_array().ok_or_else(|| invalid(format!("{key} must be an array")))?;
-                require(array.is_empty(), || format!("not supported yet: sheet sketch {key}"))?;
+            if let Some(array) = sketch.get(key)
+                && !array.is_array()
+            {
+                return Err(invalid(format!("{key} must be an array")));
             }
         }
         if let Some(curves) = sketch.get("curves").and_then(Value::as_array) {
@@ -99,6 +133,18 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
         if let Some(counters) = sketch.get("counters").and_then(Value::as_object) {
             require(counters.len() <= 64, || "sheet sketch counter prefix limit exceeded".into())?;
             require(counters.keys().all(|key| key.len() <= MAX_LOCAL_ID_BYTES), || "sheet sketch counter prefix too long".into())?;
+        }
+    }
+    Ok(())
+}
+
+/// Reject unsupported auxiliary arrays in one sketch after checking the drawing's raw bounds.
+pub(super) fn check_raw_support(record: &Value) -> Result<()> {
+    if let Some(sketch) = record.get("sketch") {
+        for key in AUXILIARY {
+            if let Some(array) = sketch.get(key).and_then(Value::as_array) {
+                require(array.is_empty(), || format!("not supported yet: sheet sketch {key}"))?;
+            }
         }
     }
     Ok(())
@@ -181,9 +227,15 @@ pub(super) fn check_drawing(drawing: &Drawing) -> Result<()> {
 fn check_payload(record: &SheetSketch) -> Result<()> {
     check_name(&record.name, "sheet sketch")?;
     let sk = &record.sketch;
-    require(sk.links.is_empty() && sk.patterns.is_empty() && sk.offsets.is_empty() && sk.freeform_offsets.is_empty() && sk.wires.is_empty(), || {
-        "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into()
-    })?;
+    require(
+        sk.links.is_empty()
+            && sk.patterns.is_empty()
+            && sk.offsets.is_empty()
+            && sk.freeform_offsets.is_empty()
+            && sk.freeform_chain_offsets.is_empty()
+            && sk.wires.is_empty(),
+        || "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into(),
+    )?;
     require(sk.equations.is_empty(), || "not supported yet: sheet sketch equations".into())?;
     require(!sk.view.three_d && !sk.view.slice, || "model-only sketch view is not a sheet sketch".into())?;
     let origin = sk.points.first().ok_or_else(|| invalid("missing sketch origin"))?;
@@ -306,11 +358,19 @@ impl Drawing {
         check_payload(&original)?;
         let mut candidate = (*original).clone();
         let out = change(&mut candidate.sketch)?;
-        check_budget(self.sketches.iter().map(|record| if record.id == sketch { &candidate } else { record.as_ref() }))?;
+        let records = || self.sketches.iter().map(|record| if record.id == sketch { &candidate } else { record.as_ref() });
+        check_budget(records())?;
+        if let Some(file) = &self.newer_file {
+            file.check_sketch_budget(records())?;
+        }
         let solved = solve_record(design, self, &original, candidate)?;
         if solved.sketch != original.sketch {
             let next = SheetSketch { sketch: solved.sketch.clone(), ..(*original).clone() };
-            check_budget(self.sketches.iter().map(|record| if record.id == sketch { &next } else { record.as_ref() }))?;
+            let records = || self.sketches.iter().map(|record| if record.id == sketch { &next } else { record.as_ref() });
+            check_budget(records())?;
+            if let Some(file) = &self.newer_file {
+                file.check_sketch_budget(records())?;
+            }
             let slot = self.sketches.iter_mut().find(|record| record.id == sketch).ok_or_else(|| invalid("sheet sketch disappeared"))?;
             *slot = Arc::new(next);
         }
@@ -359,7 +419,8 @@ fn solve_record(design: &crate::Document, owner: &Drawing, original: &SheetSketc
     require(report.keeps_orientation(), || report.failure(|conflicts| format!("sheet sketch edit would conflict with {conflicts}")))?;
     check_budget(std::iter::once(&candidate))?;
     check_payload(&candidate)?;
-    Ok(SolvedSheetSketch { drawing: owner.id, sheet: original.sheet, id: original.id, sketch: candidate.sketch, report })
+    let sheet = owner.sketch_sheet(original).ok_or_else(|| invalid("its owner is not in this drawing"))?;
+    Ok(SolvedSheetSketch { drawing: owner.id, sheet, id: original.id, sketch: candidate.sketch, report })
 }
 
 /// Names are collected after record admission, with cumulative expression work

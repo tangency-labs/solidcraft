@@ -1,7 +1,8 @@
 //! 3D sketch drawing: with the sketch's 3D Sketch option on (Sketch Palette), lines, arcs,
 //! splines and points may leave the sketch plane. They are kept as drawn 3D curves (wires with
-//! fit points, exact arcs keeping their analytic form): drawn and snapped to, movable point by
-//! point, and usable as sweep and pipe paths.
+//! fit points, exact arcs keeping their analytic form, control point splines keeping their
+//! control points): drawn and snapped to, movable point by point, and usable as sweep and pipe
+//! paths.
 //!
 //! Their fit points take constraints of their own (#10608), solved after the planar sketch:
 //! Coincident and Fix take 3D refs (`<curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's
@@ -18,8 +19,8 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, vec3};
 use crate::schema::sketch::Constrained;
 use crate::schema::sketch_3d::{
-    AlongAxisParams, AlongAxisResult, Arc3dParams, AxisName, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, OnPlaneParams, OnPlaneResult,
-    POINT3_MUST, Point3dParams, Point3dResult, Spline3dParams, point3_coordinates,
+    AlongAxisParams, AlongAxisResult, Arc3dParams, AxisName, ControlSpline3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult,
+    OnPlaneParams, OnPlaneResult, POINT3_MUST, Point3dParams, Point3dResult, Spline3dParams, point3_coordinates,
 };
 use crate::schema::sketch_dimension::DimensionResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -27,6 +28,7 @@ use crate::{Result, Session};
 
 const LINE3D_CONTRACT: TypedContract<Line3dParams> = TypedContract::new();
 const SPLINE3D_CONTRACT: TypedContract<Spline3dParams> = TypedContract::new();
+const CONTROL_SPLINE3D_CONTRACT: TypedContract<ControlSpline3dParams> = TypedContract::new();
 const ARC3D_CONTRACT: TypedContract<Arc3dParams> = TypedContract::new();
 const POINT3D_CONTRACT: TypedContract<Point3dParams> = TypedContract::new();
 const MOVE3D_CONTRACT: TypedContract<Move3dParams> = TypedContract::new();
@@ -49,6 +51,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE3D_CONTRACT)
         .output(output_schema_for::<Curves3dResult>)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more, coordinates numbers or expressions as for sketch.line3d): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
+    CommandSpec::new("sketch.spline3d.control_point", "3D Control Point Spline", crate::checked!("sketch.spline3d.control_point", control_spline3d))
+        .icon("spline_cv")
+        .enabled(in_sketch_3d)
+        .contract(&CONTROL_SPLINE3D_CONTRACT)
+        .output(output_schema_for::<Curves3dResult>)
+        .params(concat!(
+            "points: [[x,y,z]…] world control points (3 or more, coordinates numbers or expressions as for sketch.line3d): a smooth cubic 3D curve that starts on the first control point, ends on the last and is pulled towards the ones between without passing through them (needs 3D Sketch on). Stored exactly (the B-spline over its control points), so a path follows the curve itself; sketch.move3d moves a control point",
+            created_doc!()
+        )),
     CommandSpec::new("sketch.arc3d", "3D Arc", crate::checked!("sketch.arc3d", arc3d))
         .icon("arc3")
         .enabled(in_sketch_3d)
@@ -69,7 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&MOVE3D_CONTRACT)
         .output(output_schema_for::<Move3dResult>)
-        .params("wire: drawn 3D curve or point id, index?: fit point (default 0) | point: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point of a spline, a lone point; needs 3D Sketch on); to: [x,y,z] | by: [dx,dy,dz] (world); points joined to it move too, and the sketch's 3D constraints are solved with the moved point held where it was put (refused when they cannot hold it there, or when it is fixed). A `point` on the plane first turns the lines and fit-point splines through it (or the lone point) into drawn 3D curves through the same places, which `curves` lists (`wire` and `index` say where the point is now); their constraints and dimensions go. Arcs, circles, ellipses, conics and control-point or closed splines through it are refused"),
+        .params("wire: drawn 3D curve or point id, index?: fit point, or control point of a control point spline (default 0) | point: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point of a spline, a lone point; needs 3D Sketch on); to: [x,y,z] | by: [dx,dy,dz] (world); points joined to it move too, and the sketch's 3D constraints are solved with the moved point held where it was put (refused when they cannot hold it there, or when it is fixed). A `point` on the plane first turns the lines and fit-point splines through it (or the lone point) into drawn 3D curves through the same places, which `curves` lists (`wire` and `index` say where the point is now); their constraints and dimensions go. Arcs, circles, ellipses, conics and control-point or closed splines through it are refused"),
     CommandSpec::new("sketch.constraint.along_axis", "Along Axis", crate::checked!("sketch.constraint.along_axis", along_axis))
         .icon("c_hv")
         .enabled(in_sketch)
@@ -148,7 +159,7 @@ fn needs_3d(sk: &solidcraft_sketch::Sketch, cmd: &str) -> Result<()> {
     if sk.view.three_d { Ok(()) } else { Err(bad(cmd, "turn on 3D Sketch (sketch.options sketch_3d: true) to draw off the sketch plane")) }
 }
 
-/// The 3D Line, Spline, Arc and Point buttons start interactive tools, so they are only offered
+/// The 3D Line, Spline, Control Point Spline, Arc and Point buttons start interactive tools, so they are only offered
 /// while a 3D sketch is being edited; otherwise the tools could only fail on their first click.
 fn in_sketch_3d(s: &Session) -> std::result::Result<(), String> {
     let id = sketch_store::active(s).ok_or("no sketch is being edited (Create Sketch or Edit Sketch first)")?;
@@ -223,15 +234,35 @@ fn line3d(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn spline3d(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "sketch.spline3d";
+    drawn_spline(s, p, "sketch.spline3d", 2, |sk, at| sk.add_drawn_wire_in(at, WireSpace::Component))
+}
+
+/// Degree of the curve `sketch.spline3d.control_point` draws.
+const CONTROL_DEGREE: u8 = 3;
+
+fn control_spline3d(s: &mut Session, p: &Value) -> Result<Value> {
+    drawn_spline(s, p, "sketch.spline3d.control_point", solidcraft_sketch::MIN_CONTROL_POINTS, |sk, at| {
+        sk.add_drawn_control_in(at, CONTROL_DEGREE, WireSpace::Component)
+    })
+}
+
+/// A 3D spline command: `add` makes the curve from the `points` (at least `min`), which is then
+/// joined to the drawn 3D ends it starts or ends on and held where its expressions place it.
+fn drawn_spline(
+    s: &mut Session,
+    p: &Value,
+    cmd: &'static str,
+    min: usize,
+    add: impl FnOnce(&mut solidcraft_sketch::Sketch, &[Vec3]) -> std::result::Result<String, solidcraft_sketch::SketchError>,
+) -> Result<Value> {
     let inverse = inverse_owner_frame(s, p, cmd)?;
     let target = sketch_store::target(s, p, cmd)?;
-    let given = point_values(cmd, p, 2)?;
+    let given = point_values(cmd, p, min)?;
     let pts = points3(s, cmd, &given, &inverse)?;
     let ((id, placed), info) = edit(s, p, cmd, false, |sk, doc| {
         needs_3d(sk, cmd)?;
         let at: Vec<Vec3> = pts.iter().map(|(at, _)| *at).collect();
-        let id = sk.add_drawn_wire_in(&at, WireSpace::Component)?;
+        let id = add(sk, &at)?;
         let held: Vec<(WirePoint, Option<PointExprs3>)> =
             pts.iter().enumerate().map(|(index, (_, e))| (WirePoint { wire: id.clone(), index }, e.clone())).collect();
         let mut placed = join_in(sk, doc, target, std::slice::from_ref(&id))?;
@@ -980,6 +1011,147 @@ const SIDE: f64 = 1e-9;
 
 fn round6(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
+}
+
+/// Turn the curves `curves` of the target 3D sketch into drawn 3D curves through the same places,
+/// moved by `offset` (world). The points `points` move by `offset` too, each on its own: a lone
+/// point becomes a drawn 3D point, and the lines and fit-point splines through one that isn't on
+/// a moved curve become drawn 3D curves with just that point moved. Returns the new drawn curves.
+pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], points: &[String], offset: Vec3) -> Result<(Vec<String>, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let st = s.world_state()?;
+    let plane = st.sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let comp = move |q: Vec2| solidcraft_doc::apply_point(&inverse, plane.to_world(q));
+    let shift = solidcraft_doc::apply_vector(&inverse, offset);
+    edit(s, p, cmd, false, |sk, doc| {
+        needs_3d(sk, cmd)?;
+        let mut which = Vec::new();
+        for c in curves {
+            which.push(sk.curve_index(c).ok_or_else(|| bad(cmd, format!("no curve `{c}`")))?);
+        }
+        which.sort_unstable();
+        which.dedup();
+        // Points moved on their own: lone ones, and ones on curves that stay where they are
+        // (those curves are lifted in place, then just the point moves).
+        let mut alone: Vec<(String, Vec3)> = Vec::new();
+        let mut on_curves: Vec<usize> = Vec::new();
+        let mut in_place: Vec<usize> = Vec::new();
+        for r in points {
+            let pi = sk.resolve_point(r).filter(|i| *i != 0).ok_or_else(|| bad(cmd, format!("no point `{r}`")))?;
+            let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
+            if through.is_empty() {
+                let q = sk.points.get(pi).ok_or_else(|| bad(cmd, "the point is missing"))?;
+                if !alone.iter().any(|(id, _)| *id == q.id) {
+                    alone.push((q.id.clone(), comp(q.pos)));
+                }
+            } else if !through.iter().all(|c| which.contains(c)) {
+                on_curves.push(pi);
+                in_place.extend(through.into_iter().filter(|c| !which.contains(c)));
+            }
+        }
+        in_place.sort_unstable();
+        in_place.dedup();
+        let moved = which.len();
+        let mut all = which.clone();
+        all.extend(in_place.iter().copied());
+        // Each curve as a drawn 3D curve: its point ids, and its fit points in component space.
+        let mut lifted: Vec<(Vec<usize>, Vec<Vec3>)> = Vec::new();
+        for &ci in &all {
+            let ids = liftable(&sk.curves[ci], cmd)?;
+            let fit = ids
+                .iter()
+                .map(|i| sk.points.get(*i).map(|q| comp(q.pos)).ok_or_else(|| bad(cmd, "a curve's point is missing")))
+                .collect::<Result<Vec<Vec3>>>()?;
+            lifted.push((ids, fit));
+        }
+        sk.remove_curves(&all);
+        let gone: Vec<usize> = alone.iter().filter_map(|(id, _)| sk.point_index(id)).collect();
+        sk.remove_points(&gone);
+        let mut made = Vec::new();
+        // Where each point moved on its own sits on the drawn curves (curve id, fit index).
+        let mut placed: Vec<(usize, String, usize)> = Vec::new();
+        for (n, (ids, fit)) in lifted.iter().enumerate() {
+            let fit: Vec<Vec3> = if n < moved { fit.iter().map(|q| *q + shift).collect() } else { fit.clone() };
+            let w = sk.add_drawn_wire_in(&fit, WireSpace::Component)?;
+            for (k, q) in ids.iter().enumerate() {
+                if n >= moved && on_curves.contains(q) {
+                    placed.push((*q, w.clone(), k));
+                }
+            }
+            made.push(w);
+        }
+        for (_, q) in &alone {
+            made.push(sk.add_drawn_wire_in(&[*q + shift], WireSpace::Component)?);
+        }
+        // Each point on curves lifted in place moves by the offset, once (the first curve it is
+        // on; the drawn curves through it stay joined there).
+        let mut done: Vec<usize> = Vec::new();
+        for (pi, w, k) in &placed {
+            if done.contains(pi) {
+                continue;
+            }
+            done.push(*pi);
+            if let Some(now) = sk.wire_index(w).and_then(|i| sk.wires.get(i)).and_then(|x| x.fit.get(*k)).copied() {
+                sk.move_drawn_point(w, *k, now + shift)?;
+            }
+        }
+        join_in(sk, doc, id, &made)?;
+        Ok(made)
+    })
+}
+
+/// Moves drawn 3D picks along the plane as `f` moves plane geometry, and by `z` along its normal.
+pub(super) fn move_drawn(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    picks: &[(String, Option<usize>)],
+    z: f64,
+    f: &dyn Fn(Vec2) -> Vec2,
+) -> Result<(usize, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let world = s.world_state()?.sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let component = solidcore_record::Plane {
+        origin: solidcraft_doc::apply_point(&inverse, world.origin),
+        x: solidcraft_doc::apply_vector(&inverse, world.x),
+        y: solidcraft_doc::apply_vector(&inverse, world.y),
+    };
+    edit(s, p, cmd, false, |sk, _| {
+        let mut moves = Vec::new();
+        for (wire, index) in picks {
+            let drawn = sk
+                .wire_index(wire)
+                .and_then(|w| sk.wires.get(w))
+                .filter(|w| !w.fit.is_empty() && w.link.is_none())
+                .ok_or_else(|| bad(cmd, format!("`{wire}` is not an editable drawn 3D curve")))?;
+            let plane = if drawn.space == WireSpace::Component { component } else { world };
+            let which: Vec<usize> = match index {
+                Some(i) if *i < drawn.fit.len() => vec![*i],
+                Some(i) => return Err(bad(cmd, format!("`{wire}` has no drawn point {i}"))),
+                None => (0..drawn.fit.len()).collect(),
+            };
+            let moved: Vec<(usize, Vec3)> = which
+                .into_iter()
+                .filter_map(|i| drawn.fit.get(i).map(|q| (i, *q)))
+                .map(|(i, q)| (i, plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)))
+                .collect();
+            moves.extend(moved.into_iter().map(|(i, to)| (wire.clone(), i, to)));
+        }
+        if let Some((wire, index, _)) = moves.iter().find(|(w, i, _)| sk.wire_point_fixed(&WirePoint { wire: w.clone(), index: *i })) {
+            return Err(bad(cmd, format!("`{wire}` point {index} is fixed, or joined to a fixed point (unfix it to move it)")));
+        }
+        let held_before = sk.wire_constraints_holding();
+        sk.move_drawn_points(&moves)?;
+        if !held_before.is_empty() {
+            let held_after = sk.wire_constraints_holding();
+            if held_before.iter().any(|id| !held_after.contains(id)) {
+                return Err(bad(cmd, "the sketch's 3D constraints cannot hold the moved points there"));
+            }
+        }
+        Ok(moves.len())
+    })
 }
 
 #[cfg(test)]

@@ -116,14 +116,15 @@ pub struct AdapterReport {
 }
 
 /// The backends a headless device looks at on this platform: Metal on macOS, Vulkan and D3D12
-/// on Windows, Vulkan and GL elsewhere; `WGPU_BACKEND` narrows them further.
+/// on Windows, Vulkan elsewhere; `WGPU_BACKEND` narrows them further. One rule on every machine,
+/// whatever its driver.
 pub fn native_backends() -> wgpu::Backends {
     let native = if cfg!(target_os = "macos") {
         wgpu::Backends::METAL
     } else if cfg!(target_os = "windows") {
         wgpu::Backends::DX12 | wgpu::Backends::VULKAN
     } else {
-        wgpu::Backends::VULKAN | wgpu::Backends::GL
+        wgpu::Backends::VULKAN
     };
     match wgpu::Backends::from_env() {
         Some(env) if !(env & native).is_empty() => env & native,
@@ -160,12 +161,24 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
     }
 }
 
+/// Starts a wgpu instance; a process starts one at a time. Starting an instance loads the Vulkan
+/// drivers, and a second thread that started one meanwhile called into NVIDIA's half-loaded
+/// driver on Linux: the process crashed inside `vkEnumerateInstanceExtensionProperties` (#10232).
+/// Tests open a device each on parallel threads, so they met the crash as they began. Adapters,
+/// devices and rendering still run side by side.
+pub fn start_instance(desc: wgpu::InstanceDescriptor) -> wgpu::Instance {
+    static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    wgpu::Instance::new(desc)
+}
+
 #[cfg(test)]
 thread_local! {
     /// Instances made on this thread that list GL together with another backend, for tests.
     pub(crate) static MIXED_INSTANCES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// An instance of `backends`, with the rest of its descriptor from wgpu's environment.
 fn instance_of(backends: wgpu::Backends) -> wgpu::Instance {
     #[cfg(test)]
     if backends.contains(wgpu::Backends::GL) && backends != wgpu::Backends::GL {
@@ -173,7 +186,7 @@ fn instance_of(backends: wgpu::Backends) -> wgpu::Instance {
     }
     let mut desc = crate::instance_descriptor_from_env();
     desc.backends = backends;
-    wgpu::Instance::new(desc)
+    start_instance(desc)
 }
 
 // Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
@@ -187,28 +200,44 @@ fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
     }
 }
 
-/// Listing GL adapters opens an OpenGL context through EGL, and a GL adapter keeps it for as long
-/// as its instance lives. When GL was listed in the same instance as Vulkan, the picked Vulkan
-/// adapter kept that context alive, and threads that created and destroyed these contexts at
-/// once could hang Mesa's OpenGL driver (radeonsi, Mesa 25.2) in `glDebugMessageCallback` or
-/// `eglDestroyContext`, as the GPU tests did. So GL is listed once, in an instance of its own
-/// that the process keeps ([`gl_adapters`]), and the process lists, picks and drops the other
-/// adapters it did not pick, with their instances, one caller at a time.
-#[cfg(not(target_arch = "wasm32"))]
+/// Every adapter the native backends offer, best first, listed by one instance.
+#[cfg(not(test))]
+fn adapters() -> Vec<wgpu::Adapter> {
+    let all = native_backends();
+    adapters_of(&instance_of(all), all)
+}
+
+/// Runs `list`. Outside this crate's tests, listings run side by side.
+#[cfg(not(test))]
+fn one_listing_at_a_time<T>(list: impl FnOnce() -> T) -> T {
+    list()
+}
+
+// This crate's GPU tests list adapters differently (#19316). Listing GL adapters opens an OpenGL
+// context through EGL, and a GL adapter keeps it for as long as its instance lives. When GL was
+// listed in the same instance as Vulkan, the picked Vulkan adapter kept that context alive, and
+// test threads that created and destroyed these contexts at once hung Mesa's OpenGL driver
+// (radeonsi, Mesa 25.2) in `glDebugMessageCallback` or `eglDestroyContext`. So in a test build,
+// GL is listed once, in an instance of its own that the test process keeps ([`gl_adapters`]),
+// and the tests list, pick and drop the other adapters one at a time ([`LISTING`]). An app keeps
+// one instance listing every native backend, and keeps no OpenGL context it did not pick.
+
+/// Held while a test lists adapters, picks one and drops the rest.
+#[cfg(test)]
 static LISTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Run `list` while no other thread lists adapters ([`LISTING`]). A caller with an instance of
+/// Run `list` while no other test thread lists adapters ([`LISTING`]). A test with an instance of
 /// its own lists through this too, and drops what it doesn't keep before it returns.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn one_listing_at_a_time<T>(list: impl FnOnce() -> T) -> T {
+#[cfg(test)]
+pub(crate) fn one_listing_at_a_time<T>(list: impl FnOnce() -> T) -> T {
     let _listing = LISTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     list()
 }
 
 /// Every adapter the native backends offer, best first: the same adapters in the same order as
-/// one instance listing them all, but GL from the instance the process keeps ([`gl_adapters`]),
-/// so a picked adapter of another backend keeps no OpenGL context of its own alive.
-#[cfg(not(target_arch = "wasm32"))]
+/// one instance listing them all, but GL from the instance the test process keeps
+/// ([`gl_adapters`]), so a picked adapter of another backend keeps no OpenGL context alive.
+#[cfg(test)]
 fn adapters() -> Vec<wgpu::Adapter> {
     let all = native_backends();
     let gl = all & wgpu::Backends::GL;
@@ -222,10 +251,9 @@ fn adapters() -> Vec<wgpu::Adapter> {
     found
 }
 
-/// The GL adapters, listed once for the process and kept with their instance: their OpenGL
-/// context is made once and never torn down, so no two threads make or drop one at the same
-/// time ([`LISTING`]).
-#[cfg(not(target_arch = "wasm32"))]
+/// The GL adapters, listed once for the test process and kept with their instance: their OpenGL
+/// context is made once and never torn down, so no two test threads make or drop one at once.
+#[cfg(test)]
 fn gl_adapters() -> Vec<wgpu::Adapter> {
     static GL: std::sync::OnceLock<(wgpu::Instance, Vec<wgpu::Adapter>)> = std::sync::OnceLock::new();
     let (_, found) = GL.get_or_init(|| {
@@ -282,7 +310,7 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     desc.backends = backends;
-    let instance = wgpu::Instance::new(desc);
+    let instance = start_instance(desc);
     let mut all = pollster::block_on(instance.enumerate_adapters(backends));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(&instance, &all);

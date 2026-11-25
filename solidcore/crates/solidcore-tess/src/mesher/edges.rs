@@ -11,7 +11,8 @@ use super::size::{Rules, SizeAt};
 use crate::{Result, TessError};
 
 /// How near, as a fraction of its segment's parameter length, a node put in on an edge may lie to
-/// another before it is that node ([`insert_at`]).
+/// another shaping request before it is that node ([`insert_at`]). Crossing events are
+/// merged by identity instead and never use this spacing cutoff.
 const NEAR: f64 = 1e-6;
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
@@ -247,6 +248,21 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
 /// out, so no two nodes lie a rounding apart. The nodes are unchanged on an error: more than
 /// [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, naming the edge.
 pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]) -> Result<()> {
+    insert(b, ei, nodes, ts, true)
+}
+
+/// Insert identity-deduplicated crossing requests, with no minimum spacing. Only parameters
+/// strictly inside a segment whose evaluated points differ from its ends can add a node.
+pub(crate) fn insert_crossings(
+    b: &brep::Brep,
+    ei: usize,
+    nodes: &mut Nodes,
+    ts: &[f64],
+) -> Result<()> {
+    insert(b, ei, nodes, ts, false)
+}
+
+fn insert(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64], shaping: bool) -> Result<()> {
     let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let mut ts: Vec<f64> = ts.iter().copied().filter(|t| t.is_finite()).collect();
@@ -270,15 +286,20 @@ pub(crate) fn insert_at(b: &brep::Brep, ei: usize, nodes: &mut Nodes, ts: &[f64]
         // The last node of the segment so far: the one at `t`, then each put in.
         let mut last = t;
         while let Some(m) = next.next_if(|m| *m < u) {
-            let near = NEAR * (u - t);
+            let near = if shaping { NEAR * (u - t) } else { 0.0 };
             if !(m - last > near && u - m > near) {
                 continue;
             }
-            last = m;
             let pm = match &curve {
                 None => p + (q - p) * ((m - t) / (u - t)),
                 Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
             };
+            // Exact equality protects against a parameter step that evaluates to an existing
+            // endpoint or the preceding inserted point: neither can form a new mesh side.
+            if pm == p || pm == q || points.last() == Some(&pm) {
+                continue;
+            }
+            last = m;
             points.push(pm);
             params.push(m);
         }

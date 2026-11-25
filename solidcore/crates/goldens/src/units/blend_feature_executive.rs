@@ -388,7 +388,7 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         // the Rust reader's B-rep of the same file (no C++ export reaches the Rust side)
         let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
             Ok(b) => b,
@@ -414,6 +414,41 @@ impl UnitDiff for Runner {
             }
             Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
         }
+    }
+}
+
+/// A body as the operation returned it, and as [`rust_brep`] graphs it.
+#[cfg(test)]
+pub(crate) type Bodies = (Brep, Brep);
+
+/// The input B-rep (as read, before the script), the base B-rep and the feature B-reps
+/// (`None`: none made) of `case`'s Rust run, each of the last two as returned and as
+/// [`rust_brep`] graphs it (its logical lists dropped and its face shells normalized when the
+/// graph is written). Tests only: certificates of moved rows.
+#[cfg(test)]
+pub(crate) fn result_breps(case: &Case) -> (Brep, Bodies, Vec<Option<Bodies>>) {
+    let as_graphed = |b: &Brep| {
+        let raw = b.clone_standing_for_self().unwrap();
+        let mut b = b.clone_standing_for_self().unwrap();
+        if graph_exportable(&b).unwrap() {
+            strip_unrecorded(&mut b).unwrap();
+            normalize_face_shells(&mut b).unwrap();
+        }
+        (raw, b)
+    };
+    let i: Inputs = case.parse().unwrap();
+    let mut k = crate::runner_kernel();
+    let mut b = crate::own_reader::read_file_rebuild(&mut k, &path(&i).unwrap(), i.rebuild)
+        .unwrap()
+        .unwrap();
+    let input = b.clone_standing_for_self().unwrap();
+    match run_script(&mut k, &mut b, &i).unwrap() {
+        RustRun::Record(_, features) => (
+            input,
+            as_graphed(&b),
+            features.iter().map(|f| f.as_ref().map(as_graphed)).collect(),
+        ),
+        RustRun::PastFixture => panic!("{}: past the fixture", case.name),
     }
 }
 

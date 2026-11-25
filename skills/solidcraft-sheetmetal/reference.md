@@ -29,7 +29,10 @@ that rule's thickness), `corner_relief_shape` (`notch`|`round`|`rectangular`|`te
 
 ### `sheet.flange`
 Base: `sketch`, `profiles?`, `rule?`, `flip?`, `name?`, `body_name?`.
-Contour: `sketch`, `curves` (an open chain of lines), `distance`, `rule?`, `flip?`, `reverse?`.
+Without `profiles`, nested loops alternate material and holes, as for Extrude: a loop inside
+an outline is a hole, and a loop inside that hole is material again. Explicit `profiles: "all"`
+includes every profile and fills those holes; explicit profile picks select only those regions.
+Contour: `sketch`, `curves` (an open chain of lines and tangent arcs), `distance`, `rule?`, `flip?`, `reverse?`.
 Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's), `height_from?`
 (`outer`|`inner`|`tangent`), `position?` (`inside`|`outside`|`middle`|`material_outside`|
 `tangent`), `flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`, `then?`, `name?`,
@@ -38,6 +41,8 @@ Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's
 An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 `{point:[x,y,z], angle?, height?, segments?}` for an edge with its own values. `then` lists up to
 16 further bends `{angle?, height, flip?}`, each on the far edge of the one before.
+When you supply `name`, the first bend takes that name and the command returns its feature ID and
+name. When you omit `name`, the command returns the last bend's feature ID and name.
 
 ```json
 {"command":"sheet.flange","params":{"type":"edge","edges":[{"point":[100,0,2],"segments":[
@@ -73,6 +78,17 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 - `sheet.export_bend_table`: `body?`, `format?` (`csv`|`json`), `path?`. Each row gives the bend's
   angle, direction, radius, allowance, length and its flat centre line, so an agent can check
   where a bend landed.
+
+### On a drawing
+A note (`drawing.note.add`) or a title block cell on a sheet that documents a sheet metal part
+reads its sheet metal fields live, so a drawing never carries a typed-in thickness. A field is a
+part of the note's content: `content:[{"field":{"source":"component","key":"thickness"}}]`, and
+likewise `sheet_rule` (the rule's name), `k_factor`, `bend_radius` (the radius all its bends
+share), `flat_length` and `flat_width` (the flat's longer and shorter side). Lengths are in the
+drawing's units with two decimals (`2.00 mm`). A field reads empty when the part has no sheet
+metal body, its sheet bodies disagree, its bends have different radii, or its flat no longer
+describes the body. In a note, `drawing.note.inspect` shows that field with `state:"empty"` in the
+note's `fields`; `drawing.check` reports `empty_field` for title block cells only.
 
 ### Inspection
 - `inspect.measure`: `bodies?`, `names_only?`, or `items` (faces and edges) for lengths, areas,

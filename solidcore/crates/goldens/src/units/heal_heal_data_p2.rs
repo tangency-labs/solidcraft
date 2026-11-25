@@ -1413,6 +1413,8 @@ fn put_owner_block(b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
 }
 
 fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
+    #[cfg(test)]
+    crate::certify::written(b);
     o.push(STATE);
     o.push(h.tgt_vertices.len() as f64);
     o.extend(h.tgt_vertices.iter().map(|v| f64::from(v.index())));
@@ -2590,8 +2592,11 @@ fn rust_heal(
             Ok(new_probs) if last_without_state => {
                 if repair {
                     put_repair_summary(&h, &b, &mut o).map_err(|e| harness(e.to_string()))?;
+                    crate::trim_hook::observe(&mut b);
                     put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
+                #[cfg(test)]
+                crate::certify::written(&b);
                 o.extend([0.0, flag(new_probs)]);
                 stop = true;
                 break;
@@ -2859,7 +2864,6 @@ pub(crate) mod certificates {
 
     use solidcore::geom::tol::{context_xsect_tol_3d, SmallTopoType};
     use solidcore::heal::gap::GapFunction;
-    use solidcore::kernel::Kernel;
     use solidcore::topology::edgeuse::p1 as eu1;
     use solidcore::surface::surface::p4::NoObject;
     use solidcore::surface::surface::p5::DropPointOptions;
@@ -2896,7 +2900,7 @@ pub(crate) mod certificates {
         let b = KEPT
             .with(|k| k.borrow_mut().take())
             .expect("the script dumped its state");
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let tol = context_xsect_tol_3d(&k, None, SmallTopoType::NormalSize);
         let mut out = Vec::new();
         for (eu, r) in b.edgeuses().iter() {
@@ -2968,7 +2972,7 @@ pub(crate) mod certificates {
         let b = KEPT
             .with(|k| k.borrow_mut().take())
             .expect("the script dumped its state");
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         let mut out = Vec::new();
         for (vu, r) in b.vertexuses().iter() {
             let cached = r.vertex_face_gap;
@@ -3036,6 +3040,57 @@ pub(crate) mod certificates {
 mod tests {
     use super::*;
 
+    /// #17896 (the affine knot insertion, `CPoint::affine2`): the edge-face gaps it moves
+    /// in the heal rows (`tests/keepuv_moved_rows.rs` classes the rows' other moved
+    /// values). Each `(index into out, value on main, value now)` replays bit for bit, is
+    /// the cached edge-face gap of one edge use, and both values lie inside that gap's
+    /// certified enclosure ([`certificates::edge_face_gaps`]): the move is below what the
+    /// geometry decides, equal.
+    #[test]
+    fn keepuv_affine_edge_face_gaps() {
+        use super::super::heal_heal_data_p1::Runner as P1;
+        type Moved = &'static [(usize, f64, f64)];
+        let rows: [(&dyn UnitDiff, &str, Moved); 6] = [
+            (&P1, "gen0242", &[(314, 2.5550568800550892e-9, 2.555052069280629e-9)]),
+            (&Runner, "gen0085", &[(289, 1.4828392756372229e-12, 1.482683538041431e-12)]),
+            (&Runner, "gen0138", &[(168, 1.668595474901957e-10, 1.6640740971431822e-10)]),
+            (
+                &Runner,
+                "gen0161",
+                &[
+                    (164, 4.700439481382968e-16, 4.702354842745572e-16),
+                    (242, 4.3613132892691186e-13, 4.3613130612250355e-13),
+                ],
+            ),
+            (
+                &Runner,
+                "gen0181",
+                &[
+                    (193, 9.081025587056003e-13, 9.08102641617676e-13),
+                    (245, 2.328384760786022e-13, 2.328376082512667e-13),
+                ],
+            ),
+            (&Runner, "gen0576", &[(151, 9.600589354804734e-12, 9.543813662690915e-12)]),
+        ];
+        for (runner, name, moved) in rows {
+            let case = crate::case::regression_case(runner, name);
+            let out = runner.run_rust(&case).expect("rust");
+            let script: Inputs = case.parse().expect("a heal script");
+            let gaps = certificates::edge_face_gaps(name, &script);
+            let o = &out.values["out"];
+            for &(at, main, now) in moved {
+                assert_eq!(o[at].to_bits(), now.to_bits(), "{name} out[{at}]: {:e}, the golden holds {now:e}", o[at]);
+                let g = gaps
+                    .iter()
+                    .find(|g| g.gap.to_bits() == now.to_bits())
+                    .unwrap_or_else(|| panic!("{name} out[{at}] = {now:e} is not a cached edge-face gap"));
+                let e = &g.enclosure;
+                eprintln!("{name} out[{at}]: {main:e} -> {now:e}, edge use {}, enclosure [{:e}, {:e}]", g.edgeuse.index(), e.lo, e.hi);
+                assert!(e.holds(main) && e.holds(now), "{name} out[{at}]: {main:e} -> {now:e} not both inside {e:?}");
+            }
+        }
+    }
+
     /// WR-56 (#17467), the moved rows `gen0032` and `gen0145`: four edge-face gaps each,
     /// certified by [`certificates::moved_row`]; the histogram counts that moved
     /// (`edge_face_gap_3d_histogram`) follow from the gaps.
@@ -3099,7 +3154,7 @@ mod tests {
     }
 
     fn built(input: &BIn) -> Brep {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         match own_brep(&mut k, input, false, false).unwrap() {
             Built::Brep(b) => *b,
             Built::Failed(e) => panic!("build failed: {e}"),

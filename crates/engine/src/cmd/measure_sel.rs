@@ -353,7 +353,11 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             })
         }
         Sel::ConstructionPoint { name } => {
-            let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
+            let p = if let Some(p) = s.origin_point(name) {
+                Some(p)
+            } else {
+                crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+            }?;
             Some(Item {
                 geo: Geo::Points(vec![p]),
                 dir: None,
@@ -367,6 +371,14 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             geo: Geo::Points(vec![*point]),
             dir: None,
             json: json!({"type": "vertex", "position": point}),
+            shape: Shape::Point(*point),
+            slot: None,
+            exact: Some(Exact::Point(*point)),
+        }),
+        Sel::PointCloudPoint { cloud, index, point } => Some(Item {
+            geo: Geo::Points(vec![*point]),
+            dir: None,
+            json: json!({"type": "point", "cloud": cloud, "point_index": index, "position": point}),
             shape: Shape::Point(*point),
             slot: None,
             exact: Some(Exact::Point(*point)),
@@ -597,12 +609,12 @@ fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
     triangle_set(a).closest(&triangle_set(b), f64::INFINITY).map(|m| (m.a, m.b))
 }
 
-/// The closest points of two items on their bodies' exact B-reps: an edge (its curve over its own
-/// interval) against an edge, a face (as it is trimmed) or a vertex, solved by the kernel. `None`
-/// for other pairs and for a mesh body, whose triangles are its geometry; an error where the
-/// kernel can't answer for B-rep items (the caller then marks the mesh's answer approximate).
+/// The closest points of two items on their bodies' exact B-reps: two trimmed face selections,
+/// or an edge (over its curve's own interval) against an edge, trimmed face or vertex, solved by
+/// the kernel. `None` for other pairs and for a mesh body, whose triangles are its geometry;
+/// an error where the kernel can't answer for B-rep items.
 fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::result::Result<Option<solidcraft_kernel::BodyDistance>, String> {
-    use solidcraft_kernel::{BodyDistance, Members, edges_closest, point_closest};
+    use solidcraft_kernel::{BodyDistance, Members, edges_closest, faces_closest, point_closest};
     let body = |name: &str| st.body(name).map(|b| &b.body).ok_or_else(|| format!("no body named '{name}'"));
     let swap = |d: Option<BodyDistance>| d.map(|d| BodyDistance { from: d.to, to: d.from, ..d });
     #[cfg(test)]
@@ -613,6 +625,7 @@ fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::re
         return Err("the kernel's solve was made to fail for a test".into());
     }
     let found = match (&a.exact, &b.exact) {
+        (Some(Exact::Faces { body: x, faces }), Some(Exact::Faces { body: y, faces: to })) => faces_closest(body(x)?, faces, body(y)?, to),
         (Some(Exact::Edges { body: x, edges }), Some(Exact::Edges { body: y, edges: to })) => {
             edges_closest(body(x)?, edges, body(y)?, Members::Edges(to))
         }
@@ -787,11 +800,15 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         }
         // Edges, faces and vertices of B-rep bodies come nearest where their exact curves and
         // surfaces do, not where the display mesh's chords and triangles do (#17823). Where the
-        // kernel's solve can't answer, the mesh's closest points stand, marked approximate.
+        // kernel's solve can't answer for face pairs, measurement fails; existing edge paths
+        // retain their marked approximate result.
         match exact_closest(&world, a, b) {
             Ok(Some(e)) => out.set_closest(e.distance, e.from, e.to),
             Ok(None) => {}
             Err(e) => {
+                if matches!((&a.exact, &b.exact), (Some(Exact::Faces { .. }), Some(Exact::Faces { .. }))) {
+                    return Err(crate::EngineError::Other(e));
+                }
                 out.closest_exact = Some(false);
                 out.closest_note = Some(format!("approximate, from the display mesh: {e}"));
             }

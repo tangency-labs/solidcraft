@@ -1,6 +1,7 @@
 //! The Drawing workspace's Dimension tool, as the sketch's: pick one edge of a view for its length,
 //! or a circle's or an arc's radius or diameter; pick a second for the distance between the two, or
-//! the angle between two lines that aren't parallel. Once the picks say what it measures, the
+//! the angle between two lines that aren't parallel. A cylinder seen side on shows no circle: one of
+//! its two outline lines, or both, gives its diameter. Once the picks say what it measures, the
 //! dimension follows the pointer until a click on the sheet places it, horizontal, vertical or
 //! aligned by where the pointer is ([`linear_axis`], the sketch tool's rule) and
 //! an angle in the sector the pointer is in ([`in_sector`]). A click on another
@@ -28,6 +29,9 @@ use crate::{
 };
 
 const COMMAND: &str = "drawing.dimension.add";
+/// How finely a preview's curves and letters are flattened, on paper: finer than the sheet needs at
+/// any zoom it shows a dimension being placed at.
+const PREVIEW_TOLERANCE_MM: f64 = 0.01;
 /// How far the pointer moves on paper, in screen points, before the preview is laid out again.
 const RELAYOUT_PX: f64 = 1.0;
 /// Two lines whose directions' cross product is under this are parallel.
@@ -42,16 +46,34 @@ pub(super) struct Draft {
     preview: Option<Preview>,
 }
 
-/// An edge picked on a view: how `drawing.dimension.add` names it, and its shape on paper.
+/// What a click would pick where the pointer is, looked up once for each place the pointer rests:
+/// it is shaded before the click, as a sketch shades the curve under the pointer.
+pub(super) struct Hover {
+    sheet: u64,
+    revision: u64,
+    at: Vec2,
+    hit: Option<(u64, Picked)>,
+}
+
+/// A line picked on a view: what drew it, how `drawing.dimension.add` names that, and its shape on
+/// paper.
 #[derive(Clone, Debug)]
 pub(crate) struct Picked {
     body: String,
-    index: usize,
+    of: Of,
     path: Vec<u64>,
     shape: Shape,
     /// Its stroke on paper, as the view drew it when it was picked: the draft ends with the
     /// revision, so it never outlives a moved view.
     stroke: Vec<Seg2>,
+}
+
+/// What drew a picked line: an edge of the body, or the outline (silhouette) of its curved face, by
+/// their index among the body's edges or faces. A cylinder seen side on shows two outline lines.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Of {
+    Edge(usize),
+    Outline(usize),
 }
 
 /// What a picked edge is on paper, read from the stroke the view draws for it.
@@ -65,10 +87,11 @@ pub(crate) enum Shape {
     Other,
 }
 
-/// The dimension the picks make with the pointer at `at`, as `drawing.dimension.add` dry run answered it.
+/// The dimension the picks make with the pointer at `at`, drawn as it will be placed.
 struct Preview {
     at: Vec2,
-    answer: Result<Value, String>,
+    /// The dimension alone on its sheet, as the sheet will draw it once placed.
+    marks: Option<crate::drawing_sheet_page::Marks>,
 }
 
 /// What a stroke drawn on paper is: one line (its pieces on one line, as hidden-line removal
@@ -137,27 +160,49 @@ fn smaller_angle(a: [Vec2; 2], b: [Vec2; 2]) -> Option<(Vec2, Vec2, f64)> {
 }
 
 impl Picked {
+    fn index(&self) -> usize {
+        match self.of {
+            Of::Edge(index) | Of::Outline(index) => index,
+        }
+    }
+
+    /// The edge, or the outline's face: both are named by the body, the index and the path.
     fn edge(&self) -> Value {
-        json!({"body": self.body, "index": self.index, "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"body": self.body, "index": self.index(), "path": self.path})
     }
 
     fn centre(&self) -> Value {
-        json!({"centre": {"body": self.body, "index": self.index}, "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"centre": {"body": self.body, "index": self.index()}, "path": self.path})
+    }
+
+    fn is_outline(&self) -> bool {
+        matches!(self.of, Of::Outline(_))
+    }
+
+    /// Whether `other` is this pick again: the same edge, or the same outline line (a cylinder's two
+    /// outline lines share their face, so their strokes tell them apart).
+    fn same(&self, other: &Picked) -> bool {
+        self.body == other.body && self.of == other.of && self.path == other.path && (!self.is_outline() || self.stroke == other.stroke)
     }
 
     /// One end of a straight edge as a corner, by its point in the design's frame.
     fn end(&self, app: &SolveApp) -> Option<Value> {
-        let pick = EdgePick::Index { body: self.body.clone(), index: self.index };
+        let pick = EdgePick::Index { body: self.body.clone(), index: self.index() };
         let [start, _]: [Vec3; 2] = app.session.doc.edge_line(&app.session.model, &pick, &self.path).ok()?;
-        Some(json!({"point": [start.x, start.y, start.z], "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()}))
+        Some(json!({"point": [start.x, start.y, start.z], "path": self.path}))
     }
 }
 
 /// The `kind` of `drawing.dimension.add` the picks make with the pointer at `at`, as the sketch's
 /// Dimension tool reads the same picks: one line its length, one circle or arc its size, two lines
 /// the angle between them or, parallel, the distance across them, a line and a circle from the line
-/// to the centre, two circles between their centres.
+/// to the centre, two circles between their centres. A cylinder seen side on is measured by its
+/// outline: one of its outline lines, or both, is its Ø. An outline with anything else measures nothing.
 pub(crate) fn kind_for(app: &SolveApp, picks: &[Picked], at: Vec2) -> Option<Value> {
+    if let Some(first) = picks.iter().find(|p| p.is_outline()) {
+        let one_cylinder = picks.iter().all(|p| p.body == first.body && p.of == first.of && p.path == first.path);
+        return one_cylinder.then(|| json!({"cylinder": {"face": first.edge()}}));
+    }
     Some(match picks {
         [one] => match one.shape {
             Shape::Straight([a, b]) => json!({"length": {"edge": one.edge(), "direction": axis_name(linear_axis(a, b, at))}}),
@@ -204,16 +249,24 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// Whether the tool has picked something for the dimension it is making.
+pub(crate) fn has_picks(app: &SolveApp) -> bool {
+    app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty())
+}
+
 /// Drops the tool's picks, keeping the tool: the first Esc, as in the sketch. Whether there were any.
 pub(crate) fn clear_picks(app: &mut SolveApp) -> bool {
     app.drawing_workspace.dimension.take().is_some_and(|draft| !draft.picks.is_empty())
 }
 
-/// The edge under `point`, picked: on a drawn view, an edge of a body (not a silhouette).
+/// The line under `point`, picked: on a drawn view, an edge of a body or the outline of its curved face.
 fn pick(app: &mut SolveApp, sheet: u64, point: Vec2, band: f64) -> Result<Option<(u64, Picked)>, String> {
     let Some(hit) = drawing_scene::line_at(&mut app.session, sheet, point, band).map_err(|error| error.to_string())? else { return Ok(None) };
-    let Source::Edge { edge, .. } = hit.source else { return Ok(None) };
-    Ok(Some((hit.view, Picked { body: hit.body.body, index: edge, path: hit.body.path, shape: shape_of(&hit.path), stroke: hit.path })))
+    let of = match hit.source {
+        Source::Edge { edge, .. } => Of::Edge(edge),
+        Source::Silhouette { face } => Of::Outline(face),
+    };
+    Ok(Some((hit.view, Picked { body: hit.body.body, of, path: hit.body.path, shape: shape_of(&hit.path), stroke: hit.path })))
 }
 
 /// What `drawing.dimension.add` takes for the picks with the text at `at`, or `None` when they make
@@ -228,40 +281,12 @@ fn params_for(app: &SolveApp, draft: &Draft, at: Vec2) -> Option<Value> {
     Some(params)
 }
 
+/// The dimension the picks make with the pointer at `at`, drawn as the placed one will be: the same
+/// group from the same layout, at its paper size, so the preview is what the click places.
 fn preview(app: &mut SolveApp, draft: &Draft, at: Vec2) -> Option<Preview> {
-    let mut dry = params_for(app, draft, at)?;
-    dry["dry_run"] = json!(true);
-    Some(Preview { at, answer: app.run(COMMAND, dry) })
-}
-
-fn points(value: &Value) -> Vec<Vec2> {
-    value.as_array().into_iter().flatten().filter_map(|p| serde_json::from_value::<[f64; 2]>(p.clone()).ok().map(Vec2::from)).collect()
-}
-
-/// Paints an answer's layout: its lines, arrowheads and text, as it will sit once placed.
-fn paint_layout(painter: &egui::Painter, at: OnScreen, answer: &Value) {
-    let tokens = Tokens::get();
-    let stroke = egui::Stroke::new(1.0, tokens.accent);
-    let layout = &answer["layout"];
-    for line in ["extension_lines", "dimension_lines"].iter().flat_map(|key| layout[*key].as_array().into_iter().flatten()) {
-        let line: Vec<egui::Pos2> = points(line).into_iter().map(|p| at.screen(p)).collect();
-        painter.add(egui::Shape::line(line, stroke));
-    }
-    for arrow in layout["arrows"].as_array().into_iter().flatten() {
-        let (Some(tip), Some(dir)) = (points(&json!([arrow["tip"]])).first().copied(), points(&json!([arrow["points"]])).first().copied()) else {
-            continue;
-        };
-        let back = dir * -3.0;
-        let side = dir.perp() * 1.0;
-        let shape = [tip, tip + back + side, tip + back - side].map(|p| at.screen(p));
-        painter.add(egui::Shape::convex_polygon(shape.to_vec(), tokens.accent, egui::Stroke::NONE));
-    }
-    let text = answer["text"].as_str().unwrap_or_default();
-    let centre = layout["text_boxes"].as_array().and_then(|boxes| boxes.first()).map(points).filter(|corners| corners.len() == 4);
-    if let Some(corners) = centre {
-        let middle = corners.iter().fold(Vec2::ZERO, |sum, p| sum + *p) * 0.25;
-        painter.text(at.screen(middle), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(tokens.font_small), tokens.accent);
-    }
+    let params = params_for(app, draft, at)?;
+    let scene = solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params).ok();
+    Some(Preview { at, marks: scene.map(|scene| crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)) })
 }
 
 /// Paints a picked edge's stroke, so the picks show.
@@ -275,6 +300,25 @@ fn paint_pick(painter: &egui::Painter, at: OnScreen, shape: Shape, path: &[Seg2]
         let line: Vec<egui::Pos2> = (0..=24).map(|i| at.screen(seg.point_at(f64::from(i) / 24.0))).collect();
         painter.add(egui::Shape::line(line, stroke));
     }
+}
+
+/// The edge a click at `point` would pick, kept while the pointer rests there. None once the picks
+/// are complete, where a click places the dimension instead.
+fn hovered(app: &mut SolveApp, at: OnScreen, sheet: u64, point: Vec2, band: f64, more: bool) -> Option<(u64, Picked)> {
+    if !more {
+        app.drawing_workspace.dimension_hover = None;
+        return None;
+    }
+    let revision = app.session.revision;
+    let kept = app
+        .drawing_workspace
+        .dimension_hover
+        .take()
+        .filter(|h| h.sheet == sheet && h.revision == revision && h.at.dist(point) * at_scale(at) <= RELAYOUT_PX);
+    let hover = kept.unwrap_or_else(|| Hover { sheet, revision, at: point, hit: pick(app, sheet, point, band).ok().flatten() });
+    let hit = hover.hit.clone();
+    app.drawing_workspace.dimension_hover = Some(hover);
+    hit
 }
 
 pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, sheet: u64, point: Vec2, band: f64, clicked: bool) {
@@ -296,9 +340,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
         match (&mut draft, hit) {
             // A first pick, or another edge of the same view as the first.
             (None, Some((view, picked))) => draft = Some(Draft { sheet, revision, view, picks: vec![picked], preview: None }),
-            (Some(d), Some((view, picked)))
-                if view == d.view && !d.picks.iter().any(|p| p.body == picked.body && p.index == picked.index && p.path == picked.path) =>
-            {
+            (Some(d), Some((view, picked))) if view == d.view && !d.picks.iter().any(|p| p.same(&picked)) => {
                 d.picks.push(picked);
                 d.preview = None;
             }
@@ -314,6 +356,14 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
             (None, None) => {}
         }
     }
+    // The edge a click would take is shaded before the click, as the sketch's Dimension tool shades
+    // the curve under the pointer: an edge of the picked view that is not picked yet.
+    let more = draft.as_ref().is_none_or(|draft| draft.picks.len() < 2);
+    if let Some((view, edge)) = hovered(app, at, sheet, point, band, more)
+        && draft.as_ref().is_none_or(|d| view == d.view && !d.picks.iter().any(|p| p.same(&edge)))
+    {
+        paint_pick(painter, at, edge.shape, &edge.stroke);
+    }
     if let Some(d) = &mut draft {
         let stale = d.preview.as_ref().is_none_or(|p| p.at.dist(point) * at_scale(at) > RELAYOUT_PX);
         if stale {
@@ -322,8 +372,9 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
         for picked in &d.picks {
             paint_pick(painter, at, picked.shape, &picked.stroke);
         }
-        if let Some(Preview { answer: Ok(answer), .. }) = &d.preview {
-            paint_layout(painter, at, answer);
+        // In the accent colour, as every preview on the sheet is; otherwise just as it will print.
+        if let Some(marks) = d.preview.as_ref().and_then(|p| p.marks.as_ref()) {
+            at.paint_preview(painter, marks, Vec2::ZERO, Tokens::get().accent);
         }
         painter.ctx().request_repaint();
     }
@@ -333,6 +384,12 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
 /// Paper points per millimetre on screen.
 fn at_scale(at: OnScreen) -> f64 {
     at.screen(Vec2::new(1.0, 0.0)).x as f64 - at.screen(Vec2::ZERO).x as f64
+}
+
+/// What is shaded under the pointer, for tests: its shape on paper.
+#[cfg(test)]
+pub(crate) fn hovered_shape(app: &SolveApp) -> Option<Shape> {
+    app.drawing_workspace.dimension_hover.as_ref().and_then(|h| h.hit.as_ref().map(|(_, picked)| picked.shape))
 }
 
 /// The picks so far, for tests: their shapes on paper.

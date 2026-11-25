@@ -33,6 +33,7 @@ fn fixture(name: &str) -> String {
     let (package, version) = API.split_once('@').unwrap();
     let source = match name {
         "command" => include_str!("../../../crates/engine/src/plugin/fixture.wat"),
+        "exporter" => include_str!("../../../crates/engine/src/plugin/exporter_fixture.wat"),
         _ => include_str!("../../../crates/engine/src/plugin/importer_fixture.wat"),
     };
     source.replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version)
@@ -73,6 +74,40 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// #19237: `plugin --help` says what each operation does, and an operation's own help says what
+/// that operation does: `plugin check --help` does not print `plugin test`.
+#[test]
+fn plugin_help_lists_each_operation_and_each_operation_has_its_own_help() {
+    let both = cli(&["plugin", "--help"]);
+    assert!(both.status.success(), "{}", text(&both.stderr));
+    let check = cli(&["plugin", "check", "--help"]);
+    assert!(check.status.success(), "{}", text(&check.stderr));
+    let test = cli(&["plugin", "test", "--help"]);
+    assert!(test.status.success(), "{}", text(&test.stderr));
+    let (both, check, test) = (text(&both.stdout), text(&check.stdout), text(&test.stdout));
+    assert!(both.contains("solidcraft-cli plugin check") && both.contains("solidcraft-cli plugin test"), "{both}");
+    assert!(check.contains("solidcraft-cli plugin check") && !check.contains("solidcraft-cli plugin test"), "{check}");
+    assert!(test.contains("solidcraft-cli plugin test") && !test.contains("solidcraft-cli plugin check"), "{test}");
+    // `plugin --help` is both operations' help, one after the other.
+    let body = |usage: &str| usage.strip_prefix("usage:\n").unwrap_or_default().to_string();
+    assert_eq!(both, format!("usage:\n{}{}", body(&check), body(&test)));
+}
+
+/// #19237: an argument that is not a plugin says what was expected (the plugin's package folder,
+/// or its .zip), not the CLI's generic usage.
+#[test]
+fn an_argument_that_is_not_a_plugin_says_what_it_expected() {
+    let scratch = Scratch::new();
+    let nowhere = scratch.path("nowhere");
+    for action in ["check", "test"] {
+        let output = cli(&["plugin", action, &nowhere]);
+        assert!(!output.status.success(), "`plugin {action}` succeeded");
+        let (stdout, stderr) = (text(&output.stdout), text(&output.stderr));
+        assert!(stdout.contains("fix: Give the plugin's package folder"), "plugin {action}: {stdout}");
+        assert!(!stderr.contains("usage:"), "plugin {action}: {stderr}");
+    }
+}
+
 #[test]
 fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     let scratch = Scratch::new();
@@ -111,6 +146,22 @@ fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     }
     let output = cli(&["plugin", "check", &scratch.path("nowhere")]);
     assert!(!output.status.success() && text(&output.stdout).contains("error   package: could not read"), "{}", text(&output.stdout));
+}
+
+#[test]
+fn check_reports_invalid_conditional_fields_without_running_wasm() {
+    let scratch = Scratch::new();
+    for condition in [json!({"field":"missing","eq":true}), json!({"field":"size","eq":1})] {
+        let mut manifest = command_manifest();
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{
+            "size":{"type":"number","x-solidcraft-visible-when":condition}}});
+        let path = package(&scratch.0, &manifest, &command_component("unreachable"), &[]);
+        let output = cli(&["plugin", "check", &path, "--json"]);
+        assert!(!output.status.success(), "{}", text(&output.stdout));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["ok"], false);
+        assert!(text(&output.stdout).contains("input_schema"));
+    }
 }
 
 #[test]
@@ -175,6 +226,45 @@ fn test_runs_the_packages_cases_on_the_real_host() {
     assert!(!output.status.success() && text(&output.stderr).contains("does not pass plugin check"), "{}", text(&output.stderr));
 }
 
+/// The plugin guide keeps a case's design in the tests folder. A design saved there as JSON is that
+/// case's input, not a case of its own: it is not read as a case, and the case runs on it.
+#[test]
+fn a_json_design_a_case_runs_on_is_not_read_as_a_case() {
+    let scratch = Scratch::new();
+    let on_plate = json!({"entry":"make","design":"plate.json","expect":{"model":{"body_count":2,"total":{"volume_mm3":1024}}}});
+    let path = package(&scratch.0, &command_manifest(), &command_component("call $box"), &[("on-plate", on_plate)]);
+    let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Plate"));
+    made.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    std::fs::write(Path::new(&path).join("tests/plate.json"), serde_json::to_vec(&*made.doc).unwrap()).unwrap();
+    let output = cli(&["plugin", "test", &path, "--json"]);
+    assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
+    assert_eq!(report["cases"][0]["name"], "on-plate", "{report}");
+}
+
+#[test]
+fn an_exporter_without_folder_grants_runs_default_and_explicit_cases() {
+    let scratch = Scratch::new();
+    let manifest = json!({"id":"writer","name":"Writer","version":"1.0.0","capabilities":["formats@0.1"],"runtime":{
+        "module":"exporter.wasm","commands":["document.inspect"],
+        "entries":[{"name":"copy","kind":"exporter","extensions":["smp"]}],
+        "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}});
+    let path = package(&scratch.0, &manifest, &wat::parse_str(fixture("exporter")).unwrap(), &[]);
+    for name in ["copy (defaults)", "write"] {
+        if name == "write" {
+            let case = json!({"entry":"copy","expect":{"reply":{"format":"writer.copy","plugin":"Writer"}}});
+            std::fs::write(Path::new(&path).join("tests/write.json"), case.to_string()).unwrap();
+        }
+        let output = cli(&["plugin", "test", &path, "--json"]);
+        assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
+        assert_eq!(report["cases"][0]["name"], name);
+        assert_eq!(report["cases"][0]["status"], "passed");
+    }
+}
+
 #[test]
 fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     let scratch = Scratch::new();
@@ -188,7 +278,7 @@ fn an_importers_cases_open_their_files_and_check_the_loss_report() {
     // The fixture copies the file into the design: give it a design's bytes. A file starting with T traps.
     let mut made = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
-    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc)).unwrap();
+    std::fs::write(Path::new(&path).join("tests/bracket.smp"), solidcraft_engine::io::write_design(&made.doc).unwrap()).unwrap();
     std::fs::write(Path::new(&path).join("tests/trap.smp"), b"T").unwrap();
     std::fs::write(Path::new(&path).join("tests/sketch.smp"), b"U").unwrap();
     let output = cli(&["plugin", "test", &path]);
@@ -290,4 +380,20 @@ fn a_cases_grants_and_fixtures_stay_inside_its_tests_and_scratch_folders() {
             assert!(!output.status.success() && text(&output.stderr).contains("could not read the tests folder"), "{}", text(&output.stderr));
         }
     }
+}
+
+#[test]
+fn plugin_test_approves_requested_fuel_by_default_and_accepts_explicit_fuel_grants() {
+    let scratch = Scratch::new();
+    let fuel = 10_000_000_000_000_u64;
+    let mut manifest = command_manifest();
+    manifest["runtime"]["limits"]["fuel"] = json!(fuel);
+    let path = package(
+        &scratch.0,
+        &manifest,
+        &command_component("call $box"),
+        &[("default", json!({"entry":"make"})), ("explicit", json!({"entry":"make","grants":{"fuel":fuel}}))],
+    );
+    let output = cli(&["plugin", "test", &path]);
+    assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
 }
