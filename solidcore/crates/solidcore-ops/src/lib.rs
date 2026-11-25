@@ -59,6 +59,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dome;
 pub mod dxf;
 pub mod error;
 pub mod eval_curve;
@@ -90,7 +91,6 @@ pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
-pub mod member_turn;
 pub mod mesh_edit;
 pub mod mid_joint;
 pub mod mid_sheet;
@@ -114,7 +114,9 @@ pub use solidcore::eval::ray_spline;
 #[doc(hidden)]
 pub use solidcore::eval::ray_tensor;
 pub mod record_check;
+pub mod section_corners;
 pub mod session;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod spline_space;
 pub mod split;
@@ -246,6 +248,8 @@ pub fn reduce_mesh(
 
 #[cfg(test)]
 mod ball_corner_tests;
+#[cfg(test)]
+mod dome_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]

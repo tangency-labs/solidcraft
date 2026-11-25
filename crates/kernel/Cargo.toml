@@ -20,6 +20,8 @@ solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
 # CADIR read and write, for io (`services::cadir`).
 solidcore-cadir = { workspace = true }
+# CADIR's model types, which the exchange family's adapter reads and writes.
+cadmpeg-ir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

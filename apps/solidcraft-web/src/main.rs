@@ -612,7 +612,12 @@ mod web {
             if self.files.recovery.borrow().is_some() {
                 return;
             }
-            let session = &self.app.session;
+            // A clean active tab leaves the previous owner's dirty design recoverable.
+            let owner =
+                self.autosaved.as_ref().filter(|_| !self.app.session.is_dirty()).and_then(|(uid, _, _)| {
+                    solidcraft_ui_egui::documents::open_sessions(&self.app).into_iter().find(|s| s.uid == *uid && s.is_dirty())
+                });
+            let session = owner.unwrap_or(&self.app.session);
             let per_design = self.app.preferences.keep_unsaved_in_browser;
             let desired = (!per_design && !self.autosave_discard && session.is_dirty()).then(|| autosave_revision(session));
             // Wait until the per-design copy is current before giving up the single archive.
@@ -680,7 +685,13 @@ mod web {
                     if now || keep::due(time, first, t.last_change) {
                         match solidcraft_engine::recovery::capture_bytes(s) {
                             Ok(bytes) => {
-                                let entry = keep::Entry { id, name: s.doc.name.clone(), path: s.path.clone(), changed_at: t.last_change };
+                                let entry = keep::Entry {
+                                    id,
+                                    name: s.doc.name.clone(),
+                                    path: s.path.clone(),
+                                    changed_at: t.last_change,
+                                    preserve_from_save: solidcraft_ui_egui::save_job::protects_host_recovery(app, s),
+                                };
                                 files::write_kept(files, &entry, bytes, revision);
                                 t.first_unwritten = None;
                             }
@@ -996,6 +1007,16 @@ mod web {
             }
             let Some((what, name)) = act else { return };
             let path = format!("{}{name}", files::OPFS);
+            if matches!(what, "delete" | "rename")
+                && (solidcraft_ui_egui::save_job::host_path_pending(&self.app, &path)
+                    || self
+                        .renaming
+                        .as_ref()
+                        .is_some_and(|(from, _)| solidcraft_ui_egui::save_job::host_path_pending(&self.app, &format!("{}{from}", files::OPFS))))
+            {
+                self.app.set_status("a save to this file is in progress", true);
+                return;
+            }
             match what {
                 "open" => {
                     self.app.open_path_async(&path);
@@ -1516,7 +1537,7 @@ mod web {
                             files::start(&files);
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
-                        let (restorable, restorer) = (files.clone(), files.clone());
+                        let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
                         let services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
@@ -1538,12 +1559,13 @@ mod web {
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
-                                        saver.say("This browser can't save to a folder: the design is kept in this browser. File > Download design saves a file.", false);
+                                        saver.say("This browser saves designs in browser storage. File > Download design makes a copy on your computer.", false);
                                         Box::pin(std::future::ready(Some(format!("{}{name}", files::OPFS))))
                                     }
                                     SaveTarget::Download => Box::pin(std::future::ready(Some(format!("{}{name}", files::DOWNLOADS)))),
                                 }
                             })),
+                            persist_design: Some(Box::new(move |path, bytes| files::persist_design(&writer, path, bytes))),
                             // A recent design on the disk, from an earlier session, opens by asking
                             // the browser for its remembered file.
                             can_restore: Some(Box::new(move |path: &str| {

@@ -37,6 +37,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
@@ -312,6 +313,7 @@ pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
 pub use distance::point_closest;
+pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
 pub use draft_corners::CornerRefusal;
@@ -435,22 +437,29 @@ pub use repair::RepairRefusal;
 pub use repair::RepairReport;
 pub use repair::SewnGap;
 pub use repair::repair;
+pub use route::CELL_GRID_LIMITS;
 pub use route::Which;
 pub use route::boolean;
 pub use route::box_solid;
+pub use route::cell_regions;
 pub use route::chamfer;
 pub use route::chamfer_sides;
 pub use route::cylinder;
+pub use route::default_cell_grid;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::offset_faces;
+pub use route::plan_cell_grid;
+pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::shell;
 pub use route::sphere;
+pub use route::step_string;
 pub use route::thicken;
 pub use route::torus;
 pub use route::which;
+pub use route::write_cadir;
 pub use sew::EdgeSpec;
 pub use sew::FaceSpec;
 pub use sew::MAX_CHAIN_POINTS;
@@ -458,14 +467,17 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
-pub use solidcore_ops::member_turn::ParallelTurnError;
-pub use solidcore_ops::member_turn::parallel_turn;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
+pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::turn_to_parallel;
 pub use solidcore_tess::DisplayGuide;
 pub use solidcore_tess::DisplayGuidePoint;
 pub use solidcore_tess::GuidedMesh;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
+pub use solidcraft_kernel_api::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
@@ -481,6 +493,7 @@ pub use splitface::split_body;
 pub use splitface::split_body_by_faces;
 pub use splitface::split_faces;
 pub use splitface::split_faces_with_map;
+pub use splitface::{FieldKind, PieceSides, split_piece_sides};
 pub use step::step_export;
 pub use step::step_export_with_face_ids;
 pub use step_in::HealedBody;
@@ -551,6 +564,7 @@ pub use surface_trim::mutual_trim;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
+pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
@@ -639,9 +653,16 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
 
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {

@@ -1361,8 +1361,8 @@ crates/ui-egui/src/move_preview.rs:ghost triangles
 crates/ui-egui/src/navigation.rs:device atan2,dot
 crates/ui-egui/src/navigation.rs:kept_view_middle distance
 crates/ui-egui/src/navigation.rs:navigator_home_centre distance
-crates/ui-egui/src/navigation.rs:orbit hypot
-crates/ui-egui/src/navigation.rs:orbit_drag dot
+crates/ui-egui/src/navigation.rs:orbit_drag_styled dot
+crates/ui-egui/src/navigation.rs:orbit_styled hypot
 crates/ui-egui/src/navigation.rs:snap_directions normalized
 crates/ui-egui/src/navigation.rs:snapped_axis_camera dot
 crates/ui-egui/src/navigation.rs:snapped_quarter_roll dot
@@ -1466,7 +1466,6 @@ crates/ui-egui/src/tools.rs:edge_center_outline dot,normalized
 # UI picking only: the distance from the pointer to the line's middle; it picks a point in the view, it builds no geometry.
 crates/ui-egui/src/tools.rs:midpoint_of distance
 crates/ui-egui/src/tools.rs:polygon_outline normalized
-crates/ui-egui/src/tools.rs:preview_circumcentre cross
 crates/ui-egui/src/tools.rs:preview_curve cross,dot,normalized
 crates/ui-egui/src/tools.rs:run_shape cross,dot,normalized
 crates/ui-egui/src/tools.rs:sketch_axis_of dot

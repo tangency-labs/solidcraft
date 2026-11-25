@@ -78,6 +78,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
+    // palette-role icon SVG parsing shared by the renderer and plugin validation (no UI toolkit)
+    ("icon-svg", Class::Shared),
     // length display: a millimetre value in a design unit with its decimal places (no dependencies)
     ("display-units", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)

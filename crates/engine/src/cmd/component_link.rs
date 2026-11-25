@@ -79,7 +79,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RELINK_CONTRACT)
         .output(output_schema_for::<RelinkResult>)
         .params(
-        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json); configuration?: row name or id, null to follow the saved source state (omitted: keep the selection for the same file, otherwise follow the new file) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; names?: \"keep\" (default) leaves the body names as relinking always did (replaced only when the new source has another number of bodies), \"sync\" takes the new source's body names, renames what other features, materials and appearances keep under the old names with them, and gives the linked feature the source design's name when it still has its component's (component and placement names stay yours; only for the whole component, a placement relinked on its own shows a component made from the new source); occurrence?: one of its placements — when it has others, only that placement comes to show the design, as a placement of the component already linked to it or of a new one under the same parent, keeping its position and joints (component is then the one it shows, previous_component the one it showed); returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -2206,6 +2206,12 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the linked bodies are gone; break the link or insert the design again"));
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
+    let sync = match p.get("names") {
+        None => false,
+        Some(Value::String(n)) if n == "keep" => false,
+        Some(Value::String(n)) if n == "sync" => true,
+        Some(_) => return Err(bad(cmd, "`names` must be \"keep\" or \"sync\"")),
+    };
     let file = absolute(Path::new(given));
     // Any design Insert Design takes: a .sc container (or a legacy one) or a plain JSON design.
     if !solidcraft_io::is_design_path(given) {
@@ -2230,9 +2236,10 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let ((_, sf, faces, metadata, properties, meshes), _) =
+    let ((source_name, sf, faces, metadata, properties, meshes), _) =
         design_bodies(&Source::File(file.clone()), &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
+    let source_names = sf.body_names.clone();
     let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind))
         || link_meshes(s, comp, link.feature) != meshes.as_slice();
     let path = stored(s.path.as_deref(), &file);
@@ -2249,6 +2256,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let mut inherited = link.inherited.clone();
     let mut removed = Vec::new();
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
+        // Both modes start as Relink always did; `sync` renames the bodies below.
         if f.body_names.len() != sf.body_names.len() {
             if f.body_names.is_empty() {
                 f.body_names = sf.body_names;
@@ -2300,6 +2308,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(error) = s.model.result(link.feature).and_then(|r| r.error.clone()) {
         return Err(bad(cmd, error));
     }
+    if sync {
+        sync_names(s, comp, link.feature, &source_name, &source_names, &mut warnings);
+    }
     inherit_properties(s, comp, &properties)?;
     let (_, kept) = inherit_metadata(s, comp, &metadata);
     warnings.extend(kept);
@@ -2325,6 +2336,46 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         },
     )
+}
+
+/// `names: "sync"`: the linked bodies, by position, take the names the new source gives them,
+/// through the rename `body.rename` does, so the materials, appearances and later features that
+/// name a body follow it. A body that cannot take its new name (another body has it) keeps its
+/// name and is reported. The linked feature takes the source design's name when it still has the
+/// component's (the pair Insert Design makes); the component keeps its name.
+fn sync_names(s: &mut Session, comp: u64, feature: u64, source_name: &str, source: &[String], warnings: &mut Vec<String>) {
+    // The feature's own build result names every body it made, in build order, which is what the
+    // stored name slots follow; a later feature may have removed some of them from the model.
+    let made: Vec<String> =
+        s.model.result(feature).map(|r| r.state.bodies.iter().filter(|b| b.feature == feature).map(|b| b.name.clone()).collect()).unwrap_or_default();
+    let slots = s.doc.feature(feature).map(|f| f.body_name_slots(made.len())).unwrap_or_default();
+    let alive: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == feature).map(|b| b.name.clone()).collect();
+    let survivors = made.iter().zip(slots).filter(|(name, _)| alive.contains(name));
+    for (old, slot) in survivors.map(|(n, slot)| (n.clone(), slot)).collect::<Vec<_>>() {
+        let old = &old;
+        let Some(target) = source.get(slot).map(|n| n.trim()).filter(|n| !n.is_empty()) else { continue };
+        if old == target {
+            continue;
+        }
+        let before = s.doc.clone();
+        match super::browser::rename_one(s, "component.relink", old, target) {
+            Ok(_) => s.refresh(),
+            Err(e) => {
+                s.doc = before;
+                s.refresh();
+                warnings.push(format!("body {old} keeps its name instead of {target}: {e}"));
+            }
+        }
+    }
+    let name = source_name.trim();
+    let own = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
+    let taken = s.doc.features.iter().any(|f| f.name == name && f.id != feature);
+    if !name.is_empty()
+        && !taken
+        && let Some(f) = s.doc_mut().feature_mut(feature).filter(|f| Some(&f.name) == own.as_ref())
+    {
+        f.name = name.to_string();
+    }
 }
 
 /// The solver's joint errors and conflicts after a relink: added to `warnings`, and as rows.
@@ -3388,6 +3439,66 @@ mod tests {
         assert!(meshes(&a).is_empty());
         assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["board"]));
         assert_eq!(meshes(&a), chip);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Deleting or updating an early linked component must not re-evaluate later independent
+    /// linked components, either in-session or on the first edit after opening a saved assembly.
+    #[test]
+    fn deleting_or_updating_early_linked_component_keeps_later_links_cached() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save_part = |path: &Path, body_name: &str, height: f64| {
+            let mut part = Session::default();
+            run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": height, "body_name": body_name}));
+            run(&mut part, "file.save", json!({"path": path}));
+        };
+        let (p_a, p_b, p_c, p_d, asm) =
+            (dir.join("PartA.sc"), dir.join("PartB.sc"), dir.join("PartC.sc"), dir.join("PartD.sc"), dir.join("Assembly.sc"));
+        save_part(&p_a, "BlockA", 10.0);
+        save_part(&p_b, "BlockB", 10.0);
+        save_part(&p_c, "BlockC", 10.0);
+        save_part(&p_d, "BlockD", 10.0);
+
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": p_a}));
+        let comp_b = run(&mut s, "component.insert_design", json!({"path": p_b}))["component"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": p_c}));
+        run(&mut s, "component.insert_design", json!({"path": p_d}));
+        run(&mut s, "file.save", json!({"path": asm}));
+
+        // First edit after opening: deleting PartB recomputes zero later linked components.
+        let mut opened_del = Session::default();
+        run(&mut opened_del, "doc.open", json!({"path": asm}));
+        let before = opened_del.model.recomputed;
+        run(&mut opened_del, "component.delete", json!({"component": comp_b}));
+        assert_eq!(opened_del.model.recomputed - before, 0, "opened delete must not recompute later linked imports");
+        assert!((volume(&mut opened_del) - 6000.0).abs() < 1e-6, "{}", volume(&mut opened_del));
+
+        // In-session delete of PartB also recomputes zero later linked components.
+        let before = s.model.recomputed;
+        run(&mut s, "component.delete", json!({"component": comp_b}));
+        assert_eq!(s.model.recomputed - before, 0, "in-session delete must not recompute later linked imports");
+        assert!((volume(&mut s) - 6000.0).abs() < 1e-6, "{}", volume(&mut s));
+
+        // Save the 3-part assembly, update PartA on disk, and verify Update Links recomputes only
+        // PartA (never PartC or PartD) both in-session and right after opening.
+        run(&mut s, "file.save", json!({"path": asm}));
+        save_part(&p_a, "BlockA", 25.0);
+
+        let mut opened_upd = Session::default();
+        run(&mut opened_upd, "doc.open", json!({"path": asm}));
+        let before = opened_upd.model.recomputed;
+        assert_eq!(run(&mut opened_upd, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(opened_upd.model.recomputed - before, 1, "opened update_links must recompute only PartA");
+        assert!((volume(&mut opened_upd) - 9000.0).abs() < 1e-6, "{}", volume(&mut opened_upd));
+
+        let before = s.model.recomputed;
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(s.model.recomputed - before, 1, "in-session update_links must recompute only PartA");
+        assert!((volume(&mut s) - 9000.0).abs() < 1e-6, "{}", volume(&mut s));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

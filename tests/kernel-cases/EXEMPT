@@ -32,12 +32,14 @@ browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
 browser.find                      the browser tree: search by name; crates/engine/src/browser_find_tests.rs
 browser.group                     the browser tree: order, groups and folding
+browser.isolate                   visibility only: crates/engine/src/cmd/browser.rs tests
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
 browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
 browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
+browser.unisolate                 visibility only: crates/engine/src/cmd/browser.rs tests
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)
@@ -91,6 +93,10 @@ document.metadata                 document metadata and revisions
 document.metadata.remove          document metadata and revisions
 document.metadata.set             document metadata and revisions
 document.revision                 document metadata and revisions
+drawing.auto_center_mark.exclude  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.include  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.inspect  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
+drawing.auto_center_mark.set      a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -349,6 +355,7 @@ pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
 pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
+pulley.insert                     timing-belt pulleys built from sketch, extrude and cylinder features: volumes against the outline's area worked out by hand in crates/engine/src/cmd/pulleys_tests.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.batch                      rendering: images, cameras, stages
@@ -416,6 +423,7 @@ render.texture.list               rendering image resources; crates/engine/src/c
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.all                        the selection
 select.clear                      the selection
+select.edge_loop                  the selection; crates/engine/src/cmd/edit_tests.rs::select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge
 select.filter                     the selection
 select.invert                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
@@ -608,6 +616,7 @@ view.grid                         the view: camera, layout, display
 view.ground_shadow                the view: camera, layout, display
 view.history_layout               the view: camera, layout, display
 view.home                         the view: camera, layout, display
+view.isolate_others               display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/viewport tests
 view.isometric                    the view: camera, layout, display
 view.layout                       the view: camera, layout, display
 view.left                         the view: camera, layout, display
@@ -623,6 +632,7 @@ view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_
 view.parts_library                the view: a panel shown or hidden; crates/ui-egui/src/parts_library.rs::tests::the_command_opens_and_closes_the_card
 view.perspective                  the view: camera, layout, display
 view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
+view.plane_size                   construction plane display size only: crates/engine/src/construct_tests.rs::a_construction_plane_keeps_the_size_it_is_given
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display
@@ -679,3 +689,4 @@ sketch.project_to_surface         sketch from the model: curves the kernel compu
 sketch.spline.control_point_5     sketch: a curve kind no case profiles yet
 sketch.spline3d                   sketch: a curve kind no case profiles yet
 sketch.spun_profile               sketch from the model: curves the kernel computes from bodies
+solid.dome                        the dome is tested in the engine: crates/engine/src/cmd/features_more_tests.rs (the kernel cap is in solidcore-ops dome_tests.rs)

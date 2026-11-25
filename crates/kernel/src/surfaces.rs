@@ -1404,7 +1404,7 @@ pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
     loft_sheet_with_rails(sections, &[], crate::RailFit::Scale)
 }
 
-/// [`loft_sheet`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft_sheet`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain sheet loft.
 ///
@@ -1442,6 +1442,14 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
         check_chains(std::slice::from_ref(chain), "loft")?;
     }
     let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
+    if rails.len() > 2 {
+        // solidcore's skin is open, so a closed loop's sheet is not built along three or more rails.
+        if all_closed {
+            return Err(KernelError::Failed("not supported yet: a sheet loft of closed sections along three or more guide rails".into()));
+        }
+        let skin = crate::smlib_sweeps::skin_sections(&matched)?;
+        return all_new(Body::from_record(crate::smlib_sweeps::railed_skin(&skin, rails, fit, false)?)?, &[]);
+    }
     let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
     let curves: usize = lofted.iter().map(Vec::len).sum();
     if curves > solidcore_ops::sweep::MAX_CURVES {

@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr (two parallel lines `a`, `b` that share no end are joined by a half circle instead, alone and not in `points`: its radius is half their spacing, so `radius` is only checked and otherwise ignored; `end`: \"start\" (default) or \"end\" picks which end of line `a`'s direction it closes, and both lines are cut back to its ends; lines that do not overlap are refused, and lines on one line are refused as parallel). A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
         .in_sketch_part()
         .contract(&CHAMFER_EQUAL_CONTRACT)
@@ -2684,11 +2684,25 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
     let corners = corner_list(p, cmd)?;
+    // For two parallel lines: which end of line `a` the half circle joins.
+    let far_end = match str_(p, "end") {
+        None | Some("start") => false,
+        Some("end") => true,
+        Some(_) => return Err(bad(cmd, "`end` must be \"start\" or \"end\"")),
+    };
     let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
+        }
+        // Two parallel lines are joined by a half circle, whose radius their spacing fixes (#16238).
+        if let [q] = &corners[..]
+            && let Some((la, lb)) = parallel_pair(sk, q, cmd)?
+        {
+            let (arc, cons) = fillet_semicircle(sk, la, lb, far_end, cmd)?;
+            let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
+            return Ok((vec![arc_id], cons, String::new(), kept_json(Vec::new()), Vec::new()));
         }
         // A corner symmetric to another is rounded with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
@@ -2715,8 +2729,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         FilletResult {
             curves,
             constraints,
-            param: (!on_sheet).then_some(param),
-            expression: on_sheet.then_some(r_expr.to_string()),
+            expression: (on_sheet && !param.is_empty()).then_some(r_expr.to_string()),
+            param: (!on_sheet && !param.is_empty()).then_some(param),
             virtual_corners,
             moved_to_virtual_corner,
             offset_released,
@@ -2725,6 +2739,106 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         },
     )
+}
+
+/// The two lines of a corner given as `{a, b}` when they are parallel, share no end and lie
+/// apart: a pair a half circle joins (#16238). None for anything else, so lines lying on each
+/// other and every other corner go the ordinary way (and are refused there as before).
+fn parallel_pair(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+    if str_(p, "point").is_some() {
+        return Ok(None);
+    }
+    let (Some(la), Some(lb)) = (str_(p, "a").and_then(|i| sk.curve_index(i)), str_(p, "b").and_then(|i| sk.curve_index(i))) else {
+        return Ok(None);
+    };
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Ok(None) };
+    if la == lb || [a0, a1].iter().any(|x| *x == b0 || *x == b1) {
+        return Ok(None);
+    }
+    let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else { return Ok(None) };
+    let (da, db) = (p1 - p0, q1 - q0);
+    if da.len() <= TOL || db.len() <= TOL || da.cross(db).abs() > 1e-9 * da.len() * db.len() {
+        return Ok(None);
+    }
+    // Lying on one line: no corner, no half circle.
+    if (q0 - p0).cross(da).abs() / da.len() <= TOL * 10.0 {
+        return Ok(None);
+    }
+    for l in [la, lb] {
+        let plain = sk.curves.get(l).is_some_and(|c| !c.infinite && sk.offset_distance(&c.id).is_none());
+        if sk.is_ellipse_axis(l) || sk.is_linked_curve(l) || !plain {
+            return Err(bad(cmd, "a half circle cannot join an infinite line, an offset's line, or a linked or axis line"));
+        }
+    }
+    Ok(Some((la, lb)))
+}
+
+/// Join two parallel lines with a half circle tangent to both: its diameter is their spacing,
+/// its centre is on the mid-line between them, and it bulges away from the lines at their `start`
+/// (`far` false: the end at the lower side along line `a`'s direction) or `end` side. Both lines
+/// are cut back to where the half circle meets them: the inner of the two ends on that side, so
+/// the longer line loses its overhang. Returns the arc and its tangent constraints (#16238).
+fn fillet_semicircle(sk: &mut Sketch, la: usize, lb: usize, far: bool, cmd: &str) -> Result<(usize, Vec<String>)> {
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Err(bad(cmd, "a half circle joins two lines")) };
+    let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else {
+        return Err(bad(cmd, "a line's end is missing"));
+    };
+    let u = (p1 - p0).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
+    let spacing = (q0 - p0).cross(u).abs();
+    if spacing <= TOL * 10.0 {
+        return Err(bad(cmd, "the lines lie on each other: there is no gap for a half circle"));
+    }
+    // Positions along `u`, from line a's first end.
+    let (ta0, ta1) = (0.0, (p1 - p0).dot(u));
+    let (tb0, tb1) = ((q0 - p0).dot(u), (q1 - p0).dot(u));
+    // Each line's end at the low and at the high side, with its position.
+    let (low_a, high_a) = if ta0 <= ta1 { ((a0, ta0), (a1, ta1)) } else { ((a1, ta1), (a0, ta0)) };
+    let (low_b, high_b) = if tb0 <= tb1 { ((b0, tb0), (b1, tb1)) } else { ((b1, tb1), (b0, tb0)) };
+    let (lo, hi) = (low_a.1.max(low_b.1), high_a.1.min(high_b.1));
+    if hi - lo <= TOL * 10.0 {
+        return Err(bad(cmd, "the lines do not overlap, so there is no end of both for a half circle to join"));
+    }
+    let x = if far { hi } else { lo };
+    let (end_a, end_b) = if far { (high_a.0, high_b.0) } else { (low_a.0, low_b.0) };
+    let (pa, pb) = (p0 + u * x, q0 + u * (x - tb0));
+    // A line whose end moves must not be held by anything that moving would break.
+    for (l, e, to) in [(la, end_a, pa), (lb, end_b, pb)] {
+        if sk.point(e).is_some_and(|q| q.dist(to) <= TOL * 10.0) {
+            continue;
+        }
+        let id = sk.curves.get(l).map(|c| c.id.clone()).unwrap_or_default();
+        let other_curve = sk.curves.iter().enumerate().any(|(i, c)| i != l && c.kind.uses(e));
+        let positioned = sk.points.get(e).is_some_and(|q| q.fixed || q.exprs.is_some() || q.link.is_some());
+        let sized = sk.constraints.iter().any(|k| {
+            matches!(k.kind, ConstraintKind::Length { l: y, .. } | ConstraintKind::Midpoint { l: y, .. } if y == l)
+                || matches!(k.kind, ConstraintKind::Equal { a, b } if a == l || b == l)
+        });
+        if e == 0 || other_curve || positioned || sized || sk.constraints.iter().any(|k| k.kind.refers_to_point(e)) {
+            return Err(bad(cmd, format!("`{id}` must be cut back to the half circle, and its end or its length is held by other geometry")));
+        }
+    }
+    for (e, to) in [(end_a, pa), (end_b, pb)] {
+        if let Some(q) = sk.points.get_mut(e) {
+            q.pos = to;
+        }
+    }
+    let center = (pa + pb) * 0.5;
+    // The half circle bulges to the low side for `start`, the high side for `end`; run
+    // counter-clockwise from the end whose offset from the centre is the turn of the bulge.
+    let w = if far { u } else { u * -1.0 };
+    let n = Vec2::new(w.y, -w.x);
+    let (first, second, p_first) = if (pa - center).dot(n) > 0.0 { (end_a, end_b, pa) } else { (end_b, end_a, pb) };
+    let arc = sk.add_arc(center, p_first, center * 2.0 - p_first, [None, Some(first), Some(second)], None)?;
+    let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+    Ok((arc, cons))
 }
 
 /// The virtual corners kept and the constraints moved to them, for a response.
