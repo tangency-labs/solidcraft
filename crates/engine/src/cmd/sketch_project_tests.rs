@@ -786,6 +786,43 @@ fn intersecting_an_edge_lying_in_the_plane_gives_the_edge() {
     }
 }
 
+/// A spline edge that lies in the sketch plane over parts of its length gives those parts. The
+/// profile on XZ has a cubic control-point spline from (0, 0) to (80, 0): its first four and
+/// last four control points lie on the X axis, so its first and last spans do (a cubic span
+/// depends on four control points), and a bump rises between them. Extruded, the spline's edge
+/// on XZ lies in XY at both ends and leaves it between. Intersect on XY gives the two parts, one
+/// from X = 0 and one to X = 80, not the whole edge with its bump flattened into the plane.
+#[test]
+fn intersecting_an_edge_partly_in_the_plane_gives_the_parts_in_it() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 0], [40, 20], [50, 0], [60, 0], [70, 0], [80, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[80, 0], [80, -10], [0, -10], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "body_name": "Bump"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let r = run(&mut s, "sketch.intersect", json!({"refs": [{"edge": [5, 0, 0], "body": "Bump"}]}));
+    let si = inspect(&mut s);
+    let curves = linked_curves(&si);
+    assert_eq!(curves.len(), 2, "{r} {si}");
+    let mut spans: Vec<[f64; 2]> = curves
+        .iter()
+        .map(|c| {
+            let (a, b) = (&c["start_at"], &c["end_at"]);
+            for p in [a, b] {
+                assert!(p[1].as_f64().is_some_and(|y| y.abs() < 1e-9), "{c}");
+            }
+            let (xa, xb) = (a[0].as_f64().unwrap_or(f64::NAN), b[0].as_f64().unwrap_or(f64::NAN));
+            [xa.min(xb), xa.max(xb)]
+        })
+        .collect();
+    spans.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let [first, last] = spans[..] else { panic!("{spans:?}") };
+    assert!(first[0].abs() < 1e-9 && first[1] > 0.0 && first[1] < 40.0, "{spans:?}");
+    assert!((last[1] - 80.0).abs() < 1e-9 && last[0] > 40.0 && last[0] < 80.0, "{spans:?}");
+    assert!(first[1] < last[0], "{spans:?}");
+}
+
 #[test]
 fn break_link_makes_normal_geometry() {
     let mut s = Session::default();
