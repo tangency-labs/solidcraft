@@ -108,7 +108,6 @@ crates/doc/src/eval.rs:faces_near closest_on_triangle,cross,normalized,triangles
 crates/doc/src/eval.rs:feature_json triangles
 crates/doc/src/eval.rs:feature_tools_with_constructor atan2,cross,dot,normalized
 crates/doc/src/eval.rs:flat_to_end dot
-crates/doc/src/eval.rs:from_slope_height dot
 crates/doc/src/eval.rs:hole_depth_to dot
 crates/doc/src/eval.rs:hole_dir_into_face dot,normalized
 crates/doc/src/eval.rs:hole_run_on cross,dot
@@ -118,7 +117,6 @@ crates/doc/src/eval.rs:hole_threads dot
 crates/doc/src/eval.rs:hole_tools_reaching dot
 crates/doc/src/eval.rs:least_turn atan2,cross,dot
 crates/doc/src/eval.rs:level_along dot
-crates/doc/src/eval.rs:level_on dot
 crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
@@ -133,7 +131,6 @@ crates/doc/src/eval.rs:path_points cross,normalized
 crates/doc/src/eval.rs:path_station normalized
 crates/doc/src/eval.rs:pattern_transforms atan2,cross,dot,normalized
 crates/doc/src/eval.rs:pick_lies_on_a_round_axis dot,normalized
-crates/doc/src/eval.rs:planes_cross_over atan2,normalized
 crates/doc/src/eval.rs:ray_face raycast
 crates/doc/src/eval.rs:replay normalized
 crates/doc/src/eval.rs:resolve_edges cross
@@ -146,7 +143,6 @@ crates/doc/src/eval.rs:same_extrude_from_face dot,normalized
 crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
 crates/doc/src/eval.rs:slanted_plane dot
-crates/doc/src/eval.rs:slope_rise dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
 crates/doc/src/eval.rs:trim_between_planes dot
 crates/doc/src/eval.rs:trim_between_slopes dot

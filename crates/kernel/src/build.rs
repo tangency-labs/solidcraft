@@ -5,7 +5,7 @@
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
-pub use solidcore_ops::prism::{symmetric_offset_intervals, symmetric_offset_probe_points};
+pub use solidcore_ops::prism::{level_on_plane, plane_rise, planes_cross_over, symmetric_offset_intervals, symmetric_offset_probe_points};
 
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;

@@ -9628,7 +9628,7 @@ fn feature_tools_with_constructor(
                 // A flat face at a slant: where its plane, extended past the face, lies over the
                 // profiles too, so a profile that overhangs the face still reaches it.
                 if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
-                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off);
+                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off)?;
                     hs.extend([rise_lo, rise_hi]);
                 }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
@@ -9683,8 +9683,8 @@ fn feature_tools_with_constructor(
                     // From a slanted face To a flat one: over both planes' whole rise across the
                     // profiles, then cut at each.
                     (Some((fp, tp, _)), _) => {
-                        let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off);
-                        let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off);
+                        let (from_lo, from_hi) = slope_rise(fp, &ss.plane, &regions, off)?;
+                        let (to_lo, to_hi) = slope_rise(tp, &ss.plane, &regions, off)?;
                         let (rise_lo, rise_hi) = (from_lo.min(to_lo), from_hi.max(to_hi));
                         let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
                         (rise_lo - margin, rise_hi + margin)
@@ -9692,7 +9692,7 @@ fn feature_tools_with_constructor(
                     (None, Some(fp)) => {
                         // The rise is measured over sampled outlines, so the prism runs a margin
                         // past it: its own caps must never reach the result.
-                        let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from);
+                        let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from)?;
                         let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
                         (lo + rise_lo - margin, hi + rise_hi + margin)
                     }
@@ -13242,8 +13242,7 @@ pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3, 
     if level_start_reason(&slope, n, &ends).is_some() {
         return None;
     }
-    let m = slope.normal();
-    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / n.dot(m))))
+    kernel::level_on_plane(plane, centre, &slope)
 }
 
 /// The plane a To Object end `face` (found as the build finds it, `None` for a point or an edge
@@ -13796,18 +13795,11 @@ fn slanted_plane(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> Option<P
 }
 
 /// How far `slope` lies along `plane`'s normal over the profiles, measured from `level`: the
-/// least and the most, over every point of the regions' outer loops.
-fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> (f64, f64) {
-    let n = plane.normal();
-    let m = slope.normal();
-    let across = n.dot(m);
-    let mut rise = (0.0_f64, 0.0_f64);
-    for q in regions.iter().flat_map(|r| r.outer.polyline(1e-2)) {
-        let q = plane.to_world(q);
-        let t = (slope.origin - q).dot(m) / across - level;
-        rise = (rise.0.min(t), rise.1.max(t));
-    }
-    rise
+/// least and the most over the regions' outer loops ([`kernel::plane_rise`]), widened to hold 0
+/// as the old sampled fold did, since the prism it sizes runs from `level` too.
+fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> Result<(f64, f64)> {
+    let (lo, hi) = kernel::plane_rise(plane, slope, regions).ok_or_else(along_the_extrusion)?;
+    Ok(((lo - level).min(0.0), (hi - level).max(0.0)))
 }
 
 /// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
@@ -13850,61 +13842,22 @@ fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, si
     Ok(out)
 }
 
-/// Whether `to` lies before `from` along the extrusion (`n` times the sign of `d`, `n` the
-/// normal of `plane`) somewhere over the profiles' outer loops: the two planes cross over them.
-/// The gap between the planes changes linearly across the sketch, so its least value over a
-/// loop lies at a line's end or at an arc's end or its point farthest the gap's way down,
-/// found exactly; a Bézier or conic piece is sampled to 1e-6 mm. A crossing on a loop's edge,
-/// within a hair, does not count.
+/// Whether `to` lies before `from` along the extrusion (`plane`'s normal times the sign of `d`)
+/// somewhere over the profiles' outer loops: the two planes cross over them
+/// ([`kernel::planes_cross_over`]).
 fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2], d: f64) -> Result<bool> {
-    let gap = |q: Vec2| -> Result<f64> {
-        let q = plane.to_world(q);
-        Ok((level_on(plane, q, to)? - level_on(plane, q, from)?) * d.signum())
-    };
-    // The gap's slope across the sketch: it falls fastest along `down`.
-    let at0 = gap(Vec2::new(0.0, 0.0))?;
-    let slope = Vec2::new(gap(Vec2::new(1.0, 0.0))? - at0, gap(Vec2::new(0.0, 1.0))? - at0);
-    let down = (slope * -1.0).normalized();
-    let mut points = Vec::new();
-    for seg in regions.iter().flat_map(|r| &r.outer.segs) {
-        match *seg {
-            solidcore_record::Seg2::Line { a, b } => points.extend([a, b]),
-            solidcore_record::Seg2::Arc { center, radius, start, sweep } => {
-                points.extend([center + Vec2::from_angle(start) * radius, center + Vec2::from_angle(start + sweep) * radius]);
-                if let Some(down) = down {
-                    // The arc's point at angle `t` is `center + from_angle(t) * radius`, as at its
-                    // ends, so with a negative radius its lowest point lies at the angle opposite
-                    // `down`. Whether the arc passes that angle, going from `start` by `sweep`:
-                    let toward = if radius < 0.0 { down * -1.0 } else { down };
-                    let turn = (toward.y.atan2(toward.x) - start) * sweep.signum();
-                    if turn.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                        points.push(center + toward * radius);
-                    }
-                }
-            }
-            _ => points.extend(seg.polyline(1e-6)),
-        }
-    }
-    let mut least = f64::INFINITY;
-    let mut reach = 0.0_f64;
-    for q in points {
-        let g = gap(q)?;
-        least = least.min(g);
-        reach = reach.max(g.abs());
-    }
-    Ok(least < -1e-9 * (1.0 + reach))
+    kernel::planes_cross_over(plane, from, to, regions, d).ok_or_else(along_the_extrusion)
 }
 
 /// Where the line along `plane`'s normal through `centre` meets `face_plane`, as a level along
-/// that normal. Refused for a face plane that runs along the normal, which the line never meets.
+/// that normal ([`kernel::level_on_plane`]). Refused for a face plane that runs along the
+/// normal, which the line never meets.
 fn level_on(plane: &Plane, centre: Vec3, face_plane: &Plane) -> Result<f64> {
-    let n = plane.normal();
-    let m = face_plane.normal();
-    let across = n.dot(m);
-    if across.abs() < 1e-9 {
-        return Err(DocError::Invalid("the From or To face runs along the extrusion".into()));
-    }
-    Ok(level_along(plane, centre + n * ((face_plane.origin - centre).dot(m) / across)))
+    kernel::level_on_plane(plane, centre, face_plane).ok_or_else(along_the_extrusion)
+}
+
+fn along_the_extrusion() -> DocError {
+    DocError::Invalid("the From or To face runs along the extrusion".into())
 }
 
 /// `input`'s part on one side of `plane` ([`kernel::half_space`]), its history carried through
