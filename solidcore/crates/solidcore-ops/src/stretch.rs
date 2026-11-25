@@ -12,7 +12,7 @@
 use solidcore::stretch::{self as kernel, CutPlane, Stretch};
 use solidcore_record::brep::Surface as RecordSurface;
 
-pub use solidcore::stretch::{Crossing, Refusal};
+pub use solidcore::stretch::{Crossing, Lies, Refusal, SketchPlane};
 
 use crate::boolean::union_all;
 use crate::session::{read_body, Answer};
@@ -175,6 +175,33 @@ fn halves(body: &Body, plane: &CutPlane) -> Result<Option<(Body, Body)>> {
     )
 }
 
+/// Where a stretch of `body` along `normal` is best cut when no place is given, as the distance
+/// from the picked face point `from`, else from its least level along the normal
+/// ([`solidcore::stretch::proposed_cut`]): the middle of the longest run where the body is a
+/// prism along it. `None` for a direction with no length.
+///
+/// # Errors
+/// Those of the session and the kernel's, reading the faces.
+pub fn proposed_cut(body: &Body, normal: [f64; 3], from: Option<[f64; 3]>) -> Result<Option<f64>> {
+    read_body("stretch proposed_cut", body, |k, b| {
+        kernel::proposed_cut(k, b, normal, from)
+    })
+}
+
+/// How a sketch plane with normal `plane_normal` lies to a stretch along `normal`
+/// ([`solidcore::stretch::plane_lies`]).
+#[must_use]
+pub fn plane_lies(plane_normal: [f64; 3], normal: [f64; 3]) -> Lies {
+    kernel::plane_lies(plane_normal, normal)
+}
+
+/// Whether two bodies, each as its box and volume, are the same part to a millionth of its size
+/// ([`solidcore::stretch::same_part`]).
+#[must_use]
+pub fn same_part(a: ([f64; 3], [f64; 3], f64), b: ([f64; 3], [f64; 3], f64)) -> bool {
+    kernel::same_part(a, b)
+}
+
 /// A point on the cut plane of a stretch along `normal` ([`solidcore::stretch::cut_point`]):
 /// `at` along the normal from the picked face point `from`, or from `low`, the body's least
 /// level along the normal. `None` for a direction with no length.
@@ -236,6 +263,62 @@ mod tests {
                 room: 20.0
             }))
         );
+    }
+
+    #[test]
+    fn the_proposed_cut_is_the_middle_of_the_longest_plain_run() {
+        // A 40 mm block with a hole down through it at x = 10 (7 to 13): the plain runs along x
+        // are 0 to 7 and 13 to 40; the longest's middle is at 26.5.
+        let block = crate::body::make_box([0.0; 3], [40.0, 20.0, 10.0]).unwrap();
+        let hole = crate::body::make_cylinder([10.0, 10.0, -5.0], 3.0, 20.0).unwrap();
+        let holed = crate::boolean::boolean(block, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let at = proposed_cut(&holed, X, None).unwrap().unwrap();
+        assert!((at - 26.5).abs() < 1e-6, "{at}");
+        // From a face at x = 40 the same cut is 13.5 behind it.
+        let at = proposed_cut(&holed, X, Some([40.0, 3.0, 3.0]))
+            .unwrap()
+            .unwrap();
+        assert!((at + 13.5).abs() < 1e-6, "{at}");
+        // Along z the hole runs with the direction: the whole height is one run.
+        let at = proposed_cut(&holed, [0.0, 0.0, 1.0], None)
+            .unwrap()
+            .unwrap();
+        assert!((at - 5.0).abs() < 1e-6, "{at}");
+    }
+
+    #[test]
+    fn sketch_points_are_sided_and_moved_in_their_plane() {
+        // The XZ plane: x along world x, y along world z.
+        let plane = SketchPlane {
+            origin: [0.0, 5.0, 0.0],
+            x_axis: X,
+            y_axis: [0.0, 0.0, 1.0],
+        };
+        assert!(plane.past_cut([30.0, 2.0], [20.0, 0.0, 0.0], X) > 0.0);
+        assert!(plane.past_cut([10.0, 2.0], [20.0, 0.0, 0.0], X) < 0.0);
+        assert_eq!(plane.moved([30.0, 2.0], X, 15.0), [45.0, 2.0]);
+        assert_eq!(
+            plane.moved([30.0, 2.0], [0.0, 0.0, -1.0], 4.0),
+            [30.0, -2.0]
+        );
+        assert_eq!(plane.runs([0.0, 0.0], [10.0, 0.0], X), Some(true));
+        assert_eq!(plane.runs([0.0, 0.0], [0.0, 10.0], X), Some(false));
+        assert_eq!(plane.runs([0.0, 0.0], [10.0, 10.0], X), None);
+        assert_eq!(plane_lies([0.0, -1.0, 0.0], X), Lies::InPlane);
+        assert_eq!(
+            plane_lies([0.0, -1.0, 0.0], [0.0, 1.0, 0.0]),
+            Lies::Along(false)
+        );
+        assert!(same_part(
+            ([0.0; 3], [10.0; 3], 1000.0),
+            ([0.0; 3], [10.0; 3], 1000.0)
+        ));
+        assert!(!same_part(
+            ([0.0; 3], [10.0; 3], 1000.0),
+            ([0.0; 3], [11.0; 3], 1000.0)
+        ));
     }
 
     #[test]

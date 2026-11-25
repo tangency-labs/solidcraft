@@ -217,7 +217,7 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
         // Stretch (#20512): the body, faces the cuts are measured from (each sets its axis's
         // direction), and per axis X, Y, Z its sign, distance (empty: no stretch along it) and
-        // cut (empty: the middle of the body's longest plain stretch, `canvas::stretch_level`).
+        // cut (empty: the middle of the body's longest plain stretch, `canvas::stretch_proposal`).
         Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false), ("Cut from faces", PLANAR_FACES, true)],
             FeatureKind::Stretch { stretches, .. }) {
             sign_x: usize = 0 => stretch_row(stretches, 0).0,
@@ -7059,15 +7059,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 if !at.trim().is_empty() {
                     one["at"] = json!(at);
-                } else if let Some(level) = crate::canvas::stretch_level(app, &name, direction) {
+                } else if let Some(at) = crate::canvas::stretch_proposal(app, &name, direction, face) {
                     // No Cut At: the middle of the longest plain stretch, kept as a number, from the
                     // face when one is picked, else from the side that stays put.
-                    let n = direction.vector();
-                    let base = match face {
-                        Some(p) => p.dot(n),
-                        None => crate::canvas::stretch_fixed_level(app, &name, direction).unwrap_or(level),
-                    };
-                    one["at"] = json!(crate::canvas::format_len(&app.session.doc, level - base));
+                    one["at"] = json!(crate::canvas::format_len(&app.session.doc, at));
                 }
                 stretches.push(one);
             }

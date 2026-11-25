@@ -2426,8 +2426,9 @@ pub(crate) fn projected_rotation_angle(
 /// Where one axis of Stretch's handles stand on its body (#20512): the middle of the side that
 /// moves, the unit direction it goes, half the body's widest size across (for the cut plane's
 /// square), where the cut is measured from (the picked face's point, else the side that stays
-/// put) and the distance from there to the cut when Cut At is empty. From the shown body's box:
-/// these place handles; the stretch itself is decided on the exact body.
+/// put) and the distance from there to the cut when Cut At is empty. The handles stand on the
+/// shown body's box; the proposed cut is solidcore's, from the exact body
+/// ([`stretch_proposal`]).
 struct StretchFrame {
     moving: Vec3,
     n: Vec3,
@@ -2440,62 +2441,45 @@ fn stretch_frame(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::
     let st = app.session.model.state();
     let b = st.body(body)?.mesh().bounds();
     let n = direction.vector();
+    let arr = |v: Vec3| [v.x, v.y, v.z];
     let c = b.center();
-    let lo = b.min.dot(n).min(b.max.dot(n));
-    let hi = b.min.dot(n).max(b.max.dot(n));
-    if !(hi - lo > 0.0) {
+    // How far the box reaches from its centre along the direction, behind and ahead.
+    let [behind, ahead] = solidcore_ops::affine::span_along(arr(b.min), arr(b.max), arr(c), arr(n)).ok()?;
+    if !(ahead > behind) {
         return None;
     }
-    let centre_level = c.dot(n);
     let size = b.max - b.min;
     let width = (size.x.abs().max(size.y.abs()).max(size.z.abs())) * 0.6;
-    let base = face.map_or(lo, |p| p.dot(n));
-    let level = stretch_level(app, body, direction).unwrap_or((lo + hi) / 2.0);
-    Some(StretchFrame { moving: c + n * (hi - centre_level), n, width, from: c + n * (base - centre_level), auto: level - base })
+    let from_centre = face.map_or(behind, |p| solidcore_ops::affine::distance_along(arr(c), arr(n), arr(p)));
+    let auto = stretch_proposal(app, body, direction, face)?;
+    Some(StretchFrame { moving: c + n * ahead, n, width, from: c + n * from_centre, auto })
 }
 
-/// The level along `direction` of the side of `body` that stays put (its least level), from the
-/// shown body's box.
-pub(crate) fn stretch_fixed_level(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection) -> Option<f64> {
-    let b = app.session.model.state().body(body)?.mesh().bounds();
-    let n = direction.vector();
-    Some(b.min.dot(n).min(b.max.dot(n)))
+thread_local! {
+    /// The last proposals, by design revision, body, direction and picked face: worked out on
+    /// the exact body, once per change rather than once per frame.
+    static PROPOSALS: std::cell::RefCell<Vec<(ProposalKey, Option<f64>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Where Stretch cuts `body` along `direction` when nothing says where (#20512): the level of
-/// the middle of the longest stretch where every face crossing it runs along the direction (flat
-/// walls and round walls along it). From the shown mesh: a proposal the user sees and can move;
-/// the stretch checks the exact body at the cut it gets. `None` when the body has no such
-/// stretch.
-pub(crate) fn stretch_level(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection) -> Option<f64> {
+type ProposalKey = (u64, String, &'static str, Option<[u64; 3]>);
+
+/// Where Stretch cuts `body` along `direction` when nothing says where (#20512), as a Cut At
+/// from the picked face point `face`, else from the side that stays put: the middle of the
+/// longest run where the body keeps one section, worked out by solidcore on the exact body
+/// (`solidcraft_kernel::stretch_proposal`), the same proposal the command makes.
+pub(crate) fn stretch_proposal(app: &SolveApp, body: &str, direction: solidcraft_engine::doc::StretchDirection, face: Option<Vec3>) -> Option<f64> {
+    let key: ProposalKey = (app.session.revision, body.to_string(), direction.key(), face.map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]));
+    if let Some(found) = PROPOSALS.with(|p| p.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| *v)) {
+        return found;
+    }
     let st = app.session.model.state();
-    let m = st.body(body)?.mesh();
-    let n = direction.vector();
-    let b = m.bounds();
-    let lo = b.min.dot(n).min(b.max.dot(n));
-    let hi = b.min.dot(n).max(b.max.dot(n));
-    // Per face: whether every triangle stands along the direction, and its levels' range.
-    let mut faces: std::collections::BTreeMap<u32, (bool, f64, f64)> = std::collections::BTreeMap::new();
-    for (t, face) in m.triangles.iter().zip(&m.tri_face) {
-        let Some([a, b2, c]) = m.tri(t) else { continue };
-        let along = (b2 - a).cross(c - a).normalized().is_none_or(|normal| normal.dot(n).abs() < 1e-3);
-        let levels = [a.dot(n), b2.dot(n), c.dot(n)];
-        let (tlo, thi) = (levels.iter().copied().fold(f64::INFINITY, f64::min), levels.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        let e = faces.entry(*face).or_insert((true, f64::INFINITY, f64::NEG_INFINITY));
-        *e = (e.0 && along, e.1.min(tlo), e.2.max(thi));
-    }
-    let mut busy: Vec<(f64, f64)> = faces.values().filter(|(along, ..)| !along).map(|(_, a, b)| (*a, *b)).collect();
-    busy.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut best: Option<(f64, f64)> = None;
-    let mut reached = lo;
-    for (a, b) in busy.into_iter().chain([(hi, hi)]) {
-        if a > reached && best.is_none_or(|(x, y)| a - reached > y - x) {
-            best = Some((reached, a));
-        }
-        reached = reached.max(b);
-    }
-    let (a, b) = best.filter(|(a, b)| b - a > (hi - lo) * 1e-3)?;
-    Some((a + b) / 2.0)
+    let made = st.body(body).and_then(|b| solidcraft_engine::kernel::stretch_proposal(&b.body, direction.vector(), face).ok());
+    PROPOSALS.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|(k, _)| k.0 == key.0);
+        p.push((key, made));
+    });
+    made
 }
 
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {

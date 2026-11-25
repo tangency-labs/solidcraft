@@ -25,6 +25,7 @@ use crate::prism::measure::{
     cylinder_of, face_points, outward_is_natural, plane_of, walk, wall_error,
 };
 use crate::query::api_queries::{brep_bounding_box, get_faces};
+use crate::query::face::p1::calculate_bounding_box;
 use crate::topology::Brep;
 
 /// How far from square or parallel a face may be and still count as a wall or a cap (one less
@@ -443,6 +444,158 @@ pub fn band(
         }
     }
     Ok(Ok(()))
+}
+
+/// Where a stretch of `b` along unit `normal` is best cut when no place is given: the middle of
+/// the longest run along the normal where the body is a prism (every face crossing it a wall
+/// along the normal), as the distance from the body's least level along the normal. A flat face
+/// square to the normal breaks the run at its level; any other face that is not such a wall
+/// breaks it over its box's reach along the normal. Half the body's length when no run is left.
+/// Measured from the picked face point `from` when there is one (as a stretch's Cut At is),
+/// else from the body's least level along the normal. `None` for a direction with no length or
+/// a body with no length along it.
+///
+/// # Errors
+/// The kernel's, reading the faces and their boxes.
+pub fn proposed_cut(
+    k: &Kernel,
+    b: &Brep,
+    normal: [f64; 3],
+    from: Option<[f64; 3]>,
+) -> crate::Result<Option<f64>> {
+    let Ok(n) = Vec3::from(normal).unitize() else {
+        return Ok(None);
+    };
+    let [lo, hi] = brep_bounding_box(k, b, true)?.span_along(Point3::ZERO, n);
+    let size = hi - lo;
+    if !(size.is_finite() && size > 0.0) {
+        return Ok(None);
+    }
+    let mut breaks: Vec<[f64; 2]> = Vec::new();
+    let mut work = 2_000_000usize;
+    for f in get_faces(b)? {
+        let face = b.face(f)?;
+        let wall = face.surface.as_ref().is_some_and(|surface| {
+            if let Some((_, pn)) = plane_of(surface) {
+                return pn.dot(n).abs() <= SQUARE.sqrt();
+            }
+            if let Some((_, axis, _)) = cylinder_of(surface) {
+                return 1.0 - axis.dot(n).abs() <= SQUARE;
+            }
+            wall_error(surface, n, size, &mut work).is_some_and(|e| e <= size * 1e-9)
+        });
+        if wall {
+            continue;
+        }
+        let [a, z] = calculate_bounding_box(k, b, f, true)?.span_along(Point3::ZERO, n);
+        breaks.push([a, z]);
+    }
+    breaks.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let (mut best, mut best_len) = ((lo + hi) / 2.0, 0.0);
+    let mut reached = lo;
+    for [a, z] in breaks.iter().copied().chain([[hi, hi]]) {
+        if a > reached && a - reached > best_len {
+            best_len = a - reached;
+            best = (a + reached) / 2.0;
+        }
+        reached = reached.max(z);
+    }
+    let base = from.map_or(lo, |p| Point3::from(p).dot(n));
+    Ok(Some(best - base))
+}
+
+/// How a sketch plane with unit normal `plane_normal` lies to a stretch along `normal`: the
+/// stretch runs in its plane, along its normal (with the normal or against it), or neither.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lies {
+    /// The stretch runs in the plane.
+    InPlane,
+    /// The stretch runs along the plane's normal; `true` with it, `false` against it.
+    Along(bool),
+    /// Neither.
+    Oblique,
+}
+
+/// How the plane with normal `plane_normal` lies to a stretch along `normal` ([`Lies`]).
+#[must_use]
+pub fn plane_lies(plane_normal: [f64; 3], normal: [f64; 3]) -> Lies {
+    let (Ok(p), Ok(n)) = (
+        Vec3::from(plane_normal).unitize(),
+        Vec3::from(normal).unitize(),
+    ) else {
+        return Lies::Oblique;
+    };
+    let c = p.dot(n);
+    if 1.0 - c.abs() < SQUARE {
+        Lies::Along(c > 0.0)
+    } else if c.abs() <= SQUARE {
+        Lies::InPlane
+    } else {
+        Lies::Oblique
+    }
+}
+
+/// A sketch plane: its origin and unit axes, a 2D point `[x, y]` on it being
+/// `origin + x·x_axis + y·y_axis`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SketchPlane {
+    /// Its origin.
+    pub origin: [f64; 3],
+    /// Its x axis.
+    pub x_axis: [f64; 3],
+    /// Its y axis.
+    pub y_axis: [f64; 3],
+}
+
+impl SketchPlane {
+    fn world(&self, p: [f64; 2]) -> Point3 {
+        Point3::from(self.origin) + Vec3::from(self.x_axis) * p[0] + Vec3::from(self.y_axis) * p[1]
+    }
+
+    /// How far the sketch point `p` stands past the cut plane through `cut` along `normal`
+    /// (negative behind it): the side of the cut it is on.
+    #[must_use]
+    pub fn past_cut(&self, p: [f64; 2], cut: [f64; 3], normal: [f64; 3]) -> f64 {
+        let n = Vec3::from(normal).unitize_or_z();
+        (self.world(p) - Point3::from(cut)).dot(n)
+    }
+
+    /// The sketch point `p` moved `distance` along `normal` (a direction in the plane).
+    #[must_use]
+    pub fn moved(&self, p: [f64; 2], normal: [f64; 3], distance: f64) -> [f64; 2] {
+        let n = Vec3::from(normal).unitize_or_z();
+        [
+            p[0] + n.dot(Vec3::from(self.x_axis)) * distance,
+            p[1] + n.dot(Vec3::from(self.y_axis)) * distance,
+        ]
+    }
+
+    /// How the segment from sketch point `a` to `b` runs to `normal`: `Some(true)` along it,
+    /// `Some(false)` square to it, `None` neither or a segment of no length.
+    #[must_use]
+    pub fn runs(&self, a: [f64; 2], b: [f64; 2], normal: [f64; 3]) -> Option<bool> {
+        let d = (self.world(b) - self.world(a)).unitize().ok()?;
+        let c = d.dot(Vec3::from(normal).unitize_or_z()).abs();
+        if c > 1.0 - SQUARE {
+            Some(true)
+        } else if c < SQUARE {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether two bodies are the same part to a millionth of its size: their boxes' corners within
+/// a millionth of `b`'s diagonal (at least 1) and their volumes within a millionth of `b`'s.
+#[must_use]
+pub fn same_part(a: ([f64; 3], [f64; 3], f64), b: ([f64; 3], [f64; 3], f64)) -> bool {
+    let (a_lo, a_hi, a_vol) = a;
+    let (b_lo, b_hi, b_vol) = b;
+    let size = (Point3::from(b_hi) - Point3::from(b_lo)).length().max(1.0);
+    let near =
+        |p: [f64; 3], q: [f64; 3]| (Point3::from(p) - Point3::from(q)).length() <= size * 1e-6;
+    near(a_lo, b_lo) && near(a_hi, b_hi) && (a_vol - b_vol).abs() <= b_vol.abs() * 1e-6
 }
 
 /// A point on the cut plane of a stretch along `normal`: `at` along the unit normal from the

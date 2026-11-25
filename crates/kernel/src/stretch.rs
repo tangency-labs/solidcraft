@@ -44,6 +44,26 @@ pub fn stretch_axis(point: Vec3, axis: Vec3, start: f64, end: f64, at: Vec3, nor
     (Vec3::new(p[0], p[1], p[2]), s, e)
 }
 
+/// Where a stretch of `body` along `normal` is best cut when no place is given, as a Cut At: the
+/// distance from the picked face point `from`, else from the side that stays put
+/// ([`solidcore_ops::stretch::proposed_cut`]): the middle of the longest run where the body
+/// keeps one section.
+pub fn stretch_proposal(body: &Body, normal: Vec3, from: Option<Vec3>) -> Result<f64> {
+    body.require_brep("Stretch")?;
+    let form = body.ops_body().ok_or_else(|| KernelError::Failed("Stretch: the body could not be read".into()))?;
+    let (ops, _) = &*form;
+    solidcore_ops::stretch::proposed_cut(ops, arr(normal), from.map(arr))
+        .map_err(|e| KernelError::Failed(format!("Stretch: {e}")))?
+        .ok_or_else(|| KernelError::Invalid("the body has no length along the stretch direction".into()))
+}
+
+/// Whether `a` is the part `b` is, to a millionth of its size: the same box and volume
+/// ([`solidcore_ops::stretch::same_part`]).
+pub fn same_part(a: &Body, b: &Body) -> bool {
+    let (Ok(x), Ok(y)) = (crate::measure(a), crate::measure(b)) else { return false };
+    solidcore_ops::stretch::same_part((arr(x.bbox.min), arr(x.bbox.max), x.volume), (arr(y.bbox.min), arr(y.bbox.max), y.volume))
+}
+
 fn arr(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }

@@ -7,7 +7,8 @@
 
 use std::collections::HashSet;
 
-use solidcore_record::Vec2;
+use solidcore_ops::stretch::{self, Lies, SketchPlane};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{Document, FeatureKind, ModelState, StretchDirection};
 use solidcraft_geom::prelude::*;
@@ -19,7 +20,8 @@ use crate::Session;
 /// (world, in the body's frame) and the distance.
 pub(super) struct Planned {
     pub direction: StretchDirection,
-    pub level: f64,
+    /// A point on the cut plane.
+    pub cut: Vec3,
     pub distance: f64,
 }
 
@@ -49,21 +51,25 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
     // Sketch points already moved by an earlier axis: a later axis adds to where they are now.
     let mut moved: HashSet<(u64, usize)> = HashSet::new();
     for p in planned {
-        let n = p.direction.vector();
-        if 1.0 - n.dot(normal).abs() < 1e-9 {
+        let n = arr(p.direction.vector());
+        let cut = arr(p.cut);
+        let lies = stretch::plane_lies(arr(normal), n);
+        match lies {
             // Along the Extrude: its depth grows, when the side that moves is the far cap.
-            let extrudes_along = match extent.direction {
-                solidcraft_doc::Direction::Positive => 1.0,
-                solidcraft_doc::Direction::Negative => -1.0,
-                solidcraft_doc::Direction::Symmetric => return Err("the Extrude is symmetric".into()),
-            };
-            if n.dot(normal) * extrudes_along < 0.0 {
-                return Err("the side that moves is the sketch's own".into());
+            Lies::Along(with_normal) => {
+                let forward = match extent.direction {
+                    solidcraft_doc::Direction::Positive => with_normal,
+                    solidcraft_doc::Direction::Negative => !with_normal,
+                    solidcraft_doc::Direction::Symmetric => return Err("the Extrude is symmetric".into()),
+                };
+                if !forward {
+                    return Err("the side that moves is the sketch's own".into());
+                }
+                let name = input_param(feature, "Distance").ok_or("the Extrude's depth has no parameter")?;
+                out.push(grown(s, &exprs, &name, p.distance)?);
             }
-            let name = input_param(feature, "Distance").ok_or("the Extrude's depth has no parameter")?;
-            out.push(grown(s, &exprs, &name, p.distance)?);
-        } else if n.dot(normal).abs() > 1e-9 {
-            return Err("the direction is neither in the sketch's plane nor along the Extrude".into());
+            Lies::InPlane => {}
+            Lies::Oblique => return Err("the direction is neither in the sketch's plane nor along the Extrude".into()),
         }
         let mut base_spanned = false;
         for f in &mut doc.features {
@@ -71,9 +77,9 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             // components, and the sketches only they use, stay as they are.
             if f.id > made_by && related.contains(&f.id) && !matches!(f.kind, FeatureKind::Sketch { .. }) {
                 for point in f.kind.face_points_mut() {
-                    if point.dot(n) > p.level {
-                        *point += n * p.distance;
-                    }
+                    // A picked point is an axis of no length: beyond the cut it moves with the part.
+                    let (moved, ..) = stretch::moved_axis(arr(*point), n, 0.0, 0.0, cut, n, p.distance);
+                    *point = Vec3::new(moved[0], moved[1], moved[2]);
                 }
             }
             if !sketches.contains(&f.id) {
@@ -82,13 +88,11 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             let FeatureKind::Sketch { sketch, .. } = &mut f.kind else { continue };
             let Some(solved) = state.sketch(f.id) else { continue };
             let plane = solved.plane;
-            if plane.normal().dot(n).abs() > 1e-9 {
+            if stretch::plane_lies(arr(plane.normal()), n) != Lies::InPlane {
                 continue;
             }
-            // The direction and the cut in this sketch's coordinates.
-            let u = Vec2::new(n.dot(plane.x), n.dot(plane.y));
-            let level = p.level - plane.origin.dot(n);
-            let spanning = spanning_dimensions(&solved.sketch, u, level);
+            let on = SketchPlane { origin: arr(plane.origin), x_axis: arr(plane.x), y_axis: arr(plane.y) };
+            let spanning = spanning_dimensions(&solved.sketch, &on, cut, n);
             if f.id == base_sketch && !spanning.is_empty() {
                 base_spanned = true;
             }
@@ -98,13 +102,14 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             // Which side of the cut a point is on comes from the solved sketch; where it goes
             // adds this axis's move to any move an earlier axis made.
             for (i, (point, now)) in sketch.points.iter_mut().zip(&solved.sketch.points).enumerate() {
-                if point.link.is_none() && now.pos.dot(u) > level {
+                if point.link.is_none() && on.past_cut(xy(now.pos), cut, n) > 0.0 {
                     let from = if moved.insert((f.id, i)) { now.pos } else { point.pos };
-                    point.pos = from + u * p.distance;
+                    let [x, y] = on.moved(xy(from), n, p.distance);
+                    point.pos = Vec2::new(x, y);
                 }
             }
         }
-        if 1.0 - n.dot(normal).abs() >= 1e-9 && !base_spanned {
+        if lies == Lies::InPlane && !base_spanned {
             return Err("no dimension of the sketch spans the cut".into());
         }
     }
@@ -172,34 +177,32 @@ fn plain(e: &str) -> bool {
     !number.is_empty() && number.parse::<f64>().is_ok_and(f64::is_finite) && matches!(unit, "" | "mm" | "cm" | "m" | "in" | "ft")
 }
 
-/// The parameters of the driving dimensions of `sketch` that measure across the cut at `level`
-/// along unit `u` (sketch coordinates): two points on either side, measured along `u`.
-fn spanning_dimensions(sketch: &Sketch, u: Vec2, level: f64) -> Vec<String> {
-    let at = |i: usize| sketch.points.get(i).map(|p| p.pos.dot(u) - level);
+/// The parameters of the driving dimensions of `sketch` (drawn `on` its plane) that measure
+/// across the cut through `cut` along `n`: two points on either side, measured along `n`.
+fn spanning_dimensions(sketch: &Sketch, on: &SketchPlane, cut: [f64; 3], n: [f64; 3]) -> Vec<String> {
+    let point = |i: usize| sketch.points.get(i).map(|p| xy(p.pos));
+    let side = |i: usize| point(i).map(|p| on.past_cut(p, cut, n));
     let line = |l: usize| match sketch.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
-    let along = |a: usize, b: usize| -> bool {
-        let (Some(pa), Some(pb)) = (sketch.points.get(a), sketch.points.get(b)) else { return false };
-        (pb.pos - pa.pos).normalized().is_some_and(|d| d.dot(u).abs() > 1.0 - 1e-9)
+    let runs = |a: usize, b: usize| match (point(a), point(b)) {
+        (Some(pa), Some(pb)) => on.runs(pa, pb, n),
+        _ => None,
     };
-    let across = |a: usize, b: usize| matches!((at(a), at(b)), (Some(x), Some(y)) if x * y < 0.0);
-    let ux = u.x.abs() > 1.0 - 1e-9;
-    let uy = u.y.abs() > 1.0 - 1e-9;
+    let across = |a: usize, b: usize| matches!((side(a), side(b)), (Some(x), Some(y)) if (x > 0.0) != (y > 0.0) && x != 0.0 && y != 0.0);
+    // Whether the stretch runs along the sketch's own x or y axis.
+    let ux = on.runs([0.0, 0.0], [1.0, 0.0], n) == Some(true);
+    let uy = on.runs([0.0, 0.0], [0.0, 1.0], n) == Some(true);
     let mut out = Vec::new();
     for c in sketch.constraints.iter().filter(|c| !c.driven) {
         let Some(name) = c.param.clone() else { continue };
         let spans = match c.kind {
             ConstraintKind::DistanceX { p, q, .. } => ux && across(p, q),
             ConstraintKind::DistanceY { p, q, .. } => uy && across(p, q),
-            ConstraintKind::Distance { p, q, .. } => along(p, q) && across(p, q),
-            ConstraintKind::Length { l, .. } => line(l).is_some_and(|(a, b)| along(a, b) && across(a, b)),
-            ConstraintKind::PointLineDistance { p, l, .. } => line(l).is_some_and(|(a, b)| {
-                let square = matches!((sketch.points.get(a), sketch.points.get(b)), (Some(pa), Some(pb))
-                    if (pb.pos - pa.pos).normalized().is_some_and(|d| d.dot(u).abs() < 1e-9));
-                square && across(p, a)
-            }),
+            ConstraintKind::Distance { p, q, .. } => runs(p, q) == Some(true) && across(p, q),
+            ConstraintKind::Length { l, .. } => line(l).is_some_and(|(a, b)| runs(a, b) == Some(true) && across(a, b)),
+            ConstraintKind::PointLineDistance { p, l, .. } => line(l).is_some_and(|(a, b)| runs(a, b) == Some(false) && across(p, a)),
             _ => false,
         };
         if spans {
@@ -212,9 +215,13 @@ fn spanning_dimensions(sketch: &Sketch, u: Vec2, level: f64) -> Vec<String> {
 /// Does `body` in `state` have the box and volume `expected` has (within a millionth of its
 /// size)? The check that the edited sketch made the part the stretch makes.
 pub(super) fn same_part(state: &ModelState, body: &str, expected: &solidcraft_kernel::Body) -> bool {
-    let Some(b) = state.body(body) else { return false };
-    let (Ok(got), Ok(want)) = (solidcraft_kernel::measure(&b.body), solidcraft_kernel::measure(expected)) else { return false };
-    let size = want.bbox.max.dist(want.bbox.min).max(1.0);
-    let corners = got.bbox.min.dist(want.bbox.min) <= size * 1e-6 && got.bbox.max.dist(want.bbox.max) <= size * 1e-6;
-    corners && (got.volume - want.volume).abs() <= want.volume.abs() * 1e-6
+    state.body(body).is_some_and(|b| solidcraft_kernel::same_stretched_part(&b.body, expected))
+}
+
+fn arr(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn xy(p: Vec2) -> [f64; 2] {
+    [p.x, p.y]
 }

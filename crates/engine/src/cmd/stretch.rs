@@ -5,7 +5,6 @@
 use serde_json::{Value, json};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{AxisStretch, FeatureKind, StretchDirection};
-use solidcraft_geom::prelude::*;
 
 use super::stretch_sketch;
 use super::{
@@ -77,10 +76,10 @@ fn stretch(s: &mut Session, p: &Value) -> Result<Value> {
             Some(at) => at,
             None if from.is_some() => "0 mm".into(),
             None => {
-                let n = direction.vector();
-                let b = source.body.exact_bounds().map_err(|e| bad(cmd, e.to_string()))?;
-                let size = (b.max.dot(n) - b.min.dot(n)).abs();
-                format!("{} mm", (size / 2.0 * 1e6).round() / 1e6).into()
+                // Where the body keeps one section longest, as the canvas proposes it.
+                let at = solidcraft_kernel::stretch_proposal(&source.body, direction.vector(), None).map_err(|e| bad(cmd, e.to_string()))?;
+                let shown = format!("{at:.6}");
+                format!("{} mm", shown.trim_end_matches('0').trim_end_matches('.')).into()
             }
         };
         check_expr(s, &at, Kind::Length, cmd, "at")?;
@@ -127,15 +126,9 @@ fn edit_sketch(s: &mut Session, body: &str, stretches: &[AxisStretch]) -> std::r
         let at = s.doc.eval(&one.at, Kind::Length).map_err(|e| e.to_string())?;
         let distance = s.doc.eval(&one.distance, Kind::Length).map_err(|e| e.to_string())?;
         let n = one.direction.vector();
-        let base = match &one.from {
-            Some(face) => face.0.dot(n),
-            None => {
-                let b = expected.exact_bounds().map_err(|e| e.to_string())?;
-                b.min.dot(n).min(b.max.dot(n))
-            }
-        };
-        expected = solidcraft_kernel::stretch(&expected, n * (base + at), n, distance).map_err(|e| e.to_string())?;
-        planned.push(stretch_sketch::Planned { direction: one.direction, level: base + at, distance });
+        let cut = solidcraft_kernel::stretch_cut(&expected, n, one.from.as_ref().map(|face| face.0), at).map_err(|e| e.to_string())?;
+        expected = solidcraft_kernel::stretch(&expected, cut, n, distance).map_err(|e| e.to_string())?;
+        planned.push(stretch_sketch::Planned { direction: one.direction, cut, distance });
     }
     let (edited, changes) = stretch_sketch::changes(s, &state, body, &planned)?;
     let errors_before = s.model.results.iter().filter(|r| r.error.is_some()).count();

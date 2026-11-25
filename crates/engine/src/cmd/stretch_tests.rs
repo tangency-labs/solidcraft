@@ -271,3 +271,21 @@ fn edit_sketch_leaves_another_bodys_sketch_alone() {
     let peg = solidcraft_kernel::measure(&st.body("Peg").unwrap().body).unwrap();
     assert!(((peg.bbox.min.x + peg.bbox.max.x) / 2.0 - 80.0).abs() < 1e-6, "{:?}", peg.bbox);
 }
+
+#[test]
+fn with_no_cut_given_the_stretch_cuts_clear_of_a_hole_in_the_middle() {
+    // A 10 mm hole through the plate's middle (x 45 to 55): half the plate's length would cut
+    // through it. The proposal is the middle of a plain run instead (solidcore's, from the faces).
+    let mut s = plate();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "distance": 10, "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "+x", "distance": 15}));
+    assert!((plate_box(&s).1.x - 115.0).abs() < 1e-6);
+    let at = s.doc.features.iter().find_map(|f| match &f.kind {
+        solidcraft_doc::FeatureKind::Stretch { stretches, .. } => stretches.first().map(|one| one.at.as_str().to_string()),
+        _ => None,
+    });
+    assert_eq!(at.as_deref(), Some("22.5 mm"));
+}

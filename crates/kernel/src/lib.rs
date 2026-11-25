@@ -250,7 +250,7 @@ pub use step_in::{
 /// followed, the most bodies, and the most occurrences visited.
 pub use step_in::{MAX_ASSEMBLY_DEPTH as IMPORT_MAX_DEPTH, MAX_BODIES as IMPORT_MAX_BODIES, MAX_VISITS as IMPORT_MAX_VISITS};
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
-pub use stretch::{stretch, stretch_axis, stretch_cut};
+pub use stretch::{same_part as same_stretched_part, stretch, stretch_axis, stretch_cut, stretch_proposal};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
 pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
