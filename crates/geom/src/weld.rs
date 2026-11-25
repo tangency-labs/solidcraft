@@ -10,8 +10,6 @@
 //! ISO intermittent clear spacing is derived from stored centre pitch, never confused
 //! with it; unsupported combinations return errors.
 
-use std::f64::consts::{FRAC_PI_3, FRAC_PI_4};
-
 use serde::{Deserialize, Serialize};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
@@ -341,7 +339,10 @@ impl Weld {
         }
         let left = labels.iter().filter(|t| matches!(t.role, TextRole::Size(_))).map(|t| t.width_mm).fold(0.0, f64::max);
         let right = labels.iter().filter(|t| matches!(t.role, TextRole::Length(_))).map(|t| t.width_mm).fold(0.0, f64::max);
-        let symbol_width = [&self.arrow_side, &self.other_side].into_iter().flatten().map(|s| elementary_size(s.kind, aws, g).0).fold(g, f64::max);
+        let mut symbol_width = g;
+        for s in [&self.arrow_side, &self.other_side].into_iter().flatten() {
+            symbol_width = symbol_width.max(elementary_size(s.kind, aws, g)?.0);
+        }
         let x = 3.0 * h + left;
         let end = x + symbol_width + right + 3.0 * h;
         let mut drawing = Drawing { convention, items: Vec::new(), text: Vec::new(), reference_length_mm: end };
@@ -394,7 +395,7 @@ impl Weld {
         for (side, spec) in [(Side::Arrow, &self.arrow_side), (Side::Other, &self.other_side)] {
             if let Some(s) = spec {
                 let (y, sign) = position(side);
-                let (w, height) = elementary_size(s.kind, aws, g);
+                let (w, height) = elementary_size(s.kind, aws, g)?;
                 elementary(&mut drawing.items, s.kind, x, y, w, sign * height, d);
                 if let Some(contour) = s.contour {
                     let diagonal = 1.0 / 2.0_f64.sqrt();
@@ -403,23 +404,8 @@ impl Weld {
                     } else {
                         (Vec2::new(x + w / 2.0, y + sign * height), Vec2::new(1.0, 0.0), Vec2::new(0.0, sign))
                     };
-                    let radius = 1.5 * g;
-                    let offset = radius * 3.0_f64.sqrt() / 2.0;
-                    let middle = face + outward * (0.5 * g + radius - offset);
-                    let p0 = middle - tangent * (0.75 * g);
-                    let p3 = middle + tangent * (0.75 * g);
-                    let path = match contour {
-                        Contour::Flush => Seg2::Line { a: p0, b: p3 },
-                        Contour::Convex | Contour::Concave => {
-                            let bulge = if contour == Contour::Convex { 1.0 } else { -1.0 };
-                            let center = middle - outward * (bulge * offset);
-                            // The contour starts 120° from the face tangent. The fillet face
-                            // rotates that tangent another 45° toward its symbol baseline.
-                            let tilt = if s.kind == Kind::Fillet { FRAC_PI_4 } else { 0.0 };
-                            let start = sign * (bulge * 2.0 * FRAC_PI_3 - tilt);
-                            Seg2::Arc { center, radius, start, sweep: -sign * bulge * FRAC_PI_3 }
-                        }
-                    };
+                    let path = solidcore_tess::weld_symbol::weld_contour_mark(face, tangent, outward, g, mark_contour(contour))
+                        .map_err(|_| Invalid("contour mark geometry is out of range"))?;
                     stroke(&mut drawing.items, vec![path], false, d);
                 }
             }
@@ -514,14 +500,23 @@ fn stroke(items: &mut Vec<Item>, path: Vec<Seg2>, closed: bool, width_mm: f64) {
     items.push(Item::Stroke { path, closed, width_mm, pattern: None });
 }
 
-fn elementary_size(kind: Kind, aws: bool, g: f64) -> (f64, f64) {
-    match (kind, aws) {
+fn mark_contour(contour: Contour) -> solidcore_tess::weld_symbol::WeldContour {
+    use solidcore_tess::weld_symbol::WeldContour;
+    match contour {
+        Contour::Flush => WeldContour::Flush,
+        Contour::Convex => WeldContour::Convex,
+        Contour::Concave => WeldContour::Concave,
+    }
+}
+
+fn elementary_size(kind: Kind, aws: bool, g: f64) -> Result<(f64, f64)> {
+    Ok(match (kind, aws) {
         (Kind::Fillet, _) => (g, g),
         (Kind::SquareButt, true) => (0.6 * g, 1.2 * g),
         (Kind::SquareButt, false) => (0.5 * g, g),
         (Kind::SingleVButt, true) => (2.0 * g, g),
-        (Kind::SingleVButt, false) => (g, g * 3.0_f64.sqrt() / 2.0),
-    }
+        (Kind::SingleVButt, false) => (g, solidcore_tess::weld_symbol::v_groove_height(g).map_err(|_| Invalid("V groove height is out of range"))?),
+    })
 }
 
 fn elementary(items: &mut Vec<Item>, kind: Kind, x: f64, y: f64, w: f64, h: f64, d: f64) {
