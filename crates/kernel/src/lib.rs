@@ -36,8 +36,11 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
+pub mod drawing_centre_mark;
 mod emboss;
+mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -51,6 +54,7 @@ pub mod fuzz;
 mod heal;
 mod helix;
 pub mod history;
+pub mod hlr;
 mod iges_in;
 mod iges_out;
 mod intersection;
@@ -97,6 +101,7 @@ mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
 mod native;
+pub mod network;
 mod numbered;
 mod offset;
 mod offset_backend;
@@ -115,6 +120,7 @@ pub use par::map_with_local_pools;
 mod display_plan_tests;
 #[cfg(test)]
 mod pinch_tests;
+mod placement;
 #[cfg(test)]
 mod planar_faces_tests;
 mod plane_fit;
@@ -127,6 +133,8 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+#[cfg(test)]
+mod record_eval_tests;
 mod repair;
 mod route;
 #[cfg(test)]
@@ -219,6 +227,7 @@ pub use body::CapSignature;
 pub use body::DISPLAY_ANGLE;
 pub use body::DisplayShare;
 pub use body::EdgeInfo;
+pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
@@ -299,6 +308,7 @@ pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
 pub use distance::point_closest;
+pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
 pub use draft_corners::CornerRefusal;
@@ -357,6 +367,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::levels_along;
 pub use measure::measure;
 pub use measure::measure_mass;
 pub use mesh_convert::convert_prismatic_mesh;
@@ -434,6 +445,8 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::member_turn::ParallelTurnError;
 pub use solidcore_ops::member_turn::parallel_turn;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
@@ -522,6 +535,7 @@ pub use surface_trim::mutual_trim;
 pub use surface_trim::trim;
 pub use surface_trim::trim_dropped_keep;
 pub use surface_trim::trim_keep;
+pub use surface_trim::trim_sheet_keep;
 pub use surface_untrim::UntrimHoles;
 pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
@@ -603,6 +617,9 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
@@ -643,6 +660,7 @@ impl Cause for solidcraft_smlib::CheckReport {}
 impl Cause for solidcraft_smlib::export::ExportError {}
 impl Cause for solidcore_record::brep::history::Failed {}
 impl Cause for solidcore_ops::pcurve::Error {}
+impl Cause for solidcraft_geom::brep::eval::Error {}
 impl<T: Cause + ?Sized> Cause for &T {
     fn panic(&self) -> Option<&str> {
         (**self).panic()

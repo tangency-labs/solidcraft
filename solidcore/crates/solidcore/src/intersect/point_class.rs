@@ -85,9 +85,24 @@
 //!   curves on surfaces, ...) adds nothing, so no uncertified figure becomes a tolerance and
 //!   such an end stays as upstream leaves it. Upstream
 //!   leaves a split's new vertex smaller than that until a later UV-trim build covers it,
-//!   if one runs. Ends outside the neighbourhood (an `sss_point` move off the edges,
-//!   #21511) are left as upstream leaves them. The opaque-handle
+//!   if one runs. The opaque-handle
 //!   [`PointClassification::merge_into_object`] reaches no edges and is unchanged.
+//! - **The surf/surf/surf point carries the edge ends (#21511).** `MergeIntoObject` moves a
+//!   vertex to its `m_vSSSPoint` and leaves its edges ending where they did, up to tens of
+//!   units off a vertex of tolerance `1e-7`, which `AssertValid`'s edge-end test refuses.
+//!   [`PointClassification::merge_into_brep`] moves each such end (one outside the vertex's
+//!   ball) to the vertex (`vertex::carry_far_edge_ends`). When the curve passes the point
+//!   inside its natural interval (one traversal; a bounded line is not extended), the edge
+//!   is re-trimmed: its curve kept exactly and only the far end's parameter moved there, so
+//!   a line or conic through the point (an intersection edge of exact surfaces) keeps its
+//!   class. Otherwise only a wire edge (no face uses it) may have its curve edited:
+//!   a line becomes the line to its kept end, a B-spline or conic a B-spline with that end's
+//!   control point moved (both ends knots it passes through). An edge a face uses is never
+//!   edited that way, so a face's conic never becomes a spline. The change is notified,
+//!   deleting the edge uses' UV trim curves as upstream's own surf/surf/surf edge edit does
+//!   (`sm_SetXSectEdgeThroughPoint`), and kept only when certified to put the end within
+//!   half the vertex tolerance without pushing another valid end out; otherwise, and for a
+//!   curve kind neither edit applies to, the edge stays as upstream leaves it.
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
@@ -372,6 +387,16 @@ pub trait ClassObject: Copy + PartialEq {
 pub trait ClassGeometry<O> {
     /// The curve of a [`ClassObjectKind::Curve`] handle.
     fn curve(&self, o: O) -> Option<&Curve>;
+    /// Not upstream (tangency-labs/solidcraft#11574): a curve that is the curve of
+    /// handle `o`, parameter for parameter, in a form the curve/curve intersection
+    /// solves in closed form (a seam's ruling,
+    /// [`Surface::seam_ruling`](crate::surface::surface::Surface::seam_ruling)), which a
+    /// classification's edge intersection takes in the curve's place. Nothing else reads
+    /// it. `None` (the default): the curve itself.
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        let _ = o;
+        None
+    }
     /// The surface of a [`ClassObjectKind::Surface`] handle.
     fn surface(&self, o: O) -> Option<&Surface>;
     /// The volume of a [`ClassObjectKind::Volume`] handle.
@@ -1885,9 +1910,13 @@ impl<O: ClassObject> PointClassification<O> {
         // vertex whose ends all lie inside that ball is raised to twice the farthest
         // end's bound ([`vertex::edge_end_reach`]; doubling is exact). This is grow-only
         // and at most doubles the tolerance, and later merges and classifications read the
-        // larger radius (a later point within it joins this vertex). Ends outside the ball (the
-        // `sss_point` move can carry a vertex off its edges) are not the merge's
-        // neighbourhood and stay as upstream leaves them (#21511).
+        // larger radius (a later point within it joins this vertex). Ends outside the ball are
+        // not the merge's neighbourhood: the `sss_point` move can carry a vertex off its
+        // edges, and those edges' ends are moved to the vertex first (#21511,
+        // [`vertex::carry_far_edge_ends`]), so the vertex still bounds them.
+        if self.sss_point_flag {
+            vertex::carry_far_edge_ends(k, b, vertex_id, env)?;
+        }
         vertex::cover_merged_ends(k, b, vertex_id)?;
         Ok(outputs)
     }

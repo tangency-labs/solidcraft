@@ -583,6 +583,65 @@ fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
     }
 }
 
+/// Rounds between planes that end square on a face or meet three at a corner are built in
+/// closed form (`blend::exact_round`): every edge of the block, or one of them, takes exactly the
+/// volume and area of the rounded block, and the result is a valid solid with the faces the
+/// sessions make: a cylinder per edge, a ball patch per corner.
+#[test]
+fn a_block_s_rounds_between_planes_take_their_closed_forms() {
+    all_fixes();
+    let r: f64 = 2.0;
+    let (a, b, c) = (30.0, 20.0, 10.0);
+    let corner = 1.0 - PI / 6.0;
+    let edge = 1.0 - PI / 4.0;
+    // one edge, ending square on the two end faces
+    let body = block();
+    let e = top_front(&body);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), ABC - edge * r * r * a) < 1e-9);
+    assert_eq!(body.counts().unwrap(), [7, 15, 10]);
+    // every edge: twelve cylinders, eight ball corners
+    let body = block();
+    let mut picks = Vec::new();
+    for y in [0.0, b] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [a / 2.0, y, z]));
+        }
+    }
+    for x in [0.0, a] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [x, b / 2.0, z]));
+        }
+        for y in [0.0, b] {
+            picks.push(edge_at(&body, [x, y, c / 2.0]));
+        }
+    }
+    blend(&body, Blend::Round, &picks, &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let lengths = 4.0 * (a + b + c - 6.0 * r);
+    let want = ABC - edge * r * r * lengths - 8.0 * corner * r * r * r;
+    assert!(
+        rel(volume(&body), want) < 1e-9,
+        "{} against {want}",
+        volume(&body)
+    );
+    assert_eq!(body.counts().unwrap(), [26, 48, 24]);
+    // the concave edge inside an L, ending square on the top and the bottom: material added
+    let ell = || {
+        let block = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+        let notch = make_box([20.0, 15.0, -1.0], [21.0, 16.0, 22.0]).unwrap();
+        solidcore_ops::boolean::boolean(block, notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let body = ell();
+    let e = edge_at(&body, [20.0, 15.0, 10.0]);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), 18000.0 + edge * r * r * 20.0) < 1e-9);
+}
+
 #[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();
@@ -1568,6 +1627,46 @@ fn a_variable_round_runs_from_the_end_nearest_a_point() {
         fillet_variable_from(&b, 99, [0.0; 3], 1, &knots, &radii),
         Err(Error::Argument)
     );
+}
+
+/// A variable round of a closed edge, a cylinder's top or bottom rim: a smooth law from 2 at
+/// its seam, rising halfway round and back to 2, and 2 all round, builds a valid body whose
+/// volume lies between the constant rounds' of 2 and 4 (the same as 2's for 2 all round). The
+/// station closing the loop used to take t at the rim's start, not its end, and the round
+/// failed with status 1001 (#18542).
+#[test]
+fn a_variable_round_of_a_closed_rim_builds() {
+    all_fixes();
+    let cylinder = || make_cylinder([0.0; 3], 20.0, 60.0).unwrap();
+    let constant = |e: usize, r: f64| {
+        let b = cylinder();
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+        volume(&b)
+    };
+    for e in [1, 2] {
+        let (v2, v4) = (constant(e, 2.0), constant(e, 4.0));
+        for (knots, radii) in [
+            (
+                &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0][..],
+                &[2.0, 2.0, 4.0, 2.0, 2.0][..],
+            ),
+            (&[0.0, 0.0, 1.0, 1.0][..], &[2.0, 2.0][..]),
+        ] {
+            let b = cylinder();
+            let degree = knots.len() - radii.len() - 1;
+            fillet_variable_from(&b, e, [20.0, 0.0, 60.0], degree, knots, radii).unwrap();
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "edge {e}, {radii:?}"
+            );
+            let v = volume(&b);
+            if radii.len() == 2 {
+                assert!(rel(v, v2) < 1e-6, "edge {e}: {v} against {v2}");
+            } else {
+                assert!(v4 < v && v < v2, "edge {e}: {v} not between {v4} and {v2}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -6336,6 +6435,118 @@ fn a_round_on_a_rim_through_a_spheres_poles_joins_at_the_poles() {
     assert!(
         taken > 0.0 && taken < sphere_on_plane_round(1.0, 0.2),
         "the channelled socket's round took {taken}"
+    );
+}
+
+/// acid-9's tower: the loft with straight rulings from the 40 x 40 square at z = 0 to the
+/// same square turned 45 degrees at z = 100 (each corner to the corner 45 degrees further
+/// round, so its four sides are twisted ruled faces), bored through by a cylinder of radius
+/// 18.47 and kept inside the sphere of radius 55 about (0, 0, 50), which trims its eight
+/// corners. The sphere is first turned `turn` degrees about z: its seam, the meridian at
+/// azimuth `turn`, crosses the top corner at azimuth 0 when `turn` is 0 and no corner when
+/// it is 22.5. That is no geometry: only how the sphere's face is named.
+fn twisted_tower(turn: f64) -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::{loft, Curve as C};
+    use solidcore_ops::{make_sphere, BooleanOp};
+    let square = |z: f64, from: f64| {
+        let corner = |i: usize| {
+            let a = (from + 90.0 * i as f64).to_radians();
+            [
+                20.0 * 2.0_f64.sqrt() * a.cos(),
+                20.0 * 2.0_f64.sqrt() * a.sin(),
+                z,
+            ]
+        };
+        (0..4)
+            .map(|i| C::Line {
+                start: corner(i),
+                end: corner(i + 1),
+            })
+            .collect::<Vec<_>>()
+    };
+    let tower = loft(&[square(0.0, 45.0), square(100.0, 90.0)], 1, true).unwrap();
+    let bore = make_cylinder([0.0, 0.0, -1.0], 18.47, 102.0).unwrap();
+    let tower = boolean(tower, bore, BooleanOp::Subtract).unwrap().unwrap();
+    let sphere = make_sphere([0.0, 0.0, 50.0], 55.0).unwrap();
+    sphere.transform(&turn_about(2, turn)).unwrap();
+    boolean(tower, sphere, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-9's picks: a point on each edge where the sphere meets a twisted face, near both ends
+/// of each face's bottom and top edges (the points of `cad-acid-tests`' `solidcraft/acid.py`,
+/// found there by bisection along the rulings).
+const TOWER_PICKS: [[f64; 3]; 16] = [
+    [18.727901831, 20.184356381, 2.388473554],
+    [-0.093587256, 27.534229441, 97.611526446],
+    [-19.40346417, 19.535816536, 2.388473554],
+    [-27.515121653, 1.029868889, 97.611526446],
+    [-20.184356381, 18.727901831, 2.388473554],
+    [-27.534229441, -0.093587256, 97.611526446],
+    [-19.535816536, -19.40346417, 2.388473554],
+    [-1.029868889, -27.515121653, 97.611526446],
+    [-18.727901831, -20.184356381, 2.388473554],
+    [0.093587256, -27.534229441, 97.611526446],
+    [19.40346417, -19.535816536, 2.388473554],
+    [27.515121653, -1.029868889, 97.611526446],
+    [20.184356381, -18.727901831, 2.388473554],
+    [27.534229441, 0.093587256, 97.611526446],
+    [19.535816536, 19.40346417, 2.388473554],
+    [1.029868889, 27.515121653, 97.611526446],
+];
+
+/// acid-9 (the twisted tower's R 1 rounds where its sphere meets its ruled faces): the
+/// sphere's seam crosses the top corner at azimuth 0, splitting the edge with the face on
+/// its one side, so the tangent chain takes 17 edges. The rounds of the two edges at that
+/// corner are mitred at the loft's corner ruling, and their rails cross on the sphere just
+/// past the seam: the corner solved that point with the name its own solve landed on, a
+/// period away from the other edge's edge use, the trace sorted it past that edge's far end
+/// and, running along the edge use's parameters, never reached it ("Fillet Surface
+/// Computation Failure", the trace touching its domain's boundary again). A rail end now
+/// takes the name nearest its edge use's trim curve at the rail's end. Turning the sphere
+/// 22.5 degrees moves its seam off every corner (16 edges) and changes no geometry, so both
+/// build a valid solid and take the same volume off: each body's faces lie within the
+/// body's tolerance (1e-5) of the same exact surfaces, so the volumes differ by at most
+/// that tolerance times the rounds' area, under pi r L with L the edges' length, each of
+/// the 16 under 30 long (an edge runs on its face from the corner ruling to the cap or
+/// base), 0.0151.
+#[test]
+fn rounds_mitred_beside_a_sphere_seam_take_what_they_take_off_it() {
+    all_fixes();
+    let r = 1.0;
+    let bound = 1e-5 * PI * r * 16.0 * 30.0;
+    let mut taken = Vec::new();
+    for (turn, count) in [(0.0, 17), (22.5, 16)] {
+        let case = format!("the sphere turned {turn} degrees");
+        let b = twisted_tower(turn);
+        let picks: Vec<usize> = TOWER_PICKS.iter().map(|&p| nearest_edge(&b, p)).collect();
+        let chain = tangent_chain(&b, None, &picks, &[], HALF_DEGREE).unwrap();
+        assert!(chain.undecided.is_empty(), "{case}: {chain:?}");
+        assert_eq!(chain.members.len(), count, "{case}: the rounded edges");
+        let before = b.volume(1e-10).unwrap();
+        blend(
+            &b,
+            Blend::Round,
+            &chain.members,
+            &vec![r; chain.members.len()],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("{case}: the rounds do not build: {e:?}"));
+        assert!(b.is_manifold_solid().unwrap(), "{case}");
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{case}: {report}");
+        let after = b.volume(1e-10).unwrap();
+        assert!(after < before, "{case}: the rounds took nothing off");
+        taken.push(before - after);
+    }
+    assert!(
+        (taken[0] - taken[1]).abs() <= bound,
+        "the rounds took {} off with the seam at the corner, {} with it clear",
+        taken[0],
+        taken[1]
     );
 }
 
