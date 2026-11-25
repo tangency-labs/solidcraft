@@ -23,6 +23,7 @@ pub mod flush_contact;
 mod line_meeting;
 pub mod r#loop;
 pub mod normal;
+mod planar_disjoint;
 pub mod point_identity;
 pub mod poly;
 pub mod poly_properties;

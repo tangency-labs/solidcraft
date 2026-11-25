@@ -233,10 +233,11 @@ impl Sketch {
                     .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
                     .map(|curve| curve.id.clone())
                     .collect();
-                let helpers =
-                    self.curves.iter().enumerate().filter_map(|(index, curve)| {
-                        curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)
-                    });
+                let helpers = self
+                    .curves
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, curve)| curve.spline_guide_owner().is_some_and(|parent| spline_ids.contains(parent)).then_some(index));
                 let mut seen: std::collections::BTreeSet<usize> = cs.iter().copied().collect();
                 cs.extend(helpers.filter(|index| seen.insert(*index)));
                 let ps: Vec<_> = entity_ids.iter().filter(|id| self.curve_index(id).is_none()).filter_map(|id| self.resolve_point(id)).collect();
@@ -583,7 +584,7 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
         let mut kind = cu.kind.clone();
         kind.map_points(&m);
-        let prefix = if cu.spline_handle_of.is_some() {
+        let prefix = if cu.spline_guide_owner().is_some() {
             "h"
         } else {
             match &kind {
@@ -609,11 +610,12 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
             fixed: false,
             infinite,
             spline_handle_of: cu.spline_handle_of,
+            spline_control_polygon_of: cu.spline_control_polygon_of,
         });
     }
     let mut made = Vec::with_capacity(clones.len());
     for mut copy in clones {
-        if let Some(parent) = copy.spline_handle_of.as_mut() {
+        for parent in [&mut copy.spline_handle_of, &mut copy.spline_control_polygon_of].into_iter().flatten() {
             *parent = curve_map.get(parent).cloned().ok_or_else(|| SketchError::Invalid("missing spline handle parent".into()))?;
         }
         sk.curves.push(copy);
