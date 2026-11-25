@@ -816,7 +816,7 @@ fn arc_lengths(k: &Kernel, b: &Brep, fraction: f64) -> Result<Vec<f64>, Stop> {
                 match c.find_parameter_at_arc_length(k, ivl.min(), fraction * length) {
                     Err(err) => row[2] = fail(&err)?,
                     Ok(found) => {
-                        row[2] = f64::from(found.status());
+                        row[2] = f64::from(crate::output::arc_length_status(&found));
                         match c.evaluate_point(k, found.end_param) {
                             Ok(p) => {
                                 row[3] = p.x;
