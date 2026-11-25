@@ -57,6 +57,25 @@
 //! | [`CsIntersectEnfo`], [`CsNormalizeEnfo`], [`FindPsNormalEnfo`], [`SspIntersectEnfo`], [`SsiNormalizeEnfo`], [`SsNormalizeEnfo`], [`SssIntersectEnfo`] | the constructors of `SmCSIntersectENFO`, `SmCSNormalizeENFO`, `SmFindPSNormalENFO`, `SmSSPIntersectENFO`, `SmSSINormalizeENFO`, `SmSSNormalizeENFO`, `SmSSSIntersectENFO` |
 //!
 //! Deviations:
+//! - **Zero tests far from the origin (#18634).** [`base_is_degenerate_curve`] calls a
+//!   derivative zero within the caller's tolerance (at least `SM_EFF_ZERO`), or within
+//!   `SM_EFF_ZERO (1 + max |P|)` only when the length it spans across the domain side is
+//!   too, not whenever it is within `max(tol, SM_EFF_ZERO (1 + max |P|))` (every zero
+//!   here is one upstream finds too). [`base_is_degenerate_point`] floors its
+//!   tolerance with `max(1000 SM_EFF_ZERO, SM_EFF_ZERO (1 + max(|P0|, |P1|)))`, not
+//!   upstream's `1000 SM_EFF_ZERO (1 + |P0| + |P1|)`; the scaled part is the Level 2
+//!   check's own coincidence resolution (`SmBSplineCurve` tests 3 and 4,
+//!   `SM_EFF_ZERO (1 + max |coord|)`). The floor is never above upstream's, equals it at
+//!   `P = 0`, and near the origin the callers' `tol_3d` (at least 1e-6) dominates both.
+//!   [`Surface::is_periodic`] keeps upstream's seam gap test; when the squared gap
+//!   exceeds `SM_EFF_ZERO` (the allowance at the origin) it also needs the squared chord
+//!   from the seam to the middle of the domain to exceed the scaled allowance at some
+//!   sample, so a surface nowhere wider than the gap it allows far from the origin is
+//!   not closed (every periodic answer here is one upstream gives too, and every surface
+//!   whose gap is within `SM_EFF_ZERO` keeps upstream's answer). A wide surface far
+//!   out with a seam gap under upstream's allowance is still called periodic, as
+//!   upstream. Upstream refused, or mis-seamed, faces far from the origin (a box 1e-3
+//!   wide at 1e6, 2e-4 wide at 1e5).
 //! - **Nesting.** `StepSurface::new` returns `InvalidInput` when the base surface would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -83,8 +102,9 @@
 //!   arrays are a function of the surface ([`Surface::continuities`]), which those
 //!   readers ask directly: they get no cache at all, so a read during a Boolean
 //!   operation builds no tree and makes no UV trim curves. No history of the surface's
-//!   caches is kept (the fast-drop face test's state bits still depend on whether the
-//!   face's cache was built: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest of the cache (its UV domain, face
+//!   caches is kept (the fast-drop face test asks the face whether to test, not the
+//!   cache's build: [`SurfaceSolveContext::surface_cache_without_get_tree`]). The rest
+//!   of the cache (its UV domain, face
 //!   containment and modified-face state) is rebuilt as before. The debug cache
 //!   counters are not modelled. The owner of a face's surface is an
 //!   [`ObjectRef`] the surface cannot follow to the B-rep: a caller holding the face
@@ -134,7 +154,8 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::assert_array::labels::FACE_TYPE;
 use crate::geom::extent1d::Extent1d;
@@ -347,9 +368,9 @@ pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
     const OP: &str = "surface::surface::p1::evaluate_directional_derivs";
     // check state
     if highest_deriv > 3 {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "a derivative order above three was asked",
+            SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
         ));
     }
 
@@ -994,9 +1015,9 @@ pub fn validate_surface_cache(
         }
         // low work - use OldCache when its given
         ObjectCacheType::Surface => Ok(old),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_CACHE,
-            "the cache type has no surface cache",
+            SurfaceFailure::UnsupportedCacheKind,
         )),
     }
 }
@@ -1195,11 +1216,13 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
     /// This surface's cache as `smsurf_GetSurfaceCache` hands it out to a reader that
     /// does not call `GetTree` (the state bits `GlobalPointSolve`'s fast-drop face
     /// test reads). Upstream's factory defers the tree during a Boolean operation, and
-    /// the tree build may change those bits (it turns point testing off on a face
+    /// upstream's tree build changes those bits (it turns point testing off on a face
     /// without UV trim curves), so a context that keeps face caches answers the cache
-    /// without the deferred tree; by default the solve's cache. The bits then depend on
-    /// whether the face's cache was built before, as upstream's and as the live
-    /// readers' (`intersect::point_class`, `topology::vertexuse`) do.
+    /// without the deferred tree; by default the solve's cache. No build writes the
+    /// point test bit here: whether the test runs is asked of the face (its loop uses)
+    /// each time, so the answer does not depend on whether or how the face's cache was
+    /// built before (upstream's does), as for the live readers (`intersect::point_class`,
+    /// `topology::vertexuse`).
     ///
     /// Only those state bits are answered ([`SurfaceCacheState`]), read from a kept
     /// cache in place: the values the cache handed out would read.
@@ -2436,8 +2459,22 @@ impl Surface {
 
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
-        let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
+        let mut cache = match get_surface_cache::<()>(k, self, None) {
+            Ok(cache) => cache,
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(e, SolidError::PreparationRequired { .. }) =>
+            {
+                return Err(e);
+            }
+            Err(e) => {
+                return Err(super::p7::chained(
+                    OP_BOX,
+                    SurfaceFailure::SurfaceCacheNotBuilt,
+                    e,
+                ))
+            }
+        };
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2962,10 +2999,14 @@ impl Surface {
             for (ii, curve) in curves_3d.iter_mut().enumerate() {
                 // SM_CAST_PTR(SmBSplineCurve, ..): NULL (then dereferenced) otherwise
                 if !matches!(curve.kind(), CurveKind::BSpline(_)) {
-                    return Err(SolidError::surface_missing(
+                    return Err(Failure::new(
                         OP,
-                        "the B-spline form of the 3D curve",
-                    ));
+                        SurfaceFailure::Defect {
+                            why: "a silhouette 3D curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 }
 
                 // To add color attribute for curve from color of surface: not modelled
@@ -3010,12 +3051,25 @@ impl Surface {
 
                     let uv_curve = curves_uv
                         .get_mut(ii)
-                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
+                        .ok_or_else(|| {
+                            Failure::new(
+                                OP,
+                                SurfaceFailure::Defect {
+                                    why: "a silhouette 3D curve has no UV curve, but the tracer stores its 3D and UV curves in pairs",
+                                },
+                            )
+                            .with_status(SM_ERR_NULL_POINTER)
+                            .into_error()
+                        })?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
-                        return Err(SolidError::surface_missing(
+                        return Err(Failure::new(
                             OP,
-                            "the B-spline form of the UV curve",
-                        ));
+                            SurfaceFailure::Defect {
+                                why: "a silhouette UV curve is not a B-spline, but the tracer stores only B-splines (copied as B-splines or flushed from its B-spline fit)",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error());
                     }
                     let mut new_uv_bsc = uv_curve.clone();
                     // may snap sIvl by tol to existing knots
@@ -3036,9 +3090,12 @@ impl Surface {
     // ---- shape tests ----------------------------------------------------------------
 
     /// Whether the surface is periodic across its `surf_param` boundaries of
-    /// `uv_domain` (`IsPeriodic`): at six interior samples, equal positions (to the
-    /// scaled zero) and tangent directions on both sides of the possible seam (to the
-    /// angle tolerance, checked again unitised).
+    /// `uv_domain` (`IsPeriodic`): at six interior samples, positions on both sides of
+    /// the possible seam whose squared gap is within the scaled zero, and equal tangent
+    /// directions (to the angle tolerance, checked again unitised). A surface whose
+    /// squared gap exceeds `SM_EFF_ZERO` (the allowance at the origin) must also reach
+    /// farther than the scaled zero from the seam somewhere (its squared chord to the
+    /// middle of the domain across it exceeds it at some sample, #18634).
     ///
     /// Upstream ignores the evaluation statuses and goes on with what a failed
     /// evaluation left; here, as the fork (WR-663, tangency-labs/smlib 21dcf69), a
@@ -3058,6 +3115,8 @@ impl Surface {
 
         // locals
         let ang_tol_rad_sq = ANG_TOL_RAD * ANG_TOL_RAD;
+        let mut wide = false;
+        let mut gap_square = 0.0_f64;
 
         // for every internal sample points (don't do end points)
         for ii in 1..NUM_TEST_POINTS {
@@ -3090,8 +3149,25 @@ impl Surface {
             let scaled_zero = p_max[0][0].scaled_zero();
 
             // Check position difference.
-            if (p_min[0][0] - p_max[0][0]).length_squared() > scaled_zero {
+            let gap = (p_min[0][0] - p_max[0][0]).length_squared();
+            if gap > scaled_zero {
                 return Ok(false);
+            }
+            gap_square = gap_square.max(gap);
+
+            // Is the surface wider across the seam here than the gap the test allows?
+            if !wide {
+                let mut uv_mid = uv;
+                if surf_param == SurfParamType::U {
+                    uv_mid.x = uv_domain.evaluate(0.5, 0.5).x;
+                } else {
+                    uv_mid.y = uv_domain.evaluate(0.5, 0.5).y;
+                }
+                // (a middle that cannot be evaluated leaves upstream's answer)
+                wide = match ignored(self.evaluate(k, uv_mid, 0, 0, upper_flags(true)))? {
+                    Some(d) => (first_block(&d)[0][0] - p_min[0][0]).length_squared() > scaled_zero,
+                    None => true,
+                };
             }
 
             // Check tangent-vector directions, in V, then in U.
@@ -3109,8 +3185,15 @@ impl Surface {
             }
         } // end iter every internal sample point
 
-        // all done
-        Ok(true) // passed all tests
+        // A surface nowhere wider across the seam than the gap the test allows, whose
+        // seam gap the same test would see at the origin (squared gap above
+        // `SM_EFF_ZERO`, the allowance at `P = 0`), is not closed: its start, middle and
+        // end are one point to the test only because it lies far from the origin
+        // (#18634: upstream's squared gap of `SM_EFF_ZERO * (1 + max |P|)` admits gaps of
+        // 1e-6 sqrt(1 + max |P|), so a plane 2e-4 wide at 1e5 from the origin was found
+        // periodic and its face reported a crossed or missing seam). A surface whose gap
+        // is within `SM_EFF_ZERO` keeps upstream's answer wherever it lies.
+        Ok(wide || gap_square <= EFF_ZERO) // passed all tests
     }
 
     /// Whether the surface over `uv_domain` (default the natural domain) degenerates
@@ -3486,7 +3569,6 @@ pub fn base_is_degenerate_point(
     // evaluate interval start and end points
     let mut uv2 = Point2::new(uv0.x, uv1.y);
     let mut uv3 = Point2::new(uv1.x, uv0.y);
-    let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
 
     // a surface that cannot be evaluated is not shown degenerate, as the fork
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
@@ -3506,18 +3588,26 @@ pub fn base_is_degenerate_point(
         return Ok(false);
     };
 
-    // select a tolerance - scale it to sP1 location
-    let scaled_zero =
-        1000.0 * EFF_ZERO * (1.0 + pv0[0][0].max_dimension() + pv1[0][0].max_dimension());
-    let tol2 = (tol_3d * tol_3d).max(scaled_zero * scaled_zero);
+    // select a tolerance: the caller's, at least upstream's floor at the origin and the
+    // scaled zero of sP0 and sP1 (#18634: upstream scales the thousandfold floor,
+    // `1000 * SM_EFF_ZERO * (1 + |P0| + |P1|)`, which refused faces far from the origin
+    // that the Level 2 check accepts)
+    let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
+    let scaled_zero = pv0[0][0]
+        .max_dimension()
+        .max(pv1[0][0].max_dimension())
+        .scaled_zero();
+    let tol = tol_3d.max(1000.0 * EFF_ZERO).max(scaled_zero);
+    let tol2 = tol * tol;
+    let near = |a: Vec3, b: Vec3| a.distance_squared(b) < tol2;
     let zero_derivs = |pv: &[[Vec3; 2]; 2]| {
         pv[1][0].length_squared() * uv_size2 < tol2 && pv[0][1].length_squared() * uv_size2 < tol2
     };
 
     // when corner points are close and have zero 1st derivatives
-    if pv0[0][0].distance_squared(pv1[0][0]) < tol2
-        && pv0[0][0].distance_squared(pv2[0][0]) < tol2
-        && pv0[0][0].distance_squared(pv3[0][0]) < tol2
+    if near(pv0[0][0], pv1[0][0])
+        && near(pv0[0][0], pv2[0][0])
+        && near(pv0[0][0], pv3[0][0])
         && zero_derivs(&pv0)
         && zero_derivs(&pv1)
         && zero_derivs(&pv2)
@@ -3545,10 +3635,10 @@ pub fn base_is_degenerate_point(
         };
 
         // when all those points are also degenerate
-        if pt.distance_squared(pv0[0][0]) < tol2
-            && pt.distance_squared(pv1[0][0]) < tol2
-            && pt.distance_squared(pv2[0][0]) < tol2
-            && pt.distance_squared(pv3[0][0]) < tol2
+        if near(pt, pv0[0][0])
+            && near(pt, pv1[0][0])
+            && near(pt, pv2[0][0])
+            && near(pt, pv3[0][0])
             && zero_derivs(&pv0)
             && zero_derivs(&pv1)
             && zero_derivs(&pv2)
@@ -3558,7 +3648,7 @@ pub fn base_is_degenerate_point(
             let Some(pc) = eval(uv_domain.evaluate(0.5, 0.5))? else {
                 return Ok(false);
             };
-            if pt.distance_squared(pc[0][0]) < tol2 && zero_derivs(&pc) {
+            if near(pt, pc[0][0]) && zero_derivs(&pc) {
                 // take a guess and consider this degenerate
                 return Ok(true);
             }
@@ -3572,8 +3662,11 @@ pub fn base_is_degenerate_point(
 
 /// `SmSurface::IsDegenerateCurve` (base body): the domain is an iso-parameter line,
 /// or the corners, four interior points, four diagonal points and the centre all have
-/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`)
-/// to `max(scaled zero, opt_3d_tol)`. A domain that is a point is not a curve.
+/// parallel first derivatives, or all have a vanishing `Su` (or all a vanishing `Sv`):
+/// within `max(opt_3d_tol, SM_EFF_ZERO)`, or within the scaled zero
+/// `SM_EFF_ZERO (1 + max |P|)` only when its length times the domain side is too
+/// (upstream: within `max(scaled zero, opt_3d_tol)`, #18634). A domain that is a point
+/// is not a curve.
 ///
 /// # Errors
 ///
@@ -3685,17 +3778,31 @@ pub fn base_is_degenerate_curve(
         }
     }
 
-    // pick a tangent tolerance
-    let mut tol = EFF_ZERO * (1.0 + d0[0][0][0].max_dimension().max(d0[2][0][0].max_dimension()));
-    if tol < opt_3d_tol {
-        tol = opt_3d_tol;
-    }
+    // pick a tangent tolerance: a derivative is zero within the caller's tolerance (at
+    // least SM_EFF_ZERO), or within the scaled zero of the two corners when the length
+    // it spans across the domain side, `|S_u| * u-side` or `|S_v| * v-side`, is too
+    // (#18634: upstream takes the derivative alone against `max(tol, SM_EFF_ZERO * (1 +
+    // max |P|))`, which called a unit-speed side 5e3 long at 1e12 from the origin zero;
+    // every derivative zero here is zero upstream too)
+    let tol = opt_3d_tol.max(EFF_ZERO);
     let tol_square = tol * tol;
+    let scaled_zero =
+        EFF_ZERO * (1.0 + d0[0][0][0].max_dimension().max(d0[2][0][0].max_dimension()));
+    let scaled_zero_square = scaled_zero * scaled_zero;
 
     // Surface degenerates to Curve when all Su (then all Sv) values are zero
     for (i, j) in [(1, 0), (0, 1)] {
-        let zero =
-            |d: &[[Vec3; 2]; 2]| is_zero_to_tol(block_at(d, i, j).length_squared(), tol_square);
+        let side = if i == 1 {
+            uv_domain.x_length()
+        } else {
+            uv_domain.y_length()
+        };
+        let zero = |d: &[[Vec3; 2]; 2]| {
+            let speed_square = block_at(d, i, j).length_squared();
+            is_zero_to_tol(speed_square, tol_square)
+                || (is_zero_to_tol(speed_square, scaled_zero_square)
+                    && is_zero_to_tol(speed_square * (side * side), scaled_zero_square))
+        };
         if d0.iter().all(zero) {
             // check sample points
             if d1.is_none() {
@@ -3795,9 +3902,11 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     }
 
     // error: arrive here when no segments contain the input dParamInside value
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_IVL,
-        "no segment contains the parameter",
+        SurfaceFailure::ParameterOutsideInterval {
+            param: param_inside,
+        },
     ))
 }
 
@@ -4245,9 +4354,9 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
         let Ok([unit_t, unit_tt]) = derivs else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
-                "the unit derivatives of the singular direction are undefined",
+                SurfaceFailure::ZeroLengthTangent,
             ));
         };
 

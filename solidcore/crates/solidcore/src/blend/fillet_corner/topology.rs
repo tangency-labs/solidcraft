@@ -58,7 +58,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
-use crate::error::blend::{BlendFailure, CornerShape};
+use crate::error::blend::{BlendFailure, CornerInput, CornerShape, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -169,8 +169,57 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 /// build ([`BlendFailure::CornerShapeNotBuilt`], guide rule 8), with the status of the site
 /// it replaces.
 #[track_caller]
-fn shape_not_built(op: &'static str, shape: CornerShape) -> SolidError {
+pub(super) fn shape_not_built(op: &'static str, shape: CornerShape) -> SolidError {
     SolidError::blend(op, BlendFailure::CornerShapeNotBuilt(shape))
+}
+
+/// A corner step at `op` is given a corner, or a pseudo-B-rep, that lacks `input` or holds
+/// it otherwise than the corner topology makes it, about `entity` where the step has one
+/// ([`BlendFailure::CornerInputInvalid`]): invalid input, as the steps are public and read a
+/// `FilletCorner` and a `FilletBrep` a caller can build. Status `status`, that of the site
+/// it replaces.
+#[track_caller]
+pub(super) fn corner_input(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+    status: i32,
+) -> SolidError {
+    // (the failure takes its entity from the cause)
+    Failure::new(op, BlendFailure::CornerInputInvalid { input, entity })
+        .with_status(status)
+        .into_error()
+}
+
+/// A link of the fillet structures a corner step at `op` reads is not there
+/// ([`BlendFailure::FilletSetUpInvalid`]), about `entity` where the step has one: invalid
+/// input, as for [`corner_input`]. Status `status`, that of the site it replaces.
+#[track_caller]
+pub(super) fn set_up(
+    op: &'static str,
+    part: FilletSetUp,
+    entity: Option<EntityRef>,
+    status: i32,
+) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
+    match entity {
+        Some(at) => failure.at(at),
+        None => failure,
+    }
+    .with_status(status)
+    .into_error()
+}
+
+/// A fillet edge `e` without its original face ([`FilletSetUp::OriginalFace`] at the
+/// edge, `SM_ERR_NULL_POINTER`: upstream `NER`).
+#[track_caller]
+pub(super) fn no_original_face(op: &'static str, e: EdgeId) -> SolidError {
+    set_up(
+        op,
+        FilletSetUp::OriginalFace,
+        Some(EntityRef::Edge(e)),
+        SM_ERR_NULL_POINTER,
+    )
 }
 
 fn edge_of(target: &Brep, eu: EdgeuseId) -> Result<EdgeId> {

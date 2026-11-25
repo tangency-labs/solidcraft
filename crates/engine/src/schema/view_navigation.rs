@@ -182,6 +182,27 @@ pub struct OriginAxesAcrossViewResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Show or hide the scale bar in the view's bottom left corner: a bar and the round length it
+/// stands for in the design's units, at the view's centre in perspective (#375). An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ScaleBarParams {
+    /// True shows the scale bar, false hides it.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted scale bar setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ScaleBarResult {
+    /// Whether the scale bar is shown now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
 /// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
@@ -268,6 +289,30 @@ pub struct RibbonTabsOnly {
     /// The requested state; absent when the call asked to switch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `view.browser`: show or hide the Browser tree panel, the design's tree of components, bodies
+/// and sketches. A window setting the app keeps: not saved with the design, not an undo step,
+/// and it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserTreeParams {
+    /// True shows the Browser tree panel, false hides it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub visible: Option<bool>,
+}
+
+/// What `view.browser` returns: the request echoed. The window applies it to the Browser tree
+/// panel and the design is not changed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrowserTreeResult {
+    /// The requested state; absent when the call asked to toggle it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

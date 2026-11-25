@@ -161,6 +161,7 @@
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::query::QueryFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -267,6 +268,10 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
         )
     }
 
+    fn has_loopuses(&self) -> Result<bool> {
+        crate::topology::face::p4::has_loopuses(self.b, self.f)
+    }
+
     fn loopuse_edgeuses(&self, loopuse: EntityRef) -> Result<Vec<EntityRef>> {
         let EntityRef::Loopuse(lu) = loopuse else {
             return Err(cache_face_entity("not a loop use"));
@@ -336,7 +341,7 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
     fn natural_uv_domain(&self) -> Result<Option<Extent2d>> {
         Ok(Some(
             fp2::surface(self.b, self.f)?
-                .ok_or_else(|| SolidError::query_missing(OP_CACHE_FACE, "the face's surface"))?
+                .ok_or_else(|| SolidError::query(OP_CACHE_FACE, QueryFailure::FaceWithoutSurface))?
                 // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
                 .natural_uv_domain_if_built(),
         ))
@@ -432,7 +437,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP_CACHE_FACE, "the face's surface"))?
+        .ok_or_else(|| SolidError::query(OP_CACHE_FACE, QueryFailure::FaceWithoutSurface))?
         .clone_for_evaluation()?;
     // `GetFace()` is NULL while the owner is cleared
     let cleared = b.is_surface_owner_cleared(f);
@@ -1191,7 +1196,7 @@ fn point_classify_with_topology(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::query_missing(OP_CLASSIFY, "the face's surface"))?;
+        .ok_or_else(|| SolidError::query(OP_CLASSIFY, QueryFailure::FaceWithoutSurface))?;
     // (an owned surface: the loop classification edits the B-rep while it walks)
     let surface: Surface = if let Some(copy) = with_out_of_bounds_enabled(surface)? {
         copy
@@ -1338,14 +1343,9 @@ fn point_classify_with_topology(
 /// The failure of [`point_classify`] when no loop of the face `this` classifies the point
 /// (upstream `SM_ERR`, about the face).
 fn no_loop_classifies(this: EntityRef) -> SolidError {
-    crate::error::Failure::new(
-        OP_CLASSIFY,
-        crate::error::query::QueryFailure::Failed(
-            "the point is in no loop of the face (a loop crosses its seam)",
-        ),
-    )
-    .at(this)
-    .into_error()
+    crate::error::Failure::new(OP_CLASSIFY, QueryFailure::NoLoopClassifies)
+        .at(this)
+        .into_error()
 }
 
 /// The on-boundary exit of [`point_classify`]: the edge, its parameter, the gap from
@@ -1739,7 +1739,7 @@ fn boundary_edge<O: ClassObject>(
     };
     let record = objects.brep().edge(edge)?;
     if record.curve.is_none() {
-        return Err(SolidError::query_missing(OP_CURVE, "the edge's curve"));
+        return Err(SolidError::query(OP_CURVE, QueryFailure::EdgeWithoutCurve));
     }
     Ok(BoundaryEdge {
         edge: objects.edge(edge),
@@ -1765,11 +1765,7 @@ fn seam_ends(k: &Kernel, b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<
     if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
         return Ok(None);
     }
-    let first = crate::topology::edge::vertex(b, edge)?;
-    let second = match first {
-        Some(v) => crate::topology::edge::other_vertex(b, edge, Some(v))?,
-        None => None,
-    };
+    let (first, second) = crate::topology::edge::start_end_vertices(b, edge)?;
     let mut ends = [None, None];
     for (slot, v) in ends.iter_mut().zip([first, second]) {
         let Some(v) = v else { continue };
@@ -2089,19 +2085,20 @@ fn boundary_loops<O: ClassObject>(
     cached: bool,
 ) -> Result<Vec<BoundaryLoop<O>>> {
     let fu = fp2::upward_faceuse(objects.brep(), face)?
-        .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's upward face use"))?;
+        .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::FaceWithoutFaceuse))?;
     let loopuses = objects.brep().faceuse(fu)?.loopuses.clone();
     let mut loops = Vec::new();
     for lu in loopuses {
         let mut vertices = Vec::new();
         for vu in loopuse::vertexuses(objects.brep(), lu, None)? {
-            let vu =
-                vu.ok_or_else(|| SolidError::query_missing(OP_CURVE, "a loop use's vertex use"))?;
+            let vu = vu.ok_or_else(|| {
+                SolidError::query(OP_CURVE, QueryFailure::LoopuseWithoutVertexuse)
+            })?;
             let b = objects.brep();
             let vertex = b
                 .vertexuse(vu)?
                 .vertex
-                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "a vertex use's vertex"))?;
+                .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::VertexuseWithoutVertex))?;
             let record = b.vertex(vertex)?;
             let (point, zone_tol_3d) = (record.point, record.tolerance);
             // Cached traversal supplies its own UV only for visited vertices.
@@ -2126,11 +2123,11 @@ fn boundary_loops<O: ClassObject>(
         }
         let mut edges = Vec::new();
         for eu in loopuse::edgeuses(objects.brep(), lu, None, None)? {
-            let edge = objects
-                .brep()
-                .edgeuse(eu)?
-                .edge
-                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "an edge use's edge"))?;
+            let edge = objects.brep().edgeuse(eu)?.edge.ok_or_else(|| {
+                crate::error::Failure::new(OP_CURVE, QueryFailure::EdgeuseWithoutEdge)
+                    .with_status(crate::error::SM_ERR_NULL_POINTER)
+                    .into_error()
+            })?;
             // the trim curve as of now: ComputeUVPoint above may have made it
             let (trim, owner) = eu1::uv_trim_curve(objects.brep(), eu)?;
             let trim_curve = match (trim, owner) {
@@ -2326,6 +2323,7 @@ fn curve_on_classify_body<O: ClassObject>(
     // init output
     reset_classification(k, cc)?;
     cc.set_face(Some(objects.face(f)));
+    cc.set_native_material_contacts(!has_big_gaps);
     let mut modified = false;
     // the UV trim curves made by the trim boundary intersection's ComputeUVPoint calls
     // that `objects` cannot resolve (see WithMadeTrimCurves)
@@ -2350,12 +2348,7 @@ fn curve_on_classify_body<O: ClassObject>(
             match intersect_ts_bound(k, objects, &mut made_trims, cc, f, do_check_3d) {
                 Ok(()) => {}
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => {
-                    return Err(SolidError::query_failed(
-                        OP_CURVE,
-                        "the UV curve of an edge use could not be made",
-                    ))
-                }
+                Err(e) => return Err(boundary_not_intersected(e)),
             }
         } else {
             // 3D Curve Branch
@@ -2508,6 +2501,16 @@ fn reset_classification<O: ClassObject>(k: &Kernel, cc: &mut CurveClassification
     cc.reset(k, &ResetOptions::default())
 }
 
+/// The face boundary's intersection with the 2D classification curve failed with `e`:
+/// upstream's `SM_ERR`, with `e` kept as the cause. Its own class is `failed`
+/// ([`SolidError::kind`]); whether it is a defect or a refusal is decided by its cause
+/// ([`SolidError::is_defect`] and [`SolidError::is_refusal`] follow the chain).
+fn boundary_not_intersected(e: SolidError) -> SolidError {
+    crate::error::Failure::new(OP_CURVE, QueryFailure::BoundaryNotIntersected)
+        .caused_by(e)
+        .into_error()
+}
+
 /// `SmCurveClassification::IntersectTSBound(this, bDoCheck3d)`, on the face's B-rep
 /// (see [`WithMadeTrimCurves`]).
 fn intersect_ts_bound<O: ClassObject>(
@@ -2519,17 +2522,17 @@ fn intersect_ts_bound<O: ClassObject>(
     do_check_3d: bool,
 ) -> Result<()> {
     if objects.classify_surface(face)?.is_none() {
-        return Err(SolidError::query_missing(OP_CURVE, "the face's surface"));
+        return Err(SolidError::query(
+            OP_CURVE,
+            QueryFailure::FaceWithoutSurface,
+        ));
     }
     // Face->surface and TrimCache: smsurf_GetSurfaceCache(pSurface) (made on the
     // face's B-rep); NER of a surface cache that is not a trimmed one
     let lease = face_surface_cache(k, objects.brep_mut(), face)?;
     if !lease.trimmed {
         lease.release();
-        return Err(SolidError::query_missing(
-            OP_CURVE,
-            "the face's trim curves",
-        ));
+        return Err(SolidError::query(OP_CURVE, QueryFailure::NoTrimmedCache));
     }
     // the cached branch reads the vertex uses' UV points from the cache
     let base = lease.cache.base();
@@ -2540,7 +2543,7 @@ fn intersect_ts_bound<O: ClassObject>(
         let visits = {
             let surface = objects
                 .classify_surface(face)?
-                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
+                .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface))?;
             let objects_r = &*objects;
             let cache_handle = |h: EntityRef| match h {
                 EntityRef::Vertexuse(vu) => Some(objects_r.vertexuse(vu)),
@@ -2587,14 +2590,15 @@ fn cached_ts_bound<O: ClassObject>(
     // the face's edge uses behind the handles
     let b = objects.brep();
     let fu = fp2::upward_faceuse(b, face)?
-        .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's upward face use"))?;
+        .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::FaceWithoutFaceuse))?;
     let mut ids = Vec::new();
     for &lu in &b.faceuse(fu)?.loopuses {
         for eu in loopuse::edgeuses(b, lu, None, None)? {
-            let edge = b
-                .edgeuse(eu)?
-                .edge
-                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "an edge use's edge"))?;
+            let edge = b.edgeuse(eu)?.edge.ok_or_else(|| {
+                crate::error::Failure::new(OP_CURVE, QueryFailure::EdgeuseWithoutEdge)
+                    .with_status(crate::error::SM_ERR_NULL_POINTER)
+                    .into_error()
+            })?;
             ids.push((objects.edgeuse(eu), eu, edge));
         }
     }
@@ -2604,7 +2608,7 @@ fn cached_ts_bound<O: ClassObject>(
     for vertex in visits.vertices {
         let surface = objects
             .classify_surface(face)?
-            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
+            .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface))?;
         cc.ts_bound_vertex(
             k,
             &WithMadeTrimCurves {
@@ -2620,7 +2624,13 @@ fn cached_ts_bound<O: ClassObject>(
         let &(_, eu, edge) = ids
             .iter()
             .find(|(h, _, _)| *h == edgeuse.edgeuse)
-            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the classification's edge use"))?;
+            // the caller's adapter named a visited edge use the face's loops do not hold
+            .ok_or_else(|| {
+                SolidError::intersect(
+                    OP_CURVE,
+                    crate::error::intersect::IntersectFailure::CacheItemNotOnBoundary,
+                )
+            })?;
         // get/create the UVCurve for this Edgeuse
         if edgeuse.trim_curve.is_none() {
             let fetch = crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
@@ -2645,7 +2655,7 @@ fn cached_ts_bound<O: ClassObject>(
         edgeuse.edge = boundary_edge(k, objects, face, edge, false, false)?;
         let surface = objects
             .classify_surface(face)?
-            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
+            .ok_or_else(|| SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface))?;
         cc.ts_bound_edgeuse(
             k,
             &WithMadeTrimCurves {
@@ -2680,7 +2690,10 @@ fn intersect_edges<O: ClassObject>(
     has_big_gaps: bool,
 ) -> Result<()> {
     if objects.classify_surface(face)?.is_none() {
-        return Err(SolidError::query_missing(OP_CURVE, "the face's surface"));
+        return Err(SolidError::query(
+            OP_CURVE,
+            QueryFailure::FaceWithoutSurface,
+        ));
     }
     // IntersectEdges reads the edge/face gaps with the surface's owner cleared
     // (SmTemporaryChangeValue on m_pOwner)
@@ -2861,7 +2874,7 @@ pub(crate) mod tests {
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert!(matches!(
             e.query_failure(),
-            Some(crate::error::query::QueryFailure::Failed(_))
+            Some(QueryFailure::NoLoopClassifies)
         ));
     }
 
@@ -3145,6 +3158,10 @@ pub(crate) mod tests {
         assert!(
             matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
             "{r:?}"
+        );
+        assert_eq!(
+            r.as_ref().err().and_then(SolidError::query_failure),
+            Some(&QueryFailure::FaceWithoutSurface)
         );
     }
 
@@ -3459,6 +3476,97 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(cc.size(), 1);
     }
+    /// A failed boundary intersection stays upstream's `SM_ERR` and keeps its cause.
+    #[test]
+    fn a_failed_boundary_intersection_keeps_its_cause() {
+        let cause = SolidError::query(OP_CURVE, QueryFailure::FaceWithoutSurface);
+        // invalid input is neither a refusal nor a defect, so neither is the wrapper
+        assert!(!cause.is_refusal() && !cause.is_defect());
+        let e = boundary_not_intersected(cause);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(!e.is_refusal());
+        assert!(!e.is_defect());
+        assert_eq!(
+            e.query_failure(),
+            Some(&QueryFailure::BoundaryNotIntersected)
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.cause().and_then(SolidError::query_failure),
+            Some(&QueryFailure::FaceWithoutSurface)
+        );
+        let defect = crate::error::Failure::new(
+            OP_CURVE,
+            QueryFailure::Defect {
+                why: "a test defect",
+            },
+        )
+        .into_error();
+        let e = boundary_not_intersected(defect);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.is_defect());
+        // a refusal cause makes the wrapper a refusal, keeping its own class
+        let refusal = SolidError::blend(
+            "blend::op",
+            crate::error::blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::TangentContinuationEndUnsupported,
+            ),
+        );
+        assert!(refusal.is_refusal());
+        let e = boundary_not_intersected(refusal);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert!(e.is_refusal() && !e.is_defect());
+    }
+
+    /// Each broken link of the caller's body the boundary walk reads is named, keeping
+    /// upstream's `SM_ERR_NULL_POINTER` (the edge use's missing edge through the
+    /// status override, as its cause defaults to `SM_ERR`).
+    #[test]
+    fn broken_boundary_links_are_named_null_pointers() {
+        let k = Kernel::default();
+        let walk = |b: &Brep, f: FaceId| {
+            let objects = Handles {
+                b,
+                source: Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 2)),
+            };
+            let mut copy = b.clone_standing_for_self().unwrap();
+            boundary_loops(
+                &k,
+                &mut SnapshotObjects::new(&objects, b, &mut copy),
+                &mut Vec::new(),
+                f,
+                true,
+            )
+            .map(|_| ())
+        };
+        let check = |r: Result<()>, want: QueryFailure| {
+            let e = r.unwrap_err();
+            assert_eq!(e.query_failure(), Some(&want), "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        };
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.face_mut(f).unwrap().faceuse = None;
+        check(walk(&b, f), QueryFailure::FaceWithoutFaceuse);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.edgeuse_mut(EdgeuseId::from_index(1)).unwrap().vertexuse = None;
+        check(walk(&b, f), QueryFailure::LoopuseWithoutVertexuse);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.vertexuse_mut(VertexuseId::from_index(2)).unwrap().vertex = None;
+        check(walk(&b, f), QueryFailure::VertexuseWithoutVertex);
+
+        let mut b = Brep::new();
+        let f = square(&mut b);
+        b.edgeuse_mut(EdgeuseId::from_index(3)).unwrap().edge = None;
+        check(walk(&b, f), QueryFailure::EdgeuseWithoutEdge);
+    }
+
     #[test]
     fn cached_boundary_views_resolve_real_edge_and_trim_handles() {
         let k = Kernel::default();

@@ -828,12 +828,15 @@ pub struct ExecutiveObjects<O> {
     pub edge_attribute: O,
 }
 
+/// The least radius or chamfer width [`is_radius_supported`] takes, in B-rep tolerances.
+pub(crate) const SUPPORTED_TOLERANCES: f64 = 8.0;
+
 /// `SmFilletExecutive::IsRadiusSupported`: `false` for a radius or chamfer width below
-/// 8 times the B-rep tolerance `brep_tol` (below that, some fillets come out
-/// non-manifold, crash or hang), and for NaN.
+/// [`SUPPORTED_TOLERANCES`] (8) times the B-rep tolerance `brep_tol` (below that, some
+/// fillets come out non-manifold, crash or hang), and for NaN.
 #[must_use]
 pub fn is_radius_supported(radius: f64, brep_tol: f64) -> bool {
-    radius >= 8.0 * brep_tol * (1.0 - EFF_ZERO_SQRT)
+    radius >= SUPPORTED_TOLERANCES * brep_tol * (1.0 - EFF_ZERO_SQRT)
 }
 
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
@@ -882,7 +885,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             fit_kind: super::p3::FitKind::Radius,
             fit_setback: -1.0,
             rollover_adjusting: false,
-            rolled_beside_band: false,
         }
     }
 
@@ -1620,15 +1622,7 @@ fn curve_as_bspline(
         CurveKind::Ellipse(e) => return Ok(e.base().clone()),
         CurveKind::Parabola(p) => return Ok(p.base().clone()),
         CurveKind::Hyperbola(h) => return Ok(h.base.clone()),
-        CurveKind::Hermite(_) => "Hermite",
-        CurveKind::Projected(_) => "projected",
-        CurveKind::Iso(_) => "iso-parametric",
-        CurveKind::Offset(_) => "offset",
-        CurveKind::Conic(_) => "conic",
-        CurveKind::CrvInVolume(_) => "curve-in-volume",
-        CurveKind::CrvOnSurf(_) => "curve-on-surface",
-        CurveKind::TangentField(_) => "tangent-field",
-        CurveKind::Composite(_) => "composite",
+        other => other.name(),
     };
     Err(SolidError::blend_at(
         op,

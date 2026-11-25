@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Flush constraint</title>
+  <path d="M9.11 25.95L32.49 39.45L32.49 55.2L9.11 41.7Z" fill="#b8c3cf"/>
+  <path d="M45.16 32.14L32.49 39.45L32.49 55.2L45.16 47.88Z" fill="#8e9faf"/>
+  <path d="M21.77 18.63L45.16 32.14L32.49 39.45L9.11 25.95Z" fill="#b9ddf8"/>
+  <path d="M21.77 18.63L45.16 32.14L45.16 47.88L32.49 55.2L9.11 41.7L9.11 25.95Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.11 25.95L32.49 39.45L45.16 32.14" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.49 39.45L32.49 55.2" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.72 17.5L47.1 31L47.1 46.76L23.72 33.25Z" fill="#b8c3cf"/>
+  <path d="M57.82 24.81L47.1 31L47.1 46.76L57.82 40.58Z" fill="#8e9faf"/>
+  <path d="M34.44 11.32L57.82 24.81L47.1 31L23.72 17.5Z" fill="#b9ddf8"/>
+  <path d="M34.44 11.32L57.82 24.81L57.82 40.58L47.1 46.76L23.72 33.25L23.72 17.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.72 17.5L47.1 31L57.82 24.81" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.1 31L47.1 46.76" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.13 26.5L35.41 10.76" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.13 26.5L35.41 10.76" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

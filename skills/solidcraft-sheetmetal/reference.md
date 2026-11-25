@@ -29,6 +29,9 @@ that rule's thickness), `corner_relief_shape` (`notch`|`round`|`rectangular`|`te
 
 ### `sheet.flange`
 Base: `sketch`, `profiles?`, `rule?`, `flip?`, `name?`, `body_name?`.
+Without `profiles`, nested loops alternate material and holes, as for Extrude: a loop inside
+an outline is a hole, and a loop inside that hole is material again. Explicit `profiles: "all"`
+includes every profile and fills those holes; explicit profile picks select only those regions.
 Contour: `sketch`, `curves` (an open chain of lines and tangent arcs), `distance`, `rule?`, `flip?`, `reverse?`.
 Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's), `height_from?`
 (`outer`|`inner`|`tangent`), `position?` (`inside`|`outside`|`middle`|`material_outside`|
