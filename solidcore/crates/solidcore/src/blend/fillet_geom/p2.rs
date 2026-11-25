@@ -1708,7 +1708,9 @@ fn crossed_seam(
 /// starts (within `100 * approx_tol`), are one branch of the intersection of `surfaces` run on
 /// through their meeting point, proved from the surfaces' definitions:
 /// - the meeting point is a regular point of the intersection: the surfaces' normal cones over
-///   a ball holding both pieces' ends there prove the surfaces cross, never tangent, at every
+///   a ball holding both pieces' ends there and the intersection's points they stand for (each
+///   within `approx_tol` of its piece, so the ball is no wider: its radius gives the turn below
+///   no more room than the pieces' own fit) prove the surfaces cross, never tangent, at every
 ///   point of both in it ([`crossing_line_in_ball`]), so no branch point, touch point or
 ///   tangent curve lies there (docs/ssi.md §4.4, §8 item 7) and the intersection is one smooth
 ///   curve through it, along `n1 x n2`;
@@ -1751,7 +1753,9 @@ fn continues_across(
         *slot = (p, tangent);
     }
     let [(p, t1), (q, t2)] = ends;
-    let radius = (p.distance(q) + 100.0 * approx_tol) * (1.0 + gamma(2));
+    // the ball holds both ends and the intersection's points within `approx_tol` of them, and no
+    // more: its spread is the turn allowed below, so a wider ball would pass a kink (#21959 review)
+    let radius = (p.distance(q) + approx_tol) * (1.0 + gamma(2));
     if !radius.is_finite() {
         return Ok(false);
     }
@@ -5963,19 +5967,18 @@ mod tests {
         let first = branch(&k, 1.0, 0.0, 45.0);
         let t = Vec3::new(-1.0, -1.0, 1.0) / 3.0_f64.sqrt();
         let n = Vec3::new(1.0, -1.0, 0.0) / 2.0_f64.sqrt();
-        for (dir, runs_on) in [(t, true), (t + n * 0.2, false), (n, false)] {
-            let second = Curve::from(crate::curve::line::Line::from_points(
-                seam,
-                seam + dir * 0.1,
-                3,
-            ));
-            let got = continues_across(
-                &k,
-                [&first, &second],
-                surfaces(&at_45, &about_x),
-                approx_tol,
-            );
-            assert_eq!(got.unwrap(), runs_on, "{dir:?}");
+        // (at a fit a hundred times looser too: the ball the turn is read over is no wider than
+        // the fit, so the kink is still one; #21959 review)
+        for tol in [approx_tol, 100.0 * approx_tol] {
+            for (dir, runs_on) in [(t, true), (t + n * 0.2, false), (n, false)] {
+                let second = Curve::from(crate::curve::line::Line::from_points(
+                    seam,
+                    seam + dir * 0.1,
+                    3,
+                ));
+                let got = continues_across(&k, [&first, &second], surfaces(&at_45, &about_x), tol);
+                assert_eq!(got.unwrap(), runs_on, "{dir:?} at {tol}");
+            }
         }
     }
 }
