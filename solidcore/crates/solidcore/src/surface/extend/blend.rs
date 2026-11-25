@@ -280,13 +280,11 @@ fn along(
             if y <= x {
                 continue;
             }
-            // a station that does not solve, a foot off its support or a span not proved:
-            // an ask that does not work, as a weight not positive
-            let span = match span_of_definition(k, &next, idx, target) {
-                Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
-                Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
-                Err(e) if e.failed_routine_status().is_some() => return Ok(None),
-                Err(e) => return Err(e),
+            let Some(span) = span_of_ask(span_of_definition(k, &next, idx, target), |span| {
+                feet_on(k, &next, span)
+            })?
+            else {
+                return Ok(None);
             };
             let length = (y - x) / rate;
             // a piece clipped shorter than a span the knot fixup keeps (the side just before a
@@ -407,6 +405,24 @@ struct Piece {
     span: DefinitionSpan,
     part: [f64; 2],
     length: f64,
+}
+
+/// The span an ask along the spine runs (`span`, [`span_of_definition`]'s), or `None` for an
+/// ask that does not work, as a weight not positive: a station that does not solve, a foot
+/// off its support (`feet`, [`feet_on`]) or a span not proved. Work given up (a
+/// cancellation, or a certificate that spent its work budget:
+/// [`SolidError::is_unported_or_cancelled`]) is passed on, never another ask.
+pub(super) fn span_of_ask(
+    span: Result<DefinitionSpan>,
+    feet: impl FnOnce(&DefinitionSpan) -> Result<bool>,
+) -> Result<Option<DefinitionSpan>> {
+    Ok(Some(match span {
+        Ok(span) if span.certified.is_finite() && feet(&span)? => span,
+        Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(e) if e.failed_routine_status().is_some() => return Ok(None),
+        Err(e) => return Err(e),
+    }))
 }
 
 /// The knots after the source's joint for `pieces` from `end` by `e` in all: each part's

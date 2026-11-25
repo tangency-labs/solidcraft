@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 71] = [
+const ANSWERING: [&str; 73] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -162,7 +162,9 @@ const ANSWERING: [&str; 71] = [
     "volume",
     "counts",
     "boolean",
+    "boolean_tagged",
     "union_all",
+    "union_all_tagged",
     "boolean2d",
     "imprint",
     "solid_count",
@@ -297,7 +299,9 @@ fn every_entry_point_answers() {
     says("volume", a.volume(1e-6));
     says("counts", a.counts());
     says("boolean", a.boolean(&t, BooleanOp::Union));
+    says("boolean_tagged", a.boolean_tagged(&t, BooleanOp::Union));
     says("union_all", Brep::union_all(&[&a, &t]));
+    says("union_all_tagged", Brep::union_all_tagged(&[&a, &t]));
     says("boolean2d", a.boolean2d(&t, BooleanOp::Union));
     says("imprint", a.imprint(&t));
     says("solid_count", a.solid_count());
@@ -943,4 +947,46 @@ fn status_sites_only_shrink() {
         assert!(*n <= listed, "{file} makes {n} bare statuses, {listed} listed: carry the typed refusal (Error::Refused), not a new status");
     }
     assert_eq!(found, expected, "fewer bare statuses than listed: lower the counts in SITES");
+}
+
+/// Each operand of a boolean tagged as it is and combined (solidcore#3359): the same record, the
+/// same numbering and the same history as tagging copies of them and combining those, which
+/// copied each operand once more. A cut by a box and by a cylinder, a union and an intersection.
+#[test]
+fn a_tagged_boolean_is_the_boolean_of_tagged_copies() {
+    let plate = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
+    let pocket = Brep::make_box([5.0, 5.0, 2.0], [8.0, 6.0, 10.0]).unwrap();
+    let bore = Brep::made_core(core::make_cylinder([25.0, 15.0, -1.0], 4.0, 8.0).unwrap());
+    let boss = Brep::made_core(core::make_cylinder([30.0, 10.0, 3.0], 3.0, 9.0).unwrap());
+    let cases = [
+        (&plate, &pocket, BooleanOp::Subtract),
+        (&plate, &bore, BooleanOp::Subtract),
+        (&plate, &boss, BooleanOp::Union),
+        (&plate, &boss, BooleanOp::Intersect),
+    ];
+    for (a, b, op) in cases {
+        let before = a.tagged(0).unwrap().boolean(&b.tagged(1).unwrap(), op).unwrap().unwrap();
+        let after = a.boolean_tagged(b, op).unwrap().unwrap();
+        assert_eq!(after.to_native_ordered().unwrap(), before.to_native_ordered().unwrap(), "{op:?}");
+        assert_eq!(after.history().unwrap(), before.history().unwrap(), "{op:?}");
+    }
+    // The operands are left as they were: untagged, their records unchanged.
+    let plain = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
+    assert_eq!(plate.to_native_ordered().unwrap(), plain.to_native_ordered().unwrap());
+}
+
+/// A union of operands each tagged as it is (solidcore#3359): the same record, numbering and
+/// history as the union of tagged copies.
+#[test]
+fn a_tagged_union_is_the_union_of_tagged_copies() {
+    let a = Brep::make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    let b = Brep::make_box([8.0, 2.0, 2.0], [10.0, 6.0, 6.0]).unwrap();
+    let c = Brep::made_core(core::make_cylinder([5.0, 5.0, 9.0], 3.0, 5.0).unwrap());
+    let operands = [&a, &b, &c];
+    let tagged: Vec<Brep> = operands.iter().enumerate().map(|(i, x)| x.tagged(i).unwrap()).collect();
+    let refs: Vec<&Brep> = tagged.iter().collect();
+    let before = Brep::union_all(&refs).unwrap();
+    let after = Brep::union_all_tagged(&operands).unwrap();
+    assert_eq!(after.to_native_ordered().unwrap(), before.to_native_ordered().unwrap());
+    assert_eq!(after.history().unwrap(), before.history().unwrap());
 }

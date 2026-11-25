@@ -9,7 +9,6 @@
 //! | Rust                               | Status difftest compares       |
 //! |------------------------------------|--------------------------------|
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::Failed`]         | `SM_ERR`                       |
 //! | the named causes of the surface solvers, [`SurfaceFailure::SolverWithout`] to [`SurfaceFailure::NothingLifted`] | each its own (`comparison_status`), or the site's through `with_status` |
 //! | the named causes of the volume surfaces and the implicit checks, [`SurfaceFailure::TooFewKnots`] to [`SurfaceFailure::CallFailed`] | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //! | [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::NoNormal`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
@@ -25,8 +24,7 @@
 //! | every other named cause            | `SM_ERR`, with the class its doc names |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). [`SurfaceFailure::Failed`]
-//! carries a phrase for the WR-57 replay seam's taped answers.
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127).
 //!
 //! **Classes of the named causes.** A check of the caller's argument or object that is
 //! malformed is [`ErrorKind::InvalidInput`]; a box or point outside the domain it must lie
@@ -257,9 +255,6 @@ pub enum SurfaceFailure {
     /// The caller's face has no surface ([`ErrorKind::InvalidInput`],
     /// `SM_ERR_NULL_POINTER`).
     FaceHasNoSurface,
-    /// The routine could not continue, as the phrase says (for example "the generator
-    /// curve has no NURB form").
-    Failed(&'static str),
     /// The point found near a singular boundary is proven farther from the test point than
     /// the guess. Class `failed`.
     FartherThanGuess {
@@ -709,11 +704,12 @@ pub enum AnalyticCheck {
     /// A meridian at an end of its sweep has no control point off the axis on the side of
     /// the fitted sweep, so the sweep has no start or end direction.
     MeridianOnAxis,
-    /// Moved onto the mean-radius cylinder, its net is not on that cylinder (its end
-    /// circles are turned against each other or off the axis).
+    /// Moved onto the cylinder its rebuild records (or as it is, for radii within
+    /// `EFF_ZERO`), its net is not on that cylinder (its end circles are turned against
+    /// each other or off the axis).
     NetOffCylinder,
-    /// Moved onto the mean-radius cylinder, its net would have a radius not above zero at
-    /// a control point.
+    /// Moved onto the cylinder its rebuild records, its net would have a radius not above
+    /// zero at a control point.
     NetRadiusNotPositive,
     /// Neither direction of its iso curves is a family of coaxial circles in parallel
     /// planes with a planar generator.
@@ -743,9 +739,9 @@ impl core::fmt::Display for AnalyticCheck {
             Self::MeridianOnAxis => {
                 "a meridian at an end of its sweep has no control point off the axis on its side"
             }
-            Self::NetOffCylinder => "its moved net is not on the mean-radius cylinder",
+            Self::NetOffCylinder => "its net is not on the cylinder it rebuilds as",
             Self::NetRadiusNotPositive => {
-                "its net has no positive radius at a control point on the mean-radius cylinder"
+                "its net has no positive radius at a control point on the cylinder it rebuilds as"
             }
             Self::NoCircularDirection => "neither direction's iso curves are coaxial circles",
             Self::RadiiDiffer => "its top and bottom radii differ",
@@ -1084,7 +1080,6 @@ impl core::fmt::Display for SurfaceFailure {
             Self::ExtensionSpansPastBound => f.write_str("the extension needs more spans than its bound"),
             Self::ExtensionTowardFailed => f.write_str("the G1R extension toward the point failed"),
             Self::FaceHasNoSurface => f.write_str("the face has no surface"),
-            Self::Failed(what) => f.write_str(what),
             Self::FartherThanGuess { found, guess } => write!(
                 f,
                 "the point found is farther from the test point than the guess: at least {found}, the guess at most {guess}"
@@ -1233,9 +1228,8 @@ impl core::fmt::Display for SurfaceFailure {
             Self::RevolutionAxisDegenerate => f.write_str("the axis of the surface of revolution has no direction"),
             Self::RotationSenseUndefined => f.write_str("the end rows give no sense to turn about the axis"),
             Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
-            // Kept word for word: the wr57 replay tape (`goldens` `wr57_replay`, `heal.heal_data_p3`) hashes this
-            // error's message as the answer at its substituted calls. The bounds stay in
-            // the fields.
+            // The phrase the site reported before it was named, kept word for word. The
+            // bounds stay in the fields.
             Self::SingularBoundaryNotPole { .. } => f.write_str(
                 "a point of the singular boundary is nearer the test point than the point found: the boundary is not a pole",
             ),
@@ -1348,7 +1342,7 @@ mod tests {
 
     #[test]
     fn surface_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
-        let cases = [(SurfaceFailure::Failed("x"), SM_ERR)];
+        let cases = [(SurfaceFailure::ExtensionTowardFailed, SM_ERR)];
         for (failure, code) in cases {
             let typed = SolidError::surface("surface::op", failure);
             let before = SolidError::failed_routine("surface::op", code);
@@ -1366,14 +1360,6 @@ mod tests {
             );
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
-        assert_eq!(
-            SolidError::surface(
-                "surface::op",
-                SurfaceFailure::Failed("the generator has no NURB form")
-            )
-            .to_string(),
-            "surface::op: the generator has no NURB form"
-        );
         assert_eq!(
             SolidError::failed_routine("surface::op", SM_ERR).surface_failure(),
             None
@@ -1513,42 +1499,15 @@ mod tests {
         assert_eq!(chained.sm_status(), Some(SM_ERR_NULL_POINTER));
     }
 
-    /// A sample of the surface files (`extend` and its sides, `side`,
-    /// `implicit`, the volumes, `srf_in_volume`, `procedural_blend` and its offset,
-    /// `trim_srf_cache`): each keeps the operation, status, kind and entity of its
-    /// `Upstream`.
+    /// Samples of the surface files (`trim_srf_cache`, `procedural_blend`): each keeps the
+    /// operation, status, kind and entity of the routine failure it replaced.
     #[test]
-    fn the_extend_volume_and_blend_samples_keep_their_upstream_answers() {
+    fn the_trim_cache_and_blend_samples_keep_their_routine_answers() {
         let samples = [
-            (
-                "surface::extend::analytic::analytic_extended_sides",
-                SurfaceFailure::Failed("the joint is not an interior knot"),
-                SM_ERR,
-            ),
-            (
-                "surface::extend::ball",
-                SurfaceFailure::Failed("the B-spline surface has no NURB"),
-                SM_ERR,
-            ),
-            (
-                "surface::volume::p1::Volume::copy",
-                SurfaceFailure::Failed("a plain volume cannot be copied"),
-                SM_ERR,
-            ),
-            (
-                "surface::srf_in_volume",
-                SurfaceFailure::Failed("the volume's inversion failed"),
-                SM_ERR,
-            ),
             (
                 "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
                 SurfaceFailure::DisjointFaceDomain,
                 SM_ERR_INVALID_INPUT,
-            ),
-            (
-                "surface::side",
-                SurfaceFailure::Failed("the iso curve has no NURB"),
-                SM_ERR,
             ),
         ];
         for (operation, failure, code) in samples {
@@ -2107,7 +2066,7 @@ mod tests {
         let op = "surface::op";
         super::super::tests::assert_defect(
             &SolidError::surface(op, defect),
-            &SolidError::surface(op, SurfaceFailure::Failed("x")),
+            &SolidError::surface(op, SurfaceFailure::ExtensionTowardFailed),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),

@@ -446,6 +446,7 @@ fn blend_call(
         turn: match turn {
             Turn::Mitre => solidcore_ops::Turn::Mitre,
             Turn::Swept => solidcore_ops::Turn::Swept,
+            Turn::Auto => solidcore_ops::Turn::Auto,
         },
         ..solidcore_ops::BlendOptions::default()
     };
