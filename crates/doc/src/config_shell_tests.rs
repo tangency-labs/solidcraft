@@ -182,7 +182,6 @@ fn shell_planar_format13_keeps_v12_documents_and_refuses_future() {
     crate::format::pieces_in_shell_order(&mut legacy["features"]);
     for f in legacy["features"].as_array_mut().into_iter().flatten() {
         f["kernel_piece_order"] = json!(true);
-        f["least_face_piece_order"] = json!(true);
     }
     assert_eq!(legacy, current, "the migration preserves every prior field");
     legacy["format"] = json!(crate::format::format_string(crate::format::FORMAT + 1));
