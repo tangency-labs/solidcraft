@@ -1859,7 +1859,7 @@ fn weld_for_3mf(b: &solidcraft_doc::ModelBody, m: &Mesh, tagged: bool, notes: &m
         && !b.body.is_mesh()
         && let Some(note) = unsealed_note(&original.0, &original.1, !tagged)
     {
-        for fraction in [0.1, 0.01, 0.001] {
+        for fraction in [0.1, 0.01, 0.001, 0.0001] {
             let candidate = weld(eps * fraction);
             if !candidate.1.is_empty() && unsealed_note(&candidate.0, &candidate.1, !tagged).is_none() {
                 return Ok(candidate);
@@ -2409,22 +2409,24 @@ mod tests {
         let (_, model) = model();
         let state = model.state();
         let body = &state.bodies[0];
-        let gap = 0.5 * weld_eps(&body.body);
-        let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [0., -gap, 0.], [1., -gap, 0.], [0., -1., 0.], [0., -1., -1.]]
-            .map(|[x, y, z]| Vec3::new(x, y, z))
-            .to_vec();
-        let tetrahedron = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
-        let triangles = tetrahedron.into_iter().chain(tetrahedron.map(|t| t.map(|i| i + 4))).collect();
-        let mesh = Mesh { positions, triangles, ..Mesh::default() };
-        let (v, t) = threemf::weld(&mesh.positions, &mesh.triangles, weld_eps(&body.body));
-        assert!(unsealed_note(&v, &t, true).is_some(), "the usual weld joins the two separate ridges");
-        for tagged in [false, true] {
-            let mut notes = Vec::new();
-            let (v, t, from) = weld_for_3mf(body, &mesh, tagged, &mut notes)?;
-            assert!(notes.is_empty());
-            assert_eq!((v.len(), t.len()), (8, 8));
-            assert!(unsealed_note(&v, &t, !tagged).is_none());
-            assert_eq!(from, (0..8).collect::<Vec<_>>());
+        for separation in [0.5, 0.0005] {
+            let gap = separation * weld_eps(&body.body);
+            let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [0., -gap, 0.], [1., -gap, 0.], [0., -1., 0.], [0., -1., -1.]]
+                .map(|[x, y, z]| Vec3::new(x, y, z))
+                .to_vec();
+            let tetrahedron = [[0, 2, 1], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
+            let triangles = tetrahedron.into_iter().chain(tetrahedron.map(|t| t.map(|i| i + 4))).collect();
+            let mesh = Mesh { positions, triangles, ..Mesh::default() };
+            let (v, t) = threemf::weld(&mesh.positions, &mesh.triangles, weld_eps(&body.body));
+            assert!(unsealed_note(&v, &t, true).is_some(), "the usual weld joins the two separate ridges");
+            for tagged in [false, true] {
+                let mut notes = Vec::new();
+                let (v, t, from) = weld_for_3mf(body, &mesh, tagged, &mut notes)?;
+                assert!(notes.is_empty(), "separation {separation}, tagged {tagged}: {notes:?}");
+                assert_eq!((v.len(), t.len()), (8, 8));
+                assert!(unsealed_note(&v, &t, !tagged).is_none());
+                assert_eq!(from, (0..8).collect::<Vec<_>>());
+            }
         }
         Ok(())
     }
