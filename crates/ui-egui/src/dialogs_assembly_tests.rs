@@ -1178,7 +1178,7 @@ fn joint_from_two_snaps() {
     let o = &p["a"]["frame"]["origin"];
     let at = Vec3::new(o[0].as_f64().unwrap(), o[1].as_f64().unwrap(), o[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9, "{p}");
-    assert_eq!(p["offset_x"], 5.0);
+    assert_eq!(p["offset_x"], json!("5 mm"));
     // OK makes it.
     for (id, p) in apply_commands(&app, &d).unwrap() {
         app.run(&id, p).unwrap();
@@ -1214,8 +1214,6 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
     for name in ["Offset X", "Offset Y", "Offset Z"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} is editable");
     }
@@ -1226,8 +1224,19 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.settle();
     assert_eq!(harness.app.session.doc, before, "Cancel preserves the joint");
 
+    // Even if a prior joint had its Position section folded, Edit Joint opens the saved
+    // offsets again. The user can still fold it while editing.
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset X").is_none(), "Position still folds on click");
+    crate::dialogs::cancel(&mut harness.app);
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    for name in ["Offset X", "Offset Y", "Offset Z"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} reopens automatically");
+    }
     for (name, value) in [("Offset X", "20 mm"), ("Offset Y", "40 mm")] {
         harness.step(&json!({"click":{"handle":format!("dialog:{name}")}})).unwrap();
         harness.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -1314,6 +1323,79 @@ fn joint_origin_can_be_the_origin_or_a_sketch_point() {
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 1, "a joint was made from the origin and the sketch point");
 }
+/// A part placed more than once shows its sketches on every copy, not only on the one they are
+/// edited at, and a sketch point picked on a copy holds that copy: before, the pick named no copy
+/// and the joint took the first copy, also when the one picked lay right on top of it.
+#[test]
+fn a_sketch_point_picked_on_another_copy_of_a_part_holds_that_copy() {
+    let mut app = two_boxes();
+    // A sketch point on B's top face, at world (35, 5, 10).
+    app.session.execute("component.activate", &json!({"component": "B"})).unwrap();
+    app.session
+        .execute("sketch.create", &json!({"plane": {"origin": [30.0, 0.0, 10.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]}, "name": "S"}))
+        .unwrap();
+    app.session.execute("sketch.point", &json!({"point": [5.0, 5.0], "id": "q"})).unwrap();
+    app.session.execute("sketch.finish", &json!({})).unwrap();
+    app.session.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+    let part = app.session.doc.find_component("B").unwrap();
+    let first = app.session.doc.occurrence_of(part).unwrap().id;
+    // One copy right on top of the first, one 40 mm along Y.
+    let on_top = app.run("occurrence.copy", json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+    let moved = app.run("occurrence.copy", json!({"occurrence": first, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+
+    // The sketch is drawn at the first copy and at both others.
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).expect("the sketch's other placements").iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![on_top], vec![moved]]);
+    let (at, z) = world.placed_sketch_point(sketch, &[moved], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 45.0, 10.0)) < 1e-9 && z.dist(Vec3::Z) < 1e-9, "{at:?} {z:?}");
+
+    // A pick of the sketch where it is edited holds the first copy; one on the copy on top of it,
+    // at the same place, holds that copy.
+    let own = snap_of(&app.session, &Sel::SketchPoint { id: format!("{sketch}:q") }).unwrap();
+    assert_eq!(own.param["occurrence"], first);
+    let top = snap_of(&app.session, &Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![on_top] }).unwrap();
+    assert!(top.at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-9, "{top:?}");
+    assert_eq!((top.param["occurrence"].clone(), top.param["path"].clone()), (json!(on_top), json!([on_top])));
+
+    // In a joint's origin input the view picks the point on the moved copy, where it is drawn.
+    app.start("joint.create");
+    let proj = crate::viewport::projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)));
+    let screen = proj.to_screen(Vec3::new(35.0, 45.0, 10.0)).unwrap();
+    let hits = crate::viewport::pick(&app, &proj, screen);
+    let Some(crate::viewport::Hit::PlacedSketchPoint { path, .. }) = hits.first() else { panic!("the copy's point is picked: {hits:?}") };
+    assert_eq!(*path, [moved]);
+    let pick = app.dialog.as_ref().unwrap().candidate(&app.session, &hits[0]).expect("the joint's origin takes it");
+    assert_eq!(pick, Sel::PlacedSketchPoint { sketch, id: "q".into(), path: vec![moved] });
+
+    // And the joint it makes moves that copy, the point onto the world origin, and no other copy.
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::Vertex { body: String::new(), point: Vec3::ZERO });
+    d.pick(&app.session, pick);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+    let transform = |o: u64| app.session.doc.occurrences.iter().find(|x| x.id == o).unwrap().transform;
+    let q = solidcraft_engine::doc::apply_point(&transform(moved), Vec3::new(35.0, 5.0, 10.0));
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "the moved copy's point is on the origin: {q:?}");
+    for o in [first, on_top] {
+        assert!(solidcraft_engine::doc::is_identity(&transform(o)), "copy {o} stays");
+    }
+
+    // Edited at the moved copy, the sketch is drawn there, and at the two others as copies.
+    app.session.execute("component.activate", &json!({"component": part, "occurrence": moved, "path": [moved]})).unwrap();
+    let world = app.session.world_state().unwrap();
+    let paths: Vec<Vec<u64>> = world.sketch_copies.get(&sketch).unwrap().iter().map(|c| c.path.clone()).collect();
+    assert_eq!(paths, [vec![first], vec![on_top]]);
+    let drawn = world.sketch(sketch).unwrap();
+    let q = drawn.plane.to_world(drawn.sketch.point(drawn.sketch.resolve_point("q").unwrap()).unwrap());
+    assert!(q.dist(Vec3::ZERO) < 1e-6, "{q:?}");
+    let (at, _) = world.placed_sketch_point(sketch, &[first], "q").unwrap();
+    assert!(at.dist(Vec3::new(35.0, 5.0, 10.0)) < 1e-6, "{at:?}");
+}
+
 #[test]
 fn revolute_joint_uses_the_picked_straight_edges() {
     let mut app = two_boxes();
@@ -1552,10 +1634,13 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
     app.run("parameters.add", json!({"name": "gap", "expression": "3 mm"})).unwrap();
     let (fa, fb) = (json!({"occurrence": a, "face": [10, 10, 10]}), json!({"occurrence": b, "face": [40, 10, 0]}));
-    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset": "gap", "angle": "0 deg"})).unwrap();
+    app.run("joint.create", json!({"type": "rigid", "a": fa, "b": fb, "offset_x": "gap * 2", "offset_y": "-gap", "offset": "gap", "angle": "0 deg"}))
+        .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.offset[0], "gap * 2");
+        assert_eq!(f.offset[1], "-gap");
         assert_eq!(f.offset[2], "gap");
         f.flip = true;
     }
@@ -1564,7 +1649,34 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     }
     let j = &app.session.doc.assembly.joints[0];
     assert!(j.flip);
-    assert_eq!((j.exprs.offset.as_deref(), j.exprs.angle.as_deref()), (Some("gap"), None));
+    assert_eq!(
+        (j.exprs.offset_x.as_deref(), j.exprs.offset_y.as_deref(), j.exprs.offset.as_deref(), j.exprs.angle.as_deref()),
+        (Some("gap * 2"), Some("-gap"), Some("gap"), None)
+    );
+}
+
+/// Creating a joint on a face with a parameter-backed lateral offset that evaluates to zero keeps
+/// the face reference (rather than freezing to a fixed frame) and still follows later changes.
+#[test]
+fn zero_valued_lateral_offset_expression_keeps_face_reference() {
+    let mut app = two_boxes();
+    app.run("parameters.add", json!({"name": "dx", "expression": "0 mm"})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        d.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "dx".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1["a"].get("face").is_some(), "zero-valued expression keeps face reference: {}", cmds[0].1);
+    assert_eq!(cmds[0].1["offset_x"], json!("dx"));
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("dx"));
+    app.run("parameters.change", json!({"name": "dx", "expression": "15 mm"})).unwrap();
+    assert_eq!(app.session.doc.assembly.joints[0].offset_xy, [15.0, 0.0]);
 }
 
 /// Edit Joint shows both sides pre-filled, each on its own component. OK sends no side while
@@ -2536,6 +2648,37 @@ fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
     assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
 }
 
+/// Edit Joint from the Drive Joints dialog opens with the joint's two sides, so its offsets can
+/// be edited and the edit confirmed (#17196).
+#[test]
+fn edit_joint_from_drive_joints_keeps_its_two_sides() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
+    let glue = h.app.session.doc.assembly.joints[0].id;
+    h.app.start("joint.drive");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    let mut d = h.app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "20 mm".into();
+    // The edit can be confirmed: the dialog has the joint's two sides, so nothing is asked for
+    // again (without them OK was off and asked for component 1's joint origin).
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].0, "joint.edit");
+    assert_eq!(commands[0].1["joint"], json!(glue));
+    assert_eq!(commands[0].1["offset_x"], json!("20 mm"));
+    // The two sides are the first two inputs; the Joint dialog holds the alignment references
+    // after them, so the sides are read by their place and not by the count of the inputs.
+    assert!(d.inputs.len() >= 2, "the Edit Joint dialog keeps its two sides");
+    assert_eq!(d.inputs[0].label, "Component 1");
+    assert_eq!(d.inputs[1].label, "Component 2");
+    assert_eq!(d.inputs[0].items.len(), 1, "the first side keeps its pick");
+    assert_eq!(d.inputs[1].items.len(), 1, "the second side keeps its pick");
+}
+
 /// A rigid joint has nothing to drive: Drive Joints won't start on it.
 #[test]
 fn drive_preset_refuses_a_rigid_joint() {
@@ -2635,7 +2778,7 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let origin = &p["a"]["frame"]["origin"];
     let at = Vec3::new(origin[0].as_f64().unwrap(), origin[1].as_f64().unwrap(), origin[2].as_f64().unwrap());
     assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9);
-    assert_eq!(p["offset_x"], json!(6.35));
+    assert_eq!(p["offset_x"], json!("0.25 in"));
     app.run("joint.create", p).unwrap();
     let joint = app.session.doc.assembly.joints[0].id;
     app.start("joint.drive");
@@ -3499,9 +3642,7 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let joint = harness.app.session.doc.assembly.joints[0].id;
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
-    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some());
+    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some(), "Position opens on an existing constraint");
     for name in ["Offset X", "Offset Y"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_none());
     }
@@ -3668,4 +3809,71 @@ fn edit_joint_keeps_a_limit_typed_as_an_expression() {
     assert_eq!(app.session.doc.assembly.joints[0].exprs.limit(0), [None, Some("stop")]);
     app.run("parameters.change", json!({"name": "stop", "expression": "12 mm"})).unwrap();
     assert_eq!(app.session.doc.assembly.joints[0].limits[0], Some((0.0, 12.0)));
+}
+
+#[test]
+fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "12.5".into();
+        f.dynamics[0][2] = "0.1".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].dynamics[0].unwrap();
+    assert_eq!((saved.effort, saved.damping), (Some(12.5), Some(0.1)));
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.dynamics[0][0], "12.5");
+        f.dynamics[0] = Default::default();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(app.session.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn find_limits_leaves_the_dynamics_out() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
+    f.dynamics[0][0] = "lots".into();
+    let commands = edit_commands(&app, f, &d.inputs).unwrap();
+    assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
+}
+
+#[test]
+fn a_mistyped_dynamics_value_is_refused_with_a_message() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    for typed in ["lots", "nan", "inf", "-inf"] {
+        if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+            f.dynamics[0][0] = typed.into();
+        }
+        assert!(apply_commands(&app, &d).is_err(), "{typed}");
+    }
 }

@@ -176,12 +176,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
         ("sketch.construction_line.angle", 1) => a + Vec2::from_angle(lk("Angle").unwrap_or_else(|| (h - a).angle())) * (h - a).len().max(1.0),
-        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
-            let v = h - a;
-            let len = lk("Length").unwrap_or(v.len());
-            let ang = lk("Angle").unwrap_or_else(|| snap_axis(v.angle()));
-            a + Vec2::from_angle(ang) * len
-        }
+        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_end(app, a, h, lk("Length"), lk("Angle")),
         // A midpoint line runs from the end's mirror image through the midpoint to the end, so
         // the midpoint is the middle of the line: a typed length is half of it on each side.
         ("sketch.line.midpoint", 1) => {
@@ -338,6 +333,34 @@ pub fn snap_axis(ang: f64) -> f64 {
     let q = std::f64::consts::FRAC_PI_2;
     let k = (ang / q).round();
     if (ang - k * q).abs() < 2.5f64.to_radians() { k * q } else { ang }
+}
+
+/// Where the end of a line from `a` goes for the cursor at `h`: on the horizontal or the vertical
+/// when the line is near it, but only while the end stays within the pointer's reach, the reach
+/// every other snap uses (#16994). A typed length or a typed angle wins over the cursor.
+fn line_end(app: &SolveApp, a: Vec2, h: Vec2, length: Option<f64>, angle: Option<f64>) -> Vec2 {
+    let v = h - a;
+    let len = length.unwrap_or(v.len());
+    if let Some(ang) = angle {
+        return a + Vec2::from_angle(ang) * len;
+    }
+    let at = a + Vec2::from_angle(snap_axis(v.angle())) * len;
+    // A typed length says how long the line is: the end goes there, on the axis or not.
+    if length.is_some() || (at - h).len() <= reach_mm(app) { at } else { h }
+}
+
+/// How far (screen points) a snap may move the point it places from the pointer: the reach the
+/// other snaps use (#16994).
+const SNAP_REACH: f64 = 7.0;
+
+/// The pointer's reach in the sketch's own millimetres: how far a snap may move the point it
+/// places, in the view's scale.
+fn reach_mm(app: &SolveApp) -> f64 {
+    let Some(rect) = app.viewport.rect else { return f64::INFINITY };
+    let fov = app.view_fov();
+    let half = if fov > 0.0 { app.cam.distance * (fov * 0.5).tan() } else { app.cam.distance * 0.4 };
+    let per_point = 2.0 * half / f64::from(rect.height().max(1.0));
+    if per_point.is_finite() && per_point > 0.0 { SNAP_REACH * per_point } else { f64::INFINITY }
 }
 
 /// Is the segment exactly horizontal or vertical (an inferred constraint)?

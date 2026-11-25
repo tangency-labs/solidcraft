@@ -1,0 +1,90 @@
+{
+  "en": {
+    "ui.pattern_copy_at_end": "Copy at the end",
+    "ui.pattern_copy_at_end_2": "Copy at the end 2",
+    "ui.pattern_count_extent": "Quantity and Extent",
+    "ui.pattern_count_spacing": "Quantity and Spacing",
+    "ui.pattern_distance_type": "Distance Type",
+    "ui.pattern_distance_type_2": "Distance Type 2",
+    "ui.pattern_extent": "Extent",
+    "ui.pattern_extent_2": "Extent 2",
+    "ui.pattern_spacing_extent": "Spacing and Extent"
+  },
+  "de": {
+    "ui.pattern_copy_at_end": "Kopie am Ende",
+    "ui.pattern_copy_at_end_2": "Kopie am Ende 2",
+    "ui.pattern_count_extent": "Anzahl und Gesamtlänge",
+    "ui.pattern_count_spacing": "Anzahl und Abstand",
+    "ui.pattern_distance_type": "Abstandsart",
+    "ui.pattern_distance_type_2": "Abstandsart 2",
+    "ui.pattern_extent": "Gesamtlänge",
+    "ui.pattern_extent_2": "Gesamtlänge 2",
+    "ui.pattern_spacing_extent": "Abstand und Gesamtlänge"
+  },
+  "ar": {
+    "ui.pattern_copy_at_end": "نسخة عند النهاية",
+    "ui.pattern_copy_at_end_2": "نسخة عند النهاية 2",
+    "ui.pattern_count_extent": "العدد والامتداد",
+    "ui.pattern_count_spacing": "العدد والتباعد",
+    "ui.pattern_distance_type": "نوع المسافة",
+    "ui.pattern_distance_type_2": "نوع المسافة 2",
+    "ui.pattern_extent": "الامتداد",
+    "ui.pattern_extent_2": "الامتداد 2",
+    "ui.pattern_spacing_extent": "التباعد والامتداد"
+  },
+  "he": {
+    "ui.pattern_copy_at_end": "עותק בקצה",
+    "ui.pattern_copy_at_end_2": "עותק בקצה 2",
+    "ui.pattern_count_extent": "כמות וטווח",
+    "ui.pattern_count_spacing": "כמות ומרווח",
+    "ui.pattern_distance_type": "סוג מרחק",
+    "ui.pattern_distance_type_2": "סוג מרחק 2",
+    "ui.pattern_extent": "טווח",
+    "ui.pattern_extent_2": "טווח 2",
+    "ui.pattern_spacing_extent": "מרווח וטווח"
+  },
+  "ja": {
+    "ui.pattern_copy_at_end": "終端にコピー",
+    "ui.pattern_copy_at_end_2": "終端にコピー 2",
+    "ui.pattern_count_extent": "数量と全長",
+    "ui.pattern_count_spacing": "数量と間隔",
+    "ui.pattern_distance_type": "距離タイプ",
+    "ui.pattern_distance_type_2": "距離タイプ 2",
+    "ui.pattern_extent": "全長",
+    "ui.pattern_extent_2": "全長 2",
+    "ui.pattern_spacing_extent": "間隔と全長"
+  },
+  "ko": {
+    "ui.pattern_copy_at_end": "끝에 복사본",
+    "ui.pattern_copy_at_end_2": "끝에 복사본 2",
+    "ui.pattern_count_extent": "수량 및 전체 길이",
+    "ui.pattern_count_spacing": "수량 및 간격",
+    "ui.pattern_distance_type": "거리 유형",
+    "ui.pattern_distance_type_2": "거리 유형 2",
+    "ui.pattern_extent": "전체 길이",
+    "ui.pattern_extent_2": "전체 길이 2",
+    "ui.pattern_spacing_extent": "간격 및 전체 길이"
+  },
+  "vi": {
+    "ui.pattern_copy_at_end": "Bản sao ở cuối",
+    "ui.pattern_copy_at_end_2": "Bản sao ở cuối 2",
+    "ui.pattern_count_extent": "Số lượng và tổng chiều dài",
+    "ui.pattern_count_spacing": "Số lượng và khoảng cách",
+    "ui.pattern_distance_type": "Kiểu khoảng cách",
+    "ui.pattern_distance_type_2": "Kiểu khoảng cách 2",
+    "ui.pattern_extent": "Tổng chiều dài",
+    "ui.pattern_extent_2": "Tổng chiều dài 2",
+    "ui.pattern_spacing_extent": "Khoảng cách và tổng chiều dài"
+  },
+  "zh": {
+    "ui.pattern_copy_at_end": "末端副本",
+    "ui.pattern_copy_at_end_2": "末端副本 2",
+    "ui.pattern_count_extent": "数量和总长",
+    "ui.pattern_count_spacing": "数量和间距",
+    "ui.pattern_distance_type": "距离类型",
+    "ui.pattern_distance_type_2": "距离类型 2",
+    "ui.pattern_extent": "总长",
+    "ui.pattern_extent_2": "总长 2",
+    "ui.pattern_spacing_extent": "间距和总长"
+  }
+}

@@ -157,13 +157,14 @@ job (§5.1).
 
 | refusal | when | what it names | checked | file |
 |---|---|---|---|---|
-| `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_offset`; `sheets.rs`, `proved_singular` |
-| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
+| `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `proved_singular` (`least_wall`) |
+| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
+| `OffsetFailure::TubeFolds`, `TubeNotCertified` | a rounded offset's cap is the tube of radius \|d\| about a convex edge, `c + d u` with `u` on the arc between the faces' normals turned to the offset's side; it folds where `d (u · k) ≥ 1` (`k` the edge's curvature vector); `TubeNotCertified` when that is neither proved nor ruled out (#13685) | the edge, the distance and, for `TubeFolds`, `largest`, the largest distance at which the edge's tube is proved not to fold (none if none is; only the tube is proved there, so other defects can still appear at or near it) | on the first cap built for each edge, in every offset but the local operation (not a closing wall) | `offset_executive/p1.rs`, `refuse_folding_tube`; `query/tangent_edge.rs`, `tube_regularity` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
-| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance: neither the straight segment across the gap nor the face's section by a plane offset face holding both ends was proved to lie on the face (the section is not sought where the gap's input vertex is not known; a failed intersection is kept as the cause) | the original input face, when available | always | `offset_executive/step_gaps.rs` |
 
 The loop-gap search's own failures are defects, not refusals (class `stage_failed`, status `SM_ERR`): the gaps are in the offset loops the kernel built, so the input is not what fails (#21059).
 
@@ -310,6 +311,20 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
   along the normal). If all or none are cavity, every region is kept. This is a local test, not
   S4's winding number.
+- **The loop gaps** (`offset_executive/step_gaps.rs`, `close_loop_gaps`): where an input vertex's
+  faces' offsets do not meet in one point, a face's loop has a gap between its two edges at the
+  vertex. Where the gap's end lies on the other edge, that edge is trimmed to it and the vertex
+  moved there (not in a local operation, whose moved faces' edges can be left behind). Otherwise
+  the gap's edge runs on to the vertex: straight where a proved bound puts the whole segment on
+  the face's extended surface, else along the face's section by the plane of another offset face
+  at the vertex that holds both ends (the offsets of a round and its side, tangent, cross a third
+  face's offset at two points: `a_tube_joined_to_a_flared_loft_shells_open_at_both_ends`,
+  `solidcore-ops/src/offset/tests.rs`). The segments no other face borders (a curved one only
+  where the border's curve is proved within tolerance of it) bound a polygon (`cap_vertex_gaps`),
+  filled by its own plane face, or taken into the plane face along whose straight edge it closes
+  when that face's plane holds it and the closing stretch runs from an end vertex of that edge to
+  a point inside it (with both ends inside the edge, the polygon gets its own face). A face's segments are oriented by the input's face use, so
+  faces whose surfaces face opposite ways chain into one polygon.
 
 Without `extend_convex_edges` the rounded offset closes convex edges with cylinders and vertices
 with spheres (`edgeuse_offset`, `vertex_offset`, `offset_geometry_creation.rs`).
