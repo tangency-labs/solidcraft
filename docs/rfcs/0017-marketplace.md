@@ -56,7 +56,7 @@ We took Home Assistant's split as the model: code that runs inside the host and 
 | **Content pack** | Data only: colour themes, view shaders, material and appearance libraries, sample designs, drawing templates and title blocks, render studios and environments, profile and fastener tables | No | Themes and shaders: yes (`themes@0.1`, `shaders@0.2`, a package with no runtime). The rest need a capability each (section 2.2). |
 | **Part generator** | Builds a part from a vendor ordering code or from parameters (section 2.3) | Yes (a plugin with a `generators` declaration) | No |
 
-A package may be more than one thing, as a plugin that ships its own theme already may. The marketplace shows its **primary kind** (the first that applies in the order plugin, generator, content pack) and lists the rest as contents.
+A package may be more than one thing, as a plugin that ships its own theme already may. The marketplace shows its **primary kind** (the first that applies in the order generator, plugin, content pack, so a plugin that declares `generators` is shown as a generator) and lists the rest as contents.
 
 ### 2.1 Plugins
 
@@ -75,7 +75,7 @@ A content pack is a package whose manifest has no `runtime` and one or more data
 | `templates` | `templates@0.1` (new) | Drawing sheets, borders, title blocks, design templates |
 | `tables` | `tables@0.1` (new) | Standard-size tables for the profile and fastener commands |
 
-The new capabilities are separate small proposals, one per section. They are not part of the first marketplace phase. Themes and shaders are enough to ship the first content packs, and the marketplace must not wait on the rest. Each new section follows the existing rules: it is data, a host that does not know the section ignores it with a "needs a newer SolidCraft" note instead of failing to load the package, it adds no code, and it is checked by the host against schemas and size caps before it is used.
+The new capabilities are separate small proposals, one per section. They are not part of the first marketplace phase. Themes and shaders are enough to ship the first content packs, and the marketplace must not wait on the rest. Each new section follows the existing rules: it is data, a host that predates the section refuses the package with a clear reason ("needs a newer SolidCraft"), because the manifest keeps its strict field set (`deny_unknown_fields`) and an unknown field or an unserved capability is refused before anything is used; the index records each release's required capabilities and `min_host_version`, so the marketplace does not offer such a package to an older host in the first place, it adds no code, and it is checked by the host against schemas and size caps before it is used.
 
 Because a content pack runs no code, its approval screen is short: name, publisher, licence, what it adds, and nothing to grant.
 
@@ -118,11 +118,11 @@ A catalog-only generator, which needs no code because a built-in parametric temp
 | Sandbox | The standard sandbox | The same | The same |
 | Permissions on the approval screen | As requested | As requested, with the extra care in section 6 | As requested, with the extra care in section 6 |
 | `net` (RFC 0002, reserved) | Eligible later, for named `https` origins, requested by the host | Never | Never |
-| Updates | Offered; auto-offered without re-review when the declared permissions and entries are unchanged (section 8) | Offered, with the changed-permission rule | Offered, with the changed-permission rule |
+| Updates | Offered once that release is reviewed; a diff review for trusted developers (section 8) | Offered, with the changed-permission rule | Offered, with the changed-permission rule |
 | Index signature covers its hash | Yes | Yes | Not in the index |
 | Revocable by us | Yes | Yes | Only if its hash or repository is on the revocation list |
 
-**Verified.** The review reads the source and the component's build (section 7), the manifest's permissions against what the code needs, and the clean-room checks (section 12). A "trusted developer" is a GitHub account or organization on the index's developers list, added after at least one reviewed plugin and an agreement to the publisher rules. Trusted developers still go through review for a first listing and for any update that changes permissions or entries; a code-only update from a trusted developer goes through the machine checks and reaches users with the badge once the index builds. This is the HACS idea of a default list that maintainers curate, with the Home Assistant idea that custom integrations are not supported by the project, turned into an explicit label.
+**Verified.** The review reads the source and the component's build (section 7), the manifest's permissions against what the code needs, and the clean-room checks (section 12). A "trusted developer" is a GitHub account or organization on the index's developers list, added after at least one reviewed plugin and an agreement to the publisher rules. Every Verified release is reviewed: the badge means this release was read, not only that its publisher is trusted. A trusted developer gets a faster review (a maintainer reads the diff against the last reviewed release, not the whole source) and a first listing still gets the full one. Until a new release is reviewed, the previous reviewed release stays the one offered, and the new one shows as an update that is not yet reviewed. This is the HACS idea of a default list that maintainers curate, with the Home Assistant idea that custom integrations are not supported by the project, turned into an explicit label.
 
 **Listed.** The name is honest: the index lists it, we have not vetted it. Automated checks cover the manifest, version rules, licence, attribution, sizes, a built component that matches the listing, and a scan of the package for banned content (section 12). They cannot prove behaviour.
 
@@ -136,12 +136,13 @@ One public repository, `tangency-labs/solidcraft-index` (name to confirm), holds
 
 - `verified/<id>.json` and `listed/<id>.json`: one small file per item (section 4.2).
 - `developers.json`: trusted developers.
-- `revoked.json`: revocations (section 9).
+- `delisted.json`: items hidden from browse and updates (section 9.1). Records are kept, never dropped, so a delisted item does not fall back to the per-repository update check.
+- `revoked.json`: revocations (section 9.1).
 - A build workflow that validates every file, fetches each item's releases, checks them (section 4.3), and writes one `index.json` plus a detached signature `index.json.sig`, published as a release asset and on project Pages.
 
 SolidCraft downloads `index.json` and `index.json.sig`, verifies the signature with public keys built into the app (section 7), and reads the verified snapshot. A snapshot has an issue time, a sequence number that only increases, and an expiry. The app refuses an older sequence than it has already seen, so an old snapshot cannot be replayed to hide a revocation.
 
-The index is small: id, name, short description, kind, tier, publisher, licence, repository, tags, and per release the version, `min_host_version`, required and optional capabilities, size and hashes. It carries no package bytes and no pictures. Pictures are loaded when the user opens an item's page (section 10).
+The index is small: id, name, short description, kind, tier, publisher, licence, repository, tags, and per release the version, `min_host_version`, required and optional capabilities, size and hashes. It carries no package bytes and no pictures (a mirror may add `asset_url` and picture hashes, section 10). Pictures are loaded when the user opens an item's page (section 10).
 
 The index schema is generated from Rust types in a shared crate, `craft-market` (no SolidCraft dependency, builds for wasm; `cargo xtask layers` forbids otherwise), the way the plugin manifest schema is generated from `craft-plugin`.
 
@@ -203,7 +204,7 @@ Every release the build sees is re-checked on every run, so a release whose dige
 
 The sandbox and the permission model do not change. This section only says how the tier shapes what the user sees and what extra care applies.
 
-What exists and stays exactly as it is (RFC 0002, `docs/plugins.md`): permissions in the manifest (`files` folders with read or write, `clock`, command groups, `input_folder`, the reserved `net`), fuel, memory, stack and deadline limits and the app's ceilings, the approval screen showing what is requested, folders chosen by the user with Browse, approvals stored per plugin id, and the approval bound to `package_hash`, the hash of the exact manifest and component. The `archive` hash covers the whole `.zip`. A changed package, even one edited in place, runs only after it is approved again. Approvals can only narrow the manifest's requests.
+What exists and stays exactly as it is (RFC 0002, `docs/plugins.md`): permissions in the manifest (`files` folders with read or write, `clock`, command groups, `input_folder`, the reserved `net`), fuel, memory, stack and deadline limits and the app's ceilings, the approval screen showing what is requested, folders chosen by the user with Browse, approvals stored per plugin id, and the approval bound to `package_hash`, the hash of the exact manifest and component (not images or other data files, by design). The `archive` hash covers the whole `.zip`, including those files, and the marketplace checks it at install and update. A changed manifest or component, even one edited in place, runs only after it is approved again. Approvals can only narrow the manifest's requests.
 
 **What the tier adds**
 
@@ -231,7 +232,7 @@ Three separate things need to be true: the index is ours, the package is the one
 4. **Source must be public and reproducible enough to read.** Verified plugins are open source (RFC 0002 section 5 already says so). A component with no public source is not eligible.
 5. **Developer keys.** Trusted developers are identified by their GitHub account or organization in `developers.json`, not by a key of theirs. Per-author signing keys come later; they add a second thing to lose and a second thing to revoke.
 
-The approval hash the user sees binds all of it: if anything about the package changes after review, `package_hash` changes, the stored approval no longer matches, and the plugin stops until approved again, the existing behaviour.
+The approval hash the user sees binds all of it: if the manifest or component changes after review, `package_hash` changes, the stored approval no longer matches, and the plugin stops until approved again, the existing behaviour. `package_hash` does not cover other package files, such as a content pack's data files or images. Those are pinned by the `archive` hash in the index at install and update time, and a content pack grants nothing, so an edited data file on disk gains no permission. Whether to hash data files into the approval too is a design question for the content-pack phase (phase 3), and would update `docs/plugins.md` with it.
 
 What this does not give: it does not prove a verified plugin is free of bugs or of a later malicious update that passes review. That is why Verified updates that change permissions or entries are reviewed again, and why revocation exists.
 
@@ -241,9 +242,9 @@ The update flow RFC 0002's `updates.github` field and `docs/plugins.md` describe
 
 What the marketplace adds:
 
-- **One index request replaces many.** For an item that is in the index, the check reads the signed snapshot (one small download) instead of calling GitHub once per plugin. Custom items and items whose index entry is missing still use the per-repository call. The update setting that turns checks off, and the organization's policy over it, turn this off too.
+- **One index request replaces many.** For an item that is in the index, the check reads the signed snapshot (one small download) instead of calling GitHub once per plugin. Custom items still use the per-repository call. A delisted item is not "missing": the snapshot carries a signed `delisted.json` record for it (section 9.1), and an installed package that matches a record (by id and repository) gets no update offers from either path. Only a package with no index entry and no delisting record is treated as Custom. The update setting that turns checks off, and the organization's policy over it, turn this off too.
 - **Newest compatible, not newest.** The offered update is the newest compatible release (section 5), and the card says when a newer one is held back and why.
-- **Verified updates without re-review.** If a Verified item's new release has the same declared permissions, command groups, entries, slots and limits as the reviewed one (compared on the manifest, not on the code), the index build admits it with the Verified badge. A release that changes any of them stays Listed-until-reviewed: it is shown as an update with "not yet reviewed" and the user is told. RFC 0002's rule stands: a code-only update never adds an entry or surface silently, and a change in what was approved stops the plugin until the user approves again.
+- **Verified updates: diff review, not silent trust.** If a Verified item's new release has the same declared permissions, command groups, entries, slots and limits as the reviewed one (compared on the manifest, not on the code), the index build admits it with the Verified badge. A release that changes any of them stays Listed-until-reviewed: it is shown as an update with "not yet reviewed" and the user is told. RFC 0002's rule stands: a code-only update never adds an entry or surface silently, and a change in what was approved stops the plugin until the user approves again.
 - **Never silent.** Updates are offered, never installed without the user's click and the confirmation. There is no auto-update in v1. A later "update trusted plugins automatically" choice, if people want it, is a separate decision with its own page, never a Preferences row.
 - **Rollback.** The previous version is kept until the next update, so "Restore previous version" works offline. It is the same package and the same approval hash, so nothing new runs.
 - **Content packs** update the same way. A pack that adds a theme and a plugin updates as one package.
@@ -263,7 +264,7 @@ What the marketplace adds:
 Two actions, kept apart, because one hides and the other stops.
 
 - **Delisting** removes the item from browse and search and from "Update available". Already-installed copies keep working, and keep their approvals. Used when an item is abandoned, the author asks, or the licence or listing rules are no longer met and no harm is involved.
-- **Revocation** is for harm: malware, data theft, a sandbox escape, a clear licence or clean-room violation, a replaced package whose hash no longer matches what was reviewed. `revoked.json` lists a package id and version range or an exact `archive` hash, with a reason, a severity and a date.
+- **Revocation** is for harm: malware, data theft, a sandbox escape, a clear licence or clean-room violation, a replaced package whose hash no longer matches what was reviewed. `revoked.json` lists records, each with exactly one selector (a package `id` with a version range, an exact `archive` hash, or a `repo` in `owner/repo` form), a reason, a severity and a date. A `repo` selector matches any installed package whose `updates.github` or recorded source repository equals it (case-insensitively, as GitHub names are), so it also catches a Custom source and any new release from that repository.
   - `block`: the host refuses to run the package and shows why; the user cannot override it. The stored approval stays on disk but is not honoured.
   - `warn`: the package keeps running, the card shows a banner with the reason, and the user can remove it from there.
 - Revocation applies to Custom items too, by hash or by repository, because the list is checked against everything installed. A Custom item the user installed that we have revoked is shown the same way.
@@ -278,7 +279,7 @@ Two actions, kept apart, because one hides and the other stops.
 - **The index is cached on disk** with its issue time and sequence number. Browse works offline from the cache and says "as of <date>". Search runs on the cache.
 - **Installing offline** works from a `.zip` file (as today), and from the cache of a package the user already downloaded. There is no way to download a package offline; the button says why.
 - **Pictures and long descriptions** are fetched when the user opens an item's page, from the author's repository over `https`, and cached with a size cap. A missing picture never blocks anything. The app draws everything itself: text from the listing and README is shown as plain text, with no links that run, and no remote content is rendered as markup. This keeps the page from being a way to put anything on screen.
-- **What the app sends.** To read the index: a plain `GET` for two files, with no identifiers. To download an item: a plain `GET` of the release asset from GitHub. Nothing else, and no usage counts. The same controls as the update check govern it: the update setting, and an organization policy that can turn it off, or point the app at the organization's own mirror of the index (an `index_url` the policy sets), so a company can run a fully private marketplace or none.
+- **What the app sends.** To read the index: a plain `GET` for two files, with no identifiers. To download an item: a plain `GET` of the release asset from GitHub. Nothing else, and no usage counts. The same controls as the update check govern it: the update setting, and an organization policy that can turn it off, or point the app at the organization's own mirror of the index (an `index_url` the policy sets). For a mirror that keeps traffic inside the organization, the index schema lets each release carry an optional `asset_url` and each item optional picture entries with a sha256, and the app uses those instead of the author's GitHub URLs. The download is still checked against the same pinned `archive` hash, and a picture against its hash. We do not host anything: the organization does. Without those fields the app contacts GitHub, so a mirror of the index alone is not a private marketplace.
 - **Air-gapped use.** `solidcraft-cli` can verify and install from a downloaded snapshot and package files (`market install --from <dir>`), so a machine with no network can still use a reviewed set carried over on a drive.
 
 ## 11. The web build
@@ -344,7 +345,7 @@ The marketplace page's own settings (index source, "show pre-releases for this i
 |---|---|
 | `market.search` | `{query?, kind?, tier?}` returns cards from the cached snapshot |
 | `market.show` | `{id}` or `{repo}` returns the item page data for an index item or a Custom source |
-| `market.install` | `{id | repo, version?, approval, archive, approve?, accept_unreviewed?}` the same dry-run, pin and approve rules as `plugin.install`, with the index's pins checked |
+| `market.install` | `{id \| repo, version?, approval, archive, approve?, accept_unreviewed?}` the same dry-run, pin and approve rules as `plugin.install`, with the index's pins checked |
 | `market.updates` | Lists available updates and held-back ones, and why |
 | `market.refresh` | Fetches and verifies a new snapshot (the one network action; refuses if checks are off by policy) |
 | `market.sources` | Lists, adds or removes Custom sources |
