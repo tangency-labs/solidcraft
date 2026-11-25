@@ -1455,6 +1455,42 @@ fn joint_snapped_to_sketch_circle_center_follows_parameter_change() {
     let t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
     let com = solidcraft_engine::doc::apply_point(&t, Vec3::new(45.0, 10.0, 90.0));
     assert!(com.dist(Vec3::new(45.0, 10.0, 50.0)) < 1e-6, "Beam:1 COM should follow h -> 60 mm: {com:?}");
+
+    // Nonzero lateral offsets (Offset X / Offset Y) must also keep the persistent sketch reference.
+    app.run("joint.delete", json!({"joint": app.session.doc.assembly.joints[0].id})).unwrap();
+    app.run("parameters.change", json!({"name": "h", "expression": "100"})).unwrap();
+    let beam_face2 = {
+        let st = app.session.world_state().unwrap();
+        let b = st.body("BeamBody").expect("BeamBody");
+        let faces = b.joint_faces().unwrap();
+        let f = faces.iter().find(|f| f.plane_normal.is_some_and(|n| n.x < -0.9)).expect("Beam -X face");
+        Sel::Face { body: "BeamBody".into(), index: f.index, point: f.centroid }
+    };
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, Sel::SketchPoint { id: format!("{sketch}:c1.center") });
+    d.pick(&app.session, beam_face2);
+    if let crate::dialogs::Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[0] = "5".into();
+        f.offset[1] = "2".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(
+        matches!(&app.session.doc.assembly.joints[0].a.snap, solidcraft_engine::doc::joints::Snap::SketchPoint { sketch: s, point, .. } if *s == sketch && point == "c1.center"),
+        "nonzero lateral offset must keep Snap::SketchPoint: {:?}",
+        app.session.doc.assembly.joints[0].a.snap
+    );
+    let before_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let before_com = solidcraft_engine::doc::apply_point(&before_t, Vec3::new(45.0, 10.0, 90.0));
+    app.run("parameters.change", json!({"name": "h", "expression": "60"})).unwrap();
+    let after_t = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, beam_occ);
+    let after_com = solidcraft_engine::doc::apply_point(&after_t, Vec3::new(45.0, 10.0, 90.0));
+    assert!(
+        (after_com - before_com).dist(Vec3::new(0.0, 0.0, -40.0)) < 1e-6,
+        "offset sketch joint should follow h -> 60 mm by -40 mm in Z: before={before_com:?}, after={after_com:?}"
+    );
 }
 
 #[test]

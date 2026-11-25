@@ -4952,4 +4952,52 @@ fn joint_origin_on_sketch_circle_follows_parameter_change() {
     ] {
         assert!(s.execute("joint.origin", &bad).is_err(), "{bad}");
     }
+
+    // Strict schema check accepts sketch-point origins on joint.create and joint.as_built,
+    // and clearing a_alignment with null clears a stored x reference without adding one when absent.
+    s.param_check = crate::schema::ParamCheck::Strict;
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeam"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "PostToBeamStrict",
+            "flip": false,
+            "a": {"occurrence": "Post:1", "sketch": "HoleSketch", "curve": "c1"},
+            "b": {"occurrence": "Beam:1", "face": [20, 10, 70]}
+        }),
+    );
+    // Unaligned sketch-point origin stays x: None when cleared with a_alignment: null.
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: None, .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // A sketch-point origin with a stored x reference clears that reference when a_alignment is null.
+    if let solidcraft_doc::joints::Snap::SketchPoint { x, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+        *x = Some(solidcraft_doc::joints::XRef::Reference {
+            reference: solidcraft_doc::joints::AlignmentRef::OriginAxis { axis: "Y".into() },
+            reverse: false,
+        });
+    }
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: Some(solidcraft_doc::joints::XRef::Dir(_)), .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // joint.as_built also accepts a sketch-point `at` under Strict parameter checking.
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeamStrict"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "a": "Post:1", "b": "Beam:1", "at": {"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center"}}),
+    );
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { point, .. } if point == "c1.center"),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
 }

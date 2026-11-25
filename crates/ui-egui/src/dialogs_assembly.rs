@@ -2649,7 +2649,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             if (x.abs() > 1e-12 || y.abs() > 1e-12) && alignment.iter().any(Option::is_some) {
                 return Err("Secondary alignment needs Offset X and Offset Y to be zero".into());
             }
-            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
+            let a_param = if (x.abs() > 1e-12 || y.abs() > 1e-12) && a.param.get("sketch").is_none() { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.

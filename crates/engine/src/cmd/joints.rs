@@ -1690,6 +1690,13 @@ pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: O
     };
     match &mut origin.snap {
         Snap::FaceCenter { x: slot, .. } | Snap::CircleCenter { x: slot, .. } | Snap::Plane { x: slot, .. } | Snap::Axis { x: slot, .. } => *slot = x,
+        Snap::SketchPoint { x: slot, .. } if v.is_null() => {
+            if slot.is_some() {
+                *slot = x;
+            } else {
+                return Ok(origin);
+            }
+        }
         _ if v.is_null() => return Ok(origin),
         _ => return Err(bad(cmd, "secondary alignment needs a face, circle, plane or axis origin")),
     }
@@ -1700,7 +1707,9 @@ pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: O
 
 fn persistent_alignment(origin: &JointOrigin) -> Option<&XRef> {
     let x = match &origin.snap {
-        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
+            x.as_ref()
+        }
         _ => None,
     };
     x.filter(|x| matches!(x, XRef::Reference { .. } | XRef::Planar { .. }))
@@ -1804,6 +1813,7 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
                 | Snap::CircleCenter { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                 | Snap::Plane { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
                 | Snap::Axis { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
+                | Snap::SketchPoint { x: Some(XRef::Planar { .. } | XRef::Reference { .. }), .. }
         )
     };
     if angle.is_none() && !j.kind.is_relation() && !aligned(&j.a) && !aligned(&j.b) {
