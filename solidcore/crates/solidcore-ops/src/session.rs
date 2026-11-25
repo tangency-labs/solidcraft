@@ -243,6 +243,10 @@ fn give_back(k: Kernel) {
     drop(surplus);
 }
 
+/// A call's fuel as [`with_body`] found it: `(spent, limit)` when the tank was empty.
+#[derive(Clone, Copy)]
+struct Empty(Option<(u64, u64)>);
+
 thread_local! {
     /// This thread's own fixes, when it named some ([`set_thread_fixes`]).
     static THREAD_FIXES: Cell<Option<UpstreamFixes>> = const { Cell::new(None) };
@@ -254,6 +258,12 @@ thread_local! {
     /// kept or put back its body: [`run_with`] then answers the same, so a cancel landing between
     /// the two never leaves an edit in place under a `Cancelled` answer.
     static STOPPED: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The fuel tank of the call running on this thread ([`crate::fuel`]), for [`with_body`]
+    /// to read whether it ran out when it keeps or puts back its body.
+    static TANK: std::cell::RefCell<Option<CancelToken>> = const { std::cell::RefCell::new(None) };
+    /// Whether the call running on this thread ran out of fuel, and how far, as [`with_body`]
+    /// decided it when it kept or put back its body: [`run_with`] then answers the same.
+    static EMPTY: Cell<Option<Empty>> = const { Cell::new(None) };
     /// The kernel's own statement of the last error a call on this thread failed with
     /// ([`take_failure_detail`]).
     static DETAIL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
@@ -515,7 +525,16 @@ fn run_with<T: Answer>(
     let mut k = take();
     start_clean(&mut k);
     k.fixes = current_fixes();
-    k.cancel.clone_from(&token);
+    // The call's fuel: a tank the kernel's checks spend, joined with the application's token
+    // so that either stops it. Counting changes nothing the kernel computes.
+    let tank = crate::fuel::limit(call).map(CancelToken::with_fuel);
+    k.cancel = match (&tank, &token) {
+        (Some(t), Some(c)) => Some(t.either(c)),
+        (Some(t), None) => Some(t.clone()),
+        (None, c) => c.clone(),
+    };
+    TANK.with(|t| t.replace(tank.clone()));
+    EMPTY.with(|d| d.set(None));
     CURRENT.with(|c| c.set(Some(call)));
     IN_CALL.with(|d| d.set(d.get() + 1));
     let depth = Depth;
@@ -561,12 +580,37 @@ fn run_with<T: Answer>(
     let stopped = STOPPED
         .with(Cell::take)
         .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));
+    let empty = EMPTY
+        .with(Cell::take)
+        .map_or_else(|| tank.as_ref().and_then(CancelToken::out_of_fuel), |e| e.0);
+    TANK.with(|t| t.replace(None));
     let noted = NOTED.with(Cell::take);
     let mut kernel_code = None;
     let (r, fit) = match caught {
         // Cancelled during the call: no result, even one the kernel finished first, and a
         // kernel whose caches it may have left half-built is not used again.
         Ok(_) if stopped => (Err(Error::Cancelled), false),
+        // Out of fuel: the same, with the fuel it spent. The kernel's check that found the
+        // tank empty names where it stopped, when its error came back up.
+        Ok(r) if empty.is_some() => {
+            let (spent, limit) = empty.unwrap_or_default();
+            let operation = match &r {
+                Err(e) if e.is_out_of_fuel() => e.operation(),
+                _ => "OutOfFuel",
+            };
+            let e = Error::OutOfFuel {
+                op: call,
+                spent,
+                limit,
+            };
+            DETAIL.with(|d| d.replace(Some(e.to_string())));
+            kernel_code = Some(FailureCode {
+                call,
+                kind: solidcore::error::ErrorKind::OutOfFuel.code(),
+                operation,
+            });
+            (Err(e), false)
+        }
         Ok(Ok(v)) => (Ok(v), true),
         Ok(Err(e)) => {
             DETAIL.with(|d| d.replace(Some(e.to_string())));
@@ -714,12 +758,15 @@ pub(crate) fn with_body<T: Answer>(
 }
 
 /// Whether [`with_body`] keeps the edit that answered `r`: an answer that is no refusal, of a
-/// call not cancelled part way (a call cancelled part way returns no result ([`run_with`]): its
-/// edit goes too).
+/// call not cancelled part way and not out of fuel (such a call returns no result
+/// ([`run_with`]): its edit goes too).
 fn kept<T: Answer>(r: &solidcore::Result<T>) -> bool {
     let stopped = crate::cancel::is_cancelled();
     STOPPED.with(|d| d.set(Some(stopped)));
-    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped
+    // out of fuel part way: no result either, so the edit goes
+    let empty = TANK.with(|t| t.borrow().as_ref().and_then(CancelToken::out_of_fuel));
+    EMPTY.with(|d| d.set(Some(Empty(empty))));
+    r.as_ref().is_ok_and(|v| v.refusal().is_none()) && !stopped && empty.is_none()
 }
 
 /// Runs a measure with a read-only form on the kernel, under one lock of `body`: `read`
