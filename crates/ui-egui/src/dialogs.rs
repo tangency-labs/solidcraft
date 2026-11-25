@@ -1297,10 +1297,6 @@ impl Dialog {
                 Dialog::new(kind, inputs)
             }
         };
-        // A new Plane at Angle goes through its axis; the dialog's own option turns that off (#6180).
-        if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
-            *through_axis = true;
-        }
         recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)

@@ -3712,10 +3712,10 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
     assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
 }
 
-/// A new Plane at Angle starts with "Through the axis" on and goes through an edge off the base;
-/// with the option turned off it sends nothing new (#6180).
+/// A new Plane at Angle starts with "Through the axis" off, as before; ticking it in the dialog
+/// sends `through_axis` and the plane goes through an edge off the base (#6180).
 #[test]
-fn plane_at_angle_through_the_axis_starts_on_and_can_be_turned_off() {
+fn plane_at_angle_through_the_axis_starts_off_and_can_be_turned_on() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
     let mut made = Vec::new();
@@ -3723,7 +3723,7 @@ fn plane_at_angle_through_the_axis_starts_on_and_can_be_turned_off() {
         h.app.start("construct.plane.at_angle");
         h.frames(2);
         let d = h.app.dialog.as_mut().unwrap();
-        assert!(matches!(d.kind, Kind::AnglePlane { through_axis: true, direction_only: false, .. }), "{:?}", d.kind);
+        assert!(matches!(d.kind, Kind::AnglePlane { through_axis: false, direction_only: false, .. }), "{:?}", d.kind);
         if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
             *through_axis = on;
         }
