@@ -1567,6 +1567,29 @@ fn brute_force(
         .then_some(natural.v_interval().length())
         .filter(|p| p.is_finite() && *p > 0.0);
 
+    // The face's own parameter box may be narrower than where its edge's lift goes: an import
+    // lifts a rim continuously round a closed surface, past the box the face had before its
+    // seams were completed. Solving inside that box pulls every sample beyond it onto its
+    // edge, the same point again and again, which the spacing test below then drops: the trim
+    // is built over the part of the edge inside the box only. Along a periodic direction every
+    // parameter of the period is a place on the face's surface, so solve over all of it.
+    let mut solve_u = (face_domain.u_min(), face_domain.u_max());
+    let mut solve_v = (face_domain.v_min(), face_domain.v_max());
+    if u_period.is_some() {
+        solve_u = (
+            solve_u.0.min(natural.u_min()),
+            solve_u.1.max(natural.u_max()),
+        );
+    }
+    if v_period.is_some() {
+        solve_v = (
+            solve_v.0.min(natural.v_min()),
+            solve_v.1.max(natural.v_max()),
+        );
+    }
+    let solve_domain =
+        crate::geom::extent2d::Extent2d::from_bounds(solve_u.0, solve_v.0, solve_u.1, solve_v.1);
+
     // for 101 points
     for ii in 0..=100_u32 {
         // evaluate the curve at evenly spaced parameter points
@@ -1578,7 +1601,7 @@ fn brute_force(
         let solutions = surface.global_point_solve::<NoObject>(
             k,
             Some(NoObject),
-            face_domain,
+            &solve_domain,
             SolverOperation::Minimize,
             p0,
             edge_tol,
@@ -1586,9 +1609,6 @@ fn brute_force(
             SolutionRequested::All,
         )?;
 
-        if solutions.as_slice().is_empty() {
-            eprintln!("L9DBG   no solution at ii={ii} param={param}");
-        }
         // when a closest point was found
         if let Some(sol) = solutions.as_slice().first() {
             // get the surface UV Point from the solution array
@@ -1620,20 +1640,6 @@ fn brute_force(
                 // (Note, dMaxDev is 0 if ptr is Null.)
                 max_dev = max_dev.max(dev.unwrap_or(0.0));
             }
-        }
-    }
-
-    {
-        let (a, z) = (params.first().copied(), params.last().copied());
-        let flag = a.is_none_or(|a| (a - edge_domain.min()).abs() > 1e-9)
-            || z.is_none_or(|z| (z - edge_domain.max()).abs() > 1e-9);
-        eprintln!(
-            "L9DBG brute_force edge_dom=[{}, {}] sampled=[{a:?}, {z:?}] n={} maxdist={max_dist} tol={edge_tol} uvtol={uv_tol} periods={u_period:?},{v_period:?} face_dom={:?} {}",
-            edge_domain.min(), edge_domain.max(), params.len(), face_domain.size(),
-            if flag { "SHORT" } else { "full" }
-        );
-        if flag {
-            eprintln!("L9DBG   points={points:?} params={params:?}");
         }
     }
 
@@ -4605,10 +4611,10 @@ mod tests {
         }
     }
 
-    /// The edge lies a little off its surface, more than its tolerance, and crosses the
-    /// periodic seam: the trim still covers the whole edge interval.
+    /// The face's parameter box is narrower than the edge's lift across a periodic seam (an
+    /// import's face before its seams are completed): the trim still covers the whole edge.
     #[test]
-    fn point_drop_of_an_edge_off_its_surface_covers_the_whole_interval() {
+    fn point_drop_over_a_face_box_narrower_than_the_edge_covers_the_whole_edge() {
         use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
         use crate::primitive::api_primitives::{create_cylinder, create_cylinder_surface};
 
@@ -4619,13 +4625,12 @@ mod tests {
             .iter()
             .find_map(|(eu, u)| u.edge.map(|e| (eu, e)))
             .unwrap();
-        b.edge_mut(e).unwrap().tolerance = 1e-6;
         let surface = Surface::from(create_cylinder_surface(&k, Vec3::ZERO, 5.0, 3.0).unwrap());
         let curve = Curve::from(
             BSplineCurve::create_circle_segment(
                 3,
                 &Axis2Placement::default(),
-                5.0 + 1.7e-6,
+                5.0,
                 -10.0,
                 10.0,
                 NurbCircleParam::Quadratic,
@@ -4633,20 +4638,20 @@ mod tests {
             .unwrap(),
         );
         let interval = curve.natural_interval();
-        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let natural = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        // a box over the first part of the period: the arc's first half lies outside it
+        let narrow = crate::geom::extent2d::Extent2d::from_bounds(
+            natural.u_min(),
+            natural.v_min(),
+            natural.u_min() + 0.25 * natural.x_length(),
+            natural.v_max(),
+        );
         let mut fail = DropCurveFail::default();
         let made = brute_force(
-            &k, &mut b, eu, e, &surface, &domain, &curve, &interval, false, true, &mut fail,
+            &k, &mut b, eu, e, &surface, &narrow, &curve, &interval, false, true, &mut fail,
         )
         .unwrap();
         let span = made.curve.natural_interval();
-        eprintln!(
-            "L9DBG span {:?} {:?} edge {:?} {:?}",
-            span.min(),
-            span.max(),
-            interval.min(),
-            interval.max()
-        );
         assert!(
             (span.min() - interval.min()).abs() < 1e-9
                 && (span.max() - interval.max()).abs() < 1e-9,

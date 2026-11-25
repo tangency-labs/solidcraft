@@ -1597,6 +1597,13 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     }
     assert!(crate::record_check::validate(&short).is_err());
     assert!(!crate::pcurve::passes_import_checks(&short));
+    // A completion that is used says nothing. One the checks refuse is named, so the import
+    // can tell a reader why the body kept its imported trims.
+    let (used, skipped) = crate::pcurve::complete_periodic_seams_noted(&source).unwrap();
+    assert!(used.is_some() && skipped.is_none());
+    let why = crate::pcurve::import_check_failure(&short).unwrap();
+    assert!(why.contains("the completed record is invalid"), "{why}");
+    assert!(crate::pcurve::import_check_failure(&completed).is_none());
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");
