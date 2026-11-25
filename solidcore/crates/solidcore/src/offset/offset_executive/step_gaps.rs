@@ -602,12 +602,67 @@ impl OffsetExecutive {
             }
         }
         for &(face, across) in closed_edges {
-            let explained = gone.contains(&face) || across.is_some_and(|a| gone_orig.contains(&a));
+            let explained = gone.contains(&face)
+                || across.is_some_and(|a| gone_orig.contains(&a))
+                || self.closed_on_both_sides(original, b, closed_edges, face, across)?;
             if !explained {
                 return Err(self.edge_vanishes(original, face, None));
             }
         }
         Ok((gone_list, gone))
+    }
+
+    /// (#1126) Whether the edge of `face` closed to a point (the original face `across`
+    /// beside it) is one edge closed on both its sides: `face`'s only closed edge, the
+    /// face across having closed exactly one edge, the one across from `face`, and both
+    /// faces keeping a loop of three edges or more. The point is then a vertex where the
+    /// faces either side meet the two faces whose edge closed (an offset that just
+    /// reaches where its neighbours converge). An edge of a face that closed more than
+    /// once, or that leaves a face fewer than three edges, is no such vertex.
+    ///
+    /// # Errors
+    ///
+    /// Those of the face and loop queries.
+    fn closed_on_both_sides(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        closed_edges: &[(FaceId, Option<FaceId>)],
+        face: FaceId,
+        across: Option<FaceId>,
+    ) -> Result<bool> {
+        let Some(across) = across else {
+            return Ok(false);
+        };
+        let original_of = |f: FaceId| -> Result<Option<FaceId>> {
+            match self.faceuse_to_faces.firsts(f).as_slice() {
+                [fu] => eu::faceuse_face(original, *fu),
+                _ => Ok(None),
+            }
+        };
+        let Some(this_orig) = original_of(face)? else {
+            return Ok(false);
+        };
+        // the closed edges of the offset face across, and that face
+        let mut across_closed = Vec::new();
+        for &(other, other_across) in closed_edges {
+            if other != face && original_of(other)? == Some(across) {
+                across_closed.push((other, other_across));
+            }
+        }
+        let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
+        let [(other, Some(back))] = across_closed[..] else {
+            return Ok(false);
+        };
+        if !once || back != this_orig {
+            return Ok(false);
+        }
+        for f in [face, other] {
+            if face4::edges(b, f, None, false, None)?.len() < 3 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
@@ -764,6 +819,29 @@ impl OffsetExecutive {
                 edge::set_interval(b, e, &new_ivl)?;
                 return Ok(None);
             }
+        }
+
+        // (#1126) The edge's two vertices met at the gap and its curve misses them: the
+        // edge closed to a point where the faces either side meet (a draft that just
+        // reaches where its neighbours converge). It is squeezed out like a closed edge
+        // above; `closed_faces` takes it only where its edge on the face across closed
+        // with it.
+        if self.operation() == OffsetOperation::LocalOperation
+            && self.squeeze_closed_edge(
+                kernel,
+                original,
+                b,
+                f,
+                u,
+                e,
+                at_start,
+                vertex_point,
+                tol,
+                notifications,
+                closed_edges,
+            )?
+        {
+            return Ok(None);
         }
 
         // (#21215) The gap's end on the other edge at the vertex: the two edges cross

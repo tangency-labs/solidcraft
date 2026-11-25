@@ -3150,33 +3150,50 @@ mod drafts {
         ));
     }
 
-    /// #1126, past the critical angle atan(1/4), where the wall's foot reaches the line
-    /// x = 0, y = 15 the sides meet on:
-    /// - t = 1/4, the foot exactly on the line: the wall's bottom edge closes to the point
-    ///   (0, 15, 0), where four faces meet. V = 4 [15 Y^2 - Y^3/3] from 10 to 15 = 13000/3;
-    ///   6 faces, 11 edges, 7 vertices.
-    /// - t = 1/2, past the line: the wall ends in a point on the line at z = 20 - 5/t = 10
-    ///   (a triangle), and below that point the two sides meet along a new edge on the line,
-    ///   down to the bottom, whose outline becomes the triangle (-15, 0) (15, 0) (0, 15).
-    ///   V = 2 [15 Y^2 - Y^3/3] from 10 to 15, plus 10 (30 15 - 15^2) = 6500/3 + 2250 =
-    ///   13250/3 (for any t >= 1/4, V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
+    /// #1126 at the critical angle atan(1/4), where the wall's foot reaches the line
+    /// x = 0, y = 15 the sides meet on: the wall's bottom edge closes to the point
+    /// (0, 15, 0), where four faces meet (the wall, the bottom and both sides), and no new
+    /// edge. V = 4 [15 Y^2 - Y^3/3] from 10 to 15 = 13000/3; 6 faces, 11 edges, 7 vertices.
+    #[test]
+    fn a_short_wall_drafted_onto_where_its_sides_converge() {
+        all_fixes();
+        // atan(1/4), the double nearest it
+        const QUARTER: f64 = 0.244_978_663_126_864_14;
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([[-15.0, 0.0, 0.0], [15.0, 0.0, 0.0], [0.0, 15.0, 0.0]]);
+        assert!(draft_the_short_wall(
+            QUARTER,
+            13000.0 / 3.0,
+            [6, 11, 7],
+            &points
+        ));
+    }
+
+    /// #1126 past the critical angle, t = 1/2: the wall ends in a point on the line x = 0,
+    /// y = 15 at z = 20 - 5/t = 10 (a triangle), and below that point the two sides meet
+    /// along a new edge on the line, down to the bottom, whose outline becomes the triangle
+    /// (-15, 0) (15, 0) (0, 15). V = 2 [15 Y^2 - Y^3/3] from 10 to 15, plus
+    /// 10 (30 15 - 15^2) = 6500/3 + 2250 = 13250/3 (for any t >= 1/4,
+    /// V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
     #[test]
     #[ignore = "fails until #1126 is fixed"]
-    fn a_short_wall_drafted_onto_and_past_where_its_sides_converge() {
+    fn a_short_wall_drafted_past_where_its_sides_converge() {
         all_fixes();
-        // atan(1/4), atan(1/2): the doubles nearest them
-        const QUARTER: f64 = 0.244_978_663_126_864_14;
+        // atan(1/2), the double nearest it
         const HALF: f64 = 0.463_647_609_000_806_1;
-        let mut onto = CONVERGING_TOP.to_vec();
-        onto.extend([[-15.0, 0.0, 0.0], [15.0, 0.0, 0.0], [0.0, 15.0, 0.0]]);
-        let mut past = onto.clone();
-        past.push([0.0, 15.0, 10.0]);
-        let onto_ok = draft_the_short_wall(QUARTER, 13000.0 / 3.0, [6, 11, 7], &onto);
-        let past_ok = draft_the_short_wall(HALF, 13250.0 / 3.0, [6, 12, 8], &past);
-        assert!(
-            onto_ok && past_ok,
-            "onto the line {onto_ok}, past it {past_ok}"
-        );
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [0.0, 15.0, 0.0],
+            [0.0, 15.0, 10.0],
+        ]);
+        assert!(draft_the_short_wall(
+            HALF,
+            13250.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
     }
 }
 
