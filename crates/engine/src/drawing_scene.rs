@@ -603,12 +603,16 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let mut owners = Vec::new();
     let drawn = on.iter().map(|(id, view, centre)| {
         let choice = sessions.choice(view);
-        let drawn = match sessions.drawing(&choice) {
-            Ok((from, failing)) => {
-                let shown = shown.entry(choice.clone()).or_insert_with(|| crate::drawing_view::shown(from));
-                draw(from, failing, shown, prepared.entry(choice.clone()).or_default(), *id, view)
-            }
-            Err(why) => draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view),
+        let own = shown.entry(choice.clone()).or_insert_with(|| sessions.drawing(&choice).and_then(|(from, _)| crate::drawing_view::shown(from)));
+        let overlays = match &*own {
+            Ok(set) => crate::drawing_view::overlays(&mut sessions, view, &set.of_view(view)),
+            Err(_) => Vec::new(),
+        };
+        // Every session is made now, so the view's and its overlays' are held together.
+        let overlays = with_sessions(&sessions, overlays);
+        let drawn = match sessions.made(&choice) {
+            Some(Ok((from, failing))) => draw(from, failing, own, &overlays, prepared.entry(choice.clone()).or_default(), *id, view),
+            _ => draw(s, &[], own, &[], &mut PreparedBodies::default(), *id, view),
         };
         owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
         (*id, *centre, drawn)
@@ -926,17 +930,33 @@ impl Lettering {
     }
 }
 
+/// One of a view's overlays as [`draw`] draws it (#13048): the session its position draws from and
+/// the parts that position moves ([`crate::drawing_view::overlays`]), or why it can't be drawn.
+type Overlay<'a> = std::result::Result<(&'a Session, ShownSet), Unmeasured>;
+
+/// `overlays` with the session each draws from, from `sessions`, which made them.
+fn with_sessions<'a>(sessions: &'a ViewSessions, overlays: Vec<(Choice, std::result::Result<ShownSet, Unmeasured>)>) -> Vec<Overlay<'a>> {
+    let one = |(choice, set): (Choice, std::result::Result<ShownSet, Unmeasured>)| {
+        let (from, _) = sessions.made(&choice).ok_or(Unmeasured::NotPosed)??;
+        Ok((from, set?))
+    };
+    overlays.into_iter().map(one).collect()
+}
+
 /// View `id`, drawing as `view` does, of the bodies `shown` holds, from `s`, where its configuration
 /// row fails to build `failing` features the design builds: its lines, the hidden ones too
 /// when its style draws them, sampled at
 /// [`CHORD_MM`] on paper, or coarser past 100:1, where that would ask the mesh for chords finer than
-/// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
+/// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Then each of
+/// its `overlays`' visible lines through the same frame, as phantom lines over its own
+/// ([`crate::drawing_view::phantom_items`]); its boundary holds them. Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 /// The bodies its exact lines need come from `prepared`, as the sheet's other views left them.
 fn draw(
     s: &Session,
     failing: &[String],
     shown: &std::result::Result<ShownSet, Unmeasured>,
+    overlays: &[Overlay],
     prepared: &mut PreparedBodies,
     id: u64,
     view: &ResolvedView,
@@ -945,18 +965,19 @@ fn draw(
         return draw_flat(s, id, view, of);
     }
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
+    let drawn_overlays = || overlays.iter().filter_map(|overlay| overlay.as_ref().ok());
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
+        let around = crate::drawing_view::reach(around, drawn_overlays().map(|(_, set)| set), &view.basis);
         (set, extents, around)
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    // A section view also says which of its parts it draws uncut.
+    // A section view also says which of its parts it draws uncut, and a view which overlays it leaves out.
     let uncut = measured.as_ref().ok().and_then(|(set, ..)| set.uncut.clone());
-    let why = match (crate::drawing_view::state_reason(s, view, failing), uncut) {
-        (Some(state), Some(uncut)) => Some(format!("{state}; {uncut}")),
-        (state, uncut) => state.or(uncut),
-    };
+    let left_out = overlays.iter().enumerate().filter_map(|(at, overlay)| overlay.as_ref().err().map(|why| format!("its overlay {}: {why}", at + 1)));
+    let said: Vec<String> = crate::drawing_view::state_reason(s, view, failing).into_iter().chain(uncut).chain(left_out).collect();
+    let why = (!said.is_empty()).then(|| said.join("; "));
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_cut_yet(view).or_else(|| crate::drawing_view::not_detailed_yet(view));
@@ -981,20 +1002,32 @@ fn draw(
         Ok(frame) => frame,
         Err(e) => return none(Status::Failed(reason(e))),
     };
+    // An overlay's lines are its visible ones, each from the session its position draws from.
+    let phantom = LineRequest { hidden: false, reference_hidden: false, ..request };
+    let overlaid = |(from, set): &(&Session, ShownSet)| -> Result<Vec<Item>> {
+        let lines = crate::drawing_view::lines(from, set, &frame, &phantom, &mut PreparedBodies::default(), CMD)?;
+        Ok(crate::drawing_view::phantom_items(&lines, view.line_group.value))
+    };
     // A detail view shows only its region: its boundary is the region's.
     let around = view.detail.map_or(around, |region| region.shape().bounds());
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
         let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
+        let phantom = drawn_overlays().filter(|(_, set)| !set.bodies.is_empty()).map(overlaid).collect::<Result<Vec<_>>>()?;
         let hatched = match &view.cut {
             Some(cut) => crate::drawing_view::hatches(&set, cut, &frame, view.line_group.value),
             None => crate::drawing_view::Hatching::default(),
         };
-        Ok((lines, rect, hatched))
+        Ok((lines, rect, hatched, phantom))
     });
     match lines {
-        Ok((lines, rect, hatched)) => {
-            let (group, drew) = paper_lines(&lines, id, view.line_group.value);
+        Ok((lines, rect, hatched, phantom)) => {
+            let (mut group, mut drew) = paper_lines(&lines, id, view.line_group.value);
+            // The overlays' strokes go over the view's own, and name no body to pick.
+            for item in phantom.into_iter().flatten() {
+                group.items.push(item);
+                drew.push(None);
+            }
             // A detail view's lines are cut to its window, each line on its own, so each part keeps
             // the line's owner.
             let (mut group, drew) = match view.detail {
@@ -2256,21 +2289,35 @@ struct FillRegionEntry {
 /// threads (which change no geometry, yet draw lines of their own). A world state
 /// with the same draws the same lines, so an appearance, or an edit taken back, draws nothing. It
 /// keys the whole set, not a view's own bodies: which bodies share a mesh, so the lines' last bits,
-/// hangs on all of them ([`crate::mesh_lines`]).
+/// hangs on all of them ([`crate::mesh_lines`]). Then the same of what each of the view's overlays
+/// draws (#13048), empty for one that can't be drawn, so an edit that moves only an overlay's parts
+/// draws the view again.
 #[derive(Debug, PartialEq)]
-pub(crate) struct SourceKey(Vec<(Vec<u64>, String, bool, u64, Vec<ThreadInfo>)>);
+pub(crate) struct SourceKey(Vec<Vec<(Vec<u64>, String, bool, u64, Vec<ThreadInfo>)>>);
 
 impl SourceKey {
     /// None when there is nothing to show, or a body's geometry has no key: a view drawn from it
     /// always draws again.
-    fn of(shown: &std::result::Result<ShownSet, Unmeasured>) -> Option<Arc<SourceKey>> {
-        let set = shown.as_ref().ok()?;
-        let body = |one: &Shown| {
-            let body = set.body(one)?;
-            let threads = set.state.threads.iter().filter(|t| t.body == body.name).cloned().collect();
-            Some((one.path.clone(), one.body.clone(), one.reference, body.geometry_key()?, threads))
+    fn of<'a>(
+        shown: &std::result::Result<ShownSet, Unmeasured>,
+        overlays: impl IntoIterator<Item = std::result::Result<&'a ShownSet, Unmeasured>>,
+    ) -> Option<Arc<SourceKey>> {
+        let keys = |set: &ShownSet| {
+            let body = |one: &Shown| {
+                let body = set.body(one)?;
+                let threads = set.state.threads.iter().filter(|t| t.body == body.name).cloned().collect();
+                Some((one.path.clone(), one.body.clone(), one.reference, body.geometry_key()?, threads))
+            };
+            set.bodies.iter().map(body).collect::<Option<Vec<_>>>()
         };
-        set.bodies.iter().map(body).collect::<Option<Vec<_>>>().map(|bodies| Arc::new(SourceKey(bodies)))
+        let mut sets = vec![keys(shown.as_ref().ok()?)?];
+        for overlay in overlays {
+            sets.push(match overlay {
+                Ok(set) => keys(set)?,
+                Err(_) => Vec::new(),
+            });
+        }
+        Some(Arc::new(SourceKey(sets)))
     }
 }
 
@@ -3190,6 +3237,10 @@ struct ViewJob {
     later: Option<Choice>,
     /// Whether its view draws the design as it places its parts, whose shown set the cache keeps.
     placed: bool,
+    /// The design as it places its parts, where its view's overlays' copies are made from (#13048),
+    /// when `copy` isn't it: a view in another position, with overlays. Boxed, so a job keeps one
+    /// session's size in [`Work`], beside a picture's.
+    base: Option<Box<Session>>,
     /// The drawing open when the job was asked for: its records of the view's dimensions and notes.
     drawing: Arc<Drawing>,
     ticket: Ticket,
@@ -3226,7 +3277,7 @@ struct ViewDone {
 impl ViewJob {
     /// Works the view's lines, dimensions and notes out: the one long piece of work, on any thread.
     fn run(self) -> ViewDone {
-        let ViewJob { copy, refused, later, placed, drawing, ticket, shown } = self;
+        let ViewJob { copy, refused, later, placed, base, drawing, ticket, shown } = self;
         // A view of another configuration: its copy, made here ([`copy_for`]). A panic while it is made
         // fails the view, as `Session::execute` fails a command, and the view is then up to date: its
         // job isn't asked for again until the design changes.
@@ -3240,34 +3291,42 @@ impl ViewJob {
             }))
         });
         let panicked = matches!(made, Some(Err(_)));
-        let (copy, failing, refused) = match made {
-            Some(Ok(Ok(made))) => (made.session, made.failing, None),
-            Some(Ok(Err(why))) => (copy, Vec::new(), Some(why)),
+        let (made, failing, refused) = match made {
+            Some(Ok(Ok(made))) => (Some(made.session), made.failing, None),
+            Some(Ok(Err(why))) => (None, Vec::new(), Some(why)),
             // Drawn as its placeholder, then failed, below.
-            Some(Err(_)) => (copy, Vec::new(), Some(Unmeasured::NotConfigured)),
-            None => (copy, Vec::new(), refused),
+            Some(Err(_)) => (None, Vec::new(), Some(Unmeasured::NotConfigured)),
+            None => (None, Vec::new(), refused),
         };
+        // The session the view draws from, and the design its overlays' copies are made from.
+        let (from, design) = (made.as_ref().unwrap_or(&copy), base.as_deref().unwrap_or(&copy));
         // A design whose parts can't be placed draws its views as placeholders (`shown` says why).
-        let state = copy.world_state().unwrap_or_else(|_| copy.model.state());
+        let state = from.world_state().unwrap_or_else(|_| from.model.state());
         let shown = match (refused, shown) {
             (Some(why), _) => Err(why),
             (None, Some((was, shown))) if Arc::ptr_eq(&was, &state) => shown,
-            _ => crate::drawing_view::shown(&copy),
+            _ => crate::drawing_view::shown(from),
         };
+        let mut sessions = ViewSessions::new(design);
+        let overlays = match &shown {
+            Ok(set) => crate::drawing_view::overlays(&mut sessions, &ticket.resolved, &set.of_view(&ticket.resolved)),
+            Err(_) => Vec::new(),
+        };
+        let overlays = with_sessions(&sessions, overlays);
         // One view a job, so nothing it prepares is lent to another.
-        let mut drawn = draw(&copy, &failing, &shown, &mut PreparedBodies::default(), ticket.view, &ticket.resolved);
+        let mut drawn = draw(from, &failing, &shown, &overlays, &mut PreparedBodies::default(), ticket.view, &ticket.resolved);
         if panicked {
             drawn.status = Status::Failed(COPY_PANICKED.into());
         }
-        let shows = SourceKey::of(&shown);
+        let shows = SourceKey::of(&shown, overlays.iter().map(|overlay| overlay.as_ref().map(|(_, set)| set).map_err(|why| *why)));
         // The view's dimensions and notes through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
-        // `copy` is the session the view draws from (its row's copy, or the design when the row can't be
+        // `from` is the session the view draws from (its row's copy, or the design when the row can't be
         // put on it), so its records are read on it.
-        let lines = draw_dimensions(&copy, None, &drawing, &dimensions, |_| frame, false);
+        let lines = draw_dimensions(from, None, &drawing, &dimensions, |_| frame, false);
         let frames = drawn.frame.map(|frame| BTreeMap::from([(ticket.view, (frame, Vec2::ZERO))])).unwrap_or_default();
-        let marks = if drawn.frame.is_some() { marks::groups(&copy, &drawing, &frames) } else { marks::unframed(&drawing, ticket.view) };
+        let marks = if drawn.frame.is_some() { marks::groups(from, &drawing, &frames) } else { marks::unframed(&drawing, ticket.view) };
         let shown = placed.then_some((state, shown));
         ViewDone { ticket, drawn, shows, dimensions, lines, marks, shown }
     }
@@ -3329,18 +3388,19 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
     let lettering = Lettering::of(s, d);
     let choice = ViewSessions::new(s).choice(&view);
     let placed = choice.is_placed();
-    let (copy, refused, later, shown) = if placed {
-        (designed(s), None, None, s.drawing_scenes.shown.take())
+    let (copy, refused, later, shown, base) = if placed {
+        (designed(s), None, None, s.drawing_scenes.shown.take(), None)
     } else if choice.evaluates() {
-        (designed(s), None, Some(choice), None)
+        (designed(s), None, Some(choice), None, None)
     } else {
+        let base = (!view.overlays.value.is_empty()).then(|| Box::new(designed(s)));
         match copy_for(s, &choice) {
-            Ok(copy) => (copy.session, None, None, None),
-            Err(why) => (designed(s), Some(why), None, None),
+            Ok(copy) => (copy.session, None, None, None, base),
+            Err(why) => (designed(s), Some(why), None, None, None),
         }
     };
     let ticket = Ticket { request, drawing: d.id, view: id, resolved: view, state, revision: s.revision, lettering };
-    ViewJob { copy, refused, later, placed, drawing: d.clone(), ticket, shown }
+    ViewJob { copy, refused, later, placed, base, drawing: d.clone(), ticket, shown }
 }
 
 /// Takes a job's work into the cache when it is for its latest request and nothing it was asked from
@@ -3499,36 +3559,44 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
     // fails to build features is of another configuration, which is left behind.
     let says = |view: &ResolvedView| crate::drawing_view::state_reason(s, view, &[]);
     // Each by the key of the session it draws from, so a view of the active row is the design's.
-    let behind: Vec<(u64, Choice, Option<String>)> = {
+    let behind: Vec<(u64, Choice, ResolvedView, Option<String>)> = {
         let sessions = ViewSessions::new(s);
         on.filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;
-            Some((id, sessions.choice(&entry.view), says(&entry.view)))
+            Some((id, sessions.choice(&entry.view), entry.view.clone(), says(&entry.view)))
         })
         .collect()
     };
-    let mut now: BTreeMap<Choice, Option<Arc<SourceKey>>> = BTreeMap::new();
-    if behind.iter().any(|(_, choice, _)| choice.is_placed()) {
+    let mut now: BTreeMap<Choice, std::result::Result<ShownSet, Unmeasured>> = BTreeMap::new();
+    if behind.iter().any(|(_, choice, ..)| choice.is_placed()) {
         let shown = match s.drawing_scenes.shown.take() {
             Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
             _ => crate::drawing_view::shown(s),
         };
-        now.insert(Choice::default(), SourceKey::of(&shown));
+        now.insert(Choice::default(), shown.clone());
         s.drawing_scenes.shown = Some((state.clone(), shown));
     }
+    // What each shows now, with its overlays, as its job keys it ([`Job::run`]).
+    let mut keys = Vec::with_capacity(behind.len());
     {
         let mut sessions = ViewSessions::new(s);
-        for (_, choice, _) in &behind {
-            if !now.contains_key(choice) && !choice.evaluates() {
-                let shown = sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from));
-                now.insert(choice.clone(), SourceKey::of(&shown));
+        for (id, choice, view, why) in behind {
+            if choice.evaluates() {
+                continue;
             }
+            let shown = now.entry(choice.clone()).or_insert_with(|| sessions.drawing(&choice).and_then(|(from, _)| crate::drawing_view::shown(from)));
+            let overlays = match &*shown {
+                Ok(set) => crate::drawing_view::overlays(&mut sessions, &view, &set.of_view(&view)),
+                Err(_) => Vec::new(),
+            };
+            let overlays = overlays.iter().map(|(_, set)| set.as_ref().map_err(|why| *why));
+            keys.push((id, SourceKey::of(shown, overlays), why));
         }
     }
     let cache = &mut s.drawing_scenes;
-    for (id, choice, why) in behind {
-        let Some(Some(now)) = now.get(&choice) else { continue };
-        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, now)) {
+    for (id, now, why) in keys {
+        let Some(now) = now else { continue };
+        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, &now)) {
             entry.state = state.clone();
             // A new reason is a new drawing of the view, so the sheet is assembled again.
             if entry.drawn.why != why {

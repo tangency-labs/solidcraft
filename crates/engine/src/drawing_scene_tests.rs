@@ -1573,6 +1573,137 @@ fn views_at_one_study_step_share_one_copy() {
     built(&s, sheet);
 }
 
+/// View `id`'s strokes in `scene`: each path, its width and its dashes' lengths.
+fn strokes_of(scene: &Scene, id: u64) -> Vec<(Vec<Seg2>, f64, Option<Vec<f64>>)> {
+    let items = scene.groups.iter().filter(|g| g.object == id && g.kind == ObjectKind::View).flat_map(|g| &g.items);
+    let stroke = |item: &Item| match item {
+        Item::Stroke { path, width_mm, pattern, .. } => Some((path.clone(), *width_mm, pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+        _ => None,
+    };
+    items.filter_map(stroke).collect()
+}
+
+/// The box round `strokes`' paths.
+fn stroke_box(strokes: &[(Vec<Seg2>, f64, Option<Vec<f64>>)]) -> Aabb2 {
+    strokes.iter().flat_map(|(path, ..)| path).fold(Aabb2::EMPTY, |b, seg| b.union(&seg.bounds()))
+}
+
+/// [`hinge_pair`]'s view with an overlay of the leaf turned up (#13048): the session, the sheet and
+/// the view.
+fn overlaid_hinge() -> (Session, u64, u64) {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"overlays": [[{"joint": "Hinge", "values": [90]}]]}}));
+    (s, sheet, view)
+}
+
+/// An overlay of the hinge with its leaf turned up (#13048): the view draws its own lines as they were,
+/// then the leaf a second time, turned up, in narrow long-dashed double-dotted lines (ISO 128-20
+/// type 05). The plate, which the overlay doesn't move, is drawn once. Built at once and drawn by the
+/// provider, the sheet is the same bytes.
+#[test]
+fn an_overlay_draws_the_parts_its_position_moves_in_phantom_lines() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let before = strokes_of(&built(&s, sheet).scene, view);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"overlays": [[{"joint": "Hinge", "values": [90]}]]}}));
+    let (own, phantom): (Vec<_>, Vec<_>) = strokes_of(&built(&s, sheet).scene, view).into_iter().partition(|(.., dashes)| dashes.is_none());
+    assert_eq!(own, before, "the view's own lines are as they were");
+    let group = LineGroup::DEFAULT;
+    assert!(!phantom.is_empty());
+    // ISO 128-20 Table 3: a long dash of 24 narrow-line widths, then two dots of half a width, each
+    // after a gap of 3, and a gap of 3 to end.
+    let d = LineKind::Thin.width_mm(group);
+    let type_05 = vec![24.0 * d, 3.0 * d, 0.5 * d, 3.0 * d, 0.5 * d, 3.0 * d];
+    for (_, width, dashes) in &phantom {
+        assert_eq!((*width, dashes.clone()), (LineKind::Thin.width_mm(group), Some(type_05.clone())));
+    }
+    // The leaf turned up, seen from above: 40 mm along its hinge, 2 mm across, inside the plate's
+    // and leaf's 40 x 40; the plate's own 40 x 20 isn't drawn again.
+    let (leaf, all) = (stroke_box(&phantom), stroke_box(&own));
+    assert!((leaf.size().x - 40.0).abs() < 1e-6 && (leaf.size().y - 2.0).abs() < 1e-6, "{leaf:?}");
+    assert!(all.inflated(1e-6).contains(leaf.min) && all.inflated(1e-6).contains(leaf.max), "{leaf:?} {all:?}");
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+}
+
+/// The provider draws an overlaid view again when only its overlay moves: a limit on the hinge, set
+/// while the drawing is closed, holds the overlay's leaf at 60°, and the view's kept lines aren't
+/// taken for it, though the view's own parts are where they were.
+#[test]
+fn an_overlay_that_moves_alone_draws_its_view_again() {
+    let (mut s, sheet, view) = overlaid_hinge();
+    let height = |s: &mut Session| {
+        let strokes = strokes_of(&settled(s, sheet).scene, view);
+        stroke_box(&strokes.into_iter().filter(|(.., dashes)| dashes.is_some()).collect::<Vec<_>>()).size().y
+    };
+    assert!((height(&mut s) - 2.0).abs() < 1e-6);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.limits", json!({"joint": "Hinge", "min": 0, "max": 60}));
+    run(&mut s, "drawing.open", drawing);
+    // At 60°: 20 cos 60° across the plate, and 2 sin 60° of its thickness.
+    let at_60 = 20.0 * 60f64.to_radians().cos() + 2.0 * 60f64.to_radians().sin();
+    assert!((height(&mut s) - at_60).abs() < 1e-6, "{}", height(&mut s));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+}
+
+/// An overlay naming a joint the design no longer has draws without it, here the design's own
+/// placement, so it moves nothing and draws nothing; the sheet's entry for the view says so.
+#[test]
+fn an_overlay_naming_a_gone_joint_says_so() {
+    let (mut s, sheet, view) = overlaid_hinge();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+    run(&mut s, "drawing.open", drawing);
+    let built = built(&s, sheet);
+    assert!(strokes_of(&built.scene, view).iter().all(|(.., dashes)| dashes.is_none()));
+    let state = built.views.iter().find(|v| v.view == view).unwrap();
+    assert_eq!(state.why.as_deref(), Some("its overlay 1 names 1 joint the design no longer has"));
+}
+
+/// Views share the copy an overlay draws from: the overlay's key is its view's own choice in the
+/// overlay's position, so a second view with the same overlay, and a view drawn in that position,
+/// make no copy of their own.
+#[test]
+fn overlays_share_their_copies() {
+    let (mut s, sheet, first) = overlaid_hinge();
+    let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": [60, 250], "overlays": [[{"joint": "Hinge", "values": [90]}]]});
+    let second = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let p =
+        json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": [250, 250], "pose": [{"joint": "Hinge", "values": [90]}]});
+    let posed = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    let mut sessions = crate::drawing_view::ViewSessions::new(&s);
+    for view in [first, second] {
+        let view = d.resolve_view(view).unwrap();
+        let own = crate::drawing_view::shown_by(&mut sessions, &view).unwrap();
+        let drawn = crate::drawing_view::overlays(&mut sessions, &view, &own);
+        assert!(drawn.iter().all(|(_, set)| set.as_ref().is_ok_and(|set| set.bodies.len() == 1)), "the leaf alone moves");
+    }
+    sessions.of(&d.resolve_view(posed).unwrap()).unwrap();
+    assert_eq!(sessions.copies(), 1);
+}
+
+/// A detail view of an overlaid view draws the overlay too, cut to its window like its own lines: a
+/// circle of 5 mm round the hinge's corner, (40, 20) on the top view's plane, at twice the view's 1:1.
+/// Uncut, the turned-up leaf's phantom lines would run 80 mm across the sheet.
+#[test]
+fn a_detail_of_an_overlaid_view_cuts_the_overlay_to_its_window() {
+    let (mut s, sheet, view) = overlaid_hinge();
+    let p = json!({"parent": ids::encode(view), "boundary": {"circle": {"centre": [40.0, 20.0], "radius": 5.0}}, "place": {"at": [300.0, 100.0]}});
+    let made = run(&mut s, "drawing.view.detail", p);
+    let detail = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    assert_eq!(made["scale"]["text"].as_str(), Some("2:1"), "{made}");
+    let built = built(&s, sheet);
+    assert_eq!(built.views.iter().find(|v| v.view == detail).map(|v| v.status.clone()), Some(Status::Drawn));
+    let phantom: Vec<_> = strokes_of(&built.scene, detail).into_iter().filter(|(.., dashes)| dashes.is_some()).collect();
+    assert!(!phantom.is_empty(), "the overlay's leaf crosses the region");
+    let centre = Vec2::new(300.0, 100.0);
+    let points = phantom.iter().flat_map(|(path, ..)| path.iter().flat_map(|seg| [seg.start(), seg.end()]));
+    assert!(points.into_iter().all(|p| (p - centre).len() <= 10.0 + 1e-6), "inside the window: {phantom:?}");
+}
+
 /// How wide view `id` is on sheet `sheet` built at once, round what it draws, in paper millimetres.
 fn drawn_width(s: &Session, sheet: u64, id: u64) -> f64 {
     built(s, sheet).objects.iter().find(|o| o.object == id).map_or(f64::NAN, |o| o.bounds_mm.size().x)
@@ -2294,7 +2425,7 @@ fn a_deleted_drawings_lines_are_not_kept() {
 /// A set with nothing to show has no key, so a view drawn from it always draws again.
 #[test]
 fn nothing_to_show_has_no_source_key() {
-    assert_eq!(SourceKey::of(&Err(Unmeasured::NoBodies)), None);
+    assert_eq!(SourceKey::of(&Err(Unmeasured::NoBodies), std::iter::empty()), None);
 }
 
 /// A view whose lines would take the sheet past a paper scene's records fails and is left out;
@@ -3112,7 +3243,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
     let (notes, _) = sheet_texts(&s, &d, sheet, &lettering, true);
     let mut prepared = PreparedBodies::default();
-    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &mut prepared, *id, view)));
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &[], &mut prepared, *id, view)));
     let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);

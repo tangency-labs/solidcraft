@@ -577,6 +577,9 @@ pub struct ViewSet {
     /// The position of its assembly it draws.
     #[serde(deserialize_with = "super::present")]
     pub pose: Option<Option<PoseParam>>,
+    /// The other positions of its assembly it draws over its own, in phantom lines.
+    #[serde(deserialize_with = "super::present")]
+    pub overlays: Option<Option<Vec<PoseParam>>>,
     /// The configuration of the design it draws.
     #[serde(deserialize_with = "super::present")]
     pub configuration: Option<Option<ConfigurationParam>>,
@@ -705,6 +708,9 @@ pub struct SettingsResult {
     /// The position of its assembly it draws: `"designed"`, `{"joints": [...]}` as saved (radians
     /// and mm), or `{"study": {"id": .., "step": ..}}`.
     pub pose: PoseResult,
+    /// The other positions it draws over its own, in phantom lines: a list of positions as `pose`
+    /// shows one.
+    pub overlays: OverlaysResult,
     /// The configuration of the design it draws: `"active"`, or `{"row": id}` for a row of the
     /// design's configuration table.
     pub configuration: ConfigurationResult,
@@ -737,6 +743,21 @@ pub struct DrawnRowResult {
 pub struct PoseResult {
     #[serde(flatten)]
     pub setting: SettingResult<Value>,
+    #[serde(flatten)]
+    pub drawn: PositionResult,
+}
+
+/// A view's overlays as inspect shows them (#13048): the setting, and what each draws, in its order.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OverlaysResult {
+    #[serde(flatten)]
+    pub setting: SettingResult<Value>,
+    pub drawn: Vec<PositionResult>,
+}
+
+/// What a position of a view's assembly draws, for one other than the design's own placement.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct PositionResult {
     /// The joints it draws, at the values they take once driven (a value past a limit draws at the
     /// limit), in degrees and mm. Empty when the joints can't be driven.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1013,6 +1034,10 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PoseParam")]
     pub pose: Option<PoseParam>,
+    /// The other positions of its assembly it draws over its own, in phantom lines (none when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<PoseParam>")]
+    pub overlays: Option<Vec<PoseParam>>,
     /// The configuration of the design it draws (the active one when not given).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ConfigurationParam")]

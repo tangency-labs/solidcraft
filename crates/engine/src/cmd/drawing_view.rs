@@ -58,11 +58,12 @@ use solidcraft_doc::drawing::measure::{self, AngleFrom, LinearDirection, Measure
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{
-    Beside, DetailBoundary, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
+    Beside, DetailBoundary, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_overlays, check_pose,
 };
 use solidcraft_doc::drawing::{Owner, SheetSketch};
 use solidcraft_doc::drawing_view::{
-    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
+    Exploded, JointPose, Looking, MAX_OVERLAYS, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection,
+    ViewOverrides,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -78,17 +79,18 @@ use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
 use crate::drawing_view::{
-    CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured, ViewSessions,
+    CHORD_RANGE, Choice, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured,
+    ViewSessions,
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult,
     CopyParams, CreateResult, DPI_RANGE, DetailBoundaryParam, DetailParams, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam,
     ExtentsResult, FlatParams, FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam,
-    MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
-    ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult,
-    SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam,
-    ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    MeasurementResult, MoveParams, OutsideResult, OverlaysResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult,
+    PositionResult, ProjectedParams, ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult,
+    SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult,
+    ThreadResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -163,7 +165,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
         .params(concat!(
-            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
+            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), overlays (the other positions it draws over its own in phantom lines: a list of positions as pose shows one, with drawn: what each draws), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -175,7 +177,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .output(output_schema_for::<EditResult>)
         .params(concat!(
             "view: a saved view's id; ",
-            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
+            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?, overlays?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
             "no model is evaluated, but to check a new source or hide, a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -227,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
             "view?: as drawing.view.snapshot's (front by default); ",
             "scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block, centred where it goes, or 1:1 with nothing to measure; saved either way); ",
             "position_mm?: [x, y] for its centre (default the sheet's centre); ",
-            "visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?, source?: {occurrences: [[ids…]]}, hide?: [[ids…]] (as drawing.view.snapshot's), exploded?: \"assembled\" (default) or an exploded view of the design by its name or id, pose?: \"designed\" (default), [{joint: id or name, values: [as joint.drive takes them]}] or {study: id or name, step: a whole step of its timeline}, configuration?: \"active\" (default) or a row of the design's configuration table by its name or id: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; ",
+            "visual_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?, source?: {occurrences: [[ids…]]}, hide?: [[ids…]] (as drawing.view.snapshot's), exploded?: \"assembled\" (default) or an exploded view of the design by its name or id, pose?: \"designed\" (default), [{joint: id or name, values: [as joint.drive takes them]}] or {study: id or name, step: a whole step of its timeline}, overlays?: up to 8 other positions, each as pose takes one, drawn over its own in narrow phantom lines (the parts each moves, visible lines only), configuration?: \"active\" (default) or a row of the design's configuration table by its name or id: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space or lies over its title block]}. A view of the drawing's design. One undo step; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -669,6 +671,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sessions = ViewSessions::new(s);
     let placed = crate::drawing_view::on_sheet_from(&mut sessions, d, view.id, INSPECT)?;
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
+    let overlays = overlays_result(s, &mut sessions, &resolved, view.settings.overlays.clone());
     let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
     let own = &view.settings;
     let reply = InspectResult {
@@ -695,6 +698,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             hide: setting(resolved.hide, own.hide.clone().map(Some), path_lists),
             exploded: setting(resolved.exploded, own.exploded, exploded_value),
             pose,
+            overlays,
             configuration,
         },
         reference_shown_percent: view.reference_shown_percent,
@@ -747,6 +751,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let found = Found {
         exploded: set.exploded.as_ref().map(|chosen| chosen.as_ref().map(|chosen| exploded_of(s, chosen, EDIT)).transpose()).transpose()?,
         pose: set.pose.as_ref().map(|chosen| chosen.as_ref().map(|chosen| pose_of(s, chosen, EDIT)).transpose()).transpose()?,
+        overlays: set.overlays.as_ref().map(|chosen| chosen.as_deref().map(|chosen| overlays_of(s, chosen, EDIT)).transpose()).transpose()?,
         configuration: set
             .configuration
             .as_ref()
@@ -754,7 +759,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             .transpose()?,
     };
     let descendants: Vec<u64> = s.drawing(EDIT)?.with_projected(&BTreeSet::from([id])).into_iter().filter(|v| *v != id).collect();
-    let apart = found.exploded.is_some() || found.pose.is_some() || found.configuration.is_some();
+    let apart = found.exploded.is_some() || found.pose.is_some() || found.overlays.is_some() || found.configuration.is_some();
     if apart || set.visual_style.is_some() || set.reference_style.is_some() || set.linked.is_some() {
         let mut staged = Drawing::clone(s.drawing(EDIT)?);
         change(&mut staged, id, set, &found)?;
@@ -809,12 +814,13 @@ fn find<'a>(d: &'a Drawing, id: u64, cmd: &str) -> Result<&'a View> {
 }
 
 /// What an edit's choices name in the design, found there before it changes anything: its exploded
-/// view ([`exploded_of`]), its position ([`pose_of`]) and its configuration ([`configuration_of`]),
-/// each `None` when the edit leaves it.
+/// view ([`exploded_of`]), its position ([`pose_of`]), its overlays ([`overlays_of`]) and its
+/// configuration ([`configuration_of`]), each `None` when the edit leaves it.
 #[derive(Default)]
 struct Found {
     exploded: Option<Option<Exploded>>,
     pose: Option<Option<Pose>>,
+    overlays: Option<Option<Arc<[Pose]>>>,
     configuration: Option<Option<ViewConfiguration>>,
 }
 
@@ -881,6 +887,9 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     if let Some(pose) = &found.pose {
         own.pose = pose.clone();
     }
+    if let Some(overlays) = &found.overlays {
+        own.overlays = overlays.clone();
+    }
     if let Some(configuration) = found.configuration {
         own.configuration = configuration;
     }
@@ -940,6 +949,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("hide", x.hide != y.hide),
         ("exploded", x.exploded != y.exploded),
         ("pose", x.pose != y.pose),
+        ("overlays", x.overlays != y.overlays),
         ("configuration", x.configuration != y.configuration),
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
         ("view", a.kind != b.kind),
@@ -1066,6 +1076,17 @@ fn pose_of(s: &Session, chosen: &PoseParam, cmd: &str) -> Result<Pose> {
     Ok(pose)
 }
 
+/// `chosen` as a view saves its overlays, for `cmd`: at most [`MAX_OVERLAYS`] positions, counted before
+/// any is looked up, each as [`pose_of`] reads one.
+fn overlays_of(s: &Session, chosen: &[PoseParam], cmd: &str) -> Result<Arc<[Pose]>> {
+    if chosen.len() > MAX_OVERLAYS {
+        return Err(bad(cmd, format!("a view has at most {MAX_OVERLAYS} overlays")));
+    }
+    let overlays: Arc<[Pose]> = chosen.iter().map(|one| pose_of(s, one, cmd)).collect::<Result<_>>()?;
+    check_overlays(&overlays).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(overlays)
+}
+
 /// `at` as a view saves it, for `cmd`: the study by its id, and a whole step of its timeline.
 fn study_step_of(s: &Session, at: &StudyPoseParam, cmd: &str) -> Result<StudyStep> {
     let index = super::motion::study_index(s, &json!({"study": at.study}), cmd)?;
@@ -1085,9 +1106,25 @@ fn pose_value(pose: Pose) -> Value {
 /// position of its own, also what it draws from `sessions`: the joints it sets, or a study keys, at
 /// the values they take, the joints `s`'s design no longer has, and the study step it draws.
 fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, own: Option<Pose>) -> PoseResult {
-    let setting = setting(view.pose.clone(), own, pose_value);
-    let (joints, study): (Vec<u64>, Option<StudyStepResult>) = match &view.pose.value {
-        Pose::Designed => return PoseResult { setting, drawn: None, skipped: None, study: None },
+    let choice = sessions.choice(view);
+    PoseResult { drawn: position_result(s, sessions, &choice, &view.pose.value), setting: setting(view.pose.clone(), own, pose_value) }
+}
+
+/// Saved view `view`'s overlays as inspect shows them (#13048), where `own` is what the view sets
+/// itself: each as [`pose_result`] shows a position, drawn as the view's own choice in it.
+fn overlays_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, own: Option<Arc<[Pose]>>) -> OverlaysResult {
+    let base = sessions.choice(view);
+    let drawn = view.overlays.value.iter().map(|pose| position_result(s, sessions, &base.with_pose(pose), pose)).collect();
+    let show = |overlays: Arc<[Pose]>| Value::Array(overlays.iter().cloned().map(pose_value).collect());
+    OverlaysResult { setting: setting(view.overlays.clone(), own, show), drawn }
+}
+
+/// What position `pose` draws from `sessions` as the session keyed `choice`, for inspect: for one other
+/// than the design's placement, the joints it sets, or a study keys, at the values they take, the
+/// joints `s`'s design no longer has, and the study step it draws.
+fn position_result(s: &Session, sessions: &mut ViewSessions, choice: &Choice, pose: &Pose) -> PositionResult {
+    let (joints, study): (Vec<u64>, Option<StudyStepResult>) = match pose {
+        Pose::Designed => return PositionResult::default(),
         Pose::Joints(joints) => (joints.iter().map(|j| j.joint).collect(), None),
         Pose::Study(at) => match at.drawn(&s.doc.assembly.studies) {
             Some((m, step)) => {
@@ -1098,9 +1135,9 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
             None => (Vec::new(), None),
         },
     };
-    let skipped = crate::drawing_view::gone_joints(s, view);
-    let drawn = match sessions.of(view) {
-        Ok(posed) => {
+    let skipped = crate::drawing_view::gone_joints(s, pose);
+    let drawn = match sessions.drawing(choice) {
+        Ok((posed, _)) => {
             // As the solver places them, after motion links: a screw's travel follows its turn.
             let active = posed.doc.active_assembly();
             let placed = solidcraft_doc::joints::joint_values(&active.assembly);
@@ -1122,7 +1159,7 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
         }
         Err(_) => Vec::new(),
     };
-    PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped), study }
+    PositionResult { drawn: Some(drawn), skipped: Some(skipped), study }
 }
 
 /// Refuses a drawing in which one of `views` draws its parts apart in a way it can't draw: a flat
@@ -1275,6 +1312,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
                         exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
                         pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
+                        overlays: Some(resolved.overlays.value.clone()).filter(|overlays| !overlays.is_empty()),
                         configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
                     };
                 }
@@ -1391,6 +1429,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         line_group: None,
         exploded: request.exploded.as_ref().map(|chosen| exploded_of(s, chosen, BASE)).transpose()?,
         pose: request.pose.as_ref().map(|chosen| pose_of(s, chosen, BASE)).transpose()?,
+        overlays: request.overlays.as_deref().map(|chosen| overlays_of(s, chosen, BASE)).transpose()?,
         configuration: request.configuration.as_ref().map(|chosen| configuration_of(s, chosen, BASE)).transpose()?,
     };
     let place = ViewPlace::At([position.x, position.y]);

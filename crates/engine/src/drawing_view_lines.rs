@@ -341,19 +341,14 @@ pub fn paper_group(lines: &Lines, object: u64, group: LineGroup) -> Group {
 /// parts' visible ones as thin lines, then the model's as visible lines; each with its threads after
 /// it: root lines thin, limit lines as the part's edges.
 pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<Option<usize>>) {
-    let stroke = |piece: &Piece, width_mm: f64| {
-        let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
-        let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
-        // One straight line never closes on itself, however short.
-        let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
+    let drawn = |piece: &Piece, width_mm: f64| {
         let hidden = piece.visibility == Visibility::Hidden;
-        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| Dashes { lengths_mm: d.to_vec(), phase_mm: 0.0 });
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
+        stroke(piece, width_mm, hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| d.to_vec()))
     };
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
         let pieces = lines.lines.iter().enumerate().filter(move |(_, l)| l.reference == reference);
         let pieces = pieces.flat_map(|(at, l)| l.pieces.iter().map(move |p| (at, p)));
-        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((stroke(p, width_mm)?, Some(at))))
+        pieces.filter(move |(_, p)| p.visibility == visibility).filter_map(move |(at, p)| Some((drawn(p, width_mm)?, Some(at))))
     };
     // A thread's piece is one segment: a limit line at the width given, a root line thin.
     let thin_mm = LineKind::Thin.width_mm(group);
@@ -361,7 +356,7 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
         let pieces = lines.threads.iter().filter(move |t| t.reference == reference).flat_map(|t| &t.pieces);
         pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| {
             let width_mm = if p.stroke == ThreadStroke::Limit { width_mm } else { thin_mm.min(width_mm) };
-            Some((stroke(&Piece { visibility, path: vec![p.seg], accuracy: CurveAccuracy::Analytic }, width_mm)?, None))
+            Some((drawn(&Piece { visibility, path: vec![p.seg], accuracy: CurveAccuracy::Analytic }, width_mm)?, None))
         })
     };
     let painted = |reference: bool, visibility: Visibility, width_mm: f64| {
@@ -403,6 +398,24 @@ fn centred(lengths_mm: Vec<f64>, length_mm: f64) -> Dashes {
     Dashes { lengths_mm, phase_mm: if phase < period { phase } else { 0.0 } }
 }
 
+/// `lines`' visible pieces as phantom lines in line `group` (#13048), as an overlay draws the parts its
+/// position moves: each piece one narrow stroke of ISO 128-20's long dash and two dots
+/// ([`chain_dashes_mm`]). No piece is hidden: an overlay draws none.
+pub fn phantom_items(lines: &Lines, group: LineGroup) -> Vec<Item> {
+    let pieces = lines.lines.iter().flat_map(|line| &line.pieces).filter(|piece| piece.visibility == Visibility::Visible);
+    pieces.filter_map(|piece| stroke(piece, LineKind::Thin.width_mm(group), Some(chain_dashes_mm(2, group)))).collect()
+}
+
+/// `piece` as one stroke `width_mm` wide, dashed `dashes` from its start: closed when it ends where
+/// it starts; nothing when it has no length to draw.
+fn stroke(piece: &Piece, width_mm: f64, dashes: Option<Vec<f64>>) -> Option<Item> {
+    let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
+    let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
+    // One straight line never closes on itself, however short.
+    let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
+    let pattern = dashes.map(|lengths_mm| Dashes { lengths_mm, phase_mm: 0.0 });
+    (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
+}
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
 pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {

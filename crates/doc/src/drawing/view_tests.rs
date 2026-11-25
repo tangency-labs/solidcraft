@@ -374,6 +374,63 @@ fn a_pose_keeps_its_limits_on_reading() {
     }
 }
 
+/// A view's overlays, the other positions it draws over its own, save in its settings as a list of
+/// positions and follow down its chain until a view sets its own: `[]` is a setting of its own, as
+/// `designed` is for a position. A view that sets none saves none and draws no overlay.
+#[test]
+fn overlays_follow_their_parent_and_save_as_they_are() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().overlays;
+    assert_eq!(resolved(&d, top), Setting { value: Arc::from([]), set_by: SetBy::Default });
+    let opened = Pose::Joints(Arc::from([JointPose { joint: 77, values: vec![std::f64::consts::FRAC_PI_2] }]));
+    let overlays: Arc<[Pose]> = Arc::from([opened, Pose::Study(StudyStep { id: 31, step: 40 })]);
+    view_mut(&mut d, front).settings.overlays = Some(overlays.clone());
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: overlays.clone(), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, front), Setting { value: overlays, set_by: SetBy::This });
+    view_mut(&mut d, right).settings.overlays = Some(Arc::from([]));
+    assert_eq!(resolved(&d, top), Setting { value: Arc::from([]), set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let listed = v["views"].as_array().unwrap();
+    let saved = |id: u64| listed.iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let overlays = json!([{"joints": [{"joint": 77, "values": [std::f64::consts::FRAC_PI_2]}]}, {"study": {"id": 31, "step": 40}}]);
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "overlays": overlays}));
+    assert_eq!(saved(right)["settings"], json!({"visual_style": "visible_hidden", "overlays": []}));
+    assert_eq!(saved(top).get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// A view's overlays keep their limits on reading: at most 8, each a position a view may hold
+/// ([`check_pose`]); `designed` is one.
+#[test]
+fn overlays_keep_their_limits_on_reading() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |overlays: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["overlays"] = overlays;
+        })
+    };
+    let posed = json!({"joints": [{"joint": 7, "values": [1]}]});
+    let cases = [
+        (json!(vec![posed.clone(); 8]), "read"),
+        (json!(vec![posed.clone(); 9]), "at most 8 overlays"),
+        (json!([]), "read"),
+        (json!(["designed", {"study": {"id": 3, "step": 2}}]), "read"),
+        (json!([{"joints": []}]), "at least one joint"),
+        (json!([{"joints": [{"joint": 7, "values": [1]}, {"joint": 7, "values": [2]}]}]), "each joint once"),
+        (json!(null), "read"),
+        (json!("designed"), ""),
+        (json!([1.5]), ""),
+    ];
+    for (overlays, says) in cases {
+        let e = with(overlays.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{}: {e}", overlays.to_string().chars().take(60).collect::<String>());
+    }
+}
+
 /// A view's configuration saves as the row's id, as an exploded view's choice saves its view, and
 /// follows down its chain until a view sets its own. "active" is a setting of its own: a child can
 /// draw the active configuration under a parent that draws another. A view that sets none saves

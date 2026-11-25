@@ -3004,6 +3004,52 @@ fn two_views_one_posed_draw_differently_and_both_come_back() {
     assert!((height(&mut opened, posed) - 20.0).abs() < 1e-6);
 }
 
+/// An overlay grows its view's boundary to hold the parts it draws (#13048): the hinge turned up is
+/// 20 mm tall on its sheet, 40 with an overlay of the design's placement. Inspect says what each
+/// overlay draws; a projected view follows its parent's overlays until it sets its own, `[]` too.
+#[test]
+fn an_overlay_grows_its_views_boundary_and_projected_views_follow_it() {
+    let (mut s, view, hinge) = hinge_pair();
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Hinge", "values": [90]}]}));
+    assert!((height(&mut s, view) - 20.0).abs() < 1e-6);
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"overlays": ["designed", [{"joint": "Hinge", "values": [45]}]]}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["overlays"]), steps + 1));
+    assert!((height(&mut s, view) - 40.0).abs() < 1e-6);
+    let overlays = inspect_view(&mut s, view)["settings"]["overlays"].clone();
+    let saved = json!(["designed", {"joints": [{"joint": hinge, "values": [std::f64::consts::FRAC_PI_4]}]}]);
+    assert_eq!((&overlays["value"], &overlays["from"], &overlays["set"]), (&saved, &json!("this"), &saved), "{overlays}");
+    assert_eq!(overlays["drawn"][0], json!({}), "{overlays}");
+    assert_eq!(overlays["drawn"][1]["drawn"], json!([{"joint": hinge, "name": "Hinge", "values": [45.0]}]), "{overlays}");
+    let (_, below) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "below", "place": {"at": [150, 60]}}));
+    let followed = inspect_view(&mut s, below)["settings"]["overlays"].clone();
+    assert_eq!((&followed["value"], &followed["from"]), (&saved, &json!("parent")), "{followed}");
+    edit_view(&mut s, below, json!({"overlays": []}));
+    let own = inspect_view(&mut s, below)["settings"]["overlays"].clone();
+    assert_eq!((&own["value"], &own["from"]), (&json!([]), &json!("this")), "{own}");
+}
+
+/// Overlays keep their limits when asked for, as on reading: a 9th is refused before any joint is
+/// looked up, and each is a position `pose` takes. A shaded view doesn't draw overlays yet: an edit
+/// that would give one to it, or make an overlaid view shaded, is refused, and the view is unchanged.
+#[test]
+fn overlays_keep_their_limits_and_shaded_views_refuse_them() {
+    let (mut s, view, _) = hinge_pair();
+    let posed = json!([{"joint": "Hinge", "values": [90]}]);
+    let e = edit_refused(&mut s, view, json!({"overlays": vec![posed.clone(); 9]}));
+    assert!(e.contains("at most 8 overlays"), "{e}");
+    edit_view(&mut s, view, json!({"overlays": vec![posed.clone(); 8]}));
+    let e = edit_refused(&mut s, view, json!({"overlays": [[{"joint": "No such joint", "values": [1]}]]}));
+    assert!(e.contains("No such joint"), "{e}");
+    let e = edit_refused(&mut s, view, json!({"visual_style": "shaded"}));
+    assert!(e.contains("not supported yet: a shaded view with overlays"), "{e}");
+    edit_view(&mut s, view, json!({"overlays": null}));
+    edit_view(&mut s, view, json!({"visual_style": "shaded"}));
+    let e = edit_refused(&mut s, view, json!({"overlays": [posed]}));
+    assert!(e.contains("not supported yet: a shaded view with overlays"), "{e}");
+    assert_eq!(saved(&s, view).settings.overlays, None);
+}
+
 /// Drawing a view in a position of its own changes nothing in the design: the joint keeps its value,
 /// the occurrences their placements, and nothing is left moved. The edit is one undo step.
 #[test]

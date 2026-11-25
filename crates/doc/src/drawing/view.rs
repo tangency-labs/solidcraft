@@ -50,8 +50,8 @@ use super::cutting_line::CuttingLine;
 use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
-    ViewDirection, ViewOverrides, ViewSettings,
+    Exploded, MAX_JOINT_VALUES, MAX_OVERLAYS, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges,
+    ViewConfiguration, ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -497,6 +497,8 @@ pub struct ResolvedView {
     pub exploded: Setting<Exploded>,
     /// The position of its assembly it draws: the design's, or its joints at values of its own.
     pub pose: Setting<Pose>,
+    /// The other positions of its assembly it draws over its own, in phantom lines: none by default.
+    pub overlays: Setting<Arc<[Pose]>>,
     /// The configuration of the design it draws: the active one, or a row of its table.
     pub configuration: Setting<ViewConfiguration>,
     /// A flat pattern view's body and turn; none for a view of the model.
@@ -577,6 +579,13 @@ pub fn check_pose(pose: &Pose) -> Result<()> {
     })?;
     let listed: BTreeSet<u64> = joints.iter().map(|j| j.joint).collect();
     require(listed.len() == joints.len(), || "a position lists each joint once".into())
+}
+
+/// What a view's overlays may hold, saved or asked for: at most [`MAX_OVERLAYS`] positions, each one
+/// a view's position may be ([`check_pose`]).
+pub fn check_overlays(overlays: &[Pose]) -> Result<()> {
+    require(overlays.len() <= MAX_OVERLAYS, || format!("a view has at most {MAX_OVERLAYS} overlays"))?;
+    overlays.iter().try_for_each(check_pose)
 }
 
 /// The views from `id` up to its base view, nearest first, each found by `find`: refused when a
@@ -693,6 +702,7 @@ impl Drawing {
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
         view.settings.pose.as_ref().map_or(Ok(()), check_pose)?;
+        view.settings.overlays.as_deref().map_or(Ok(()), check_overlays)?;
         if let Some(label) = &view.label {
             let letter = (1..=MAX_LETTERS).contains(&label.letter.len()) && label.letter.bytes().all(|b| b.is_ascii_uppercase());
             require(letter, || "its letter is one to three capital letters A to Z".into())?;
@@ -833,6 +843,7 @@ impl Drawing {
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
+            overlays: or_default(&chain, |s| s.overlays.clone(), Arc::from([])),
             configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
             flat,
             detail,

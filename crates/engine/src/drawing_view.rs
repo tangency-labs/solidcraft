@@ -41,7 +41,9 @@ mod threads;
 
 pub use exact::{Fallback, PreparedBodies};
 pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
-pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+pub use lines::{
+    CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines, phantom_items,
+};
 pub use threads::ThreadLine;
 
 #[path = "drawing_view_flat.rs"]
@@ -250,21 +252,34 @@ pub struct Choice {
     study: Option<StudyStep>,
 }
 
+/// Position `pose` as a key holds it: its joints' values as their bits, by joint, or its study step.
+fn pose_key(pose: &Pose) -> (Vec<(u64, Vec<u64>)>, Option<StudyStep>) {
+    let mut joints: Vec<(u64, Vec<u64>)> = match pose {
+        Pose::Designed | Pose::Study(_) => Vec::new(),
+        Pose::Joints(joints) => joints.iter().map(|j| (j.joint, j.values.iter().map(|v| (v + 0.0).to_bits()).collect())).collect(),
+    };
+    joints.sort();
+    let study = if let Pose::Study(at) = pose { Some(*at) } else { None };
+    (joints, study)
+}
+
 impl Choice {
     /// What saved view `view` draws, as it saves it. The key of the session it draws from is
     /// [`ViewSessions::choice`].
     pub fn of(view: &ResolvedView) -> Choice {
-        let mut pose: Vec<(u64, Vec<u64>)> = match &view.pose.value {
-            Pose::Designed | Pose::Study(_) => Vec::new(),
-            Pose::Joints(joints) => joints.iter().map(|j| (j.joint, j.values.iter().map(|v| (v + 0.0).to_bits()).collect())).collect(),
-        };
-        pose.sort();
-        let study = if let Pose::Study(at) = view.pose.value { Some(at) } else { None };
+        let (pose, study) = pose_key(&view.pose.value);
         let configuration = match view.configuration.value {
             ViewConfiguration::Active => None,
             ViewConfiguration::Row(row) => Some(row),
         };
         Choice { configuration, exploded: view.exploded.value, pose, study }
+    }
+
+    /// The same choice in position `pose` instead of its own: the key of the session an overlay of a
+    /// view drawing it draws from ([`overlays`]).
+    pub fn with_pose(&self, pose: &Pose) -> Choice {
+        let (pose, study) = pose_key(pose);
+        Choice { pose, study, ..self.clone() }
     }
 
     /// Whether it draws the design as it places its parts, as the default choice does.
@@ -345,6 +360,15 @@ impl<'a> ViewSessions<'a> {
         let placed = self.placed;
         let copy = self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice));
         copy.as_ref().map(|copy| (&copy.session, copy.failing.as_slice())).map_err(|why| *why)
+    }
+
+    /// [`ViewSessions::drawing`] for a session already made: none when its copy wasn't made yet. With
+    /// nothing to make, several sessions can be held at once.
+    pub fn made(&self, choice: &Choice) -> Option<std::result::Result<(&Session, &[String]), Unmeasured>> {
+        if choice.is_placed() {
+            return Some(Ok((self.placed, &[])));
+        }
+        self.copies.get(choice).map(|copy| copy.as_ref().map(|copy| (&copy.session, copy.failing.as_slice())).map_err(|why| *why))
     }
 
     /// How many copies it made.
@@ -453,19 +477,34 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<ViewCo
     Ok(ViewCopy { session: copy, failing })
 }
 
-/// The joints saved view `view`'s position names that `s`'s design no longer has, in its order. The
-/// view draws with the rest ([`copy_for`]).
-pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
-    let Pose::Joints(joints) = &view.pose.value else { return Vec::new() };
+/// The joints position `pose` names that `s`'s design no longer has, in its order. A view draws with
+/// the rest ([`copy_for`]).
+pub fn gone_joints(s: &Session, pose: &Pose) -> Vec<u64> {
+    let Pose::Joints(joints) = pose else { return Vec::new() };
     joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+/// What the sheet says of position `pose`, called `what`, drawn from `s`: that it names joints or a
+/// motion study `s`'s design no longer has. With none of its joints left, or its study gone, it
+/// draws the design's placement.
+fn position_reason(s: &Session, pose: &Pose, what: &str) -> Option<String> {
+    match pose {
+        Pose::Study(at) => at.drawn(&s.doc.assembly.studies).is_none().then(|| format!("{what} names a motion study the design no longer has")),
+        _ => Some(gone_joints(s, pose).len())
+            .filter(|gone| *gone > 0)
+            .map(|gone| format!("{what} names {gone} joint{} the design no longer has", plural(gone))),
+    }
 }
 
 /// What the sheet says beside saved view `view`, drawn from `s` (#13048), as a drawn note says why:
 /// that its configuration row rebuilds with `failing` features that the design builds ([`ViewCopy`]),
-/// and that its position names joints or a motion study `s`'s design no longer has. With none of its
-/// joints left, or its study gone, it draws the design's placement.
+/// and that its position, or one of its overlays, names joints or a motion study `s`'s design no
+/// longer has ([`position_reason`]).
 pub fn state_reason(s: &Session, view: &ResolvedView, failing: &[String]) -> Option<String> {
-    let plural = |n: usize| if n == 1 { "" } else { "s" };
     let configuration = match view.configuration.value {
         ViewConfiguration::Row(id) if !failing.is_empty() => {
             let row = s.doc.configs.row(RowKey::Id(id)).map_or("", |row| row.name.as_str());
@@ -473,16 +512,53 @@ pub fn state_reason(s: &Session, view: &ResolvedView, failing: &[String]) -> Opt
         }
         _ => None,
     };
-    let position = match view.pose.value {
-        Pose::Study(at) => at.drawn(&s.doc.assembly.studies).is_none().then(|| "its position names a motion study the design no longer has".into()),
-        _ => Some(gone_joints(s, view).len())
-            .filter(|gone| *gone > 0)
-            .map(|gone| format!("its position names {gone} joint{} the design no longer has", plural(gone))),
-    };
-    match (configuration, position) {
-        (Some(configuration), Some(position)) => Some(format!("{configuration}; {position}")),
-        (configuration, position) => configuration.or(position),
+    let position = position_reason(s, &view.pose.value, "its position");
+    let overlays = view.overlays.value.iter().enumerate().filter_map(|(at, pose)| position_reason(s, pose, &format!("its overlay {}", at + 1)));
+    let said: Vec<String> = configuration.into_iter().chain(position).chain(overlays).collect();
+    (!said.is_empty()).then(|| said.join("; "))
+}
+
+/// Each of saved view `view`'s overlays (#13048), in its order, from `sessions`: the parts its position
+/// moves from where `own`, what the view itself shows ([`measured`]), places them ([`moved`]), or why
+/// it can't be drawn. Each is the view's own choice in another position ([`Choice::with_pose`]), so
+/// views drawing the same position share its copy, and an overlay of the view's own position moves
+/// nothing.
+pub fn overlays(sessions: &mut ViewSessions, view: &ResolvedView, own: &ShownSet) -> Vec<(Choice, std::result::Result<ShownSet, Unmeasured>)> {
+    let base = sessions.choice(view);
+    let mut out = Vec::with_capacity(view.overlays.value.len());
+    for pose in view.overlays.value.iter() {
+        let choice = base.with_pose(pose);
+        let set = sessions.drawing(&choice).and_then(|(from, _)| shown(from)).map(|all| moved(own, all.of_view(view).into_owned()));
+        out.push((choice, set));
     }
+    out
+}
+
+/// The bodies of `other`, what a view shows of another position of its assembly, that it places
+/// elsewhere than `own` does, or that `own` doesn't show: what an overlay draws. A body is matched by
+/// the occurrences that place it and its body's name, and stays put when each entry of its placement
+/// is within [`EPS`] of `own`'s: exact placements, not meshes, decide it.
+pub fn moved(own: &ShownSet, mut other: ShownSet) -> ShownSet {
+    let placed: BTreeMap<(&[u64], &str), &ModelBody> =
+        own.bodies.iter().filter_map(|b| Some(((b.path.as_slice(), b.body.as_str()), own.body(b)?))).collect();
+    let same = |a: &ModelBody, b: &ModelBody| {
+        a.source_transform.iter().flatten().zip(b.source_transform.iter().flatten()).all(|(x, y)| (x - y).abs() <= EPS)
+    };
+    let keep: Vec<bool> = other
+        .bodies
+        .iter()
+        .map(|b| other.body(b).is_some_and(|body| placed.get(&(b.path.as_slice(), b.body.as_str())).is_none_or(|was| !same(was, body))))
+        .collect();
+    let mut keep = keep.into_iter();
+    other.bodies.retain(|_| keep.next().unwrap_or(false));
+    other
+}
+
+/// What a view shows with its overlays: `around` grown to hold the parts each of `overlays` draws, on
+/// `basis`. The view stays centred on its own parts ([`frame`]), as it does with its reference parts.
+pub fn reach<'a>(around: Aabb2, overlays: impl IntoIterator<Item = &'a ShownSet>, basis: &Plane) -> Aabb2 {
+    let bodies = overlays.into_iter().flat_map(|set| set.bodies.iter().filter_map(|b| set.body(b)));
+    bodies.fold(around, |all, body| all.union(&body.mesh_bounds_in(basis)))
 }
 
 /// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why
@@ -582,10 +658,18 @@ pub fn not_cut_yet(view: &ResolvedView) -> Option<&'static str> {
 /// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
 /// shaded parts' pictures are rendered from the design as it builds and places its parts. Its lines
 /// alone draw. Exploded comes first, as an exploded view of a position is still exploded, then posed,
-/// as a position of a row is still a position.
+/// as a position of a row is still a position. Overlays are drawn over a whole, assembled view's
+/// lines only: not over a section's, nor an exploded view's.
 pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
-    if !(view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()) {
+    let overlaid = !view.overlays.value.is_empty();
+    if overlaid && view.cut.is_some() {
+        Some("not supported yet: a section view with overlays")
+    } else if overlaid && view.exploded.value != Exploded::Assembled {
+        Some("not supported yet: an exploded view with overlays")
+    } else if !(view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded()) {
         None
+    } else if overlaid {
+        Some("not supported yet: a shaded view with overlays")
     } else if view.exploded.value != Exploded::Assembled {
         Some("not supported yet: a shaded view of an exploded view")
     } else if view.pose.value != Pose::Designed {
@@ -607,6 +691,8 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
         Some("a flat pattern view is never exploded: it draws one body's flat")
     } else if view.pose.value != Pose::Designed {
         Some("a flat pattern view has no position: it draws one body's flat")
+    } else if !view.overlays.value.is_empty() {
+        Some("a flat pattern view has no overlays: it draws one body's flat")
     } else if view.configuration.value != ViewConfiguration::Active {
         Some("not supported yet: a flat pattern view of a configuration of its own")
     } else {
@@ -765,7 +851,7 @@ pub fn not_detailed_yet(view: &ResolvedView) -> Option<&'static str> {
 
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
 /// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
-/// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
+/// [`shows`] and its overlays' [`reach`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
 /// is evaluated: no model is evaluated, but a view of another configuration evaluates a copy of the
 /// design ([`copy_for`]); the design is unchanged.
@@ -826,7 +912,11 @@ pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cm
     }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let shown = shown_by(sessions, &view);
-    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
+    let measured = measured(&shown, &view).map(|(set, e)| {
+        let around = shows(&set, &view.basis, &e, view.reference_shown_percent);
+        let overlays = overlays(sessions, &view, &set);
+        (e, reach(around, overlays.iter().filter_map(|(_, set)| set.as_ref().ok()), &view.basis))
+    });
     placed(&view, measured, centre, cmd)
 }
 
