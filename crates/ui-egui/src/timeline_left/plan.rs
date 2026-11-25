@@ -2,9 +2,10 @@
 //!
 //! Working this out from the design took every frame several passes over all features for each
 //! folder (and a search for each folder's last feature at every row), which a long history with
-//! folders paid for on every repaint, even with the pointer only moving. Everything here follows
-//! from the design alone, so it is built once per design change ([`RowPlan::of`]) and kept in the
-//! egui context; what the open folders and folds change ([`RowPlan::order`]) is kept beside it
+//! folders paid for on every repaint, even with the pointer only moving. The plan follows
+//! the design and projection display preference, so it is built when either changes
+//! ([`RowPlan::of`]) and kept in the egui context; what the open folders and folds change
+//! ([`RowPlan::order`]) is kept beside it
 //! until one of them opens or closes. The functions it replaced live on in the tests as the
 //! reference it is compared with.
 
@@ -21,8 +22,9 @@ use crate::timeline::{TimelineKind, icon_of};
 /// A feature as its row draws it: id, name, icon, suppressed, type name and kind.
 pub(super) type FeatureInfo = (u64, String, &'static str, bool, &'static str, TimelineKind);
 
-/// What a plan was built from. The design changes through commands, which count the session's
-/// revision up; the marker and the counts guard edits made in place without one.
+/// What a plan was built from, including the projection display preference. The design changes
+/// through commands, which count the session's revision up; the marker and the counts guard
+/// edits made in place without one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PlanKey {
     session: u64,
@@ -31,6 +33,7 @@ struct PlanKey {
     marker: Option<usize>,
     features: usize,
     groups: usize,
+    project_link_tools: bool,
     under_feature: bool,
 }
 
@@ -44,6 +47,7 @@ impl PlanKey {
             marker: doc.marker,
             features: doc.features.len(),
             groups: doc.timeline_groups.len(),
+            project_link_tools: app.ui.project_link_tools,
             under_feature,
         }
     }
@@ -74,7 +78,7 @@ pub(super) struct RowPlan {
     index_of: HashMap<u64, usize>,
     /// The folder each feature is in (`group_for`), by timeline position.
     pub group_of: Vec<Option<u64>>,
-    /// Whether the sketch at each timeline position has patterns.
+    /// Whether the sketch at each timeline position has patterns or projections to fold.
     pub has_patterns: Vec<bool>,
     /// The first folder with each id: the one `groups.iter().find` would give.
     by_id: HashMap<u64, usize>,
@@ -104,7 +108,7 @@ pub(super) struct RowPlan {
 }
 
 impl RowPlan {
-    /// The plan for the design as it is, kept until it changes.
+    /// The plan for the design and display preference, kept until either changes.
     pub(super) fn cached(app: &SolveApp, ui: &egui::Ui, under_feature: bool) -> Arc<Self> {
         let id = egui::Id::unique("sc_history_row_plan");
         let key = PlanKey::of(app, under_feature);
@@ -163,7 +167,7 @@ impl RowPlan {
             .iter()
             .map(|feature| {
                 index_of.get(&feature.0).and_then(|index| doc.features.get(*index)).is_some_and(
-                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty()),
+                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || (app.ui.project_link_tools && sketch.links.iter().any(crate::sketch_link_tree::listed))),
                 )
             })
             .collect();
@@ -369,7 +373,7 @@ impl RowPlan {
     pub(super) fn folds(&self, app: &SolveApp) -> Folds {
         // A folder shows open here until it is folded (`timeline_folders::is_open`).
         let closed = self.fold_keys.iter().filter(|(_, key)| !crate::history_folds::is_open(app, key, true)).map(|(id, _)| *id).collect();
-        let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::is_open(app, key, false)).map(|(feature, _)| *feature).collect();
+        let open_hosts = self.host_keys.iter().filter(|(_, key)| crate::browser::fold_open(app, key, false)).map(|(feature, _)| *feature).collect();
         Folds { closed, open_hosts }
     }
 

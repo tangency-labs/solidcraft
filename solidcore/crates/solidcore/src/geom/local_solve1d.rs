@@ -62,6 +62,7 @@
 //!   clamps each step against the default inside-out `[1e20, -1e20]` interval, replacing
 //!   every step with `+-1.584e19` against the Newton direction.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 pub use crate::geom::local_solve_nd::TerminationReason;
@@ -75,16 +76,17 @@ pub const UNDEF_ULONG: u64 = 123456789;
 /// `ZEPS` of `SolveByBrent`.
 const ZEPS: f64 = 1.0e-12;
 
-/// Upstream returns `SM_ERR` after a failed evaluation; an `Unported` error is
-/// passed through unchanged.
+/// Upstream returns `SM_ERR` after a failed evaluation: the solver's failure keeps the
+/// evaluator's error as its cause ([`GeomFailure::CallFailed`]); an `Unported` or
+/// `Cancelled` error is passed through unchanged.
 fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
     if matches!(
         e,
-        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+        SolidError::Unported { .. } | SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
     ) {
         e
     } else {
-        SolidError::geom_failed(operation, "the function could not be evaluated")
+        SolidError::geom_call(operation)(e)
     }
 }
 
@@ -164,9 +166,11 @@ pub trait EvalFunction {
     /// The default (upstream base class) fails with `SM_ERR`.
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, signal_errors: bool) -> Result<()> {
         let _ = (t, out, signal_errors);
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::local_solve1d::EvalFunction::evaluate",
-            "the function has no evaluation",
+            GeomFailure::Defect {
+                why: "the solver called an EvalFunction that does not implement evaluate; every function the kernel solves implements it",
+            },
         ))
     }
 }
@@ -615,7 +619,14 @@ impl LocalSolve1d {
         }
 
         // Should have returned within the loop.
-        Err(SolidError::geom_failed(OP, "the solve did not converge"))
+        Err(SolidError::geom(
+            OP,
+            GeomFailure::BrentDidNotConverge {
+                iterations: self.max_iter,
+                at: x,
+                bracket: [bracket_min, bracket_max],
+            },
+        ))
     }
 
     /// Regula-falsi bisection between `lower_t` (`F < 0`) and `upper_t` (`F > 0`)
@@ -905,7 +916,9 @@ impl LocalSolve1d {
         if let Err(e) = r {
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) {
                 return Err(e);
             }

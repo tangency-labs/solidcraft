@@ -177,6 +177,32 @@ fn references_match_the_golden_record() {
     check_golden("golden_refs.txt", GOLDEN_REFS, &ref_record());
 }
 
+/// A whole-sheet cutter is a body reference, not a face pick. Copies and renames must
+/// rewrite that reference, and older face-tool designs must keep their saved shape.
+#[test]
+fn surface_trim_whole_sheet_tool_is_remapped_without_a_face_pick() {
+    use serde_json::json;
+
+    let definition = json!({"type": "surface_trim", "body": "Target", "plane": {"type": "origin", "name": "XY"},
+        "tool_body": "Cutter", "keep": [2, 1, 0]});
+    let mut kind: FeatureKind = serde_json::from_value(definition.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&kind).unwrap()["tool_body"], "Cutter");
+    assert!(kind.face_points().is_empty());
+    kind.remap_bodies(&BTreeMap::from([("Cutter".into(), "Renamed cutter".into()), ("Target".into(), "Copied target".into())]));
+    let remapped = serde_json::to_value(&kind).unwrap();
+    assert_eq!(remapped["tool_body"], "Renamed cutter");
+    assert_eq!(remapped["body"], "Copied target");
+    assert!(remapped.get("tool").is_none());
+
+    let mut legacy = definition;
+    legacy.as_object_mut().unwrap().remove("tool_body");
+    legacy["tool"] = json!({"body": "Cutter", "point": [0, 3, 0]});
+    let legacy: FeatureKind = serde_json::from_value(legacy).unwrap();
+    let saved = serde_json::to_value(legacy).unwrap();
+    assert_eq!(saved["tool"], json!({"body": "Cutter", "point": [0.0, 3.0, 0.0]}));
+    assert!(saved.get("tool_body").is_none());
+}
+
 #[test]
 fn construction_names_follow_renames_in_every_definition() {
     use crate::walk::{Ref, Walk};
@@ -274,5 +300,18 @@ fn the_record_covers_every_variant() {
             let variant = t.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_lowercase();
             assert!(names.contains(&variant), "FeatureKind::{t} has no fixture in feature_walk_tests");
         }
+    }
+}
+
+/// A conversion's first face is a face pick with bends or without (#6748): it gets a persistent
+/// name and follows its face as the model changes, like the faces picked after it. `main` walked
+/// it as a bare position when no bends were given, from the flat model's plate conversion.
+#[test]
+fn a_conversion_without_bends_still_picks_its_first_face() {
+    let o = serde_json::json!([1.0, 2.0, 3.0]);
+    for bends in [serde_json::json!([]), serde_json::json!([[4.0, 5.0, 6.0]])] {
+        let v = serde_json::json!({"type": "sheet_convert", "body": "B", "face": o, "faces": [o], "bends": bends});
+        let kind: FeatureKind = serde_json::from_value(v).unwrap();
+        assert_eq!(kind.face_points().len(), 2, "bends {bends}: both picked faces are face picks");
     }
 }

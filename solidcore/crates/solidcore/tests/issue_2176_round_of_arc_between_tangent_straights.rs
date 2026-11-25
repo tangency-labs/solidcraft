@@ -50,14 +50,12 @@ const RADIUS: f64 = 0.5;
 /// A point on the R2 corner arc at x > 0.
 const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 
-/// Every opt-in fix on except `geometric_g2_continuity` (SolidCraft's set, as in the issue).
+/// Every opt-in fix on (SolidCraft's set, as in the issue).
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -214,8 +212,12 @@ fn the_neighbours_keep_their_rounds() {
             2e-6,
         ),
         // the fork's 7.958672926831696 (pinned here, to 1e-10, until #16735) leaks through
-        // the round's tolerant edges as this integrator did; checked below
-        ([0.0, -25.0, 2.0], 7.958_672_912_139_264, 1e-10),
+        // the round's tolerant edges as this integrator did; checked below. Since the trim
+        // pieces integrate by Gauss-Kronrod (#14460): forced to accuracy 1e-12 Gauss-Kronrod
+        // gives 7.958672911836857 (4.6e-13 above this) and the earlier Runge-Kutta trim pieces
+        // 7.958672911830945; with Runge-Kutta trim pieces it was 7.958672912139264, 3.0e-10
+        // above
+        ([0.0, -25.0, 2.0], 7.958_672_911_836_402, 1e-10),
     ] {
         let mut k = kernel();
         let mut b = plate(&mut k);

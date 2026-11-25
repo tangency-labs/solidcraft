@@ -181,10 +181,8 @@ fn wr_614_all_booleans_at_1e5_and_5e6() {
 
 #[test]
 fn wr_614_all_upstream_fixes_union_1e5_is_valid_solid() {
-    let mut fixes = UpstreamFixes::all();
-    fixes.geometric_g2_continuity = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
 
@@ -622,5 +620,78 @@ fn wr_614_diverging_same_side_boxes_keep_crossing() {
     assert!(
         (v - want).abs() <= ACCURACY * want,
         "volume {v}, want {want}"
+    );
+}
+
+/// tangency-labs/solidcraft#18166: the join of a body with a cone face B and a kept piece
+/// whose rolling-ball blend A leaves B tangentially along its edge E (E's other face lies
+/// on B). A and B are intersected along a curve that runs inside the tolerance band from
+/// E's end X to A's boundary edge N, 3.46e-3 from E's other end V, and the merge failed
+/// (`make_faceuse`: "the related vertex is not an end of the edge use"). solidcore
+/// certifies the strip between E and that curve within tolerance of B
+/// (`topology_intersector::curved_strip`) and drops the curve: the union is one valid
+/// manifold solid. The two operands touch along the coincident faces and do not overlap,
+/// so its volume is the sum of theirs: the certified enclosures (`enclose_volume`, each
+/// at most 0.04 wide, checked) of the union and of the two operands' sum must meet, and
+/// the enclosure of `union − (body + kept)`, rounded outward, must lie within ±0.12, three
+/// widths (PROVEN when it does: the true difference lies in it, so the union's volume is
+/// the operands' sum within 0.12, 2.5e-6 of it; a lost or doubled face piece moves it by
+/// far more; MEASURED: body [47534.0631202, 47534.1021680], kept [150.8624456,
+/// 150.9011549], union [47684.9444051, 47684.9842170], difference about [−0.059, 0.059]).
+#[test]
+fn curved_strip_join_union_is_one_valid_solid() {
+    use solidcore::geom::attribute::AttributeStore as Store;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::api_files::read_brep_from_file;
+    use solidcore::topology::brep::p10::TopologyEnv;
+    use solidcore::topology::topology::NotifyRecords;
+
+    const WIDTH: f64 = 0.04;
+    let load = |k: &mut Kernel, bytes: &[u8]| {
+        let fresh = Brep::new();
+        let mut store = Store::new();
+        let mut records = NotifyRecords::new();
+        let key_of = |e| fresh.owner_identity(e);
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let mut b = read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+        b.refresh_cached_topology();
+        b
+    };
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut body = load(&mut k, include_bytes!("data/curved_strip_join_body.smb"));
+    let mut kept = load(&mut k, include_bytes!("data/curved_strip_join_kept.smb"));
+    let body_v = enclose_volume(&k, &mut body, WIDTH).unwrap();
+    let kept_v = enclose_volume(&k, &mut kept, WIDTH).unwrap();
+
+    let mut u = boolean_union(&mut k, body, kept).unwrap();
+    assert_eq!(shape(&u).3, 1, "one solid region");
+    assert!(shape(&u).4, "manifold solid");
+    assert_valid(&mut k, &mut u, "curved strip join");
+    let v = enclose_volume(&k, &mut u, WIDTH).unwrap();
+    // (the operands touch and do not overlap: the union's volume is their sum)
+    for e in [&body_v, &kept_v, &v] {
+        assert!(e.hi - e.lo <= WIDTH, "{e:?} wider than {WIDTH}");
+    }
+    assert!(
+        v.lo <= body_v.hi + kept_v.hi && v.hi >= body_v.lo + kept_v.lo,
+        "union {v:?}, body {body_v:?}, kept {kept_v:?}"
+    );
+    // (each subtraction and sum rounds by under 1e-11 at these sizes: 1e-9 outward covers it)
+    let diff = (
+        v.lo - (body_v.hi + kept_v.hi) - 1e-9,
+        v.hi - (body_v.lo + kept_v.lo) + 1e-9,
+    );
+    assert!(
+        -3.0 * WIDTH <= diff.0 && diff.1 <= 3.0 * WIDTH,
+        "union − (body + kept) in {diff:?}"
     );
 }

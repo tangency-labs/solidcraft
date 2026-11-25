@@ -100,7 +100,9 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
         let at = Rect::from_center_size(pos2(square.right() + t.space_6 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
         super::icons::paint_icon(&ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)), at, icon, 1.0);
     }
-    let text_rect = Rect::from_min_max(pos2((square.right() + icon_width + gap).min(rect.right()), rect.top()), rect.max);
+    // The box is snapped to a device pixel, which can leave the text less room than its width by a
+    // fraction of one: a pixel of slack keeps an exactly-sized label from eliding ("Fl…").
+    let text_rect = Rect::from_min_max(pos2((square.right() + icon_width + gap).min(rect.right()), rect.top()), rect.max + vec2(1.0, 0.0));
     if wrap {
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let at = pos2((text_rect.left() * ppp).round() / ppp, ((text_rect.center().y - galley.size().y / 2.0) * ppp).round() / ppp);
@@ -123,6 +125,44 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
 #[cfg(test)]
 #[path = "checks_tests.rs"]
 pub(super) mod tests;
+
+/// The size of [`switch_at`]'s pill.
+pub fn switch_size() -> egui::Vec2 {
+    let t = Tokens::get();
+    vec2(t.space_24 + t.space_8, t.space_16 + t.space_2)
+}
+
+/// A slide switch (a knob in a pill) at an explicit rect, for a settings card's on/off.
+pub fn switch_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool) -> Response {
+    let t = Tokens::get();
+    let mut response = ui.interact(rect, ui.make_persistent_id(("switch", label)), egui::Sense::click());
+    if response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    let on = *value;
+    let fill = if on {
+        t.form_primary_fill
+    } else if response.hovered() {
+        t.form_dim
+    } else {
+        t.control_border
+    };
+    ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+    let knob = rect.height() / 2.0 - t.space_2;
+    let x = if on { rect.right() - t.space_2 - knob } else { rect.left() + t.space_2 + knob };
+    ui.painter().circle_filled(pos2(x, rect.center().y), knob, if on { t.on_accent } else { t.form_ink });
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(t.space_2),
+            rect.height() / 2.0 + t.space_2,
+            egui::Stroke::new(t.space_2, t.form_primary),
+            egui::StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, label));
+    response.backing_on_hover_text(label)
+}
 
 /// A checkbox at an explicit square, for vertically centred settings-card actions.
 pub fn checkbox_at(ui: &mut Ui, rect: Rect, label: &str, value: &mut bool) -> Response {

@@ -17,7 +17,7 @@
 //! ([`keeps_contract`]); one outside it is a harness error.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
-//! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
+//! `srand(time(NULL))` / `rand()` upstream and from the call's own seeded generator in the port
 //! (`plan/findings.md`); such cases record what does not depend on the draw: the
 //! point count, the U values and, on a rectangular face, each V's grid slot
 //! (`round(v / dVInc)`, the dither being under half a slot).
@@ -1491,7 +1491,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if !keeps_contract(Op::Export, &path, &block, None) {
         return Err(harness(format!("export: {CONTRACT}")));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
@@ -1533,7 +1533,7 @@ fn fix_returns_early(dist: f64, dom: &Extent2d) -> bool {
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     use solidcore::topology::edgeuse::p1 as eu1;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let fid = |x: i64| FaceId::from_index(x as u32);
     let eid = |x: i64| EdgeuseId::from_index(x as u32);
     let mut o = Vec::new();
@@ -1878,7 +1878,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
             let r = e.evaluate(*t, &mut d);
@@ -1904,7 +1904,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeArea {
                 kernel: &k,
                 surface: &s,
@@ -2173,7 +2173,7 @@ fn lacks_kind(i: &Inputs) -> bool {
     let (Some(brep), Ok(path)) = (&i.brep, path_of(i)) else {
         return false;
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
         .is_ok_and(|b| b.is_ok_and(|(_, c)| resolve(&i.op, &counts_of(c)).is_err()))
 }
@@ -2307,7 +2307,7 @@ mod tests {
             let Some(row) = out.values.get("state").cloned() else {
                 continue;
             };
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let brep = i.brep.as_ref().unwrap();
             let path = path_of(&i).unwrap();
             let (mut b, c) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
@@ -2327,7 +2327,7 @@ mod tests {
             if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
                 continue;
             }
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
             assert_eq!(r.uv.len() as u64, count, "{name}: point count");
             let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
@@ -2388,6 +2388,88 @@ mod tests {
         assert_eq!(covered.len(), POINTS_RECTANGULAR);
         for name in POINTS_MOVED {
             assert!(covered.contains(name), "{name}: a moved row is not certified");
+        }
+    }
+
+    /// extra00702 (WR-455's contact move, tangency-labs/solidcraft#17404): the internal
+    /// point of a rectangular-trimmed B-spline face over `[0, 1]^2` moves from the face's
+    /// constant-V line `v = 8/21` to its first one, `v = 1/21`: main's lines 1 to 7 met
+    /// the face's interior in no interval, the new row's first line does. PROVEN for both
+    /// points: the surface's `x` depends on `u` alone, strictly increasing (the net's `x`
+    /// is `0.001 i`, so every derivative control point is positive), and its `y` is
+    /// `(1 - N_0(u)) Y(v)` with `Y` strictly increasing (row 0 of the net is the origin,
+    /// the others have `y = 0.001 j`), so at a fixed `u > 0` strictly increasing in `v`;
+    /// bisection finds the `u` with the point's `x`, then the `v` with its `y` there,
+    /// and the surface point there is within 1e-15 of the point (far below the face's
+    /// 1e-5 tolerance), at a `(u, v)` strictly inside the face, at least 0.01 from its
+    /// boundary. Class: equal (both are internal points; the new one is on the first line
+    /// `CalculateAnInternalPoint` tries).
+    #[test]
+    fn wr455_extra00702_internal_point_is_inside_the_face() {
+        let case = crate::case::regression_case(&Runner, "extra00702");
+        let i: Inputs = case.parse().unwrap();
+        let state = run_rust(&i).unwrap().values["state"].clone();
+        let now = Vec3::new(state[1], state[2], state[3]);
+        assert_eq!(state[0], 0.0);
+        assert_eq!(
+            [now.x, now.y, now.z],
+            [5.997_856_171_225_904e-5, 5.011_072_986_310_686e-5, 6.674_095_540_413_089e-5]
+        );
+        let main = Vec3::new(8.501_171_443_409_645e-5, 1.955_087_294_908_429e-4, -2.533_443_274_855_833e-4);
+
+        let mut k = crate::runner_kernel();
+        let path = path_of(&i).unwrap();
+        let (b, _) = own_brep(&mut k, i.brep.as_ref().unwrap(), &path, i.validate_only, i.init_gaps)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("extra00702: no brep"));
+        let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        let f = b.face(faces[0]).unwrap();
+        assert_eq!(f.rectangular_trim, 1);
+        assert_eq!(
+            [f.uv_domain.min().x, f.uv_domain.min().y, f.uv_domain.max().x, f.uv_domain.max().y],
+            [0.0, 0.0, 1.0, 1.0]
+        );
+        assert_eq!(f.tolerance, 1e-5);
+        let s = f.surface.as_ref().unwrap();
+
+        // the net: x = 0.001 i; y = 0.001 j, but 0 on row 0 (the degenerate edge)
+        let net = case.inputs["brep"]["surface"]["bspline"]["net"].as_array().unwrap();
+        assert_eq!(net.len(), 4);
+        for (r, row) in net.iter().enumerate() {
+            let row = row.as_array().unwrap();
+            assert_eq!(row.len(), 5);
+            for (c, p) in row.iter().enumerate() {
+                let xyw = [p[0].as_f64().unwrap(), p[1].as_f64().unwrap(), p[3].as_f64().unwrap()];
+                // non-rational (the weight is the `NOW` marker); row 0 is one point, the
+                // origin (the face's `u = 0` edge is degenerate)
+                let y = if r == 0 { 0.0 } else { 0.001 * c as f64 };
+                assert_eq!(xyw, [0.001 * r as f64, y, -f64::MAX], "net ({r}, {c})");
+            }
+        }
+        // the parameter at which the strictly increasing `f` reaches `target`
+        let solve = |f: &dyn Fn(f64) -> f64, target: f64| {
+            let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+            assert!(f(lo) < target && target < f(hi));
+            for _ in 0..200 {
+                let mid = 0.5 * (lo + hi);
+                if f(mid) < target {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            0.5 * (lo + hi)
+        };
+        let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+        for (name, p, line) in [("new", now, 1.0 / 21.0), ("main", main, 8.0 / 21.0)] {
+            let u = solve(&|u| at(u, 0.5).x, p.x);
+            let v = solve(&|v| at(u, v).y, p.y);
+            let d = at(u, v).distance(p);
+            assert!(d <= 1e-15, "{name}: {d:e} from the surface point at ({u}, {v})");
+            let margin = u.min(v).min(1.0 - u).min(1.0 - v);
+            assert!(margin >= 0.01, "{name}: ({u}, {v}) is {margin} from the boundary");
+            assert!((v - line).abs() <= 1e-12, "{name}: v {v} is not the line {line}");
         }
     }
 

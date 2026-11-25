@@ -7,6 +7,36 @@ use serde_json::{Value, json};
 
 use crate::Session;
 
+#[test]
+fn secondary_alignment_script_replays_persistent_axis_and_planar_references() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        run(&mut s, "component.create", json!({"name":name}));
+        run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[x,0,0]}));
+    }
+    run(&mut s, "component.activate", json!({"component":"A"}));
+    let axis = run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[20,0,0]},"name":"Clocking"}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid","name":"Aligned","angle":0,
+        "a":{"occurrence":"A:1","face":[10,10,10]},"b":{"occurrence":"B:1","face":[40,10,0]},
+        "a_alignment":{"reference":{"type":"construction","feature":axis},"reverse":true}}),
+    );
+    let t = replay(&script(&mut s));
+    assert_eq!(t.doc.assembly.joints[0].a.snap, s.doc.assembly.joints[0].a.snap);
+    let st = s.model.state();
+    let a = s.doc.find_component("A").unwrap();
+    let face = solidcraft_doc::joints::face_name_at(&s.doc, &st, a, solidcore_record::Vec3::new(20.0, 10.0, 5.0), false).unwrap();
+    run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"face":face,"reverse":true}}));
+    let t = replay(&script(&mut s));
+    assert_eq!(t.doc.assembly.joints[0].a.snap, s.doc.assembly.joints[0].a.snap);
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
@@ -712,6 +742,11 @@ fn a_standard_part_replays_with_its_seat_joint() {
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [10, 10, 5]}));
     run(&mut s, "component.metadata.set", json!({"component": "SHCS M6x20", "description": "cover screw"}));
+    // A user parameter may refer to the names the part's builder gives its
+    // inputs; they come back with the part.
+    let comp = s.doc.components.iter().find(|c| c.name.starts_with("SHCS")).unwrap().id;
+    let input = s.doc.features.iter().find(|f| f.component == comp && !f.param_names.is_empty()).unwrap().param_names[0].clone();
+    run(&mut s, "parameters.add", json!({"name": "grip", "expression": format!("{input} * 2")}));
 
     let script = script(&mut s);
     let steps = commands(&script);
@@ -782,6 +817,56 @@ fn a_linked_design_replays_and_copies() {
     assert!(steps.contains(&"occurrence.copy"), "{steps:?}");
     let mut t = replay(&r["script"]);
     same(&mut s, &mut t);
+
+    // A suppressed Import feature is refused: the constructor would bring back
+    // the linked geometry the design keeps out.
+    run(&mut s, "timeline.suppress", json!({"feature": "Cube", "suppressed": true}));
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("suppressed"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A features-only design with a reordered timeline keeps exporting: the
+/// script replays the features in timeline order with their stored ids.
+#[test]
+fn a_reordered_features_only_timeline_still_exports() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "name": "First", "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Second", "body_name": "Cube"}));
+    run(&mut s, "timeline.reorder", json!({"feature": "Second", "position": 0}));
+    let script = script(&mut s);
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+}
+
+/// A linked file is named as the replay resolves it: a design saved beside its
+/// part keeps the path relative to its own folder, and the script writes the
+/// file's place so a replay from another folder reads the same file.
+#[test]
+fn a_linked_design_names_its_file_by_its_place() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-link-place-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("part.solidcraft");
+    let mut u = Session::default();
+    run(&mut u, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut u, "file.save", json!({"path": source.to_string_lossy()}));
+
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": source.to_string_lossy(), "name": "Cube"}));
+    run(&mut s, "file.save", json!({"path": dir.join("assembly.solidcraft").to_string_lossy()}));
+    // The saved file keeps the link relative to its own folder; the design in
+    // memory keeps the file's place. A link read as the file keeps it would
+    // resolve against wherever the replay runs.
+    s.doc_mut().links.values_mut().next().unwrap().path = "part.solidcraft".to_string();
+
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    let insert = r["script"]["commands"].as_array().unwrap().iter().find(|c| c["command"] == "component.insert_design").unwrap();
+    let named = insert["params"]["path"].as_str().unwrap().to_string();
+    assert!(std::path::Path::new(&named).is_absolute(), "the script names the file by its place: {named}");
+
+    let t = replay(&r["script"]);
+    assert_eq!(t.doc.links.values().next().unwrap().path, named);
+    assert_eq!(std::fs::read(&named).unwrap(), std::fs::read(&source).unwrap(), "the replay reads the file the design named");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -48,9 +48,12 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // Length boxes start empty: an empty box keeps the infinite line (#10258). Offset is the
         // distance from the reference, beside that length.
         ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle), b("Length", Length)],
-        ("sketch.construction_line.horizontal" | "sketch.construction_line.vertical" | "sketch.construction_line.parallel", 0 | 1) => {
-            vec![b("Length", Length), b("Offset", Length)]
-        }
+        // Horizontal and vertical lines are placed by coordinates, in X, Y order (#15618): Offset is
+        // the one across the line (Y for a horizontal line), Along the one along it, which only a
+        // segment's start uses.
+        ("sketch.construction_line.horizontal", 0 | 1) => vec![b("Length", Length), b("Along", Length), b("Offset", Length)],
+        ("sketch.construction_line.vertical", 0 | 1) => vec![b("Length", Length), b("Offset", Length), b("Along", Length)],
+        ("sketch.construction_line.parallel", 0 | 1) => vec![b("Length", Length), b("Offset", Length)],
         ("sketch.construction_line.perpendicular", 0 | 1) => vec![b("Length", Length)],
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
@@ -67,6 +70,9 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // By side: the side from the first click to the second (#11271).
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
+        // The whole first edge, then the width across from it (#4798).
+        ("sketch.rectangle.edge_center", 1) => vec![b("Length", Length)],
+        ("sketch.rectangle.edge_center", 2) => vec![b("Width", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
         | ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", 3) => vec![b("Width", Length)],
@@ -116,12 +122,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
         ("sketch.construction_line.angle", 1) => a + Vec2::from_angle(lk("Angle").unwrap_or_else(|| (h - a).angle())) * (h - a).len().max(1.0),
-        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
-            let v = h - a;
-            let len = lk("Length").unwrap_or(v.len());
-            let ang = lk("Angle").unwrap_or_else(|| snap_axis(v.angle()));
-            a + Vec2::from_angle(ang) * len
-        }
+        ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_end(app, a, h, lk("Length"), lk("Angle")),
         // A midpoint line runs from the end's mirror image through the midpoint to the end, so
         // the midpoint is the middle of the line: a typed length is half of it on each side.
         ("sketch.line.midpoint", 1) => {
@@ -138,6 +139,20 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             let d = h - a;
             Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
         }
+        // The edge's end: its box is the whole edge, centred on the first point.
+        ("sketch.rectangle.edge_center", 1) => {
+            let v = h - a;
+            let ang = if t.hover.as_ref().is_some_and(|x| x.1.is_some()) { v.angle() } else { snap_axis(v.angle()) };
+            a + Vec2::from_angle(ang) * lk("Length").map_or(v.len(), |l| l * 0.5)
+        }
+        ("sketch.rectangle.edge_center", 2) => match lk("Width") {
+            Some(w) => {
+                let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
+                let n = dir_or_x(a - c0).perp();
+                c0 + n * (w * sign(n.dot(h - c0)))
+            }
+            None => h,
+        },
         ("sketch.circle.center", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
         ("sketch.slot.center_point", 1) => a + dir_or_x(h - a) * lk("Length").map_or((h - a).len(), |l| l * 0.5),
@@ -258,6 +273,34 @@ pub fn snap_axis(ang: f64) -> f64 {
     if (ang - k * q).abs() < 2.5f64.to_radians() { k * q } else { ang }
 }
 
+/// Where the end of a line from `a` goes for the cursor at `h`: on the horizontal or the vertical
+/// when the line is near it, but only while the end stays within the pointer's reach, the reach
+/// every other snap uses (#16994). A typed length or a typed angle wins over the cursor.
+fn line_end(app: &SolveApp, a: Vec2, h: Vec2, length: Option<f64>, angle: Option<f64>) -> Vec2 {
+    let v = h - a;
+    let len = length.unwrap_or(v.len());
+    if let Some(ang) = angle {
+        return a + Vec2::from_angle(ang) * len;
+    }
+    let at = a + Vec2::from_angle(snap_axis(v.angle())) * len;
+    // A typed length says how long the line is: the end goes there, on the axis or not.
+    if length.is_some() || (at - h).len() <= reach_mm(app) { at } else { h }
+}
+
+/// How far (screen points) a snap may move the point it places from the pointer: the reach the
+/// other snaps use (#16994).
+const SNAP_REACH: f64 = 7.0;
+
+/// The pointer's reach in the sketch's own millimetres: how far a snap may move the point it
+/// places, in the view's scale.
+fn reach_mm(app: &SolveApp) -> f64 {
+    let Some(rect) = app.viewport.rect else { return f64::INFINITY };
+    let fov = app.view_fov();
+    let half = if fov > 0.0 { app.cam.distance * (fov * 0.5).tan() } else { app.cam.distance * 0.4 };
+    let per_point = 2.0 * half / f64::from(rect.height().max(1.0));
+    if per_point.is_finite() && per_point > 0.0 { SNAP_REACH * per_point } else { f64::INFINITY }
+}
+
 /// Is the segment exactly horizontal or vertical (an inferred constraint)?
 pub fn axis_aligned(a: Vec2, b: Vec2) -> Option<bool> {
     let d = b - a;
@@ -287,32 +330,50 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 /// measure so they don't cover it.
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let off = 20.0 * px;
-    // A one-click construction line's Length box waits beside the pointer before any click.
-    // A bare digit goes there, so a typed length still makes a segment. Offset sits further
-    // along and takes a digit only once that box has the keyboard.
-    if t.pts.is_empty() && t.dims.iter().any(|b| construction_length(t, b)) {
+    // A one-click construction line's Offset box waits above and right of the pointer before any
+    // click, clear of the grey coordinates below it (#15618). A bare digit goes there.
+    // The classic tools (`construction_line_classic`): the Length box waits beside the pointer, and
+    // Offset further along, as before #15618.
+    if t.classic && t.pts.is_empty() && t.dims.iter().any(|b| construction_length(t, b)) {
         let length_at = e + Vec2::new(2.5 * off, -1.5 * off);
-        let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
+        let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0.abs()).unwrap_or(0.0);
         return t
             .dims
             .iter()
             .map(|b| if b.label == "Offset" { (distance, length_at + Vec2::new(6.0 * off, 0.0)) } else { (0.0, length_at) })
             .collect();
     }
+    if t.pts.is_empty() && solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() && t.dims.iter().any(|b| b.label == "Offset") {
+        let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
+        let along = if t.cmd == "sketch.construction_line.vertical" { e.y } else { e.x };
+        return t.dims.iter().map(|b| (if b.label == "Along" { along } else { distance }, e + Vec2::new(2.5 * off, 1.5 * off))).collect();
+    }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
     match (t.cmd, t.pts.len()) {
-        // As for a line: the angle near the start, the length at the middle (#10258).
-        ("sketch.construction_line.angle", 1) => line_boxes(a, e, px, off).into_iter().rev().collect(),
-        // Behind the start, away from the pointer: the next click, on the pointer's side, picks
-        // the side the line runs to.
+        // As for a line: the angle near the start, the length at the middle of the segment being
+        // drawn (#10258, #15618).
+        ("sketch.construction_line.angle", 1) if t.classic => line_boxes(a, e, px, off).into_iter().rev().collect(),
+        ("sketch.construction_line.angle", 1) => {
+            line_boxes(a, crate::sketch_construction::segment_end(app, t, e).unwrap_or(e), px, off).into_iter().rev().collect()
+        }
+        // Classic: behind the start, away from the pointer, as before #15618.
         (
             "sketch.construction_line.horizontal"
             | "sketch.construction_line.vertical"
             | "sketch.construction_line.parallel"
             | "sketch.construction_line.perpendicular",
             1,
-        ) => vec![(0.0, a - dir_or_x(e - a) * (2.5 * off))],
+        ) if t.classic => vec![(0.0, a - dir_or_x(e - a) * (2.5 * off))],
+        // The length at the middle of the segment being drawn, a little off it, as the Line tool
+        // shows it (#15618).
+        (
+            "sketch.construction_line.horizontal"
+            | "sketch.construction_line.vertical"
+            | "sketch.construction_line.parallel"
+            | "sketch.construction_line.perpendicular",
+            1,
+        ) => line_boxes(a, crate::sketch_construction::segment_end(app, t, e).unwrap_or(e), px, off).into_iter().take(1).collect(),
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_boxes(a, e, px, off),
         // The midpoint line runs from the end's mirror image through the midpoint to the end,
         // so its length is the whole line: twice the distance from the midpoint to the cursor.
@@ -339,6 +400,15 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             let d = e - a;
             let (sx, sy) = (sign(d.x), sign(d.y));
             vec![(2.0 * d.x.abs(), Vec2::new(a.x, a.y - d.y - sy * off)), (2.0 * d.y.abs(), Vec2::new(a.x + d.x + sx * 2.0 * off, a.y))]
+        }
+        ("sketch.rectangle.edge_center", 1) => {
+            let n = dir_or_x(e - a).perp();
+            vec![(2.0 * (e - a).len(), (a + e) * 0.5 + n * off)]
+        }
+        ("sketch.rectangle.edge_center", 2) => {
+            let n = dir_or_x(a - first).perp();
+            let w = n.dot(e - first);
+            vec![(w.abs(), e + n * (sign(w) * 2.5 * off))]
         }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
@@ -432,13 +502,19 @@ fn reference_line(app: &SolveApp, id: &str) -> Option<(Vec2, Vec2)> {
     Some((sketch.point(a)?, sketch.point(b)?))
 }
 
-/// Where a locked offset puts the line: on the cursor's side of the reference, at the typed distance.
+/// Where typed values put the line. Horizontal and vertical lines take the typed coordinates
+/// (#15618); a parallel line goes on the cursor's side of the reference, at the typed distance.
 fn construction_offset_at(app: &SolveApp, t: &Tool, h: Vec2) -> Option<Vec2> {
-    let distance = locked(app, t, "Offset")?;
+    let (across, along) = (locked(app, t, "Offset"), locked(app, t, "Along"));
+    let typed = across.is_some() || along.is_some();
     match t.cmd {
-        "sketch.construction_line.horizontal" => Some(Vec2::new(h.x, sign(h.y) * distance)),
-        "sketch.construction_line.vertical" => Some(Vec2::new(sign(h.x) * distance, h.y)),
+        // Classic: a distance on the cursor's side, as before #15618.
+        "sketch.construction_line.horizontal" if t.classic => Some(Vec2::new(h.x, sign(h.y) * across?)),
+        "sketch.construction_line.vertical" if t.classic => Some(Vec2::new(sign(h.x) * across?, h.y)),
+        "sketch.construction_line.horizontal" if typed => Some(Vec2::new(along.unwrap_or(h.x), across.unwrap_or(h.y))),
+        "sketch.construction_line.vertical" if typed => Some(Vec2::new(across.unwrap_or(h.x), along.unwrap_or(h.y))),
         "sketch.construction_line.parallel" => {
+            let distance = across?;
             let (a, b) = reference_line(app, t.picks.first()?)?;
             let dir = (b - a).normalized()?;
             let normal = dir.perp();
@@ -453,8 +529,8 @@ fn construction_offset_at(app: &SolveApp, t: &Tool, h: Vec2) -> Option<Vec2> {
 fn construction_offset_live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Option<Vec<(f64, Vec2)>> {
     let off = 20.0 * px;
     match t.cmd {
-        "sketch.construction_line.horizontal" => Some(vec![(e.y.abs(), Vec2::new(e.x + off, e.y * 0.5))]),
-        "sketch.construction_line.vertical" => Some(vec![(e.x.abs(), Vec2::new(e.x * 0.5, e.y + off))]),
+        "sketch.construction_line.horizontal" => Some(vec![(e.y, Vec2::new(e.x + off, e.y * 0.5))]),
+        "sketch.construction_line.vertical" => Some(vec![(e.x, Vec2::new(e.x * 0.5, e.y + off))]),
         "sketch.construction_line.parallel" => {
             let (a, b) = reference_line(app, t.picks.first()?)?;
             let dir = (b - a).normalized()?;
@@ -473,6 +549,20 @@ fn boxes_now(t: &Tool) -> Vec<DimBox> {
     if t.cmd == "sketch.construction_line.parallel" && input_stage(t) == 0 || !t.pts.is_empty() {
         boxes.retain(|b| b.label != "Offset");
     }
+    // The classic tools keep the Length box from the start and have no Along box.
+    if t.classic {
+        boxes.retain(|b| b.label != "Along");
+        return boxes;
+    }
+    // A construction line has a Length box only while a segment is drawn, after its first click:
+    // the Sketch Palette says whether it is infinite (#15618).
+    if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() && (t.pts.is_empty() || !crate::sketch_construction::segment(t)) {
+        boxes.retain(|b| b.label != "Length");
+    }
+    // Where along the line it starts matters only to a segment, before its first click.
+    if !t.pts.is_empty() || !crate::sketch_construction::segment(t) {
+        boxes.retain(|b| b.label != "Along");
+    }
     boxes
 }
 
@@ -487,6 +577,7 @@ pub fn sync(t: &mut Tool) {
                 t.cmd,
                 "sketch.arc.center_point"
                     | "sketch.ellipse"
+                    | "sketch.rectangle.edge_center"
                     | "sketch.slot.center_to_center"
                     | "sketch.slot.overall"
                     | "sketch.slot.center_point"
@@ -586,6 +677,9 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
         }
         match dimension.label {
             "Angle" => {}
+            // A horizontal or vertical construction line's X and Y are coordinates: zero is on the
+            // axis, a negative value on its other side (#15618).
+            "Along" | "Offset" if !t.classic && matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical") => {}
             "Sweep" if t.cmd == "sketch.slot.arc_center" && value <= 0.0 => {
                 return Err("Arc slot Sweep must be greater than zero and less than 360 degrees".into());
             }
@@ -655,9 +749,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    t.classic = app.preferences.construction_line_classic;
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
-    crate::sketch_construction::line_type_switch(ui, &mut t);
+    if t.classic {
+        crate::sketch_construction::line_type_switch(ui, &mut t);
+    }
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
@@ -699,6 +796,12 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         // filter has been installed (e.g. immediately repeated keyboard input).
         ui.ctx().memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
     }
+    // A box shown for the first time is laid out once unseen, and loses the keyboard it was just
+    // given there (a digit that turns grey coordinates into boxes, #15618): give it back now.
+    let refocus = egui::Id::unique("sc_dim_refocus");
+    if let Some(id) = ui.ctx().data_mut(|d| d.remove_temp::<Option<egui::Id>>(refocus)).flatten() {
+        ui.ctx().memory_mut(|m| m.request_focus(id));
+    }
     let mut completed = false;
     let mut any_focused = false;
     let layout = app.viewport.layout.as_ref();
@@ -706,18 +809,35 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         layout.map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive()).map(|view| Room::new(view, layout.and_then(|l| l.usable.as_ref())));
     let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
     let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
+    // A construction line's untyped length is infinite, unless it is a segment drawn to the
+    // pointer (#15066).
+    let segment_length = if construction { hover.as_ref().and_then(|h| crate::sketch_construction::pointer_segment_length(app, t, h)) } else { None };
     for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
             // A construction line's Length box holds no value until the user types one: an
             // unset length keeps the line infinite, and the box shows the ∞ as its placeholder
-            // (#17052), so a typed size is the whole value.
-            if construction && b.label == "Length" {
-                b.value.clear();
-            } else {
-                b.value = fmt(app, b.label, b.kind, *v);
-            }
+            // (#17052), so a typed size is the whole value. A segment drawn to the pointer
+            // shows the length a click would give it (#15066).
+            b.value = match (construction && b.label == "Length", segment_length) {
+                (true, Some(length)) => fmt(app, b.label, b.kind, length),
+                (true, None) => String::new(),
+                _ => fmt(app, b.label, b.kind, *v),
+            };
         }
     }
+    let sizes: Vec<_> = t
+        .dims
+        .iter()
+        .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
+        .collect();
+    // Rectangle dimensions belong to their edges, not to the pointer. Keep them near
+    // those anchors when a border or panel leaves no room at the preferred position.
+    let rectangle_positions = if matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center" | "sketch.rectangle.rounded") {
+        let anchors: Option<Vec<_>> = lv.iter().map(|(_, at)| proj.to_screen(plane.to_world(*at)).map(|p| p + vec2(-34.0, -11.0))).collect();
+        anchors.map(|anchors| rectangle_input_positions(&anchors, &sizes, view, ui.ctx().pointer_latest_pos()))
+    } else {
+        None
+    };
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
     // and each other. Place them together outside its projected outline, in screen space:
     // their separation must not shrink with the shape or a tilted sketch plane.
@@ -726,11 +846,6 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        let sizes: Vec<_> = t
-            .dims
-            .iter()
-            .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
-            .collect();
         bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
     } else {
         None
@@ -755,19 +870,71 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
                 return None;
             }
-            let sizes: Vec<_> = t
-                .dims
-                .iter()
-                .map(|b| {
-                    crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum()
-                })
-                .collect();
             Some(line_input_positions([start, end], &sizes, view, tk.space_8))
         })
     } else {
         None
     };
+    // Before a horizontal or vertical construction line's first click, its coordinates sit where
+    // the Line tool shows the pointer's, in grey (#15618). A typed digit turns the ones that place
+    // the line into boxes there, in X, Y order; one that does not (along an infinite line) stays
+    // grey.
+    let coords = construction
+        && !t.classic
+        && t.pts.is_empty()
+        && matches!(t.cmd, "sketch.construction_line.horizontal" | "sketch.construction_line.vertical");
+    let mut coord_pos: Vec<Option<egui::Pos2>> = vec![None; t.dims.len()];
+    let mut quiet = false;
+    if coords
+        && let Some(h) = hover.as_ref()
+        && let Some(sp) = proj.to_screen(plane.to_world(h.0))
+    {
+        let start = crate::tool_cursor::readout_at(ui.painter(), proj.rect, sp);
+        let point = effective(app, t, h.0);
+        let font = egui::FontId::proportional(tk.font_small);
+        let grey = Tokens::view().text_dim;
+        let active = (0..t.dims.len()).any(|i| t.dims[i].locked || ui.ctx().memory(|m| m.has_focus(box_id(i))));
+        if active {
+            let roles = if t.cmd == "sketch.construction_line.vertical" {
+                [("X", "Offset", point.x), ("Y", "Along", point.y)]
+            } else {
+                [("X", "Along", point.x), ("Y", "Offset", point.y)]
+            };
+            let mut x = start.x;
+            // Letters and grey values centred on the boxes' height.
+            let mid = start.y + (crate::ui_kit::placement_field_content_size(ui, "0") + field_frame.total_margin().sum()).y * 0.5;
+            for (k, (axis, label, value)) in roles.into_iter().enumerate() {
+                if k > 0 {
+                    x += tk.space_8;
+                }
+                // Each value with its axis letter before it, as X, Y value pairs are named in the
+                // app's dialogs (`value_pair`).
+                let letter = ui.painter().text(egui::pos2(x, mid), egui::Align2::LEFT_CENTER, axis, font.clone(), tk.dialog_label);
+                x = letter.right() + tk.space_3;
+                match t.dims.iter().position(|b| b.label == label) {
+                    Some(i) => {
+                        coord_pos[i] = Some(egui::pos2(x, start.y));
+                        let size = crate::ui_kit::placement_field_content_size(ui, &t.dims[i].value)
+                            + vec2(2.0 * tk.form_inset, 0.0)
+                            + field_frame.total_margin().sum();
+                        x += size.x + tk.space_2;
+                    }
+                    None => {
+                        let text = crate::prefs::show_mm(app, value, 1);
+                        x = ui.painter().text(egui::pos2(x, mid), egui::Align2::LEFT_CENTER, text, font.clone(), grey).right();
+                    }
+                }
+            }
+        } else {
+            let shown = ui.painter().text(start, egui::Align2::LEFT_TOP, crate::sketch_cursor_readout::text(app, point), font, grey);
+            crate::scenario::publish_rect("viewport:readout", shown);
+            quiet = true;
+        }
+    }
     for (i, b) in t.dims.iter_mut().enumerate() {
+        if quiet {
+            continue;
+        }
         let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
         let id = egui::Id::unique(("sc_dim", i));
@@ -778,6 +945,19 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         if construction && b.label == "Length" && text.is_empty() {
             text = INFINITE.to_owned();
         }
+        // A key that moves the caret (Left, Right, Home, End) in a box that follows the cursor
+        // keeps its value where it is, so the caret can move into it and the user can add to
+        // it (`50.00` then `-5`); otherwise the next frame selects the whole text again and
+        // typing replaces it (#20607).
+        if has_focus
+            && !b.locked
+            && !b.value.is_empty()
+            && ui.input(|input| {
+                [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::Home, egui::Key::End].into_iter().any(|key| input.key_pressed(key))
+            })
+        {
+            b.locked = true;
+        }
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
@@ -785,12 +965,15 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
-        let pos = line_positions
-            .as_ref()
-            .or(polygon_positions.as_ref())
-            .and_then(|positions| positions.get(i).copied())
-            .or(apart.get(i).copied().flatten())
-            .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
+        let pos = coord_pos[i].unwrap_or_else(|| {
+            line_positions
+                .as_ref()
+                .or(polygon_positions.as_ref())
+                .or(rectangle_positions.as_ref())
+                .and_then(|positions| positions.get(i).copied())
+                .or(apart.get(i).copied().flatten())
+                .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()))
+        });
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
         Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::unique(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
             ui.ctx(),
@@ -812,6 +995,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                         r.request_focus();
                     }
                     any_focused |= r.has_focus() || r.lost_focus();
+                    if has_focus && ui.is_sizing_pass() {
+                        ui.ctx().data_mut(|d| d.insert_temp(refocus, Some(id)));
+                    }
                 });
             },
         );
@@ -835,6 +1021,35 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Place measured rectangle fields nearest their edge anchors, keeping the pointer and
+/// earlier fields clear. Use the full free region, including space beside floating panels.
+fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Option<Room>, pointer: Option<Pos2>) -> Vec<Pos2> {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Point, Size};
+
+    let Some(view) = view else { return anchors.to_vec() };
+    let domain = view.free.map_or_else(|| logical_rect(view.view), |free| free.domain);
+    let mut obstacles = view.free.map_or_else(Vec::new, |free| free.obstacles.clone());
+    if let Some(pointer) = pointer {
+        obstacles.push(logical_rect(egui::Rect::from_center_size(pointer, vec2(2.0 * POINTER_GAP, 2.0 * POINTER_GAP))));
+    }
+    anchors
+        .iter()
+        .zip(sizes)
+        .map(|(&anchor, &size)| {
+            let wanted = egui::Rect::from_min_size(anchor, size);
+            let center = wanted.center();
+            let placed = resolve_usable_region(domain, &obstacles)
+                .ok()
+                .and_then(|free| free.place_footprint(Size { width: size.x, height: size.y }, Point { x: center.x, y: center.y }, 0.0))
+                .map(egui_rect)
+                .unwrap_or_else(|| view.clamp(wanted));
+            obstacles.push(logical_rect(placed.expand(2.0)));
+            placed.min
+        })
+        .collect()
 }
 
 /// Keep measured Length and Angle fields clear of the projected line and each other.
@@ -990,13 +1205,14 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
 /// About the size of a value box, for keeping it in view.
 pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
-/// Whether `p` is over the active tool's own floating boxes: a value box or the construction
-/// line's construction/normal switch. #10600: these must not swallow a click that lands on a
-/// sketch point, so the viewport asks before letting one take the click.
+/// Whether `p` is over the active tool's own floating boxes: a value box or, with
+/// `construction_line_classic`, the construction line's Construction/Normal switch. #10600: these
+/// must not swallow a click that lands on a sketch point, so the viewport asks before letting one
+/// take the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
     (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
-        || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+        || (t.classic && ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p)))
 }
 
 /// The boxes at `positions` (top left, `None` for one not shown) with none covering another: a

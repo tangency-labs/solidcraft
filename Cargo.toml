@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.43.0"
+version = "0.49.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -20,8 +20,11 @@ craft-plugin = { path = "crates/craft-plugin" }
 craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-profile = { path = "crates/profile" }
+solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+# The kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md)
+solidcraft-kernel-api = { path = "crates/kernel-api" }
 solidcraft-smlib = { path = "crates/smlib" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }
@@ -30,9 +33,16 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+# A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
+solidcraft-design-preview = { path = "crates/design-preview" }
+solidcraft-icon-svg = { path = "crates/icon-svg" }
 solidcraft-engine = { path = "crates/engine" }
-solidcraft-ui-egui = { path = "crates/ui-egui" }
+# Without its default features, so an app built with `--no-default-features` leaves out what
+# they bring (usage statistics); each app turns them on in its own defaults.
+solidcraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 solidcraft-ui-kit = { path = "crates/ui-kit" }
+# The app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values
+solidcraft-panel-layout = { path = "crates/panel-layout" }
 solidcraft-look = { path = "crates/look" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
@@ -40,6 +50,7 @@ solidcraft-display-units = { path = "crates/display-units" }
 solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-theme = { path = "crates/theme" }
 solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-views = { path = "crates/views" }
 solidcraft-viewport-egui = { path = "crates/viewport-egui" }
 solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
@@ -61,6 +72,8 @@ solidcore-record = { path = "solidcore/crates/solidcore-record" }
 solidcore-ops = { path = "solidcore/crates/solidcore-ops" }
 # STEP import and export (vendored with solidcore): the Part 21 parser is solidcore-record's.
 solidcore-step = { path = "solidcore/crates/solidcore-step" }
+# CADIR (cadmpeg's neutral CAD model) read into B-rep records, as the STEP reader assembles them.
+solidcore-cadir = { path = "solidcore/crates/solidcore-cadir" }
 # Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
 # subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
 # SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
@@ -81,6 +94,9 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# A container part's CRC-32, to check a part copied on save holds what it is saved for; already in
+# the tree through zip.
+crc32fast = "1.5"
 # Provenance: the CBOR manifest encoding (RFC 8949), COSE_Sign1 records (RFC 9052) and Ed25519
 # (RFC 8032). All pure Rust and permissive (Apache-2.0; BSD-3-Clause), so the browser build and
 # `cargo xtask licences --check` keep working.
@@ -118,24 +134,36 @@ gethostname = "1"
 # FreeCAD and Rhino import (Apache-2.0, pure Rust; native and browser builds).
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
-# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
-cadmpeg-core = "=0.6.7"
-cadmpeg-ir = "=0.6.7"
-cadmpeg-registry = { version = "=0.6.7", default-features = false, features = ["fcstd", "rhino", "step"] }
+# and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through;
+# `iges` writes IGES when "Export STEP and IGES with cadmpeg" is on (no IGES import route).
+cadmpeg-core = "=0.6.12"
+cadmpeg-ir = "=0.6.12"
+cadmpeg-registry = { version = "=0.6.12", default-features = false, features = ["fcstd", "iges", "rhino", "step", "usd"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
+# The installed fonts, for a character no bundled face has (#20005; MIT, pure Rust). Without
+# fontconfig, its other dependencies are already in the tree.
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "memmap"] }
+
 # Ends a process group with the system call (MIT; already in the tree through zip).
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+nix = { version = "0.31", default-features = false, features = ["signal", "user"] }
 
 # images
 image = { version = "0.25", default-features = false, features = ["png", "hdr"] }
 png = "0.18.1"
 # LZW for GIF animations (MIT OR Apache-2.0, pure Rust; already in the tree through image's tiff).
 weezl = "0.1.12"
+# sheet PDFs (MIT OR Apache-2.0, pure Rust; brings ryu, Apache-2.0 OR BSL-1.0)
+pdf-writer = "0.15"
+# deflate for PDF content streams (MIT OR Apache-2.0; already in the tree through zip)
+flate2 = "1.1"
 # rasterises the UI icon SVGs (BSD-3-Clause, pure Rust, builds for wasm)
 tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+# rasterises an SVG given as a canvas or decal image (MIT OR Apache-2.0, pure Rust, builds for
+# wasm); no default features: no text, system fonts, raster images or SVGZ, so it reads no file but the SVG
+resvg = { version = "0.50", default-features = false }
 # build scripts: reads the icon palette (MIT OR Apache-2.0)
 toml = "1"
 
@@ -162,12 +190,22 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 # `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
 neg_cmp_op_on_partial_ord = "allow"
+# `eprintln!` and `eprint!` panic when stderr is a pipe whose reader has closed, which an agent
+# running `solidcraft mcp` (and the app that one starts) can leave behind (#10111). Write through
+# `solidcraft_geom::note!` (`solidcraft_engine::note!`), which ignores a failed write. Tests are
+# exempt (clippy.toml `allow-print-in-tests`); examples and build scripts allow it at the top.
+print_stderr = "deny"
 
+# Dev builds keep line tables only, so backtraces still name file:line. Full debug info made the
+# app binary 4.9 GB and every relink slow. For a debugger, override it:
+# `CARGO_PROFILE_DEV_DEBUG=2`.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 # Tests and lints (`cargo xtask ci`, GitHub CI): quick to build, quick enough to run. Light
 # optimisation, line tables only (file:line in backtraces), no LTO, no debug assertions.
@@ -193,11 +231,28 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
+# Local performance work: release without its thin LTO, incremental. A rebuild after an edit
+# drops from 1.5-2 minutes to 3-10 seconds (the thin LTO link of the app was most of it), for
+# about 4-7% more CPU time when running. Measure with it while iterating, and take the final numbers with
+# --release. See docs/perf.md.
+[profile.profiling]
+inherits = "release"
+lto = false
+incremental = true
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]
-# Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
-egui-wgpu = { path = "vendor/egui-wgpu" }
+# egui 0.37.0, vendored with `git subtree` so SolidCraft can carry its own changes (vendor/README.md).
+# egui-wgpu keeps OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
+ecolor = { path = "vendor/egui/crates/ecolor" }
+eframe = { path = "vendor/egui/crates/eframe" }
+egui = { path = "vendor/egui/crates/egui" }
+egui-wgpu = { path = "vendor/egui/crates/egui-wgpu" }
+egui-winit = { path = "vendor/egui/crates/egui-winit" }
+egui_glow = { path = "vendor/egui/crates/egui_glow" }
+emath = { path = "vendor/egui/crates/emath" }
+epaint = { path = "vendor/egui/crates/epaint" }
+epaint_default_fonts = { path = "vendor/egui/crates/epaint_default_fonts" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
 # winit 0.30 never binds and eframe 0.37 still requires winit 0.30.

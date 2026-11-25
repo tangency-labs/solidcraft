@@ -364,6 +364,7 @@ impl Builder {
                 direction,
                 distance2: second.map(mm),
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: through,
                 taper: None,
                 to: None,
@@ -374,7 +375,9 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation,
             targets,
@@ -414,7 +417,7 @@ impl Builder {
             },
             Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius")?),
                 height: mm(len("height")?),
                 operation: op,
@@ -509,8 +512,17 @@ impl Builder {
                         alignment2: Default::default(),
                         reversed: false,
                         reversed2: false,
+                        distance1: Default::default(),
+                        distance2: Default::default(),
+                        extent1: None,
+                        extent2: None,
+                        copy_at_end1: false,
+                        copy_at_end2: false,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             Some("circular") => {
@@ -535,6 +547,9 @@ impl Builder {
                         axis_feature: None,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
+                    components: Vec::new(),
+                    occurrences: Vec::new(),
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
@@ -618,6 +633,7 @@ impl Builder {
                     return Err(format!("{name}: a variable radius fillet is not rebuilt yet"));
                 }
                 FeatureKind::Fillet {
+                    edge_radii: Vec::new(),
                     edges,
                     radius: mm(f(r, "radius").ok_or_else(|| format!("{name}: no radius"))?),
                     body: Some(body.into()),

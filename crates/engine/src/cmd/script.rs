@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ExportScriptResult>)
         .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
+         steps, path (as given), absolute_path (with path: the file written as an absolute path, left out when it can't be worked out), bytes (with path: the size of the file written), omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -187,7 +187,7 @@ pub(crate) fn step_params(cmd: &str, v: Option<&Value>) -> Result<Vec<Param>> {
 fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.export_script";
     let state = s.model.state();
-    let (commands, omitted) = script_steps(&s.doc, &|body| state.body(body).is_some())?;
+    let (commands, omitted) = script_steps(&s.doc, &|body| state.body(body).is_some(), s.path.as_deref())?;
     let steps = commands.len();
     let script = Script {
         about: ScriptAbout {
@@ -199,14 +199,24 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
         commands,
     };
     let path = str_(p, "path");
+    let mut bytes = None;
     if let Some(path) = path {
         let text = serde_json::to_string_pretty(&script).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        bytes = Some(text.len());
     } else if p.get("path").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`path` must be a file path"));
     }
+    // `path` echoes the call, as it did before #18838 (#19248). `absolute_path` names the file in full:
+    // a relative path resolves against this process's folder, which an agent talking to the
+    // app over MCP can't see. It is left out where it can't be worked out: with no such folder
+    // (browser storage), or when the folder's name isn't valid UTF-8. On Linux and macOS a ".."
+    // stays in it: taking it out by the text alone names another file when the folder before it
+    // is a link. Windows removes it, and resolves the path the same way when opening it.
+    let absolute_path = path.and_then(|p| std::path::absolute(p).ok()).and_then(|a| a.to_str().map(str::to_string));
     let path = path.map(str::to_string);
-    serde_json::to_value(ExportScriptResult { omitted, path, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    serde_json::to_value(ExportScriptResult { omitted, path, absolute_path, bytes, script, steps, param_warnings: Vec::new() })
+        .map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn step(command: &str, params: Value) -> Value {
@@ -218,8 +228,9 @@ fn not_supported(what: &str) -> EngineError {
 }
 
 /// The steps that rebuild `doc` on an empty design, and what they leave out. `has_body` says
-/// whether the design has a body of that name now, for the columns of the configuration table.
-pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> Result<(Vec<Value>, Vec<String>)> {
+/// whether the design has a body of that name now, for the columns of the configuration table,
+/// and `own` is the design's own file, for the paths of linked designs.
+pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own: Option<&str>) -> Result<(Vec<Value>, Vec<String>)> {
     if doc.components.iter().any(|c| c.parent != 0) {
         return Err(not_supported("nested components"));
     }
@@ -340,12 +351,15 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
 
     // A linked design rebuilds its Import feature from the file at its step.
     for (comp, link) in &doc.links {
+        let name = doc.components.iter().find(|c| c.id == *comp).map(|c| c.name.clone()).unwrap_or_default();
         match doc.features.iter().find(|f| f.id == link.feature) {
-            Some(f) if f.component == *comp && matches!(f.kind, FeatureKind::Import { .. }) => {
+            Some(f) if f.component == *comp && matches!(f.kind, FeatureKind::Import { .. }) && !f.suppressed => {
                 skipped.insert(link.feature);
             }
+            Some(f) if f.suppressed => {
+                return Err(not_supported(&format!("a linked design whose import feature is suppressed (`{name}`)")));
+            }
             _ => {
-                let name = doc.components.iter().find(|c| c.id == *comp).map(|c| c.name.clone()).unwrap_or_default();
                 return Err(not_supported(&format!("a linked design whose import feature is missing or changed (`{name}`)")));
             }
         }
@@ -357,9 +371,14 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
         Feature(&'e Feature),
     }
     let mut events: Vec<(u64, Event<'_>)> = Vec::new();
+    // A stream that interleaves features with component, occurrence and
+    // constructor steps is walked in id order, so a timeline reordered
+    // relative to creation order breaks the interleaving and is refused. A
+    // features-only stream keeps the timeline's own order.
+    let interleaved = !doc.components.is_empty() || !doc.occurrences.is_empty();
     let mut last_feature_id = 0u64;
     for f in &doc.features {
-        if f.id < last_feature_id {
+        if interleaved && f.id < last_feature_id {
             return Err(not_supported("a timeline reordered relative to creation order"));
         }
         last_feature_id = f.id;
@@ -375,7 +394,9 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
             events.push((o.id, Event::Copy(o)));
         }
     }
-    events.sort_by_key(|(id, _)| *id);
+    if interleaved {
+        events.sort_by_key(|(id, _)| *id);
+    }
     let mut sim_occ: Vec<(u64, String)> = Vec::new();
 
     // User parameters go in as soon as everything they refer to exists, so each step sees the
@@ -475,21 +496,32 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
                     comp_map.insert(c.id, c.id);
                     occ_map.insert(c.id.saturating_add(1), c.id.saturating_add(1));
                     sim_next = c.id.saturating_add(2 + built as u64);
+                    // The builder names its inputs again at replay: a user
+                    // parameter that refers to one flushes after the part.
+                    for f in doc.features.iter().filter(|f| f.id > c.id.saturating_add(1) && f.id <= c.id.saturating_add(1 + built as u64)) {
+                        known.extend(f.param_names.iter().filter(|n| !n.is_empty()).cloned());
+                    }
                 } else if let Some(link) = doc.links.get(&c.id) {
                     // A linked design comes in through its own constructor,
                     // which reads the file again and rebuilds the Import
-                    // feature at the id its steps allocate.
+                    // feature at the id its steps allocate. The file is named
+                    // as the replay resolves it: against its own folder, not
+                    // wherever the replay happens to run.
                     if sim_next != c.id || link.feature != c.id.saturating_add(2) {
                         return Err(not_supported(&format!("a linked design whose rebuilt feature would not keep its id (`{}`)", c.name)));
                     }
+                    let file = super::design_link::absolute(&super::design_link::resolve(own, &link.path));
                     let mut o = Map::new();
-                    o.insert("path".into(), json!(link.path));
+                    o.insert("path".into(), json!(file.to_string_lossy()));
                     o.insert("name".into(), json!(c.name));
                     out.push(step("component.insert_design", Value::Object(o)));
                     comp_map.insert(c.id, c.id);
                     occ_map.insert(c.id.saturating_add(1), c.id.saturating_add(1));
                     sim_next = c.id.saturating_add(3);
-                    omitted.push(format!("linked design `{}`: the file `{}` must be present at replay", c.name, link.path));
+                    omitted.push(format!("linked design `{}`: the file `{}` must be present at replay", c.name, file.to_string_lossy()));
+                    if let Some(f) = doc.features.iter().find(|f| f.id == link.feature) {
+                        known.extend(f.param_names.iter().filter(|n| !n.is_empty()).cloned());
+                    }
                 } else {
                     let mut params = json!({"name": c.name, "grounded": false, "activate": false});
                     if let Some(o) = params.as_object_mut()
@@ -594,6 +626,24 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
         // The offset and the rest angle travel as they are stored, zero
         // included: a value left out would be re-inferred at creation from
         // wherever the parts sit (`least_turn_angle`), not restored.
+        match (&j.exprs.offset_x, j.offset_xy[0]) {
+            (Some(e), _) => {
+                o.insert("offset_x".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_x".into(), json!(v));
+            }
+            _ => {}
+        }
+        match (&j.exprs.offset_y, j.offset_xy[1]) {
+            (Some(e), _) => {
+                o.insert("offset_y".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_y".into(), json!(v));
+            }
+            _ => {}
+        }
         match (&j.exprs.offset, j.offset) {
             (Some(e), _) => {
                 o.insert("offset".into(), json!(e));
@@ -909,20 +959,12 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
         [0.0, 0.0, 0.0, 1.0],
     ]);
     let world = |p: solidcore_record::Vec3| -> [f64; 3] {
-        let p = [p.x, p.y, p.z];
-        [
-            m[0][0] * p[0] + m[1][0] * p[1] + m[2][0] * p[2] + m[3][0],
-            m[0][1] * p[0] + m[1][1] * p[1] + m[2][1] * p[2] + m[3][1],
-            m[0][2] * p[0] + m[1][2] * p[1] + m[2][2] * p[2] + m[3][2],
-        ]
+        let p = solidcraft_doc::apply_point(&m, p);
+        [p.x, p.y, p.z]
     };
     let dir = |d: solidcore_record::Vec3| -> [f64; 3] {
-        let d = [d.x, d.y, d.z];
-        [
-            m[0][0] * d[0] + m[1][0] * d[1] + m[2][0] * d[2],
-            m[0][1] * d[0] + m[1][1] * d[1] + m[2][1] * d[2],
-            m[0][2] * d[0] + m[1][2] * d[1] + m[2][2] * d[2],
-        ]
+        let d = solidcraft_doc::apply_vector(&m, d);
+        [d.x, d.y, d.z]
     };
     let mut arg = Map::new();
     arg.insert("occurrence".into(), json!(occ));
@@ -936,6 +978,8 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
             XRef::Dir(d) => json!(dir(*d)),
             XRef::Face { face, pick: None } => json!(face),
             XRef::Face { pick: Some(p), .. } => json!({"face": world(*p)}),
+            XRef::Reference { reference, reverse } => json!({"reference":reference,"reverse":reverse}),
+            XRef::Planar { planar_face, reverse } => json!({"planar_face":planar_face,"reverse":reverse}),
         }
     };
     match &origin.snap {

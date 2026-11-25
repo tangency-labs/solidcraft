@@ -26,6 +26,8 @@ pub enum InstallError {
     NotOnePlugin,
     #[error("the .zip has no {0}, which plugin.json names")]
     MissingModule(String),
+    #[error("the .zip has no {0}, which plugin.json names in themes")]
+    MissingTheme(String),
     /// The module is missing and the .zip holds Rust sources: most likely the "Source code"
     /// archive that GitHub lists beside a release, not the plugin's own .zip (#16736).
     #[error(
@@ -55,6 +57,31 @@ pub struct Unpacked {
     pub files: Vec<safe_zip::File>,
 }
 
+impl Unpacked {
+    /// Optional artwork never prevents installation. Uses exactly the bytes being reviewed.
+    pub fn swatch_warnings(&self) -> Vec<String> {
+        let Some(runtime) = &self.manifest.runtime else { return Vec::new() };
+        craft_plugin::swatches::check(&runtime.entries, |path| {
+            let file = self.files.iter().find(|file| file.path == path).ok_or_else(|| "not found in the package".to_string())?;
+            if file.bytes.len() > craft_plugin::swatches::MAX_BYTES {
+                return Err("file is larger than 64 KiB".into());
+            }
+            Ok(file.bytes.clone())
+        })
+        .warnings
+    }
+}
+
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Held while a package is written to or deleted from the plugins folder (an install's write and its
+/// stored approvals, a removal's delete), so two writes never overlap: a job the app gave up on can
+/// still be writing when the next one starts. Reading and checking a package takes no part in it, so a
+/// worker stuck in a read holds nothing. A holder that panicked leaves nothing locked.
+pub fn write_lock() -> std::sync::MutexGuard<'static, ()> {
+    WRITE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Files a desktop zip tool adds that are not part of the plugin.
 fn is_junk(path: &str) -> bool {
     path.starts_with("__MACOSX/") || path.rsplit('/').next().is_some_and(|name| name == ".DS_Store" || name == "Thumbs.db")
@@ -63,7 +90,14 @@ fn is_junk(path: &str) -> bool {
 /// Checks `zip`: one plugin (`plugin.json` and its module) at the top or in one top-level folder,
 /// a manifest the host accepts, safe paths and sizes.
 pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
-    let files: Vec<_> = safe_zip::read(zip, LIMITS)?.into_iter().filter(|f| !is_junk(&f.path)).collect();
+    let files = safe_zip::read(zip, LIMITS)?;
+    from_files(files, format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip)))
+}
+
+/// Checks a plugin's files as [`unpack`] reads them from a `.zip`, with `archive` the hash of what
+/// they came from. `plugin check` reads a package folder into the same checks.
+pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacked, InstallError> {
+    let files: Vec<_> = files.into_iter().filter(|f| !is_junk(&f.path)).collect();
     let manifests: Vec<&str> =
         files.iter().filter(|f| f.path == "plugin.json" || f.path.ends_with("/plugin.json")).map(|f| f.path.as_str()).collect();
     let prefix = match manifests.as_slice() {
@@ -91,6 +125,16 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         crate::EngineError::Plugin(e) => InstallError::Manifest(e),
         e => InstallError::Manifest(HostError::InvalidManifest { field: "manifest".into(), reason: e.to_string() }),
     })?;
+    // An install may ask for approval above the user's default, never above this hard ceiling.
+    if let Some(runtime) = &manifest.runtime
+        && runtime.limits.fuel > craft_plugin::MAX_APPROVED_FUEL
+    {
+        return Err(InstallError::Manifest(HostError::OverCeiling {
+            limit: "fuel".into(),
+            requested: runtime.limits.fuel,
+            allowed: craft_plugin::MAX_APPROVED_FUEL,
+        }));
+    }
     if let Some(runtime) = &manifest.runtime
         && !files.iter().any(|f| f.path == runtime.module)
     {
@@ -110,11 +154,13 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
     if files.len() + folders.len() > super::MAX_FILES {
         return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin folder holds at most 1024 files and folders".into() }));
     }
+    check_themes(&manifest, &files)?;
     // Every file but the plugin's component stays within a command component's budget.
     let component_path = manifest.runtime.as_ref().map(|r| r.module.as_str());
     if files.iter().any(|f| Some(f.path.as_str()) != component_path && f.bytes.len() > craft_plugin::MAX_COMPONENT_BYTES) {
         return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin file other than its component is over 16 MiB".into() }));
     }
+    check_shaders(&manifest, &files)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module = files.iter().find(|f| f.path == runtime.module).ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?;
         if module.bytes.len() > runtime.max_component_bytes() {
@@ -126,8 +172,41 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         &[]
     };
     let approval = super::package_hash(text, component);
-    let archive = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip));
     Ok(Unpacked { manifest, approval, archive, files })
+}
+
+/// Refuses only a package that could never draw; the app compiles the source again when it draws.
+fn check_shaders(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), InstallError> {
+    let file = |name: &str| files.iter().find(|f| f.path == name);
+    for shader in &manifest.shaders {
+        let source = file(&shader.source).ok_or_else(|| InstallError::MissingModule(shader.source.clone()))?;
+        let text = std::str::from_utf8(&source.bytes).map_err(|_| {
+            InstallError::Manifest(HostError::InvalidManifest {
+                field: format!("shaders.{}", shader.id),
+                reason: format!("{} is not UTF-8 text", shader.source),
+            })
+        })?;
+        craft_plugin::shader::compile(shader, text).map_err(InstallError::Manifest)?;
+        for texture in &shader.textures {
+            // A texture the person chooses may ship no file at all.
+            let Some(name) = &texture.file else { continue };
+            let picture = file(name).ok_or_else(|| InstallError::MissingModule(name.clone()))?;
+            if picture.bytes.len() > craft_plugin::shader::MAX_TEXTURE_BYTES {
+                return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("{name} is over 16 MiB") }));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Each theme's file is in the package and is a theme file (`themes@0.1`); the host reads it again
+/// when it lists the theme.
+fn check_themes(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), InstallError> {
+    for theme in &manifest.themes {
+        let file = files.iter().find(|f| f.path == theme.source).ok_or_else(|| InstallError::MissingTheme(theme.source.clone()))?;
+        craft_plugin::theme::check_file(&theme.id, &file.bytes).map_err(InstallError::Manifest)?;
+    }
+    Ok(())
 }
 
 /// The installed plugin of this id: its name and version, if its folder holds a readable manifest.
@@ -144,10 +223,17 @@ pub fn installed(plugins: &Path, id: &str) -> Option<(String, String)> {
     })
 }
 
-/// Writes `plugin` to `plugins/<id>/`. An installed plugin of that id is replaced only when
-/// `replace`; the old folder is kept until the new one is in place.
+/// [`install_locked`] under the write lock.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathBuf, InstallError> {
+    let _write = write_lock();
+    install_locked(plugin, plugins, replace)
+}
+
+/// Writes `plugin` to `plugins/<id>/`. An installed plugin of that id is replaced only when
+/// `replace`; the old folder is kept until the new one is in place. The caller holds [`write_lock`].
+#[cfg(not(target_arch = "wasm32"))]
+pub fn install_locked(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathBuf, InstallError> {
     let io = |e: std::io::Error| InstallError::Io(e.to_string());
     let id = &plugin.manifest.id;
     let target = plugins.join(id);

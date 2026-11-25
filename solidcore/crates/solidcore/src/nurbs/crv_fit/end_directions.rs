@@ -100,7 +100,7 @@ const SQUARE_OP: &str = "nurbs::crv_fit::end_directions::square_to_plane";
 /// # Errors
 ///
 /// `InvalidInput` for no points, a coordinate or a distance that is not finite, a normal that
-/// is not finite or has no length, or a tolerance not finite and positive.
+/// is not finite or is zero, or a tolerance not finite and positive.
 pub fn square_to_plane(a: &[Vec3], normal: Vec3, at: DerivEnd, tol: f64) -> Result<Option<Vec3>> {
     if !(tol.is_finite() && tol > 0.0) {
         return Err(SolidError::invalid_input(
@@ -108,14 +108,12 @@ pub fn square_to_plane(a: &[Vec3], normal: Vec3, at: DerivEnd, tol: f64) -> Resu
             "a tolerance not finite and positive",
         ));
     }
-    let length = normal.length();
-    if !(length.is_finite() && length > 0.0) {
+    let Some((_, n)) = normal.length_and_unit() else {
         return Err(SolidError::invalid_input(
             SQUARE_OP,
-            "a normal not finite or of no length",
+            "a normal not finite or zero",
         ));
-    }
-    let n = normal / length;
+    };
     let end = match at {
         DerivEnd::Start => a.first(),
         DerivEnd::End => a.last(),
@@ -217,6 +215,21 @@ mod tests {
     }
 
     #[test]
+    fn a_normal_of_any_finite_length_gives_the_same_direction() {
+        // its squared length underflows to 0 at 1e-200 and overflows at 1e200
+        let a = pts();
+        for at in [DerivEnd::Start, DerivEnd::End] {
+            let unit = square_to_plane(&a, Vec3::new(0.0, 0.0, 1.0), at, 1e-5).unwrap();
+            assert!(unit.is_some(), "{at:?}");
+            let subnormal = f64::from_bits(1);
+            for z in [1e-200, 1e200, f64::MIN_POSITIVE, subnormal, f64::MAX] {
+                let any = square_to_plane(&a, Vec3::new(0.0, 0.0, z), at, 1e-5);
+                assert_eq!(any.unwrap(), unit, "{z:e} {at:?}");
+            }
+        }
+    }
+
+    #[test]
     fn square_to_plane_refuses_hostile_input() {
         let a = pts();
         let z = Vec3::new(0.0, 0.0, 1.0);
@@ -224,7 +237,7 @@ mod tests {
             (&a[..0], z, 1e-5),
             (&a[..], Vec3::ZERO, 1e-5),
             (&a[..], Vec3::new(f64::NAN, 0.0, 1.0), 1e-5),
-            (&a[..], Vec3::new(f64::MAX, f64::MAX, 0.0), 1e-5),
+            (&a[..], Vec3::new(0.0, f64::INFINITY, 1.0), 1e-5),
             (&a[..], z, 0.0),
             (&a[..], z, f64::NAN),
             (

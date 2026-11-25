@@ -16,20 +16,23 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::query::api_queries::brep_is_closed_touching_solids;
 use solidcore::topology::brep::mirror::transform_matrix;
-use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::p2::{create_missing_uv_trim_curves, is_manifold_solid};
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
 use solidcore::topology::brep::primitive_outward::{is_outward_primitive, Template};
 use solidcore::topology::brep::sheet::turn_over_sheet;
-use solidcore::topology::brep::{is_outward_solid, is_valid_and_outward};
+use solidcore::topology::brep::{is_outward_solid, valid_and_outward_failure, SolidTest};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, EntityRef, Vec3};
 
-use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+/// The faces a record's open shells use backward, which a body built from its data turns over
+/// ([`Body::turn_over_listed`]).
+pub use solidcore_convert::brep::backward_sheet_faces;
+use solidcore_convert::brep::{to_kernel, to_record, turn_to_record_side, Order, Unsupported};
 use solidcore_record::brep::Brep as Record;
 
 use crate::error::status;
-use crate::session::{measure_body, read_body, run, with_body};
+use crate::session::{measure_body, read_body, read_held, run, with_body};
 use crate::split::copies_of;
 use crate::{Error, Result};
 
@@ -58,7 +61,8 @@ pub(crate) struct Proof {
     primitive: Option<Template>,
 }
 
-/// The proof that a B-rep is valid and faces out ([`is_valid_and_outward`] held on it), with
+/// The proof that a B-rep is valid and faces out ([`valid_and_outward_failure`] answering
+/// `None` for it), with
 /// the kernel settings it was made under. Made only by [`prove`], on the B-rep it is then kept
 /// beside; it stands for that B-rep only while it is unchanged ([`BodyGuard`]) and the
 /// kernel's settings are the same ([`Outward::holds`]).
@@ -101,22 +105,63 @@ impl Outward {
     }
 }
 
-/// The proof that `b` is valid and faces out, if it is ([`is_valid_and_outward`], the part of
-/// the solid tests after their topology test): the only maker of an [`Outward`].
+/// The proof that `b` is valid and faces out, if it is ([`valid_and_outward_failure`], the part
+/// of the solid tests after their topology test): the only maker of an [`Outward`].
 ///
 /// # Errors
 /// The kernel's, from the validity check and the volume's sign.
 fn prove(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Option<Outward>> {
-    Ok(is_valid_and_outward(k, b)?.then(|| Outward {
-        settings: Box::new(Settings::of(k)),
-    }))
+    Ok(prove_naming(k, b)?.ok())
+}
+
+/// As [`prove`], naming the test the body fails where it is not a valid outward solid: the
+/// kernel's [`SolidTest`], so a caller can tell a body that is not a solid from one whose
+/// volume sign the kernel could not decide ([`SolidTest::VolumeUndecided`]).
+///
+/// # Errors
+/// The kernel's, from the validity check and the volume's sign.
+fn prove_naming(
+    k: &mut Kernel,
+    b: &mut Brep,
+) -> solidcore::Result<std::result::Result<Outward, SolidTest>> {
+    give_missing_trims(k, b)?;
+    match valid_and_outward_failure(k, b)? {
+        None => Ok(Ok(Outward {
+            settings: Box::new(Settings::of(k)),
+        })),
+        Some(test) => Ok(Err(test)),
+    }
+}
+
+/// The step a body takes before its proof (#21105): every use on a face gets its UV trim
+/// ([`create_missing_uv_trim_curves`]), once and in that call's order, as an edit of the body,
+/// with the tolerance raises attaching a trim makes. The validity check builds a missing trim
+/// only on a copy and leaves the body as it was, so without this step every proof of a body
+/// that lacks trims (one made by [`Body::from_record`], which makes none, or an operation's
+/// result) would build them again; after it the check runs on the body and builds none, nor
+/// does a later proof.
+///
+/// A trim that cannot be built stays missing (the call stops at the first one), and its failure
+/// is not this step's answer: the check builds the same trim on its copy and answers for it as
+/// it did on the body before, by the rule it applies to that build (the face walk and the
+/// pointer pass's face check go on past every failure but a cancellation or an unported step).
+/// Those two stop the proof here too.
+///
+/// # Errors
+/// The kernel's cancellation and unported statuses.
+fn give_missing_trims(k: &Kernel, b: &mut Brep) -> solidcore::Result<()> {
+    match create_missing_uv_trim_curves(k, b) {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(()) | Err(_) => Ok(()),
+    }
 }
 
 /// A [`Body`] locked: the B-rep to read through `Deref`; through `DerefMut` it is handed out
 /// only once the proof beside it is dropped, so no change of the B-rep keeps a proof made
 /// before it.
 #[derive(Debug)]
-pub(crate) struct BodyGuard<'a>(MutexGuard<'a, Held>);
+#[doc(hidden)] // public only for the bridge below ([`Body::kernel`])
+pub struct BodyGuard<'a>(MutexGuard<'a, Held>);
 
 impl std::ops::Deref for BodyGuard<'_> {
     type Target = Brep;
@@ -130,6 +175,31 @@ impl std::ops::DerefMut for BodyGuard<'_> {
         self.0.outward = None;
         self.0.primitive = None;
         &mut self.0.brep
+    }
+}
+
+/// A temporary bridge for SolidCraft's kernel wrapper (`crates/smlib`), which still calls the
+/// kernel crate itself for the operation families not yet moved onto this crate: it makes a
+/// body from a kernel B-rep and locks a body for its B-rep. Not part of the API: no other
+/// client may use it, and it is deleted with the last family (tangency-labs/solidcore#3304).
+#[doc(hidden)]
+impl Body {
+    /// A body of the kernel B-rep `b`, with no proof ([`Body::new`]).
+    #[must_use]
+    pub fn from_kernel(b: Brep) -> Body {
+        Body::new(b)
+    }
+
+    /// The kernel's body, locked ([`Body::lock`]): a body an earlier panic left unfinished is
+    /// still handed out, so the caller asks [`Body::kernel_left_unfinished`] first.
+    pub fn kernel(&self) -> BodyGuard<'_> {
+        self.lock()
+    }
+
+    /// Whether a panic interrupted an edit of this body ([`Body::is_poisoned`]).
+    #[must_use]
+    pub fn kernel_left_unfinished(&self) -> bool {
+        self.is_poisoned()
     }
 }
 
@@ -219,12 +289,42 @@ impl Body {
     }
 
     /// A deep copy (`SmApiBrepCopy`): the same topology in the same order, with the attributes
-    /// its entities carry.
+    /// its entities carry. The copy holds what the body holds beside its B-rep, read under the
+    /// lock the copy is made under: the proof that it is valid and faces out, or the template
+    /// it was built from. Both are statements about the B-rep's geometry and topology, which
+    /// the copy has unchanged, so an operation that takes the copy does not prove it again.
     ///
     /// # Errors
     /// Those of the kernel's copy; [`Error::Internal`] for a body a panic left unfinished.
     pub fn copy(&self) -> Result<Body> {
-        read_body("SmApiBrepCopy", self, brep_copy).map(Body::new)
+        let (brep, outward, primitive) = read_held("SmApiBrepCopy", self, |k, held| {
+            Ok(Some((
+                brep_copy(k, held)?,
+                held.0.outward.clone(),
+                held.0.primitive,
+            )))
+        })?
+        .ok_or(Error::Exception)?;
+        Ok(Body(Mutex::new(Held {
+            brep,
+            outward,
+            primitive,
+        })))
+    }
+
+    /// The order of the body's own lists: record face, edge and vertex `i` is the kernel's
+    /// `i`th, as the kernel holds them now (no edges split). An operation's result numbers its
+    /// entities afresh, so an order is the body's as it is when this is called; picks by point
+    /// ([`crate::pick::edges`], [`crate::pick::vertices`]) give indices into these lists.
+    #[must_use]
+    pub fn own_order(&self) -> Order {
+        let g = self.lock();
+        Order {
+            split_edges: 0,
+            faces: g.face_list().to_vec(),
+            edges: g.edge_list().to_vec(),
+            vertices: g.vertex_list().to_vec(),
+        }
     }
 
     /// A deep copy with `order` mapped to the copy's own entity IDs. The ordering of each
@@ -263,6 +363,7 @@ impl Body {
             Ok(Ok((
                 copy,
                 Order {
+                    split_edges: 0,
                     faces,
                     edges,
                     vertices,
@@ -333,6 +434,38 @@ impl Body {
         })
     }
 
+    /// Gives the faces at `positions` of this body's face list the side a record gives them by
+    /// `forward: false` in an open shell: for a body just built from a record's data (an
+    /// application's own import of a record), which lists its faces in the record's order, the
+    /// faces [`backward_sheet_faces`] names. The kernel uses every face of an open shell forward
+    /// and keeps a sheet face's side in its surface: each face is turned over (`SmFace::SwapUV`)
+    /// with its loops started where the record walks them, so the body's record numbers its
+    /// faces, edges and vertices as the record does (`solidcore_convert::brep::to_kernel` does
+    /// the same for its own import). A position listed twice turns once.
+    ///
+    /// # Errors
+    /// [`Error::Argument`], before the body is touched, for a position past the face list;
+    /// [`Error::Unsupported`], before the body is touched, for a face of a closed shell (whose
+    /// side its material gives); the kernel's status, the body put back as it was (the call's
+    /// rollback).
+    pub fn turn_over_listed(&self, positions: &[u32]) -> Result<()> {
+        if positions.is_empty() {
+            return Ok(());
+        }
+        with_body("turn_over", self, |k, b| {
+            let mut picked = Vec::new();
+            for &i in positions {
+                let Some(&f) = b.face_list().get(i as usize) else {
+                    return Ok(Err(Error::Argument));
+                };
+                if !picked.contains(&f) {
+                    picked.push(f);
+                }
+            }
+            Ok(turn_faces(k, b, &picked))
+        })?
+    }
+
     /// Face, edge and vertex counts.
     ///
     /// # Errors
@@ -364,6 +497,37 @@ impl Body {
             brep_volume(k, b, relative_accuracy, &attrs)
         })
     }
+}
+
+/// Each face of `faces` turned to the side its record gives it
+/// ([`turn_to_record_side`]), after checking that every one is a sheet's (both its uses in one
+/// shell), so a refusal leaves the body as it was.
+fn turn_faces(k: &Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<()> {
+    for &f in faces {
+        if !sheet_face(b, f).map_err(status)? {
+            return Err(Error::Unsupported(
+                "turning over a face of a closed shell: its material gives its side",
+            ));
+        }
+    }
+    for &f in faces {
+        turn_to_record_side(k, b, f).map_err(status)?;
+    }
+    b.refresh_cached_topology();
+    Ok(())
+}
+
+/// Whether both uses of face `f` lie in one shell (a sheet's face).
+fn sheet_face(b: &Brep, f: FaceId) -> solidcore::Result<bool> {
+    let face = b.face(f)?;
+    let Some(top) = face.faceuse else {
+        return Ok(false);
+    };
+    let fu = b.faceuse(top)?;
+    let Some(mate) = fu.mate else {
+        return Ok(false);
+    };
+    Ok(fu.shell == b.faceuse(mate)?.shell)
 }
 
 /// A sheet turned over ([`Body::turn_over`]): its record and order, and where each record edge
@@ -465,6 +629,27 @@ impl Body {
     }
 }
 
+/// What an operation tests of a solid operand and requires of its result: every family's
+/// (booleans, blends, sweeps, offsets, splits). An operation's plain call runs under
+/// [`Contract::Closed`]; its `_with` call takes the contract.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Contract {
+    /// An operand that is a closed manifold solid must give a closed result: a manifold solid
+    /// (for a boolean, solids touching along edges or at vertices too). Topology tests only:
+    /// no validity check runs and no volume is computed, on the operand or on the result, so
+    /// a volume whose sign the kernel cannot decide never refuses a result, and the result
+    /// holds no proof. An application that wants a result checked asks for it
+    /// ([`Body::check_solid`]) when it chooses.
+    #[default]
+    Closed,
+    /// An operand counts as a solid only when it is closed and proved valid and facing out
+    /// (its held proof, its template, or a new proof), and a solid's result must be proved so
+    /// too: [`Error::NotSolidBecause`] naming the test it fails where it is not. The result
+    /// keeps its proof, so the next proved operation that takes it does not prove it again
+    /// (#14830).
+    Proved,
+}
+
 /// What an operation's result must be ([`finish`]), as its input says: a solid input must give
 /// a solid. Made from the input ([`Expect::of`]), never chosen by a caller; the two exceptions
 /// are an operation's own contract, stated by the operation: [`Expect::FACES`] for one with no
@@ -482,8 +667,13 @@ impl Expect {
     /// # Errors
     /// The kernel's, from the solid test.
     pub(crate) fn of(k: &mut Kernel, input: &mut Brep) -> solidcore::Result<Expect> {
+        // (the trims only for a body the solid test will check: past its topology test)
+        let solid = is_manifold_solid(input)? && {
+            give_missing_trims(k, input)?;
+            is_outward_solid(k, input)?
+        };
         Ok(Expect {
-            solid: is_outward_solid(k, input)?,
+            solid,
             touching: false,
         })
     }
@@ -507,7 +697,10 @@ impl Expect {
         let solid = is_manifold_solid(input)?
             && (proof.outward.is_some_and(|o| o.holds(k))
                 || match proof.primitive {
-                    Some(t) => is_outward_primitive(k, input, &t)?,
+                    Some(t) => {
+                        give_missing_trims(k, input)?;
+                        is_outward_primitive(k, input, &t)?
+                    }
                     None => false,
                 }
                 || prove(k, input)?.is_some());
@@ -515,6 +708,27 @@ impl Expect {
             solid,
             touching: false,
         })
+    }
+
+    /// What a result of an operation on `input` must be under `contract`. [`Contract::Closed`]:
+    /// a solid's when `input` is a closed manifold solid, by the topology test alone (the
+    /// proof is not looked at). [`Contract::Proved`]: [`Expect::of_held`]'s.
+    ///
+    /// # Errors
+    /// As [`Expect::of_held`].
+    pub(crate) fn under(
+        k: &mut Kernel,
+        input: &mut Brep,
+        proof: Proof,
+        contract: Contract,
+    ) -> solidcore::Result<Expect> {
+        match contract {
+            Contract::Closed => Ok(Expect {
+                solid: is_manifold_solid(input)?,
+                touching: false,
+            }),
+            Contract::Proved => Expect::of_held(k, input, proof),
+        }
     }
 
     /// As [`Expect::of`], a solid's result allowed to be solids touching along edges or at
@@ -546,7 +760,8 @@ impl Expect {
 }
 
 /// The result contract: a result has faces ([`Error::Empty`] if not), and a solid input gives a
-/// solid ([`Error::NotSolid`] if not): closed, manifold, valid and oriented out.
+/// solid ([`Error::NotSolidBecause`] naming the test it fails if not): closed, manifold, valid
+/// and oriented out.
 ///
 /// # Errors
 /// The kernel's error from the solid test.
@@ -555,7 +770,7 @@ pub(crate) fn finish(k: &mut Kernel, b: Brep, expect: Expect) -> solidcore::Resu
 }
 
 /// As [`finish`], with the proof its solid test made on the result, if it made one (a solid
-/// result: the topology test, then [`prove`]), for the result's [`Body`] to keep
+/// result: the topology test, then [`prove_naming`]), for the result's [`Body`] to keep
 /// ([`Body::held`]).
 ///
 /// # Errors
@@ -577,11 +792,49 @@ pub(crate) fn finish_proved(
     } else {
         is_manifold_solid(&b)?
     };
-    let outward = if closed { prove(k, &mut b)? } else { None };
-    if outward.is_none() {
+    let outward = if closed {
+        match prove_naming(k, &mut b)? {
+            Ok(outward) => outward,
+            Err(test) => return Ok(Err(Error::NotSolidBecause(test))),
+        }
+    } else {
+        // the topology test failed first, so it is the one named
+        return Ok(Err(Error::NotSolidBecause(if expect.touching {
+            SolidTest::NotClosedSolids
+        } else {
+            SolidTest::NotManifold
+        })));
+    };
+    Ok(Ok((b, Some(outward))))
+}
+
+/// The result contract under `contract`. [`Contract::Proved`]: [`finish_proved`]'s.
+/// [`Contract::Closed`]: a result has faces ([`Error::Empty`] if not), and a solid input gives
+/// a closed result ([`Error::NotSolid`] if not: a manifold solid, or where `expect` allows
+/// them solids touching along edges or at vertices), by the topology tests alone; no proof is
+/// made, so the result brings none.
+///
+/// # Errors
+/// The kernel's error from the solid test.
+pub(crate) fn finish_under(
+    k: &mut Kernel,
+    b: Brep,
+    expect: Expect,
+    contract: Contract,
+) -> solidcore::Result<Result<(Brep, Option<Outward>)>> {
+    if contract == Contract::Proved {
+        return finish_proved(k, b, expect);
+    }
+    if b.face_list().is_empty() {
+        return Ok(Err(Error::Empty));
+    }
+    if expect.solid
+        && !is_manifold_solid(&b)?
+        && !(expect.touching && brep_is_closed_touching_solids(&b)?)
+    {
         return Ok(Err(Error::NotSolid));
     }
-    Ok(Ok((b, outward)))
+    Ok(Ok((b, None)))
 }
 
 /// Copies of each attribute `from` carries in `src`.
@@ -740,4 +993,87 @@ pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Res
             },
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+    use solidcore::topology::trimming_tools::face_uv_curves_present;
+
+    /// A 10 mm cube united with a cylinder of radius 4 standing on its x = 10 face: the
+    /// kernel's union, whose new faces have no UV trim curves yet.
+    fn united(k: &mut Kernel) -> Brep {
+        let bx = primitives::create_box(k, Vec3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let cyl = primitives::create_cylinder(k, Vec3::new(10.0, 5.0, 0.0), 4.0, 10.0).unwrap();
+        solidcore::boolean::api_brep::boolean_union(k, bx, cyl).unwrap()
+    }
+
+    /// The faces of `b` without their UV trims.
+    fn lacking(b: &Brep) -> usize {
+        b.face_list()
+            .iter()
+            .filter(|&&f| !face_uv_curves_present(b, f).unwrap())
+            .count()
+    }
+
+    /// The trims `b` lacks, counted as the builds that give a copy of it its missing trims.
+    fn missing_builds(k: &Kernel, b: &Brep) -> u64 {
+        let mut copy = b.clone_standing_for_self().unwrap();
+        let before = k.work_counters.uv_trim_builds();
+        create_missing_uv_trim_curves(k, &mut copy).unwrap();
+        k.work_counters.uv_trim_builds() - before
+    }
+
+    /// One proof of `b` ([`prove_naming`]), which must hold, with the UV trims it built and the
+    /// certified trim bounds it computed.
+    fn proved(k: &mut Kernel, b: &mut Brep) -> (u64, u64) {
+        let w = |k: &Kernel| {
+            (
+                k.work_counters.uv_trim_builds(),
+                k.work_counters.trim_deviation_bounds(),
+            )
+        };
+        let before = w(k);
+        assert_eq!(prove_naming(k, b).unwrap().err(), None);
+        let after = w(k);
+        (after.0 - before.0, after.1 - before.1)
+    }
+
+    /// #21105: the proof of a body that lacks UV trims gives it its trims once, before its
+    /// validity check, so the check runs on the body: the first proof builds each missing trim
+    /// once, and a repeat proof builds none and computes no trim bound. For a boolean's result,
+    /// and for the same body read from its record with no use's pcurve
+    /// (`to_kernel_with_bare_uses`: a record's pcurves become the body's trims, a bare use has
+    /// none).
+    #[test]
+    fn a_proof_builds_each_missing_trim_once() {
+        let mut k = Kernel::default();
+        let result = united(&mut k);
+        let (record, _) =
+            to_record(&mut k, &mut result.clone_standing_for_self().unwrap()).unwrap();
+        let mut bare = Vec::new();
+        for (f, face) in record.faces.iter().enumerate() {
+            for (l, lp) in face.loops.iter().enumerate() {
+                if let solidcore_record::brep::Loop::Edges { edges } = lp {
+                    for p in 0..edges.len() {
+                        let at = |i: usize| u32::try_from(i).unwrap();
+                        bare.push((at(f), at(l), at(p)));
+                    }
+                }
+            }
+        }
+        let (read, _) =
+            solidcore_convert::brep::to_kernel_with_bare_uses(&mut k, &record, true, &bare)
+                .unwrap();
+        for (name, mut b) in [("boolean", result), ("record", read)] {
+            assert!(lacking(&b) > 0, "{name}: the body already has every trim");
+            let needed = missing_builds(&k, &b);
+            assert!(needed > 0, "{name}");
+            let (builds, _) = proved(&mut k, &mut b);
+            assert_eq!(builds, needed, "{name}: the first proof's trim builds");
+            assert_eq!(lacking(&b), 0, "{name}: the proof left faces without trims");
+            assert_eq!(proved(&mut k, &mut b), (0, 0), "{name}: the repeat proof");
+        }
+    }
 }

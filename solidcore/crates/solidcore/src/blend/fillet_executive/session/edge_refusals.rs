@@ -1,7 +1,7 @@
 //! The session's refusals on its edges, typed ([`BlendRefusal`] in
 //! [`SolidError::BlendRefused`]): an edge with no blend (from every preparation), a round
-//! too small to change the part (constant circular rounds, before preparation), a round
-//! that cannot end where its edge runs on tangentially and a setback asked for too short
+//! too small to change the part or to build (constant circular rounds, before preparation), a
+//! round that cannot end where its edge runs on tangentially and a setback asked for too short
 //! or too long (from `DoFilleting`).
 //!
 //! Not upstream (solidcore's): upstream fails an edge with no blend edge use with
@@ -67,7 +67,7 @@ impl FilletSession<'_> {
 
     /// The first circular constant round of `edges` (edge i at `radii[i]`, or `radii[0]`
     /// for every edge; its section
-    /// `sections[i]` or `sections[0]`) too small to change the part
+    /// `sections[i]` or `sections[0]`) too small to change the part or to build
     /// ([`round_too_small`]), refused as [`BlendRefusal::RoundTooSmall`] with status `SM_ERR`
     /// before the edges are prepared. Edges without a blend edge use are left to the
     /// preparation.

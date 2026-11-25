@@ -233,7 +233,7 @@ fn rules_and_canvases_follow_a_renamed_parameter() {
     }
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift"}));
     run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge", "active": true}));
     run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 2, "body_name": "Tray"}));
     run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [30, 20, 2], "rule": "Steel"}));
@@ -398,6 +398,102 @@ fn csv_and_json_round_trip() {
     run(&mut v, "parameters.import", json!({"path": path.to_string_lossy()}));
     assert_eq!(v.doc.param("len").map(|p| p.expr.as_str()), Some("80 mm"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_import_resolves_forward_references() {
+    let mut session = Session::default();
+    let rows = json!([
+        {"name": "panel_width", "unit": "in", "expression": "opening_width - (panel_thickness * 2)"},
+        {"name": "opening_width", "unit": "in", "expression": "24 in"},
+        {"name": "panel_thickness", "unit": "in", "expression": "3/4 in"},
+        {"name": "panel_angle", "expression": "door_angle + 15 deg"},
+        {"name": "door_angle", "expression": "30 deg"}
+    ]);
+
+    run(&mut session, "parameters.import", json!({"text": rows.to_string()}));
+
+    let (values, errors) = session.doc.param_values();
+    assert!(errors.is_empty(), "{errors:?}");
+    // Inch and angle conversions can round at the last bit on different platforms.
+    for (name, expected) in [("panel_width", 22.5), ("panel_angle", 45.0)] {
+        let actual = session.doc.param_display_value(&values, name).expect("imported parameter has a value");
+        assert!(rel(actual, expected) < 1e-12, "{name}: expected {expected}, got {actual}");
+    }
+}
+
+#[test]
+fn parameter_import_preserves_input_and_existing_table_order() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let rows = json!([
+        {"name": "a", "expression": "b + 1 mm"},
+        {"name": "b", "expression": "2 mm"},
+        {"name": "c", "expression": "3 mm"}
+    ]);
+    let imported = run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(imported["imported"], json!(["a", "b", "c"]));
+    let names: Vec<_> = s.doc.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["existing", "a", "b", "c"]);
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 3.0);
+}
+
+#[test]
+fn parameter_import_keeps_last_duplicate_and_inherited_metadata() {
+    let mut s = Session::default();
+    let rows = json!([
+        {"name": "a", "expression": "b", "unit": "", "comment": "kept"},
+        {"name": "b", "expression": "a", "unit": ""},
+        {"name": "a", "expression": "1", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    let list = run(&mut s, "parameters.list", json!({}));
+    assert_eq!(row(&list, "a")["value"], 1.0);
+    assert_eq!(row(&list, "b")["value"], 1.0);
+    assert_eq!(row(&list, "a")["comment"], "kept");
+    let rows = json!([
+        {"name": "a", "expression": "c", "unit": ""},
+        {"name": "a", "expression": "5", "unit": ""},
+        {"name": "c", "expression": "7", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 5.0);
+}
+
+#[test]
+fn parameter_import_keeps_text_literal_with_explicit_or_inherited_unit() {
+    let mut s = Session::default();
+    let rows = json!([{"name": "label", "unit": "Text", "expression": "label"}]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(s.doc.text_param("label").unwrap().text, "label");
+    // An existing text parameter stays text when unit is omitted.
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nlabel,label\n"}));
+    let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+    let mut fresh = Session::default();
+    run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+    assert_eq!(fresh.doc.text_param("label").unwrap().text, "label");
+    // The second definition inherits the first definition's text unit.
+    let rows = json!([
+        {"name": "other", "unit": "text", "expression": "first"},
+        {"name": "other", "expression": "other"}
+    ]);
+    run(&mut fresh, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(fresh.doc.text_param("other").unwrap().text, "other");
+}
+
+#[test]
+fn parameter_import_rejects_final_cycles_and_oversized_expressions_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let before = s.doc.to_json();
+    for rows in [
+        json!([{"name": "a", "expression": "b"}, {"name": "b", "expression": "a"}]),
+        json!([{"name": "a", "expression": "x".repeat(4097)}]),
+        json!([{"name": "a", "expression": "1", "unit": "invalid"}, {"name": "a", "expression": "2"}]),
+    ] {
+        assert!(s.execute("parameters.import", &json!({"text": rows.to_string()})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+    }
 }
 
 /// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
@@ -1063,7 +1159,7 @@ fn any_value_input_can_define_a_parameter() {
     assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.param("gauge").map(|p| p.expr.as_str())), ("gauge", Some("2")));
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift = 15"}));
+    run(&mut s, "canvas.insert", json!({"path": crate::tests::image_file(&png), "plane": "XY", "offset": "lift = 15"}));
     match &s.doc.canvases[0].plane {
         solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "lift"),
         other => panic!("{other:?}"),

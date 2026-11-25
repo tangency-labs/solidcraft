@@ -10,10 +10,9 @@
 //! | `rolled_rail_turns_back`, `rail_passes_side_edge_end` (crate) | none (solidcore-native) |
 //!
 //! Deviations: the solver is the caller's concrete solver object instead of a
-//! `GetSolverType` cast. A failed variable-radius law evaluation yields its status
-//! code as the radius, as upstream's `SER` inside the `double`
-//! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee and a law refused
-//! past its curve, #2706, still propagate). The gap checks of a multi-neighbour end
+//! `GetSolverType` cast. A failed variable-radius law evaluation is returned as its
+//! error, where upstream's `SER` inside the `double` `SmVariableRadiusFS::GetFilletRadius`
+//! yields its status code (1001, 1007) as the radius (#21908). The gap checks of a multi-neighbour end
 //! face (vertex and side-edge geometry, extended-surface coincidence), the last statements of
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
@@ -26,6 +25,7 @@
 
 use std::collections::BTreeMap;
 
+use super::shape_not_built;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverObject};
@@ -36,6 +36,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
 use crate::blend::fillet_tangent_rollover::planar_section;
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -147,7 +148,8 @@ fn edge_leaves_in_face(
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); [`SolidError::Unported`] from the variable-radius law evaluation.
+/// dereferences them); those of the variable-radius law evaluation
+/// ([`variable_radius_at_vertex`]).
 pub fn find_surface_extension_dist_at_corner(
     target: &Brep,
     fillet_edgeuse: EdgeuseId,
@@ -183,14 +185,13 @@ pub fn find_surface_extension_dist_at_corner(
 
 /// `SmVariableRadiusFS::GetFilletRadius` at the corner end of `fillet_edgeuse`: the law's
 /// radius at the end of the filleted edge that lies on `corner_vertex`, by
-/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw): a failed
-/// law evaluation yields its status code as the radius.
+/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw).
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); those [`FilletLaw::fillet_radius`] propagates: an unported callee,
-/// and the refusal of a law continued past its curve to an unusable radius (the corner may
-/// have narrowed the law to its setback, so the edge's end can be past the law's curve).
+/// dereferences them); those of [`FilletLaw::fillet_radius`], among them the refusal of a
+/// law continued past its curve to an unusable radius (the corner may have narrowed the
+/// law to its setback, so the edge's end can be past the law's curve).
 ///
 /// [`FilletLaw::fillet_radius`]: crate::blend::fillet_executive::p1::FilletLaw::fillet_radius
 pub fn variable_radius_at_vertex(
@@ -357,10 +358,10 @@ pub(crate) fn rolled_rail_turns_back(
 /// - R lies inside S (classified in S's interior, not on its boundary, within the body's
 ///   tolerance), and no boundary edge of S crosses the open segment from W to R, the cap
 ///   edge's place on S's plane ([`edge_clear_of_segment`]).
-/// - P is a plane, or a cylinder that holds E's line from W to R (R and the segment's midpoint
-///   lie on it within the body's tolerance, as W does, so the segment is one of its rulings
-///   to that tolerance), so R, on E's line, lies on P's surface: of the rail's crossings with
-///   P's surface (two on a cylinder), the one on E's line.
+/// - P is a plane, or a cylinder that holds E's line from W to R (every point of the segment
+///   within the body's tolerance of it, [`Cylinder::holds_segment`], so the segment is one of
+///   its rulings to that tolerance), so R, on E's line, lies on P's surface: of the rail's
+///   crossings with P's surface (two on a cylinder), the one on E's line.
 ///
 /// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
 /// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
@@ -480,9 +481,9 @@ pub(crate) fn rail_passes_side_edge_end(
     if past.is_nan() || past <= tol {
         return Ok(None);
     }
-    // a cylindrical P holds E's line from W to R: R and the segment's midpoint on it
+    // a cylindrical P holds E's line from W to R: every point of the segment on it
     if let Some(cylinder) = p_cylinder {
-        if !(cylinder.holds(r, tol) && cylinder.holds(w + (r - w) * 0.5, tol)) {
+        if !cylinder.holds_segment(w, r, tol) {
             return Ok(None);
         }
     }
@@ -792,12 +793,28 @@ struct Cylinder {
 }
 
 impl Cylinder {
-    /// Whether `p` lies on the cylinder within `tol`: its distance from the axis is the radius.
-    /// NaN does not: the comparison fails.
-    fn holds(&self, p: Point3, tol: f64) -> bool {
-        let v = p - self.origin;
-        let off = (v - self.axis * v.dot(self.axis)).length();
-        (off - self.radius).abs() <= tol
+    /// Whether every point of the segment from `a` to `b` lies on the cylinder within `tol`,
+    /// in closed form: with `p` and `q` the parts of `a - origin` and `b - a` square to the
+    /// axis, a point's distance from the axis is `|p + t q|` for `t` in [0, 1], convex in `t`,
+    /// so it is largest at an end and smallest at the segment's nearest point to the axis
+    /// (`t = -p·q / q·q`, clamped; `a` where `q` is zero, a ruling). Those three distances
+    /// must lie within `tol` of the radius, less the rounding of the projections taken in the
+    /// cylinder's frame (`gamma`). NaN does not: the comparisons fail.
+    fn holds_segment(&self, a: Point3, b: Point3, tol: f64) -> bool {
+        use crate::nurbs::math::gamma;
+        let square = |v: Vec3| v - self.axis * v.dot(self.axis);
+        let (p, q) = (square(a - self.origin), square(b - a));
+        let qq = q.dot(q);
+        let t = if qq > 0.0 {
+            (-p.dot(q) / qq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let size = (a - self.origin).length() + (b - a).length() + self.radius;
+        let slack = tol - gamma(16) * size;
+        p.length() - self.radius <= slack
+            && (p + q).length() - self.radius <= slack
+            && self.radius - (p + q * t).length() <= slack
     }
 }
 
@@ -1116,14 +1133,14 @@ impl FilletCorner {
                     extend_edge = eu1::edge(target, pick)?;
                     other_side_edgeuse = Some(other);
                 } else {
-                    // Invalid brep topology
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the brep's topology at the corner is not valid",
-                    ));
+                    // Invalid brep topology (upstream): at most three edges, whose side edges
+                    // share no face, as where an edge meeting the vertex twice is in the ring
+                    // once
+                    return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
                 }
             }
         }
+        self.end_face = end_face;
         for &(piece, face) in &ribs {
             pseudo
                 .fillet_edge_mut(piece)?
@@ -1368,7 +1385,9 @@ impl FilletCorner {
 
 #[cfg(test)]
 mod tests {
-    use super::{leaves_off_e, rolled_rail_turns_back, tangent_leaving, turns_back, TurnedBack};
+    use super::{
+        leaves_off_e, rolled_rail_turns_back, tangent_leaving, turns_back, Cylinder, TurnedBack,
+    };
     use crate::blend::fillet_solver::p1::test_manifold_tangent_rollover;
     use crate::boolean::api_brep::boolean_union;
     use crate::curve::curve::Curve;
@@ -1569,6 +1588,45 @@ mod tests {
         let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
         assert!(!leaves_off_e(te, nan));
         assert!(!leaves_off_e(nan, at(90.0)));
+    }
+
+    /// A cylinder holds a segment only when every point of it lies within the tolerance: a
+    /// ruling on it or off it inside the tolerance, and a short chord whose middle stays
+    /// inside it, do. A chord with its ends and midpoint within the tolerance but farther off
+    /// between them does not (the unit cylinder along z: W on it, R and the midpoint 0.01 off,
+    /// more than 0.0104 off at five-twelfths), nor a ruling just past the tolerance, nor NaN.
+    #[test]
+    fn a_cylinder_holds_a_segment_only_within_the_tolerance_all_along_it() {
+        let cylinder = Cylinder {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            radius: 1.0,
+        };
+        let tol = 0.010_001;
+        let at = |radius: f64, deg: f64, z: f64| {
+            let t = deg.to_radians();
+            Point3::new(radius * t.cos(), radius * t.sin(), z)
+        };
+        // rulings, on it and either side of it inside the tolerance, and just past it
+        let w = at(1.0, 0.0, 0.0);
+        assert!(cylinder.holds_segment(w, at(1.0, 0.0, 5.0), tol));
+        assert!(cylinder.holds_segment(at(1.009, 30.0, -2.0), at(1.009, 30.0, 3.0), tol));
+        assert!(cylinder.holds_segment(at(0.991, 30.0, 3.0), at(0.991, 30.0, -2.0), tol));
+        assert!(!cylinder.holds_segment(at(1.0101, 30.0, -2.0), at(1.0101, 30.0, 3.0), tol));
+        assert!(!cylinder.holds_segment(at(0.9899, 30.0, -2.0), at(0.9899, 30.0, 3.0), tol));
+        // a chord whose ends lie 0.005 out and its middle 0.004 in
+        let half = (0.996_f64 / 1.005).acos().to_degrees();
+        assert!(cylinder.holds_segment(at(1.005, -half, 0.0), at(1.005, half, 1.0), tol));
+        // the chord on it at W, its ends and midpoint within the tolerance, not between them
+        let r = Point3::new(0.950_15, 0.117_314_977_5_f64.sqrt(), 0.0);
+        let off = |p: Point3| (p.x.hypot(p.y) - 1.0).abs();
+        assert!(off(r) <= tol && off(w + (r - w) * 0.5) <= tol);
+        assert!(off(w + (r - w) * (5.0 / 12.0)) > 0.0104);
+        assert!(!cylinder.holds_segment(w, r, tol));
+        assert!(!cylinder.holds_segment(r, w, tol));
+        // NaN
+        assert!(!cylinder.holds_segment(w, Point3::new(f64::NAN, 0.0, 0.0), tol));
+        assert!(!cylinder.holds_segment(Point3::new(f64::NAN, 0.0, 0.0), w, tol));
     }
 
     /// E and N at a T tangent only within the tolerance: P = z = 0 meets S (normal at `phi`

@@ -10,6 +10,8 @@ use super::super::{FilletBody, FilletObject};
 use super::curves::InsertionCurves;
 use crate::blend::fillet_geom::p1::FilletBrep;
 use crate::curve::curve::Curve;
+use crate::error::blend::BlendFailure;
+use crate::error::{Failure, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::AttributeStore;
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::Context;
@@ -25,6 +27,17 @@ use crate::topology::{Brep, BrepId, FaceId};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "blend::fillet_executive::insertion_geometry";
+
+/// A face without a surface in one of the insertion's bodies (upstream `NER` of
+/// `GetSurface()`, status `SM_ERR_NULL_POINTER`): [`BlendFailure::FaceHasNoSurface`] at the
+/// face. [`InsertionGeometry::new`] takes all three bodies (target, pseudo and intermediate)
+/// from its caller, so a face of any of them is the caller's input.
+fn face_without_surface(face: FaceId) -> SolidError {
+    Failure::new(OP, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
+}
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
@@ -69,7 +82,7 @@ impl SurfaceBinding {
             .face_mut(face)?
             .surface
             .as_mut()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+            .ok_or_else(|| face_without_surface(face))?;
         let type_code = surface.type_code();
         let key = context.geometry_key(surface.notify_identity_slot())?;
         Ok(Self {
@@ -86,11 +99,15 @@ impl SurfaceBinding {
         if self.body != topology_ref(serial, EntityRef::Brep(BrepId::from_index(0))) {
             return Err(invalid("Surface binding belongs to a foreign body"));
         }
-        let surface = body
-            .face(self.face)?
-            .surface
-            .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+        // the binding is `Copy` and outlives the view it came from, so the caller can remove
+        // the face's surface before resolving it: a stale binding
+        let surface = body.face(self.face)?.surface.as_ref().ok_or_else(|| {
+            SolidError::blend_at(
+                OP,
+                BlendFailure::BoundSurfaceRemoved,
+                EntityRef::Face(self.face),
+            )
+        })?;
         if surface.notify_key() != Some(self.geometry.key)
             || surface.type_code() != self.geometry.type_code
         {
@@ -428,7 +445,8 @@ impl<'a> InsertionGeometry<'a> {
     }
     /// The edge of an actual face between the same-body vertices `start` and `end` that
     /// is proved to be `curve` over `interval` within `tolerance` plus its own
-    /// ([`crate::geom::tools::find_edge_proved_along`]).
+    /// ([`crate::geom::tools::find_edge_proved_along`]); `crossing` is the face whose
+    /// surface cuts `face` in the curve, if any.
     /// # Errors
     /// Invalid/cross-body operands, topology walks and the proof's cancellation.
     #[allow(clippy::too_many_arguments)] // the search's in-params
@@ -441,6 +459,7 @@ impl<'a> InsertionGeometry<'a> {
         curve: &Curve,
         interval: crate::geom::extent1d::Extent1d,
         tolerance: f64,
+        crossing: Option<FilletObject>,
     ) -> Result<Option<FilletObject>> {
         let (role, EntityRef::Face(face)) =
             Self::topology(face).ok_or_else(|| invalid("unknown Face role"))?
@@ -453,6 +472,12 @@ impl<'a> InsertionGeometry<'a> {
         };
         let (start, end) = (vertex(start)?, vertex(end)?);
         let body = self.body(role);
+        let crossing = match crossing.and_then(Self::topology) {
+            Some((other, EntityRef::Face(f))) => {
+                crate::topology::face::p2::surface(self.body(other), f)?
+            }
+            _ => None,
+        };
         let edges = crate::topology::face::p4::edges(body, face, None, false, None)?;
         let query = crate::geom::tools::CoincidentEdgeQuery {
             start_vertex: start,
@@ -463,7 +488,7 @@ impl<'a> InsertionGeometry<'a> {
             tolerance,
         };
         Ok(
-            crate::geom::tools::find_edge_proved_along(k, body, &query, &edges)?
+            crate::geom::tools::find_edge_proved_along(k, body, face, &query, &edges, crossing)?
                 .and_then(|found| edges.get(found))
                 .map(|&edge| Self::handle(role, EntityRef::Edge(edge))),
         )
@@ -1267,6 +1292,84 @@ mod tests {
                 .unwrap()
         ));
     }
+    /// The caller's face error, at `face`: an `InvalidInput` cause, not a defect, keeping
+    /// `SM_ERR_NULL_POINTER`.
+    fn assert_callers_face_error(error: &SolidError, face: FaceId) {
+        assert_eq!(
+            error.kind(),
+            crate::error::ErrorKind::InvalidInput,
+            "{error:?}"
+        );
+        assert!(!error.is_defect(), "{error:?}");
+        assert_eq!(error.entity(), Some(EntityRef::Face(face)), "{error:?}");
+        assert_eq!(
+            error.upstream_status(),
+            Some(SM_ERR_NULL_POINTER),
+            "{error:?}"
+        );
+    }
+
+    /// #19824 review: `InsertionGeometry::new` takes the pseudo and intermediate bodies from
+    /// its caller, so a face of theirs without a surface is the caller's input
+    /// (`FaceHasNoSurface` at the face), through `capture_surface` and the topology
+    /// solver's `face_surface` alike.
+    #[test]
+    fn a_face_without_a_surface_in_any_insertion_body_is_the_callers_input() {
+        use crate::intersect::topology_solver::p1::TopologyObjects;
+        let mut k = Kernel::default();
+        let mut target = box_at(&mut k, 0.0);
+        let mut intermediate = box_at(&mut k, 100.0);
+        let mut pseudo = FilletBrep::new();
+        *pseudo.brep_mut() = box_at(&mut k, 200.0);
+        let face = FaceId::from_index(1);
+        pseudo.brep_mut().face_mut(face).unwrap().surface = None;
+        intermediate.face_mut(face).unwrap().surface = None;
+        let mut view = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate).unwrap();
+        for role in [InsertionBody::Pseudo, InsertionBody::Intermediate] {
+            let error = view
+                .capture_surface(&mut k.context, role, face)
+                .unwrap_err();
+            assert_callers_face_error(&error, face);
+        }
+        for object in [
+            FilletObject::Topology(FilletBody::Pseudo, EntityRef::Face(face)),
+            FilletObject::IntermediateTopology(EntityRef::Face(face)),
+        ] {
+            let error = TopologyObjects::face_surface(&view, object).unwrap_err();
+            assert_callers_face_error(&error, face);
+        }
+    }
+
+    /// #19824 review: a `SurfaceBinding` is `Copy` and outlives the view's borrow, so the
+    /// caller can remove the face's surface and then resolve the stale binding: the
+    /// caller's input (`BoundSurfaceRemoved` at the face), not a defect.
+    #[test]
+    fn a_binding_resolved_after_its_surface_was_removed_is_the_callers_input() {
+        let mut k = Kernel::default();
+        let mut target = box_at(&mut k, 0.0);
+        let mut intermediate = box_at(&mut k, 100.0);
+        let mut pseudo = FilletBrep::new();
+        *pseudo.brep_mut() = box_at(&mut k, 200.0);
+        let face = FaceId::from_index(0);
+        let binding = {
+            let mut view =
+                InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate).unwrap();
+            view.capture_surface(&mut k.context, InsertionBody::Intermediate, face)
+                .unwrap()
+        };
+        intermediate.face_mut(face).unwrap().surface = None;
+        let view = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate).unwrap();
+        let error = view.bound_surface(binding).unwrap_err();
+        assert_callers_face_error(&error, face);
+        assert!(
+            matches!(
+                error.blend_failure(),
+                Some(BlendFailure::BoundSurfaceRemoved)
+            ),
+            "{error:?}"
+        );
+    }
+
     #[test]
     fn retained_curves_and_lent_notifications_survive_partial_edit_failure() {
         use crate::geom::context::NotifyCallback;
