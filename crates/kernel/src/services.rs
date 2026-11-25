@@ -34,7 +34,6 @@ pub use solidcore_ops::frame_member;
 pub use solidcore_ops::frame_trim;
 pub use solidcore_ops::hatch;
 pub use solidcore_ops::hole_stacks;
-pub use solidcore_ops::import_geometry;
 pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
