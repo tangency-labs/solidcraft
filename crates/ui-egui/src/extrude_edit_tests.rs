@@ -1252,6 +1252,65 @@ fn surface_extrude_dialog_ends_at_a_picked_face() {
     assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
 }
 
+/// Surface Extrude's Extent Type takes To Next (#16537): no pick and no length, OK makes each
+/// wall end at the first body in its way, Flipped runs it the other way, and editing it again
+/// shows To Next with its direction.
+#[test]
+fn surface_extrude_dialog_runs_to_the_next_body() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[-5,-5,10],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[-5,-5,-8],"length":10,"width":10,"height":1,"body_name":"Floor"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-3,0],[3,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","curves":["l1"],"distance":"4 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let surf = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(k @ crate::dialogs_surface::Surf::Extrude { .. }), .. }) => k.clone(),
+        _ => panic!("surface extrude dialog"),
+    };
+    let to_next = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, to_next, .. }) => (*to_next, extent.direction),
+        _ => panic!("the surface extrude"),
+    };
+    let bbox = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Next"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, to_object: false, .. }));
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(d.inputs.iter().all(|i| i.label != "To Object"), "To Next takes no pick");
+        assert!(d.primary().is_none(), "To Next has no length to type or drag");
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(to_next(&h), (true, solidcraft_engine::doc::Direction::Positive));
+    assert!((bbox(&h).max.z - 10.0).abs() < 1e-6, "the surface ends at the lid: {:?}", bbox(&h));
+
+    // Editing it again shows To Next; Flipped runs the wall down to the floor's top at z = -7.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, direction: 0, .. }));
+    if let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction, .. }), .. }) =
+        h.app.dialog.as_mut()
+    {
+        *direction = 2;
+    }
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(to_next(&h), (true, solidcraft_engine::doc::Direction::Negative));
+    let bb = bbox(&h);
+    assert!((bb.min.z + 7.0).abs() < 1e-6 && bb.max.z.abs() < 1e-6, "the surface ends at the floor: {bb:?}");
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, direction: 2, .. }));
+}
+
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]

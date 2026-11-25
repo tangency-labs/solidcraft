@@ -2293,6 +2293,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         curves: Vec<String>,
         extent: Extent,
+        /// To Next: instead of `extent.distance`, each wall runs on, along `extent.direction`
+        /// (one side), until it first meets a body: any face of a solid or surface body, as it
+        /// is. Designs saved before To Next carry none.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        to_next: bool,
     },
     /// A body taken apart: each face at `faces` (every face when empty) its own surface body,
     /// the faces left one surface body under the body's name. A solid comes apart into surfaces.
