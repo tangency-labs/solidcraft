@@ -53,7 +53,6 @@ use solidcore::topology::brep_data::{
     VertexData,
 };
 use solidcore::topology::brep_data_write::FromBrepEnv;
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, ShellId, VertexId, edge, shell, vertex};
 use solidcore::{EntityRef, Kernel, Point2, Point3, SolidError, Vec3};
@@ -62,7 +61,7 @@ use crate::flat::*;
 use crate::import::Arrays;
 use crate::{Error, Result};
 
-use super::{Body, answer, run, with_body};
+use super::{Body, answer, run, with_body, with_own_body};
 
 // ---- shared ------------------------------------------------------------------------------------
 
@@ -293,6 +292,17 @@ fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSp
 /// `body` as the flat arrays the C API exports (`FlatFromBrep`).
 pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
     with_body("FlatFromBrep", body, |k, b| Ok(flat_from_brep(k, b)))?
+}
+
+/// [`to_arrays`] of a body made to read a file's trims from: the trims it builds raise their
+/// edges by upstream's sampled distance, not a proved one, through
+/// [`solidcore::Kernel::with_sampled_trim_raise`], which restores the proved raise after the
+/// call: proving every trim of every face a file translates cost many times the translation.
+/// The body is a sheet made only for this call ([`crate::pcurves`]), so the token over this
+/// thread's work stops it ([`with_own_body`]): a work limit there stops a trim whose edge never
+/// drops onto its surface within the tolerance (#20575).
+pub(crate) fn to_arrays_sampled_trims(body: &Body) -> Result<Arrays> {
+    with_own_body("FlatFromBrep", body, |k, b| Ok(k.with_sampled_trim_raise(|k| flat_from_brep(k, b))))?
 }
 
 /// One NURBS curve's arrays (`smu_AddSmBSplineCurve3d`, `smu_AddSmBSplineCurve2d`): counts and
@@ -784,15 +794,7 @@ pub(crate) fn key_of(e: EntityRef) -> ObjectRef {
 /// vertices and point-shell vertices, edgeuses and wire edgeuses are split apart, every index
 /// compacted for the split.
 fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None).map_err(sc("GetEdgeuses"))? {
-        if eu1::faceuse(b, eu).map_err(sc("GetFaceuse"))?.is_none()
-            || eu1::uv_trim_curve_pointer(b, eu).map_err(sc("GetUVTrimCurvePointer"))?.is_some()
-        {
-            continue;
-        }
-        let made = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true).map_err(sc("GetOrCreateUVTrimCurve"))?;
-        made.status.map_err(sc("GetOrCreateUVTrimCurve"))?;
-    }
+    solidcore::topology::brep::create_missing_uv_trim_curves(k, b).map_err(sc("GetOrCreateUVTrimCurve"))?;
     let b: &Brep = b;
 
     // the BrepData; its records keep the B-rep's lists' order
@@ -806,7 +808,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bd = BrepData::from_brep(b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
+    let bd = BrepData::from_brep(k, b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
     let shell_ids = shells_in_order(b)?;
     let face_ids = bl::faces(b, None).map_err(sc("GetFaces"))?;
     let edge_ids = bl::edges(b, None).map_err(sc("GetEdges"))?;
@@ -1820,8 +1822,10 @@ fn compress_knots(knots: &[f64]) -> (Vec<f64>, Vec<usize>) {
 }
 
 /// `smu_CreateSmBSplineCurve_FromArrays`: a curve of `dim` 2 or 3; an unclamped knot vector goes
-/// through `SmBSplineCurve::CreateCanonical`, which clamps it.
+/// through `SmBSplineCurve::CreateCanonical`, which clamps it. Curves whose weights are all 1 are
+/// built polynomial (`w = NOW`, matching `SmBSplineCurve::CreateCanonical`).
 fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], degree: usize, dim: u64) -> Result<BSplineCurve> {
+    let rational = weights.iter().any(|&w| w != 1.0);
     if !is_clamped(knots, degree) {
         let (unique, mults) = compress_knots(knots);
         let data = CanonicalData {
@@ -1832,15 +1836,23 @@ fn bspline_curve_from_arrays(points: &[Point3], weights: &[f64], knots: &[f64], 
             knot_multiplicities: &mults,
             knots: &unique,
             knot_type: KnotType::Unspecified,
-            weights: Some(weights),
+            weights: rational.then_some(weights),
             trim: None,
         };
         return BSplineCurve::create_canonical(&data).map_err(sc("SmBSplineCurve::CreateCanonical"));
     }
     let mut pw = Vec::with_capacity(points.len());
     for (p, &w) in points.iter().zip(weights) {
-        let z = if dim == 3 { if w == 1.0 { p.z } else { w * p.z } } else { NOZ };
-        pw.push(if w == 1.0 { CPoint::new(p.x, p.y, z, 1.0) } else { CPoint::new(w * p.x, w * p.y, z, w) });
+        if !rational {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, NOW));
+        } else if w == 1.0 {
+            let z = if dim == 3 { p.z } else { NOZ };
+            pw.push(CPoint::new(p.x, p.y, z, 1.0));
+        } else {
+            let z = if dim == 3 { w * p.z } else { NOZ };
+            pw.push(CPoint::new(w * p.x, w * p.y, z, w));
+        }
     }
     let nurb = NurbCurve::new(pw, degree, knots.to_vec()).map_err(sc("sm_AllocateNurbCurve"))?;
     let mut c = BSplineCurve::new(dim);
@@ -2298,8 +2310,14 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_cone += usize::from(ty == SURFACE_CONE_I);
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            analytic_of_nurbs(k, &nurbs, ty, xsect)?
-                .ok_or_else(|| Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface")))?
+            match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+                Some(analytic) => analytic,
+                // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
+                // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
+                // keeps that, on the range and trims it already carries.
+                None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
+            }
         } else if ty == SURFACE_SPHERE_I {
             let j = i_sphere;
             i_sphere += 1;
@@ -2553,14 +2571,20 @@ fn extent2d(u0: f64, v0: f64, u1: f64, v1: f64) -> Result<Extent2d> {
 /// A body from the flat arrays the C API imports (`BrepFromFlat`): `Validate`,
 /// `FlatToBrepData`, then `MakeTopologyFromData` with the B-rep's tolerance as it is ([`own_tolerances`]) and no UV
 /// trims or analytic conversion made; it heals unless `SOURCE` says SMLib wrote the arrays.
+#[cfg(test)]
 pub(crate) fn from_arrays(a: &Arrays) -> Result<Body> {
-    let f = In(a);
-    let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
-    let b = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s)))??;
-    Ok(Body::from_kernel(b))
+    from_arrays_with_shell_order(a, false).map(|(body, _)| body)
 }
 
-fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {
+/// Reuse an enclosing shell order only for trusted arrays exported from a checked body.
+pub(crate) fn from_arrays_with_shell_order(a: &Arrays, shell_order_proven: bool) -> Result<(Body, bool)> {
+    let f = In(a);
+    let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
+    let (b, proven) = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s, shell_order_proven)))??;
+    Ok((Body::from_kernel(b), proven))
+}
+
+fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape, shell_order_proven: bool) -> Result<(Brep, bool)> {
     let mut data = flat_to_brep_data(k, f, s)?;
     // no heal for B-reps SMLib wrote
     let trusted = f.i(SOURCE).first() == Some(&1);
@@ -2579,8 +2603,10 @@ fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {
         healer_enabled: true,
     };
     make_topology_from_data(k, &mut b, &mut data, &mut env, options).map_err(sc("SmBrep::MakeTopologyFromData"))?;
-    put_enclosing_shells_first(k, &mut b)?;
-    Ok(b)
+    // Trusted data keeps its region shell lists verbatim (build_regions appends them in
+    // order). Other data can go through the healer before the order is checked.
+    let proven = (trusted && shell_order_proven) || put_enclosing_shells_first(k, &mut b)?;
+    Ok((b, proven))
 }
 
 /// The most `SmShell::IsInnerShellOf` calls one conversion makes; a body that would need more
@@ -2597,10 +2623,11 @@ const MAX_CONTAINMENT_TESTS: usize = 1 << 16;
 /// `== TRUE`, and a region where no candidate is shown to enclose the others keeps its order.
 /// solidcore errors the C++ has no counterpart for (a call without a port, a dangling id) refuse
 /// the conversion, as does a body needing more than [`MAX_CONTAINMENT_TESTS`] containment tests.
-fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<bool> {
     use solidcore::query::face::p1::calculate_shell_bounding_box;
     let infinite = b.infinite_region();
     let mut tests = 0usize;
+    let mut proven = true;
     for r in bl::regions(b, None).map_err(sc("GetRegions"))? {
         if Some(r) == infinite {
             continue;
@@ -2627,6 +2654,7 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
         }
         // stable: equal boxes keep the arrays' order
         candidates.sort_by(|a, c| c.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut established = false;
         for &(_, candidate) in &candidates {
             let mut encloses = true;
             for &s in &shells {
@@ -2647,10 +2675,43 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 let list = &mut b.region_mut(r).map_err(sc("SmRegion::SetList"))?.shells;
                 if let Some(at) = list.iter().position(|&s| s == candidate) {
                     list.rotate_left(at);
+                    established = true;
                 }
                 break;
             }
         }
+        proven &= established;
     }
-    Ok(())
+    Ok(proven)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Clamped polynomial B-spline curves (all weights 1, as flat arrays carry every non-rational
+    /// edge curve and UV trim) import with `w = NOW`, matching `SmBSplineCurve::CreateCanonical`;
+    /// rational curves keep every homogeneous weight (#20422).
+    #[test]
+    fn clamped_polynomial_bspline_curves_import_as_non_rational() {
+        let pts3 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0), Point3::new(2.0, 0.0, 1.0)];
+        let clamped = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let poly3 = bspline_curve_from_arrays(&pts3, &[1.0; 3], &clamped, 2, 3).unwrap();
+        let nurb = poly3.gw_nurb().unwrap();
+        assert!(nurb.cpts().iter().all(|p| p.w == NOW), "{:?}", nurb.cpts());
+
+        let unclamped = [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
+        let poly_unclamped = bspline_curve_from_arrays(&pts3, &[1.0; 3], &unclamped, 2, 3).unwrap();
+        assert!(poly_unclamped.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW));
+
+        let pts2 = [Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 0.0)];
+        let poly2 = bspline_curve_from_arrays(&pts2, &[1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], 1, 2).unwrap();
+        assert!(poly2.gw_nurb().unwrap().cpts().iter().all(|p| p.w == NOW && p.z == NOZ));
+
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = [Point3::new(1.0, 0.0, 0.0), Point3::new(1.0, 1.0, 0.0), Point3::new(0.0, 1.0, 0.0)];
+        let rat = bspline_curve_from_arrays(&arc, &[1.0, w, 1.0], &clamped, 2, 3).unwrap();
+        let got: Vec<[f64; 4]> = rat.gw_nurb().unwrap().cpts().iter().map(|p| [p.x, p.y, p.z, p.w]).collect();
+        assert_eq!(got, vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0]]);
+    }
 }

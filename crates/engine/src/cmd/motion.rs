@@ -105,6 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactSets>)
@@ -212,6 +213,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&STUDY_LIST_CONTRACT)
         .output(output_schema_for::<MotionStudies>),
     CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
@@ -238,6 +240,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&EXPLODE_LIST_CONTRACT)
         .output(output_schema_for::<ExplodeViews>),
     CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
@@ -1350,17 +1353,17 @@ fn keep_sampled_trace(
     };
     let pts: Vec<Value> = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
     // Made in the root, whatever is being edited, which is then as it was (also on an error).
-    let before = (s.active_sketch, s.active_component, s.active_occurrence_path.take());
+    let before = (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path.take());
     s.active_component = 0;
     let made = (|| {
-        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested(s, &q);
+        let run = |s: &mut Session, id: &str, q: Value| super::find_command(id).ok_or_else(|| bad(cmd, id.to_string()))?.run_nested_continuing(s, &q);
         let made = run(s, "sketch.create", json!({"plane": "XY", "project_edges": false, "name": name}))?;
         let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
         run(s, "sketch.options", json!({"sketch": sketch, "sketch_3d": true}))?;
         let spline = run(s, "sketch.spline3d", json!({"sketch": sketch, "points": pts}))?;
         Ok::<_, EngineError>((made, spline))
     })();
-    (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
+    (s.active_sketch, s.sketching_view, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
     let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;

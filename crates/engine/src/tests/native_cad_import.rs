@@ -10,6 +10,7 @@ use crate::*;
 const BLOCK_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.FCStd");
 const BLOCK_3DM: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/block.3dm");
 const BRACKET_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/bracket.FCStd");
+const SHELLED_FCSTD: &[u8] = include_bytes!("../../../io/src/native_cad/fixtures/shelled.FCStd");
 
 /// `bytes` saved as `name` in a fresh temp directory.
 fn file(tag: &str, name: &str, bytes: &[u8]) -> (std::path::PathBuf, String) {
@@ -150,6 +151,66 @@ fn a_freecad_history_comes_in_as_editable_features() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A FreeCAD history that is not rebuilt (here it ends in a shell) still brings the file's
+/// sketches: the solids come in as the Import feature, as before, and every sketch comes in
+/// beside them in the same component, editable, on its plane (one on a datum plane 10 mm up),
+/// with its dimensions as parameters. `history: solids` still brings the solids alone.
+#[test]
+fn an_unrebuilt_freecad_history_brings_its_sketches_beside_the_solids() {
+    use solidcraft_geom::prelude::*;
+    let (dir, path) = file("shelled", "shelled.FCStd", SHELLED_FCSTD);
+    // The file's shelled body, as FreeCAD measures it.
+    let expected = 2306.8722474294136;
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path}));
+    assert_eq!(r["history"], "sketches", "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.contains("Shell")), "the warning still says why: {r}");
+    let component = r["component"].as_u64().unwrap();
+    assert_eq!(r["features"], 4, "the Import feature and three sketches: {r}");
+    assert_eq!(s.doc.features[0].kind.type_name(), "BaseFeature");
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 0.05, "the solids are the file's: {v}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // file.insert_step names the sketches it added.
+    let mut d = Session::default();
+    let inserted = run(&mut d, "file.insert_step", json!({"path": path}));
+    assert_eq!((inserted["history"].as_str(), inserted["features_added"].as_array().map(Vec::len)), (Some("sketches"), Some(3)), "{inserted}");
+    let sketches: Vec<(&str, &solidcraft_doc::PlaneRef, &solidcraft_doc::sketch::Sketch)> = s
+        .doc
+        .features
+        .iter()
+        .skip(1)
+        .map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Sketch { plane, sketch } if f.component == component => (f.name.as_str(), plane, sketch),
+            other => panic!("{} is a {} outside the import's component", f.name, other.type_name()),
+        })
+        .collect();
+    assert_eq!(sketches.iter().map(|(n, ..)| *n).collect::<Vec<_>>(), ["BaseSketch", "HoleSketch", "Reference"]);
+
+    // The hole's sketch sits on the datum plane, 10 mm up, its circle centred at (20, 10).
+    let (_, plane, hole) = sketches[1];
+    let solidcraft_doc::PlaneRef::Custom { plane } = plane else { panic!("{plane:?}") };
+    assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
+    let circle = hole.curves.iter().find_map(|c| match c.kind {
+        solidcraft_doc::sketch::CurveKind::Circle { c, .. } => Some(hole.points[c].pos),
+        _ => None,
+    });
+    let centre = plane.to_world(circle.expect("a circle"));
+    assert!((centre.x - 20.0).abs() < 1e-9 && (centre.y - 10.0).abs() < 1e-9 && (centre.z - 10.0).abs() < 1e-9, "{centre:?}");
+    // Its 6 mm diameter is a parameter of the design.
+    let diameter = hole.constraints.iter().find(|c| c.kind.value().is_some_and(|v| (v - 6.0).abs() < 1e-9 || (v - 3.0).abs() < 1e-9));
+    assert!(diameter.and_then(|c| c.param.as_deref()).is_some_and(|p| s.doc.param(p).is_some()), "{:?}", hole.constraints);
+    // The rectangle keeps its constraints: its 40 mm side is a dimension.
+    assert!(sketches[0].2.constraints.iter().any(|c| c.kind.value().is_some_and(|v| (v - 40.0).abs() < 1e-9)));
+
+    let mut d = Session::default();
+    let r = run(&mut d, "file.insert_step", json!({"path": path, "history": "solids"}));
+    assert!(r.get("history").is_none() && r.get("features_added").is_none(), "{r}");
+    assert_eq!(d.doc.features.len(), 1, "history: solids brings the solids alone");
+    assert!((volume(&mut d) - expected).abs() < 0.05);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A rebuilt history that cannot be inserted (here the design is at its feature limit) falls
 /// back to the file's solids with a warning, and leaves the design as it was: no features,
 /// parameters or component of the attempt stay behind.
@@ -175,13 +236,15 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
         link_faces: Vec::new(),
         link_threads: Vec::new(),
         touching: solidcraft_doc::Touching::Separate,
+        profile_frame: None,
         kind: solidcraft_doc::FeatureKind::Sketch {
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             sketch: solidcraft_doc::sketch::Sketch::new(),
         },
     };
-    // Room for the file's one Import feature, but not for the five features of its history.
-    let made = solidcraft_doc::MAX_FEATURES - 3;
+    // Room for the file's one Import feature, but not for the five features of its history, nor
+    // for its two sketches, which come in beside the solids when there is room.
+    let made = solidcraft_doc::MAX_FEATURES - 1;
     {
         let doc = s.doc_mut();
         doc.features.extend((1..=made).map(|i| dummy(i as u64)));
@@ -192,6 +255,7 @@ fn a_rebuilt_history_that_cannot_be_inserted_falls_back_to_solids() {
     assert!(r["history"].is_null(), "the solids came in: {r}");
     let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     assert!(warnings.iter().any(|w| w.contains("feature history was not rebuilt")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("sketches were not imported")), "{warnings:?}");
     assert_eq!(s.doc.features.len(), before + 1, "only the file's Import feature was added");
     assert_eq!(s.doc.features.iter().filter(|f| !f.name.starts_with("Dummy")).count(), 1);
     assert_eq!(s.doc.feature(r["feature"].as_u64().unwrap()).unwrap().kind.type_name(), "BaseFeature");
@@ -229,4 +293,348 @@ fn the_reader_option_chooses_the_step_route_or_the_records() {
         assert!(e.to_string().contains("reader"), "{e}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Two separate 10 × 20 × 30 mm boxes, the second 100 mm along x, as manifold solid B-reps
+/// (186) in an IGES file, as SolidCraft's IGES export writes them: two solids, 12000 mm³
+/// together, spanning 0..110 × 0..20 × 0..30.
+fn two_boxes_iges() -> Vec<u8> {
+    use solidcore_record::Vec3;
+    let a = crate::kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let b = crate::kernel::box_solid(Vec3::new(100.0, 0.0, 0.0), Vec3::new(110.0, 20.0, 30.0)).unwrap();
+    let bodies = [
+        crate::kernel::ExportBody { name: "A".into(), body: &a, color: None },
+        crate::kernel::ExportBody { name: "B".into(), body: &b, color: None },
+    ];
+    crate::kernel::iges_export_bodies(&bodies, &Default::default()).unwrap().into_bytes()
+}
+
+/// `reader` chooses how an IGES file is read, as for a STEP file: by default (`solidcraft`)
+/// SolidCraft's IGES reader restates it as STEP and the Import feature keeps that STEP text;
+/// `cadmpeg` decodes it with cadmpeg's IGES decoder straight into records, with no STEP text.
+/// Both bring the two boxes, through `file.insert_step` and `doc.open`.
+#[test]
+fn the_reader_option_chooses_the_iges_reader() {
+    let (dir, path) = file("rdig", "boxes.igs", &two_boxes_iges());
+    for (reader, records) in [(None, false), (Some("solidcraft"), false), (Some("cadmpeg"), true)] {
+        for cmd in ["file.insert_step", "doc.open"] {
+            let mut s = Session::default();
+            let mut p = json!({"path": path});
+            if let Some(reader) = reader {
+                p["reader"] = json!(reader);
+            }
+            run(&mut s, cmd, p);
+            let import = s.doc.features.iter().find_map(|f| match &f.kind {
+                crate::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                _ => None,
+            });
+            assert_eq!(import, Some((records, records)), "{cmd} reader={reader:?}");
+            assert_eq!(s.model.state().bodies.len(), 2, "{cmd} reader={reader:?}");
+            assert!((volume(&mut s) - 12000.0).abs() < 1e-3, "{cmd} reader={reader:?}");
+            let (lo, hi) = extent(&s);
+            assert!(near(lo, [0.0, 0.0, 0.0]) && near(hi, [110.0, 20.0, 30.0]), "{cmd} reader={reader:?}: {lo:?} {hi:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The program a STEP or IGES file names is read the same with either reader, so the window makes
+/// the same stand-up offer: the reply's `system`, and `exporter` and `exporter_up`, which say a
+/// SolidWorks file has Y up and SolidCraft's own Z up (another program says nothing). STEP: the
+/// FILE_NAME preprocessor version and originating system, or FILE_DESCRIPTION, written here; IGES:
+/// the global section's native system ID (field 5), written over SolidCraft's at the same width.
+#[test]
+fn either_reader_names_the_program_and_its_up_axis() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-native-cad-producer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let step = dir.join("box.step");
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 40, "height": 5}));
+    run(&mut source, "file.export", json!({"path": step.to_string_lossy()}));
+    let text = std::fs::read_to_string(&step).unwrap();
+    let (named, described) = ("'SolidCraft','SolidCraft'", "FILE_DESCRIPTION((");
+    assert!(text.contains(named) && text.contains(described), "{text}");
+    let iges = String::from_utf8(two_boxes_iges()).unwrap();
+    let native = "10HSolidCraft,19H";
+    assert!(iges.contains(native), "{iges}");
+    let mut files = Vec::new();
+    for (preprocessor, system, description, want) in [
+        ("SolidCraft", "SolidCraft", "", ("SolidCraft", Some(("z", "SolidCraft")))),
+        ("SwSTEP 2.0", "SolidWorks 2021", "", ("SolidWorks 2021", Some(("y", "SolidWorks")))),
+        ("Example CAD", "Example CAD", "SolidWorks export", ("Example CAD", Some(("y", "SolidWorks")))),
+        ("Example CAD", "Example CAD", "", ("Example CAD", None)),
+    ] {
+        let header = text.replacen(named, &format!("'{preprocessor}','{system}'"), 1);
+        let header = if description.is_empty() { header } else { header.replacen(described, &format!("{described}'{description}',"), 1) };
+        files.push(("step", header, want));
+    }
+    for (system, want) in [
+        ("SolidCraft", ("SolidCraft", Some(("z", "SolidCraft")))),
+        ("SolidWorks", ("SolidWorks", Some(("y", "SolidWorks")))),
+        ("ExampleCAD", ("ExampleCAD", None)),
+    ] {
+        files.push(("igs", iges.replacen(native, &format!("10H{system},19H"), 1), want));
+    }
+    for (k, (ext, contents, (system, up))) in files.into_iter().enumerate() {
+        let path = dir.join(format!("part{k}.{ext}"));
+        std::fs::write(&path, contents).unwrap();
+        for reader in ["solidcraft", "cadmpeg"] {
+            for cmd in ["file.insert_step", "doc.open"] {
+                let r = run(&mut Session::default(), cmd, json!({"path": path.to_string_lossy(), "reader": reader}));
+                let got = r["exporter_up"].as_str().zip(r["exporter"].as_str());
+                assert_eq!((r["system"].as_str(), got), (Some(system), up), "part{k}.{ext} {cmd} reader={reader}: {r}");
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Rhino export through cadmpeg (`file.export` to `.3dm`), read back through the Rhino import
+// above. Expected volumes and boxes come from the designs' dimensions.
+
+/// The world box of every shown body, rounded to a micrometre, sorted.
+fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
+    let mut out: Vec<[i64; 6]> = s
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .map(|b| {
+            let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+            [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+fn um(b: [f64; 6]) -> [i64; 6] {
+    b.map(|v| (v * 1e3).round() as i64)
+}
+
+/// The cylinder's exact volume, π · 6² · 15 = 540π mm³.
+const CYLINDER_VOLUME_MM3: f64 = 1_696.460_032_938_488;
+
+/// A loose 10 mm cube, a coloured cylinder (radius 6 mm, 15 mm high, at x = 80 mm), and a
+/// `Bracket` component (a 20 × 20 × 10 mm base and a 10 × 10 × 10 mm block on it) placed twice,
+/// the second copy 40 mm along Y.
+fn parts() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-30, 0, 0], "body_name": "Loose"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 15, "base": [80, 0, 0], "body_name": "Pin"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Pin"], "color": "#0040ff"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Loose"], "color": "#ff8000"}));
+    run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 5, 10], "operation": "new", "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Bracket", "translate": [0, 40, 0]}));
+    s
+}
+
+/// The design's solids that Rhino holds exactly: the cube and the bracket's boxes, twice.
+fn exact_boxes() -> Vec<[i64; 6]> {
+    let mut want = vec![
+        um([-30.0, 0.0, 0.0, -20.0, 10.0, 10.0]),
+        um([0.0, 0.0, 0.0, 20.0, 20.0, 10.0]),
+        um([0.0, 40.0, 0.0, 20.0, 60.0, 10.0]),
+        um([5.0, 5.0, 10.0, 15.0, 15.0, 20.0]),
+        um([5.0, 45.0, 10.0, 15.0, 55.0, 20.0]),
+    ];
+    want.sort();
+    want
+}
+
+/// `file.export` writes a `.3dm` file (any case) from the design: every box where the design shows
+/// it, as an exact solid that both Rhino readers bring back with its volume, and the cylinder,
+/// which cadmpeg's Rhino writer cannot hold exactly yet, as its mesh with a warning naming it.
+/// The components are not kept, and a warning says so.
+#[test]
+fn file_export_writes_rhino_and_it_reads_back() {
+    let (dir, _) = file("rhino-out", "unused", b"");
+    let mut s = parts();
+    let cylinder = s.world_state().unwrap().bodies.iter().find(|b| b.name.starts_with("Pin")).map(|b| b.name.clone()).unwrap();
+    for name in ["parts.3dm", "PARTS.3DM"] {
+        let path = dir.join(name).to_string_lossy().to_string();
+        let out = run(&mut s, "file.export", json!({"path": path}));
+        assert_eq!(out["format"], "Rhino", "{out}");
+        let warnings = out["warnings"].to_string();
+        assert!(warnings.contains(&format!("{cylinder}: written as its mesh only")), "{out}");
+        assert!(warnings.contains("components and placements are not written"), "{out}");
+        for reader in ["solidcraft", "cadmpeg"] {
+            let mut back = Session::default();
+            run(&mut back, "file.insert_step", json!({"path": path, "reader": reader}));
+            // SolidCraft's own Rhino reader leaves the cylinder's mesh out; cadmpeg's brings it in
+            // as a mesh body spanning the cylinder (radius 6 mm, 15 mm high, at x = 80 mm).
+            let mut want = exact_boxes();
+            let mut mesh_volume = 0.0;
+            if reader == "cadmpeg" {
+                let world = back.world_state().unwrap();
+                let meshes: Vec<_> = world.bodies.iter().filter(|b| b.body.is_mesh()).collect();
+                let [mesh] = meshes.as_slice() else { panic!("{name}: one mesh body, got {}", meshes.len()) };
+                let m = solidcraft_kernel::measure(&mesh.body).unwrap();
+                let bb = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+                for (got, want) in bb.iter().zip([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]) {
+                    assert!((got - want).abs() < 0.01, "{name}: {bb:?}");
+                }
+                want.push(bb.map(|v| (v * 1e3).round() as i64));
+                want.sort();
+                // The cylinder's volume is π r² h = 540π mm³. Its mesh is a prism on a
+                // polygon inscribed in the circle, at a chord tolerance of at most 2e-4 of the
+                // body's size (its 22.6 mm diagonal: a sagitta s ≤ 0.0046 mm), so short of it by
+                // less than (4/3) s / r ≈ 0.1%; 1% allows that, and the file's single-precision
+                // points (≈1e-6 relative) cannot take it past π r² h by 1e-4.
+                let exact = CYLINDER_VOLUME_MM3;
+                assert!(
+                    m.volume > 0.99 * exact && m.volume < exact * (1.0 + 1e-4),
+                    "{name}: the cylinder's mesh holds {} mm³, not {exact}",
+                    m.volume
+                );
+                mesh_volume = m.volume;
+            }
+            assert_eq!(shown_boxes(&back), want, "{name} {reader}");
+            let v = volume(&mut back);
+            assert!((v - (1000.0 + 2.0 * (4000.0 + 1000.0)) - mesh_volume).abs() < 1e-6, "{name} {reader}: {v}");
+        }
+    }
+    // Chosen bodies only.
+    let path = dir.join("loose.3dm").to_string_lossy().to_string();
+    let out = run(&mut s, "file.export", json!({"path": path, "bodies": ["Loose"]}));
+    assert!(out.get("warnings").is_none_or(|w| w.as_array().is_some_and(Vec::is_empty)), "{out}");
+    let mut back = Session::default();
+    run(&mut back, "file.insert_step", json!({"path": path}));
+    assert_eq!(shown_boxes(&back), vec![um([-30.0, 0.0, 0.0, -20.0, 10.0, 10.0])]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format: 3dm` names Rhino; `format: 3dm` under another format's extension is refused, while
+/// another format named under a Rhino extension is written as asked; FreeCAD is refused with
+/// why, leaving no file behind.
+#[test]
+fn rhino_and_freecad_export_check_their_format() {
+    let (dir, _) = file("rhino-format", "unused", b"");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let path = dir.join("block.3dm").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": path, "format": "3dm"}))["format"], "Rhino");
+    let step = dir.join("block.step").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": step, "format": "3dm"})).unwrap_err().to_string();
+    assert!(e.contains("disagrees with the path's extension"), "{e}");
+    assert!(!std::path::Path::new(&step).exists());
+    // The other way round, a format SolidCraft writes itself, named, is written whatever the
+    // extension, as an explicit format always was: STEP under a Rhino name.
+    let rhino = dir.join("part.3dm").to_string_lossy().to_string();
+    assert_eq!(run(&mut s, "file.export", json!({"path": rhino, "format": "step"}))["format"], "Step");
+    assert!(std::fs::read(&rhino).unwrap().starts_with(b"ISO-10303-21;"));
+    let fcstd = dir.join("block.FCStd").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": fcstd})).unwrap_err().to_string();
+    assert!(e.contains("FreeCAD files cannot be exported yet"), "{e}");
+    assert!(!std::path::Path::new(&fcstd).exists());
+    // A file already there is left as it was by a refused export.
+    std::fs::write(&fcstd, b"kept").unwrap();
+    assert!(s.execute("file.export", &json!({"path": fcstd})).is_err());
+    assert_eq!(std::fs::read(&fcstd).unwrap(), b"kept");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A body's colour: its own, else the one colour every face of it has.
+fn colour_of(b: &solidcraft_kernel::Body) -> Option<[f32; 3]> {
+    b.color().or_else(|| {
+        let faces = &b.paint()?.faces;
+        let first = faces.first()?.color;
+        (faces.len() == b.face_count() && faces.iter().all(|f| f.color == first)).then_some(first)
+    })
+}
+
+/// [`exact_boxes`] and the cylinder: radius 6 mm, 15 mm high at x = 80 mm.
+fn all_boxes() -> Vec<[i64; 6]> {
+    let mut want = exact_boxes();
+    want.push(um([74.0, -6.0, 0.0, 86.0, 6.0, 15.0]));
+    want.sort();
+    want
+}
+
+/// `file.export` writes STEP and IGES with SolidCraft's own writers unless `writer: cadmpeg`
+/// asks for cadmpeg's. Each file, by either writer, reads back through SolidCraft's reader (and a
+/// STEP file through cadmpeg's too) with every body where the design shows it, the volume the
+/// design's dimensions give and the cylinder in its colour. The default writes the same file as
+/// `writer: solidcraft`, which is not cadmpeg's.
+#[test]
+fn file_export_writes_step_and_iges_with_either_writer() {
+    let (dir, _) = file("step-writer", "unused", b"");
+    let mut s = parts();
+    let volume_want = 1000.0 + 2.0 * (4000.0 + 1000.0) + CYLINDER_VOLUME_MM3;
+    let blue = [0.0, 64.0 / 255.0, 1.0];
+    for ext in ["step", "igs"] {
+        let mut texts = Vec::new();
+        for writer in [None, Some("solidcraft"), Some(" CadMpeg ")] {
+            let path = dir.join(format!("parts-{}.{ext}", writer.map_or("default", str::trim))).to_string_lossy().to_string();
+            let mut p = json!({"path": path});
+            if let Some(w) = writer {
+                p["writer"] = json!(w);
+            }
+            let out = run(&mut s, "file.export", p);
+            assert_eq!(out["format"], if ext == "step" { "Step" } else { "Iges" }, "{out}");
+            let text = std::fs::read_to_string(&path).unwrap();
+            // cadmpeg's writers name themselves in the file's header; SolidCraft's do not.
+            assert_eq!(text.contains("cadmpeg"), writer.is_some_and(|w| w.trim().eq_ignore_ascii_case("cadmpeg")), "{ext} {writer:?}");
+            texts.push(text);
+            let readers: &[&str] = if ext == "step" { &["solidcraft", "cadmpeg"] } else { &["solidcraft"] };
+            for reader in readers {
+                let mut back = Session::default();
+                run(&mut back, "file.insert_step", json!({"path": path, "reader": reader}));
+                assert_eq!(shown_boxes(&back), all_boxes(), "{ext} {writer:?} {reader}");
+                assert!((volume(&mut back) - volume_want).abs() < 1e-3, "{ext} {writer:?} {reader}");
+                let world = back.world_state().unwrap();
+                // Names need not survive every writer: the cylinder is the body with its box.
+                let cylinder = world
+                    .bodies
+                    .iter()
+                    .find(|b| {
+                        let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+                        [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+                            == um([74.0, -6.0, 0.0, 86.0, 6.0, 15.0])
+                    })
+                    .unwrap_or_else(|| panic!("{ext} {writer:?} {reader}: no cylinder body"));
+                let colour = colour_of(&cylinder.body).unwrap_or_else(|| panic!("{ext} {writer:?} {reader}: the cylinder is not coloured"));
+                for (got, want) in colour.iter().zip(blue) {
+                    assert!((f64::from(*got) - want).abs() < 1e-3, "{ext} {writer:?} {reader}: the cylinder's colour: {colour:?}");
+                }
+                assert_eq!(
+                    world
+                        .bodies
+                        .iter()
+                        .filter(|b| colour_of(&b.body).is_some_and(|c| c.iter().zip(blue).all(|(g, w)| (f64::from(*g) - w).abs() < 1e-3)))
+                        .count(),
+                    1,
+                    "{ext} {writer:?} {reader}: only the cylinder is blue"
+                );
+            }
+        }
+        // The default and `solidcraft` write the same file but for the header's time stamp.
+        let body = |t: &str| t.split_once("DATA;").or_else(|| t.split_once("S      1")).map(|(_, b)| b.to_string()).unwrap_or_default();
+        assert_eq!(body(&texts[0]).lines().count(), body(&texts[1]).lines().count(), "{ext}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `writer` is for STEP and IGES only, and takes solidcraft or cadmpeg; anything else is refused
+/// before a file is written.
+#[test]
+fn the_writer_option_is_refused_where_it_does_not_apply() {
+    let (dir, _) = file("step-writer-refused", "unused", b"");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    for (name, writer) in
+        [("a.stl", "cadmpeg"), ("a.3mf", "solidcraft"), ("a.usda", "cadmpeg"), ("a.3dm", "cadmpeg"), ("a.step", "other"), ("a.igs", "")]
+    {
+        let path = dir.join(name).to_string_lossy().to_string();
+        let e = s.execute("file.export", &json!({"path": path, "writer": writer})).expect_err(name).to_string();
+        assert!(e.contains("`writer`"), "{name}: {e}");
+        assert!(!std::path::Path::new(&path).exists(), "{name}");
+    }
+    let path = dir.join("a.step").to_string_lossy().to_string();
+    let e = s.execute("file.export", &json!({"path": path, "writer": 1})).expect_err("a number").to_string();
+    assert!(e.contains("`writer`"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -204,7 +204,7 @@ fn unused_welded_vertices_need_no_collapse_state() {
         Vec3::new(20.0, 0.0, 0.0),
     ];
     let tris = [[4, 3, 5], [1, 4, 2], [3, 6, 5], [2, 7, 3], [8, 3, u32::MAX]];
-    let (mesh, source) = Collapser::new(&pos, &tris).unwrap();
+    let (mesh, source) = Collapser::new(&pos, &tris, WeldOrder::Positions).unwrap();
     // The first zero is the representative even though a later corner carries its index.
     assert_eq!(source, [1, 3, 5, 6]);
     assert_eq!(mesh.pos[0][0].to_bits(), (-0.0_f64).to_bits());
@@ -228,6 +228,51 @@ fn unused_welded_vertices_need_no_collapse_state() {
     };
     assert_eq!(bits(&clean[0]), bits(&sparse[0]));
     assert_eq!(clean[0].error.to_bits(), sparse[0].error.to_bits());
+}
+
+#[test]
+fn indexed_facets_weld_in_corner_order() {
+    let positions = [
+        Vec3::new(-10.0, 0.0, 0.0),
+        Vec3::X,
+        Vec3::ZERO,
+        Vec3::new(1.0, 1.0, 0.0),
+        Vec3::new(-0.0, 0.0, 0.0),
+        Vec3::Y,
+        Vec3::new(f64::NAN, 0.0, 0.0),
+    ];
+    let triangles = [[2, 1, u32::MAX], [4, 1, 5], [2, 4, 3], [1, 3, 5], [2, 6, 5]];
+    let (mesh, source) = Collapser::new(&positions, &triangles, WeldOrder::Facets).unwrap();
+    // Triangles with missing vertices are omitted before expansion. The first zero in the
+    // remaining corner stream wins, even though its storage index follows the other zero.
+    assert_eq!(source, [4, 1, 5, 3]);
+    assert_eq!(mesh.pos[0][0].to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(mesh.tris, [[0, 1, 2], [1, 3, 2]]);
+
+    let expanded = [
+        positions[4],
+        positions[1],
+        positions[5],
+        positions[2],
+        positions[4],
+        positions[3],
+        positions[1],
+        positions[3],
+        positions[5],
+        positions[2],
+        positions[6],
+        positions[5],
+    ];
+    let reference = levels(
+        &expanded,
+        &[[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]],
+        &[1],
+    );
+    let indexed = levels_from_indexed_facets(&positions, &triangles, &[1]);
+    assert_eq!(indexed.len(), 1);
+    assert_eq!(indexed[0].triangles, reference[0].triangles);
+    assert_eq!(indexed[0].positions, reference[0].positions);
+    assert_eq!(indexed[0].error.to_bits(), reference[0].error.to_bits());
 }
 
 /// Timing, not a check (`SOLIDCORE_TESS_BENCH_STL=part.stl cargo test --release -p

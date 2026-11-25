@@ -11,21 +11,23 @@ use serde::Deserialize;
 
 use super::config::NameList;
 use super::types::{
-    AngleExpr, ConventionParam, DirectionParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection, feature_common,
-    present,
+    AngleExpr, ConventionParam, DirectionParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection, ToPoint,
+    feature_common, present,
 };
 
 /// Extrude a sketch's curves or profiles into a surface body: walls only, no caps.
 ///
-/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper`, `corner`,
-/// `to`, `to_offset` and `from`) are left out: a surface extrude refuses the first ones as "not
-/// supported yet" and does nothing with the others.
+/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper`, `corner`
+/// and `from`) are left out: a surface extrude refuses the first ones as "not supported yet" and
+/// does nothing with the others.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SurfaceExtrudeParams {
     /// How far: the length one way; with `direction: symmetric`, the total (per side with
-    /// `convention: legacy_per_side`); with `distance2`, the first side's length.
-    pub distance: LengthExpr,
+    /// `convention: legacy_per_side`); with `distance2`, the first side's length. Required
+    /// unless `to` or `to_next` is given.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
     /// The sketch, by id or name. Default: the active sketch, else the last one.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "IdOrName")]
@@ -57,6 +59,19 @@ pub struct SurfaceExtrudeParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
     pub convention: Option<ConventionParam>,
+    /// End at this face, vertex or point (To Object). A curved or slanted face trims the walls
+    /// where they meet its surface.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ToPoint")]
+    pub to: Option<ToPoint>,
+    /// How far past `to` to go: to a point or a flat face square to the extrusion only.
+    #[serde(default)]
+    pub to_offset: Option<LengthExpr>,
+    /// To Next: each wall runs on, one way as `direction` says, until it first meets a solid or
+    /// surface body (its faces as they are). Takes no `distance`, `distance2`, `to` or
+    /// `to_offset`.
+    #[serde(default)]
+    pub to_next: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -98,6 +113,15 @@ pub struct SurfaceRevolveParams {
     /// `symmetric` is the same as `symmetric: true`.
     #[serde(default)]
     pub direction: Option<RevolveDirection>,
+    /// Each face faces the side Surface Extrude's would: the curve's direction crossed with the
+    /// sketch normal, so out of a profile. Default: true. False builds each face along its
+    /// surface's own normal, as surface revolves saved before it keep.
+    #[serde(default)]
+    pub faced: Option<bool>,
+    /// A full turn that closes the walls stays a closed surface body, which Stitch makes a solid.
+    /// Default: true. False makes a solid of it, as surface revolves saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -27,7 +27,6 @@ use crate::boolean::api_brep::boolean_union;
 use crate::error::offset::OffsetFailure;
 use crate::error::{Reason, Result, SolidError};
 use crate::kernel::Kernel;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::offset::offset_executive::p2::{shell_brep_simple, ShellOptions};
 use crate::offset::wall_room::{shell_wall_room, WallRoom};
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2};
@@ -64,6 +63,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
     let mut found: BTreeSet<FaceId> = BTreeSet::from([seed]);
     let mut todo = vec![seed];
     while let Some(f) = todo.pop() {
+        let outer = crate::topology::face::p2::outer_faceuse(b, f)?;
         for e in face_edges(b, f)? {
             let faces = edge::faces(b, e, None)?;
             // the use of the edge on `f`'s face use that faces out of the material
@@ -72,9 +72,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
                 let Some(fu) = eu1::faceuse(b, u)? else {
                     continue;
                 };
-                if eu1::face(b, u)? == Some(f)
-                    && eu1::faceuse_orientation(b, fu)? == OrientType::Same
-                {
+                if eu1::face(b, u)? == Some(f) && Some(fu) == outer {
                     on_f = Some(u);
                 }
             }
@@ -105,6 +103,8 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
 /// The features of `b`: each set of two or more faces, at most half of them, reached from a
 /// face across convex edges ([`feature_from`]), smallest first, each once.
 fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
+    // a measurement copy: it reads the topology and tangency of the body and its faces are
+    // only grouped, never built from, so its surfaces' definitions are not needed
     let mut probe = b.clone_standing_for_self()?;
     let mut seen: BTreeSet<FaceId> = BTreeSet::new();
     let mut found = Vec::new();
@@ -129,8 +129,9 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
 /// `b` with `faces` taken off as a feature: the base and the feature, each closed by a planar
 /// cap on the footprint. `None` when it does not come off, or has room for a cavity of `wall`.
 fn take_off(k: &mut Kernel, b: &Brep, faces: &[FaceId], wall: f64) -> Result<Option<(Brep, Brep)>> {
-    // the footprint capped with its plane (the module's claim holds over a planar one only)
-    let mut base = b.clone_standing_for_self()?;
+    // the footprint capped with its plane (the module's claim holds over a planar one only);
+    // the base is shelled and the feature joined back, so both keep the faces' definitions
+    let mut base = b.clone_standing_for_self_keeping_definitions()?;
     let mut feature = match defeature_and_rebuild(
         k,
         &mut base,
@@ -187,7 +188,8 @@ fn taking_off(k: &mut Kernel, b: &Brep, options: ShellOptions) -> Result<Option<
             ok => ok,
         }
     };
-    let mut current = b.clone_standing_for_self()?;
+    // the body each feature is taken off and shelled, so its definitions are kept
+    let mut current = b.clone_standing_for_self_keeping_definitions()?;
     let mut taken: Vec<Brep> = Vec::new();
     for faces in features(k, b)? {
         if taken.len() >= MAX_FEATURES {

@@ -95,7 +95,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.show_history", "Show Component History", crate::checked!("component.show_history", show_history))
         .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
-    CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component))
+    CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component)).begins_edit()
         .at("SOLID", "ASSEMBLE")
         .icon("component")
         .contract(&CREATE_CONTRACT)
@@ -107,7 +107,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              (grease, paint, a label): listed in bills of materials with its quantity, never active (default activate false; true \
              is refused), and nothing can be put in it",
         ),
-    CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies))
+    CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies)).begins_edit()
         .icon("component")
         .contract(&FROM_BODIES_CONTRACT)
         .output(output_schema_for::<FromBodiesResult>)
@@ -115,6 +115,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.activate", "Activate Component", crate::checked!("component.activate", activate))
         .icon("activate")
         .noundo()
+        .doc_only()
         .contract(&ACTIVATE_CONTRACT)
         .output(output_schema_for::<ActivateResult>)
         .params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
@@ -145,6 +146,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListResult>)
         .params(
@@ -156,6 +158,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PROPERTIES_CONTRACT)
         .output(output_schema_for::<PropertiesResult>)
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}. A placement inside it that counts as a reference (its occurrence's bom_type, else its component's) adds nothing, nor does anything inside that; the placement measured counts whatever its type"),
+    CommandSpec::new("body.collision", "Collision Shape", crate::checked!("body.collision", properties::body_collision))
+        .icon("body")
+        .contract(&properties::BODY_COLLISION_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
+        .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
+    CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
+        .icon("measure")
+        .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::PhysicalOverrideResult>)
+        .params("component; mass?: kg; com?: [x, y, z] mm; inertia?: [xx, yy, zz, xy, xz, yz] kg m² (omit all to clear): what robot exports use for the component's own bodies"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", crate::checked!("occurrence.properties", properties::occurrence))
         .icon("measure").noundo()
         .contract(&OCCURRENCE_PROPERTIES_CONTRACT)
@@ -179,7 +191,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "component: removes the rigid joints that hold its contents together (an imported assembly's rigid group), so its parts \
              move and take joints one by one → joints (the ids removed)",
         ),
-    CommandSpec::new("component.move_bodies", "Move Bodies to Component", crate::checked!("component.move_bodies", move_bodies))
+    CommandSpec::new("component.move_bodies", "Move Bodies to Component", crate::checked!("component.move_bodies", move_bodies)).begins_edit()
         .icon("move")
         .contract(&MOVE_BODIES_CONTRACT)
         .output(output_schema_for::<MoveBodiesResult>)
@@ -188,21 +200,23 @@ pub static COMMANDS: &[CommandSpec] = &[
          one; a component placed more than once gets them in every instance); from_path?: the placement of their component they \
          move from (default: its only one, else its first, where its bodies have their own names)",
     ),
-    CommandSpec::new("component.copy_bodies", "Paste Bodies", copy_bodies).icon("paste").params(
+    CommandSpec::new("component.copy_bodies", "Paste Bodies", copy_bodies).begins_edit().icon("paste").params(
         "bodies: [names, as the Browser shows them: a body seen in another placement of its component (`Cube (B:2)`) is copied \
          from there]; component?: where the copies go (default: the active one); component_path?: its placement to place them \
          by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
          copy stays where its body is in the world; the copies' names come back as `bodies`",
     ),
-    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).icon("paste").params(
+    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).begins_edit().icon("paste").params(
         "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
-         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         only one); placement?: `world` (default) or `origin`, where copied components go: at the same world coordinates, or \
+         with the first one's origin on the target's origin, the others kept where they are from it (bodies always keep \
+         their world coordinates). Pastes what was copied in another design: its bodies as imported bodies \
          (no history) in one Import feature, or its components as independent copies with their history, appearances, \
          joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
          A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
          `bodies` and `feature`, or the pasted components' `paths`",
     ),
-    CommandSpec::new("component.move_sketches", "Move Sketches to Component", crate::checked!("component.move_sketches", move_sketches))
+    CommandSpec::new("component.move_sketches", "Move Sketches to Component", crate::checked!("component.move_sketches", move_sketches)).begins_edit()
         .icon("move")
         .contract(&MOVE_SKETCHES_CONTRACT)
         .output(output_schema_for::<MoveSketchesResult>)
@@ -211,7 +225,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component.move_sketches.to_parts",
         "Move Sketches to Their Parts",
         crate::checked!("component.move_sketches.to_parts", sketches_to_parts::to_parts),
-    )
+    ).begins_edit()
     .icon("move")
     .contract(&MOVE_SKETCHES_TO_PARTS_CONTRACT)
     .output(output_schema_for::<MoveSketchesToPartsResult>)
@@ -221,7 +235,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
          plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
     ),
-    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
+    CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features)).begins_edit()
         .icon("move")
         .contract(&MOVE_FEATURES_CONTRACT)
         .output(output_schema_for::<MoveFeaturesResult>)
@@ -241,22 +255,22 @@ pub static COMMANDS: &[CommandSpec] = &[
              nothing: placements move first (taking what they hold), then features (taking the bodies they made), then the bodies \
              still elsewhere (a body transfer, which leaves its features behind)",
         ),
-    CommandSpec::new("occurrence.copy", "Paste (Instance)", crate::checked!("occurrence.copy", copy_occurrence))
+    CommandSpec::new("occurrence.copy", "Paste (Instance)", crate::checked!("occurrence.copy", copy_occurrence)).begins_edit()
         .icon("copy")
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<CopyResult>)
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
-    CommandSpec::new("component.paste_new", "Paste New", crate::checked!("component.paste_new", paste_new))
+    CommandSpec::new("component.paste_new", "Paste New", crate::checked!("component.paste_new", paste_new)).begins_edit()
         .icon("paste")
         .contract(&PASTE_NEW_CONTRACT)
         .output(output_schema_for::<PasteNewResult>)
         .params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
-    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence))
+    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence)).begins_edit_when(crate::edit_start::captures_history)
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
         .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z] (numbers or length expressions: an occurrence moved by expressions that name parameters keeps them and moves with them when the parameters change, along the axes the move was given in; other moves of it stay; a parameter they use can't be deleted, and a renamed one carries into them); axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z] (numbers or length expressions, kept like translate's: the point the turn is about moves the part by what the turn leaves behind when a parameter in it changes); to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, its translation column (entries 4, 8 and 12) numbers or length expressions that are kept and followed like translate's; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
-    CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag))
+    CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag)).begins_edit()
         .icon("move")
         .contract(&DRAG_CONTRACT)
         .output(output_schema_for::<DragResult>)
@@ -265,7 +279,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          point - at (with any chain of joints it is in that is joined to nothing grounded) and captures its position; other pending \
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
-    CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align))
+    CommandSpec::new("occurrence.align", "Align Occurrence", crate::checked!("occurrence.align", align::align)).begins_edit()
         .icon("align")
         .contract(&ALIGN_CONTRACT)
         .output(output_schema_for::<OccurrenceAlignResult>)
@@ -324,7 +338,7 @@ pub(super) fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u6
 
 pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let kk = key(p.get("occurrence")).ok_or_else(|| bad(cmd, "`occurrence` must be an id or name"))?;
-    if let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == kk || o.name == kk) {
+    if let Some(o) = s.doc.active_occurrences().find(|o| o.id.to_string() == kk || o.name == kk) {
         return Ok(o.id);
     }
     // A component name: its occurrence when it has exactly one (a name that is only digits is an id, never a component).
@@ -333,7 +347,7 @@ pub(super) fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
         Err(_) => s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.filter(|c| *c != 0),
     };
     let Some(component) = component else { return Err(bad(cmd, format!("no occurrence `{kk}`"))) };
-    let of: Vec<_> = s.doc.occurrences.iter().filter(|o| o.component == component).collect();
+    let of: Vec<_> = s.doc.active_occurrences().filter(|o| o.component == component).collect();
     match of.as_slice() {
         [only] => Ok(only.id),
         [] => Err(bad(cmd, format!("no occurrence `{kk}`: component `{kk}` is not placed anywhere"))),
@@ -528,7 +542,7 @@ fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_in_place(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.edit_in_place";
     let id = component(s, p, "component", cmd)?;
-    if !s.doc.links.contains_key(&id) {
+    if !s.doc.links.get(&id).is_some_and(|link| link.is_design()) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
     let path = match p.get("path") {
@@ -600,7 +614,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         features_of.entry(f.component).or_default().push(f);
     }
     let (mut occurrences_of, mut children_of): (HashMap<u64, Vec<&Occurrence>>, HashMap<u64, Vec<&Occurrence>>) = Default::default();
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         occurrences_of.entry(o.component).or_default().push(o);
         children_of.entry(o.parent).or_default().push(o);
     }
@@ -679,12 +693,48 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
     let imported = imported_bodies_within(s, id);
+    let body_owners: Vec<(String, u64, u64)> =
+        s.model.state().bodies.iter().map(|b| (b.name.clone(), b.feature, s.doc.model_body_component(b))).collect();
+    let prev_links: Vec<(u64, Vec<String>)> =
+        s.doc.links.iter().map(|(&c, l)| (c, l.inherited.iter().map(|p| p.material.clone()).collect())).collect();
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
     let d = s.doc_mut();
+    let mut prune_candidates: std::collections::HashSet<String> = prev_links
+        .into_iter()
+        .filter(|(comp, _)| removed.components.contains(comp))
+        .flat_map(|(_, mats)| mats)
+        .map(|m| m.to_ascii_lowercase())
+        .collect();
+    for (body, feat, _) in &body_owners {
+        if removed.features.contains(feat) {
+            d.materials.remove(body);
+        }
+    }
     for (feature, made, skipped) in imported {
+        // A body an outside Import keeps building only drops its material when it is one of the
+        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        if let Some(f) = d.feature(feature) {
+            let slots = f.body_name_slots(made.len());
+            for (slot, name) in slots.iter().zip(&made) {
+                if skipped.contains(&(*slot as u64)) {
+                    d.materials.remove(name);
+                }
+            }
+        }
+        for link in d.links.values_mut().filter(|l| l.feature == feature) {
+            for &slot in &skipped {
+                if let Some(snap) = link.inherited.get_mut(slot as usize) {
+                    if !snap.material.is_empty() {
+                        prune_candidates.insert(snap.material.to_ascii_lowercase());
+                        snap.material.clear();
+                    }
+                    snap.material_fingerprint = None;
+                }
+            }
+        }
         let Some(f) = d.feature_mut(feature) else { continue };
         // The bodies left keep the names they have now, though a skipped one had a name first.
         f.pin_body_names(&made, &[]);
@@ -694,6 +744,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             skip.dedup();
         }
     }
+    super::component_link::prune_unused_linked_materials(d, &prune_candidates);
     let gone = removed.components;
     if gone.contains(&s.active_component) {
         s.active_component = 0;
@@ -831,7 +882,7 @@ fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     // The steps above are this command's one undo step.
     scratch.undo.clear();
     scratch.selection = copies.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"bodies": copies, "component": to}))
 }
 
@@ -955,7 +1006,7 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
         // A world frame requires an explicit containing placement when any ancestor is instanced.
         for ancestor in &path {
             if let Some(a) = s.doc.occurrences.iter().find(|a| a.id == *ancestor)
-                && s.doc.occurrences.iter().filter(|x| x.component == a.component).count() > 1
+                && s.doc.active_occurrences().filter(|x| x.component == a.component).take(2).count() > 1
             {
                 return Err(bad(cmd, "occurrence has multiple placements; supply its `path`"));
             }
@@ -1290,6 +1341,16 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     if s.active_component == 0 || crate::frames::mapped() {
         return;
     }
+    to_active_frame_geometry(s, kind);
+}
+
+/// The active component's frame from world coordinates, for a command whose picks `frames` maps
+/// but whose other geometry is still in the world: a sweep's path on a body's edges and the
+/// direction its profile follows.
+pub fn to_active_frame_geometry(s: &Session, kind: &mut FeatureKind) {
+    if s.active_component == 0 {
+        return;
+    }
     let m = s.active_component_frame();
     if solidcraft_doc::is_identity(&m) {
         return;
@@ -1350,6 +1411,20 @@ fn repin_after_move(s: &mut Session, occurrence: u64) {
         if let Some(f) = s.doc_mut().feature_mut(id) {
             f.kind = kind;
         }
+    }
+}
+
+/// [`to_active_frame`] for one plane, of a feature whose other planes are already in the frame.
+pub fn plane_to_active_frame(s: &Session, plane: &mut solidcraft_doc::PlaneRef) {
+    if s.active_component == 0 || crate::frames::mapped() {
+        return;
+    }
+    let m = s.active_component_frame();
+    if solidcraft_doc::is_identity(&m) {
+        return;
+    }
+    if let Some(inv) = solidcraft_doc::mat_inverse(&m) {
+        solidcraft_doc::map_plane_ref(&inv, plane);
     }
 }
 

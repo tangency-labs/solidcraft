@@ -18,6 +18,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_primitives as api;
+use solidcore::primitive::primitive_creation::model::PrimitiveModel;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
@@ -397,12 +398,13 @@ fn a_slice_by_a_solid_fails_with_a_typed_reason() {
     let (a, b, _) = operands(&mut k, "box-box-union").unwrap();
     let error = boolean(&mut k, a, b, BooleanOperation::Slice).unwrap_err();
     assert!(matches!(error, SolidError::Failed(_)), "{error:?}");
-    assert_eq!(error.kind(), ErrorKind::Failed);
+    assert_eq!(error.kind(), ErrorKind::InvalidInput);
     assert_eq!(error.sm_status(), Some(solidcore::error::SM_ERR));
     assert_eq!(error.operation(), "boolean::merge::p4::manifold_boolean");
     assert_eq!(
         error.to_string(),
-        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the B-rep is not one"
+        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the other B-rep is \
+         not one"
     );
     assert!(!error.is_port_failure());
 }
@@ -914,7 +916,22 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         (Op::Difference, "difference", sphere - common, [3, 5, 4]),
     ] {
         let mut k = Kernel::default();
-        let a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
+        // the sphere as the generated case gave it, with its negative radius:
+        // `create_sphere` refuses that now, so it is built as `create_sphere` built it,
+        // by the primitive creation itself (the sphere of the radius's magnitude from
+        // the mirrored profile, which is where this case's seam is)
+        let mut frame = Axis2Placement::default();
+        frame
+            .set_canonical(
+                Point3::new(c[0], c[1], c[2]),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            )
+            .unwrap();
+        let (a, ()) = PrimitiveModel::build_new(&mut k, |pc, model| {
+            pc.create_partial_sphere(model, PrimitiveModel::MAIN, r, 0.0, 360.0, &frame)
+        })
+        .unwrap();
         let b = api::create_box(&mut k, Point3::new(o[0], o[1], o[2]), d[0], d[1], d[2]).unwrap();
         let result = match op {
             Op::Union => boolean_union(&mut k, a, b),
@@ -980,6 +997,118 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
         };
         if !(1.6e-4..1.8e-4).contains(&apart) {
             failures.push(format!("{name}: crossings {crossings:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A unit sphere cut by the plane y = -3e-5, which passes 3e-5 from both poles and runs
+/// 3e-5 beside the sphere's seam: the intersection is the cap y <= -3e-5, bounded by one
+/// circle. Near a pole the circle's trim curve on the sphere turns through a quarter of the
+/// u domain within a few 3e-5 of the curve; the drop that makes it accepted a first span
+/// 1/8192 of the circle long whatever its samples said, and that span's UV cubic reached
+/// u = 1.42 of the [0, 1] domain, its image up to 5e-4 off the circle (tolerance 1e-5): the trim
+/// jumped across the seam (`SmEdgeuse` test 7) and the union's and difference's sphere faces
+/// had intersecting loops (`SmFace` test 38). A span whose image is proved off the curve is
+/// now subdivided. Every trim curve on the sphere lies within the tolerance of the plane
+/// (sampled), inside the sphere's domain, the result has the cap's faces, edge and vertex
+/// and its exact volume, and the check reports neither test.
+#[test]
+fn a_circle_passing_near_a_spheres_poles_gets_a_trim_curve_on_the_circle() {
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::{edge, edgeuse, face};
+    let delta = 3e-5;
+    let tol = 1e-5;
+    let h = 1.0 - delta;
+    let cap = PI * h * h * (3.0 - h) / 3.0;
+    let mut failures = Vec::new();
+    for (op, name) in [(Op::Intersection, "intersection"), (Op::Union, "union")] {
+        let mut k = Kernel::default();
+        let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0).unwrap();
+        let b =
+            api::create_box(&mut k, Point3::new(-2.0, -2.0, -2.0), 4.0, 2.0 - delta, 4.0).unwrap();
+        let result = match op {
+            Op::Intersection => boolean_intersection(&mut k, a, b),
+            _ => boolean_union(&mut k, a, b),
+        };
+        let mut brep = match result {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        for eu in solidcore::topology::brep::p2::edgeuses(&brep, None).unwrap() {
+            let f = edgeuse::p1::face(&brep, eu).unwrap().unwrap();
+            let surface = face::p2::surface(&brep, f).unwrap().unwrap();
+            if !matches!(surface.kind(), SurfaceKind::Sphere(_)) {
+                continue;
+            }
+            // the circle's edge uses (not the seam's, in the union)
+            let e = edgeuse::p1::edge(&brep, eu).unwrap().unwrap();
+            let on_plane = edge::curve(&brep, e).unwrap().is_some_and(|c| {
+                let ivl = edge::interval(&brep, e).unwrap();
+                let mid = c.evaluate_point(&k, 0.5 * (ivl.min() + ivl.max())).unwrap();
+                (mid.y + delta).abs() <= tol
+            });
+            let trim = edgeuse::p1::uv_trim_curve(&brep, eu).unwrap().0;
+            let Some(trim) = trim.filter(|_| on_plane) else {
+                continue;
+            };
+            let ivl = trim.natural_interval();
+            let mut worst = (0.0_f64, 0.0_f64);
+            let mut nonfinite = false;
+            for i in 0..=20_000 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20_000.0;
+                let uv = trim.evaluate_point(&k, t).unwrap();
+                let p = surface
+                    .evaluate_point(&k, solidcore::geom::vector2d::Point2::new(uv.x, uv.y))
+                    .unwrap();
+                // how far the image is from the plane, and the trim from the domain [0, 1]^2
+                let outside = (-uv.x).max(uv.x - 1.0).max(-uv.y).max(uv.y - 1.0);
+                let off = (p.y + delta).abs();
+                // f64::max drops a NaN, so a non-finite sample fails here, not in the maxima
+                if !(off.is_finite() && outside.is_finite()) {
+                    nonfinite = true;
+                    break;
+                }
+                worst = (worst.0.max(off), worst.1.max(outside));
+            }
+            if nonfinite {
+                failures.push(format!("{name}: a sphere trim sample is not finite"));
+            } else if !(worst.0 <= tol && worst.1 <= 1e-9) {
+                failures.push(format!(
+                    "{name}: a sphere trim is {:e} off the plane, {:e} outside the domain",
+                    worst.0, worst.1
+                ));
+            }
+        }
+        if let Op::Intersection = op {
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != [2, 1, 1] {
+                failures.push(format!("{name}: faces/edges/vertices {counts:?}"));
+            }
+            let v = volume_of(&k, &mut brep);
+            let rel = (v - cap).abs() / cap;
+            if rel.is_nan() || rel > VOLUME_REL_TOL {
+                failures.push(format!("{name}: volume {v:e} vs {cap:e} (rel {rel:.2e})"));
+            }
+        }
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        for line in check.lines() {
+            if line.contains("SmEdgeuse::Test #7 ") || line.contains("SmFace::Test #38 ") {
+                failures.push(format!("{name}: {line}"));
+            }
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -1449,6 +1578,58 @@ fn a_boss_a_hair_past_a_cylinders_rim_joins() {
             let joined = boolean_union(&mut k, base, boss)
                 .unwrap_or_else(|e| panic!("r {r}, overhang {overhang}: {e}"));
             let want = PI * (r * r * h + boss_r * boss_r * boss_h);
+            assert_closed_with_volume(&mut k, joined, want, want * 1e-9);
+        }
+    }
+}
+
+/// The shape of stress corpus item S0051: a ball of radius 25 cut flat at z = 15 (a rim of
+/// radius 20 about z, through the ball's seam at +x), and a boss of radius 2.4 and height 4.8
+/// standing on the flat face at x = 17.6 + `gap`, so that its bottom circle passes `gap`
+/// outside the rim where the seam meets it, at a zone tolerance of 1e-5 and of 1e-7. Below
+/// the contact tolerance (the zone tolerance) the two coplanar circles touch at one point
+/// (docs/booleans.md §6, "Circles a hair less than tangent"); they cross `2√(2δ r R / (R -
+/// r))` apart, 4.7e-3 for δ 1e-6. The surface intersection of the ball with the boss's wall
+/// met the lens at its two crossings, and the plane of the flat face cut the boss's circle
+/// at the side of its domain, the rim's tangent there: those points were made vertices of
+/// their own beside the touch, and the union failed for every gap below 7e-6 ("the related
+/// vertex is not an end of the edge use", or a merged vertex refused for the tolerance its
+/// gaps needed). The union is one valid solid of the two volumes added, the ball less its
+/// cap, `4/3 π R³ - π c² (3R - c) / 3` (c = 10), and the boss, `π r² h`: the boss stands on the
+/// flat face and overhangs it only in the air.
+#[test]
+fn a_boss_a_hair_past_a_cut_balls_rim_joins() {
+    let (big, cut, r, h) = (25.0_f64, 15.0_f64, 2.4_f64, 4.8_f64);
+    let c = big - cut;
+    let want = 4.0 / 3.0 * PI * big.powi(3) - PI * c * c * (3.0 * big - c) / 3.0 + PI * r * r * h;
+    let kernel = |zone: f64| Kernel {
+        fixes: solidcraft_fixes::solidcraft_fixes(),
+        ..Kernel::new(&solidcore::KernelOptions {
+            tolerances: solidcore::Tolerances {
+                zone_tol_3d: zone,
+                xsect_tol_3d: 2.0 * zone,
+                approx_tol_3d: zone / 2.0,
+                ..solidcore::Tolerances::default()
+            },
+            ..solidcore::KernelOptions::default()
+        })
+    };
+    let rows: [(f64, &[f64]); 2] = [
+        (1e-5, &[1e-7, 1e-6, 3e-6, 5e-6, 7e-6, 9e-6]),
+        (1e-7, &[1e-8, 9e-8]),
+    ];
+    for (zone, gaps) in rows {
+        for &gap in gaps {
+            let mut k = kernel(zone);
+            let p = Point3::new;
+            let ball = api::create_sphere(&mut k, p(0.0, 0.0, 0.0), big).unwrap();
+            let above = api::create_box(&mut k, p(-30.0, -30.0, cut), 60.0, 60.0, 20.0).unwrap();
+            let body = boolean_difference(&mut k, ball, above).unwrap();
+            let boss = api::create_cylinder(&mut k, p(20.0 - r + gap, 0.0, cut), r, h).unwrap();
+            let joined = boolean_union(&mut k, body, boss)
+                .unwrap_or_else(|e| panic!("zone {zone:e}, gap {gap:e}: {e}"));
+            // the ball's face, the flat face, the boss's wall and top
+            assert_eq!(counts(&joined), [4, 6, 4], "zone {zone:e}, gap {gap:e}");
             assert_closed_with_volume(&mut k, joined, want, want * 1e-9);
         }
     }
@@ -2078,5 +2259,251 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
                 );
             }
         }
+    }
+}
+
+/// #18639: a box whose face x = 1 - d lies d inside the side of a cylinder of radius 1
+/// and height 1. Within the contact tolerance (1e-5) the plane touches the cylinder's
+/// wall along one line (WR-510, docs/booleans.md §6), so the union is the body of the
+/// exact tangency d = 0: the same faces, edges, vertices and two solids sharing the
+/// tangent line. The plane crosses the cylinder sqrt(2d - d^2) (3.2e-3 at 5e-6) from the
+/// line, and Level 2 read their order at 20 edge tolerances, inside that crossing, as the
+/// box face lying inside the cylinder (`SmEdge` test 9). Past the band, where the faces
+/// are more than the contact tolerance apart, the box face lies outside.
+///
+/// The test asks for the body of d = 0, clean at Level 2, in both operand orders, with no
+/// operand lost (the volume is pi + 1 - s within 1e-6 relative, s the circular segment
+/// acos(1 - d) - (1 - d) sqrt(1 - (1 - d)^2), under 3e-8 here). Then it moves the box face
+/// of the same bodies in until it dips 1.1e-5 (just past the contact tolerance), 2e-5 and
+/// 3.5e-5 into the cylinder at the line, a box face on the wrong side of the cylinder past
+/// the tolerance, and asks for `SmEdge` test 9 each time.
+#[test]
+fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
+    fn union(d: f64, cylinder_first: bool) -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        let c = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0).unwrap();
+        let b = api::create_box(&mut k, Point3::new(1.0 - d, -0.5, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let (x, y) = if cylinder_first { (c, b) } else { (b, c) };
+        let u = boolean_union(&mut k, x, y).unwrap();
+        (k, u)
+    }
+    fn solids(b: &Brep) -> usize {
+        solidcore::topology::brep::p1::regions(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&r| Some(r) != b.infinite_region())
+            .count()
+    }
+    for cylinder_first in [true, false] {
+        let (_, tangent) = union(0.0, cylinder_first);
+        let want_counts = counts(&tangent);
+        let want_solids = solids(&tangent);
+        for d in [1e-6, 5e-6, 9e-6] {
+            let case = format!("d {d:e}, cylinder first {cylinder_first}");
+            let (mut k, mut u) = union(d, cylinder_first);
+            assert_eq!(counts(&u), want_counts, "{case}");
+            assert_eq!(solids(&u), want_solids, "{case}");
+            let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "{case}: {lines:?}");
+            let e: f64 = 1.0 - d;
+            let s = e.acos() - e * (1.0 - e * e).sqrt();
+            let want = PI + 1.0 - s;
+            let v = volume_of(&k, &mut u);
+            assert!(
+                (v - want).abs() <= VOLUME_REL_TOL * want,
+                "{case}: {v} against {want}"
+            );
+            // Real defects are still caught: the box face moved in until it dips past the
+            // contact tolerance into the cylinder at the line lies on the wrong side of
+            // the cylinder by more than the tolerance there, and crosses it farther out.
+            for dip in [1.1e-5, 2e-5, 3.5e-5] {
+                let (mut k, mut u) = union(d, cylinder_first);
+                let line = solidcore::topology::brep::p1::edges(&u, None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|&e| u.edge(e).unwrap().edgeuses.len() == 8)
+                    .unwrap();
+                let inward = Axis2Placement::new(Point3::new(d - dip, 0.0, 0.0), Vec3::X, Vec3::Y);
+                for f in solidcore::topology::edge::faces(&u, line, None).unwrap() {
+                    let face = u.face_mut(f).unwrap();
+                    let surface = face.surface.as_mut().unwrap();
+                    if matches!(
+                        surface.kind(),
+                        solidcore::surface::surface::SurfaceKind::Plane(_)
+                    ) {
+                        surface.transform(&k, &inward, None).unwrap();
+                    }
+                }
+                let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                    .unwrap()
+                    .lines();
+                assert!(
+                    lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+                    "{case}, box face dipping {dip:e}: {lines:?}"
+                );
+            }
+        }
+    }
+}
+
+/// #18639 at small radii: a box whose face x = r - d lies d = 5e-6 inside the side of a
+/// cylinder of radius r = 0.01 or 0.002 (height 1) unions as the tangent body, clean at
+/// Level 2 in both operand orders (main reports `SmEdge` test 9 at r = 0.01), with no
+/// operand lost (the analytic volume within less than the cylinder's volume).
+///
+/// Real defects: the same bodies with the box face moved in until it dips 1.1e-5, 1.5e-5
+/// or 2e-5 into the cylinder at the line, or with the overlap split between the faces (box
+/// face in by h, cylinder wall out by h, h = 7.5e-6 or 9.5e-6, so each face lies within the
+/// 1e-5 edge tolerance of the line but they overlap by 1.5e-5 or 1.9e-5), report test 9
+/// wherever main reports it. Those are the rows below; on the other rows of the same
+/// matrix (r = 0.01 cylinder first dipping 1.5e-5 or 2e-5, r = 0.002 cylinder first, and
+/// the r = 0.002 splits) main reports no test 9 either. At these radii a dip comes back
+/// within the contact tolerance by 20 edge tolerances (it recovers by (2e-4)^2 / 2r, 2e-6
+/// at r = 0.01 and 1e-5 at r = 0.002), so test 9 sees the crossing only by checking the
+/// faces' gap from the line itself out.
+#[test]
+fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() {
+    use solidcore::surface::surface::SurfaceKind;
+    fn union(r: f64, d: f64, cylinder_first: bool) -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        let c = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, 1.0).unwrap();
+        let b = api::create_box(&mut k, Point3::new(r - d, -0.5, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let (x, y) = if cylinder_first { (c, b) } else { (b, c) };
+        let u = boolean_union(&mut k, x, y).unwrap();
+        (k, u)
+    }
+    // Moves the box face on the tangent line in until it dips `dip` into the cylinder at
+    // the line and the cylinder wall out by `h` along x, and returns the Level 2 report.
+    fn moved(r: f64, d: f64, cylinder_first: bool, dip: f64, h: f64) -> Vec<String> {
+        let (mut k, mut u) = union(r, d, cylinder_first);
+        let line = solidcore::topology::brep::p1::edges(&u, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| u.edge(e).unwrap().edgeuses.len() == 8)
+            .unwrap();
+        for f in solidcore::topology::edge::faces(&u, line, None).unwrap() {
+            let face = u.face_mut(f).unwrap();
+            let surface = face.surface.as_mut().unwrap();
+            let by = if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                d - dip + h
+            } else {
+                h
+            };
+            let shift = Axis2Placement::new(Point3::new(by, 0.0, 0.0), Vec3::X, Vec3::Y);
+            surface.transform(&k, &shift, None).unwrap();
+        }
+        check_brep(&mut k, &mut u, CheckLevel::Level2)
+            .unwrap()
+            .lines()
+    }
+    let d = 5e-6;
+    for r in [0.01, 0.002] {
+        for cylinder_first in [true, false] {
+            let (mut k, mut u) = union(r, d, cylinder_first);
+            let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(
+                lines.is_empty(),
+                "r {r}, cylinder first {cylinder_first}: {lines:?}"
+            );
+            // No operand lost: the union is the unit box plus the cylinder (pi r^2, height
+            // 1) less their overlap, the cylinder's segment x >= e = r - d (area
+            // r^2 acos(e / r) - e sqrt(r^2 - e^2), under 1e-9 here; the box spans y in
+            // [-0.5, 0.5], wider than the cylinder), within 1e-6 relative. That bound is
+            // under pi r^2, so a union that dropped the cylinder fails.
+            let e: f64 = r - d;
+            let s = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+            let want = PI * r * r + 1.0 - s;
+            assert!(VOLUME_REL_TOL * want < PI * r * r, "r {r}");
+            let v = volume_of(&k, &mut u);
+            assert!(
+                (v - want).abs() <= VOLUME_REL_TOL * want,
+                "r {r}, cylinder first {cylinder_first}: {v} against {want}"
+            );
+        }
+    }
+    // (r, cylinder first, the box face's dip at the line, the cylinder wall's move out):
+    // a split of h each is a dip of 2h with the wall h out.
+    let defects = [
+        (0.01, true, 1.1e-5, 0.0),
+        (0.01, true, 1.5e-5, 7.5e-6),
+        (0.01, true, 1.9e-5, 9.5e-6),
+        (0.01, false, 1.1e-5, 0.0),
+        (0.01, false, 1.5e-5, 0.0),
+        (0.01, false, 2e-5, 0.0),
+        (0.01, false, 1.5e-5, 7.5e-6),
+        (0.01, false, 1.9e-5, 9.5e-6),
+        (0.002, false, 1.1e-5, 0.0),
+        (0.002, false, 1.5e-5, 0.0),
+        (0.002, false, 2e-5, 0.0),
+    ];
+    for (r, cylinder_first, dip, h) in defects {
+        let lines = moved(r, d, cylinder_first, dip, h);
+        assert!(
+            lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+            "r {r}, cylinder first {cylinder_first}, dip {dip:e}, wall out {h:e}: {lines:?}"
+        );
+    }
+}
+
+/// #21104: a box 40 x 30 x 10 united with a cylinder of radius 5 and length 50 lying along
+/// its top face, axis along x at y = 15, sunk `d` = 1e-5 (exactly the contact tolerance)
+/// into the face, turned so the cylinder's seam lies on the contact line. Within the
+/// contact tolerance the wall touches the face along that line (WR-510,
+/// docs/booleans.md §6, `within_contact_tol` takes a distance at the tolerance as within
+/// it), so the union is the body of the exact tangency: the box's top face split in two by
+/// the line (7 faces) and the cylinder's wall and caps (3), 10 faces; the box's 12 edges,
+/// the two top edges the line ends on split (2 more) and the line, which is also the seam's
+/// middle piece, plus the two circles and the seam's two pieces past the box, 19 edges;
+/// the box's 8 vertices, the line's ends and the seam's two ends on the circles, 12
+/// vertices. Below the tolerance (#20695) this body is clean at Level 2; at the tolerance
+/// test 9 read the crossing check at its strict side and kept the 20 edge tolerance step,
+/// where the box face reads inside the cylinder (`SmEdge` test 9).
+///
+/// The test asks for that body, clean at Level 2, in both operand orders, with no operand
+/// lost: the volume is 12000 + 1250 pi less the overlap, 40 times the circular segment of
+/// height d, within 1e-6 relative (a union that dropped the cylinder would miss by
+/// 1250 pi).
+#[test]
+fn issue_21104_cylinder_sunk_the_contact_tolerance_on_its_seam_unions_as_tangent() {
+    let d = 1e-5;
+    let r = 5.0;
+    for cylinder_first in [false, true] {
+        let case = format!("d {d:e}, cylinder first {cylinder_first}");
+        let mut k = Kernel::default();
+        let block = api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0).unwrap();
+        let mut cylinder =
+            api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, 50.0).unwrap();
+        // The cylinder's axis (local z) goes to x, its seam (local x) to -z: the seam is
+        // the cylinder's lowest line, on the box's top face.
+        let place = Axis2Placement::new(
+            Point3::new(-5.0, 15.0, 15.0 - d),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        solidcore::topology::brep::p5::transform(&mut k, &mut cylinder, &place, None, false)
+            .unwrap();
+        let (a, b) = if cylinder_first {
+            (cylinder, block)
+        } else {
+            (block, cylinder)
+        };
+        let mut u = boolean_union(&mut k, a, b).unwrap_or_else(|e| panic!("{case}: {e}"));
+        assert_eq!(counts(&u), [10, 19, 12], "{case}");
+        let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{case}: {lines:?}");
+        let e: f64 = r - d;
+        let segment = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+        let want = 12000.0 + 1250.0 * PI - 40.0 * segment;
+        let v = volume_of(&k, &mut u);
+        assert!(
+            (v - want).abs() <= VOLUME_REL_TOL * want,
+            "{case}: {v} against {want}"
+        );
     }
 }

@@ -31,23 +31,37 @@
 //! STEP, not the full cylinders' axial extents, and are tested against both face domains at their
 //! middle, not their bottom end, which a trimmed face domain skips (WR-259).
 //! Conversion errors propagate; the original tolerance branches are kept.
+//! Not upstream: a plane's section of the cone, a circle or an ellipse, touches a side of
+//! the plane's domain where it overlaps it by up to the contact tolerance
+//! (`within_contact_tol`) and both surfaces are faces'
+//! (`Plane::make_new_plane_ellipse_in_contact`, docs/booleans.md §6).
 //! WR-510 (#1525): a plane parallel to a cylinder's axis is also tangent when it lies
 //! within the zone tolerance of a bounded face's wall along a line (the larger of the
 //! cone's and the plane's face tolerances, 0 without a face) and that line lies in the
-//! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
+//! face's sweep, else its crossings are tested; bare surfaces keep upstream's test. "Within"
+//! is read as every contact site reads it (`within_contact_tol`): a plane exactly the zone
+//! tolerance into the wall, or off a cone's generator, is within it.
+//! Where that tangent line is off the face and an end of the face's sweep lies between it
+//! and a crossing, the face touches the plane along that end: one tangent line there, not
+//! the crossing a little further on (#20390), as an arc that starts on a line a hair inside
+//! its circle touches it at its start (`Ellipse::intersect_with_line`). That touch is read
+//! with the rim's tolerance, [`contact_tol_3d`], and taken only along an end the requested
+//! domain holds whose line meets the plane's domain; else the crossing stays.
 //! A plane holding a generator of a cone (a box's face against a cone lying on it) touches
 //! it along that generator: one tangent line in closed form, as for the cylinder, instead of
 //! a traced curve through the tangency, whose repeated points the check refuses. It holds
 //! the generator within a face's zone tolerance; a bare plane that dips into the cone does
 //! only while its two crossings lie within `tol` of the generator, the cylinder's own test.
 //! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
-//! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
+//! up to [`contact_tol_3d`] (`within_contact_tol`) touch along one line; bare surfaces keep
+//! two crossings.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, CurveLocationType, Line};
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -58,7 +72,9 @@ use crate::geom::geom_utility::p1::{
     parallelogram_cross_vectors, CircleCircle,
 };
 use crate::geom::geom_utility::p2::segment_segment_intersect;
-use crate::geom::tol::{approx_tol3d, are_same_to_tol, contact_tol_3d, is_zero};
+use crate::geom::tol::{
+    approx_tol3d, are_same_to_tol, contact_tol_3d, is_zero, within_contact_tol,
+};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
@@ -143,9 +159,12 @@ fn append_boundary_intersections(
             || result.curve_types.len() != count
             || result.deviations.len() != count
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the intersection result's lists differ in length",
+                SurfaceFailure::Defect {
+                    why: "an intersection result's lists differ in length, though the \
+                          intersections push one entry to each list per curve",
+                },
             ));
         }
     }
@@ -226,7 +245,13 @@ fn bbox(k: &Kernel, cone: &Cone, domain: &Extent2d) -> Result<Extent3d> {
         )?
         .normal
         .ok_or_else(|| {
-            SolidError::surface_failed(OP, "the surface's bounding box could not be computed")
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the B-spline bounding box routine, asked for the normal box, \
+                          returned without it, though it returns every box it is asked for",
+                },
+            )
         })
 }
 
@@ -247,6 +272,58 @@ fn angle_in_sweep(cone: &Cone, axis: Vec3, direction: Vec3, tol: f64) -> Result<
         deg = end;
     }
     Ok(deg >= start && deg <= end)
+}
+
+/// The direction, from the axis, of the end of the cone's sweep that lies strictly between
+/// `tangent` (the direction of the plane's tangent line, off the sweep) and `crossing` (the
+/// direction of a crossing line in the sweep), the short way round, and that the requested
+/// `domain` holds: the generator along which a face that starts on the lens of a plane a
+/// hair inside its wall touches that plane. `None` when neither end does (an end of the
+/// surface's sweep that the requested domain stops short of is not an end of the face).
+fn sweep_end_on_the_lens(
+    k: &Kernel,
+    cone: &Cone,
+    domain: &Extent2d,
+    axis: Vec3,
+    tangent: Vec3,
+    crossing: Vec3,
+) -> Result<Option<Vec3>> {
+    let x_axis = cone.rev().position().x_axis();
+    let from_x = |direction: Vec3| axis.ccw_angle_between(x_axis, direction);
+    // the angle from the tangent line, in (-pi, pi]
+    let turn = |angle: f64, tangent_angle: f64| {
+        let mut d = (angle - tangent_angle) % (2.0 * PI);
+        if d > PI {
+            d -= 2.0 * PI;
+        } else if d <= -PI {
+            d += 2.0 * PI;
+        }
+        d
+    };
+    let tangent_angle = from_x(tangent)?;
+    let to_crossing = turn(from_x(crossing)?, tangent_angle);
+    let step = cone.rev().step_uv_domain();
+    for end_deg in [cone.rev().start_angle_deg(), cone.rev().end_angle_deg()] {
+        let end = end_deg * PI / 180.0;
+        let to_end = turn(end, tangent_angle);
+        if to_end * to_crossing > 0.0 && to_end.abs() < to_crossing.abs() {
+            // the end as the requested domain sees it: the coordinate of its generator
+            // that does not change along the axis
+            let low = cone.convert_uv_from_step_to_nurbs(k, Point2::new(end_deg, step.v_min()))?;
+            let high = cone.convert_uv_from_step_to_nurbs(k, Point2::new(end_deg, step.v_max()))?;
+            let (at, held) = if (low.x - high.x).abs() <= (low.y - high.y).abs() {
+                (low.x, domain.u_interval())
+            } else {
+                (low.y, domain.v_interval())
+            };
+            if !held.contains_value(at, crate::geom::tol::ScaledZero::scaled_zero(&held)) {
+                continue;
+            }
+            let y_axis = axis.cross(x_axis);
+            return Ok(Some(end.cos() * x_axis + end.sin() * y_axis));
+        }
+    }
+    Ok(None)
 }
 
 fn add_plane_line(
@@ -361,6 +438,14 @@ impl Cone {
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT, |t| approx_tol3d(k, t));
+        // a section a hair past a side of the plane's domain touches it where both
+        // surfaces are faces' (`Plane::make_new_plane_ellipse_in_contact`); bare surfaces keep
+        // upstream's
+        let contact = if zone_tols.iter().all(Option::is_some) {
+            contact_tol_3d(k)
+        } else {
+            0.0
+        };
         let box1 = bbox(k, self, domain)?;
         // crPlane.CalculateBoundingBox: expanded by its face's tolerance (no face:
         // SM_ZONE_TOL_3D)
@@ -403,10 +488,25 @@ impl Cone {
                 let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
                 let dir = if distance > 0.0 { -normal } else { normal };
                 let line_in_sweep = angle_in_sweep(self, axis, dir, ang_tol)?;
+                // (within the zone tolerance as every contact site reads it,
+                // `within_contact_tol`)
+                let size = bottom.max_dimension().max(plane_origin.max_dimension()) + bot_radius;
                 let tangent = distance.abs() >= bot_radius
                     || (distance.abs() > bot_radius - tol
                         && bot_radius * bot_radius - distance * distance < tol * tol)
-                    || (distance.abs() > bot_radius - zone_tol && line_in_sweep);
+                    || (zone_tol > 0.0
+                        && within_contact_tol(bot_radius - distance.abs(), zone_tol, size)
+                        && line_in_sweep);
+                // The touch at an end of the sweep (below) is the contact the face's rim
+                // reads against the plane's edge, so it takes the rim's tolerance,
+                // `contact_tol_3d`, not the faces' zone tolerance, which may have grown
+                // past it: between the two the rim crosses, and so does the wall. As at the
+                // rim, a wall whose whole circle lies within that tolerance of the plane
+                // touches it at no single line and keeps its crossings
+                // (`line_coplanar_circle_intersect_distinct`).
+                let end_contact = zone_tol > 0.0
+                    && within_contact_tol(bot_radius - distance.abs(), contact_tol_3d(k), size)
+                    && !within_contact_tol(bot_radius + distance.abs(), contact_tol_3d(k), size);
                 if tangent {
                     if line_in_sweep {
                         let start = bottom + bot_radius * dir;
@@ -426,16 +526,47 @@ impl Cone {
                     let val = sqrt(bot_radius * bot_radius - distance * distance);
                     for start in [center + val * vec, center - val * vec] {
                         if angle_in_sweep(self, axis, start - bottom, ang_tol)? {
-                            let end = start + line_max * scale * axis;
-                            add_plane_line(
-                                &mut out,
-                                plane,
-                                other_domain,
-                                start,
-                                end,
-                                tol,
-                                TsectCurveType::Crossing,
-                            )?;
+                            // Not upstream (#20390): a plane in contact with the wall whose
+                            // tangent line is off the face stays within the contact
+                            // tolerance of the wall from that line to this crossing. An end
+                            // of the face's sweep between the two lies on the plane by that
+                            // tolerance, so the face touches the plane along it: one tangent
+                            // line there, and no crossing a hair further on, as an arc that
+                            // starts on a line a hair inside its circle touches it at its
+                            // start (`Ellipse::intersect_with_line`, docs/booleans.md §6).
+                            // Only with the tangent line off the face (a wall nearly all
+                            // the way round holds it, and its start is then no end beside
+                            // this crossing), only an end the requested domain holds, and
+                            // only where the tangent line meets the plane's own domain: else
+                            // the crossing stays, as the one curve of this pair there.
+                            let touch = if end_contact && !line_in_sweep {
+                                sweep_end_on_the_lens(k, self, domain, axis, dir, start - bottom)?
+                            } else {
+                                None
+                            };
+                            let mut touched = false;
+                            if let Some(end_dir) = touch {
+                                let from = bottom + bot_radius * end_dir;
+                                let to = from + line_max * scale * axis;
+                                if let (Some(curve), true) =
+                                    plane.make_new_plane_line(other_domain, from, to, tol)?
+                                {
+                                    add(&mut out, curve, TsectCurveType::Tangent);
+                                    touched = true;
+                                }
+                            }
+                            if !touched {
+                                let end = start + line_max * scale * axis;
+                                add_plane_line(
+                                    &mut out,
+                                    plane,
+                                    other_domain,
+                                    start,
+                                    end,
+                                    tol,
+                                    TsectCurveType::Crossing,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -484,7 +615,7 @@ impl Cone {
             }
             let center = position.origin() + v * axis;
             let radius = self.radius(v).abs();
-            let curves = plane.make_new_plane_ellipse(
+            let curves = plane.make_new_plane_ellipse_in_contact(
                 k,
                 other_domain,
                 center,
@@ -494,6 +625,7 @@ impl Cone {
                 position.y_axis(),
                 &step.u_interval(),
                 tol,
+                contact,
             )?;
             add_plane_ellipses(k, &mut out, curves)?;
         } else {
@@ -527,9 +659,12 @@ impl Cone {
                         // How far `p` lies past the plane, away from the axis: above 0 where the
                         // plane cuts into the cone at that end.
                         let side = d.dot(normal).signum();
+                        let size = plane_origin
+                            .max_dimension()
+                            .max(bottom.max_dimension().max(top.max_dimension()) + reach);
                         let held = |p: Point3| {
                             let e = (p - plane_origin).dot(normal) * side;
-                            e.abs() <= zone_tol
+                            (zone_tol > 0.0 && within_contact_tol(e.abs(), zone_tol, size))
                                 || (e <= 0.0 && -e <= tol)
                                 || (e > 0.0 && 2.0 * reach * e / tilt <= tol * tol)
                         };
@@ -607,7 +742,7 @@ impl Cone {
                 tol,
             )?;
             for interval in intervals {
-                let curves = plane.make_new_plane_ellipse(
+                let curves = plane.make_new_plane_ellipse_in_contact(
                     k,
                     other_domain,
                     center,
@@ -617,6 +752,7 @@ impl Cone {
                     y,
                     &interval,
                     tol,
+                    contact,
                 )?;
                 add_plane_ellipses(k, &mut out, curves)?;
             }
@@ -821,6 +957,13 @@ impl Cone {
                 CircleCircle::Crossing(p, q) => vec![p, q],
                 CircleCircle::Coincident => return Ok(true),
             };
+            // Axes within EFF_ZERO_SQRT are parallel here, but a move along `axis` leaves `other`
+            // by that angle times the move, past `zero` (#15727): test on `other`'s generator.
+            let other_along = if axis.dot(other_axis) < 0.0 {
+                -other_axis
+            } else {
+                other_axis
+            };
             for point in points {
                 let line_point = point + (min - param) * axis;
                 // Upstream tests the bottom end of the line, which lies outside a face
@@ -829,9 +972,10 @@ impl Cone {
                 // WR-259). The middle of the clipped line lies within both faces' axial
                 // ranges (to the tolerance); the inversions below decide the rest.
                 let test_point = line_point + 0.5 * (max - min) * axis;
+                let other_test_point = point + ((min - param) + 0.5 * (max - min)) * other_along;
                 let zero = EFF_ZERO * (1.0 + line_point.max_dimension());
                 let inv = intersection_inversion(self, k, test_point, zero)?;
-                let other_inv = intersection_inversion(other, k, test_point, zero)?;
+                let other_inv = intersection_inversion(other, k, other_test_point, zero)?;
                 let (Some(inv), Some(other_inv)) = (inv, other_inv) else {
                     continue;
                 };
@@ -991,9 +1135,12 @@ fn nurbs_uv_status_ignored(cone: &Cone, k: &Kernel, step_uv: Point2) -> Result<P
 
 fn ellipse_contains(k: &Kernel, curve: &Curve, point: Point3) -> Result<bool> {
     let CurveKind::Ellipse(ellipse) = curve.kind() else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the curve is not an ellipse",
+            SurfaceFailure::Defect {
+                why: "a curve compared is not an ellipse, though both callers compare only \
+                      the ellipse arcs the cone/cone branch built",
+            },
         ));
     };
     Ok(ellipse.step_inversion(k, point, true, 0.0).1 != Some(CurveLocationType::Exterior))
@@ -1342,6 +1489,35 @@ mod tests {
         }
     }
 
+    /// tangency-labs/solidcraft#15727: with one axis 5e-12 rad off, the holes of the issue711 test
+    /// still cross in both lines, in either order; both were dropped and the cut came back empty.
+    #[test]
+    fn cylinders_a_hair_off_parallel_keep_both_crossing_lines() {
+        let k = Kernel::default();
+        let a = cylinder(&k, Vec3::new(6.0, 0.0, -1.0), false, false, false);
+        let mut b = Cone::new_cylinder_bounded(
+            Vec3::new(3.0, 5.196, -1.0),
+            Vec3::new(1.0, 0.0, -5e-12),
+            Vec3::Y,
+            5.0,
+            0.0,
+            360.0,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        b.make_nurb(&k).unwrap();
+        let da = axial_domain(&k, &a, 1.0, 11.0);
+        let db = b.rev().base().natural_uv_domain();
+        for (a, da, b, db) in [(&a, da, &b, db), (&b, db, &a, da)] {
+            let (more, out) = a.intersect_with_cone(&k, &da, b, &db, Some(1e-7)).unwrap();
+            assert!(!more);
+            assert_axial_lines(&out, [a, b], 2, 0.0, 10.0);
+            assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        }
+    }
+
     #[test]
     fn issue711_axial_trims_respect_both_parameterizations_and_axis_directions() {
         let k = Kernel::default();
@@ -1518,18 +1694,39 @@ mod tests {
         owner: PlaneOwner,
         zone_tols: [Option<f64>; 2],
     ) -> SurfaceIntersection {
+        let wall = axial_domain(k, c, 0.0, 12.0);
+        wall_section_within(k, c, d, owner, zone_tols, &wall, -20.0)
+    }
+
+    /// [`wall_section`] with the requested part of the wall, `wall`, and the plane's patch
+    /// from `y_min` up (to 20, and 20 either way along z).
+    fn wall_section_within(
+        k: &Kernel,
+        c: &Cone,
+        d: f64,
+        owner: PlaneOwner,
+        zone_tols: [Option<f64>; 2],
+        wall: &Extent2d,
+        y_min: f64,
+    ) -> SurfaceIntersection {
         let plane = Plane::from_normal(Vec3::new(d, 0.0, 0.0), Vec3::X);
-        let plane_domain = Extent2d::from_bounds(-20.0, -20.0, 20.0, 20.0);
+        // the patch's corners in the plane's own coordinates
+        let (origin, u, v) = (
+            plane.position().origin(),
+            plane.position().x_axis(),
+            plane.position().y_axis(),
+        );
+        let corners = [(y_min, -20.0), (y_min, 20.0), (20.0, -20.0), (20.0, 20.0)]
+            .map(|(y, z)| Vec3::new(d, y, z) - origin)
+            .map(|p| (p.dot(u), p.dot(v)));
+        let low = |pick: fn(&(f64, f64)) -> f64| corners.iter().map(pick).fold(f64::MAX, f64::min);
+        let high = |pick: fn(&(f64, f64)) -> f64| corners.iter().map(pick).fold(f64::MIN, f64::max);
+        let plane_domain = Extent2d::from_points(
+            Point2::new(low(|c| c.0), low(|c| c.1)),
+            Point2::new(high(|c| c.0), high(|c| c.1)),
+        );
         let (more, out) = c
-            .intersect_with_plane_owned(
-                k,
-                &axial_domain(k, c, 0.0, 12.0),
-                &plane,
-                owner,
-                &plane_domain,
-                None,
-                zone_tols,
-            )
+            .intersect_with_plane_owned(k, wall, &plane, owner, &plane_domain, None, zone_tols)
             .unwrap();
         assert!(!more);
         out
@@ -1702,9 +1899,272 @@ mod tests {
             .is_empty());
     }
 
+    /// The wall face of the radius-3 cylinder along z swept over `start`..`end` degrees.
+    fn wall_swept(k: &Kernel, start: f64, end: f64) -> Cone {
+        wall_of_radius(k, 3.0, start, end)
+    }
+
+    /// [`wall_swept`] for a cylinder of `radius`.
+    fn wall_of_radius(k: &Kernel, radius: f64, start: f64, end: f64) -> Cone {
+        let mut c = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            radius,
+            start,
+            end,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        c
+    }
+
+    /// The kinds of a wall section's curves and where each line starts, as (x, y).
+    fn section_lines(out: &SurfaceIntersection) -> Vec<(TsectCurveType, f64, f64)> {
+        out.curve_types
+            .iter()
+            .zip(&out.curves_3d)
+            .map(|(kind, curve)| {
+                let CurveKind::Line(line) = curve.kind() else {
+                    panic!("expected an analytic line");
+                };
+                let p = line.evaluate_point(line.natural_interval().min());
+                (*kind, p.x, p.y)
+            })
+            .collect()
+    }
+
+    /// #20390: a plane a hair inside the wall crosses it in two lines and stays within that
+    /// hair of it between them. A face that starts between the tangent line and a crossing
+    /// has its own end on the plane by the zone tolerance, and touches the plane along that
+    /// end: one tangent line there, not the crossing a little further on (the edge of that
+    /// end and the crossing were two lines of one contact, 3.4e-5 apart in the issue's
+    /// notch, and the boolean failed between them). All in closed form on the radius-3
+    /// wall: the plane `x = 3 - depth` crosses it at `±acos(1 - depth / 3)`.
+    #[test]
+    fn a_wall_that_starts_between_the_tangent_line_and_a_crossing_touches_along_its_start() {
+        let k = Kernel::default();
+        let zone = Some(1e-5);
+        let faces = [
+            (PlaneOwner::Face(zone), [None, zone]),
+            (PlaneOwner::NoFace, [zone, None]),
+        ];
+        let at = |deg: f64| (3.0 * deg.to_radians().cos(), 3.0 * deg.to_radians().sin());
+        let near = |got: (TsectCurveType, f64, f64), kind: TsectCurveType, (x, y): (f64, f64)| {
+            got.0 == kind && (got.1 - x).abs() < 1e-12 && (got.2 - y).abs() < 1e-12
+        };
+
+        // the issue's proportions: 1.6e-10 deep (crossings at ±5.9e-4°), the face from
+        // 8.6e-5°; and the wall of WR-510's test, 1e-6 deep (±0.0468°), from 0.04°
+        for (depth, start) in [(1.6e-10, 8.6e-5), (1e-6, 0.04)] {
+            let c = wall_swept(&k, start, 80.0);
+            let d = 3.0 - depth;
+            let crossing = (1.0 - depth / 3.0_f64).acos().to_degrees();
+            assert!(start < crossing, "{depth}: the face starts on the lens");
+            for (owner, zone_tols) in faces {
+                let lines = section_lines(&wall_section(&k, &c, d, owner, zone_tols));
+                assert_eq!(lines.len(), 1, "{depth} {owner:?}: {lines:?}");
+                assert!(
+                    near(lines[0], TsectCurveType::Tangent, at(start)),
+                    "{depth} {owner:?}: {lines:?}"
+                );
+            }
+            // bare surfaces keep the crossing
+            let lines = section_lines(&wall_section(&k, &c, d, PlaneOwner::NoFace, [None; 2]));
+            assert_eq!(lines.len(), 1, "{depth}: {lines:?}");
+            assert!(
+                near(
+                    lines[0],
+                    TsectCurveType::Crossing,
+                    (d, (9.0 - d * d).sqrt())
+                ),
+                "{depth}: {lines:?}"
+            );
+        }
+
+        // the mirror image: a face that ends on the lens touches along its end
+        let c = wall_swept(&k, -80.0, -0.04);
+        for (owner, zone_tols) in faces {
+            let lines = section_lines(&wall_section(&k, &c, 3.0 - 1e-6, owner, zone_tols));
+            assert_eq!(lines.len(), 1, "{owner:?}: {lines:?}");
+            assert!(
+                near(lines[0], TsectCurveType::Tangent, at(-0.04)),
+                "{owner:?}: {lines:?}"
+            );
+        }
+
+        // not changed: a face that holds the tangent line touches along it; a face that
+        // starts past the crossing meets the plane nowhere; and a plane deeper in the wall
+        // than the zone tolerance (1e-4: crossings at ±0.468°) keeps its crossing
+        for (owner, zone_tols) in faces {
+            let c = wall_swept(&k, -0.01, 80.0);
+            let lines = section_lines(&wall_section(&k, &c, 3.0 - 1e-6, owner, zone_tols));
+            assert_eq!(lines.len(), 1, "{owner:?}: {lines:?}");
+            assert!(
+                near(lines[0], TsectCurveType::Tangent, (3.0, 0.0)),
+                "{owner:?}: {lines:?}"
+            );
+
+            let c = wall_swept(&k, 0.05, 80.0);
+            let out = wall_section(&k, &c, 3.0 - 1e-6, owner, zone_tols);
+            assert!(out.curves_3d.is_empty(), "{owner:?}");
+
+            let c = wall_swept(&k, 0.3, 80.0);
+            let d = 3.0 - 1e-4;
+            let lines = section_lines(&wall_section(&k, &c, d, owner, zone_tols));
+            assert_eq!(lines.len(), 1, "{owner:?}: {lines:?}");
+            assert!(
+                near(
+                    lines[0],
+                    TsectCurveType::Crossing,
+                    (d, (9.0 - d * d).sqrt())
+                ),
+                "{owner:?}: {lines:?}"
+            );
+        }
+    }
+
+    /// The touch along a wall's start is taken only where it is the faces' contact; else
+    /// the crossing stays, as before. On the wall of
+    /// `a_wall_that_starts_between_the_tangent_line_and_a_crossing_touches_along_its_start`
+    /// (from 0.04°, the plane 1e-6 deep, its crossing at 0.0468°, `y = 0.00244949`):
+    /// - a requested part of the wall that starts at 0.045°, past the surface's own start
+    ///   and before the crossing, does not hold that start, so it is no edge of the face;
+    /// - a plane patch from `y = 0.00235` holds the crossing but not the start's line, at
+    ///   `y = 3 sin 0.04° = 0.00209440`;
+    /// - with a face's zone tolerance grown to 1e-4, a plane 5e-5 deep (its crossing at
+    ///   0.3308°) is past the contact tolerance the rim reads, 1e-5, so the wall crosses as
+    ///   the rim does; 1e-6 deep it still touches.
+    #[test]
+    fn the_touch_along_a_walls_start_is_only_the_faces_own_contact() {
+        let k = Kernel::default();
+        let zone = Some(1e-5);
+        let faces = [
+            (PlaneOwner::Face(zone), [None, zone]),
+            (PlaneOwner::NoFace, [zone, None]),
+        ];
+        let c = wall_swept(&k, 0.04, 80.0);
+        let d: f64 = 3.0 - 1e-6;
+        let crossing = (d, (9.0 - d * d).sqrt());
+        let whole = axial_domain(&k, &c, 0.0, 12.0);
+        let is = |got: &[(TsectCurveType, f64, f64)], kind: TsectCurveType, (x, y): (f64, f64)| {
+            got.len() == 1
+                && got[0].0 == kind
+                && (got[0].1 - x).abs() < 1e-12
+                && (got[0].2 - y).abs() < 1e-12
+        };
+        let start = (
+            3.0 * 0.04_f64.to_radians().cos(),
+            3.0 * 0.04_f64.to_radians().sin(),
+        );
+
+        // the requested part of the wall from 0.045°
+        let part = Extent2d::from_points(
+            c.convert_uv_from_step_to_nurbs(&k, Point2::new(0.045, 0.0))
+                .unwrap(),
+            c.convert_uv_from_step_to_nurbs(&k, Point2::new(80.0, 12.0))
+                .unwrap(),
+        );
+        for (owner, zone_tols) in faces {
+            let lines = section_lines(&wall_section_within(
+                &k, &c, d, owner, zone_tols, &part, -20.0,
+            ));
+            assert!(
+                is(&lines, TsectCurveType::Crossing, crossing),
+                "{owner:?}: {lines:?}"
+            );
+
+            // the plane's patch from y = 0.00235, and one from y = 0.002 that holds the start
+            let lines = section_lines(&wall_section_within(
+                &k, &c, d, owner, zone_tols, &whole, 0.00235,
+            ));
+            assert!(
+                is(&lines, TsectCurveType::Crossing, crossing),
+                "{owner:?}: {lines:?}"
+            );
+            let lines = section_lines(&wall_section_within(
+                &k, &c, d, owner, zone_tols, &whole, 0.002,
+            ));
+            assert!(
+                is(&lines, TsectCurveType::Tangent, start),
+                "{owner:?}: {lines:?}"
+            );
+        }
+
+        // a wall nearly all the way round, from -0.01° to 359.98°, holds the tangent line:
+        // the rule's premise fails, whatever the tolerances (here a zone tolerance of 1e-7,
+        // under the plane's depth, so the tangent line is not taken either). Its start lies
+        // between the tangent line and the crossing at -0.0468°, but that crossing is at
+        // the wall's other end; both crossings stay.
+        let round = wall_swept(&k, -0.01, 359.98);
+        let tight = Some(1e-7);
+        let lines = section_lines(&wall_section(
+            &k,
+            &round,
+            d,
+            PlaneOwner::NoFace,
+            [tight, None],
+        ));
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.0 == TsectCurveType::Crossing && (l.1 - d).abs() < 1e-12),
+            "{lines:?}"
+        );
+        assert!(
+            (lines[0].2 + lines[1].2).abs() < 1e-12
+                && (lines[0].2.abs() - crossing.1).abs() < 1e-12,
+            "{lines:?}"
+        );
+
+        // a wall so small that its whole circle lies within the contact tolerance of the
+        // plane (radius 5e-6, the plane through its axis) touches it at no single line: the
+        // rim keeps its crossings there, and so does the wall, swept from 10° to 170°, at 90°
+        let tiny = wall_of_radius(&k, 5e-6, 10.0, 170.0);
+        for (owner, zone_tols) in faces {
+            let lines = section_lines(&wall_section(&k, &tiny, 0.0, owner, zone_tols));
+            assert!(
+                is(&lines, TsectCurveType::Crossing, (0.0, 5e-6)),
+                "{owner:?}: {lines:?}"
+            );
+        }
+
+        // a zone tolerance grown past the contact tolerance
+        let grown = Some(1e-4);
+        let c = wall_swept(&k, 0.2, 80.0);
+        for (owner, zone_tols) in [
+            (PlaneOwner::Face(grown), [None, grown]),
+            (PlaneOwner::NoFace, [grown, None]),
+        ] {
+            let d: f64 = 3.0 - 5e-5;
+            let lines = section_lines(&wall_section(&k, &c, d, owner, zone_tols));
+            assert!(
+                is(&lines, TsectCurveType::Crossing, (d, (9.0 - d * d).sqrt())),
+                "{owner:?}: {lines:?}"
+            );
+        }
+        let c = wall_swept(&k, 0.04, 80.0);
+        for (owner, zone_tols) in [
+            (PlaneOwner::Face(grown), [None, grown]),
+            (PlaneOwner::NoFace, [grown, None]),
+        ] {
+            let lines = section_lines(&wall_section(&k, &c, 3.0 - 1e-6, owner, zone_tols));
+            assert!(
+                is(&lines, TsectCurveType::Tangent, start),
+                "{owner:?}: {lines:?}"
+            );
+        }
+    }
+
     /// WR-510 (#1525): a face swept over 0.04°..0.06° only, cut by the plane `x = 3 - 1e-6`.
-    /// The plane is within the zone tolerance (1e-5) of the wall, but the tangent line at 0°
-    /// is outside the face; the crossing at +0.0468° is inside it and stays.
+    /// The tangent line at 0° is outside the face; the crossing at +0.0468° is inside it,
+    /// and bare surfaces keep it. (Where a face's zone tolerance holds the plane in contact
+    /// with the wall, the face touches the plane along its start, at 0.04°:
+    /// `a_wall_that_starts_between_the_tangent_line_and_a_crossing_touches_along_its_start`.)
     #[test]
     fn issue1525_tangent_line_outside_sweep_keeps_crossing() {
         let k = Kernel::default();
@@ -1722,25 +2182,14 @@ mod tests {
         );
         c.make_nurb(&k).unwrap();
         let d = 3.0 - 1e-6;
-        let zone = Some(1e-5);
-        for (owner, zone_tols) in [
-            (PlaneOwner::NoFace, [None, None]),
-            (PlaneOwner::Face(zone), [None, zone]),
-            (PlaneOwner::NoFace, [zone, None]),
-        ] {
-            let out = wall_section(&k, &c, d, owner, zone_tols);
-            assert_eq!(
-                out.curve_types,
-                vec![TsectCurveType::Crossing],
-                "{owner:?} {zone_tols:?}"
-            );
-            let CurveKind::Line(line) = out.curves_3d[0].kind() else {
-                panic!("expected an analytic line");
-            };
-            let p = line.evaluate_point(line.natural_interval().min());
-            let y = (3.0 * 3.0 - d * d).sqrt();
-            assert!((p.x - d).abs() < 1e-9 && (p.y - y).abs() < 1e-9, "{p:?}");
-        }
+        let out = wall_section(&k, &c, d, PlaneOwner::NoFace, [None, None]);
+        assert_eq!(out.curve_types, vec![TsectCurveType::Crossing]);
+        let CurveKind::Line(line) = out.curves_3d[0].kind() else {
+            panic!("expected an analytic line");
+        };
+        let p = line.evaluate_point(line.natural_interval().min());
+        let y = (3.0 * 3.0 - d * d).sqrt();
+        assert!((p.x - d).abs() < 1e-9 && (p.y - y).abs() < 1e-9, "{p:?}");
     }
 
     #[test]

@@ -9,6 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{Expr, Mat, RailFit, SweepOrientation, SweepRail};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::kernel::MAX_LOFT_RAILS;
 
 use crate::SolveApp;
 use crate::selection::{AXES, CURVES, EDGES, SelInput};
@@ -88,10 +89,74 @@ pub fn direction_input() -> SelInput {
     SelInput::new("Direction", AXES | EDGES, false)
 }
 
+/// The guide rail rows' labels, in order: a loft takes up to [`MAX_LOFT_RAILS`] rails.
+const RAIL_LABELS: &[&str] = &[
+    "Rail",
+    "Second Rail",
+    "Rail 3",
+    "Rail 4",
+    "Rail 5",
+    "Rail 6",
+    "Rail 7",
+    "Rail 8",
+    "Rail 9",
+    "Rail 10",
+    "Rail 11",
+    "Rail 12",
+    "Rail 13",
+    "Rail 14",
+    "Rail 15",
+    "Rail 16",
+];
+
+/// The input that picks rail `k`'s curves (from 0), in order along the rail; optional.
+pub fn rail_input(k: usize) -> SelInput {
+    SelInput::new(RAIL_LABELS.get(k).copied().unwrap_or("Rail"), CURVES, true)
+}
+
 /// The inputs that pick a sweep's guide rails: the first rail's curves and the second's, in order
 /// along each rail; both optional.
 pub fn rail_inputs() -> [SelInput; 2] {
-    [SelInput::new("Rail", CURVES, true), SelInput::new("Second Rail", CURVES, true)]
+    [rail_input(0), rail_input(1)]
+}
+
+/// Keeps a loft's rail rows (the inputs from `first` on) as one list that grows as rails are picked
+/// (#12185): two rows at least, one more once the last row has a pick, up to [`MAX_LOFT_RAILS`]
+/// rows, and at most one empty row at the end beyond the first two.
+pub fn grow_rails(inputs: &mut Vec<SelInput>, first: usize) {
+    while inputs.len() < first + 2 {
+        inputs.push(rail_input(inputs.len() - first));
+    }
+    while inputs.len() > first + 2 && inputs[inputs.len() - 1].items.is_empty() && inputs[inputs.len() - 2].items.is_empty() {
+        inputs.pop();
+    }
+    if inputs.last().is_some_and(|input| !input.items.is_empty()) && inputs.len() - first < MAX_LOFT_RAILS {
+        inputs.push(rail_input(inputs.len() - first));
+    }
+}
+
+/// Sets the rail rows from `first` on to the stored rails' picks, adding a row for each rail past
+/// the rows there are (#12185); [`grow_rails`] then settles the empty rows.
+pub fn fill_rails(inputs: &mut Vec<SelInput>, first: usize, rails: impl IntoIterator<Item = Vec<Sel>>) {
+    for (k, items) in rails.into_iter().enumerate() {
+        if inputs.len() <= first + k {
+            inputs.push(rail_input(k));
+        }
+        inputs[first + k].items = items;
+    }
+}
+
+/// [`grow_rails`] for a Loft or Surface Loft dialog, keeping its active row and its open list on
+/// rows that still exist (#12185). Other dialogs are left alone.
+pub fn grow_loft_rails(d: &mut crate::dialogs::Dialog) {
+    if !matches!(d.kind, crate::dialogs::Kind::Loft { .. } | crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Loft { .. })) {
+        return;
+    }
+    grow_rails(&mut d.inputs, 1);
+    d.active = d.active.min(d.inputs.len() - 1);
+    if d.listed.is_some_and(|i| i >= d.inputs.len()) {
+        d.listed = None;
+    }
 }
 
 /// The path picked as a chain of a body's edges: the body and a point on each edge (#2216).
@@ -133,11 +198,9 @@ pub fn profile_sketch(items: &[Sel], active: Option<u64>) -> Option<u64> {
     sketch
 }
 
-/// A feature's stored rails as the rail inputs' selections (`active`: the sketch being edited).
-pub fn rail_sels(rails: &[SweepRail], active: Option<u64>) -> [Vec<Sel>; 2] {
-    let sels =
-        |i: usize| rails.get(i).map(|r| r.curves.iter().map(|id| crate::selection::curve_pick(id, r.sketch.0, active)).collect()).unwrap_or_default();
-    [sels(0), sels(1)]
+/// A feature's stored rails as one selection per rail (`active`: the sketch being edited).
+pub fn rail_sels(rails: &[SweepRail], active: Option<u64>) -> Vec<Vec<Sel>> {
+    rails.iter().map(|r| r.curves.iter().map(|id| crate::selection::curve_pick(id, r.sketch.0, active)).collect()).collect()
 }
 
 /// The option rows; true when Enter was pressed in a field.
@@ -171,9 +234,9 @@ pub fn rail_fit_index(fit: RailFit) -> usize {
 
 /// The picked rails (each in the sketch its curves are in) and the fit (`fit`, an index into
 /// [`RAIL_FITS`]), added to `p`; whether any rail was picked.
-pub fn rail_params(app: &SolveApp, fit: usize, rails: [&[Sel]; 2], p: &mut Value) -> Result<bool, String> {
+pub fn rail_params(app: &SolveApp, fit: usize, rails: &[&[Sel]], p: &mut Value) -> Result<bool, String> {
     let mut given = Vec::new();
-    for sels in rails {
+    for sels in rails.iter().copied() {
         let curves: Vec<String> = sels.curve_ids();
         if curves.is_empty() {
             continue;
@@ -195,7 +258,7 @@ pub fn rail_params(app: &SolveApp, fit: usize, rails: [&[Sel]; 2], p: &mut Value
 /// scale when they change anything; with rails picked, the rails (each in the sketch its curves
 /// are in) and the fit instead. `picked` is the direction input's selection, `rails` the rail
 /// inputs'.
-pub fn params(app: &SolveApp, o: &SweepOpts, picked: Option<&Sel>, rails: [&[Sel]; 2], p: &mut Value) -> Result<(), String> {
+pub fn params(app: &SolveApp, o: &SweepOpts, picked: Option<&Sel>, rails: &[&[Sel]], p: &mut Value) -> Result<(), String> {
     // Rails set the profile's turn and size: the other options don't apply.
     if rail_params(app, o.rail_fit, rails, p)? {
         return Ok(());

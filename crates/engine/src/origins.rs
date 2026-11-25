@@ -91,7 +91,7 @@ impl Session {
             if path.is_empty() || path.len() > 64 || !seen.insert(path) || !self.occurrence_visible(path) {
                 continue;
             }
-            let Ok(placement) = self.occurrence_placement(path) else { continue };
+            let Ok(placement) = self.shown_occurrence_placement(path) else { continue };
             for item in ITEMS {
                 let name = key(path, item);
                 if !self.visibility.hidden_origin.contains(&name)

@@ -1,6 +1,7 @@
 //! The cell grid feature (#14044): solidcore plans the cells over the sketch's profiles, each cell
 //! becomes a prism along the sketch normal, and the prisms, apart from each other by the web,
-//! are one tool: the targets are cut once, not once per cell.
+//! are one tool: the targets are cut once, not once per cell. Raised cells are one tool for each
+//! set of target bodies they meet, so a cell joins only the bodies it touches.
 
 use super::*;
 use solidcore_record::cell_grid::CellGridSpec;
@@ -16,7 +17,16 @@ const _: () = assert!(MAX_CUT_CELLS < solidcore_record::brep::MAX_SHELLS, "one s
 /// Past this many cells the cut takes noticeable time, and the feature says so.
 pub const SLOW_CUT_CELLS: usize = 100;
 
-/// The tool of a cell grid feature: every cell's prism, as one body.
+/// The kernel's refusal of a cell grid, in its own words (as the kernel's error carried them
+/// before the router).
+fn refused(e: solidcraft_kernel::KernelError) -> DocError {
+    match e {
+        solidcraft_kernel::KernelError::Invalid(why) => DocError::Invalid(why),
+        e => DocError::Invalid(e.to_string()),
+    }
+}
+
+/// The tool of a cell grid feature: every cell's prism, as one body (raised: one per set of bodies met).
 pub(crate) fn tools(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -68,7 +78,7 @@ pub(crate) fn tools(
         f,
     )?;
     let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-    let defaults = solidcore_ops::cell_grid::default_spec();
+    let defaults = solidcraft_kernel::default_cell_grid();
     let sides = match sides {
         Some(e) => {
             let n = val(vals, e, Kind::Unitless)?;
@@ -116,7 +126,7 @@ pub(crate) fn tools(
         },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
-    let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let plan = solidcraft_kernel::plan_cell_grid(&loops, &spec).map_err(refused)?;
     if plan.cells.is_empty() {
         return Err(DocError::Invalid("no cell fits inside the profiles: use smaller cells, a thinner web or `clip: free`".into()));
     }
@@ -154,20 +164,59 @@ pub(crate) fn tools(
     extrude_within_reach([lo, hi])?;
     let mut tools: Vec<Traced> = Vec::new();
     for cell in &plan.cells {
-        let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let pieces = solidcraft_kernel::cell_regions(cell).map_err(refused)?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
+    // Raised cells join each body they meet, as a join extrude's regions do: packed into one tool
+    // they would fuse every target any cell touches. So they are packed per set of bodies met.
+    let groups = match mode {
+        crate::CellGridMode::Cut => vec![tools],
+        crate::CellGridMode::Raised => group_by_targets(tools, &shown, &scope)?,
+    };
     // The cells lie apart by the web, so the kernel's own check of their boxes (which a
     // staggered grid's neighbours fail) is not asked.
-    if tools.len() > 1 {
-        let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-        if let Some(one) = kernel::join_apart(&bodies)? {
-            return Ok(vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())]);
+    let mut packed: Vec<Traced> = Vec::new();
+    for group in groups {
+        if group.len() > 1 {
+            let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+            if let Some(one) = kernel::join_apart(&bodies)? {
+                packed.push(Traced::step(one, &group.iter().collect::<Vec<_>>()));
+                continue;
+            }
+        }
+        packed.extend(group);
+    }
+    Ok(packed)
+}
+
+/// The cell tools in groups that meet the same target bodies (each group in the order of the
+/// cells). With fewer than two target bodies there is nothing to tell apart: one group. Exact
+/// contact, as the join itself decides which bodies a tool joins.
+fn group_by_targets(tools: Vec<Traced>, shown: &ModelState, scope: &[String]) -> Result<Vec<Vec<Traced>>> {
+    let targets: Vec<&ModelBody> = shown.bodies.iter().filter(|b| scope.contains(&b.name) && !b.body.is_mesh()).collect();
+    if targets.len() < 2 || tools.len() < 2 {
+        return Ok(vec![tools]);
+    }
+    let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+    let mut met: Vec<Vec<usize>> = vec![Vec::new(); tools.len()];
+    for (ti, target) in targets.iter().enumerate() {
+        let mut at = 0;
+        for chunk in bodies.chunks(1024) {
+            for (k, hit) in target.body.meets_each(chunk)?.into_iter().enumerate() {
+                if hit && let Some(m) = met.get_mut(at + k) {
+                    m.push(ti);
+                }
+            }
+            at += chunk.len();
         }
     }
-    Ok(tools)
+    let mut groups: BTreeMap<Vec<usize>, Vec<Traced>> = BTreeMap::new();
+    for (tool, m) in tools.into_iter().zip(met) {
+        groups.entry(m).or_default().push(tool);
+    }
+    Ok(groups.into_values().collect())
 }
 
 /// How far from the sketch plane the bodies named in `scope` reach, with a margin: the distance a

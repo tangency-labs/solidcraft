@@ -129,7 +129,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                 open = next;
                 rows.ui().data_mut(|data| data.insert_temp(id, open));
             }
-            Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
+            Event::Click(_) | Event::Open(_) => {
+                if !app.preferences.design_sub_tab_sheets {
+                    select_sheet(app, sheet.id);
+                } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+                    app.set_status(error, true);
+                }
+            }
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
             _ => {}
         }
@@ -248,7 +254,7 @@ pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
     Some(view_name(app, drawing, view, number))
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
     // A view with a label is called what its label says: its name, else its words and letter
     // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {

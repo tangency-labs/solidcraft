@@ -64,6 +64,7 @@
 //! - The stepper's `IsLocalMin` / `IsLocalMax` are not used upstream and are not
 //!   ported. Debug-only drawing and `SM_ASSERT`s are omitted.
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_closest_point, vec_lin_comb_two_vectors};
@@ -72,12 +73,13 @@ use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SortKey};
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{sqrt, Point3};
 use crate::kernel::Kernel;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 use super::p1::{control_point, ErrorNormType, SurfPtGlobalSolver, SurfPtSolveStepper};
@@ -180,7 +182,6 @@ impl SurfPtGlobalSolver<'_> {
 
         let mut sub_domain = domain;
         let mut grid_uv_guess = Point2::UNDEF;
-        let mut grid_ok = false;
 
         let mut best_func_val = BIG_DOUBLE;
 
@@ -195,7 +196,6 @@ impl SurfPtGlobalSolver<'_> {
                 &mut grid_uv_guess,
                 &mut best_func_val,
             )?;
-            grid_ok = true;
             if grid_size_u < 2 || grid_size_v < 2 {
                 break; // Just to be safe.
             }
@@ -225,31 +225,24 @@ impl SurfPtGlobalSolver<'_> {
         }
 
         // If guesses from both FindPolygonGuess() and RefinePatchByGrid(), pick the
-        // better one.
-        if poly_ok && grid_ok {
+        // better one. (The grid loop above always runs, and its refinement returns on
+        // failure, so the grid guess is always made: upstream's "both failed" branch
+        // cannot be taken and is not ported.)
+        if poly_ok {
             let poly_dist = self.calc_func_val(k, uv)?;
             let grid_dist = self.calc_func_val(k, grid_uv_guess)?;
 
             // when either guess is uninitialized - quit
             if poly_dist >= BIG_DOUBLE && grid_dist >= BIG_DOUBLE {
-                return Err(SolidError::surface_failed(
-                    OP_ROUGH,
-                    "neither rough guess is initialized",
-                ));
+                return Err(SolidError::surface(OP_ROUGH, SurfaceFailure::NoRoughGuess));
             }
 
             // when the GridGuess is better than the PolyGuess, use it
             if grid_dist < poly_dist {
                 uv = grid_uv_guess;
             }
-        } else if grid_ok {
-            uv = grid_uv_guess;
         } else {
-            // both failed
-            return Err(SolidError::surface_failed(
-                OP_ROUGH,
-                "both rough guesses failed",
-            ));
+            uv = grid_uv_guess;
         }
 
         Ok(RoughGuess {
@@ -275,9 +268,9 @@ impl SurfPtGlobalSolver<'_> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline() else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_POLY,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
         let op = b.solver_op();
@@ -333,9 +326,9 @@ impl SurfPtGlobalSolver<'_> {
 
         // Next try: Iter every ControlPoint and find the one closest to the target
         let rational = bspl.is_rational();
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_POLY, "the B-spline surface has no control points")
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_POLY, SurfaceFailure::NoControlPoints, e))?;
 
         let mut tied: Option<(usize, usize)> = None;
         let mut num_ties: usize = 0;
@@ -1003,7 +996,10 @@ impl SurfPtGlobalSolver<'_> {
     /// off upstream); a result that is the wrong kind of extremum (or not on the
     /// surface for intersect, or pushing a boundary for normalise) is retried from a
     /// grid-refined guess; the best solution is returned with its across-seam
-    /// partners. Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
+    /// partners, unless a target distance bounds it out (a minimum farther than the
+    /// target, or a maximum nearer, by more than the tolerance: #20438). Every request
+    /// is answered with that one candidate (`eSolutionRequested` is `NotUsed`
+    /// upstream). Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
     /// the caller's handle for the surface.
     ///
     /// # Errors
@@ -1027,6 +1023,7 @@ impl SurfPtGlobalSolver<'_> {
         k: &Kernel,
         surface_obj: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        self.set_dropped_beyond_target(false);
         let mut solutions = SolutionArray::new();
 
         // First find a rough guess.
@@ -1038,12 +1035,7 @@ impl SurfPtGlobalSolver<'_> {
         let rough = match NetScope::with_net(k, || self.find_rough_guess(k)) {
             Ok(r) => r,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    OP_SOLVE,
-                    "no rough guess was found",
-                ))
-            }
+            Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::NoRoughGuess, e)),
         };
         let (best_idx_u, best_idx_v) = (rough.best_idx_u, rough.best_idx_v);
 
@@ -1218,6 +1210,34 @@ impl SurfPtGlobalSolver<'_> {
                 sol = *s;
                 best_sol_value = sol.start.solution_value;
                 found_answer = true;
+            }
+        }
+
+        // Not upstream (#20438; `cpdOptTargetDistance` is `NotUsed` there): a target
+        // distance bounds the answer as it bounds the tree solve's, which seeds its
+        // best answer so far with the target's square (`GlobalPointSolve_0`) and culls
+        // a solution neither better than it nor within the tolerance of it
+        // (`AddSortedSolution`, the same expressions): a minimum farther than the
+        // target by more than the tolerance is not reported. Only a minimise is
+        // bounded here: the sort-out above keeps the nearest candidate for every
+        // operation, so for a maximise it is not the farthest (#13684) and a bound
+        // on it would drop answers the farther candidates honour; the kernel sends
+        // a maximise to the tree solve, which bounds every candidate. The tree solve
+        // culls only a minimum and a maximum by it.
+        if found_answer {
+            if let Some(target) = self.base.target_distance() {
+                let value = sol.start.solution_value;
+                let value_sq = value * value;
+                let best_sq = target * target;
+                let best = sqrt(best_sq.abs());
+                let (better, far) = match op {
+                    SolverOperation::Minimize => (value_sq < best_sq, value > best + loose_tol),
+                    _ => (true, false),
+                };
+                if !better && far {
+                    found_answer = false;
+                    self.set_dropped_beyond_target(true);
+                }
             }
         }
 
@@ -1412,9 +1432,9 @@ impl SurfPtSolveStepper<'_> {
                 return Ok((adjusted, scale));
             }
             self.set_uv(domain.clamp_point(self.uv()));
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_ADJUST,
-                "the guess is outside the domain and the step is zero",
+                SurfaceFailure::ZeroStepOutsideDomain,
             ));
         }
 
@@ -1908,9 +1928,9 @@ impl SurfPtSolveStepper<'_> {
                 | ErrorNormType::MaxAbs
                 | ErrorNormType::Gap
         ) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LINE_B,
-                "the error norm is an absolute norm",
+                SurfaceFailure::LineSearchNormUnsigned,
             ));
         }
 
@@ -1918,9 +1938,9 @@ impl SurfPtSolveStepper<'_> {
         let mut y1 = self.error_norm(norm_type)?;
 
         if y0 * y1 > 0.0 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LINE_B,
-                "the error norm does not change sign over the step",
+                SurfaceFailure::LineSearchNotBracketed,
             ));
         }
 

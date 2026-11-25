@@ -9,6 +9,7 @@
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
 //! | `edge_ends`, `faces_tangent_at` (fork, WR-668) | the edge lookups of `sm_IsZeroSpeedTangentEnd` |
+//! | `tangent_sections::tangent_directions` (not upstream, #18639) | none: test 9's directions past the contact band of tangent planes and cylinders |
 //! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
@@ -21,7 +22,10 @@
 //! `IsAnalytic` and `IsBounded`. Not upstream (WR-540, #383): where two faces round an
 //! edge leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb). Not upstream (WR-668, tangency-labs/smlib
+//! fork's tangency-labs/smlib@5533bbb). Not upstream (#18639): round a line edge whose
+//! faces are all planes and cylinders along it, test 9 reads them instead at the step
+//! `tangent_sections` certifies in closed form, past the band in which the tangent faces
+//! are within the contact tolerance of each other, wherever one is certified. Not upstream (WR-668, tangency-labs/smlib
 //! ecf1963, the default since its flag was retired): the edge check and edge-use
 //! check build the edge's [`EdgeEnds`] (its interval and whether its faces are tangent
 //! at each end) before checking its curve or a UV trim, since a Rust curve does not
@@ -284,8 +288,12 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
         rtn &= cx.rep.this_bool(b, C, this, 2, ok)?;
     }
 
+    // not upstream: the geometric tests of an edge whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::edge_clean(k, e);
+
     // Check Edge->Curve
-    if has_curve {
+    if has_curve && geo {
         rtn &= edge_curve_check(k, b, cx, e)?;
     }
 
@@ -301,29 +309,31 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
-    let curve_length = {
-        let c = super::super::required(b.edge(e)?.curve.as_ref())?;
-        c.approximate_length(k, &interval, 5, false)?.0
-    };
+    if geo {
+        let curve_length = {
+            let c = super::super::required(b.edge(e)?.curve.as_ref())?;
+            c.approximate_length(k, &interval, 5, false)?.0
+        };
 
-    // 7: Edge Length must be larger than its tolerance
-    let ok = !need || curve_length >= edge_tol - EFF_ZERO;
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
+        // 7: Edge Length must be larger than its tolerance
+        let ok = !need || curve_length >= edge_tol - EFF_ZERO;
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
 
-    // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
-    // Face->Surfaces (level 2)
-    let xsect_tol = edge_tol + edge_tol;
-    let mut max_gap = 0.0;
-    let ok = !cx.rep.need(2) || {
-        let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
-        max_gap = gap;
-        passed
-    };
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+        // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
+        // Face->Surfaces (level 2)
+        let xsect_tol = edge_tol + edge_tol;
+        let mut max_gap = 0.0;
+        let ok = !cx.rep.need(2) || {
+            let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
+            max_gap = gap;
+            passed
+        };
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+    }
 
     // 14: Edge->Edgeuse orientations must alternate, SAME-OPPO-SAME-OPPO
     let ok = !need || assert_test_edge14(b, e)?;
@@ -376,7 +386,8 @@ fn edge_point(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Point3> {
 /// The direction edge use `eu`'s face leaves the edge in at `t` (with its point,
 /// tangent and face normal): its binormal, or with `step_off` (WR-540) the direction to
 /// its point `step_off_dist` into the face, square to the edge (kept as the binormal when
-/// the step or a unitisation fails).
+/// the step or a unitisation fails); with `certified` (#18639) the direction it holds for
+/// `eu`.
 fn sector_direction(
     k: &Kernel,
     b: &mut Brep,
@@ -385,9 +396,14 @@ fn sector_direction(
     options: BinormalOptions,
     step_off: bool,
     step_off_dist: f64,
+    certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
     let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
+        eval.binormal = dir;
+        return Ok(eval);
+    }
     if !step_off {
         return Ok(eval);
     }
@@ -447,12 +463,15 @@ fn radial_order(
     // binormal angles tie (or differ by rounding, either way round) and cannot show the
     // order. Where any sector is that narrow, every face is measured by the direction from
     // the edge to its point a short step into the face (20 edge tolerances, as
-    // IsConvexRadialSector steps).
+    // IsConvexRadialSector steps). Not upstream (#18639): round a line edge whose faces
+    // are planes and cylinders along it, every face is read instead at the step that
+    // `tangent_sections` certifies past the tangent faces' contact band, where one is.
     let seq_param = extent.evaluate(0.456);
-    let mut step_off = false;
-    let step_off_dist = 20.0 * tedge::tolerance(b, e)?;
+    let edge_tol = tedge::tolerance(b, e)?;
+    let step_off_dist = 20.0 * edge_tol;
     let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
     let num_eus = b.edge(e)?.edgeuses.len();
+    let mut walked: Vec<(EdgeuseId, EdgeuseId, bool)> = Vec::new();
     let mut eu = target;
     let mut sectors = 0usize;
     while let Some(rad) = eu1::radial(b, eu)? {
@@ -461,19 +480,25 @@ fn radial_order(
         }
         let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
         let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let mut tie = false;
         if let (Some(b0), Some(b1)) = (b0, b1) {
             if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
-                if u0.dot(u1) > tie_dot {
-                    step_off = true;
-                }
+                tie = u0.dot(u1) > tie_dot;
             }
         }
+        walked.push((eu, rad, tie));
         sectors += 1;
         match eu1::mate(b, rad)? {
-            Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
+            Some(next) if next != target && sectors < num_eus => eu = next,
             _ => break,
         }
     }
+    let step_off = walked.iter().any(|s| s.2);
+    let certified = if step_off {
+        super::tangent_sections::tangent_directions(k, b, e, seq_param, edge_tol, &walked)?
+    } else {
+        None
+    };
 
     let mut steps = 0;
     while Some(target) != primary {
@@ -493,8 +518,11 @@ fn radial_order(
             ));
         }
         let t = extent.evaluate(0.456);
-        let target_eval = sector_direction(k, b, target, t, options, step_off, step_off_dist)?;
-        let radial_eval = sector_direction(k, b, radial, t, options, step_off, step_off_dist)?;
+        let certified = certified.as_deref();
+        let target_eval =
+            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
+        let radial_eval =
+            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
 
         // 1st iteration save variables
         if primary.is_none() {
@@ -627,7 +655,13 @@ fn in_wire_shell(
 
 /// The UV trim checks of `SmEdgeuse::AssertValid` (tests 11, 6, 7, 25, 26) for an edge
 /// use holding a UV trim curve.
-fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) -> Result<bool> {
+fn uv_trim_checks(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    eu: EdgeuseId,
+    geo: bool,
+) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
     let mut rtn = true;
@@ -668,7 +702,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
 
     // UVTrimCurve->Owner pointer must equal this Edgeuse pointer
     let check = trim.owner() == Some((cx.keys)(this));
-    if check {
+    if check && geo {
         let s = super::super::required(surface)?;
         let on_surface = crate::curve::crv_on_surf::CrvOnSurf::new(
             k,
@@ -688,7 +722,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     rtn &= cx.rep.this_bool(b, C, this, 6, !need || check)?;
 
     // 7: see if the UVTrimCurve jumps across a periodic boundary inappropriately
-    let ok = !need || {
+    let ok = !need || !geo || {
         let trim = super::super::required(b.edgeuse(eu)?.uv_trim_curve.as_ref())?;
         seams::assert_no_periodic_jump(k, trim, closed_u, closed_v, &domain)?
     };
@@ -705,6 +739,15 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     rtn &= cx.rep.this_bool(b, C, this, 25, !need || equality)?;
     rtn &= cx.rep.this_bool(b, C, this, 26, !need || containment)?;
     Ok(rtn)
+}
+
+/// Whether edge use `eu`'s geometric tests run: its edge's neighbourhood has not passed
+/// them on a body before ([`crate::geom::check_memo`]).
+fn edgeuse_geometry_due(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
+    Ok(match b.edgeuse(eu)?.edge {
+        Some(e) => !crate::geom::check_memo::edge_clean(k, e),
+        None => true,
+    })
 }
 
 /// `SmEdgeuse::AssertValid(SM_NO_WALK)`.
@@ -724,6 +767,9 @@ pub(super) fn edgeuse(
         rtn &= base::topology(b, cx, this)?;
     }
     let need = cx.rep.need(0);
+    // not upstream: the geometric tests of a use of an edge whose neighbourhood passed
+    // them on a body before are skipped ([`crate::geom::check_memo`])
+    let geo = edgeuse_geometry_due(k, b, eu)?;
 
     // Edgeuse and the objects it attaches to need to share common contexts
     let record = b.edgeuse(eu)?;
@@ -757,7 +803,7 @@ pub(super) fn edgeuse(
 
     // for edgeuses with UVTrimCurves on closed surfaces
     if has_trim {
-        rtn &= uv_trim_checks(k, b, cx, eu)?;
+        rtn &= uv_trim_checks(k, b, cx, eu, geo)?;
     }
 
     // 17: Edgeuse type is SmLoopuse_TYPE only when m_pSorLU points to a Loopuse
@@ -866,7 +912,7 @@ pub(super) fn edgeuse(
                     };
                 rtn &= cx.rep.this_bool(b, C, this, 24, ok)?;
 
-                if let (Some(r), Some(_)) = (radial, mate) {
+                if let (Some(r), Some(_), true) = (radial, mate, geo) {
                     let options = BinormalOptions::default();
                     let t = extent.evaluate(0.456);
                     let target = evaluate_binormal(k, b, eu, t, true, &options)?;
@@ -900,7 +946,7 @@ pub(super) fn edgeuse(
     }
 
     // when Edgeuse has a UVTrimCurve - Check that it's valid
-    if has_trim {
+    if has_trim && geo {
         let level = cx.rep.level;
         // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
@@ -934,7 +980,7 @@ pub(super) fn edgeuse(
     }
 
     // 20: The Control Polygon turns to follow a singular surface boundary
-    let dog_leg = seams::has_dog_leg_near_pole(k, b, eu)?;
+    let dog_leg = geo && seams::has_dog_leg_near_pole(k, b, eu)?;
     rtn &= cx.rep.this_bool(b, C, this, 20, !need || !dog_leg)?;
 
     // all done

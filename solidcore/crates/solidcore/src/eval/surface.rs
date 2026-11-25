@@ -567,6 +567,26 @@ impl SurfaceEval {
         Ok(self.collapse(uv, reach)?.flags())
     }
 
+    /// Whether the piece of the iso-line along `d` through `uv` over the `d` parameters `range`
+    /// lies within `reach` mm of `centre`, certified ([`super::collapse::iso_within`]): where a
+    /// loop's uses meet a jump apart at a vertex, the run between them inside its tolerance. A
+    /// plane's or a spline's only, any other surface refused.
+    pub fn iso_within(
+        &self,
+        uv: [f64; 2],
+        d: usize,
+        range: (f64, f64),
+        centre: Vec3,
+        reach: f64,
+    ) -> Result<bool, EvalError> {
+        match self {
+            SurfaceEval::Eval(e, _) => super::collapse::iso_within(e, uv, d, range, centre, reach),
+            _ => Err(EvalError::Unevaluable(
+                "an iso-line piece of a surface that is not a spline".into(),
+            )),
+        }
+    }
+
     /// A certified bound on how far the surface moves per unit of parameter `d`, over the
     /// points whose other parameter lies in `across`, or past an end of the range it reaches by
     /// at most `beyond_across`, and whose `d` parameter is on the knot range or past it by at
@@ -585,6 +605,24 @@ impl SurfaceEval {
             }
             _ => Err(EvalError::Unevaluable(
                 "a partial bound of a surface that is not a spline".into(),
+            )),
+        }
+    }
+
+    /// A certified bound on how far the surface moves when a point of the strip `along` ×
+    /// `across` moves along `d` by at most `o` within it
+    /// ([`super::collapse::strip_shift_bound`]); a spline's only, any other surface refused.
+    pub fn strip_shift_bound(
+        &self,
+        d: usize,
+        along: [f64; 2],
+        across: [f64; 2],
+        o: f64,
+    ) -> Result<f64, EvalError> {
+        match self {
+            SurfaceEval::Eval(e, _) => super::collapse::strip_shift_bound(e, d, along, across, o),
+            _ => Err(EvalError::Unevaluable(
+                "a shift bound of a surface that is not a spline".into(),
             )),
         }
     }

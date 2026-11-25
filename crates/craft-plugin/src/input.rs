@@ -7,57 +7,156 @@
 use crate::{HostError, Result};
 use serde_json::{Map, Value};
 
+/// Dialog hint for choosing an installed font family; programmatic values remain strings.
+pub const FONT_KEY: &str = "x-solidcraft-font";
+
+/// Validate the optional font hint without looking at installed fonts or limiting values.
+pub fn font_field(schema: &Value) -> Result<bool> {
+    match schema.get(FONT_KEY) {
+        None => Ok(false),
+        Some(Value::Bool(true)) if schema.get("type").and_then(Value::as_str) == Some("string") => Ok(true),
+        Some(_) => Err(bad(FONT_KEY, "must be true on a string property")),
+    }
+}
+
 /// How deep a schema and value are followed.
 const MAX_DEPTH: usize = 32;
 /// The most schema nodes one check visits (`oneOf` inside `oneOf` multiplies).
 const MAX_STEPS: usize = 100_000;
 
+/// Rules that follow alternatives for the same value, but not its child values.
+#[derive(Clone, Copy)]
+struct CheckContext<'a> {
+    conditions: Conditions<'a>,
+    selection: bool,
+}
+impl<'a> CheckContext<'a> {
+    const fn new(conditions: Conditions<'a>) -> Self {
+        Self { conditions, selection: false }
+    }
+}
+
 /// `Ok` when `value` fits `schema`; otherwise the first field that does not, and why.
 pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
     crate::conditions::validate_conditions(schema)?;
     let mut steps = 0;
-    check(schema, value, "params", 0, &mut steps, true, true)
+    check(schema, value, "params", 0, &mut steps, true, CheckContext::new(Conditions::Evaluate))
+}
+
+/// Check an individual input property while retaining its field name's selection context.
+pub fn check_input_field(name: &str, schema: &Value, value: &Value) -> Result<()> {
+    crate::conditions::validate_conditions(schema)?;
+    check(schema, value, &format!("params.{name}"), 0, &mut 0, true, CheckContext::new(Conditions::Evaluate))
 }
 
 /// Validate and omit hidden fields before passing input to plugin code.
 pub fn prepare_input(schema: &Value, value: &Value) -> Result<Value> {
     check_input(schema, value)?;
-    fn visible(schema: &Value, value: &Value, depth: usize, steps: &mut usize) -> Result<Value> {
+    fn visible(schemas: &[&Value], value: &Value, selection: bool, depth: usize, steps: &mut usize) -> Result<Value> {
         *steps += 1;
         if depth > MAX_DEPTH || *steps > MAX_STEPS {
             return Err(bad("params", "is nested too deeply to check"));
         }
+        let mut applicable = Vec::new();
+        for schema in schemas {
+            scopes(schema, value, selection, depth, steps, &mut applicable)?;
+        }
         if let Some(object) = value.as_object() {
-            let conditions = crate::conditions::InputConditions::parse(schema)?;
-            let controls = conditions.visible_values(object);
+            let conditions = SharedConditions::new(applicable, object)?;
             let mut out = Map::new();
             for (key, value) in object {
-                if conditions.fields.get(key).is_some_and(|f| !f.visible(&controls)) {
+                if conditions.hidden(key) {
                     continue;
                 }
-                let property =
-                    schema.get("properties").and_then(|p| p.get(key)).or_else(|| schema.get("additionalProperties")).unwrap_or(&Value::Null);
-                out.insert(key.clone(), visible(property, value, depth + 1, steps)?);
+                let properties: Vec<_> = conditions
+                    .schemas
+                    .iter()
+                    .filter_map(|s| s.get("properties").and_then(|p| p.get(key)).or_else(|| s.get("additionalProperties")))
+                    .collect();
+                out.insert(key.clone(), visible(&properties, value, matches!(key.as_str(), "selection" | "target" | "targets"), depth + 1, steps)?);
             }
             return Ok(Value::Object(out));
         }
         if let Some(values) = value.as_array() {
-            let items = schema.get("items").unwrap_or(&Value::Null);
-            return values.iter().map(|v| visible(items, v, depth + 1, steps)).collect::<Result<Vec<_>>>().map(Value::Array);
+            let items: Vec<_> = applicable.iter().filter_map(|s| s.get("items")).collect();
+            return values.iter().map(|v| visible(&items, v, false, depth + 1, steps)).collect::<Result<Vec<_>>>().map(Value::Array);
         }
         Ok(value.clone())
     }
-    visible(schema, value, 0, &mut 0)
+    visible(&[schema], value, false, 0, &mut 0)
 }
 
+// Choose conditional object branches using their load-validated scalar discriminators, before
+// hidden keys or their otherwise invalid values can affect branch selection.
+fn selected_branch<'a>(options: &'a [Value], value: &Value, steps: &mut usize) -> Result<Option<&'a Value>> {
+    let mut budget = MAX_STEPS.saturating_sub(*steps);
+    let selected = crate::conditions::selected_branch(options, value, &mut budget);
+    *steps = MAX_STEPS - budget;
+    selected
+}
+
+fn conditional_branches(options: &[Value], value: &Value) -> bool {
+    (options.len() == 1 || value.is_object()) && options.iter().any(|option| crate::conditions::contains_conditions(option, false))
+}
+
+fn scopes<'a>(schema: &'a Value, value: &Value, selection: bool, depth: usize, steps: &mut usize, out: &mut Vec<&'a Value>) -> Result<()> {
+    *steps += 1;
+    if depth > MAX_DEPTH || *steps > MAX_STEPS {
+        return Err(bad("params", "is nested too deeply to check"));
+    }
+    out.push(schema);
+    let selection = selection || schema.get("x-solidcraft-selection").is_some();
+    for key in ["oneOf", "anyOf"] {
+        if let Some(options) = schema.get(key).and_then(Value::as_array) {
+            let selected = if conditional_branches(options, value) {
+                selected_branch(options, value, steps)?
+            } else {
+                let context = CheckContext { conditions: Conditions::Ignore, selection };
+                options.iter().take(256).find(|option| check(option, value, "params", depth + 1, steps, false, context).is_ok())
+            };
+            if *steps > MAX_STEPS {
+                return Err(bad("params", "is nested too deeply to check"));
+            }
+            if let Some(selected) = selected {
+                scopes(selected, value, selection, depth + 1, steps, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+struct SharedConditions<'a> {
+    schemas: Vec<&'a Value>,
+    scopes: Vec<crate::conditions::InputConditions>,
+    controls: Map<String, Value>,
+}
+impl<'a> SharedConditions<'a> {
+    fn new(schemas: Vec<&'a Value>, object: &Map<String, Value>) -> Result<Self> {
+        let scopes = schemas.iter().map(|s| crate::conditions::InputConditions::parse(s)).collect::<Result<Vec<_>>>()?;
+        let controls =
+            crate::conditions::visible_values(object, scopes.iter().flat_map(|c| c.fields.iter().map(|(name, rules)| (name.as_str(), rules))))?;
+        Ok(Self { schemas, scopes, controls })
+    }
+    fn hidden(&self, name: &str) -> bool {
+        self.scopes.iter().any(|c| c.fields.get(name).is_some_and(|f| !f.visible(&self.controls)))
+    }
+}
+#[derive(Clone, Copy)]
+enum Conditions<'a> {
+    Ignore,
+    Evaluate,
+    Schemas(&'a [&'a Value]),
+    Applicable(&'a [&'a Value]),
+    Shared(&'a SharedConditions<'a>),
+}
 // The base schema constraints, without conditions (used to validate condition literals).
 pub(crate) fn check_value(schema: &Value, value: &Value) -> Result<()> {
-    check(schema, value, "value", 0, &mut 0, true, false)
+    check(schema, value, "value", 0, &mut 0, true, CheckContext::new(Conditions::Ignore))
 }
 
 /// The schema as a tool lists it, with the same default-closed object rules as [`check_input`].
 pub fn strict_input_schema(schema: &Value) -> Value {
-    fn strict(schema: &mut Value, depth: usize, closed: bool) {
+    fn strict(schema: &mut Value, depth: usize, closed: bool, selection: bool) {
         if depth > MAX_DEPTH {
             return;
         }
@@ -66,27 +165,30 @@ pub fn strict_input_schema(schema: &Value) -> Value {
         if object && defaults_closed(o, closed) && !o.contains_key("additionalProperties") {
             o.insert("additionalProperties".into(), Value::Bool(false));
         }
+        let selection = selection || o.contains_key("x-solidcraft-selection");
         if let Some(Value::Object(properties)) = o.get_mut("properties") {
-            for property in properties.values_mut() {
-                strict(property, depth + 1, true);
+            for (key, property) in properties {
+                strict(property, depth + 1, true, matches!(key.as_str(), "selection" | "target" | "targets"));
             }
         }
         if let Some(extra @ Value::Object(_)) = o.get_mut("additionalProperties") {
-            strict(extra, depth + 1, true);
+            strict(extra, depth + 1, true, false);
         }
         if let Some(items) = o.get_mut("items") {
-            strict(items, depth + 1, true);
+            let generic_pick =
+                selection && items.as_object().is_some_and(|p| p.len() == 1 && p.get("type").and_then(Value::as_str) == Some("object"));
+            strict(items, depth + 1, !generic_pick, false);
         }
         for key in ["oneOf", "anyOf"] {
             if let Some(Value::Array(options)) = o.get_mut(key) {
                 for option in options.iter_mut().take(256) {
-                    strict(option, depth + 1, false);
+                    strict(option, depth + 1, false, selection);
                 }
             }
         }
     }
     let mut schema = schema.clone();
-    strict(&mut schema, 0, true);
+    strict(&mut schema, 0, true, false);
     schema
 }
 
@@ -140,11 +242,46 @@ fn count(schema: &Map<String, Value>, key: &str) -> Option<usize> {
     schema.get(key).and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX))
 }
 
-fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize, closed: bool, conditional: bool) -> Result<()> {
+fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut usize, closed: bool, context: CheckContext<'_>) -> Result<()> {
     *steps += 1;
     if depth > MAX_DEPTH || *steps > MAX_STEPS {
         return Err(bad(field, "is nested too deeply to check"));
     }
+    let conditions = context.conditions;
+    let selection = context.selection
+        || schema.get("x-solidcraft-selection").is_some()
+        || matches!(field.rsplit('.').next(), Some("selection" | "target" | "targets"));
+    let roots = match conditions {
+        Conditions::Shared(shared) => shared.schemas.clone(),
+        Conditions::Schemas(schemas) | Conditions::Applicable(schemas) => schemas.to_vec(),
+        _ => vec![schema],
+    };
+    let applicable = if matches!(conditions, Conditions::Evaluate | Conditions::Schemas(_))
+        && roots.iter().any(|schema| crate::conditions::has_conditions(schema))
+    {
+        let mut applicable = Vec::new();
+        for schema in &roots {
+            scopes(schema, value, selection, depth, steps, &mut applicable)?;
+        }
+        Some(applicable)
+    } else {
+        None
+    };
+    let shared = match (&applicable, value.as_object()) {
+        (Some(schemas), Some(object)) => Some(SharedConditions::new(schemas.clone(), object)?),
+        _ => None,
+    };
+    let conditions = match (&shared, &applicable) {
+        (Some(shared), _) => Conditions::Shared(shared),
+        (_, Some(schemas)) => Conditions::Applicable(schemas),
+        _ => conditions,
+    };
+    let schemas = match conditions {
+        Conditions::Shared(shared) => shared.schemas.as_slice(),
+        Conditions::Applicable(schemas) => schemas,
+        _ => roots.as_slice(),
+    };
+    let context = CheckContext { conditions, selection };
     // `true`, `{}` or anything that is not a schema object: any value.
     let Some(schema) = schema.as_object() else {
         return if schema == &Value::Bool(false) { Err(bad(field, "is not allowed")) } else { Ok(()) };
@@ -173,10 +310,17 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             && !options.is_empty()
         {
             let mut matched = false;
-            for option in options.iter().take(256) {
-                if check(option, value, field, depth + 1, steps, false, conditional).is_ok() {
+            if !matches!(conditions, Conditions::Ignore) && conditional_branches(options, value) {
+                if let Some(option) = selected_branch(options, value, steps)? {
+                    check(option, value, field, depth + 1, steps, false, context)?;
                     matched = true;
-                    break;
+                }
+            } else {
+                for option in options.iter().take(256) {
+                    if check(option, value, field, depth + 1, steps, false, context).is_ok() {
+                        matched = true;
+                        break;
+                    }
                 }
             }
             if !matched {
@@ -229,18 +373,30 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             return Err(bad(field, "has too many items"));
         }
         if let Some(item) = schema.get("items") {
+            let item_schemas: Vec<_> = schemas.iter().filter_map(|schema| schema.get("items")).collect();
+            let conditions = if matches!(conditions, Conditions::Ignore) { Conditions::Ignore } else { Conditions::Schemas(&item_schemas) };
+            let generic_pick = selection && item.as_object().is_some_and(|p| p.len() == 1 && p.get("type").and_then(Value::as_str) == Some("object"));
             for (i, value) in items.iter().enumerate() {
-                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, true, conditional)?;
+                check(item, value, &format!("{field}[{i}]"), depth + 1, steps, !generic_pick, CheckContext::new(conditions))?;
             }
         }
     }
     if let Some(object) = value.as_object() {
         let properties = schema.get("properties").and_then(Value::as_object);
-        let conditions = if conditional { crate::conditions::InputConditions::from_properties(properties)? } else { Default::default() };
-        let controls = conditions.visible_values(object);
+        let rules = if matches!(conditions, Conditions::Ignore) {
+            Default::default()
+        } else {
+            crate::conditions::InputConditions::from_properties(properties)?
+        };
+        let empty = Map::new();
+        let controls = match conditions {
+            Conditions::Shared(shared) => &shared.controls,
+            _ => &empty,
+        };
+        let hidden = |name: &str| matches!(conditions, Conditions::Shared(shared) if shared.hidden(name));
         if let Some(Value::Array(required)) = schema.get("required") {
             for name in required.iter().filter_map(Value::as_str) {
-                if !object.contains_key(name) && conditions.fields.get(name).is_none_or(|f| f.visible(&controls)) {
+                if !object.contains_key(name) && !hidden(name) {
                     return Err(bad(&format!("{field}.{name}"), "is required"));
                 }
             }
@@ -250,26 +406,33 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
         // An object schema that says nothing about other fields declares exactly its properties.
         let declared = defaults_closed(schema, closed) && (properties.is_some() || schema.get("type").and_then(Value::as_str) == Some("object"));
         for (name, value) in object {
-            if conditions.fields.get(name).is_some_and(|f| !f.visible(&controls)) {
+            if hidden(name) {
                 continue;
             }
             let field = format!("{field}.{name}");
+            let property_schemas: Vec<_> = schemas
+                .iter()
+                .filter_map(|schema| schema.get("properties").and_then(|p| p.get(name)).or_else(|| schema.get("additionalProperties")))
+                .collect();
+            let child_conditions = if matches!(conditions, Conditions::Ignore) { Conditions::Ignore } else { Conditions::Schemas(&property_schemas) };
+            let child = CheckContext::new(child_conditions);
             match (properties.and_then(|p| p.get(name)), additional) {
                 (Some(property), _) => {
-                    if let (Some(rules), Some(options)) = (conditions.fields.get(name), property.get("oneOf").and_then(Value::as_array))
+                    let child = CheckContext { selection: property.get("x-solidcraft-selection").is_some(), ..child };
+                    if let (Some(rules), Some(options)) = (rules.fields.get(name), property.get("oneOf").and_then(Value::as_array))
                         && rules.has_choice_filter()
                         && options.iter().take(256).enumerate().all(|(i, option)| {
-                            !rules.option_available(i, &controls) || check(option, value, &field, depth + 1, steps, false, conditional).is_err()
+                            !rules.option_available(i, controls) || check(option, value, &field, depth + 1, steps, false, child).is_err()
                         })
                     {
                         return Err(bad(&field, "is not an available choice"));
                     }
-                    check(property, value, &field, depth + 1, steps, true, conditional)?;
+                    check(property, value, &field, depth + 1, steps, true, child)?;
                 }
                 (None, Some(Value::Bool(false))) => return Err(bad(&field, "is not an input of this entry")),
                 // Declared properties and nothing said about others: as strict as an app command.
                 (None, None) if declared => return Err(bad(&field, "is not an input of this entry")),
-                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps, true, conditional)?,
+                (None, Some(extra @ Value::Object(_))) => check(extra, value, &field, depth + 1, steps, true, child)?,
                 (None, _) => {}
             }
         }

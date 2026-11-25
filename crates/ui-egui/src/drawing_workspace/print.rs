@@ -3,9 +3,10 @@
 //! system's PDF viewer to print from there. The PDF asks the viewer to print at actual size
 //! (`/PrintScaling /None`), and a note says to keep it at 100 %.
 //!
-//! - **Desktop:** the PDF is written to a file in the system's temporary folder off the window
-//!   thread, as an export is ([`crate::file_load::Kind::ExportSheet`]), then opened with the
-//!   default app ([`crate::Services::open_path`]).
+//! - **Desktop:** the PDF is written off the window thread, as an export is
+//!   ([`crate::file_load::Kind::ExportSheet`]), into a fresh folder of its own in the system's
+//!   temporary folder, readable only by the user, then opened with the default app
+//!   ([`crate::Services::open_path`]).
 //! - **Browser:** the PDF is made at once and opened in a new tab ([`crate::Services::open_bytes`]).
 //!
 //! When nothing can open it, the status says so and where the file is: printing never fails
@@ -28,29 +29,56 @@ fn file_name(app: &SolveApp) -> String {
     format!("{}.pdf", if safe.trim().is_empty() { "Drawing" } else { safe.trim() })
 }
 
+/// A new folder in the system's temporary folder for one print's PDF, readable only by this user
+/// (on Unix): made fresh each time, never one another user or another print made first.
+fn private_folder() -> std::io::Result<std::path::PathBuf> {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let base = std::env::temp_dir();
+    for _ in 0..64 {
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let stamp = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        let folder = base.join(format!("SolidCraft print {}-{n}-{stamp:x}", std::process::id()));
+        // Only Unix sets the folder's mode, so only Unix needs a mutable builder (an unused `mut`
+        // fails the Windows lint).
+        #[cfg(unix)]
+        let builder = {
+            let mut builder = std::fs::DirBuilder::new();
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            builder
+        };
+        #[cfg(not(unix))]
+        let builder = std::fs::DirBuilder::new();
+        match builder.create(&folder) {
+            Ok(()) => return Ok(folder),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no fresh folder for the PDF"))
+}
+
 /// Starts printing the open drawing.
 pub(crate) fn start(app: &mut SolveApp) {
     let name = file_name(app);
     if app.services.open_path.is_some() {
-        let folder = std::env::temp_dir().join("SolidCraft print");
-        if let Err(e) = std::fs::create_dir_all(&folder) {
-            app.set_status(format!("{}: {e}", tr("ui.drawing_print.failed")), true);
-            return;
-        }
+        let folder = match private_folder() {
+            Ok(folder) => folder,
+            Err(e) => {
+                app.set_status(format!("{}: {e}", tr("ui.drawing_print.failed")), true);
+                return;
+            }
+        };
         let path = folder.join(name).to_string_lossy().into_owned();
         let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ExportSheet);
-        request.options = json!({"format": "pdf", "path": path}).as_object().cloned().unwrap_or_default();
+        request.options = json!({"path": path}).as_object().cloned().unwrap_or_default();
         request.print = true;
         if let Err(error) = crate::file_load::begin_request(app, request) {
             app.set_status(error, true);
         }
         return;
     }
-    // In a browser: made at once, then shown in a new tab.
-    let made = app.run("drawing.print", json!({}));
-    let bytes = made.and_then(|reply| {
-        reply["data"].as_str().and_then(solidcraft_engine::doc::canvas::base64_decode).ok_or_else(|| tr("ui.drawing_print.failed").to_string())
-    });
+    // In a browser: made at once, its bytes as they are, then shown in a new tab.
+    let bytes = solidcraft_engine::print_pdf(&mut app.session).map_err(|e| format!("{}: {e}", tr("ui.drawing_print.failed")));
     match (bytes, &app.services.open_bytes) {
         (Ok(bytes), Some(open)) => match open(&name, "application/pdf", &bytes) {
             Ok(()) => app.set_status(tr("ui.drawing_print.opened"), false),
@@ -115,7 +143,7 @@ mod tests {
         }));
         h.app.ui.tab = "DRAWING REVIEW".into();
         h.frames(4);
-        h.step(&json!({"click":{"handle":"button:drawing.print.planned"}})).unwrap();
+        h.step(&json!({"click":{"handle":"button:drawing.print"}})).unwrap();
         wait(&mut h);
         let paths = opened.lock().unwrap().clone();
         assert_eq!(paths.len(), 1, "{paths:?}");
@@ -124,7 +152,14 @@ mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(bytes.starts_with(b"%PDF-") && text.contains("/Count 2") && text.contains("/PrintScaling /None"));
         assert_eq!(h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default(), tr("ui.drawing_print.opened"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let folder = std::path::Path::new(&paths[0]).parent().unwrap();
+            assert_eq!(std::fs::metadata(folder).unwrap().permissions().mode() & 0o777, 0o700, "a folder only this user reads");
+        }
         let _ = std::fs::remove_file(&paths[0]);
+        let _ = std::fs::remove_dir(std::path::Path::new(&paths[0]).parent().unwrap());
     }
 
     /// With no PDF viewer to open it, the status says so and names the file: never silent.

@@ -18,6 +18,8 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     ghost: true,
     tint_new: true,
     cut_tint: true,
+    replaced_ghost: true,
+    glass_new: false,
 };
 
 /// A grounded plate (100 x 100 x 10, top at z 10) and a 20 mm block above it at (30, 40, 50).

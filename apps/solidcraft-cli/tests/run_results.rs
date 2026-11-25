@@ -538,6 +538,26 @@ fn eval_propagates_script_errors_before_writing_a_report() {
     }
 }
 
+/// #20926: `eval` takes `--quiet` as `run` does: nothing on stdout, a `--json-out` report still
+/// written, and the exit status unchanged.
+#[test]
+fn eval_takes_quiet_like_run() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        let output = cli().arg(command).arg(&script).arg("--quiet").output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty(), "{command}: {}", String::from_utf8_lossy(&output.stdout));
+        let _ = std::fs::remove_file(&report);
+        let output = cli().arg(command).arg("--quiet").arg(&script).arg("--json-out").arg(&report).output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let written: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert!(written["body_count"].is_number(), "{written}");
+    }
+}
+
 #[test]
 fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
     let dir = Scratch::new();
@@ -661,6 +681,9 @@ fn snapshot_runs_its_script_on_the_in_design() {
 /// `drawing.open`) may follow it.
 #[test]
 fn unknown_command_suggests_the_closest_id() {
+    let misspelled_window = cli().args(["exec", "tab.window.clsoe"]).output().unwrap();
+    assert_eq!(misspelled_window.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&misspelled_window.stderr).contains("did you mean `tab.window.close`"));
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(
@@ -668,6 +691,13 @@ fn unknown_command_suggests_the_closest_id() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // An MCP tool's name suggests the command it stands for (#20925).
+    for (tool, command) in [("set_parameter", "parameters.change"), ("measure", "inspect.measure"), ("inspect-design", "document.inspect")] {
+        let output = cli().args(["exec", tool]).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("(did you mean `{command}`")), "{tool}: {stderr}");
+    }
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
@@ -1026,7 +1056,7 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
 fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let scratch = Scratch::new();
     let plugins = scratch.0.join("plugins");
-    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":1_000_000,"memory_mib":256,"deadline_ms":30000}}});
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
     let zip = scratch.0.join("sample.zip");
     let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
     std::fs::write(&zip, bytes).unwrap();
@@ -1041,15 +1071,16 @@ fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let exec = |command: &str, params: Value| run(true, command, params);
     let inspect = json!({"path": plugins.join("sample")});
     // The default: approved for that run only, nothing stored.
-    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
-    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"memory_mib": 256}})));
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
     assert!(plugins.join(".grants/sample.json").is_file());
     assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
-    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved memory, in a later run");
+    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved fuel and memory, in a later run");
     let listed = json_output(exec("plugin.grants", json!({})));
     assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
+    assert_eq!(listed["grants"][0]["fuel"], 10_000_000_000_000_u64);
     assert_eq!(json_output(exec("plugin.revoke", json!({"id": "sample"})))["revoked"], true);
     assert_eq!(json_output(exec("plugin.inspect", inspect))["within_host_limits"], false, "revoked: the app's ceiling again");
     assert_eq!(json_output(exec("plugin.grants", json!({})))["grants"], json!([]));
@@ -1099,4 +1130,121 @@ fn run_save_warns_when_another_solidcraft_has_the_design_open() {
     held(now - 3600);
     let stale = save();
     assert!(stale.status.success() && stale.stderr.is_empty(), "a stale lock: {}", String::from_utf8_lossy(&stale.stderr));
+}
+
+/// A saved design whose box is `width` by `depth` by 5 mm (20 by 10 mm to start with).
+fn parametric_design(scratch: &Scratch) -> PathBuf {
+    let script = scratch.0.join("parametric.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [
+            {"command": "parameters.add", "params": {"name": "width", "expression": "20 mm"}},
+            {"command": "parameters.add", "params": {"name": "depth", "expression": "10 mm"}},
+            {"command": "solid.box", "params": {"length": "width", "width": "depth", "height": 5}}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let design = scratch.0.join("parametric.sc");
+    let saved = cli().arg("run").arg(&script).arg("--save").arg(&design).arg("--quiet").output().unwrap();
+    assert!(saved.status.success(), "{}", String::from_utf8_lossy(&saved.stderr));
+    design
+}
+
+fn volume(report: &Value) -> f64 {
+    report["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+#[test]
+fn run_param_overrides_a_parameter_without_changing_the_file() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let before = std::fs::read(&design).unwrap();
+    assert!((volume(&json_output(cli().arg("run").arg(&design).output().unwrap())) - 1000.0).abs() < 1e-6);
+    let changed = json_output(cli().arg("run").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&changed) - 1500.0).abs() < 1e-6, "{changed}");
+    let evaluated = json_output(cli().arg("eval").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&evaluated) - 1500.0).abs() < 1e-6, "{evaluated}");
+    assert_eq!(std::fs::read(&design).unwrap(), before);
+}
+
+#[test]
+fn run_param_applies_each_override_in_the_order_given() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let both = json_output(cli().arg("run").arg(&design).args(["--param", "width=30mm", "--param", "depth=width / 3"]).output().unwrap());
+    assert!((volume(&both) - 1500.0).abs() < 1e-6, "{both}");
+    let again = json_output(
+        cli().arg("run").arg(&design).args(["--param", "width=30mm", "--param", "width=40mm", "--param", "depth=20mm"]).output().unwrap(),
+    );
+    assert!((volume(&again) - 4000.0).abs() < 1e-6, "{again}");
+}
+
+#[test]
+fn run_params_file_sets_parameters_and_a_param_after_it_wins() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let file = scratch.0.join("params.json");
+    std::fs::write(&file, json!({"width": "30 mm", "depth": 20}).to_string()).unwrap();
+    let set = json_output(cli().arg("run").arg(&design).arg("--params-file").arg(&file).output().unwrap());
+    assert!((volume(&set) - 3000.0).abs() < 1e-6, "{set}");
+    let over = json_output(cli().arg("run").arg(&design).arg("--params-file").arg(&file).args(["--param", "depth=10mm"]).output().unwrap());
+    assert!((volume(&over) - 1500.0).abs() < 1e-6, "{over}");
+}
+
+#[test]
+fn run_param_overrides_the_design_given_with_in_before_the_script_runs() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let script = scratch.0.join("more.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1, "corner": [100, 0, 0]}}]}).to_string(),
+    )
+    .unwrap();
+    let out = json_output(cli().arg("run").arg(&script).arg("--in").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&out) - 1501.0).abs() < 1e-6, "{out}");
+}
+
+#[test]
+fn run_param_names_an_unknown_parameter_and_a_script_with_no_design() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let unknown = cli().arg("run").arg(&design).args(["--param", "height_typo=3mm"]).output().unwrap();
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("height_typo"), "{}", String::from_utf8_lossy(&unknown.stderr));
+    let bad_name = scratch.0.join("never.sc");
+    let none = cli().arg("run").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
+    assert!(!none.status.success() && !bad_name.exists());
+    assert!(String::from_utf8_lossy(&none.stderr).contains("--param"), "{}", String::from_utf8_lossy(&none.stderr));
+    // A command script given as `--in` would run as it loads, before the override: refused, and
+    // nothing it would save is written.
+    let as_in = cli().arg("run").arg("--in").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
+    assert!(!as_in.status.success() && !bad_name.exists());
+    assert!(String::from_utf8_lossy(&as_in.stderr).contains("--param"), "{}", String::from_utf8_lossy(&as_in.stderr));
+}
+
+#[test]
+fn run_param_refuses_malformed_arguments_before_anything_is_written() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let out = scratch.0.join("never.stl");
+    let missing = scratch.0.join("missing.json");
+    let list = scratch.0.join("list.json");
+    std::fs::write(&list, "[1, 2]").unwrap();
+    let cases: Vec<Vec<std::ffi::OsString>> = vec![
+        vec!["--param".into(), "width".into()],
+        vec!["--param".into(), "=30mm".into()],
+        vec!["--param".into(), "width=".into()],
+        vec!["--param".into(), "width=30 parsecs".into()],
+        vec!["--param".into()],
+        vec!["--params-file".into(), missing.into_os_string()],
+        vec!["--params-file".into(), list.into_os_string()],
+    ];
+    for extra in cases {
+        let output = cli().arg("run").arg(&design).args(&extra).arg("--out").arg(&out).output().unwrap();
+        assert!(!output.status.success(), "{extra:?} should fail");
+        assert!(!String::from_utf8_lossy(&output.stderr).trim().is_empty(), "{extra:?}");
+        assert!(!out.exists(), "{extra:?} wrote a file");
+    }
 }

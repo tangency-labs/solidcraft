@@ -351,4 +351,95 @@ mod tests {
             }
         }
     }
+
+    /// #18514: a rounded rectangle 2a x 2b with corners of radius r about (+-(a - r),
+    /// +-(b - r)), counter-clockwise from its bottom line, lines and quarter arcs.
+    fn rounded_rectangle(k: &Kernel, a: f64, b: f64, r: f64) -> Vec<Curve> {
+        use crate::curve::arc::ArcDefinition;
+        use crate::curve::path::PathPiece;
+        use std::f64::consts::FRAC_PI_2;
+        let line = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            Curve::from(
+                Line::create_line_segment(
+                    3,
+                    Point3::new(x0, y0, 0.0),
+                    Point3::new(x1, y1, 0.0),
+                    None,
+                )
+                .unwrap(),
+            )
+        };
+        let arc = |cx: f64, cy: f64, quarter: f64| {
+            let d = ArcDefinition {
+                centre: Point3::new(cx, cy, 0.0),
+                axis: Vec3::Z,
+                reference: Vec3::X,
+                radius: r,
+                start: quarter * FRAC_PI_2,
+                end: (quarter + 1.0) * FRAC_PI_2,
+            };
+            PathPiece::of_arc(k, &d).unwrap().curve().clone()
+        };
+        vec![
+            line(-a + r, -b, a - r, -b),
+            arc(a - r, -b + r, -1.0),
+            line(a, -b + r, a, b - r),
+            arc(a - r, b - r, 0.0),
+            line(a - r, b, -a + r, b),
+            arc(-a + r, b - r, 1.0),
+            line(-a, b - r, -a, -b + r),
+            arc(-a + r, -b + r, 2.0),
+        ]
+    }
+
+    #[test]
+    fn a_rounded_rectangle_drafted_slightly_inward_keeps_every_corner_wall() {
+        // #18514: the issue's rounded rectangle, 0.5 degrees inward. At these heights the
+        // offset method lost the walls of two corner arcs: their offsets' mid points lie
+        // exactly the offset (about 0.017) from their arcs, and the classifier dropped
+        // them where that distance, computed about 111 from the origin, rounded below
+        // `offset * (1 - 1e-12)`. The sections are the profile offset inward by
+        // `s = z tan 0.5 degrees`: lines moved in by s, arcs of radius r - s about the same
+        // centres, so the area is `(2a - 2s)(2b - 2s) - (4 - pi)(r - s)^2` and the volume
+        // its integral over the height. Every height builds a wall along each of the four
+        // lines and four arcs and two caps: 10 faces, 24 edges, 16 vertices.
+        use crate::mass::integrator::properties::brep_volume_default;
+        use crate::topology::brep::outward_solid_failure;
+        let (a, b, r) = (111.48254626441849, 41.48254626441848, 8.982546264418483);
+        let draft = Some(Draft {
+            angle_deg: 0.5,
+            corner: OffsetCornerType::CurveExtension,
+        });
+        let t = 0.5_f64.to_radians().tan();
+        let (w, h2) = (2.0 * a, 2.0 * b);
+        let c4 = 4.0 - std::f64::consts::PI;
+        let volume = |h: f64| {
+            h * (w * h2 - c4 * r * r)
+                + t * h * h / 2.0 * (-2.0 * (w + h2) + 2.0 * c4 * r)
+                + t * t * h * h * h / 3.0 * std::f64::consts::PI
+        };
+        for height in [2.0, 2.01, 2.5] {
+            let mut k = Kernel::default();
+            let c = rounded_rectangle(&k, a, b, r);
+            let TaperExtrude::Solid(mut body) =
+                extrude(&mut k, &c, Vec3::Z, height, draft, true, &TOL).unwrap()
+            else {
+                panic!("{height}: refused")
+            };
+            let counts = (
+                body.face_list().len(),
+                body.edge_list().len(),
+                body.vertex_list().len(),
+            );
+            assert_eq!(counts, (10, 24, 16), "{height}");
+            assert!(is_manifold_solid(&body).unwrap(), "{height}");
+            assert_eq!(outward_solid_failure(&mut k, &mut body).unwrap(), None);
+            let v = brep_volume_default(&k, &mut body, 1e-9).unwrap();
+            let exact = volume(height);
+            assert!(
+                (v - exact).abs() <= 1e-7 * exact,
+                "{height}: {v} vs {exact}"
+            );
+        }
+    }
 }
