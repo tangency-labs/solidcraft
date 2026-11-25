@@ -626,7 +626,7 @@ pub struct AgentChat {
     seen: Option<Revision>,
     /// Which design (`session.uid`, name, optional path) the agent last saw, so switching tabs
     /// with a shared conversation informs the agent on its next turn (#16282).
-    seen_design: Option<(u64, String, Option<String>)>,
+    seen_design: Option<Box<(u64, String, Option<String>)>>,
     tools_available: Option<bool>,
     /// The agent was started with SolidCraft's tools (solidcraft-cli and the control port were
     /// both there): if they are still unavailable, they failed to start, not to be found.
@@ -2046,7 +2046,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     let switched = app
         .agent_chat
         .seen_design
-        .as_ref()
+        .as_deref()
         .filter(|(uid, _, _)| *uid != app.session.uid)
         .map(|(_, prev_name, _)| switched_design_note(prev_name, &app.session.doc.name, app.session.path.as_deref()));
     let changed = if switched.is_some() {
@@ -2344,7 +2344,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
     if turn.replied || turn.tool_called || turn.requests > 0 {
         chat.seen = Some(Revision::of(&session.doc));
-        chat.seen_design = Some((session.uid, session.doc.name.clone(), session.path.clone()));
+        chat.seen_design = Some(Box::new((session.uid, session.doc.name.clone(), session.path.clone())));
     }
     if chat.ended.as_deref() == Some("")
         && !chat.stopped

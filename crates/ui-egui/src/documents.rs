@@ -277,8 +277,9 @@ pub struct Documents {
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
     /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
-    /// switching tabs never hands one tab's parked chat to another tab's slot.
-    parked_agent_chat: crate::agent_chat::AgentChat,
+    /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
+    /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
+    parked_agent_chat: Option<Box<crate::agent_chat::AgentChat>>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -558,9 +559,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
     let outgoing_chat = if shared_chat {
-        std::mem::replace(&mut app.docs.parked_agent_chat, slot.agent_chat)
+        app.docs.parked_agent_chat.replace(Box::new(slot.agent_chat)).map_or_else(Default::default, |chat| *chat)
     } else {
-        app.docs.parked_agent_chat = Default::default();
+        app.docs.parked_agent_chat = None;
         app.agent_chat.swap_document(&mut slot.agent_chat);
         slot.agent_chat
     };
@@ -2352,7 +2353,7 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
     }
     if app.preferences.agent_shared_session {
         crate::agent_chat::leave_document(app);
-        app.docs.parked_agent_chat = Default::default();
+        app.docs.parked_agent_chat = None;
         crate::agent_chat::continue_in_document(app);
         return;
     }
@@ -2369,7 +2370,9 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 
 /// Hidden conversations must also stop when AI is disabled or the application quits.
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
-    app.docs.parked_agent_chat.disconnect_document(&mut app.session, wait);
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_document(&mut app.session, wait);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
     }
@@ -2377,7 +2380,9 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
 
 /// Stop only the hidden conversations whose endpoint permission was revoked.
 pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
-    app.docs.parked_agent_chat.disconnect_endpoint(&mut app.session, id);
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_endpoint(&mut app.session, id);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }
