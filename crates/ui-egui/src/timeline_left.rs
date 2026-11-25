@@ -307,7 +307,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 }
 
-fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
+pub(crate) fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
     let features = selected_feature_ids(app);
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
@@ -618,7 +618,7 @@ fn visible_order(
 }
 
 /// Start a folder rename typed in its History row: no floating box (#16217).
-fn start_folder_rename(app: &mut SolveApp, group: u64) {
+pub(crate) fn start_folder_rename(app: &mut SolveApp, group: u64) {
     crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
     if let Some(rename) = app.menu.rename.as_mut() {
         rename.inline = true;

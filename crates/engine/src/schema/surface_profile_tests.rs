@@ -27,6 +27,7 @@ fn schemas_and_the_key_check_agree() {
             "sketch",
             "start_offset",
             "to",
+            "to_next",
             "to_offset",
         ],
     );
@@ -46,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
             "participants",
             "profiles",
             "sketch",
+            "stays_surface",
             "symmetric",
         ],
     );
@@ -118,6 +120,9 @@ fn the_check_takes_what_the_schema_allows() {
         ("surface.extrude", extrude.as_value(), json!({"distance": 5, "profiles": [{"point": [1, 2]}], "distance2": null}), true),
         ("surface.extrude", extrude.as_value(), json!({}), true),
         ("surface.extrude", extrude.as_value(), json!({"to": [0, 0, 1], "to_offset": "1 mm"}), true),
+        ("surface.extrude", extrude.as_value(), json!({"to_next": true, "direction": "negative"}), true),
+        ("surface.extrude", extrude.as_value(), json!({"to_next": null}), true),
+        ("surface.extrude", extrude.as_value(), json!({"to_next": "yes"}), false),
         ("surface.extrude", extrude.as_value(), json!({"to": true}), false),
         ("surface.extrude", extrude.as_value(), json!({"to": [0, 0, 1], "to_offset": true}), false),
         ("surface.extrude", extrude.as_value(), json!({"distance": ""}), false),
