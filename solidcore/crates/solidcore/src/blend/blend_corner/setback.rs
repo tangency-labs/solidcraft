@@ -2876,39 +2876,44 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     }
     // The mixed-radius planar corner was sized on analytic cylinders. Use the same
     // boundary rows when the actual sections and tangent fields agree with them.
-    let setbacks = &corner
-        .setback
-        .as_ref()
-        .ok_or_else(missing_setback)?
-        .setbacks;
+    let actual = rounds_of(&surfaces, &sides);
     let models = if order == 1 && !curved && unequal_radii(&planes.edges) {
-        model_rounds(&planes.planes, &planes.edges, setbacks).ok()
+        let setbacks = &corner
+            .setback
+            .as_ref()
+            .ok_or_else(missing_setback)?
+            .setbacks;
+        Some(
+            model_rounds(&planes.planes, &planes.edges, setbacks)
+                .map_err(|refusal| refusal.error)?,
+        )
     } else {
         None
     };
-    let origin = vertex::point(target, vtx)?;
-    let model_ends = models.as_ref().and_then(|models| {
-        let actual = rounds_of(&surfaces, &sides);
-        if models.len() != actual.len()
-            || !models.iter().all(|model| {
-                actual.get(model.index).is_some_and(|real| {
-                    same_round_end(k, &model.round(), real, origin).is_ok_and(|same| same)
-                })
-            })
-        {
-            return None;
+    let model_ends = if let Some(models) = &models {
+        let origin = vertex::point(target, vtx)?;
+        let mut matching = models.len() == actual.len();
+        let mut ends = Vec::with_capacity(models.len());
+        for model in models {
+            let Some(real) = actual.get(model.index) else {
+                matching = false;
+                break;
+            };
+            let round = model.round();
+            matching &= same_round_end(k, &round, real, origin).map_err(|refusal| refusal.error)?;
+            ends.push(round);
         }
-        Some(models.iter().map(|model| model.round()).collect::<Vec<_>>())
-    });
+        matching.then_some(ends)
+    } else {
+        None
+    };
     let mut stats = FillStats::default();
     // a corner left open derives its face curves from the fill without building it, and
     // does not demand its convexity certificate
     let first = fill_hole_counted(
         k,
         &planes.planes,
-        model_ends
-            .as_deref()
-            .unwrap_or(&rounds_of(&surfaces, &sides)),
+        model_ends.as_deref().unwrap_or(&actual),
         order,
         tol,
         !open,
