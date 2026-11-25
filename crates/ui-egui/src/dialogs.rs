@@ -11377,6 +11377,7 @@ mod refused_ok_tests {
                     tint_new: true,
                     glass_new: false,
                     cut_tint: true,
+                    replaced_ghost: true,
                 },
             )
             .unwrap();
