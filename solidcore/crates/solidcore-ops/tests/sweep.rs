@@ -1548,6 +1548,52 @@ fn a_swept_circle_s_record_opens_again() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// A swept circle saved before #21509 squared the record's plane axes: its cap planes' v axes
+/// are off square by about 1.36e-14 times their size (tangency-labs/solidcraft#21752). The
+/// record opens, as the same solid, and the record it writes again opens too.
+#[test]
+fn a_swept_circle_saved_with_its_caps_off_square_opens() {
+    use solidcore_record::brep::Surface;
+    let start = [10010.0, 9997.58, 10.0];
+    let circle = Curve::Arc {
+        center: start,
+        axis: [0.0, 1.0, 0.0],
+        reference: Z,
+        radius: 1.0,
+        start: 0.0,
+        end: TAU,
+    };
+    let end = [start[0], start[1] + 10.0, start[2]];
+    let (body, _, _) =
+        sweep_placed(&[circle], &[line(start, end)], SweepFrame::Follow, true).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let mut skewed = 0;
+    for face in &mut record.faces {
+        if let Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            let size = (0..3).map(|i| v_axis[i] * v_axis[i]).sum::<f64>().sqrt();
+            for i in 0..3 {
+                v_axis[i] += 1.36e-14 * size * u_axis[i];
+            }
+            skewed += 1;
+        }
+    }
+    assert_eq!(skewed, 2, "the two caps");
+    let (back, _) = Body::from_record(&record, true).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let (again, _) = back.to_record().unwrap();
+    assert_eq!(
+        (again.faces.len(), again.edges.len(), again.vertices.len()),
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        )
+    );
+    Body::from_record(&again, true).unwrap();
+    let (v, w) = (body.volume(1e-9).unwrap(), back.volume(1e-9).unwrap());
+    assert!(rel(v, w) < 1e-9, "volume {w} vs {v}");
+}
+
 /// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
 /// circle in two halves of one frame is the full circle from its frame's start; two frames
 /// close at the middle of the longer; an open run in a loop with a line is one arc and the line

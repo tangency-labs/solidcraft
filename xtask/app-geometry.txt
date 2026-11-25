@@ -28,7 +28,6 @@ crates/doc/src/construct.rs:facing cross,dot,normalized
 crates/doc/src/construct.rs:lies_on_mesh closest_on_triangle
 crates/doc/src/construct.rs:line_line dot
 crates/doc/src/construct.rs:line_plane dot
-crates/doc/src/construct.rs:model_axis normalized
 crates/doc/src/construct.rs:plane dot
 crates/doc/src/construct.rs:plane_plane cross,dot,normalized
 crates/doc/src/construct.rs:resolve_axis normalized
@@ -1395,7 +1394,6 @@ crates/ui-egui/src/place_gizmo/hole.rs:places normalized
 crates/ui-egui/src/place_gizmo/look.rs:angle_label normalized
 crates/ui-egui/src/place_gizmo/look.rs:grown dot,normalized
 crates/ui-egui/src/place_gizmo/primitive.rs:box_frame dot
-crates/ui-egui/src/place_gizmo/primitive.rs:frame normalized
 crates/ui-egui/src/place_gizmo/primitive.rs:planes triangles
 crates/ui-egui/src/place_gizmo/primitive.rs:square_to dot
 crates/ui-egui/src/point_clouds.rs:Key::of triangles

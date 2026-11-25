@@ -1618,6 +1618,18 @@ fn plane_face_anchor<'a>(
     }
 }
 
+/// Parse a typed axis reference for the primitive Coil marker as the command reads it.
+/// Numeric directions leave the marker at the Coil base.
+pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<solidcraft_doc::AxisRef> {
+    if crate::cmd::axis_dir_form(axis).is_ok() {
+        return None;
+    }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
+    crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
+}
+
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
 pub fn construction_axes(s: &Session) -> Vec<(u64, String, Vec3, Vec3)> {
     constructs(s)
