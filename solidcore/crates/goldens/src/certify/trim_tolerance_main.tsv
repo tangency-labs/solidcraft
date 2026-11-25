@@ -38,6 +38,7 @@
 # surface.cone_p2: the cone rebuild's EFF_ZERO branch certifies its cylinder net and records the cylinder about the axis the net's end circles are coaxial about (#17228, #21628): the digest is this branch's file (no ROWS case in the unit). Two rows move against this main, both proved in goldens/tests/issue_17228_cone_rebuild_moves.rs: adv_reb_cylarc_s1i0_id_tw rebuild status 1000 -> 1001 (a net turned 1e-4 degrees about its own axis is 2 r sin^2(a/4) = 3.8e-13 inside every cylinder the rebuild tries, 192 times gamma_8 of its size and about ten times implicit::lies_on's allowance, so the refusal NetOffCylinder is right) and gen0152 1001 -> 1000 (both end circles coaxial about the centre line, each tilted 1.43e-7 rad, so the net is within 2.9e-14 of that cylinder, under one ulp (2.2e-10) of its coordinates near 1e6; the net moves 1.6e-10)
 # intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
 # offset.offset_executive_p2: a rounded offset's tube that folds over itself is refused (#13685): this branch's file, 20 lines moved, none a ROWS case. 4 move from status 1000 to 1001 (extrude_holes1_face0_outset24_7_rounded and _unstitched, extrude_holes1_face3_outset24_7_rounded, fill_gap_extrudeHoles1_face0_round_d13, each unsound on main), and 16 refused on main stay 1001 with the smaller partial offset an earlier refusal records; proved by tests/issue_13685_tube_folds.rs and the unit's soundness probe
+# sweep.rotational_sweep_geometry: a nearly flat cone keeps its cone (#18005) moves gen0175 (its swept face a cone, not a surface of revolution; its two profile edges lines, not B-splines); no tolerance moves; the digest is the branch file
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -277,7 +278,7 @@ surface.volume_p1	abd24d71681331bd
 surface.volume_p2	0583bf0698f07807
 sweep.api_brep	abe07b0a735b1602
 sweep.api_surfaces	a46bb969a19dac47
-sweep.rotational_sweep_geometry	5b474ec3f398587f
+sweep.rotational_sweep_geometry	69725113a029b9c4
 sweep.topology_sweep	58b44a27822309c7
 sweep.trans_sweep_geometry	d85c69dbbc2574b4
 topology.api_files	ffb949079ea871c5
