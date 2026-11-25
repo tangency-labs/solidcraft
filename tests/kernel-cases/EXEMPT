@@ -577,6 +577,7 @@ view.normal_to                    the view: camera, layout, display
 view.orbit_mode                   the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
 view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
+view.parts_library                the view: a panel shown or hidden; crates/ui-egui/src/parts_library.rs::tests::the_command_opens_and_closes_the_card
 view.perspective                  the view: camera, layout, display
 view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
 view.previous_tab                 the view: camera, layout, display
