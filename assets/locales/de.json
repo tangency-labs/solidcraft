@@ -2496,7 +2496,7 @@
   "keymap.use_anyway": "{key} hier trotzdem verwenden",
   "label.move_to_left_side": "Auf die linke Seite verschieben",
   "label.move_to_right_side": "Auf die rechte Seite verschieben",
-  "linked_files.other_folders_detail": "Dieses Design verwendet Dateien aus {folders}. Laden?",
+  "linked_files.other_folders_detail": "Dieses Design verwendet Dateien aus diesen Ordnern. Laden?",
   "linked_files.other_folders_load": "Laden",
   "linked_files.other_folders_not_now": "Nicht jetzt",
   "linked_files.other_folders_title": "Verknüpfte Dateien in anderen Ordnern",

@@ -88,20 +88,71 @@ pub fn answer(app: &mut SolveApp, answer: Answer) {
     }
 }
 
+/// The folder list's heights: (its first height, the most it can be dragged to, the least). It
+/// starts at about eight lines, less for a few folders or in a short window, and its corner can
+/// drag it as tall as the window allows: the title and the Load and Not now buttons stay on
+/// screen however many folders there are.
+fn list_heights(ctx: &egui::Context, folders: usize) -> (f32, f32, f32) {
+    let t = solidcraft_theme::Tokens::get();
+    let line = t.font_small + t.space_6;
+    let chrome = t.form_close_size + t.form_footer_height + t.space_24 * 4.0 + t.font_subtitle * 2.0;
+    let least = line * 2.0;
+    let most = (ctx.content_rect().height() - chrome).max(least);
+    // A long folder wraps to a few lines in the dialog's width.
+    let wanted = folders as f32 * line * 3.0;
+    ((line * 8.0).min(wanted).clamp(least, most), most, least)
+}
+
 /// The question, when one is waiting for the design shown (one for a design in another tab waits
 /// for its tab to come back).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(prompt) = app.link_folders_prompt.iter().find(|p| p.session == app.session.uid) else { return };
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
-    let folders = prompt.folders.join(", ");
-    let detail = solidcraft_ui_text::format("linked_files.other_folders_detail", &[("folders", &folders)]);
-    let (closed, action) =
+    let detail = solidcraft_ui_text::tr("linked_files.other_folders_detail");
+    let (height, most, least) = list_heights(ctx, prompt.folders.len());
+    // The dialog is as wide as the list was dragged (kept while the app runs): never narrower
+    // than a dialog's usual width, nor wider than the window.
+    let card = solidcraft_theme::Tokens::get().form_card_width;
+    let usual = card * 1.5;
+    let width_id = egui::Id::unique("sc_link_folders_prompt_width");
+    let screen = ctx.content_rect().width();
+    let width = ctx.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(usual).min(screen).max(usual);
+    let mut confirm =
         ui_kit::Confirm::new(egui::Id::unique("sc_link_folders_prompt"), "help", solidcraft_ui_text::tr("linked_files.other_folders_title"))
             .actions(solidcraft_ui_text::tr("linked_files.other_folders_load"), solidcraft_ui_text::tr("linked_files.other_folders_not_now"), None)
-            .selected(ui_kit::Action::Cancel)
-            .show(ctx, true, |ui| {
-                ui_kit::text(ui, &detail, ui_kit::Text::Report("link_folders_prompt", false));
-            });
+            .selected(ui_kit::Action::Cancel);
+    confirm.window = confirm.window.cards(width / card);
+    let (closed, action) = confirm.show(ctx, true, |ui| {
+        ui_kit::text(ui, detail, ui_kit::Text::Report("link_folders_prompt", false));
+        // One folder a line, in a list that scrolls: an assembly whose parts each have their own
+        // folder names dozens, and the buttons below must stay on screen. Its corner drags it
+        // taller, to see more folders at once, or wider, and the dialog widens with it.
+        ui_kit::list_frame(ui, "link_folders", |ui| {
+            let fits = ui.available_width();
+            // What the dialog adds around the list, so the list's width gives the dialog's.
+            let around = width - fits;
+            let mut dragged = fits;
+            egui::Resize::default()
+                .id_salt("link_folders_size")
+                .resizable([true, true])
+                .with_stroke(false)
+                .default_size([fits, height])
+                .min_size([(usual - around).max(0.0), least])
+                .max_size([(screen - around).max(fits), most])
+                .show(ui, |ui| {
+                    dragged = ui.available_width();
+                    egui::ScrollArea::vertical().id_salt("link_folders").auto_shrink([false, false]).show(ui, |ui| {
+                        for folder in &prompt.folders {
+                            ui_kit::text(ui, folder, ui_kit::Text::MonoNote("link_folder"));
+                        }
+                    });
+                });
+            if (dragged - fits).abs() > 0.5 {
+                ui.ctx().data_mut(|d| d.insert_temp(width_id, (dragged + around).clamp(usual, screen.max(usual))));
+                ui.ctx().request_repaint();
+            }
+        });
+    });
     let mut chosen = match action {
         ui_kit::Action::Ok => Some(Answer::Load),
         ui_kit::Action::Cancel => Some(Answer::NotNow),
@@ -116,3 +167,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         answer(app, a);
     }
 }
+
+#[cfg(test)]
+#[path = "link_folders_prompt_tests.rs"]
+mod tests;

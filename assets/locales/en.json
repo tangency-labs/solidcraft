@@ -2796,7 +2796,7 @@
   "keymap.use_anyway": "Use {key} here anyway",
   "label.move_to_left_side": "Move to left side",
   "label.move_to_right_side": "Move to right side",
-  "linked_files.other_folders_detail": "This design uses files from {folders}. Load them?",
+  "linked_files.other_folders_detail": "This design uses files from these folders. Load them?",
   "linked_files.other_folders_load": "Load",
   "linked_files.other_folders_not_now": "Not now",
   "linked_files.other_folders_title": "Linked files in other folders",

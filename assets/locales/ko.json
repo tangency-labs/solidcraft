@@ -2095,7 +2095,7 @@
   "keymap.use_anyway": "그래도 여기서 {key} 사용",
   "label.move_to_left_side": "왼쪽으로 이동",
   "label.move_to_right_side": "오른쪽으로 이동",
-  "linked_files.other_folders_detail": "이 디자인은 {folders}의 파일을 사용합니다. 불러올까요?",
+  "linked_files.other_folders_detail": "이 디자인은 다음 폴더의 파일을 사용합니다. 불러올까요?",
   "linked_files.other_folders_load": "불러오기",
   "linked_files.other_folders_not_now": "나중에",
   "linked_files.other_folders_title": "다른 폴더의 링크된 파일",

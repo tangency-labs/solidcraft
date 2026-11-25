@@ -2792,7 +2792,7 @@
   "keymap.use_anyway": "Mimo to użyj tutaj {key}",
   "label.move_to_left_side": "Przenieś na lewą stronę",
   "label.move_to_right_side": "Przenieś na prawą stronę",
-  "linked_files.other_folders_detail": "Ten projekt używa plików z: {folders}. Wczytać je?",
+  "linked_files.other_folders_detail": "Ten projekt używa plików z tych folderów. Wczytać je?",
   "linked_files.other_folders_load": "Wczytaj",
   "linked_files.other_folders_not_now": "Nie teraz",
   "linked_files.other_folders_title": "Połączone pliki w innych folderach",

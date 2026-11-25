@@ -2796,7 +2796,7 @@
   "keymap.use_anyway": "ここでは{key}をそのまま使用",
   "label.move_to_left_side": "左側へ移動",
   "label.move_to_right_side": "右側へ移動",
-  "linked_files.other_folders_detail": "このデザインは {folders} のファイルを使用しています。読み込みますか？",
+  "linked_files.other_folders_detail": "このデザインは次のフォルダーのファイルを使用しています。読み込みますか？",
   "linked_files.other_folders_load": "読み込む",
   "linked_files.other_folders_not_now": "後で",
   "linked_files.other_folders_title": "ほかのフォルダーにあるリンクファイル",

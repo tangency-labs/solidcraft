@@ -2796,7 +2796,7 @@
   "keymap.use_anyway": "仍在此处使用 {key}",
   "label.move_to_left_side": "移到左侧",
   "label.move_to_right_side": "移到右侧",
-  "linked_files.other_folders_detail": "此设计使用了 {folders} 中的文件。要加载吗？",
+  "linked_files.other_folders_detail": "此设计使用了以下文件夹中的文件。要加载吗？",
   "linked_files.other_folders_load": "加载",
   "linked_files.other_folders_not_now": "暂不",
   "linked_files.other_folders_title": "其他文件夹中的链接文件",

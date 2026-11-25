@@ -2796,7 +2796,7 @@
   "keymap.use_anyway": "استخدام {key} هنا على أي حال",
   "label.move_to_left_side": "نقل إلى الجانب الأيسر",
   "label.move_to_right_side": "نقل إلى الجانب الأيمن",
-  "linked_files.other_folders_detail": "يستخدم هذا التصميم ملفات من {folders}. هل تريد تحميلها؟",
+  "linked_files.other_folders_detail": "يستخدم هذا التصميم ملفات من هذه المجلدات. هل تريد تحميلها؟",
   "linked_files.other_folders_load": "تحميل",
   "linked_files.other_folders_not_now": "ليس الآن",
   "linked_files.other_folders_title": "ملفات مرتبطة في مجلدات أخرى",

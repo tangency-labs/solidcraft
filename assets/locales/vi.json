@@ -2796,7 +2796,7 @@
   "keymap.use_anyway": "Vẫn dùng {key} tại đây",
   "label.move_to_left_side": "Chuyển sang bên trái",
   "label.move_to_right_side": "Chuyển sang bên phải",
-  "linked_files.other_folders_detail": "Thiết kế này dùng tệp từ {folders}. Tải chúng không?",
+  "linked_files.other_folders_detail": "Thiết kế này dùng tệp từ các thư mục sau. Tải chúng không?",
   "linked_files.other_folders_load": "Tải",
   "linked_files.other_folders_not_now": "Để sau",
   "linked_files.other_folders_title": "Tệp liên kết trong thư mục khác",
