@@ -1,13 +1,16 @@
 //! Extrusions, revolutions, sweeps, lofts and planar faces on solidcore: the C API's logic round
 //! SM_API's sweeps, ported from the fork's `capi/src/smlib_sweeps.cpp` (`coord_ok`, `unit`,
-//! `line`, `arc`, `nurbs`, `parse`, `finish`, `one_loop`, `FlatArc`, `one_circle`, `angle_on`,
-//! `one_wall_per_circle`, `straight`, `circular`, `joined`,
+//! `line`, `arc`, `nurbs`, `parse`, `finish`, `one_loop`, `straight`, `circular`, `joined`,
 //! `put_motion`, `turned`, `Rigid`, `Segment`, `segmented`, `carried`, `piecewise`, `maps_ok`, `placed`, `put_curve`, and the entry points
 //! `smlib_planar_faces`, `smlib_extrude`, `smlib_revolve`, `smlib_sweep_placed`, `smlib_loft`,
 //! `smlib_loft_to_point`, `smlib_sweep_stations`, `smlib_project_curves`, `smlib_face_section`,
 //! and `smlib_screw_sweep` and `smlib_screw_sweep_radial` with `Screw`, `Stations`,
 //! `lift_error`, `offset_error`, `path`, `path_curve`, `axial_radius`, `cylinder_piece`,
 //! `screw_wall` and `screw_sweep`).
+//!
+//! Planar faces, extrusions and revolutions are solidcore-ops' ([`solidcore_ops::sweep`]); a
+//! straight extrusion's runs of arcs on one circle (`one_wall_per_circle` there) are joined by
+//! [`solidcore_ops::sweep::join_circle_runs`] first.
 //!
 //! As there, each call builds its own curves from the curve list, checks its numbers before the
 //! kernel sees them, runs SM_API's sweep and hands the result over only when it is what was asked
@@ -27,7 +30,7 @@ use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
-use solidcore::geom::tol::{SmallTopoType, USE_DEFAULT, context_zone_tol_3d};
+use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
@@ -37,10 +40,7 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::surface::Surface;
-use solidcore::sweep::api_brep::{
-    CornerRefusal, OffsetCornerType, TaperCornerRefusal, TaperExtrude, create_curve_sweep_with_placements, create_linear_sweep,
-    create_rotational_sweep, create_taper_extrude_with_corner,
-};
+use solidcore::sweep::api_brep::{create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep};
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p1::{ParallelProjectionOptions, create_parallel_projection_curves};
@@ -264,260 +264,42 @@ fn one_loop(k: &Kernel, curves: &[Curve], tol: f64) -> solidcore::Result<bool> {
     Ok(matches!((first, prev), (Some(f), Some(p)) if (p - f).length() <= tol))
 }
 
-/// `FlatArc`: an arc of a curve list as numbers, its frame, radius and angles.
-#[derive(Clone, Copy)]
-struct FlatArc {
-    centre: Vec3,
-    axis: Vec3,
-    reference: Vec3,
-    radius: f64,
-    start: f64,
-    sweep: f64,
-}
-
-impl FlatArc {
-    /// `flat_arc`: the arc's numbers, its axis and reference made unit (`parse` has checked
-    /// that they can be); `None` for a curve that is no arc.
-    fn of(c: &Profile) -> Option<FlatArc> {
-        let Profile::Arc { center, axis, reference, radius, start, end } = c else { return None };
-        Some(FlatArc {
-            centre: v3(*center),
-            axis: unit(*axis).unwrap_or_else(|| v3(*axis)),
-            reference: unit(*reference).unwrap_or_else(|| v3(*reference)),
-            radius: *radius,
-            start: *start,
-            sweep: end - start,
-        })
-    }
-
-    /// The point at angle `t` (radians from the reference, counter-clockwise about the axis).
-    fn at(&self, t: f64) -> Point3 {
-        let y = self.axis.cross(self.reference);
-        self.centre + self.reference * (self.radius * t.cos()) + y * (self.radius * t.sin())
-    }
-
-    /// `angle_on`: the angle of `p` on this arc's circle, in its frame (radians, in [0, 2π)).
-    fn angle_on(&self, p: Point3) -> f64 {
-        let d = p - self.centre;
-        let y = self.axis.cross(self.reference);
-        let t = d.dot(y).atan2(d.dot(self.reference));
-        if t < 0.0 { t + TAU } else { t }
-    }
-}
-
-/// `one_circle`: whether arcs `a` and `b` lie on one circle to `tol`: centres and radii within
-/// it, and the axes alike (the same way round) to within it at the rim.
-fn one_circle(a: &FlatArc, b: &FlatArc, tol: f64) -> bool {
-    (a.centre - b.centre).length() <= tol
-        && (a.radius - b.radius).abs() <= tol
-        && a.axis.dot(b.axis) > 0.0
-        && a.axis.cross(b.axis).length() * a.radius.max(b.radius) <= tol
-}
-
-/// `one_wall_per_circle` (tangency-labs/smlib 7dee48f): the profile `curves` (parsed from
-/// `given`) with each run of consecutive arcs on one circle within a loop made one arc, so that
-/// the run's wall is one face as a single arc's is: a circle drawn in pieces (split where another
-/// sketch curve ends on it) sweeps the one cylinder it lies on, not a face per piece meeting the
-/// next along a line that is no edge of the shape. A run that is its whole loop is the full
-/// circle, swept as a plain circle is: one periodic face, its seam the one edge it uses twice.
-/// The seam goes where a plain circle has it: when the arcs are pieces of one drawn circle (they
-/// share its frame, the reference direction their angles are measured from), at that circle's
-/// own start, angle 0 of that frame; otherwise at the middle of the run's longest arc (the first
-/// of equal ones, in profile order). `tol` is the model's zone tolerance, within which
-/// consecutive curves already meet.
-fn one_wall_per_circle(k: &Kernel, given: &[Profile], curves: Vec<Curve>, tol: f64) -> solidcore::Result<Out<Vec<Curve>>> {
-    let n = curves.len();
-    if given.len() != n {
-        return Ok(Err(Error::Argument));
-    }
-    let arcs: Vec<Option<FlatArc>> = given.iter().map(FlatArc::of).collect();
-    let (mut head, mut tail) = (Vec::with_capacity(n), Vec::with_capacity(n));
-    for c in &curves {
-        let (a, b) = ends(k, c)?;
-        head.push(a);
-        tail.push(b);
-    }
-    // Whether the end of curve `i` meets the start of curve `j`; whether arc `j` goes on from
-    // arc `i`, on its circle.
-    let meets = |i: usize, j: usize| matches!((tail.get(i), head.get(j)), (Some(t), Some(h)) if (*t - *h).length() <= tol);
-    let arc_of = |i: usize| arcs.get(i).copied().flatten();
-    let joins = |i: usize, j: usize| match (arc_of(i), arc_of(j)) {
-        (Some(a), Some(b)) => meets(i, j) && one_circle(&a, &b, tol),
-        _ => false,
-    };
-    let mut taken: Vec<Option<Curve>> = curves.into_iter().map(Some).collect();
-    let mut take = |i: usize| taken.get_mut(i).and_then(Option::take).ok_or(Error::Argument);
-    let mut out = Vec::with_capacity(n);
-    let mut first = 0;
-    while first < n {
-        // The loop from `first`: its curves run end to end until one ends at its start.
-        let mut last = first;
-        while last + 1 < n && !meets(last, first) && meets(last, last + 1) {
-            last += 1;
-        }
-        let len = last - first + 1;
-        let closed = meets(last, first);
-        // Whether two of the loop's arcs go on on one circle.
-        let mut any = false;
-        let mut j = 0;
-        while j + 1 < len || (closed && len > 1 && j < len) {
-            any = any || joins(first + j, first + (j + 1) % len);
-            j += 1;
-        }
-        if !any {
-            for i in first..=last {
-                match take(i) {
-                    Ok(c) => out.push(c),
-                    Err(e) => return Ok(Err(e)),
-                }
-            }
-            first = last + 1;
-            continue;
-        }
-        // A run starts where its curve does not go on from the one before it round the loop.
-        let mut begin = 0;
-        if closed {
-            while begin < len && joins(first + (begin + len - 1) % len, first + begin) {
-                begin += 1;
-            }
-        }
-        if begin == len {
-            // The whole loop is arcs of one circle: the full circle, its seam at the drawn
-            // circle's start when the arcs share its frame, else at the middle of the longest arc.
-            let Some(a) = arc_of(first) else { return Ok(Err(Error::Argument)) };
-            let mut one_frame = true;
-            let mut longest = a;
-            for i in first..=last {
-                let Some(b) = arc_of(i) else { return Ok(Err(Error::Argument)) };
-                one_frame = one_frame && (b.reference - a.reference).length() * a.radius <= tol;
-                if b.sweep > longest.sweep {
-                    longest = b;
-                }
-            }
-            let seam = if one_frame { 0.0 } else { a.angle_on(longest.at(longest.start + 0.5 * longest.sweep)) };
-            let p = |v: Vec3| [v.x, v.y, v.z];
-            match arc(k, p(a.centre), p(a.axis), p(a.reference), a.radius, seam, seam + TAU) {
-                Ok(c) => out.push(c),
-                Err(e) => return Ok(Err(e)),
-            }
-        } else {
-            let mut kk = 0;
-            while kk < len {
-                let i = first + (begin + kk) % len;
-                // The arcs i, i + 1, ... round the loop that go on on its circle.
-                let mut m = 1;
-                while kk + m < len && joins(first + (begin + kk + m - 1) % len, first + (begin + kk + m) % len) {
-                    m += 1;
-                }
-                if m == 1 {
-                    match take(i) {
-                        Ok(c) => out.push(c),
-                        Err(e) => return Ok(Err(e)),
-                    }
-                } else {
-                    let (Some(a), Some(&h)) = (arc_of(i), head.get(i)) else { return Ok(Err(Error::Argument)) };
-                    let sweep: f64 = (0..m).filter_map(|j| arc_of(first + (begin + kk + j) % len)).map(|b| b.sweep).sum();
-                    let start = a.angle_on(h);
-                    let p = |v: Vec3| [v.x, v.y, v.z];
-                    match arc(k, p(a.centre), p(a.axis), p(a.reference), a.radius, start, start + sweep) {
-                        Ok(c) => out.push(c),
-                        Err(e) => return Ok(Err(e)),
-                    }
-                }
-                kk += m;
-            }
-        }
-        first = last + 1;
-    }
-    Ok(Ok(out))
-}
-
 /// Runs a call that makes a new body: the kernel locked, its own status as the capi passes it.
 fn making(call: &'static str, f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     run(call, f)?.map(Body::from_kernel)
 }
 
 /// `smlib_planar_faces`: a sheet of planar faces bounded by the closed `loops`
-/// (`SmApiCreatePlanarFaces`: `CreatePlanarFacesWith3DCurves` into a new B-rep's infinite region).
+/// (`SmApiCreatePlanarFaces`, [`solidcore_ops::sweep::planar_faces`]).
 pub(crate) fn planar_faces(loops: &[Profile]) -> Result<Body> {
-    making("smlib_planar_faces", |k| {
-        let curves = match parse(k, loops) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-        let region = b.infinite_region();
-        let made = {
-            let mut state = ArenaNotifyState::new(&b);
-            let mut env = state.env(None);
-            let key_of = env.key_of;
-            let this_face = |f: FaceId| key_of(EntityRef::Face(f));
-            let mut marks = Marks::default();
-            let mut fenv = FaceBuildEnv { env: &mut env, marks: &mut marks, this_face: &this_face };
-            // (the tolerance is not used: CreatePlanarFacesWith3DCurves takes the B-rep's)
-            create_planar_faces_with_3d_curves(k, &mut b, region, &curves, 0.01, &mut fenv)
-        };
-        if let Err(e) = made {
-            return Ok(Err(status(e)));
-        }
-        b.refresh_cached_topology();
-        finish(b, false)
-    })
+    let loops = ops_curves(loops);
+    super::call::ops_as("smlib_planar_faces", &[], sweep_error, || solidcore_ops::sweep::planar_faces(&loops))
 }
 
-/// `smlib_extrude`: the planar `profile` extruded `distance` along `direction`, straight
-/// (`SmApiCreateLinearSweep`) or drafted (`SmApiCreateTaperExtrude`).
+/// `smlib_extrude`: the planar `profile` extruded `distance` along `direction`, straight or
+/// drafted ([`solidcore_ops::sweep::extrude`]). A straight extrusion's runs of arcs on one
+/// circle are one arc first, as the fork's capi joins them (7dee48f), so that a circle drawn in
+/// pieces sweeps one wall ([`solidcore_ops::sweep::join_circle_runs`], at the model's zone
+/// tolerance).
 pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Body> {
     if !distance.is_finite() || !(distance > 1e-9 && distance < MAX_COORD) || !draft.is_finite() || draft.abs() >= PI / 2.0 - 1e-6 {
         return Err(Error::Argument);
     }
-    making("smlib_extrude", |k| {
-        let Some(dir) = unit(direction) else { return Ok(Err(Error::Argument)) };
-        let curves = match parse(k, profile) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        if draft == 0.0 {
-            // The fork's capi (7dee48f): arcs of a loop on one circle sweep one wall.
-            let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
-            let walls = match one_wall_per_circle(k, profile, curves, tol)? {
-                Ok(w) => w,
-                Err(e) => return Ok(Err(e)),
-            };
-            let refs: Vec<Option<&Curve>> = walls.iter().map(Some).collect();
-            return match create_linear_sweep(k, &refs, dir, distance, cap) {
-                Ok(r) => finish(r, cap),
-                Err(e) => Ok(Err(status(e))),
-            };
-        }
-        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        // SMLib's draft extrusion takes a single chain of curves, square to the extrusion: the
-        // height's sign picks the side, matched to `direction` here.
-        if !one_loop(k, &curves, 1e-6)? {
-            return Ok(Err(Error::Argument));
-        }
-        let Ok(normal) = compute_crvs_normal(k, &curves) else { return Ok(Err(Error::Argument)) };
-        let along = normal.dot(dir);
-        if along.abs() < 1.0 - 1e-9 {
-            return Ok(Err(Error::Argument));
-        }
-        let height = if along > 0.0 { distance } else { -distance };
-        let angle = draft * 180.0 / PI;
-        // The fork's corner rules (54148db, e8f23e0): the curvature rule continues each wall as
-        // itself, the tangent rule a profile of lines and arcs as their tangent planes
-        // (WR-521), and a corner either cannot close is refused,
-        // with why and where (`SmTaperCornerRefusal`, `pOptRefusedCorner`), as the capi passes it on.
-        let rule = match corner {
-            DraftCorner::Curvature => OffsetCornerType::CurveExtension,
-            DraftCorner::Tangent => OffsetCornerType::LinearExtension,
-            DraftCorner::Round => OffsetCornerType::FilletCorner,
-        };
-        match create_taper_extrude_with_corner(k, &refs, height, angle, if cap { 3 } else { 0 }, rule) {
-            Ok(TaperExtrude::Solid(r)) => finish(r, cap),
-            Ok(TaperExtrude::Refused(r)) => Ok(Err(refused(r))),
-            Err(e) => Ok(Err(status(e))),
-        }
-    })
+    if !direction.iter().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    const CALL: &str = "smlib_extrude";
+    let mut curves = ops_curves(profile);
+    if draft == 0.0 {
+        let tol = super::call::ops_as(CALL, &[], sweep_error, solidcore_ops::sweep::zone_tolerance)?;
+        curves = super::call::ops_as(CALL, &[], sweep_error, || solidcore_ops::sweep::join_circle_runs(&curves, tol))?;
+    }
+    let rule = match corner {
+        DraftCorner::Curvature => solidcore_ops::sweep::DraftCorner::Curvature,
+        DraftCorner::Tangent => solidcore_ops::sweep::DraftCorner::Tangent,
+        DraftCorner::Round => solidcore_ops::sweep::DraftCorner::Round,
+    };
+    super::call::ops_as(CALL, &[], sweep_error, || solidcore_ops::sweep::extrude(&curves, direction, distance, draft, rule, cap))
 }
 
 /// The capi's statuses for a draft corner whose continued curves do not meet, and for a wall that
@@ -525,37 +307,59 @@ pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, d
 const ERR_CORNER_APART: i32 = -1108;
 const ERR_WALL_CLOSES: i32 = -1109;
 
-/// A refused draft corner as the capi reports it: the reason with the corner's point,
-/// [`Error::Corner`] when the point is finite and the reason's own error otherwise.
-fn refused(r: CornerRefusal) -> Error {
-    let (why, otherwise) = match r.reason {
+/// A refused draft corner, `why` at `at`, as the capi reports it: [`Error::Corner`] where the
+/// point is finite, else the reason's own error.
+fn corner_refused(why: solidcore_ops::sweep::CornerRefusal, at: Option<[f64; 3]>) -> Error {
+    use solidcore_ops::sweep::CornerRefusal as TaperCornerRefusal;
+    let (why, otherwise) = match why {
         TaperCornerRefusal::Apart => (crate::sweeps::CornerRefusal::Apart, Error::Status(ERR_CORNER_APART)),
         TaperCornerRefusal::WallCloses => (crate::sweeps::CornerRefusal::WallCloses, Error::Status(ERR_WALL_CLOSES)),
         TaperCornerRefusal::NotExact => (crate::sweeps::CornerRefusal::NotExact, Error::NotExact),
     };
-    let at = [r.corner.x, r.corner.y, r.corner.z];
-    if at.iter().all(|x| x.is_finite()) { Error::Corner { why, at } } else { otherwise }
+    match at {
+        Some(at) if at.iter().all(|x| x.is_finite()) => Error::Corner { why, at },
+        _ => otherwise,
+    }
+}
+
+/// solidcore-ops' refusal of a sweep as the capi's: a draft corner as [`corner_refused`] words
+/// it, a result that is not a solid as [`Error::NotSolid`], the rest as solidcore-ops' blends
+/// and stitches are worded ([`super::blend::refused`]).
+fn sweep_error(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    if e.not_solid_test().is_some() {
+        return Error::NotSolid;
+    }
+    match e {
+        solidcore_ops::Error::DraftCornerRefused { why, at } => corner_refused(why, at),
+        solidcore_ops::Error::Empty => Error::Empty,
+        solidcore_ops::Error::NotSolid => Error::NotSolid,
+        e => super::blend::refused(call, e, detail),
+    }
+}
+
+/// A curve list as solidcore-ops takes it: the same curves.
+fn ops_curves(curves: &[Profile]) -> Vec<solidcore_ops::sweep::Curve> {
+    use solidcore_ops::sweep::Curve as Ops;
+    curves
+        .iter()
+        .map(|c| match c {
+            Profile::Line { start, end } => Ops::Line { start: *start, end: *end },
+            Profile::Arc { center, axis, reference, radius, start, end } => {
+                Ops::Arc { center: *center, axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
+            }
+            Profile::Nurbs { degree, points, knots } => Ops::Nurbs { degree: *degree, points: points.clone(), knots: knots.clone() },
+        })
+        .collect()
 }
 
 /// `smlib_revolve`: the planar `profile` turned `angle` radians about the axis through `origin`
-/// along `axis` (`SmApiCreateRotationalSweep`).
+/// along `axis` (`SmApiCreateRotationalSweep`, [`solidcore_ops::sweep::revolve`]).
 pub(crate) fn revolve(profile: &[Profile], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Body> {
-    if !coord_ok(&origin) || !angle.is_finite() || !(angle > 1e-9 && angle <= TAU * (1.0 + 1e-12)) {
+    if !coord_ok(&origin) || !angle.is_finite() || !(angle > 1e-9 && angle <= TAU * (1.0 + 1e-12)) || !axis.iter().all(|x| x.is_finite()) {
         return Err(Error::Argument);
     }
-    making("smlib_revolve", |k| {
-        let Some(dir) = unit(axis) else { return Ok(Err(Error::Argument)) };
-        let curves = match parse(k, profile) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        let degrees = (angle * 180.0 / PI).min(360.0);
-        match create_rotational_sweep(k, &refs, v3(origin), dir, degrees, cap) {
-            Ok(r) => finish(r, cap),
-            Err(e) => Ok(Err(status(e))),
-        }
-    })
+    let curves = ops_curves(profile);
+    super::call::ops_as("smlib_revolve", &[], sweep_error, || solidcore_ops::sweep::revolve(&curves, origin, axis, angle, cap))
 }
 
 /// `straight`: whether the path is lines end to end along one direction; then that unit
@@ -1192,21 +996,7 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
 /// to a point that follows guide rails (#20985). solidcore-ops builds it
 /// ([`solidcore_ops::sweep::loft_to_point_through`]).
 pub(crate) fn loft_to_point_through(sections: &[Vec<Profile>], apex: [f64; 3], params: &[f64]) -> Result<Body> {
-    use solidcore_ops::sweep::Curve as Ops;
-    let ops: Vec<Vec<Ops>> = sections
-        .iter()
-        .map(|s| {
-            s.iter()
-                .map(|c| match c {
-                    Profile::Line { start, end } => Ops::Line { start: *start, end: *end },
-                    Profile::Arc { center, axis, reference, radius, start, end } => {
-                        Ops::Arc { center: *center, axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
-                    }
-                    Profile::Nurbs { degree, points, knots } => Ops::Nurbs { degree: *degree, points: points.clone(), knots: knots.clone() },
-                })
-                .collect()
-        })
-        .collect();
+    let ops: Vec<Vec<solidcore_ops::sweep::Curve>> = sections.iter().map(|s| ops_curves(s)).collect();
     super::call::ops("smlib_loft_to_point_through", || solidcore_ops::sweep::loft_to_point_through(&ops, apex, params))
 }
 
