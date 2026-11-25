@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -124,6 +125,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_step",
     "file.export_stl",
     "file.export_urdf",
+    "file.export_urdf_options",
     "file.save_mesh",
 ];
 
@@ -141,6 +143,10 @@ const READ_ON_A_COPY: &[&str] = &[
     "inspect.clearance",
     "inspect.interference",
     "inspect.parameter_variants",
+    // The collisions of a motion study: the study plays on a copy, and the check of a slow pair
+    // took the window thread minutes, so the window stopped answering and the app was closed
+    // as not responding (#15333).
+    "motion.interference",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",
@@ -666,6 +672,7 @@ impl SolveApp {
             solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
+            copy.plugin_state.user.dialog_folders = crate::plugin_menu::take_folder_consent(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -930,6 +937,8 @@ impl SolveApp {
                         replies.map_err(|error| {
                             if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
                                 stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else if error.host_error().is_some() {
                                 error.to_string()
                             } else {
                                 self.tr("ui.plugin_context_changed").to_string()

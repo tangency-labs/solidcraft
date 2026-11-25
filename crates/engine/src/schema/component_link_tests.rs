@@ -15,10 +15,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<InsertDesignParams>(),
-        &["angle", "axis", "configuration", "matrix", "name", "origin", "parent", "path", "reuse", "to_matrix", "tolerance", "translate"],
+        &["angle", "axis", "configuration", "document", "matrix", "name", "origin", "parent", "path", "reuse", "to_matrix", "tolerance", "translate"],
     );
-    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "occurrence", "path"]);
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
@@ -35,6 +35,8 @@ fn strict_keeps_todays_errors() {
         ("component.insert_design", json!({"path": 5})),
         ("component.insert_design", json!({"path": null})),
         ("component.insert_design", json!({"path": "x".repeat(4096)})),
+        ("component.insert_design", json!({"document": 5})),
+        ("component.insert_design", json!({"document": ""})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1, 2]})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": null})),
         ("component.insert_design", json!({"path": "plate.solidcraft", "translate": [1e9, 0, 0]})),
@@ -88,6 +90,8 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<InsertDesignParams>(),
         &[
             (json!({"path": "plate.solidcraft"}), true),
+            (json!({"document": "{\"format\":65}"}), true),
+            (json!({"document": ""}), false),
             (json!({"path": "plate.solidcraft", "name": "P", "parent": "Arm", "translate": [1, 2, 3], "reuse": true}), true),
             (json!({"path": "plate.solidcraft", "parent": 4, "translate": {"x": 1, "y": 2, "z": 3}}), true),
             (json!({"path": "plate.solidcraft", "axis": [0, 0, 1], "angle": "90 deg"}), true),
@@ -114,6 +118,9 @@ fn the_schemas_take_what_the_handlers_read() {
         &[
             (json!({"component": "Plate", "path": "b.solidcraft"}), true),
             (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": 4}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "sync"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "keep"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "names": "both"}), false),
             (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": "Plate:2"}), false),
             (json!({"component": "Plate"}), false),
             (json!({"path": "b.solidcraft"}), false),

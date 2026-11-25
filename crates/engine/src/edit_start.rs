@@ -318,7 +318,7 @@ impl Session {
                 Arc::make_mut(drawing).sketches.retain(|record| record.id != entry.sketch);
             }
             self.active_sheet_sketch = None;
-            self.selection.clear();
+            self.clear_selection();
             self.revision = self.revision.saturating_add(1);
             self.publish_sketch_finish(event.clone());
             event.sequence = self.sketch_finish_sequence;

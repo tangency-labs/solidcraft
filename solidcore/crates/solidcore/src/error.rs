@@ -17,6 +17,7 @@
 //! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
 //! | [`SolidError::Unported`], [`SolidError::unported`], [`SolidError::is_unported`] | (none: call into a unit not ported yet) |
 //! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
+//! | [`SolidError::OutOfFuel`] | (none: a work budget on [`crate::Kernel`], [`crate::kernel::CancelToken::with_fuel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
@@ -33,6 +34,7 @@
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
 //! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
 //! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
+//! | [`fill::FillFailure`]       | none: why a channel fill is refused (not upstream, #18500) |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -93,6 +95,7 @@ pub mod blend;
 pub mod boolean;
 pub mod curve;
 pub mod defeature;
+pub mod fill;
 pub mod geom;
 pub mod heal;
 pub mod intersect;
@@ -150,6 +153,7 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::PreparationRequired { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::FaceTrimsUnavailable { .. }
@@ -164,23 +168,6 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
 /// [`SolidError::PreparationRequired`].
 pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
-}
-
-/// One call whose status SMLib drops and the fork passes on (`SER(...)`): with `pass_on`
-/// its error is returned to the caller (through the outer `?`); without it the result
-/// is handed back unchanged for the site's own ignore policy, so
-/// `ignore_status(passed_on(r, false)?)` is `ignore_status(r)`.
-pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
-    match r {
-        Err(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        r => Ok(r),
-    }
-}
-
-/// [`ignore_status`] of a call whose status SMLib drops and the fork passes on: with
-/// `pass_on` its error is returned, without it the status is ignored as upstream.
-pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
-    ignore_status(passed_on(r, pass_on)?)
 }
 
 /// A reference to one topological entity, used as error context.
@@ -349,6 +336,21 @@ pub enum SolidError {
         operation: &'static str,
     },
 
+    /// The operation spent the fuel its caller gave it
+    /// ([`crate::kernel::CancelToken::with_fuel`]): a deterministic budget of work units (polls
+    /// of the kernel's outer loops), never of time. Propagates wherever
+    /// [`SolidError::Cancelled`] does, so an operation out of fuel never returns a partial or
+    /// different geometric result; a caller may run it again with more.
+    #[error("{operation}: out of fuel: spent {spent} of {limit} work units")]
+    OutOfFuel {
+        /// Operation `path::to::fn` whose check found the fuel spent.
+        operation: &'static str,
+        /// The work units spent when it stopped.
+        spent: u64,
+        /// The work units it was given.
+        limit: u64,
+    },
+
     /// A fillet refused as too large, with the largest size that builds it (the fork's
     /// `GetFitRadius`, `GetFitEdge` and
     /// `GetFitKind`, which its capi's `smlib_blend_fit_size` reads, tangency-labs/smlib#79,
@@ -454,7 +456,7 @@ pub enum SolidError {
 // The one definition of every `SmStatus` number; other modules re-export or `use` these.
 // The values are pinned against `SmMessages.h` by `tests::status_codes_match_upstream`.
 
-/// Upstream `SmStatus` value `SM_SUCCESS` (`1000L`, `SmMessages.h`): success: the status every `SE`/`SER` macro tests against. No [`SolidError`] carries it; it is the value of status fields such as `BrepCheck::pointers_status` on success.
+/// Upstream `SmStatus` value `SM_SUCCESS` (`1000L`, `SmMessages.h`): success: the status every `SE`/`SER` macro tests against. No [`SolidError`] carries it; it is the value of status fields such as `DropCurveFail::fail_status` on success.
 pub const SM_SUCCESS: i32 = 1000;
 
 /// Upstream `SmStatus` value `SM_ERR` (`1001L`, `SmMessages.h`): generic failure.
@@ -1109,6 +1111,8 @@ pub enum Reason {
     Surface(surface::SurfaceFailure),
     /// A blend routine failed.
     Blend(blend::BlendFailure),
+    /// A channel fill cannot be built as asked (`prism::fill`; not upstream, #18500).
+    Fill(fill::FillFailure),
     /// A blend certificate's feet box runs past a support's net in a direction the
     /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
     /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
@@ -1145,6 +1149,7 @@ impl Reason {
             Self::Failed(_)
             | Self::Nurbs(_)
             | Self::Defeature(_)
+            | Self::Fill(_)
             | Self::Intersect(_)
             | Self::Primitive(_)
             | Self::Sweep(_)
@@ -1185,6 +1190,7 @@ impl Reason {
             Self::Topology(t) => t.comparison_status(),
             Self::Surface(s) => s.comparison_status(),
             Self::Blend(b) => b.comparison_status(),
+            Self::Fill(w) => w.comparison_status(),
         }
     }
 
@@ -1210,6 +1216,7 @@ impl Reason {
             Self::Topology(t) => t.kind(),
             Self::Surface(s) => s.kind(),
             Self::Blend(b) => b.class(),
+            Self::Fill(w) => w.kind(),
         }
     }
 }
@@ -1241,6 +1248,7 @@ impl core::fmt::Display for Reason {
             Self::Topology(t) => t.fmt(f),
             Self::Surface(s) => s.fmt(f),
             Self::Blend(b) => b.fmt(f),
+            Self::Fill(w) => w.fmt(f),
             Self::FootPastDomainEnd {
                 support,
                 s,
@@ -1264,6 +1272,12 @@ impl From<boolean::BooleanFailure> for Reason {
 impl From<nurbs::NurbsFailure> for Reason {
     fn from(n: nurbs::NurbsFailure) -> Self {
         Self::Nurbs(n)
+    }
+}
+
+impl From<fill::FillFailure> for Reason {
+    fn from(w: fill::FillFailure) -> Self {
+        Self::Fill(w)
     }
 }
 
@@ -1388,6 +1402,8 @@ pub enum ErrorKind {
     PreparationRequired = 93,
     /// A face's trims could not be used while its B-rep is edited.
     FaceTrimsUnavailable = 94,
+    /// The operation spent the fuel (work budget) its caller gave it.
+    OutOfFuel = 95,
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
@@ -1618,6 +1634,7 @@ impl ErrorKind {
             Self::Cancelled => "cancelled",
             Self::PreparationRequired => "preparation_required",
             Self::FaceTrimsUnavailable => "face_trims_unavailable",
+            Self::OutOfFuel => "out_of_fuel",
             Self::FilletTooLarge => "fillet_too_large",
             Self::BallDoesNotFit => "ball_does_not_fit",
             Self::RailLeavesFace => "rail_leaves_face",
@@ -1716,12 +1733,16 @@ impl SolidError {
 
     /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
-    /// [`SolidError::Cancelled`] through. Being replaced by
-    /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
-    /// Pass `nl_ser(OP)` to `map_err`.
+    /// [`SolidError::Cancelled`] through. Replaced by [`SolidError::nurbs_routine`], which
+    /// keeps the error as the cause: no library code calls it any more (#19848), and it stays
+    /// for the tests that compare the old form with the new.
+    #[cfg(test)]
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
-            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            Self::Unported { .. }
+            | Self::Cancelled { .. }
+            | Self::OutOfFuel { .. }
+            | Self::PreparationRequired { .. } => e,
             e if e.is_not_certified() => e,
             _ => Self::sm_err(operation),
         }
@@ -1773,6 +1794,7 @@ impl SolidError {
             | Self::PortInvariant { .. }
             | Self::PreparationRequired { .. }
             | Self::Cancelled { .. }
+            | Self::OutOfFuel { .. }
             | Self::FaceTrimsUnavailable { .. }
             | Self::UnsureRegion { .. }
             | Self::ExtendRefused { .. }
@@ -1824,10 +1846,18 @@ impl SolidError {
         Self::Cancelled { operation }
     }
 
-    /// True when this error is [`SolidError::Cancelled`].
+    /// True when this error is a stop its caller asked for: [`SolidError::Cancelled`], or
+    /// [`SolidError::OutOfFuel`] (the caller's work budget spent). Either way the operation gave
+    /// no answer on its input, and every fallback lets it through.
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled { .. })
+        matches!(self, Self::Cancelled { .. } | Self::OutOfFuel { .. })
+    }
+
+    /// True when this error is [`SolidError::OutOfFuel`].
+    #[must_use]
+    pub const fn is_out_of_fuel(&self) -> bool {
+        matches!(self, Self::OutOfFuel { .. })
     }
 
     /// True when this error must never be swallowed or remapped by an upstream
@@ -1840,7 +1870,10 @@ impl SolidError {
     pub fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
-            Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
+            Self::Unported { .. }
+                | Self::Cancelled { .. }
+                | Self::OutOfFuel { .. }
+                | Self::FaceTrimsUnavailable { .. }
         ) || self.is_not_certified()
     }
 
@@ -1897,6 +1930,7 @@ impl SolidError {
             Self::PortInvariant { .. } => ErrorKind::PortInvariant,
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
+            Self::OutOfFuel { .. } => ErrorKind::OutOfFuel,
             Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
             Self::BlendRefused { code, .. } | Self::RoundRefused { code, .. } => {
                 ErrorKind::of_status(*code)
@@ -2089,7 +2123,8 @@ impl SolidError {
             | Self::DefinitionNotCertified { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
-            | Self::Cancelled { operation } => operation,
+            | Self::Cancelled { operation }
+            | Self::OutOfFuel { operation, .. } => operation,
             Self::Failed(f) => f.operation,
             Self::Unported { upstream, .. } => upstream,
         }
@@ -2115,6 +2150,7 @@ impl SolidError {
             | Self::ExtendRefused { .. }
             | Self::Unported { .. }
             | Self::Cancelled { .. }
+            | Self::OutOfFuel { .. }
             | Self::RoundRefused { .. }
             | Self::PreparationRequired { .. } => None,
         }
@@ -2160,11 +2196,8 @@ mod tests {
         assert_eq!(ignored::<()>(Err(e.clone())), Err(e.clone()));
         assert_eq!(native_failure::<()>(Err(e.clone())), Err(e.clone()));
         assert_eq!(ignore_status::<()>(Err(e.clone())), Err(e.clone()));
-        assert_eq!(
-            passed_on::<()>(Err(e.clone()), false).map(|_| ()),
-            Err(e.clone())
-        );
         assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
+        assert_eq!(SolidError::nurbs_routine("op")(e.clone()), e);
         assert!(!SolidError::sm_err("t").is_not_certified());
     }
 
@@ -2567,6 +2600,7 @@ mod tests {
                 94,
                 "face_trims_unavailable",
             ),
+            (ErrorKind::OutOfFuel, 95, "out_of_fuel"),
             (ErrorKind::FilletTooLarge, 100, "fillet_too_large"),
             (ErrorKind::BallDoesNotFit, 101, "ball_does_not_fit"),
             (ErrorKind::RailLeavesFace, 102, "rail_leaves_face"),
@@ -2671,45 +2705,46 @@ mod tests {
                 ErrorKind::Cancelled => 11,
                 ErrorKind::PreparationRequired => 12,
                 ErrorKind::FaceTrimsUnavailable => 13,
-                ErrorKind::FilletTooLarge => 14,
-                ErrorKind::BallDoesNotFit => 15,
-                ErrorKind::RailLeavesFace => 16,
-                ErrorKind::FaceConsumed => 17,
-                ErrorKind::BandsOverlap => 18,
-                ErrorKind::BallsFold => 19,
-                ErrorKind::ChamferOffsetFolds => 20,
-                ErrorKind::CutsThePart => 21,
-                ErrorKind::BreaksThrough => 22,
-                ErrorKind::BallOffsetCollapses => 23,
-                ErrorKind::CornersTakeWholeEdge => 24,
-                ErrorKind::RunsIntoMaterial => 25,
-                ErrorKind::CliffOverflowRefused => 26,
-                ErrorKind::CliffEndFaceNotPlanar => 27,
-                ErrorKind::CliffOverflowShape => 28,
-                ErrorKind::CliffSubtractionLeavesNoSolid => 29,
-                ErrorKind::CreaseAcrossTangentEdge => 30,
-                ErrorKind::RailBelowResolution => 31,
-                ErrorKind::RailPastAxis => 32,
-                ErrorKind::JoinOffsetsDiffer => 33,
-                ErrorKind::StripBelowResolution => 34,
-                ErrorKind::EndPastSideEdge => 35,
-                ErrorKind::EndOverflowsSideEdge => 36,
-                ErrorKind::EndRollsIntoSmoothEnd => 37,
-                ErrorKind::EndAtSeamVertex => 38,
-                ErrorKind::StationDidNotConverge => 39,
-                ErrorKind::TrimLeaks => 40,
-                ErrorKind::StageFailed => 41,
-                ErrorKind::TangentContinuationEnd => 42,
-                ErrorKind::OverflowKeepsNothing => 43,
-                ErrorKind::RemovalNotExact => 44,
-                ErrorKind::NotARemovableFillet => 45,
-                ErrorKind::SideEdgeDegenerate => 46,
-                ErrorKind::SplitEndNotPlanar => 47,
-                ErrorKind::OffsetFolds => 48,
-                ErrorKind::OffsetWallsTouch => 49,
-                ErrorKind::OffsetLoopsCross => 50,
-                ErrorKind::OffsetEdgeVanishes => 51,
-                ErrorKind::OffsetCollapses => 52,
+                ErrorKind::OutOfFuel => 14,
+                ErrorKind::FilletTooLarge => 15,
+                ErrorKind::BallDoesNotFit => 16,
+                ErrorKind::RailLeavesFace => 17,
+                ErrorKind::FaceConsumed => 18,
+                ErrorKind::BandsOverlap => 19,
+                ErrorKind::BallsFold => 20,
+                ErrorKind::ChamferOffsetFolds => 21,
+                ErrorKind::CutsThePart => 22,
+                ErrorKind::BreaksThrough => 23,
+                ErrorKind::BallOffsetCollapses => 24,
+                ErrorKind::CornersTakeWholeEdge => 25,
+                ErrorKind::RunsIntoMaterial => 26,
+                ErrorKind::CliffOverflowRefused => 27,
+                ErrorKind::CliffEndFaceNotPlanar => 28,
+                ErrorKind::CliffOverflowShape => 29,
+                ErrorKind::CliffSubtractionLeavesNoSolid => 30,
+                ErrorKind::CreaseAcrossTangentEdge => 31,
+                ErrorKind::RailBelowResolution => 32,
+                ErrorKind::RailPastAxis => 33,
+                ErrorKind::JoinOffsetsDiffer => 34,
+                ErrorKind::StripBelowResolution => 35,
+                ErrorKind::EndPastSideEdge => 36,
+                ErrorKind::EndOverflowsSideEdge => 37,
+                ErrorKind::EndRollsIntoSmoothEnd => 38,
+                ErrorKind::EndAtSeamVertex => 39,
+                ErrorKind::StationDidNotConverge => 40,
+                ErrorKind::TrimLeaks => 41,
+                ErrorKind::StageFailed => 42,
+                ErrorKind::TangentContinuationEnd => 43,
+                ErrorKind::OverflowKeepsNothing => 44,
+                ErrorKind::RemovalNotExact => 45,
+                ErrorKind::NotARemovableFillet => 46,
+                ErrorKind::SideEdgeDegenerate => 47,
+                ErrorKind::SplitEndNotPlanar => 48,
+                ErrorKind::OffsetFolds => 49,
+                ErrorKind::OffsetWallsTouch => 50,
+                ErrorKind::OffsetLoopsCross => 51,
+                ErrorKind::OffsetEdgeVanishes => 52,
+                ErrorKind::OffsetCollapses => 53,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2766,6 +2801,7 @@ mod tests {
             ErrorKind::Missing,
             ErrorKind::Unported,
             ErrorKind::Cancelled,
+            ErrorKind::OutOfFuel,
         ] {
             assert!(
                 !kind.is_defect() && !kind.is_refusal() && !kind.sized(),
@@ -2862,6 +2898,15 @@ mod tests {
                 91,
             ),
             (SolidError::cancelled("op"), ErrorKind::Cancelled, 92),
+            (
+                SolidError::OutOfFuel {
+                    operation: "op",
+                    spent: 11,
+                    limit: 10,
+                },
+                ErrorKind::OutOfFuel,
+                95,
+            ),
             (
                 SolidError::PreparationRequired { operation: "op" },
                 ErrorKind::PreparationRequired,
@@ -3297,8 +3342,8 @@ mod tests {
     }
 
     /// The B-spline methods describe their failures ([`nurbs::BSplineFailure`]): their
-    /// library code builds no bare `Upstream` status, and no source file but the one
-    /// held back collapses an NLib failure without keeping it (`nl_ser`).
+    /// library code builds no bare `Upstream` status, and no source file collapses an NLib
+    /// failure without keeping it (`nl_ser`).
     #[test]
     fn the_b_spline_methods_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -3315,6 +3360,7 @@ mod tests {
             "nurbs/b_spline_surface_n_lib/approx.rs",
             "nurbs/b_spline_surface/p1.rs",
             "nurbs/b_spline_surface/p2.rs",
+            "nurbs/b_spline_curve/p1.rs",
             "nurbs/b_spline_curve/p2.rs",
             "nurbs/nurbs_crv.rs",
         ] {
