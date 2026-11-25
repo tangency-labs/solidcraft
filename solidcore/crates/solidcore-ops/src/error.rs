@@ -328,8 +328,9 @@ pub enum Error {
         /// The index of the edge it runs on into.
         continues_into: usize,
     },
-    /// A round too small to change the part (the kernel's `BlendRefusal::RoundTooSmall`): it
-    /// lies within the edge's tolerance of the edge.
+    /// A round too small to change the part or to build (the kernel's
+    /// `BlendRefusal::RoundTooSmall`): it lies within the edge's tolerance of the edge, or is
+    /// narrower across its faces than eight times the body's tolerance.
     RoundTooSmall {
         /// The edge's index.
         edge: usize,
@@ -892,6 +893,10 @@ pub enum FitKind {
     Scale,
     /// A chord round's width.
     Chord,
+    /// A bead's leg: from its joint to its toe ([`crate::bead`]).
+    Leg,
+    /// A bead's sagitta: how far the middle of its arc stands off the chord ([`crate::bead`]).
+    Sagitta,
 }
 
 impl RoomReason {
@@ -955,6 +960,8 @@ impl FitKind {
             FitKind::Distance => "distance",
             FitKind::Scale => "scale",
             FitKind::Chord => "chord width",
+            FitKind::Leg => "leg",
+            FitKind::Sagitta => "sagitta",
         }
     }
 }
