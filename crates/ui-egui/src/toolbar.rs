@@ -1276,6 +1276,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
             } else {
                 0.0
             },
+            fold_search: ui.ctx().content_rect().width() < crate::small_window::FULL_LAYOUT.x,
             buttons: jobs
                 .iter()
                 .map(|(id, label, ready)| ribbon::TabButton { id, label, ready: ready.as_ref().map(|_| ()).map_err(String::as_str) })
@@ -1325,16 +1326,21 @@ pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::ui_kit::Car
     }
 }
 
-/// The ribbon is folded to its tab row (`ribbon_tabs_only`, #10112). The Render workspace keeps
-/// its own stage bar whole.
+/// The ribbon is folded to its tab row (`ribbon_tabs_only`, #10112), by the preference or for a
+/// short window. The Render workspace keeps its own stage bar whole.
 pub(crate) fn tabs_only(app: &SolveApp) -> bool {
-    app.preferences.ribbon_tabs_only && !crate::render_workspace::active(app)
+    (app.preferences.ribbon_tabs_only || !app.shell.small_window.bands.panels) && !crate::render_workspace::active(app)
+}
+
+/// The ribbon's buttons carry their labels: the preference, unless the window is too short.
+pub(crate) fn labels(app: &SolveApp) -> bool {
+    app.preferences.ribbon_labels && app.shell.small_window.bands.labels
 }
 
 /// The height the ribbon keeps from the view: the tab row alone while it is folded, whose panels
 /// then open over the view.
 pub(crate) fn reserved_height(app: &SolveApp) -> f32 {
-    if tabs_only(app) { TAB_ROW_HEIGHT + 1.0 } else { ribbon_height(app.preferences.ribbon_labels) }
+    if tabs_only(app) { TAB_ROW_HEIGHT + 1.0 } else { ribbon_height(labels(app)) }
 }
 
 /// Where one pass of the ribbon draws: the folded tab row, the whole ribbon, or the whole ribbon
@@ -1456,7 +1462,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     let t = Tokens::get();
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
-    let full = ribbon_height(app.preferences.ribbon_labels);
+    let full = ribbon_height(labels(app));
     let cards = crate::ui_kit::Cards::new(available, layout, full, WORKSPACE_WIDTH);
     let r = if floating {
         Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
@@ -1590,7 +1596,7 @@ struct RibbonPanels {
 
 impl RibbonPanels {
     fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
-        let labels = app.preferences.ribbon_labels;
+        let labels = labels(app);
         let editing_in_place = app.edit_in_place.active.is_some();
         let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
         let panels = lists
@@ -1886,7 +1892,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
     let t = Tokens::get();
     let layout = shell_layout(app);
     let host = Container::for_layout(layout, Surface::Chrome);
-    let labels = app.preferences.ribbon_labels;
+    let labels = labels(app);
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     let RibbonShape { floating, cards, r, ws, folded } = shape;
     {
@@ -4720,6 +4726,10 @@ mod dropdown_tests {
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1200,"height":320}));
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.frames(4);
+            // A window this short folds the ribbon to its tabs: the tab opens its panels.
+            assert!(tabs_only(&h.app));
+            h.step(&json!({"click":{"handle":"tab:SKETCH"}})).unwrap();
             h.frames(4);
             h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
             h.frames(4);

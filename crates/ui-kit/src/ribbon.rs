@@ -1010,6 +1010,8 @@ pub struct Tabs<'a> {
     pub menu_open_from: &'a dyn Fn(Rect) -> bool,
     /// Room kept at the right for the search field (0: the field is elsewhere).
     pub search_width: f32,
+    /// The search field folds to its magnifier when the tabs need its room (a small window).
+    pub fold_search: bool,
     /// Buttons after the search field.
     pub buttons: Vec<TabButton<'a>>,
     /// The ribbon is a floating card: rounder tabs, concentric with its corners.
@@ -1086,9 +1088,16 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
     let corner = if row_data.floating { t.radius_lg.saturating_sub(inset as u8).max(t.radius_sm / 2) } else { t.control_radius.saturating_sub(1) };
     let button_widths: Vec<f32> = row_data.buttons.iter().map(|b| tab_width(ui, b.label)).collect();
     let buttons_width = if row_data.buttons.is_empty() { 0.0 } else { button_widths.iter().sum::<f32>() + 2.0 * t.space_2 };
+    // The field gives its room to the tabs, down to its magnifier, when they would scroll.
+    let tab_room = row.width() - 2.0 * inset - row_data.search_width - 6.0 - buttons_width;
+    let search_width = if row_data.fold_search && row_data.search_width > 0.0 && tabs_width > tab_room {
+        crate::CommandSearch::compact_width(TAB_ROW_HEIGHT - 2.0 * inset).min(row_data.search_width)
+    } else {
+        row_data.search_width
+    };
     let search = Rect::from_min_size(
-        pos2(row.right() - row_data.search_width - inset - buttons_width, row.top() + inset),
-        vec2(row_data.search_width, TAB_ROW_HEIGHT - 2.0 * inset),
+        pos2(row.right() - search_width - inset - buttons_width, row.top() + inset),
+        vec2(search_width, TAB_ROW_HEIGHT - 2.0 * inset),
     );
     let mut actions = Vec::new();
     let mut x = search.right() + t.space_2;
@@ -1112,7 +1121,7 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
         d.insert_temp(id, state);
         changed
     });
-    let end = if row_data.search_width > 0.0 { search.left() - 6.0 } else { row.right() - inset };
+    let end = if search_width > 0.0 { search.left() - 6.0 } else { row.right() - inset };
     let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
         ui.set_clip_rect(span);

@@ -818,6 +818,16 @@ impl<'a> Panel<'a> {
         ctx.data(|d| d.get_temp(self.id.with("body_scrollbar")))
     }
 
+    /// The outer height the card `id` takes with its whole body shown, from the last frame: the
+    /// height egui kept for its window plus how far its body's content ran past the body's
+    /// viewport. `None` before the card's first frame. A card that stands on a bottom edge puts
+    /// its top this far above it.
+    pub fn last_full_height(ctx: &egui::Context, id: egui::Id) -> Option<f32> {
+        let outer = ctx.memory(|m| m.area_rect(id))?.height();
+        let overflow = ctx.data(|d| d.get_temp::<f32>(id.with("body_overflow"))).unwrap_or(0.0);
+        Some(outer + overflow).filter(|h| h.is_finite())
+    }
+
     /// The painted anchor also drives dragging, including the shell's edge clearance.
     pub fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
         let viewport = self.viewport;
@@ -971,6 +981,7 @@ impl<'a> Panel<'a> {
             let fields_rect = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), fields_height));
             let state = if collapsed.as_deref().copied().unwrap_or(false) {
                 solidcraft_ui_registry::publish_count("dialog:body:content_height", 0.0);
+                ui.ctx().data_mut(|d| d.insert_temp(self.id.with("body_overflow"), 0.0_f32));
                 ComputeStatus { text: None, busy: disabled, applying: disabled }
             } else {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(fields_rect), |ui| {
@@ -1001,6 +1012,7 @@ impl<'a> Panel<'a> {
                         d.insert_temp(self.id.with("body_height"), scroll.inner_rect.height());
                         let scrolls = scroll.content_size.y > scroll.inner_rect.height() + 0.5;
                         d.insert_temp(self.id.with("body_scrollbar"), scrolls.then_some(scroll.inner_rect));
+                        d.insert_temp(self.id.with("body_overflow"), (scroll.content_size.y - scroll.inner_rect.height()).max(0.0));
                     });
                     // Content running on past either end of the viewport fades out into the card, so a
                     // field cut by the header or the footer reads as "scroll for more" rather than as a

@@ -75,7 +75,8 @@ fn fit_window_to_work_area(ctx: &egui::Context, frame: &eframe::Frame) {
     }
     let work = Area::new(x as f32 / scale, y as f32 / scale, w as f32 / scale, h as f32 / scale);
     let now = Area::new(outer.min.x, outer.min.y, outer.width(), outer.height());
-    let fitted = window_fit::fit(now, work, (960.0, 600.0));
+    let [min_w, min_h] = solidcraft_ui_egui::window_chrome::MIN_INNER_SIZE;
+    let fitted = window_fit::fit(now, work, (min_w, min_h));
     if fitted != now {
         // The frame (title bar, borders) keeps its size; only the inner size follows.
         let inner_size = egui::vec2((inner.width() - (now.w - fitted.w)).max(1.0), (inner.height() - (now.h - fitted.h)).max(1.0));

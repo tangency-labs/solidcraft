@@ -62,6 +62,9 @@ pub const WIDTH: f32 = 3.0 * BUTTON_WIDTH;
 pub const TRAFFIC_LIGHTS: f32 = 76.0;
 /// Windows' resize border at 100 % (96 DPI): `SM_CXSIZEFRAME` + `SM_CXPADDEDBORDER`, 4 + 4 px.
 pub const RESIZE_BORDER_AT_96_DPI: f32 = 8.0;
+/// The smallest the window can be made, in points: an app bar, a row of tabs and a view still
+/// fit. An app's parts give up room on the way down to it.
+pub const MIN_INNER_SIZE: [f32; 2] = [320.0, 240.0];
 
 /// The window's settings: `title` and `app_id` (the desktop entry's reverse-DNS id) are the
 /// app's; `custom_titlebar` drops the OS decorations so the app's bar is the title bar. On macOS
@@ -70,7 +73,7 @@ pub fn viewport(title: &str, app_id: &str, custom_titlebar: bool) -> ViewportBui
     ViewportBuilder::default()
         .with_title(title)
         .with_inner_size([1600.0, 1000.0])
-        .with_min_inner_size([960.0, 600.0])
+        .with_min_inner_size(MIN_INNER_SIZE)
         .with_drag_and_drop(true)
         .with_decorations(!custom_titlebar)
         .with_fullsize_content_view(true)
@@ -1190,7 +1193,7 @@ mod tests {
             assert_eq!(v.app_id.as_deref(), Some("org.example.Test"));
             assert_eq!(v.decorations, Some(!custom));
             assert_eq!((v.fullsize_content_view, v.titlebar_shown, v.title_shown), (Some(true), Some(false), Some(false)));
-            assert_eq!((v.inner_size, v.min_inner_size), (Some(vec2(1600.0, 1000.0)), Some(vec2(960.0, 600.0))));
+            assert_eq!((v.inner_size, v.min_inner_size), (Some(vec2(1600.0, 1000.0)), Some(vec2(320.0, 240.0))));
             assert_eq!(v.drag_and_drop, Some(true));
         }
     }

@@ -282,7 +282,7 @@ fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
         let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
         use crate::panel_runtime::{logical_rect, resolve_usable_region};
         let usable = resolve_usable_region(logical_rect(content), &[logical_rect(chip)]).unwrap();
-        let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
+        let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation, true);
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive());
         assert!(!layout.axis_view.intersect(chip).is_positive());
         assert!(content.contains_rect(layout.axis_view));
@@ -336,7 +336,8 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
         h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.settle();
-        for (scale, width, height) in [(1.0, 1400.0, 900.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0), (1.0, 900.0, 720.0)] {
+        // At 2× the window is 550 points wide: room for Sketch Options once the Browser gives way.
+        for (scale, width, height) in [(1.0, 1400.0, 900.0), (2.0, 1100.0, 475.0), (2.0, 1100.0, 385.0), (1.0, 900.0, 720.0)] {
             h.call("ui.prefs", json!({"ui_scale":scale}));
             h.call("ui.resize", json!({"width":width,"height":height}));
             h.settle();
@@ -402,7 +403,7 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
     assert!(usable.free.iter().any(|piece| egui_rect(*piece).contains(pos2(100.0, 700.0))), "the short-panel gap is part of the retained contour");
     for style in [crate::prefs::NavigatorStyle::Axes] {
         let navigation = bar_rect(viewport);
-        let layout = Layout::host(viewport, &usable, style, egui::Vec2::ZERO, navigation);
+        let layout = Layout::host_with_axis(viewport, &usable, style, egui::Vec2::ZERO, navigation, true);
         assert_eq!(layout.viewport, viewport);
         assert!(layout.navigation.is_positive() && layout.axis_view.is_positive());
         for control in [layout.navigation, layout.axis_view] {
@@ -489,7 +490,7 @@ fn host_fit_keeps_narrow_parts_centred_across_window_sizes() {
                     solidcraft_theme::Tokens::get().space_4,
                 )
                 .unwrap();
-            let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, egui_rect(navigation));
+            let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, egui_rect(navigation), true);
             assert!(layout.navigation.is_positive() && layout.axis_view.is_positive());
             for view in [StandardView::Front, StandardView::Iso] {
                 for fov in [0.0, 0.6] {
@@ -563,7 +564,8 @@ fn host_fit_keeps_thin_and_degenerate_model_footprints_padded_at_both_scales() {
                     Rect::from_min_size(pos2(500.0, 340.0), vec2(220.0, 160.0)),
                 ];
                 let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
-                let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport));
+                let layout =
+                    Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport), true);
                 let all_obstacles = obstacles
                     .iter()
                     .copied()
@@ -615,7 +617,7 @@ fn explicit_host_centring_preserves_zoom_and_only_falls_back_to_the_selected_foc
     let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), pos2(1000.0, 700.0));
     let obstacles = [Rect::from_min_size(pos2(0.0, viewport.top()), vec2(260.0, 220.0)), Rect::from_min_size(pos2(450.0, 300.0), vec2(180.0, 160.0))];
     let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
-    let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport));
+    let layout = Layout::host_with_axis(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, bar_rect(viewport), true);
     let safe = layout.usable.as_ref().unwrap();
     let bounds = Aabb3 { min: Vec3::new(0.0, 0.0, 10.0), max: Vec3::new(40.0, 30.0, 10.0) };
     for fov in [0.0, 0.6] {
@@ -787,7 +789,8 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
 fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for style in [crate::prefs::NavigatorStyle::Axes] {
-            for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0)] {
+            // At 2× the window is 550 points wide: room for Sketch Options once the Browser gives way.
+            for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 1100.0, 475.0), (2.0, 1100.0, 385.0)] {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout":mode}));
                 h.call("ui.prefs", json!({"navigator_style":style}));

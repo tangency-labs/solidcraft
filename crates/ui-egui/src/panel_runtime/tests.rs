@@ -14193,6 +14193,11 @@ fn plugin_panels_failed_open_does_not_starve_a_later_close() {
         }]))
         .unwrap();
     h.call("ui.resize", serde_json::json!({"width":350,"height":800}));
+    // The window's size hides the Browser. Its button shows it again, and then the Browser takes
+    // the room the blocked panel would need.
+    h.frames(2);
+    h.step(&serde_json::json!({"click":{"handle":"small_window:browser"}})).unwrap();
+    h.frames(2);
     let mut blocked = closing;
     blocked.panel.zones = vec![solidcraft_engine::plugin::ui::DockZone::Right];
     blocked.visibility_revision = 1;
@@ -14683,7 +14688,13 @@ fn production_sole_content_tracks_real_tree_folds_and_stops_at_column_capacity()
     assert!(folded < original_height - 20.0, "folding real content releases the unused space");
     let point = h.call("ui.at", serde_json::json!({"chevron":root}));
     h.call("ui.click", serde_json::json!({"x":point["result"][0],"y":point["result"][1]}));
-    h.call("ui.resize", serde_json::json!({"width":1600,"height":350}));
+    // Short, yet tall enough to keep the History along the bottom (below about 361 it goes); the
+    // ribbon folds to its tabs there, so a dozen more sketches keep the tree longer than its room.
+    for n in 0..12 {
+        h.app.run("sketch.create", serde_json::json!({"plane":"XY","name":format!("More {n}")})).unwrap();
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+    }
+    h.call("ui.resize", serde_json::json!({"width":1600,"height":400}));
     h.frames(6);
     let frame = h.app.universal_panel_frame().unwrap();
     let browser = frame.layout.sections.iter().find(|card| card.instance == id("browser")).unwrap();

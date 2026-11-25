@@ -181,7 +181,12 @@ impl Product {
     fn from_instance(instance: &InstanceId) -> PanelResult<Self> {
         Self::ALL.iter().copied().find(|product| product.id() == instance.0).ok_or_else(|| error(Rule::MissingTarget, "unknown application panel"))
     }
+    /// Offered in the current context and not hidden for the window's size.
     fn available(self, app: &crate::SolveApp) -> bool {
+        self.offered(app) && !app.shell.small_window.hides(self.id())
+    }
+    /// Offered in the current context, whatever the window's size.
+    fn offered(self, app: &crate::SolveApp) -> bool {
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
@@ -1117,6 +1122,69 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     }
 }
 
+/// A panel the window's size can hide: its instance id, icon and title.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SizedPanel {
+    pub id: &'static str,
+    pub icon: &'static str,
+    pub title_key: &'static str,
+}
+
+/// The open panels the window's size bears on: each docked side column's panels with the
+/// column's width, the left side's columns before the right side's, and the History with its
+/// band's height while it is docked along the bottom.
+pub(crate) struct SizedPanels {
+    pub columns: Vec<(Vec<SizedPanel>, f32)>,
+    pub history: Option<(SizedPanel, f32)>,
+}
+
+/// The height of a panel docked along the bottom (the History, the Render shots): the strip's
+/// 28-point chip with a six-point inset on each side, and the shared content slot's own
+/// two-point inset, or a form header's height if that is more.
+pub(crate) fn bottom_band_height() -> f32 {
+    let tokens = solidcraft_theme::Tokens::get();
+    tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2)
+}
+
+/// The panels the window's size bears on; none before the application's panels are in the
+/// shared host.
+pub(crate) fn sized_panels(app: &crate::SolveApp) -> Option<SizedPanels> {
+    let integration = app.panel_runtime.as_ref()?;
+    integration.production.as_ref()?;
+    let layout = integration.runtime().layout().layout();
+    let registry = integration.runtime().layout().registry();
+    // The History's tab icon is the Browser's; its button shows the History bar's Play instead.
+    let icon = |product: Product| if product == Product::History { "play" } else { product.icon() };
+    let sized = |product: Product| SizedPanel { id: product.id(), icon: icon(product), title_key: product.title_key() };
+    let open = |id: &InstanceId| {
+        let product = Product::from_instance(id).ok()?;
+        let instance = layout.instance(id).ok()?;
+        (instance.requested_open && product.offered(app)).then_some(product)
+    };
+    let mut sides: Vec<&Column> = layout.columns.iter().filter(|column| column.zone.side()).collect();
+    sides.sort_by_key(|column| column.zone);
+    let columns = sides
+        .into_iter()
+        .filter_map(|column| {
+            let panels: Vec<SizedPanel> = layout
+                .sections
+                .iter()
+                .filter(|section| section.column.as_ref() == Some(&column.id) && section.location.zone() == column.zone)
+                .flat_map(|section| section.tabs.iter())
+                .filter_map(open)
+                .map(sized)
+                .collect();
+            (!panels.is_empty()).then_some((panels, column.width))
+        })
+        .collect();
+    let history_height = registry.get(&PanelKind::new(Product::History.kind()).ok()?).ok()?.fixed_bottom_height.unwrap_or_else(bottom_band_height);
+    let history_id = InstanceId::new(Product::History.id()).ok()?;
+    let history = open(&history_id)
+        .filter(|_| layout.containing(&history_id).is_ok_and(|section| section.location.zone() == Zone::Bottom))
+        .map(|product| (sized(product), history_height));
+    Some(SizedPanels { columns, history })
+}
+
 /// The header button that switches between the 1D History and the 2D Timeline.
 pub(crate) const TIMELINE_VIEW: &str = "timeline-view";
 /// The 2D Timeline's header button that opens its options.
@@ -1133,9 +1201,7 @@ fn registry() -> PanelResult<PanelRegistry> {
     let tokens = solidcraft_theme::Tokens::get();
     // The 2D Timeline's grid heights plus the host's header and content inset above and below it.
     let chrome_2d = super::HostMetrics::default().header_height + 2.0 * tokens.space_2;
-    // The existing strip has a 28-point chip and six-point inset on each side;
-    // the shared content slot adds its own symmetric two-point inset.
-    let bottom_height = tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2);
+    let bottom_height = bottom_band_height();
     for product in Product::ALL.iter().copied() {
         let history = product == Product::History;
         let assistant = product == Product::Assistant;

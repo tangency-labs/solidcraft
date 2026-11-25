@@ -140,6 +140,9 @@ pub struct Harness {
     pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
+    /// Every texture the frames have uploaded (the font atlas, icons), for [`Harness::picture`].
+    #[cfg(test)]
+    textures: std::collections::HashMap<egui::TextureId, egui::ColorImage>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
     pub dir: PathBuf,
     /// The file the next Open picker returns (a `choose_file` step).
@@ -185,6 +188,8 @@ impl Harness {
             output: Default::default(),
             opened: Vec::new(),
             shapes: Vec::new(),
+            #[cfg(test)]
+            textures: std::collections::HashMap::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
             queue: None,
@@ -247,12 +252,20 @@ impl Harness {
     pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
         let mut raw = self.input(events);
         self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
+        self.run_frame(raw);
+    }
+
+    /// Lay out and draw one frame from `raw`, and keep what it gives: its output, the URLs it
+    /// opened, and its shapes and textures for [`Harness::picture`].
+    fn run_frame(&mut self, raw: egui::RawInput) {
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
             app.ui(ui);
         });
-        // Nothing is painted: drop the frame's texture changes.
+        // Nothing is painted: drop the frame's texture changes, which tests keep for pictures.
+        #[cfg(test)]
+        crate::ui_kit::test_textures_update(&mut self.textures, &out.textures_delta);
         out.textures_delta.clear();
         self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
             egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
@@ -260,6 +273,15 @@ impl Harness {
         }));
         self.output = out.platform_output;
         self.shapes = out.shapes;
+    }
+
+    /// The last frame as a picture of the whole window, drawn on the CPU: the rect egui laid it
+    /// out in, in UI points, at its pixels per point. The 3D view is drawn on the GPU, so it shows
+    /// as its backdrop.
+    #[cfg(test)]
+    pub fn picture(&self) -> image::RgbaImage {
+        let window = self.ctx.input(|i| i.viewport_rect());
+        crate::ui_kit::test_raster(&self.ctx, self.shapes.clone(), self.ctx.pixels_per_point(), window, &self.textures)
     }
 
     /// The URLs opened since the last call.
@@ -326,13 +348,7 @@ impl Harness {
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
         let raw = egui::RawInput { hovered_files: hovered, dropped_files: dropped, ..self.input(vec![egui::Event::PointerMoved(at)]) };
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| {
-            app.logic(ui.ctx());
-            app.ui(ui);
-        });
-        out.textures_delta.clear();
-        self.output = out.platform_output;
+        self.run_frame(raw);
     }
 
     /// Frames until the queued input is used up (and the view has settled).

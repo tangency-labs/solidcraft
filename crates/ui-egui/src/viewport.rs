@@ -10977,22 +10977,17 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
                 return;
             };
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
-            let orbit = crate::navigation_bar_view::canvas_caps(app).orbit;
+            let style = crate::view_gizmo::style(app);
+            // A small window's view shows the navigator only while it takes a third of its shorter side.
+            let fits =
+                crate::small_window::navigator_shown(ctx.content_rect().size(), crate::shell::panel_bounds(app, rect).size(), axis_view_size(style));
+            let axis = crate::navigation_bar_view::canvas_caps(app).orbit && fits;
             app.viewport.layout = Some(if app.viewport.card {
-                crate::viewport_layout::Layout::host_with_axis(rect, &usable, crate::view_gizmo::style(app), egui::Vec2::ZERO, navigation, orbit)
+                crate::viewport_layout::Layout::host_with_axis(rect, &usable, style, egui::Vec2::ZERO, navigation, axis)
             } else if let Some(confirm) = app.viewport.host_confirm {
-                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, crate::view_gizmo::style(app), confirm, navigation, orbit)
-            } else if orbit {
-                crate::viewport_layout::Layout::host(rect, &usable, crate::view_gizmo::style(app), crate::view_confirm::size(app), navigation)
+                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, style, confirm, navigation, axis)
             } else {
-                crate::viewport_layout::Layout::host_with_axis(
-                    rect,
-                    &usable,
-                    crate::view_gizmo::style(app),
-                    crate::view_confirm::size(app),
-                    navigation,
-                    false,
-                )
+                crate::viewport_layout::Layout::host_with_axis(rect, &usable, style, crate::view_confirm::size(app), navigation, axis)
             });
             return;
         }

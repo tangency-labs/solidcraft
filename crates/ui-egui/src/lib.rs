@@ -382,6 +382,7 @@ mod sketch_text_move;
 pub mod sketch_tools;
 mod sketch_transform_ui;
 mod sketch_view;
+pub(crate) mod small_window;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
@@ -4821,6 +4822,7 @@ impl SolveApp {
             self.home.open = false;
         }
         self.ui.layout.publish(ui.ctx());
+        small_window::update(self, ui.ctx());
         self.preferences.dialog_buttons.publish(ui.ctx());
         self.preferences.toast_place.publish(ui.ctx());
         scenario::clear_handles();
@@ -4900,11 +4902,16 @@ impl SolveApp {
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         viewport::refresh_layout(self, ui.ctx());
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
-        if self.view_windows.child_tool_owner(self.docs.current_tab()).is_none() {
+        let tool_here = self.view_windows.child_tool_owner(self.docs.current_tab()).is_none();
+        if tool_here {
             view_confirm::show(self, ui.ctx());
-            dialogs::show(self, ui.ctx());
         } else {
             self.viewport.host_confirm = None;
+        }
+        // After the confirm, whose footprint the buttons keep clear of; before the dialog.
+        small_window::show_buttons(self, ui.ctx());
+        if tool_here {
+            dialogs::show(self, ui.ctx());
         }
         issue_report::CadInput::block(self, ui, report_input);
         params_dialog::show(self, ui.ctx());

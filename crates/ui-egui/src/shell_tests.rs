@@ -1253,7 +1253,8 @@ fn cards_block_model_hover_wheel_and_drag_but_the_gap_remains_viewport() {
 #[test]
 fn sketch_options_and_compass_share_measured_clearance() {
     for style in [crate::prefs::NavigatorStyle::Axes] {
-        for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 720.0, 2.0)] {
+        // At 2× the window is 550×450 points: the Browser gives Sketch Options the room.
+        for (width, height, scale) in [(1400.0, 900.0, 1.0), (1100.0, 900.0, 2.0)] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
             h.call("ui.resize", json!({"width":width,"height":height}));
@@ -1298,7 +1299,9 @@ fn short_sketch_options_paints_and_scrolls_inside_the_viewport() {
         for height in [475, 385, 300] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
-            h.call("ui.resize", json!({"width":700,"height":height}));
+            // 550 points wide at 2×: wide enough for Sketch Options beside the view, once the
+            // Browser has given it the room.
+            h.call("ui.resize", json!({"width":1100,"height":height}));
             h.call("ui.prefs", json!({"ui_scale":2.0}));
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
             // Main's open/untied-end feedback also consumes footer space.

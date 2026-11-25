@@ -906,7 +906,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
             Err(e) => err(e),
         }),
-        "ui.resize" => wrap(solidcraft_control_egui::window::resize(ctx, p)),
+        "ui.resize" => wrap(solidcraft_control_egui::window::resize(ctx, p, crate::window_chrome::MIN_INNER_SIZE)),
         "ui.screenshot" => with(p, |q: params::Screenshot| match q.path.as_deref().map(vfs::check) {
             Some(Err(e)) => err(e),
             _ => Outcome::Screenshot { path: q.path },
