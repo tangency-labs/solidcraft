@@ -634,6 +634,35 @@ impl Transform {
         )
     }
 
+    /// Map a point on a line and its direction. Translation affects only the point.
+    #[must_use]
+    pub fn transform_line(&self, point: Point3, direction: Vec3) -> (Point3, Vec3) {
+        (
+            self.transform_point(point),
+            self.transform_vector(direction),
+        )
+    }
+
+    /// Map an undirected axis to this frame and orient its unit direction here.
+    ///
+    /// # Errors
+    /// Refuses a non-finite point or a direction with length at most 1e-9.
+    pub fn transform_canonical_axis(
+        &self,
+        point: Point3,
+        direction: Vec3,
+    ) -> crate::Result<(Point3, Vec3)> {
+        let (point, direction) = self.transform_line(point, direction);
+        let length = direction.length();
+        if !finite3(point) || !length.is_finite() || length <= 1e-9 {
+            return Err(crate::SolidError::InvalidInput {
+                operation: OP_MAPS,
+                reason: "the axis has no finite point and direction",
+            });
+        }
+        Ok((point, (direction / length).canonical_axis_direction()))
+    }
+
     /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
     /// the point `pivot` from where it was, as the move it adds to the map's turn about `pivot`:
     /// `pivot - transform_vector(pivot)`. A turn about the origin followed by this move is the

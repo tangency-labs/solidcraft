@@ -283,7 +283,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             solidcraft_doc::project::reframe_link_sketch_placements(sketch, transform, source)?;
             solidcraft_doc::reframe_plane_placements(plane, transform, source)?;
         }
-        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, &BTreeMap::new(), &copy.doc)?;
+        feature.remap_clone(&ids, &names, &BTreeMap::new(), &mapped, None)?;
         if let FeatureKind::Sketch { plane, sketch } = &mut feature.kind {
             reframe_wires(sketch, scratch.doc_mut(), transform, &world_shift);
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
