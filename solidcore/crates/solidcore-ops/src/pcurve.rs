@@ -189,13 +189,6 @@ pub fn complete_periodic_seams_noted(
     Ok((Some((completed, faces)), None))
 }
 
-/// Whether `record` passes the structural and geometric checks the import makes of every
-/// record before it publishes it ([`crate::record_check::validate`] and
-/// [`crate::record_check::agreement`]).
-pub(crate) fn passes_import_checks(record: &solidcore_record::brep::Brep) -> bool {
-    import_check_failure(record).is_none()
-}
-
 /// Moves the end knots of each trim that lies within rounding of its edge's interval onto the
 /// interval's ends. A trim built over an edge whose parameter range starts a rounding error
 /// off the record's (a seam's cut leaves `5.6e-17` where the record says `0`) passes the
@@ -214,23 +207,7 @@ pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
                 };
                 let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
                     &mut u.pcurve;
-                let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
-                    continue;
-                };
-                if first >= last || lo >= hi {
-                    continue;
-                }
-                let near = |a: f64, b: f64| (a - b).abs() <= ROUNDING;
-                if !(near(first, lo) && near(last, hi)) {
-                    continue;
-                }
-                for knot in knots.iter_mut() {
-                    if *knot == first {
-                        *knot = lo;
-                    } else if *knot == last {
-                        *knot = hi;
-                    }
-                }
+                solidcore::eval::pcurve::snap_end_knots(knots, [lo, hi], ROUNDING);
             }
         }
     }

@@ -1617,3 +1617,30 @@ pub fn restart_curve(curve: &Curve, start: f64) -> crate::Result<Curve> {
 #[cfg(test)]
 #[path = "pcurve_tests.rs"]
 mod tests;
+
+/// Moves the end knots of a clamped knot vector onto `interval`'s ends when both lie within
+/// `rounding` of them and are not already there: a trim built over an edge whose parameter
+/// range starts a rounding error off the record's (`5.6e-17` where the record says `0`) then
+/// covers the interval exactly. Every knot equal to the first (last) moves with it. Returns
+/// whether a knot moved; a vector or interval that is not ascending is left alone.
+pub fn snap_end_knots(knots: &mut [f64], interval: [f64; 2], rounding: f64) -> bool {
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
+        return false;
+    };
+    let [lo, hi] = interval;
+    if !(first < last && lo < hi) {
+        return false;
+    }
+    let near = |a: f64, b: f64| (a - b).abs() <= rounding;
+    if !(near(first, lo) && near(last, hi)) || (first == lo && last == hi) {
+        return false;
+    }
+    for knot in knots.iter_mut() {
+        if *knot == first {
+            *knot = lo;
+        } else if *knot == last {
+            *knot = hi;
+        }
+    }
+    true
+}
