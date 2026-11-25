@@ -707,7 +707,7 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
             // Exact history needs no mesh; geometry does (its face count is the mesh's).
             let names = match b.names.origin.as_ref() {
                 Some(o) if o.depth < MAX_DEPTH => b.names.lineage.as_ref().and_then(|l| crate::history_names::derive(b, o, l)).unwrap_or_else(|| {
-                    let centres = || face_centres(b);
+                    let centres = || face_centres(b).unwrap_or_default();
                     Names::unverified(geometric_names(b, o, face_count(b)), &mesh_adjacency(b), crate::history_names::by_place(&o.feature, &centres))
                 }),
                 _ => Names::unverified((0..face_count(b)).map(|k| format!("{}:face:{k}", b.name)).collect(), &[], None),
@@ -997,9 +997,10 @@ pub(crate) fn along_spread(cs: Vec<(usize, Vec3)>) -> Vec<usize> {
     order.into_iter().map(|(j, _)| j).collect()
 }
 
-/// Each face's centre: the mean of the sampled centres of its triangles.
-pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
-    samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
+/// Each face's centre: the area-weighted centroid from the kernel.
+pub(crate) fn face_centres(b: &ModelBody) -> solidcraft_kernel::Result<Vec<Vec3>> {
+    let fs = b.body.faces(0.01)?;
+    Ok(fs.into_iter().map(|f| f.centroid).collect())
 }
 
 /// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
@@ -1215,19 +1216,9 @@ pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> 
 
 /// Names of the edges nearest each point on a body (for storing references).
 pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
-    let m = b.mesh();
     let names = edge_names(b);
-    pts.iter()
-        .map(|p| {
-            m.edges
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), i))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, i)| names.get(i).cloned())
-                .unwrap_or_default()
-        })
-        .collect()
+    let lines = b.edge_lines();
+    pts.iter().map(|p| lines.nearest(*p).and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
 }
 
 /// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.

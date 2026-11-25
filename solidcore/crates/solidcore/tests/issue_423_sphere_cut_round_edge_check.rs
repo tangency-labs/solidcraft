@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#423: an R1 round on the rim of an r2 sphere cut at z = 1
 //! builds at the expected volume (7π + π²/2), but `check_brep` reported `SmBrep` test
 //! #61 ("Bad Edge fails pE->ValidateGeometry(FALSE) check") on its edges, with
-//! `fillet_cleanup_keeps_target_faces` on or off. Any in-place fillet did the same (an
+//! the clean-up's keep of the target's faces (WR-459, now the only path) on or off. Any in-place fillet did the same (an
 //! R0.5 round on a box edge too): the fillet insertion names the curves it binds to the
 //! target's edges by the session's kernel identities, and the global merge never
 //! rebound them to the target's own naming (the piecewise merge does), so the curve
@@ -48,10 +48,9 @@ fn failures(k: &mut Kernel, b: &mut Brep) -> Vec<(i64, u64)> {
 }
 
 /// The r2 sphere about the origin less everything above z = 1, rounded R1 along its
-/// rim, with `fillet_cleanup_keeps_target_faces` as `keep` says.
-fn rounded_cap(keep: bool) -> (Kernel, Brep) {
+/// rim.
+fn rounded_cap() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let sphere = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let cut = create_box(&mut k, Point3::new(-3.0, -3.0, 1.0), 6.0, 6.0, 3.0).unwrap();
     let mut b = boolean_difference(&mut k, sphere, cut).unwrap();
@@ -73,18 +72,16 @@ fn rounded_cap(keep: bool) -> (Kernel, Brep) {
 
 #[test]
 fn issue_423_rim_round_edges_pass_the_edge_geometry_check() {
-    for keep in [false, true] {
-        let (mut k, mut b) = rounded_cap(keep);
-        assert!(is_manifold_solid(&b).unwrap());
-        let expected = 7.0 * PI + PI * PI / 2.0;
-        let v = volume(&k, &mut b);
-        assert!((v - expected).abs() < 1e-3 * expected, "volume {v}");
-        // The whole check is clean, as the C++ kernel's: no SmBrep (16011) test #61
-        // (an edge fails SmEdge::ValidateGeometry, #423) and no SmEdgeuse (16005)
-        // test #6 (a UV trim curve a face classification made lost its owner, #1678).
-        let failed = failures(&mut k, &mut b);
-        assert_eq!(failed, vec![], "keep {keep}");
-    }
+    let (mut k, mut b) = rounded_cap();
+    assert!(is_manifold_solid(&b).unwrap());
+    let expected = 7.0 * PI + PI * PI / 2.0;
+    let v = volume(&k, &mut b);
+    assert!((v - expected).abs() < 1e-3 * expected, "volume {v}");
+    // The whole check is clean, as the C++ kernel's: no SmBrep (16011) test #61
+    // (an edge fails SmEdge::ValidateGeometry, #423) and no SmEdgeuse (16005)
+    // test #6 (a UV trim curve a face classification made lost its owner, #1678).
+    let failed = failures(&mut k, &mut b);
+    assert_eq!(failed, vec![]);
 }
 
 /// The same owner check on a plain box round: the whole check passes after it.
