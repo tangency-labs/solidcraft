@@ -776,12 +776,21 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
     if cells.is_empty() || cells.len() > 1000 {
         return Err(bad(cmd, "`cells` must list 1…1000 points [x, y, z], one inside each cell"));
     }
+    // Planes that also bound the cells: origin planes or construction planes, by name.
+    let mut planes = Vec::new();
+    for name in string_list(cmd, p, "planes")? {
+        planes.push(super::features::plane_param(s, Some(&Value::String(name)), cmd)?);
+    }
+    if tools.len() + planes.len() > 64 {
+        return Err(bad(cmd, "`tools` and `planes` together must list at most 64"));
+    }
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
         p,
         FeatureKind::BoundaryFill {
             tools: tools.into_iter().map(BodyName).collect(),
+            planes,
             cells: cells.into_iter().map(Position).collect(),
             operation,
             remove_tools: bool_(p, "remove_tools").unwrap_or(false),

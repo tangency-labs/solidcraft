@@ -14982,8 +14982,8 @@ fn eval_feature_kind(
             });
             Ok(())
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
-            if tools.is_empty() || tools.len() > 64 || cells.is_empty() || cells.len() > 1000 {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
+            if tools.is_empty() || tools.len() + planes.len() > 64 || cells.is_empty() || cells.len() > 1000 {
                 return Err(DocError::Invalid("Boundary Fill needs 1…64 tool bodies and 1…1000 cells".into()));
             }
             let tb: Vec<ModelBody> =
@@ -14992,6 +14992,34 @@ fn eval_feature_kind(
             if tb.iter().any(|b| b.body.is_mesh() || b.body.is_surface()) {
                 return Err(DocError::Invalid("Boundary Fill needs closed solid tools; open surface and mesh tools are not supported".into()));
             }
+            // A plane tool cuts space like an infinite plane: a cell lies on the side of it its point
+            // is on. The region a plane and the bodies close off may hold no body at all (the
+            // bore of an open tube), so with planes the cells are cut from a box (exact) that
+            // covers every tool and cell point with a margin; a cell that reaches that box is
+            // not enclosed.
+            let mut cut_planes: Vec<Plane> = Vec::new();
+            for pr in planes {
+                // A construction plane of another component is stored in that component's frame.
+                cut_planes.push(doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, pr)?, 0, f.component, Some(&*st))?);
+            }
+            let universe = match cells.first() {
+                Some(first) if !cut_planes.is_empty() => {
+                    let (mut lo, mut hi) = (first.0, first.0);
+                    for c in cells {
+                        lo = lo.min(c.0);
+                        hi = hi.max(c.0);
+                    }
+                    for b in &tb {
+                        let bb = b.body.exact_bounds()?;
+                        lo = lo.min(bb.min);
+                        hi = hi.max(bb.max);
+                    }
+                    let margin = (hi - lo).len() * 0.5 + 1.0;
+                    let pad = Vec3::new(margin, margin, margin);
+                    Some((kernel::box_solid(lo - pad, hi + pad)?, lo, hi, margin))
+                }
+                _ => None,
+            };
             let mut made = Vec::new();
             for p in cells {
                 // The cell: inside the tools that hold the point, outside the others.
@@ -15012,12 +15040,49 @@ fn eval_feature_kind(
                         Some(a) => kernel::boolean(&a.body, &b.body, BoolOp::Intersect)?.map(|r| Traced::step(r, &[&a, &b.traced()])),
                     };
                 }
-                let Some(mut cell) = acc else {
-                    return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                let mut cell = match (acc, &universe) {
+                    (Some(a), _) => a,
+                    (None, Some((u, ..))) => Traced { body: u.clone(), lineage: None, recipe: None },
+                    (None, None) => {
+                        return Err(DocError::Invalid(format!("the point {} is outside every tool: no enclosed cell there", p.0)));
+                    }
                 };
+                for pl in &cut_planes {
+                    let side = pl.height(p.0);
+                    if side.abs() <= 1e-7 * (1.0 + cell.body.size()) {
+                        return Err(DocError::Invalid("Boundary Fill cell points must be away from tool planes".into()));
+                    }
+                    cell = half_traced(&cell, pl, side > 0.0)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
+                }
                 for (b, _) in tb.iter().zip(&inside).filter(|(_, i)| !**i) {
                     let cut = kernel::boolean(&cell.body, &b.body, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("a cell came out empty".into()))?;
                     cell = Traced::step(cut, &[&cell, &b.traced()]);
+                }
+                if let Some((_, lo, hi, margin)) = &universe {
+                    // The planes can split a cell's region in pieces: the cell is the one holding the point.
+                    let lumps = cell.body.lumps()?;
+                    let lineages = crate::lineage::Lineage::lumps(&cell.body, cell.lineage.as_ref(), &lumps);
+                    let mut picked = None;
+                    for (lump, lineage) in lumps.into_iter().zip(lineages) {
+                        if matches!(lump.classify_point(p.0), Ok(kernel::PointClass::Inside)) {
+                            picked = Some(Traced { body: lump, lineage, recipe: None });
+                            break;
+                        }
+                    }
+                    cell = picked.ok_or_else(|| DocError::Invalid(format!("the point {p:?} is not inside a cell the tools and planes enclose")))?;
+                    let bb = cell.body.exact_bounds()?;
+                    let reach = *margin * 0.5;
+                    if bb.min.x < lo.x - reach
+                        || bb.min.y < lo.y - reach
+                        || bb.min.z < lo.z - reach
+                        || bb.max.x > hi.x + reach
+                        || bb.max.y > hi.y + reach
+                        || bb.max.z > hi.z + reach
+                    {
+                        return Err(DocError::Invalid(format!(
+                            "the point {p:?} is in a region the tools and planes leave open: no enclosed cell there"
+                        )));
+                    }
                 }
                 if cell.body.is_surface() {
                     return Err(DocError::Invalid("Boundary Fill did not produce a closed solid cell".into()));
@@ -17704,15 +17769,22 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     let plane = &square_to_axes(plane);
     let mut parts = Vec::new();
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
-        let Some(part) = part else { continue };
-        // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
-        let section = Some("section".to_string());
-        let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
-        parts.push(Traced::step(part, &[input, &tool]));
+        if let Some(part) = half_traced(input, plane, positive)? {
+            parts.push(part);
+        }
     }
     Ok(parts)
+}
+
+/// The part of `input` on one side of a plane (`None` when nothing is there), with its history.
+fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let section = Some("section".to_string());
+    let caps = if positive { [section, None] } else { [None, section] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
 /// `plane` with its directions' parts below rounding (1e-12) along a world axis dropped. A flat

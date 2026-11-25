@@ -178,6 +178,15 @@ fn feature_inputs_reject_external_sketch_geometry() {
     }
 }
 
+/// Boundary Fill's Tools also take planes, and still start from the body of a selected vertex.
+#[test]
+fn boundary_fill_tools_keep_the_body_of_a_preselected_vertex() {
+    let mut h = Harness::new();
+    h.app.session.selection = vec![Sel::Vertex { body: "Box".into(), point: Vec3::ZERO }];
+    let d = Dialog::for_command(&h.app, "solid.boundary_fill").unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Box".into() }]);
+}
+
 #[test]
 fn point_at_edge_and_plane_accepts_preselected_axes() {
     for (name, expected) in [("TestAxis", Vec3::new(20.0, 10.0, 0.0)), ("Z", Vec3::ZERO)] {

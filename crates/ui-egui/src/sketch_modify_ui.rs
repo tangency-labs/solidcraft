@@ -155,7 +155,7 @@ pub enum Mod {
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
-    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
+    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool, radians_trig: bool },
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
@@ -298,12 +298,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         // A sine wave to start from: one period, 40 wide and 10 high in the design's unit.
         "sketch.equation_curve" => Mod::Equation {
             form: 0,
-            x: "20 * t / pi".into(),
+            x: "t / 9".into(),
             y: "5 * sin(t)".into(),
             start: "0".into(),
-            end: "2 * pi".into(),
+            end: "360".into(),
             tolerance: "0.01 mm".into(),
             range_unit: false,
+            radians_trig: false,
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
@@ -326,6 +327,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
         end: eq.end,
         tolerance: format!("{} mm", eq.tolerance),
         range_unit: eq.variable_unit == VariableUnit::Range,
+        radians_trig: eq.radians_trig,
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
     dialog.extra.insert("curve".into(), json!(id));
@@ -722,7 +724,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
+            let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
+            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
@@ -734,8 +738,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
             ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
-            let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            if *range_unit {
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
+            }
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -1253,7 +1258,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, .. } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
                 let text = text.trim();
                 if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }

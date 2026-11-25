@@ -1367,8 +1367,8 @@ crates/ui-egui/src/move_preview.rs:ghost triangles
 crates/ui-egui/src/navigation.rs:device atan2,dot
 crates/ui-egui/src/navigation.rs:kept_view_middle distance
 crates/ui-egui/src/navigation.rs:navigator_home_centre distance
-crates/ui-egui/src/navigation.rs:orbit hypot
-crates/ui-egui/src/navigation.rs:orbit_drag dot
+crates/ui-egui/src/navigation.rs:orbit_drag_styled dot
+crates/ui-egui/src/navigation.rs:orbit_styled hypot
 crates/ui-egui/src/navigation.rs:snap_directions normalized
 crates/ui-egui/src/navigation.rs:snapped_axis_camera dot
 crates/ui-egui/src/navigation.rs:snapped_quarter_roll dot
