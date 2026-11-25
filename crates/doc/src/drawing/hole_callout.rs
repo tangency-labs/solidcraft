@@ -45,6 +45,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::PointClass;
+use solidcraft_kernel::services::affine;
 
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Mat, Model, ModelState, Result, display_units};
@@ -453,8 +454,8 @@ fn stray_bore(st: &ModelState, id: u64, holes: &[Vec3], dir: Vec3, r: f64) -> bo
     let prefix = format!("F{id}:bore:");
     let on_an_axis = |p: Vec3| {
         holes.iter().any(|at| {
-            let v = p - *at;
-            (v - dir * v.dot(dir)).len() <= r * 1.001 + 1e-6
+            let along = affine::distance_along((*at).into(), dir.into(), p.into());
+            (p - *at - dir * along).len() <= r * 1.001 + 1e-6
         })
     };
     st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
@@ -465,6 +466,12 @@ fn stray_bore(st: &ModelState, id: u64, holes: &[Vec3], dir: Vec3, r: f64) -> bo
         let spots = crate::naming::face_spots(b);
         names.iter().zip(spots.iter()).any(|(name, spot)| name.starts_with(&prefix) && spot.is_some_and(|s| !on_an_axis(s.point)))
     })
+}
+
+/// The cosine of the angle between unit directions `a` and `b`, through the kernel
+/// ([`affine::distance_along`] from the origin).
+fn cosine(a: Vec3, b: Vec3) -> f64 {
+    affine::distance_along([0.0; 3], b.into(), a.into())
 }
 
 /// The bore of feature `id` at `at` (drilled along `dir`, of radius `r`, `depth` deep when blind)
@@ -486,7 +493,7 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Opti
         for (name, spot) in names.iter().zip(spots.iter()) {
             let Some(spot) = spot.filter(|_| name.starts_with(&prefix)) else { continue };
             let v = spot.point - at;
-            let along = v.dot(dir);
+            let along = affine::distance_along(at.into(), dir.into(), spot.point.into());
             let off = (v - dir * along).len();
             // On this hole's axis and below its start.
             if along <= 0.0 || off > r * 1.001 + 1e-6 {
@@ -496,16 +503,16 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Opti
             // it. Only a face of no known surface is told by where its spot is: the wall at the
             // radius (a facet of a curved face lies inside it by its sag, so this is a fallback).
             let across = match spot.surface {
-                Some(FaceSurface::Cylinder { axis, radius, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => {
+                Some(FaceSurface::Cylinder { axis, radius, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => {
                     changed |= (radius - r).abs() > 1e-4 * (1.0 + r);
                     false
                 }
-                Some(FaceSurface::Plane { normal, .. }) if normal.dot(dir).abs() > 1.0 - 1e-6 => {
+                Some(FaceSurface::Plane { normal, .. }) if cosine(Vec3::from(normal), dir).abs() > 1.0 - 1e-6 => {
                     // A flat floor lies at the depth (a drill point's cone, below it, isn't checked).
                     changed |= depth.is_some_and(|d| (along - d).abs() > 1e-4 * (1.0 + d));
                     true
                 }
-                Some(FaceSurface::Cone { axis, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => true,
+                Some(FaceSurface::Cone { axis, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => true,
                 _ => off < r * 0.999 - 1e-6,
             };
             if across {
