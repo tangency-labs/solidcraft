@@ -65,7 +65,13 @@
 //!   returns the solve's side record ([`crate::geom::solution_array::SideRecord`]) from the
 //!   components of what the leaves' passes and the strips kept, after the solve's drop
 //!   ([`super::certified_line::drop_fenced`], [`super::certified_line::components`]);
-//!   nothing reads it yet.
+//!   nothing reads it yet. A solve whose context keeps its operation's searches
+//!   ([`super::p1::SurfaceSolveContext::line_passes`]) takes the one made on the same
+//!   inputs instead of searching again ([`super::certified_line::LinePasses`]); its
+//!   solutions are read as before.
+
+use core::cell::RefCell;
+use std::sync::Arc;
 
 use super::certified_line;
 use super::p1::{is_node_inside, is_node_valid, is_surface_cache_owner, surface_to_evaluate};
@@ -986,12 +992,15 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
     /// The crossings [`certified_line::isolate`] certifies on each leaf `kept` holds, added
     /// ([`CertifiedLsi::certified_pass`]), and the solve's side record built from the
-    /// components of what the passes kept ([`certified_line::components`]).
+    /// components of what the passes kept ([`certified_line::components`]). The search
+    /// ([`certified_line::search`]) is taken from `passes` when the operation kept one on
+    /// the same inputs, and kept there otherwise.
     fn add_certified_roots(
         &mut self,
         k: &Kernel,
         net: &certified_line::LineNet,
         kept: &Kept<O>,
+        passes: Option<&RefCell<certified_line::LinePasses>>,
     ) -> Result<SideRecord> {
         // (without the cache no leaf was solved, and none is kept)
         let Some(cache) = self.surface_cache else {
@@ -1022,146 +1031,76 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             solve_domain: self.uv_domain,
             tol,
         };
-        let leaves = &kept.leaves;
-        // the leaves and the culled strips: what lies across each one's sides
-        let domains: Vec<Extent2d> = leaves
+        // the search reads the net, the line, the leaves and the strips alone: one the
+        // operation made on the same inputs is this one's (a borrow refused is no search
+        // kept: this solve searches)
+        let jobs: Vec<certified_line::SolvedLeaf> = kept
+            .leaves
             .iter()
-            .map(|job| job.domain)
-            .chain(kept.strips.iter().copied())
+            .map(|job| certified_line::SolvedLeaf {
+                domain: job.domain,
+                interval: job.interval,
+                inside: job.inside,
+            })
             .collect();
-        // where the solve's parameter space closes on itself across a seam
-        let seams = net.seams(&self.uv_domain);
-        let sides = certified_line::leaf_sides(&domains, &self.uv_domain, seams);
-        let mut searched: Vec<certified_line::SearchedLeaf> = Vec::new();
-        // the records the drop and the components read, bounded
-        // (`certified_line::MAX_SOLVE_BOXES`)
-        let mut records = 0_usize;
-        let mut over_budget = false;
-        for (job, job_sides) in leaves.iter().zip(&sides) {
-            let found = certified_line::isolate(
+        let key = passes.map(|_| certified_line::PassKey::of(net, &line, &jobs, &kept.strips));
+        let found = match (passes, &key) {
+            (Some(passes), Some(key)) => passes.try_borrow().ok().and_then(|p| p.found(key)),
+            _ => None,
+        };
+        let search = if let Some(search) = found {
+            k.work_counters.add_line_search_reused();
+            search
+        } else {
+            let search = Arc::new(certified_line::search(
                 net,
                 &line,
-                &job.domain,
-                &job.interval,
-                job_sides,
+                &jobs,
+                &kept.strips,
                 self.base.cancel.as_ref(),
-            )?;
-            k.work_counters.add_line_pass(
-                u64::try_from(found.boxes).unwrap_or(u64::MAX),
-                u64::try_from(found.unshown).unwrap_or(u64::MAX),
-                found.stop,
-            );
-            k.work_counters.add_line_exclusion(
-                u64::try_from(found.exclusion.boxes).unwrap_or(u64::MAX),
-                found.exclusion.out_of_budget,
-            );
-            // Only a leaf the pass finished adds crossings: one stopped at the limit may
-            // hold a crossing the pass never reached, and adding one of two crossings it
-            // did reach would turn the guesses' even count (a ray passing near a crown
-            // seam, both crossings missed) into an odd one. Its answer stays the guesses'.
-            if !found.roots.is_empty() && found.stop == certified_line::Stop::Finished {
-                let leaf = LsiLeaf {
-                    cache,
-                    owner: job.owner,
-                    parent: job.parent,
-                    eval: cache.surface(),
-                    domain: job.domain,
-                    line: Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false)),
-                    interval: job.interval,
-                    conts: job.conts,
-                    nodes: job.nodes,
-                };
-                for root in &found.roots {
-                    // a root whose evaluation, filter or point test fails is not added: the
-                    // solve's answer without it is the guesses', as it was
-                    ignored(self.add_certified_root(k, &leaf, root, tol / speed))?;
+                &k.work_counters,
+            )?);
+            if let (Some(passes), Some(key)) = (passes, key) {
+                if let Ok(mut passes) = passes.try_borrow_mut() {
+                    passes.keep(key, &search);
                 }
             }
-            records = records.saturating_add(found.floor.len());
-            over_budget |= records > certified_line::MAX_SOLVE_BOXES;
-            searched.push(certified_line::SearchedLeaf {
-                domain: job.domain,
-                stop: found.stop,
-                // (past the bound the records are not kept, and never read as absence)
-                floor: (!over_budget).then_some(found.floor),
-                roots: found.roots,
-                strip: false,
-                inside: job.inside,
-            });
-        }
-        if certified_line::leaves_not_run(&searched) {
-            // every solved leaf's pass did not run: the record is not run whatever the
-            // strips would find, so they are not enclosed (nothing but the counters would
-            // read them)
-            k.work_counters.add_line_solve(0, false);
-            return Ok(SideRecord::NotRun);
-        }
-        for strip in &kept.strips {
-            if over_budget {
-                // (past the bound nothing is read of a strip: the components are not built)
-                searched.push(certified_line::SearchedLeaf {
-                    domain: *strip,
-                    stop: certified_line::Stop::NotRun,
-                    floor: None,
-                    roots: Vec::new(),
-                    strip: true,
-                    inside: false,
-                });
+            search
+        };
+        // Only a leaf the pass finished adds crossings: one stopped at the limit may hold
+        // a crossing the pass never reached, and adding one of two crossings it did reach
+        // would turn the guesses' even count (a ray passing near a crown seam, both
+        // crossings missed) into an odd one. Its answer stays the guesses'. (The solved
+        // leaves come first in the search, in the order of `kept`.)
+        for (job, found) in kept.leaves.iter().zip(&search.leaves) {
+            if found.roots.is_empty() || found.stop != certified_line::Stop::Finished {
                 continue;
             }
-            let found =
-                certified_line::enclose_strip(net, &line, strip, self.base.cancel.as_ref())?;
-            k.work_counters
-                .add_line_strip(u64::try_from(found.boxes).unwrap_or(u64::MAX), found.stop);
-            records = records.saturating_add(found.floor.len());
-            over_budget |= records > certified_line::MAX_SOLVE_BOXES;
-            searched.push(certified_line::SearchedLeaf {
-                domain: *strip,
-                stop: found.stop,
-                floor: (!over_budget).then_some(found.floor),
-                roots: Vec::new(),
-                strip: true,
-                inside: false,
-            });
+            let leaf = LsiLeaf {
+                cache,
+                owner: job.owner,
+                parent: job.parent,
+                eval: cache.surface(),
+                domain: job.domain,
+                line: Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false)),
+                interval: job.interval,
+                conts: job.conts,
+                nodes: job.nodes,
+            };
+            for root in &found.roots {
+                // a root whose evaluation, filter or point test fails is not added: the
+                // solve's answer without it is the guesses', as it was
+                ignored(self.add_certified_root(k, &leaf, root, tol / speed))?;
+            }
         }
-        let mut components = if over_budget {
-            certified_line::Components::over_budget()
-        } else {
-            let drops = certified_line::drop_fenced(
-                net,
-                &line,
-                &mut searched,
-                &sides,
-                self.base.cancel.as_ref(),
-                certified_line::MAX_DROP_ENCLOSURES,
-            )?;
-            k.work_counters.add_line_drops(&drops);
-            certified_line::components(&searched, &sides, span, seams)
-        };
-        let at_limit = searched
-            .iter()
-            .any(|l| !l.strip && l.stop == certified_line::Stop::AtLimit);
-        k.work_counters.add_line_solve(
-            u64::try_from(components.list.len()).unwrap_or(u64::MAX),
-            at_limit,
-        );
         // (a record not run leaves the solutions the guesses' alone, unclassified)
-        let stood_for = if certified_line::leaves_not_run(&searched) {
-            Vec::new()
-        } else {
-            certified_line::type_components(
-                net,
-                &line,
-                &searched,
-                &sides,
-                &mut components,
-                self.base.cancel.as_ref(),
-            )?;
-            self.type_solutions(net, &line, &components, kept.unplaced > 0)?
-        };
+        if certified_line::leaves_not_run(&search.leaves) {
+            return Ok(SideRecord::NotRun);
+        }
+        let stood_for = self.type_solutions(net, &line, &search.components, kept.unplaced > 0)?;
         Ok(certified_line::side_record(
-            &searched,
-            &components,
+            &search.leaves,
+            &search.components,
             &stood_for,
             kept.unplaced > 0,
             span,
@@ -1391,18 +1330,23 @@ pub(crate) struct CertifiedLsi<'t, 's, O> {
     net: Option<certified_line::LineNet>,
     /// The leaves whose guesses ran, and the culls.
     kept: Kept<O>,
+    /// The searches of the certified pass the operation keeps
+    /// ([`certified_line::LinePasses`]); `None`: every solve searches.
+    passes: Option<&'s RefCell<certified_line::LinePasses>>,
 }
 
 impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
-    /// `solver` with the certified pass on `net`.
+    /// `solver` with the certified pass on `net`, reusing the searches `passes` keeps.
     pub(crate) fn new(
         solver: LsiGlobalSolver<'t, 's, O>,
         net: Option<certified_line::LineNet>,
+        passes: Option<&'s RefCell<certified_line::LinePasses>>,
     ) -> Self {
         Self {
             solver,
             net,
             kept: Kept::default(),
+            passes,
         }
     }
 
@@ -1423,7 +1367,7 @@ impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
             return Ok(SideRecord::NotRun);
         };
         let kept = std::mem::take(&mut self.kept);
-        let added = self.solver.add_certified_roots(k, &net, &kept);
+        let added = self.solver.add_certified_roots(k, &net, &kept, self.passes);
         self.net = Some(net);
         added
     }
@@ -2800,5 +2744,105 @@ mod tests {
             SideRecord::Complete => {}
             SideRecord::NotRun => panic!("not run"),
         }
+    }
+
+    /// A context with plain caches that keeps the certified pass's searches, or not.
+    struct KeepingSearches(Option<RefCell<certified_line::LinePasses>>);
+
+    impl crate::surface::surface::p1::SurfaceSolveContext<H> for KeepingSearches {
+        fn build_surface_cache(
+            &mut self,
+            k: &Kernel,
+            surface: &Surface,
+            handle: Option<H>,
+        ) -> Result<SurfaceCache<H>> {
+            super::super::p1::get_surface_cache(k, surface, handle)
+        }
+
+        fn face_queries(
+            &self,
+        ) -> Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<H>> {
+            None
+        }
+
+        fn line_passes(&self) -> Option<&RefCell<certified_line::LinePasses>> {
+            self.0.as_ref()
+        }
+    }
+
+    /// A solve whose context keeps its operation's searches (`certified_line`, "Reuse within
+    /// an operation") searches once and takes the kept search when the same solve comes
+    /// again; both answers, side records and contacts included, are the answer of a solve
+    /// whose context keeps none. The line is the torus's near its crown: four crossings.
+    #[test]
+    fn a_repeated_solve_takes_its_kept_search_and_the_same_answer() {
+        // (the memos on whatever the build's features: the reuse is what is tested)
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let s = torus(&k);
+        let p = Vec3::new(82.388_988_497_226_59, 82.388_988_497_226_59, 10.000_04);
+        let d = Vec3::new(
+            -0.850_300_871_283_819_5,
+            -0.523_935_376_527_776_1,
+            -0.049_801_099_552_871_67,
+        );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let solve = |context: &mut KeepingSearches| {
+            s.global_line_intersect_with_context::<H>(
+                &k,
+                Some(H(0)),
+                None,
+                context,
+                &domain,
+                p,
+                d,
+                None,
+                false,
+                2.0e-5,
+            )
+            .unwrap()
+        };
+        let alone = solve(&mut KeepingSearches(None));
+        assert_eq!(alone.len(), 4, "{alone:?}");
+        assert_eq!(k.work_counters.line_searches_reused(), 0);
+        let mut keeping = KeepingSearches(Some(RefCell::default()));
+        let searches = k.work_counters.line_solves();
+        let first = solve(&mut keeping);
+        assert_eq!(k.work_counters.line_solves(), searches + 1);
+        assert_eq!(k.work_counters.line_searches_reused(), 0);
+        let again = solve(&mut keeping);
+        assert_eq!(
+            k.work_counters.line_solves(),
+            searches + 1,
+            "searched again"
+        );
+        assert_eq!(k.work_counters.line_searches_reused(), 1);
+        assert_eq!(first, alone);
+        assert_eq!(again, alone);
+        assert_eq!(again.side_record(), alone.side_record());
+        // a solve on other inputs (a tolerance one rounding wider) finds nothing kept: it
+        // searches, and answers as a solve whose context keeps nothing
+        let wider = f64::from_bits(2.0e-5_f64.to_bits() + 1);
+        let other = |context: &mut KeepingSearches| {
+            s.global_line_intersect_with_context::<H>(
+                &k,
+                Some(H(0)),
+                None,
+                context,
+                &domain,
+                p,
+                d,
+                None,
+                false,
+                wider,
+            )
+            .unwrap()
+        };
+        let other_alone = other(&mut KeepingSearches(None));
+        let other_kept = other(&mut keeping);
+        assert_eq!(k.work_counters.line_searches_reused(), 1);
+        assert_eq!(other_kept, other_alone);
     }
 }

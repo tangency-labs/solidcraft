@@ -221,6 +221,7 @@ pub struct WorkCounters {
     line_exclusions_out_of_budget: Cell<u64>,
     line_solves: Cell<u64>,
     line_solves_at_limit: Cell<u64>,
+    line_searches_reused: Cell<u64>,
     line_components: Cell<u64>,
     line_strips: Cell<u64>,
     line_strip_boxes: Cell<u64>,
@@ -472,6 +473,14 @@ impl WorkCounters {
         self.line_solves_at_limit.get()
     }
 
+    /// Line/surface solves that took the certified pass's search their operation had made
+    /// on the same inputs (`certified_line::LinePasses`) instead of searching: not counted
+    /// in [`WorkCounters::line_solves`]. Not the fork's.
+    #[must_use]
+    pub fn line_searches_reused(&self) -> u64 {
+        self.line_searches_reused.get()
+    }
+
     /// Components of what the certified passes of a solve kept (`certified_line`,
     /// "Components"), over all solves. Not the fork's.
     #[must_use]
@@ -635,6 +644,7 @@ impl WorkCounters {
         self.line_exclusions_out_of_budget.set(0);
         self.line_solves.set(0);
         self.line_solves_at_limit.set(0);
+        self.line_searches_reused.set(0);
         self.line_components.set(0);
         self.line_strips.set(0);
         self.line_strip_boxes.set(0);
@@ -887,6 +897,12 @@ impl WorkCounters {
             self.line_solves_at_limit
                 .set(self.line_solves_at_limit.get().saturating_add(1));
         }
+    }
+
+    /// Counts one solve that took a kept search of the certified line pass.
+    pub(crate) fn add_line_search_reused(&self) {
+        self.line_searches_reused
+            .set(self.line_searches_reused.get().saturating_add(1));
     }
 
     /// Counts one crossing the certified line pass added.
@@ -1237,7 +1253,9 @@ pub struct Kernel {
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
     /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
-    /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
+    /// analyses' bounds and memo, #2568; face test 37's winding hulls), and whether a
+    /// line solve takes the certified pass's search its operation kept on the same inputs
+    /// (`surface::surface::certified_line::LinePasses`). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
     /// everything in full, to check that.
     pub memoize_curve_caches: bool,

@@ -1259,6 +1259,16 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
 
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
+
+    /// The searches of the certified line pass this context's operation keeps for its
+    /// solves that repeat one on the same inputs
+    /// ([`crate::surface::surface::certified_line::LinePasses`]; not upstream). By default
+    /// none: every solve searches.
+    fn line_passes(
+        &self,
+    ) -> Option<&core::cell::RefCell<crate::surface::surface::certified_line::LinePasses>> {
+        None
+    }
 }
 
 /// A surface's cache handed to a solve that reads it

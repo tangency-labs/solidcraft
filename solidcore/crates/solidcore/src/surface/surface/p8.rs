@@ -2171,6 +2171,12 @@ impl Surface {
         let face_queries = context
             .as_deref()
             .and_then(SurfaceSolveContext::face_queries);
+        // (not upstream) the searches of the certified pass the operation keeps (none with
+        // the memos off: every solve searches)
+        let line_passes = context
+            .as_deref()
+            .and_then(SurfaceSolveContext::line_passes)
+            .filter(|_| k.memoize_curve_caches);
         let tree = cache.tree().ok_or_else(|| {
             Failure::new(
                 OP_LINE,
@@ -2229,7 +2235,7 @@ impl Surface {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
         };
-        let mut gs = super::p10::CertifiedLsi::new(gs, net);
+        let mut gs = super::p10::CertifiedLsi::new(gs, net, line_passes);
 
         // traverse curve and surface sub-division trees
         // for each sub-division leaf pair that has intersecting boundaries

@@ -460,9 +460,28 @@
 //! which (2) excludes; in boxes at the floor, the component's rule holds their parity, and
 //! the pair stands for it at a location (5) keeps true.
 //!
+//! **Reuse within an operation.** What a solve's passes find before they read its
+//! solutions, the [`Search`] (every leaf's pass, every strip, the drop, the components and
+//! their types), is a function of the net, the line ([`PassLine`]), and the leaves' and
+//! strips' domains, line intervals and inside flags alone: nothing else is read, and every
+//! step is deterministic. An operation whose solves repeat (the Boolean's solve with face
+//! caches runs again from its start each time it builds a face's cache or makes a trim, so
+//! the line solves of every attempt before repeat) keeps its searches in a
+//! [`LinePasses`], under a [`PassKey`] that holds every one of those inputs bit for bit
+//! ([`LineNet`]'s every value read, each `f64` by its bits): a solve finds a search only
+//! under an equal key, and takes the value its own search would compute. The roots it adds,
+//! and the typing of its solutions, are made from its own solutions as before. A search a
+//! cancel stopped is never kept. Results are unchanged; the work is not: a solve that takes
+//! a kept search polls the cancel token less, and an attempt whose root is refused for a
+//! trim to make has searched all its leaves first, so a fuel budget
+//! ([`CancelToken::with_fuel`]) may run out at another point; a search taken is not in the
+//! line counters
+//! ([`crate::kernel::WorkCounters::line_searches_reused`] counts it). The kernel's
+//! `memoize_curve_caches` off keeps nothing, to check that.
+//!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`Overlap`], [`FootWhy`], [`Stretch`], [`type_solutions`], [`SolutionAt`] | (not upstream) |
+//! | [`LineNet`], [`isolate`], [`PassLine`], [`CertifiedRoot`], [`Isolation`], [`Stop`], [`FloorBox`], [`FloorKind`], [`Exclusion`], [`LeafSides`], [`leaf_sides`], [`enclose_strip`], [`SearchedLeaf`], [`drop_fenced`], [`Drops`], [`components`], [`Components`], [`Component`], [`side_record`], [`Revolved`], [`type_components`], [`Typed`], [`Why`], [`Overlap`], [`FootWhy`], [`Stretch`], [`type_solutions`], [`SolutionAt`], [`Search`], [`PassKey`], [`LinePasses`] | (not upstream) |
 //!
 //! Deviations: none (no upstream counterpart). Bounds: no recursion (work lists); a box is
 //! halved until its middle is one of its ends; at most [`MAX_SCRATCH_BOXES`] boxes a leaf,
@@ -480,9 +499,13 @@
 //! one test, and only the stretch at the floor is tested; and, along a
 //! frame, at most [`FRAME_TIGHTENINGS`] operators for each tight box: two a junction of the
 //! chain, one an end), [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
-//! told apart.
+//! told apart; at most [`MAX_KEPT_SEARCHES`] searches and [`MAX_KEPT_BYTES`] bytes kept in
+//! one [`LinePasses`], past which a search is not kept (a solve repeating it searches).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use crate::blend::fillet_section::interval::{cmax, cmin, round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
@@ -496,7 +519,7 @@ use crate::geom::krawczyk::{
 };
 use crate::geom::nurbs_enclosure::nurbs_partials_over_box_about;
 use crate::geom::solution_array::{Contact, ContactId, SideRecord};
-use crate::kernel::{CancelToken, Kernel};
+use crate::kernel::{CancelToken, Kernel, WorkCounters};
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::surface::implicit::{side_bounds, Revolution, SideBound};
@@ -6101,6 +6124,389 @@ fn refined(
     })
 }
 
+// ---- reuse of a solve's search within one operation (not upstream) ------------------------------
+
+/// What the certified pass of one solve found before it reads the solve's solutions
+/// (module docs, "Reuse within an operation"): every searched leaf, in the traversal's
+/// order, then every culled strip (none when the leaves' passes all did not run), with the
+/// drop applied; and the components, typed (none built when the record is not run).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Search {
+    /// The searched leaves, then the strips.
+    pub leaves: Vec<SearchedLeaf>,
+    /// The components of what the passes kept, typed.
+    pub components: Components,
+}
+
+impl Search {
+    /// About how many bytes the search holds: its records and their lists, each list by its
+    /// capacity (a drop's `retain` keeps it) at its items' size, the allocator's own
+    /// overhead apart; for [`MAX_KEPT_BYTES`].
+    fn held_bytes(&self) -> usize {
+        use core::mem::size_of;
+        // a list's storage: its capacity at its items' size
+        fn bytes<T>(v: &Vec<T>) -> usize {
+            v.capacity().saturating_mul(size_of::<T>())
+        }
+        let lists =
+            |v: &Vec<Vec<[Ivl; 2]>>| v.iter().fold(bytes(v), |n, x| n.saturating_add(bytes(x)));
+        let leaves = self.leaves.iter().fold(bytes(&self.leaves), |n, l| {
+            n.saturating_add(l.floor.as_ref().map_or(0, bytes))
+                .saturating_add(bytes(&l.roots))
+        });
+        let components = self
+            .components
+            .list
+            .iter()
+            .fold(bytes(&self.components.list), |n, c| {
+                n.saturating_add(bytes(&c.boxes))
+                    .saturating_add(bytes(&c.roots))
+                    .saturating_add(lists(&c.classes))
+                    .saturating_add(lists(&c.beyond))
+            });
+        leaves
+            .saturating_add(components)
+            .saturating_add(bytes(&self.components.boxes))
+    }
+}
+
+/// A leaf the traversal of a solve solved, as its search reads it: its domain, its line
+/// interval and whether it lies wholly inside the face.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SolvedLeaf {
+    /// The leaf's domain.
+    pub domain: Extent2d,
+    /// The leaf's line interval: its roots are reported for `t` in it.
+    pub interval: Extent1d,
+    /// Whether it lies wholly inside the face ([`SearchedLeaf::inside`]).
+    pub inside: bool,
+}
+
+/// The certified pass's search of one solve (module docs, "Reuse within an operation"):
+/// each solved leaf of `leaves` searched by [`isolate`], each culled strip of `strips`
+/// enclosed ([`enclose_strip`]), the drop and the components, typed. Its inputs are the
+/// inputs of its [`PassKey`] and nothing else; `cancel` only stops it, and its work is
+/// counted in `counters`.
+///
+/// # Errors
+///
+/// A cancel.
+pub(crate) fn search(
+    net: &LineNet,
+    line: &PassLine,
+    leaves: &[SolvedLeaf],
+    strips: &[Extent2d],
+    cancel: Option<&CancelToken>,
+    counters: &WorkCounters,
+) -> Result<Search> {
+    let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+    // the leaves and the culled strips: what lies across each one's sides
+    let domains: Vec<Extent2d> = leaves
+        .iter()
+        .map(|job| job.domain)
+        .chain(strips.iter().copied())
+        .collect();
+    // where the solve's parameter space closes on itself across a seam
+    let seams = net.seams(&line.solve_domain);
+    let sides = leaf_sides(&domains, &line.solve_domain, seams);
+    let mut searched: Vec<SearchedLeaf> = Vec::new();
+    // the records the drop and the components read, bounded (`MAX_SOLVE_BOXES`)
+    let mut records = 0_usize;
+    let mut over_budget = false;
+    for (job, job_sides) in leaves.iter().zip(&sides) {
+        let found = isolate(net, line, &job.domain, &job.interval, job_sides, cancel)?;
+        counters.add_line_pass(count(found.boxes), count(found.unshown), found.stop);
+        counters.add_line_exclusion(count(found.exclusion.boxes), found.exclusion.out_of_budget);
+        records = records.saturating_add(found.floor.len());
+        over_budget |= records > MAX_SOLVE_BOXES;
+        searched.push(SearchedLeaf {
+            domain: job.domain,
+            stop: found.stop,
+            // (past the bound the records are not kept, and never read as absence)
+            floor: (!over_budget).then_some(found.floor),
+            roots: found.roots,
+            strip: false,
+            inside: job.inside,
+        });
+    }
+    if leaves_not_run(&searched) {
+        // every solved leaf's pass did not run: the record is not run whatever the strips
+        // would find, so they are not enclosed (nothing but the counters would read them)
+        counters.add_line_solve(0, false);
+        return Ok(Search {
+            leaves: searched,
+            components: Components::default(),
+        });
+    }
+    for strip in strips {
+        if over_budget {
+            // (past the bound nothing is read of a strip: the components are not built)
+            searched.push(SearchedLeaf {
+                domain: *strip,
+                stop: Stop::NotRun,
+                floor: None,
+                roots: Vec::new(),
+                strip: true,
+                inside: false,
+            });
+            continue;
+        }
+        let found = enclose_strip(net, line, strip, cancel)?;
+        counters.add_line_strip(count(found.boxes), found.stop);
+        records = records.saturating_add(found.floor.len());
+        over_budget |= records > MAX_SOLVE_BOXES;
+        searched.push(SearchedLeaf {
+            domain: *strip,
+            stop: found.stop,
+            floor: (!over_budget).then_some(found.floor),
+            roots: Vec::new(),
+            strip: true,
+            inside: false,
+        });
+    }
+    let mut comps = if over_budget {
+        Components::over_budget()
+    } else {
+        let drops = drop_fenced(
+            net,
+            line,
+            &mut searched,
+            &sides,
+            cancel,
+            MAX_DROP_ENCLOSURES,
+        )?;
+        counters.add_line_drops(&drops);
+        components(&searched, &sides, line.span, seams)
+    };
+    let at_limit = searched.iter().any(|l| !l.strip && l.stop == Stop::AtLimit);
+    counters.add_line_solve(count(comps.list.len()), at_limit);
+    // (a record not run is not typed)
+    if !leaves_not_run(&searched) {
+        type_components(net, line, &searched, &sides, &mut comps, cancel)?;
+    }
+    Ok(Search {
+        leaves: searched,
+        components: comps,
+    })
+}
+
+/// The inputs a [`Search`] is a function of, bit for bit (module docs, "Reuse within an
+/// operation"): the net, and the line, the leaves and the strips.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PassKey {
+    /// [`LineNet::words`].
+    net: Vec<u64>,
+    /// The line's point, vector, own interval, the solve's domain and the tolerance; the
+    /// number of leaves and each leaf's domain, line interval and whether it lies wholly
+    /// inside the face; the number of strips and each one's domain.
+    rest: Vec<u64>,
+}
+
+/// A count as a word of a key.
+fn count_word(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
+}
+
+/// An `(u, v)` domain as four words of a key.
+fn domain_words(d: &Extent2d, out: &mut Vec<u64>) {
+    let (lo, hi) = (d.min(), d.max());
+    out.extend([lo.x, lo.y, hi.x, hi.y].map(f64::to_bits));
+}
+
+impl PassKey {
+    /// The key of the search of `line` with the surface of `net` over the solved `leaves`
+    /// (in the traversal's order) and the culled `strips` ([`search`]).
+    pub(crate) fn of(
+        net: &LineNet,
+        line: &PassLine,
+        leaves: &[SolvedLeaf],
+        strips: &[Extent2d],
+    ) -> Self {
+        let mut rest = Vec::new();
+        let PassLine {
+            point,
+            vector,
+            span,
+            solve_domain,
+            tol,
+        } = line;
+        rest.extend(
+            [
+                point.x, point.y, point.z, vector.x, vector.y, vector.z, span[0], span[1],
+            ]
+            .map(f64::to_bits),
+        );
+        domain_words(solve_domain, &mut rest);
+        rest.push(tol.to_bits());
+        rest.push(count_word(leaves.len()));
+        for SolvedLeaf {
+            domain,
+            interval,
+            inside,
+        } in leaves
+        {
+            domain_words(domain, &mut rest);
+            rest.extend([interval.min().to_bits(), interval.max().to_bits()]);
+            rest.push(u64::from(*inside));
+        }
+        rest.push(count_word(strips.len()));
+        for strip in strips {
+            domain_words(strip, &mut rest);
+        }
+        Self {
+            net: net.words(),
+            rest,
+        }
+    }
+}
+
+impl LineNet {
+    /// Every value the passes read of the net, as words, each `f64` by its bits, each list
+    /// after its length, each option after whether it is there: two nets with the same
+    /// words are the same to every pass ([`PassKey`]).
+    fn words(&self) -> Vec<u64> {
+        // (every field, so that a field added is a field keyed)
+        let LineNet {
+            net,
+            range,
+            creases,
+            revolved,
+            form,
+            closes,
+        } = self;
+        let mut out = Vec::new();
+        let list = |out: &mut Vec<u64>, xs: &[f64]| {
+            out.push(count_word(xs.len()));
+            out.extend(xs.iter().map(|x| x.to_bits()));
+        };
+        let Nurbs {
+            p,
+            q,
+            nu,
+            nv,
+            u,
+            v,
+            pw,
+        } = net;
+        out.extend([*p, *q, *nu, *nv].map(count_word));
+        list(&mut out, u);
+        list(&mut out, v);
+        list(&mut out, pw);
+        let [[u0, u1], [v0, v1]] = *range;
+        out.extend([u0, u1, v0, v1].map(f64::to_bits));
+        for c in creases {
+            list(&mut out, c);
+        }
+        out.extend(closes.map(u64::from));
+        match revolved {
+            None => out.push(0),
+            Some(r) => {
+                out.push(1);
+                let Revolved {
+                    origin,
+                    x,
+                    y,
+                    z,
+                    shape,
+                    turn_in_u,
+                } = r;
+                for a in [origin, x, y, z] {
+                    out.extend(a.map(f64::to_bits));
+                }
+                let (kind, a, b) = match *shape {
+                    Shape::Sphere { radius } => (0, radius, 0.0),
+                    Shape::Cone { radius, slope } => (1, radius, slope),
+                    Shape::Torus { major, minor } => (2, major, minor),
+                };
+                out.extend([kind, a.to_bits(), b.to_bits(), u64::from(*turn_in_u)]);
+            }
+        }
+        match form {
+            None => out.push(0),
+            Some(f) => {
+                out.push(1);
+                out.extend([f.n(), f.m(), f.p(), f.q(), f.r(), f.s()].map(count_word));
+                for row in f.rows() {
+                    out.push(count_word(row.len()));
+                    for c in row {
+                        out.extend([c.x, c.y, c.z, c.w].map(f64::to_bits));
+                    }
+                }
+                list(&mut out, f.u_knots());
+                list(&mut out, f.v_knots());
+            }
+        }
+        out
+    }
+}
+
+/// The most searches a [`LinePasses`] keeps.
+pub(crate) const MAX_KEPT_SEARCHES: usize = 1 << 16;
+
+/// The most bytes a [`LinePasses`] holds, over its keys ([`PassKey`], each net once) and
+/// its searches ([`Search::held_bytes`]): 32 MiB. A solve at its bound holds
+/// [`MAX_SOLVE_BOXES`] floor boxes and as many component boxes, about 18 MiB, so this keeps
+/// the searches of one or two such solves, or of thousands of ordinary ones (a Boolean's
+/// solve of a tapered wall's rulings kept 4,482 searches in 30 operations, at most 1.6 MiB
+/// in one).
+pub(crate) const MAX_KEPT_BYTES: usize = 32 << 20;
+
+/// The searches of the certified line pass one operation has made, kept for the solves of
+/// that operation that repeat one on the same inputs (module docs, "Reuse within an
+/// operation"): a pure memo. A search is found only under a key equal word for word to the
+/// one it was kept under, and is the value the pass computes from those inputs, so a solve
+/// that reuses it returns what it would have computed. At most [`MAX_KEPT_SEARCHES`]
+/// searches and [`MAX_KEPT_BYTES`] bytes are kept; past either a search is not kept, and a
+/// solve that repeats it searches again.
+#[derive(Debug, Default)]
+pub struct LinePasses {
+    /// Each net's words once, with its number.
+    nets: BTreeMap<Vec<u64>, usize>,
+    /// The searches, by their net's number, then the rest of their key.
+    searches: BTreeMap<usize, BTreeMap<Vec<u64>, Arc<Search>>>,
+    /// The searches kept ([`MAX_KEPT_SEARCHES`]).
+    kept: usize,
+    /// The bytes held ([`MAX_KEPT_BYTES`]).
+    bytes: usize,
+}
+
+impl LinePasses {
+    /// The search kept under `key`, if any.
+    pub(crate) fn found(&self, key: &PassKey) -> Option<Arc<Search>> {
+        let net = self.nets.get(&key.net)?;
+        self.searches.get(net)?.get(&key.rest).cloned()
+    }
+
+    /// Keeps `search` under `key`, within the bounds; a search past them is not kept.
+    pub(crate) fn keep(&mut self, key: PassKey, search: &Arc<Search>) {
+        use core::mem::size_of;
+        if self.kept >= MAX_KEPT_SEARCHES {
+            return;
+        }
+        let words = |n: usize| n.saturating_mul(size_of::<u64>());
+        let new_net = !self.nets.contains_key(&key.net);
+        let bytes = words(key.rest.len())
+            .saturating_add(if new_net { words(key.net.len()) } else { 0 })
+            .saturating_add(search.held_bytes());
+        let total = self.bytes.saturating_add(bytes);
+        if total > MAX_KEPT_BYTES {
+            return;
+        }
+        let next = self.nets.len();
+        let net = *self.nets.entry(key.net).or_insert(next);
+        if self
+            .searches
+            .entry(net)
+            .or_default()
+            .insert(key.rest, Arc::clone(search))
+            .is_none()
+        {
+            self.kept = self.kept.saturating_add(1);
+        }
+        self.bytes = total;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9323,5 +9729,162 @@ mod tests {
                 "{found:?}"
             );
         }
+    }
+
+    /// A search kept in a [`LinePasses`] (module docs, "Reuse within an operation") is found
+    /// under a key equal word for word to its own and under no key that differs in one
+    /// input: a net with one control point a rounding away, another kind of net, a line one
+    /// rounding over, a negative zero for a zero, a tolerance a rounding wider, a leaf's inside
+    /// flag, one strip more.
+    #[test]
+    fn a_kept_search_is_found_only_under_its_own_inputs_bit_for_bit() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (p, d) = across(0.25);
+        let line = PassLine {
+            point: p,
+            vector: d,
+            span: [0.0, 1.0],
+            solve_domain: solve,
+            tol: TOL,
+        };
+        let leaf = SolvedLeaf {
+            domain: solve,
+            interval: Extent1d::from_min_max(0.0, 1.0),
+            inside: true,
+        };
+        let strip = Extent2d::from_points(
+            crate::math::Point2::new(solve.min().x, solve.min().y),
+            crate::math::Point2::new(0.0, solve.max().y),
+        );
+        let key = |net: &LineNet, line: &PassLine, leaf: SolvedLeaf, strips: &[Extent2d]| {
+            PassKey::of(net, line, &[leaf], strips)
+        };
+        let search = Arc::new(Search {
+            leaves: vec![SearchedLeaf {
+                domain: solve,
+                stop: Stop::Finished,
+                floor: Some(Vec::new()),
+                roots: Vec::new(),
+                strip: false,
+                inside: true,
+            }],
+            components: Components::default(),
+        });
+        let mut passes = LinePasses::default();
+        passes.keep(key(&net, &line, leaf, &[]), &search);
+        assert_eq!(
+            passes.found(&key(&net, &line, leaf, &[])),
+            Some(Arc::clone(&search))
+        );
+        let mut nudged = net.clone();
+        let w = nudged.net.pw.first_mut().unwrap();
+        *w = f64::from_bits(w.to_bits() + 1);
+        let other = LineNet::of(&k, &torus(&k)).unwrap().unwrap();
+        let over = |x: f64| f64::from_bits(x.to_bits() + 1);
+        let lines = [
+            PassLine {
+                point: Vec3::new(over(p.x), p.y, p.z),
+                ..line
+            },
+            PassLine {
+                span: [-0.0, 1.0],
+                ..line
+            },
+            PassLine {
+                tol: over(TOL),
+                ..line
+            },
+        ];
+        let mut missed = vec![
+            key(&nudged, &line, leaf, &[]),
+            key(&other, &line, leaf, &[]),
+            key(
+                &net,
+                &line,
+                SolvedLeaf {
+                    inside: false,
+                    ..leaf
+                },
+                &[],
+            ),
+            key(&net, &line, leaf, &[strip]),
+        ];
+        missed.extend(lines.iter().map(|l| key(&net, l, leaf, &[])));
+        for miss in &missed {
+            assert_eq!(passes.found(miss), None, "{miss:?}");
+        }
+    }
+
+    /// A [`LinePasses`] keeps at most [`MAX_KEPT_SEARCHES`] searches: one past the bound is
+    /// not kept, and the searches kept before it are still found.
+    #[test]
+    fn kept_searches_stop_at_their_bound() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (p, d) = across(0.25);
+        let key = |i: usize| {
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, f64::from(u32::try_from(i).unwrap())],
+                solve_domain: solve,
+                tol: TOL,
+            };
+            PassKey::of(&net, &line, &[], &[])
+        };
+        let search = Arc::new(Search::default());
+        let mut passes = LinePasses::default();
+        for i in 0..=MAX_KEPT_SEARCHES {
+            passes.keep(key(i), &search);
+        }
+        assert!(passes.found(&key(0)).is_some());
+        assert!(passes.found(&key(MAX_KEPT_SEARCHES - 1)).is_some());
+        assert_eq!(passes.found(&key(MAX_KEPT_SEARCHES)), None);
+    }
+
+    /// A search whose lists hold more than [`MAX_KEPT_BYTES`] (counted by their capacity,
+    /// which a drop's `retain` keeps) is not kept, and takes nothing of the budget: a small
+    /// search after it is kept.
+    #[test]
+    fn a_search_past_the_byte_bound_is_not_kept() {
+        let k = Kernel::default();
+        let s = cylinder(&k);
+        let net = LineNet::of(&k, &s).unwrap().unwrap();
+        let solve = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (p, d) = across(0.25);
+        let key = |end: f64| {
+            let line = PassLine {
+                point: p,
+                vector: d,
+                span: [0.0, end],
+                solve_domain: solve,
+                tol: TOL,
+            };
+            PassKey::of(&net, &line, &[], &[])
+        };
+        let room = MAX_KEPT_BYTES / size_of::<FloorBox>() + 1;
+        let big = Arc::new(Search {
+            leaves: vec![SearchedLeaf {
+                domain: solve,
+                stop: Stop::Finished,
+                floor: Some(Vec::with_capacity(room)),
+                roots: Vec::new(),
+                strip: false,
+                inside: true,
+            }],
+            components: Components::default(),
+        });
+        assert!(big.held_bytes() > MAX_KEPT_BYTES);
+        let mut passes = LinePasses::default();
+        passes.keep(key(1.0), &big);
+        assert_eq!(passes.found(&key(1.0)), None);
+        let small = Arc::new(Search::default());
+        passes.keep(key(2.0), &small);
+        assert_eq!(passes.found(&key(2.0)), Some(small));
     }
 }
