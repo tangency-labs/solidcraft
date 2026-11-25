@@ -100,7 +100,7 @@ pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
         }
     }
     let state = s.model.state();
-    let mass = assembly(&doc, &state)?;
+    let mass = assembly(&doc, &state, false)?;
     let group_of: BTreeMap<u64, usize> = mass.occurrences.iter().map(|o| (o.occurrence, o.group)).collect();
     let mut model = Model { gravity, ..Model::default() };
     let mut map = Mapping {

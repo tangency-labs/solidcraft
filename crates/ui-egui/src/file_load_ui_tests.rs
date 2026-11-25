@@ -306,6 +306,8 @@ fn insert_design_reads_the_saved_design_while_the_window_draws() {
         h.step(&json!({"choose_file": "plate.solidcraft"})).unwrap();
         h.app.start("component.insert_design");
         h.frames(2);
+        // OK in its options panel inserts it.
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
     };
 
     // Held before the plate's third feature: the window draws, saying what it reads.

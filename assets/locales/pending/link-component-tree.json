@@ -1,0 +1,56 @@
+{
+  "ar": {
+    "browser.kept_by_link": "تابع للتصميم المرتبط {name}: غيّره في ذلك التصميم.",
+    "cmd.component_link_mode": "تغيير وضع الارتباط",
+    "insert_design.keep_components": "الإبقاء على مكوّناته",
+    "ui.link_keep_components": "الإبقاء على مكوّناته"
+  },
+  "de": {
+    "browser.kept_by_link": "Gehört zum verknüpften Design {name}: dort ändern.",
+    "cmd.component_link_mode": "Verknüpfungsmodus ändern",
+    "insert_design.keep_components": "Komponenten beibehalten",
+    "ui.link_keep_components": "Komponenten beibehalten"
+  },
+  "en": {
+    "browser.kept_by_link": "Kept by the linked design {name}: change it in that design.",
+    "cmd.component_link_mode": "Change Link Mode",
+    "insert_design.keep_components": "Keep its components",
+    "ui.link_keep_components": "Keep Its Components"
+  },
+  "es": {
+    "browser.kept_by_link": "Pertenece al diseño vinculado {name}: cámbielo en ese diseño.",
+    "cmd.component_link_mode": "Cambiar modo de vínculo",
+    "insert_design.keep_components": "Conservar sus componentes",
+    "ui.link_keep_components": "Conservar sus componentes"
+  },
+  "he": {
+    "browser.kept_by_link": "שייך לתכן המקושר {name}: יש לשנות אותו בתכן הזה.",
+    "cmd.component_link_mode": "שינוי מצב הקישור",
+    "insert_design.keep_components": "שמירת הרכיבים שלו",
+    "ui.link_keep_components": "שמירת הרכיבים שלו"
+  },
+  "ja": {
+    "browser.kept_by_link": "リンクされたデザイン {name} の一部です。変更はそのデザインで行ってください。",
+    "cmd.component_link_mode": "リンクモードを変更",
+    "insert_design.keep_components": "コンポーネントを保持",
+    "ui.link_keep_components": "コンポーネントを保持"
+  },
+  "ko": {
+    "browser.kept_by_link": "연결된 디자인 {name}에 속합니다. 해당 디자인에서 변경하세요.",
+    "cmd.component_link_mode": "링크 모드 변경",
+    "insert_design.keep_components": "구성 요소 유지",
+    "ui.link_keep_components": "구성 요소 유지"
+  },
+  "vi": {
+    "browser.kept_by_link": "Thuộc thiết kế liên kết {name}: hãy thay đổi trong thiết kế đó.",
+    "cmd.component_link_mode": "Đổi chế độ liên kết",
+    "insert_design.keep_components": "Giữ các cụm chi tiết của nó",
+    "ui.link_keep_components": "Giữ các cụm chi tiết của nó"
+  },
+  "zh": {
+    "browser.kept_by_link": "属于链接设计 {name}：请在该设计中修改。",
+    "cmd.component_link_mode": "更改链接模式",
+    "insert_design.keep_components": "保留其组件",
+    "ui.link_keep_components": "保留其组件"
+  }
+}

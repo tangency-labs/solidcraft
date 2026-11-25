@@ -4,8 +4,9 @@ use serde_json::{Value, json};
 use solidcraft_doc::DesignLink;
 
 use super::{
-    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, ExtractParams, ExtractResult, InsertDesignParams, InsertDesignResult, LinksParams,
-    LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, ExtractParams, ExtractResult, InsertDesignParams, InsertDesignResult,
+    LinkModeParams, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams,
+    UpdateLinksResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -20,6 +21,7 @@ fn schemas_and_the_key_check_agree() {
             "axis",
             "configuration",
             "document",
+            "flexible",
             "format",
             "matrix",
             "name",
@@ -28,13 +30,15 @@ fn schemas_and_the_key_check_agree() {
             "parent",
             "path",
             "reuse",
+            "structure",
             "to_matrix",
             "tolerance",
             "translate",
         ],
     );
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "names", "occurrence", "path"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "flexible", "names", "occurrence", "path", "structure"]);
+    assert_keys(input_schema_for::<LinkModeParams>(), &["component", "flexible", "occurrence", "structure"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
@@ -68,6 +72,9 @@ fn strict_keeps_todays_errors() {
         ("component.relink", json!({"component": [1], "path": "plate.solidcraft"})),
         ("component.break_link", json!({})),
         ("component.break_link", json!({"component": [1]})),
+        ("component.link_mode", json!({})),
+        ("component.link_mode", json!({"component": [1]})),
+        ("component.link_mode", json!({"component": "Nope", "flexible": true})),
         ("component.extract", json!({})),
         ("component.extract", json!({"component": 0})),
         ("component.extract", json!({"component": true, "path": "plate.solidcraft"})),

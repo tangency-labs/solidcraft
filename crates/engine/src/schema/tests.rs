@@ -1396,19 +1396,19 @@ fn step_and_component_link_schema_keys_and_replies() {
     let examples = [
         (
             "component.links",
-            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false}]}),
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false, "structure": false, "flexible": []}]}),
         ),
         (
             "component.links",
-            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null, "structure": false, "flexible": []}]}),
         ),
         (
             "component.links",
-            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "importer": {"format": "step"}, "file": "/parts/part.step", "found": true, "changed": false}]}),
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "importer": {"format": "step"}, "file": "/parts/part.step", "found": true, "changed": false, "structure": false, "flexible": []}]}),
         ),
         (
             "component.links",
-            json!({"links": [{"component": 2, "name": "Board", "path": "board.kic", "importer": {"format": "kic.convert", "plugin": "kic", "version": "1.2"}, "file": "/parts/board.kic", "found": true, "changed": true}]}),
+            json!({"links": [{"component": 2, "name": "Board", "path": "board.kic", "importer": {"format": "kic.convert", "plugin": "kic", "version": "1.2"}, "file": "/parts/board.kic", "found": true, "changed": true, "structure": false, "flexible": []}]}),
         ),
         (
             "component.links",

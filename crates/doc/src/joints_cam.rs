@@ -1233,6 +1233,7 @@ mod tests {
             ratio: 1.0,
             offset: 0.0,
             lift: Vec::new(),
+            carried_cam: false,
         };
         let cam_def = Cam { profile: profile_ramp, follower: Follower::Knife, tip: None, reverse: false };
         let err_slider = setup(&doc, &st, &slider_cam_link, &cam_def).unwrap_err();

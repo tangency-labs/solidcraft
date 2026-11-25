@@ -1,0 +1,56 @@
+{
+  "ar": {
+    "insert_design.flexible": "مرن",
+    "insert_design.flexible_help": "يتطلب «الإبقاء على مكوّناته»: المكوّن الواحد لا يجلب مفاصل.",
+    "ui.link_make_flexible": "جعله مرنًا",
+    "ui.link_make_rigid": "جعله صلبًا"
+  },
+  "de": {
+    "insert_design.flexible": "Flexibel",
+    "insert_design.flexible_help": "Erfordert „Komponenten beibehalten“: Eine einzelne Komponente bringt keine Gelenke mit.",
+    "ui.link_make_flexible": "Flexibel machen",
+    "ui.link_make_rigid": "Starr machen"
+  },
+  "en": {
+    "insert_design.flexible": "Flexible",
+    "insert_design.flexible_help": "Needs Keep its components: one component brings no joints.",
+    "ui.link_make_flexible": "Make Flexible",
+    "ui.link_make_rigid": "Make Rigid"
+  },
+  "es": {
+    "insert_design.flexible": "Flexible",
+    "insert_design.flexible_help": "Requiere «Conservar sus componentes»: un solo componente no trae uniones.",
+    "ui.link_make_flexible": "Hacer flexible",
+    "ui.link_make_rigid": "Hacer rígido"
+  },
+  "he": {
+    "insert_design.flexible": "גמיש",
+    "insert_design.flexible_help": "דורש «שמירת הרכיבים שלו»: רכיב יחיד אינו מביא מפרקים.",
+    "ui.link_make_flexible": "הפיכה לגמיש",
+    "ui.link_make_rigid": "הפיכה לקשיח"
+  },
+  "ja": {
+    "insert_design.flexible": "フレキシブル",
+    "insert_design.flexible_help": "「コンポーネントを保持」が必要です。コンポーネントが 1 つではジョイントは取り込まれません。",
+    "ui.link_make_flexible": "フレキシブルにする",
+    "ui.link_make_rigid": "リジッドにする"
+  },
+  "ko": {
+    "insert_design.flexible": "유연",
+    "insert_design.flexible_help": "'구성 요소 유지'가 필요합니다. 구성 요소 하나에는 가져올 관절이 없습니다.",
+    "ui.link_make_flexible": "유연하게 설정",
+    "ui.link_make_rigid": "강체로 설정"
+  },
+  "vi": {
+    "insert_design.flexible": "Linh hoạt",
+    "insert_design.flexible_help": "Cần bật Giữ các cụm chi tiết của nó: một cụm chi tiết duy nhất không mang theo khớp nối.",
+    "ui.link_make_flexible": "Đặt thành linh hoạt",
+    "ui.link_make_rigid": "Đặt thành cứng"
+  },
+  "zh": {
+    "insert_design.flexible": "柔性",
+    "insert_design.flexible_help": "需要“保留其组件”：单个组件不带接头。",
+    "ui.link_make_flexible": "设为柔性",
+    "ui.link_make_rigid": "设为刚性"
+  }
+}

@@ -919,6 +919,7 @@ fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
         to: solidcore_record::Vec3::new(0.0, 0.0, 3.0),
         axis: None,
         joints: None,
+        path: Vec::new(),
     };
     let reached = solidcraft_doc::joints::reach(&s.doc, &s.model.state(), &target).unwrap();
     assert_eq!(reached.values.keys().copied().collect::<Vec<_>>(), [follower]);

@@ -499,6 +499,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             InsertDrawing(crate::dialogs_insert_drawing::Place),
             /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
             InsertAirfoil(crate::dialogs_insert_airfoil::Airfoil),
+            /// Insert Design: how the picked design comes in (`dialogs_insert_design`).
+            InsertDesign(crate::dialogs_insert_design::InsertDesign),
             /// Plastic features (`dialogs_plastic`).
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
@@ -3207,6 +3209,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
+        Kind::InsertDesign(_) => crate::dialogs_insert_design::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
@@ -6354,6 +6357,9 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::UrdfExport(f) = &d.kind {
         return crate::dialogs_urdf::run(app, f);
     }
+    if let Kind::InsertDesign(f) = &d.kind {
+        return crate::dialogs_insert_design::run(app, f);
+    }
     if let Kind::ViewDxf { dashed, tolerance, zero_origin } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance, *zero_origin);
     }
@@ -8033,7 +8039,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
-        Kind::UrdfExport(_) | Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
+        Kind::UrdfExport(_) | Kind::ViewDxf { .. } | Kind::ViewNavigator(_) | Kind::InsertDesign(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),

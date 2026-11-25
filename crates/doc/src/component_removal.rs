@@ -57,8 +57,36 @@ impl Document {
         if !self.components.iter().any(|c| c.id == root) {
             return Err(DocError::Unknown(format!("component {root}")));
         }
-        let tree: BTreeSet<u64> = self.components.iter().filter(|c| self.component_within(c.id, root)).map(|c| c.id).collect();
-        let kept = self.components_kept_by_outside_placements(root, &tree);
+        self.remove_component_trees(&BTreeSet::from([root]))
+    }
+
+    /// The components inside any of `roots`, those included: found in one walk down from them,
+    /// where asking each component of the design whether it is inside would search the design
+    /// for each.
+    pub fn components_within(&self, roots: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut children: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for c in &self.components {
+            children.entry(c.parent).or_default().push(c.id);
+        }
+        let mut inside: BTreeSet<u64> = BTreeSet::new();
+        let mut todo: Vec<u64> = roots.iter().copied().filter(|root| *root != 0 && self.components.iter().any(|c| c.id == *root)).collect();
+        while let Some(id) = todo.pop() {
+            if inside.insert(id) {
+                todo.extend(children.get(&id).into_iter().flatten().copied());
+            }
+        }
+        inside
+    }
+
+    /// [`Self::remove_component_tree`] for every one of `roots` at once: one pass over the
+    /// design, however many they are. The design itself and unknown components among them are
+    /// passed over.
+    pub fn remove_component_trees(&mut self, roots: &BTreeSet<u64>) -> Result<RemovedTree> {
+        let tree = self.components_within(roots);
+        let mut kept: BTreeSet<u64> = BTreeSet::new();
+        for root in roots {
+            kept.extend(self.components_kept_by_outside_placements(*root, &tree));
+        }
         let components: Vec<u64> = self.components.iter().map(|c| c.id).filter(|c| tree.contains(c) && !kept.contains(c)).collect();
         let inside: BTreeSet<u64> = components.iter().copied().collect();
         if self.features.iter().any(|feature| {
@@ -115,10 +143,20 @@ impl Document {
         self.plastic.assigned.retain(|name, _| !gone(name));
         // A kept component sat under the tree it was made in: it moves up to the component the
         // removed root sat in, which is left (read before the root goes).
-        let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);
+        let ups: std::collections::BTreeMap<u64, u64> =
+            roots.iter().map(|root| (*root, self.components.iter().find(|c| c.id == *root).map_or(0, |c| c.parent))).collect();
+        let mut kept_up: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+        for c in self.components.iter().filter(|c| kept.contains(&c.id) && inside.contains(&c.parent)) {
+            if let Some((root, up)) = ups.iter().find(|(root, _)| self.component_within(c.id, **root)) {
+                let _ = root;
+                kept_up.insert(c.id, *up);
+            }
+        }
         self.components.retain(|c| !inside.contains(&c.id));
-        for c in self.components.iter_mut().filter(|c| kept.contains(&c.id) && inside.contains(&c.parent)) {
-            c.parent = up;
+        for c in self.components.iter_mut() {
+            if let Some(up) = kept_up.get(&c.id) {
+                c.parent = *up;
+            }
         }
         self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
         self.parts.retain(|c, _| !inside.contains(c));
@@ -186,6 +224,14 @@ impl Document {
         }
         for group in &mut assembly.rigid_groups {
             group.members.retain(|o| !occurrences.contains(o));
+        }
+        let gone = |p: &crate::joints::PlacedPose| {
+            occurrences.contains(&p.occurrence) || occurrences.contains(&p.inner) || p.through.iter().any(|under| occurrences.contains(under))
+        };
+        assembly.poses.retain(|p| !gone(p));
+        for tree in self.links.values_mut().filter_map(|link| link.tree.as_mut()) {
+            tree.flexible.retain(|occurrence, _| !occurrences.contains(occurrence));
+            tree.nested.retain(|occurrence| !occurrences.contains(occurrence));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
         joints

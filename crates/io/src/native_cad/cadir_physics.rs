@@ -528,7 +528,7 @@ mod tests {
         }
 
         fn link(a: u64, b: u64, ratio: f64, coupling: Coupling) -> MotionLink {
-            MotionLink { a, ia: 0, b, ib: 0, ratio, offset: 0.0, coupling: Some(coupling), lift: Vec::new() }
+            MotionLink { a, ia: 0, b, ib: 0, ratio, offset: 0.0, coupling: Some(coupling), lift: Vec::new(), carried_cam: false }
         }
 
         fn gear() -> Coupling {

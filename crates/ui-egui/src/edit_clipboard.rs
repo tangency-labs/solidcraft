@@ -376,6 +376,9 @@ fn placement_cut_refused(app: &SolveApp, placements: &[Vec<u64>]) -> Option<Stri
         if app.session.doc.occurrences.iter().filter(|o| o.component == p.component).count() > 1 {
             return Some(format!("{} is placed more than once: an instance can't be cut (copy it instead)", p.name));
         }
+        if app.session.doc.link_keeping_occurrence(p.occurrence).is_some() {
+            return Some(format!("{} is inside a linked subassembly, which places it: change it in that design", p.name));
+        }
         if app.session.held_by_rigid_group(p.occurrence).is_some() {
             return Some(format!("{} is held by a rigid group: Unlock Contents first", p.name));
         }
@@ -580,6 +583,12 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         }
         // The copied design is one the user opened: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
+        // Whether a design with components comes in as a subassembly is as last chosen in Insert
+        // Design's panel: one component is what the command does untold, and a link to the
+        // design that is there already stays as it is. A pasted occurrence is rigid.
+        if app.insert_design_keeps_components {
+            params["structure"] = json!(true);
+        }
         let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", params));
         let Ok(out) = pasted else { return false };
         // Move/Copy opens on it, to place it.

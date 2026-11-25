@@ -204,6 +204,9 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
     named || s.sheet_sketching()
 }
 
+/// The delete itself, on `s`: the session, or for `dry_run` a scratch copy of it, which is why
+/// it is apart from `delete`. When nothing could be deleted, the error is the first reason
+/// something was skipped.
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
     if p.get("preserve_projection_link").is_some_and(|value| !value.is_boolean()) {
@@ -258,6 +261,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         .collect::<Result<Vec<_>>>()?;
     joints.sort_unstable();
     joints.dedup();
+    if let Some(why) = joints.iter().find_map(|joint| super::component_link::linked_joint_refusal(s, *joint)) {
+        return Err(bad(cmd, why));
+    }
     let features_before: Vec<(u64, String)> = s.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
     let mut skipped: Vec<String> = Vec::new();
     let mut skip = |why: String| {
@@ -380,6 +386,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == k || o.name == k).cloned() else {
             return Err(bad(cmd, format!("no occurrence `{k}`")));
         };
+        // A placement a linked design makes is that design's to remove: Update Links would
+        // bring it back.
+        if let Some(why) = super::component_link::kept_occurrence_refusal(s, o.id) {
+            return Err(bad(cmd, why));
+        }
         if s.doc.occurrences.iter().filter(|x| x.component == o.component).count() > 1 {
             // The joints on it and the other assembly records naming it go with it: left behind,
             // a joint stays in the Browser joined to nothing (#7749).
