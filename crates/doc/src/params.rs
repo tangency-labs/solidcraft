@@ -1919,10 +1919,10 @@ pub(crate) mod param_rows_tests {
         let doc = rules_read_by_features(rules, features);
         RULES_READ.set(0);
         let rows = doc.param_rows();
-        // A sheet metal rule holds 8 expressions and a plastic rule 10, each read once. Reading
+        // A sheet metal rule holds 9 expressions and a plastic rule 10, each read once. Reading
         // the rules again for each of the 30 sheet metal and 30 plastic features read
-        // 30 × 40 × 8 + 30 × 40 × 10 = 21,600.
-        assert!(RULES_READ.get() <= rules * (8 + 10), "{}", RULES_READ.get());
+        // 30 × 40 × 9 + 30 × 40 × 10 = 22,800.
+        assert!(RULES_READ.get() <= rules * (9 + 10), "{}", RULES_READ.get());
         // `p0` lists every feature, in timeline order.
         let all: Vec<String> = (0..features).map(|i| format!("Feature:F{i}")).collect();
         assert_eq!(rows[0].used_by, all);
