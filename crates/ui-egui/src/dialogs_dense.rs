@@ -87,6 +87,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
             crate::dialogs_sheet::Sm::Hardware { .. } => Some("sheet.hardware"),
+            crate::dialogs_sheet::Sm::ShopCheck { .. } => Some("sheet.check_shop"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),

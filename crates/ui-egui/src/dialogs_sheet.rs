@@ -211,6 +211,14 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// the file has the sheet and its mounting holes only.
                 hardware_notes: bool,
             },
+            /// Check Against Shop Rules (#20113): the shop (index into the built-in profiles), and
+            /// what `sheet.check_shop` said for the design, body and shop it was last run for.
+            /// Read-only: OK only closes it.
+            ShopCheck {
+                shop: usize,
+                data: Option<Result<Value, String>>,
+                key: Option<(u64, Option<String>, usize)>,
+            },
         }
     }
 }
@@ -226,12 +234,13 @@ impl Sm {
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
             Sm::Hardware { .. } => "ui.hardware_title",
+            Sm::ShopCheck { .. } => "ui.shop_check_title",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
         }
     }
 
     pub fn previews(&self) -> bool {
-        !matches!(self, Sm::FlatPattern { .. })
+        !matches!(self, Sm::FlatPattern { .. } | Sm::ShopCheck { .. })
     }
 
     /// The value on the canvas (the flange's follows its picks).
@@ -305,6 +314,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Sm::FlatPattern { data: None, key: None, status: None, hardware_notes: false },
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
+        "sheet.check_shop" => (Sm::ShopCheck { shop: 0, data: None, key: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -745,6 +755,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
+        Sm::ShopCheck { shop, data, key } => shop_check_rows(app, ui, shop, data, key, inputs),
         Sm::FlatPattern { data, key, status, hardware_notes } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
@@ -837,6 +848,130 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         }
     }
     enter
+}
+
+/// The sources a shop finding may open: web pages only.
+fn web_source(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+/// The counts of a check as words ("3 errors, 1 warning"); empty when there are none.
+fn shop_counts(errors: usize, warnings: usize) -> String {
+    let count = |n: usize, one: &str, many: &str| match n {
+        0 => None,
+        1 => Some(solidcraft_ui_text::tr(one).to_string()),
+        n => Some(solidcraft_ui_text::format(many, &[("n", &n.to_string())])),
+    };
+    [count(errors, "ui.shop_check_error_one", "ui.shop_check_errors"), count(warnings, "ui.shop_check_warning_one", "ui.shop_check_warnings")]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Check Against Shop Rules (#20113): the shop and body chosen, `sheet.check_shop` run again when
+/// the design, the body or the shop changes, and its findings with their sources. It changes
+/// nothing: the command is read-only.
+fn shop_check_rows(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    shop: &mut usize,
+    data: &mut Option<Result<Value, String>>,
+    key: &mut Option<(u64, Option<String>, usize)>,
+    inputs: &[SelInput],
+) {
+    use solidcraft_engine::doc::shop_rules;
+    let shops: Vec<(&str, &str)> =
+        shop_rules::profile_ids().into_iter().filter_map(|id| shop_rules::profile(id).ok().map(|p| (id, p.name.as_str()))).collect();
+    let Some(last) = shops.len().checked_sub(1) else { return };
+    *shop = (*shop).min(last);
+    let names: Vec<&str> = shops.iter().map(|(_, name)| *name).collect();
+    choice_row(ui, "ui.shop_check_shop", "sm_shop_check_shop", shop, &names);
+    let (id, name) = shops.get(*shop).copied().unwrap_or(("generic", "Generic"));
+    let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
+    let want = (app.session.revision, body.clone(), *shop);
+    if key.as_ref() != Some(&want) {
+        let mut p = json!({"shop": id});
+        if let Some(b) = &body {
+            p["body"] = json!(b);
+        }
+        *data = Some(app.session.execute("sheet.check_shop", &p).map_err(|e| e.to_string()));
+        *key = Some(want);
+    }
+    use crate::ui_kit::{StatusTone, status_line};
+    let v = match data {
+        Some(Ok(v)) => v.clone(),
+        Some(Err(e)) => {
+            status_line(ui, e, StatusTone::Error);
+            return;
+        }
+        None => return,
+    };
+    let findings: Vec<Value> = v["findings"].as_array().cloned().unwrap_or_default();
+    let is_error = |f: &Value| f["severity"] == "error";
+    let errors = findings.iter().filter(|f| is_error(f)).count();
+    let warnings = findings.len() - errors;
+    let summary = if findings.is_empty() {
+        solidcraft_ui_text::format("ui.shop_check_pass", &[("shop", name)])
+    } else {
+        solidcraft_ui_text::format("ui.shop_check_summary", &[("counts", &shop_counts(errors, warnings)), ("shop", name)])
+    };
+    let tone = if errors > 0 {
+        StatusTone::Error
+    } else if warnings > 0 {
+        StatusTone::Warning
+    } else {
+        StatusTone::Dim
+    };
+    status_line(ui, &summary, tone);
+    for f in findings.iter().take(200) {
+        let error = is_error(f);
+        let severity = solidcraft_ui_text::tr(if error { "ui.shop_check_error" } else { "ui.shop_check_warning" });
+        let line = solidcraft_ui_text::format("ui.shop_check_finding", &[("severity", severity), ("message", f["message"].as_str().unwrap_or(""))]);
+        status_line(ui, &line, if error { StatusTone::Error } else { StatusTone::Warning });
+        let sources: Vec<&str> =
+            f["sources"].as_array().map(|s| s.iter().filter_map(Value::as_str).filter(|u| web_source(u)).collect()).unwrap_or_default();
+        let feature = f["feature"].as_u64();
+        if feature.is_none() && sources.is_empty() {
+            continue;
+        }
+        form_row(ui, "", |ui| {
+            ui.horizontal(|ui| {
+                if let Some(feature) = feature
+                    && crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.shop_check_show"), true).clicked()
+                {
+                    let items = json!([{"type": "feature", "id": feature}]);
+                    if let Err(e) = app.run("select.set", json!({ "items": items })) {
+                        app.set_status(e, true);
+                    }
+                }
+                for (n, url) in sources.iter().enumerate() {
+                    let label = if sources.len() == 1 {
+                        solidcraft_ui_text::tr("ui.shop_check_source").to_string()
+                    } else {
+                        solidcraft_ui_text::format("ui.shop_check_source_n", &[("n", &(n + 1).to_string())])
+                    };
+                    let hint = solidcraft_ui_text::format("ui.shop_check_source_hint", &[("url", url)]);
+                    if crate::ui_kit::text_button(ui, &label, true).backing_on_hover_text(hint).clicked() {
+                        crate::links::open(ui.ctx(), url);
+                    }
+                }
+            });
+        });
+    }
+    let not_checked: Vec<Value> = v["not_checked"].as_array().cloned().unwrap_or_default();
+    if !not_checked.is_empty() {
+        let title = solidcraft_ui_text::tr("ui.shop_check_not_checked");
+        crate::ui_kit::section_count(ui, "sm_shop_not_checked", title, false, Some(not_checked.len()), |ui| {
+            for n in not_checked.iter().take(200) {
+                let line = solidcraft_ui_text::format(
+                    "ui.shop_check_not_checked_row",
+                    &[("rule", n["rule"].as_str().unwrap_or("")), ("why", n["why"].as_str().unwrap_or(""))],
+                );
+                status_line(ui, &line, StatusTone::Dim);
+            }
+        });
+    }
 }
 
 /// The ribbon exports use the same save picker as the flat-pattern panel. Keep the
@@ -1460,7 +1595,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             p["angle_display"] = json!(ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend"));
             ("sheet.manage_rules", p)
         }
-        Sm::FlatPattern { .. } => return Ok(Vec::new()),
+        Sm::FlatPattern { .. } | Sm::ShopCheck { .. } => return Ok(Vec::new()),
         Sm::Hardware { kind, thread, length } => return hardware_commands(app, *kind, thread, length, inputs, extra),
     };
     k.fill_simple_params(&mut p);

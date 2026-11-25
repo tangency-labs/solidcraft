@@ -18,6 +18,7 @@ const CHECK: &str = "sheet.check_shop";
 const CONTRACT: TypedContract<CheckShopParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Against Shop Rules", crate::checked!("sheet.check_shop", check_shop))
+    .at("SHEET METAL", "CHECK")
     .icon("inspect")
     .noundo()
     .read_only()

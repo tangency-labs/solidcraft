@@ -2529,3 +2529,67 @@ fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
     let error = apply_commands(&app, &e).expect_err("two commands in an edit");
     assert!(error.contains("edit changes one feature"), "{error}");
 }
+
+// ---- Check Against Shop Rules (#20113) ----
+
+/// A plate with one hole of `diameter` mm, and the Shop Check dialog open on it, drawn.
+fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("solid.hole", json!({"position": [50, 30, 2.5], "diameter": diameter})).unwrap();
+    h.app.start("sheet.check_shop");
+    h.frames(4);
+    h
+}
+
+fn shop_check_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
+    let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+        h.app.logic(ui.ctx());
+        h.app.ui(ui);
+    });
+    crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect()
+}
+
+#[test]
+fn shop_check_button_is_on_the_sheet_metal_tab() {
+    let specs = solidcraft_engine::command_specs();
+    let (commands, _) = crate::workspace::layout("SHEET METAL", "CHECK", &specs).expect("a CHECK panel on the Sheet Metal tab");
+    assert!(commands.iter().any(|c| c.id == "sheet.check_shop"));
+    assert!(start(&plate(crate::ui_kit::LayoutMode::Docked), "sheet.check_shop").is_some(), "the button opens a dialog");
+}
+
+#[test]
+fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
+    let mut h = shop_check_on(0.6);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sheet(Sm::ShopCheck { .. }))));
+    assert!(!h.app.dialog.as_ref().is_some_and(|d| d.kind.previews()), "a computed panel, nothing to preview");
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
+    assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
+    assert!(texts.iter().any(|t| t == "Source"), "the finding links its source: {texts:?}");
+    let Some(Kind::Sheet(Sm::ShopCheck { shop, data, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
+    let generic = data.clone();
+    *shop = 1;
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t.ends_with("against PCBWay")), "{texts:?}");
+    let Some(Kind::Sheet(Sm::ShopCheck { data, key, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+    assert_eq!(key.as_ref().map(|k| k.2), Some(1));
+    assert_ne!(data.as_ref().and_then(|d| d.as_ref().ok()).map(|v| v["shop"].clone()), generic.and_then(|d| d.ok()).map(|v| v["shop"].clone()));
+}
+
+#[test]
+fn shop_check_dialog_says_a_clean_part_passes_and_changes_nothing() {
+    let mut h = shop_check_on(6.0);
+    let (undo, design) = (h.app.session.undo.len(), h.app.session.doc.to_json());
+    let texts = shop_check_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "The part passes Generic's rules."), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.starts_with("Error: ")), "{texts:?}");
+    let Some(Kind::Sheet(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("shop dialog") };
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().is_empty(), "OK runs nothing: {k:?}");
+    assert_eq!((h.app.session.undo.len(), h.app.session.doc.to_json()), (undo, design), "the dialog never changes the design");
+}
