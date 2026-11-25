@@ -1820,8 +1820,10 @@ impl FilletCorner {
             )?;
 
             // store New FilletSurface in m_vSurfaces
-            let free_end =
-                !self.extended_surface_patch && self.blend.is_some_and(|blend| blend.is_end());
+            let free_end = !self.extended_surface_patch
+                && self
+                    .blend
+                    .is_some_and(super::super::blend_corner::BlendCorner::is_end);
             for blend in blends {
                 let surface = Surface::from(blend);
                 // A three-sided cap can have parallel parametric tangents at a corner.

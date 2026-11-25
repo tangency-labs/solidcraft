@@ -334,7 +334,11 @@ impl FilletSession<'_> {
             .as_ref()
             .ok_or_else(|| invalid("intermediate body is not allocated"))?;
         for corner in &self.objects.corners {
-            if corner.extended_surface_patch || !corner.blend.is_some_and(|blend| blend.is_end()) {
+            if corner.extended_surface_patch
+                || !corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_end)
+            {
                 continue;
             }
             for &face in &corner.surface_faces {
