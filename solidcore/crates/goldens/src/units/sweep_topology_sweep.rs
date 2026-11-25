@@ -499,7 +499,7 @@ impl solidcore::sweep::topology_sweep::store::SweepIdentities for WholeIdentitie
 /// points sorted, then each edge's two end points (lesser first) sorted.
 fn whole_output(record: &[f64]) -> Output {
     let Some((&status, rest)) = record.split_first() else {
-        return Output::err("empty whole-B-rep record".to_string());
+        return Output::harness("empty whole-B-rep record");
     };
     let mut ints = vec![status as i64];
     let mut values = Vec::new();
@@ -660,7 +660,7 @@ fn body_output(record: &[f64]) -> Output {
     let (faces, edges, vertices) = (counts[2] as usize, counts[4] as usize, counts[5] as usize);
     let prefix = 7 + 3 * vertices + 2 * edges;
     let Some(head) = record.get(..prefix) else {
-        return Output::err("short non-manifold body record".to_string());
+        return Output::harness("short non-manifold body record");
     };
     let rest = &record[prefix..];
     let mut output = whole_output(head);

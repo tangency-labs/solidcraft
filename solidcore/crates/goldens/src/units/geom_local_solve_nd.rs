@@ -562,9 +562,9 @@ fn rust(p: &Parsed) -> Result<Output, HarnessError> {
             Ok(solve_output(sol.x, eq.trace, head, eq.flags))
         }
         Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
-            Output::err(match e {
-                err if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => {
-                    format!("status_{}", crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))
+            Output::kernel(&e, match &e {
+                err if crate::status::is_kernel(err, solidcore::error::upstream_status(err).is_some()) => {
+                    format!("status_{}", crate::status::kind_slot(err, solidcore::error::upstream_status(err).unwrap_or(-1)))
                 }
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "status_1007".into(),
                 other => format!("rust_error: {other}"),

@@ -459,6 +459,7 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
     }
     let status = match outcome {
         Ok(()) => 0,
+        Err(e) if crate::status::is_kernel(&e, false) => crate::status::kind_slot(&e, 0),
         Err(e) => match crate::output::blend_status(&e) {
             Some(code) => code,
             None => return Err(harness(e)),

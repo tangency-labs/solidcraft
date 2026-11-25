@@ -451,7 +451,7 @@ fn build_body(k: &mut Kernel, b: &BodyIn) -> SolidResult<Brep> {
 fn status(e: &SolidError) -> Option<f64> {
     match e {
         e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {
-            solidcore::error::upstream_status(e).map(f64::from)
+            Some(crate::status::kind_slot(e, solidcore::error::upstream_status(e).map_or(-1.0, f64::from)))
         }
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
@@ -507,7 +507,7 @@ fn refused(e: &SolidError) -> Output {
     if let Some(out) = Output::unported(e) {
         return out;
     }
-    Output::rejected(format!("rust operand build: {e}"))
+    Output::rejected_kernel("rust operand build", e, format!("rust operand build: {e}"))
 }
 
 fn output(raw: &[f64]) -> Result<Output, HarnessError> {

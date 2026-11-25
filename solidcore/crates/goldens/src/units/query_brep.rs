@@ -421,6 +421,9 @@ fn seed_box() -> Extent3d {
 
 /// The `SmStatus` of a Rust result; `None` for an error upstream has no status for.
 fn status_code(e: &SolidError) -> Option<f64> {
+    if crate::status::is_kernel(e, false) {
+        return Some(crate::status::kind_slot(e, 0.0));
+    }
     solidcore::error::upstream_status(e).map(f64::from)
 }
 
@@ -554,7 +557,7 @@ fn rust_classify(i: &ClassifyIn) -> Result<Output, Fail> {
                 return Ok(d);
             }
             let Some(code) = status_code(&e) else {
-                return Ok(Output::err(format!("rust error: {e}")));
+                return Ok(Output::kernel(&e, format!("rust error: {e}")));
             };
             // as the call starts the classification
             let mut pc = PointClassification::new(tol);

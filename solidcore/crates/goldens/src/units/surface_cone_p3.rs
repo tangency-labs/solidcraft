@@ -209,7 +209,7 @@ fn output(v: &[f64]) -> Result<Output, HarnessError> {
         return Err(HarnessError::new("short cone intersection result"));
     }
     if at(v, 0) != 1000.0 {
-        return Ok(Output::err(format!("status_{}", at(v, 0) as i64)));
+        return Ok(Output::harness_text(format!("status_{}", at(v, 0) as i64)));
     }
     Ok(Output::new()
         .ints("status_and_more", vec![at(v, 0) as i64, at(v, 1) as i64])
@@ -302,7 +302,7 @@ impl UnitDiff for Runner {
         match rust(&i) {
             Ok(v) => output(&v),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
-                Output::err(format!(
+                Output::kernel(&e, format!(
                     "status_{}",
                     match e {
                         ref e if crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some()) => {

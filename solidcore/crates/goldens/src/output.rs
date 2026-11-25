@@ -120,6 +120,12 @@ impl Output {
         Self::err(label)
     }
 
+    /// A harness outcome whose text the runner composes from its own checks (a fixture
+    /// contract, a scene limit, an unresolved name): never built from a kernel error.
+    pub fn harness_text(text: impl Into<String>) -> Self {
+        Self::err(text)
+    }
+
     /// A rejection whose reason is a kernel failure: `<prefix>: kind_<code>`. `legacy` is the
     /// reason recorded before kinds, returned unless `GOLDENS_TYPED=1`.
     pub fn rejected_kernel(

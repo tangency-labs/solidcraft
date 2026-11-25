@@ -194,7 +194,7 @@ fn path_of(brep: &BrepIn) -> Result<String, HarnessError> {
 fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Err(Box::new(Output::err("no_face")));
+        return Err(Box::new(Output::harness("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -208,13 +208,13 @@ fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
         }
         OpIn::LoopRoundTrip { loop_ } => {
             if n_l == 0 {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             *loop_ = shared::sel((*loop_).max(0), n_l);
         }
         OpIn::DeleteInnerLoop { loops, .. } => {
             if n_l == 0 || loops.is_empty() {
-                return Err(Box::new(Output::err("no_loop")));
+                return Err(Box::new(Output::harness("no_loop")));
             }
             // distinct selectors, at most four (a deleted loop cannot be named again)
             let mut kept: Vec<i64> = Vec::new();

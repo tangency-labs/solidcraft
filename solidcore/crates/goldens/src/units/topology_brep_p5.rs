@@ -570,7 +570,11 @@ fn own_fixture(f: &[f64; 11]) -> Result<Result<Brep, Output>, HarnessError> {
     match built {
         Some(Built::Brep(b)) => Ok(Ok(*b)),
         Some(Built::Failed(e)) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
-            Output::rejected(format!("fixture constructor status {}", build_status(&e)))
+            Output::rejected_kernel(
+                "fixture constructor",
+                &e,
+                format!("fixture constructor status {}", build_status(&e)),
+            )
         }))),
         None => Err(HarnessError::new("fixture kind without a build")),
     }

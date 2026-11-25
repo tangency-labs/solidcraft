@@ -1863,7 +1863,10 @@ fn legacy_build_status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
         // a failure in solidcore's terms (#2615): its C++ comparison status
-        e @ SolidError::Failed(_) => f64::from(crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
+        e @ SolidError::Failed(_) => f64::from(crate::status::kind_slot(
+            &e,
+            e.sm_status().unwrap_or(solidcore::error::SM_ERR),
+        )),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
             f64::from(solidcore::error::SM_ERR_INVALID_INPUT)
         }

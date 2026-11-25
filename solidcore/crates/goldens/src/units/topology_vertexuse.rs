@@ -647,7 +647,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c) else {
-        return Ok(Output::err("no_vertexuse"));
+        return Ok(Output::harness("no_vertexuse"));
     };
     // The ops read the cached gaps (`IsOnPole`: the vertex/face gap's face UV), so a
     // gap that cannot be refilled is reported, not left at its placeholder.

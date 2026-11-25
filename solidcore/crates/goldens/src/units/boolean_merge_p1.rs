@@ -1191,7 +1191,7 @@ impl UnitDiff for Runner {
                 (i.op == OP_FACE_COINCIDENCE).then_some(&other),
             )),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
-                Output::err(format!(
+                Output::kernel(&e, format!(
                     "status_{}",
                     match e {
                         SolidError::Upstream { .. } | SolidError::Failed(_) => {

@@ -389,6 +389,11 @@ fn v3(a: [f64; 3]) -> Vec3 {
 /// [`SolidError::InvalidInput`]; `None` for a null dereference (refused) or an error
 /// with no upstream status.
 fn status_of(e: &SolidError) -> Option<f64> {
+    crate::status::legacy_or(legacy_status_of(e), || Some(crate::status::kind_slot(e, 0.0)))
+}
+
+/// [`status_of`] as recorded before kinds.
+fn legacy_status_of(e: &SolidError) -> Option<f64> {
     if let Some(code) = crate::output::blend_status(e) {
         return Some(f64::from(code));
     }
@@ -405,7 +410,7 @@ pub(super) fn rust_err(e: &SolidError) -> Output {
         return o;
     }
     if matches!(e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF) {
-        return Output::err("refused");
+        return Output::kernel(e, "refused");
     }
     match status_of(e) {
         Some(st) => Output::new().values("status", vec![st]),
@@ -579,7 +584,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
         Inputs::Tangential { eu, .. } => {
             let e = sel(*eu, n_eu);
             if e < 0 {
-                return Ok(Err(Output::err("no_edge_use")));
+                return Ok(Err(Output::harness("no_edge_use")));
             }
             vec![e]
         }
@@ -594,7 +599,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
             let vv = sel(*v, n_v);
             let ring = ring_eus(vv);
             if vv < 0 || ring.is_empty() {
-                return Ok(Err(Output::err("no_edge_use")));
+                return Ok(Err(Output::harness("no_edge_use")));
             }
             let a = pick(eu1.rem_euclid(1 << 30), &ring, n_eu);
             let mut bb = pick(eu2.rem_euclid(1 << 30), &ring, n_eu);
@@ -619,7 +624,7 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
             let vv = sel(*v, n_v);
             let ring = ring_eus(vv);
             if vv < 0 || ring.is_empty() {
-                return Ok(Err(Output::err("no_edge_use")));
+                return Ok(Err(Output::harness("no_edge_use")));
             }
             vec![vv, pick(*eu, &ring, n_eu)]
         }
@@ -1659,7 +1664,7 @@ fn corner_err(e: &SolidError) -> Result<f64, Box<Output>> {
         return Err(Box::new(o));
     }
     if matches!(e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF) {
-        return Err(Box::new(Output::err("refused")));
+        return Err(Box::new(Output::kernel(e, "refused")));
     }
     Ok(model_status(e))
 }
@@ -1850,7 +1855,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(e) => {
                     return Ok(corner_err(&e)
                         .err()
-                        .map_or_else(|| Output::err("error"), |o| *o))
+                        .map_or_else(|| Output::kernel(&e, "error"), |o| *o))
                 }
             };
             let tangent = match fc.tangent_fillet_solver(&rm.k, &rm.target, &exec, fs) {
@@ -1858,7 +1863,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Err(e) => {
                     return Ok(corner_err(&e)
                         .err()
-                        .map_or_else(|| Output::err("error"), |o| *o))
+                        .map_or_else(|| Output::kernel(&e, "error"), |o| *o))
                 }
             };
             let mut rec = vec![index(tangent), all.len() as f64];
@@ -1899,7 +1904,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
             if let Err(e) = fc.re_initialize_corner_edges(&mut rm.fb) {
                 return Ok(match corner_err(&e) {
                     Err(o) => *o,
-                    Ok(st) => Output::err(format!("status_{st}")),
+                    Ok(st) => Output::kernel(&e, format!("status_{st}")),
                 });
             }
             let mut rec = Vec::new();

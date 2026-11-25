@@ -947,7 +947,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some(op) = resolve(&i.op, c, &b) else {
-        return Ok(Output::err("no_edge"));
+        return Ok(Output::harness("no_edge"));
     };
     match run_rust_op(&mut b, &op) {
         Ok(o) => Ok(o),

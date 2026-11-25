@@ -324,8 +324,13 @@ impl UnitDiff for Runner {
                     }
                     return Ok(output);
                 }
-                if let Some(code) = solidcore::error::upstream_status(&error) {
-                    status = i64::from(code);
+                let code = if crate::status::is_kernel(&error, false) {
+                    Some(crate::status::kind_slot(&error, 0))
+                } else {
+                    solidcore::error::upstream_status(&error).map(i64::from)
+                };
+                if let Some(code) = code {
+                    status = code;
                     if request.op == 2 {
                         body = vec![0, 0, 0];
                     }

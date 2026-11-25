@@ -1860,7 +1860,7 @@ fn rust_brep(
         }
         Some(Built::Failed(e)) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::err(format!(
+            None => Ok(Err(Output::kernel(&e, format!(
                 "brep_build_status_{}",
                 build_status(&e)
             )))),
@@ -1878,7 +1878,7 @@ fn rust_brep(
                 }
                 Built::Failed(e) => match Output::unported(&e) {
                     Some(o) => Ok(Err(o)),
-                    None => Ok(Err(Output::err(format!(
+                    None => Ok(Err(Output::kernel(&e, format!(
                         "brep_build_status_{}",
                         build_status(&e)
                     )))),

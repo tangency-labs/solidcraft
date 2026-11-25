@@ -624,7 +624,7 @@ fn target_count(ty: i64, c: [usize; 10]) -> usize {
 fn resolve(op: &OpIn, c: [usize; 10], b: &Brep) -> Result<OpIn, Box<Output>> {
     let [n_r, _, _, n_f, _, _, _, n_e, _, n_v] = c;
     if n_v == 0 {
-        return Err(Box::new(Output::err("no_vertex")));
+        return Err(Box::new(Output::harness("no_vertex")));
     }
     let vs = |s: i64| sel(s, n_v).max(0);
     let tgt = |ty: i64, index: i64| {
@@ -680,7 +680,7 @@ fn resolve(op: &OpIn, c: [usize; 10], b: &Brep) -> Result<OpIn, Box<Output>> {
         },
         OpIn::Tangent { v, e1, e2, tol_deg } => {
             if n_e == 0 {
-                return Err(Box::new(Output::err("no_edge")));
+                return Err(Box::new(Output::harness("no_edge")));
             }
             let v = vs(v);
             let (local, _) = adj(v);

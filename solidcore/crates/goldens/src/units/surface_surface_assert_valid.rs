@@ -344,7 +344,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 Some(code) => format!("{}: upstream status {code}", e.operation()),
                 None => e.to_string(),
             };
-            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(text)));
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, text)));
         }
     };
     let mut v = vec![f64::from(u8::from(ok)), reports.len() as f64];

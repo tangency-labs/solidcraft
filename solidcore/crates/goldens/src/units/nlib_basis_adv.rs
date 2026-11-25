@@ -135,10 +135,11 @@ fn rust(i: Inputs) -> Result<Output, HarnessError> {
                     .values("s", s)
                     .values("xr", xr)
                     .values("xs", xs)),
-                Err(SolidError::InvalidInput { operation, reason })
-                    if operation == COMPAT_OP && reason.starts_with("index out of range") =>
+                Err(e)
+                    if matches!(&e, SolidError::InvalidInput { operation, reason }
+                        if *operation == COMPAT_OP && reason.starts_with("index out of range")) =>
                 {
-                    return Ok(Output::err(PAST_END));
+                    return Ok(Output::kernel(&e, PAST_END));
                 }
                 Err(e) => Err(e),
             }

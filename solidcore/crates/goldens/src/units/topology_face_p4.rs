@@ -187,7 +187,7 @@ fn resolve_with(
 ) -> Result<Result<Inputs, Output>, HarnessError> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Ok(Err(Output::err("no_face")));
+        return Ok(Err(Output::harness("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -222,7 +222,7 @@ fn resolve_with(
             let f = FaceId::from_index(r.face as u32);
             let edges = face_edges(b, f)?;
             if edges.is_empty() {
-                return Ok(Err(Output::err("no_face_edge")));
+                return Ok(Err(Output::harness("no_face_edge")));
             }
             let e = edges
                 .get(shared::sel((*edge).max(0), edges.len()) as usize)

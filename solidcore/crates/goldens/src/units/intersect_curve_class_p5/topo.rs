@@ -765,7 +765,7 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     if !r.exact {
-        return Ok(Output::err("inexact_geometry"));
+        return Ok(Output::harness("inexact_geometry"));
     }
     let op = op_args(&k, &r, &i.op)?;
     let mates = r.mates.clone();

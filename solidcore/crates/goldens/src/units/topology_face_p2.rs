@@ -1498,7 +1498,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     let op = match resolve(&i.op, &counts_of(c)) {
         Ok(op) => op,
-        Err(name) => return Ok(Output::err(name)),
+        Err(name) => return Ok(Output::harness_text(name)),
     };
     let (code, args) = op_args(&op)?;
     let mut input = block;

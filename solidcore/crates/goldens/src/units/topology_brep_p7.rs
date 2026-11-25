@@ -459,7 +459,7 @@ fn rust_inputs(
         }
         Inputs::MergeSelf { face, .. } => {
             if n_f == 0 {
-                return Ok(Err(Output::err("no_face")));
+                return Ok(Err(Output::harness("no_face")));
             }
             *face = shared::sel((*face).max(0), n_f);
         }

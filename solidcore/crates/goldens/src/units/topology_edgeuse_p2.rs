@@ -48,8 +48,6 @@ const MAX_SAMPLES: usize = 64;
 
 /// "Upstream would dereference null" in an output slot.
 const NULL_DEREF: f64 = -2.0;
-/// The shim did not run the op (deferred on the Rust side).
-const NOT_RUN: f64 = -3.0;
 
 /// The UV curve given to `CheckAndSetUVTrimCurve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,7 +161,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     };
     let s = sel(i.op.eu(), counts(&brep)[6]);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup {
@@ -355,10 +353,6 @@ fn output_of(op: &OpIn, body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
     if first == NULL_DEREF {
         return Output::harness("null_deref");
-    }
-    if first == NOT_RUN {
-        // only on paths the Rust side defers; compared, it fails the case
-        return Output::harness("not_run_by_cpp");
     }
     match op {
         OpIn::Tangent { .. } | OpIn::Convex { .. } => Output::new().int("result", first as i64),
@@ -579,7 +573,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     };
     if let OpIn::CheckSet { uv, .. } = &i.op {
         if uv_curve(&s.brep, s.eu, uv).is_none() {
-            return Ok(Output::err("no_uv_curve"));
+            return Ok(Output::harness("no_uv_curve"));
         }
         if let Some(o) = inexact_geometry(&s) {
             return Ok(o);
@@ -601,7 +595,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
+                e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    Ok(Output::kernel(&e, "null_deref"))
+                }
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

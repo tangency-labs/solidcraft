@@ -4194,7 +4194,7 @@ mod tests {
         missing.values.remove("edgeuse.1.geometry");
         assert!(normalize_sync_ties(missing).is_err());
         for output in [
-            Output::err("operation failure"),
+            Output::harness("operation failure"),
             Output::deferred("topology.brep_p2", "SmBrep::Notify"),
             Output::rejected("native fixture constructor status_1007"),
         ] {

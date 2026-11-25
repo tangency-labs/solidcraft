@@ -1188,7 +1188,7 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
-        return Ok(Err(Output::err("no_entity_of_that_kind")));
+        return Ok(Err(Output::harness("no_entity_of_that_kind")));
     }
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup { brep, eu, types }))
@@ -1307,6 +1307,9 @@ fn rust_edgeuse_body(
                 match s.surface.evaluate_point(&k, uv) {
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if crate::status::is_kernel(&e, false) => {
+                        v.extend([crate::status::kind_slot(&e, 0.0), 0.0, 0.0, 0.0]);
+                    }
                     Err(e) => {
                         let st = match solidcore::error::nurbs::upstream_status(&e) {
                             Some(code) => f64::from(code),
@@ -1420,7 +1423,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                e @ SolidError::InvalidInput { .. } => Ok(Output::kernel(&e, "null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

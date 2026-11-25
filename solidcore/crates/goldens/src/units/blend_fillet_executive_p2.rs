@@ -1522,7 +1522,7 @@ fn law_elliptic(
     ) {
         Ok(law) => law,
         Err(e) => {
-            return Output::unported(&e).unwrap_or_else(|| Output::err("law_without_curve"));
+            return Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, "law_without_curve"));
         }
     };
     let FilletLawKind::BSpline {
@@ -1567,7 +1567,7 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
     };
     if b.edges().len() != BOX_EDGES {
         // The shim reports the same box as `-4 n_edges`.
-        return Ok(Err(Output::err("box_edge_count")));
+        return Ok(Err(Output::harness("box_edge_count")));
     }
     Ok(Ok(Access {
         breps: vec![b],

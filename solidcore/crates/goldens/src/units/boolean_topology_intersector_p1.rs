@@ -3199,7 +3199,7 @@ pub(super) fn prepare(k: &Kernel, i: &Inputs) -> Result<Prepared, Box<Result<Out
     // counted as both-errored, not as a pass)
     if ops.is_empty() {
         if let Some((_, name)) = cut {
-            return Err(Box::new(Ok(Output::err(name))));
+            return Err(Box::new(Ok(Output::harness_text(name))));
         }
     }
     Ok(Prepared { two, ops, cut })

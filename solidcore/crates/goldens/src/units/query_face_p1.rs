@@ -216,13 +216,14 @@ fn none_output() -> Output {
 /// upstream status.
 fn status_of(r: &Result<(), SolidError>) -> Option<i64> {
     match r {
-        Ok(()) => Some(0),
+        Ok(()) => Some(crate::status::ok_slot(0)),
+        Err(e) if crate::status::is_kernel(e, false) => Some(crate::status::kind_slot(e, 0)),
         Err(e) => solidcore::error::upstream_status(e).map(i64::from),
     }
 }
 
 fn rust_err(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| Output::kernel(&e, format!("rust_error: {e}")))
+    Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
 // ---- boxes --------------------------------------------------------------------------------
@@ -463,7 +464,7 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
     ) {
         Ok(c) => Curve::from(c),
         Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
-            return Ok(Output::err(format!(
+            return Ok(Output::kernel(&e, format!(
                 "line_segment_status_{}",
                 f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or_default()))
             )))

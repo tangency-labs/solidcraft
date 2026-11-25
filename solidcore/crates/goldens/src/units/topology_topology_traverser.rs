@@ -171,7 +171,7 @@ impl UnitDiff for Runner {
         };
         let r = request(&i, c);
         if !available(r) {
-            return Ok(Output::err("no seed of requested kind"));
+            return Ok(Output::harness("no seed of requested kind"));
         }
         let lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, r.mask)
             .map_err(|e| HarnessError::new(e.to_string()))?;

@@ -722,7 +722,7 @@ pub(super) fn own_brep(
 /// deferral unchanged).
 fn failed_as_build(o: &Output) -> Output {
     match o.error.as_deref().and_then(|n| n.strip_prefix("brep_build_status_")) {
-        Some(status) => Output::err(format!("build_failed: {status}")),
+        Some(status) => Output::harness_text(format!("build_failed: {status}")),
         None => o.clone(),
     }
 }
@@ -740,7 +740,7 @@ pub(super) fn setup_error(e: &SolidError) -> Output {
 /// an upstream status. An unported callee or any other Rust error (an invalid input
 /// included: it can be a limitation of the runner's handles) is not ignored.
 fn ignored_status(e: &SolidError) -> bool {
-    solidcore::error::upstream_status(e).is_some()
+    crate::status::is_kernel(e, solidcore::error::upstream_status(e).is_some())
 }
 
 /// The face props `SetProps_Stage3` has built when it calls `ClassifyLoops`, and its
@@ -767,7 +767,7 @@ pub(super) fn stage3_props<O: LoopObject>(
     props.reset(PropStage::Stage3);
     props.prop_stage = PropStage::Stage3A;
     let Some(m_face) = props.face else {
-        return Err(Box::new(Output::err("rust_error: props without face")));
+        return Err(Box::new(Output::harness("rust_error: props without face")));
     };
     let loops = match solidcore::topology::face::p2::loops(b, m_face, false, None) {
         Ok(l) => l,
@@ -873,7 +873,7 @@ fn setup(
     i: &Inputs,
 ) -> Result<CaseOf, HarnessError> {
     use solidcore::topology::face::p2::loops as face_loops;
-    let rejected = || Ok(Err(Output::err("rejected")));
+    let rejected = || Ok(Err(Output::harness("rejected")));
     let n_faces = b.faces().len();
     if n_faces == 0 {
         return rejected();
@@ -962,6 +962,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(d);
             }
             match &e {
+                e if crate::status::is_kernel(e, false) => crate::status::kind_slot(e, 0.0),
                 SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }
                     if *reason == qf4::NOT_THIS_FACE || *reason == qf4::NO_SURFACE =>
                 {

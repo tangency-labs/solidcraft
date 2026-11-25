@@ -958,7 +958,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
         Err(out) => return Ok(out),
     };
     let Some(a) = args(&i.op, counts, |f| first_loop(&b, f)) else {
-        return Ok(Output::err("no face"));
+        return Ok(Output::harness("no face"));
     };
     let op = op_of(&i.op);
     let f = FaceId::from_index(a[0] as u32);

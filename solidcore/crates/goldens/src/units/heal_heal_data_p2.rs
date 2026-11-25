@@ -2614,7 +2614,7 @@ fn rust_heal(
                     break;
                 }
                 Fail::Deferred(d) => return Ok(d),
-                Fail::Other(m) => return Ok(Output::err(m)),
+                Fail::Other(m) => return Ok(Output::harness_text(m)),
             },
         }
     }
@@ -2622,9 +2622,10 @@ fn rust_heal(
         #[cfg(test)]
         certificates::keep(&b);
         if let Err(e) = dump(&h, &b, &mut o) {
+            let failed = Output::kernel(&e, "dump failed");
             return Ok(match classify(e) {
                 Fail::Deferred(d) => d,
-                _ => Output::err("dump failed"),
+                _ => failed,
             });
         }
     }

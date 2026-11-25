@@ -174,4 +174,34 @@ mod tests {
         };
         assert!(e.kind().code() > 0);
     }
+
+    /// Every unit says whether an error text is the kernel's or the harness's
+    /// (`Output::kernel` / `Output::harness` / `Output::harness_text`), never the untyped
+    /// `Output::err`. (The status-slot reads join this ban once every unit records kinds.)
+    #[test]
+    fn units_do_not_build_untyped_errors() {
+        fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, hits);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains("Output::err(") {
+                            hits.push(format!("{}:{}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let units = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/units");
+        assert!(units.is_dir(), "{} is missing", units.display());
+        let mut hits = Vec::new();
+        walk(&units, &mut hits);
+        assert!(hits.is_empty(), "untyped Output::err in units: {hits:?}");
+    }
 }

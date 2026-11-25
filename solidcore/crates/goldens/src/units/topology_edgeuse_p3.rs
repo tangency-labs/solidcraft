@@ -124,7 +124,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
             let brep = *b;
             let s = sel(i.op.eu(), counts(&brep)[6]);
             if s < 0 {
-                return Ok(Err(Output::err("no_entity_of_that_kind")));
+                return Ok(Err(Output::harness("no_entity_of_that_kind")));
             }
             let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
             Ok(Ok(Setup {
@@ -394,7 +394,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         "SmSurfaceCache::SubdivideToTolerances past MAX_SUBDIVISION_NODES (port bound)",
                     ))
                 }
-                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
+                e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    Ok(Output::kernel(&e, "null_deref"))
+                }
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

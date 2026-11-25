@@ -1474,7 +1474,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
     match rust_run(s) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

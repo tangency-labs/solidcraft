@@ -1016,7 +1016,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some((op, args)) = op_args(&i.op, &c)? else {
-        return Ok(Output::err("no target"));
+        return Ok(Output::harness("no target"));
     };
     if let OpIn::Merge { curves, tol, .. } = &i.op {
         let face = FaceId::from_index(args.first().copied().unwrap_or(0.0) as u32);

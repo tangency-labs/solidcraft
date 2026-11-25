@@ -16,7 +16,7 @@ pub trait UnitDiff {
     /// Unit id as in `plan/units/<id>.toml` (e.g. `nlib.knots`).
     fn id(&self) -> &'static str;
 
-    /// Runs solidcore on the case's inputs. Return `Ok(Output::err(..))` when the
+    /// Runs solidcore on the case's inputs. Return `Ok(Output::kernel(..))` when the
     /// *operation* fails and `Err` only for harness problems (bad inputs); `Err` always
     /// breaks the case. Return [`Output::deferred`] (e.g. via [`Output::unported`]) when
     /// the port hits a `SolidError::Unported` callee.

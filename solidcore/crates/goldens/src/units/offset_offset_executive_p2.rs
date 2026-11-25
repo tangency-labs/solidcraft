@@ -593,6 +593,7 @@ impl From<SolidError> for RunError {
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i32, Option<T>)> {
     match result {
         Ok(value) => Ok((NATIVE_SUCCESS, Some(value))),
+        Err(e) if crate::status::is_kernel(&e, false) => Ok((crate::status::kind_slot(&e, 0), None)),
         Err(SolidError::Upstream { code, .. }) => Ok((code, None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         Err(e @ SolidError::Failed(_)) => Ok((crate::status::kind_slot(&e, e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
@@ -929,8 +930,11 @@ fn box_refusal(input: &Inputs) -> HResult<Option<Output>> {
             let code = solidcore::error::upstream_status(&error)
                 .ok_or_else(|| bad(format!("{side} box refused without a status: {error}")))?;
             return Ok(Some(
-                Output::rejected(format!("{side} box refused by its constructor (status {code})"))
-                    .int("status", i64::from(code)),
+                Output::rejected(format!(
+                    "{side} box refused by its constructor ({})",
+                    crate::status::kernel_text(&error, format!("status {code}"))
+                ))
+                .int("status", crate::status::kind_slot(&error, i64::from(code))),
             ));
         }
     }

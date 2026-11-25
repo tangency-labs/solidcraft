@@ -1849,7 +1849,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     let Some((op, args)) = op_args(&i.op, &c)? else {
-        return Ok(Output::err("no target"));
+        return Ok(Output::harness("no target"));
     };
     // an input outside the contract is a harness error (PR #502's convention): the port
     // works through the excluded hang regimes as upstream does (HANG-16: a

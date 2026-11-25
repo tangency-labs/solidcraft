@@ -926,6 +926,7 @@ fn rust_with_fixes(
                 return Ok(deferred);
             }
             match error {
+                e if crate::status::is_kernel(&e, false) => crate::status::kind_slot(&e, 0),
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
                 // every error carrying its exact C++ status (an upstream status, a typed
                 // refusal of an edge, a corner or a size, a failure in solidcore's terms)

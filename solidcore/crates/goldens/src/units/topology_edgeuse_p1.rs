@@ -562,7 +562,7 @@ pub(crate) fn fixture_input(value: Value) -> Result<(String, Vec<f64>), HarnessE
 fn trim_sample_output(body: &[f64]) -> Output {
     match body.split_first() {
         Some((&0.0, values)) => Output::new().values("sample", values.to_vec()),
-        Some((&status, _)) => Output::err(format!("trim_sample_status_{status}")),
+        Some((&status, _)) => Output::harness_text(format!("trim_sample_status_{status}")),
         None => Output::harness("trim_sample_empty"),
     }
 }
@@ -661,7 +661,7 @@ pub(crate) fn rust_brep(
         }
         Some(Built::Failed(e)) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::err(format!(
+            None => Ok(Err(Output::kernel(&e, format!(
                 "brep_build_status_{}",
                 build_status(&e)
             )))),
@@ -676,7 +676,7 @@ pub(crate) fn rust_brep(
                 }
                 Built::Failed(e) => match Output::unported(&e) {
                     Some(o) => Ok(Err(o)),
-                    None => Ok(Err(Output::err(format!(
+                    None => Ok(Err(Output::kernel(&e, format!(
                         "brep_build_status_{}",
                         build_status(&e)
                     )))),

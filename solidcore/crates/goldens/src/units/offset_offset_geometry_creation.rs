@@ -2092,7 +2092,7 @@ fn native_face(k: &mut Kernel, b: &BrepIn) -> Result<Result<Brep, SolidError>, H
 /// A failed Rust build of B-rep `which` (`a` / `b`) as the shim reports a failed build.
 fn own_failure(which: &str, e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| {
-        Output::err(format!(
+        Output::kernel(e, format!(
             "brep_build_{which}_status_{}",
             crate::own_builder::build_status(e)
         ))
@@ -2139,7 +2139,7 @@ fn prepare(i: &Inputs) -> Result<Prepared, Early> {
     let two = Two::new(brep_a, brep_b, [exact_a, exact_b]);
     let (hdr, ops) = match resolve(i, &mut counts, &two) {
         Ok(r) => r,
-        Err(name) => return Err(Box::new(Ok(Output::err(name)))),
+        Err(name) => return Err(Box::new(Ok(Output::harness_text(name)))),
     };
     Ok(Prepared { two, hdr, ops })
 }

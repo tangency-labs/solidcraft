@@ -557,7 +557,10 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }
-        Err(e) if i.op <= 4 && solidcore::error::upstream_status(&e).is_some() => {
+        Err(e)
+            if i.op <= 4
+                && crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) =>
+        {
             let code = crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1));
             // These APIs clear their pointer outputs before the first fallible
             // operation. Compare defined native failures as statuses, not harness

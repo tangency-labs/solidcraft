@@ -88,7 +88,7 @@ fn refusal(i: &Inputs, expected: &str) -> Result<Output, HarnessError> {
         Err(reason) if expected == "UB-190" && reason.starts_with("UB-190:") => {
             // Guard-only check: no operation runs. Recorded as an error with no values,
             // never as a deferral.
-            Ok(Output::err("ffi refusal: UB-190"))
+            Ok(Output::harness("ffi refusal: UB-190"))
         }
         _ => Err(harness("expected the specific UB-190 refusal")),
     }
@@ -316,7 +316,7 @@ fn legacy_status(error: &SolidError) -> i64 {
 fn output(raw: &[f64], family: u8) -> Result<Output, HarnessError> {
     let (&status, rest) = raw.split_first().ok_or_else(|| harness("empty result"))?;
     if status != 0.0 {
-        return Ok(Output::err(format!("status={status}")));
+        return Ok(Output::harness_text(format!("status={status}")));
     }
     let mut input = rest;
     let mut controls = Vec::new();

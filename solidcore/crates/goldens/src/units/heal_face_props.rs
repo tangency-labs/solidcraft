@@ -734,7 +734,7 @@ fn tree_contract(
 /// (upstream crashes on these scripts).
 fn rejection(face: &FaceIn, ops: &[[f64; 5]]) -> Result<Output, HarnessError> {
     match script_contract(face, ops) {
-        Err(_) => Ok(Output::err("rejected")),
+        Err(_) => Ok(Output::harness("rejected")),
         Ok(()) => Err(harness("expected the input contract to reject the script")),
     }
 }

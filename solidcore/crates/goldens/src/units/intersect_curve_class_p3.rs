@@ -724,7 +724,7 @@ impl From<HarnessError> for Fail {
 
 /// The output of a case refused with status `s`.
 fn refused(s: f64) -> Output {
-    Output::err(format!("refused_{s}"))
+    Output::harness_text(format!("refused_{s}"))
 }
 
 /// `Ok(v)` or the status; `Unported` defers the case.
@@ -1389,7 +1389,7 @@ fn rust(s: &Script) -> Result<Output, HarnessError> {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Refused(s)) => Ok(refused(s)),
-        Err(Fail::Undefined(why)) => Ok(Output::err(format!("undefined_upstream: {why}"))),
+        Err(Fail::Undefined(why)) => Ok(Output::harness_text(format!("undefined_upstream: {why}"))),
         Err(Fail::Harness(e)) => Err(e),
     }
 }

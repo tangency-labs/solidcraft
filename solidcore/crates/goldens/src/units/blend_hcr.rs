@@ -401,21 +401,21 @@ fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessEr
     // the reference wrapper's scene input checks
     let (brep, hcr) = (brep_block(&i.brep)?, hcr_block(i)?);
     if let Err(m) = check_magnitudes(&brep).and_then(|()| check_magnitudes(&hcr)) {
-        return Ok(Err(Output::err(m)));
+        return Ok(Err(Output::harness_text(m)));
     }
     // the fixture's block contract (`topology.vertexuse`'s, ported in `cases::contract`)
     if let Err(e) = vertexuse_block::check(&path_of(&i.brep)?, &brep) {
-        return Ok(Err(Output::kernel(&e, format!("rejected: {e}"))));
+        return Ok(Err(Output::harness_text(format!("rejected: {e}"))));
     }
     // the reference wrapper admits the extra curve through a wire fixture too.
     if let Some(x) = &i.extra {
         let wire = brep_block(&BrepIn::Wire { curve: x.curve.clone(), t0: x.t0, t1: x.t1 })?;
         if let Err(e) = vertexuse_block::check("", &wire) {
-            return Ok(Err(Output::kernel(&e, format!("rejected: {e}"))));
+            return Ok(Err(Output::harness_text(format!("rejected: {e}"))));
         }
     }
     if let Err(m) = check_view(i) {
-        return Ok(Err(Output::err(m)));
+        return Ok(Err(Output::harness_text(m)));
     }
     // the shim's `build` (`sc_topology_fixture.h`, no validate-only, no gap walk)
     let built = match &i.brep {
@@ -511,11 +511,11 @@ impl UnitDiff for Runner {
         };
         let b = h.scene_brep();
         let Some(r) = resolve(&i, b.edges().len(), b.vertices().len()) else {
-            return Ok(Output::err("no_edge"));
+            return Ok(Output::harness("no_edge"));
         };
         let (op, ops) = ops_block(&r);
         if let Err(m) = validate_rust(op, &h, &ops) {
-            return Ok(Output::err(m));
+            return Ok(Output::harness_text(m));
         }
         match run_rust(&mut k, h, &r) {
             Ok((status, record)) => Ok(output(status, record)),
