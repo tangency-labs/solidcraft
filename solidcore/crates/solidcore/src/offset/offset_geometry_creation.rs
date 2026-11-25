@@ -130,6 +130,19 @@
 //!   (the fork's tangency-labs/smlib@23c5b0a); any other failure of `ExtendTrimEdges` is
 //!   only reported, as upstream's (the fork's passed every failure on, refusing a lone
 //!   disc's lamina edge).
+//! - **UV curve off the extended domain (#21743, not upstream).** `ExtendTrimEdges`
+//!   lifts the piece of the extended UV curve that `FindUVCurveIvlInDomain` keeps (the
+//!   one holding the original curve's midpoint) only when that midpoint is inside the
+//!   extended surface's domain (within the UV point tolerance `EFF_ZERO_SQRT * (1 + |uv|)`,
+//!   which a seam trim's fitting noise stays within), and only when the whole trimmed
+//!   piece is (`uv_piece_in_domain`: Bezier control-point hulls certify it, a curve point
+//!   outside refuses; at most 40 halvings and 4096 segments, past which it is lifted as
+//!   before). The piece runs between boundary
+//!   crossings, so it is wholly inside or wholly outside; outside (an edge use whose UV
+//!   curve is on another surface), upstream lifted it through the surface clamped at its
+//!   boundary, a 3D curve along that boundary and not over the edge. The port refuses
+//!   with [`OffsetFailure::ExtendedCurveOffDomain`] instead, which `EdgeuseOffset`
+//!   only reports, as any non-loose failure: the edge keeps its curve.
 //! - **Step walls (WR-530 addendum).** A
 //!   local operation's tangent edge whose two faces stay parallel but apart (one moved
 //!   along its normal) gets the ruled step wall between the two offset edges instead of
@@ -300,6 +313,9 @@ struct TrimmedEdge<O> {
     interval: Extent1d,
     /// The trim points run against the base edge use.
     inverted: bool,
+    /// (not upstream) Neither end had a trim point but the drop of its vertex onto the
+    /// curve: no neighbour's offset, tangent or not, reaches the curve at either end.
+    unreached: bool,
     /// Material boundaries reached through a chart seam that disappears.
     periodic_ends: Vec<PeriodicBoundaryEnd<O>>,
 }
@@ -734,6 +750,19 @@ pub trait OffsetExecutive<O> {
     /// keeps it.
     fn note_inverted_face(&mut self, offset_face: O) {
         let _ = offset_face;
+    }
+    /// Not upstream: notes original edge use `original`, whose mated offset reached no
+    /// neighbour's offset at either end (see `TrimmedEdge::unreached`); nothing unless
+    /// the adapter keeps it.
+    fn note_unreached_edgeuse(&mut self, original: O) {
+        let _ = original;
+    }
+    /// Not upstream: whether original face `face` is a face of two edges whose offset is
+    /// empty, its neighbours' offsets mated across it (`empty_lens`); `false` unless the
+    /// adapter says so.
+    fn is_eliminated_face(&self, face: O) -> bool {
+        let _ = face;
+        false
     }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall).
@@ -2874,6 +2903,22 @@ fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Op
 
 // ---- the geometry creation --------------------------------------------------------------------
 
+/// (not upstream) Whether edge use `eu` lies on one of the faces `curve_faces` and its radial on
+/// the other: an edge between the two faces whose offsets a curve is the meeting of.
+fn between_faces<O: ClassObject + SolutionObject>(
+    brep: &mut impl OffsetBrep<O>,
+    eu: O,
+    curve_faces: [Option<O>; 2],
+) -> Result<bool> {
+    let (Some(here), Some(radial)) = (brep.edgeuse_face(eu)?, brep.edgeuse_radial(eu)?) else {
+        return Ok(false);
+    };
+    let Some(there) = brep.edgeuse_face(radial)? else {
+        return Ok(false);
+    };
+    Ok(here != there && curve_faces.contains(&Some(here)) && curve_faces.contains(&Some(there)))
+}
+
 /// Whether `curve` at `t` passes through `surface` at `uv` (where they meet) by more than
 /// `tol`. To second order in arc length s the curve's height over the surface is
 /// `g1 s + g2 s^2 / 2`, `g1` the sine of the angle between them and `g2` the curve's
@@ -4622,10 +4667,24 @@ impl OffsetGeometryCreation {
             .edgeuse_edge(base_edgeuse)?
             .ok_or(dangling("edge use without edge"))?;
 
+        // (not upstream) for a curve mated across a lens the offset eliminates (`empty_lens`),
+        // the faces whose offsets the curve is the meeting of; none otherwise
+        let across = match brep.edgeuse_radial(base_edgeuse)? {
+            Some(radial) => brep
+                .edgeuse_face(radial)?
+                .is_some_and(|face| executive.is_eliminated_face(face)),
+            None => false,
+        };
+        let curve_faces = match other_base_edgeuse {
+            Some(other) if across => [brep.edgeuse_face(base_edgeuse)?, brep.edgeuse_face(other)?],
+            _ => [None, None],
+        };
         // (not upstream) the trim point of the base edge use's start vertex, then its end's
         let mut ends = [0.0_f64; 2];
         // (not upstream) whether each trim point is a cut by a neighbour's offset surface
         let mut cuts = [false; 2];
+        // (not upstream) whether each trim point is the drop of its vertex, no candidate found
+        let mut dropped = [false; 2];
         let mut periodic_ends = Vec::new();
         // (not upstream) where the base edge's middle drops onto the curve, once it is asked
         // for: one parameter for both ends
@@ -4663,6 +4722,7 @@ impl OffsetGeometryCreation {
                         bcw,
                         uv_curve_base,
                         tan_tol_deg,
+                        curve_faces,
                         &mut tan_eus,
                         &mut tan_uvs,
                         &mut off_adj_eus,
@@ -4692,6 +4752,7 @@ impl OffsetGeometryCreation {
                             obccw,
                             uv_curve_other_base,
                             tan_tol_deg,
+                            curve_faces,
                             &mut tan_eus,
                             &mut tan_uvs,
                             &mut off_adj_eus,
@@ -4723,6 +4784,7 @@ impl OffsetGeometryCreation {
                         bccw,
                         uv_curve_base,
                         tan_tol_deg,
+                        curve_faces,
                         &mut tan_eus,
                         &mut tan_uvs,
                         &mut off_adj_eus,
@@ -4752,6 +4814,7 @@ impl OffsetGeometryCreation {
                             obcw,
                             uv_curve_other_base,
                             tan_tol_deg,
+                            curve_faces,
                             &mut tan_eus,
                             &mut tan_uvs,
                             &mut off_adj_eus,
@@ -4888,6 +4951,44 @@ impl OffsetGeometryCreation {
 
                 // If this has already been mated then we should just grab the point of the vertex
                 let mut found_3d_vertex = false;
+                // (not upstream) a neighbour between the curve's own two faces, mated before
+                // any edge mated across a lens beside it (`empty_lens`): the end is where its
+                // offset starts at the base vertex, where it lies nearest the curve (both are
+                // the meeting of the same two offsets)
+                if between_faces(brep, tan_eu, curve_faces)? {
+                    let tan_edge = brep
+                        .edgeuse_edge(tan_eu)?
+                        .ok_or(dangling("edge use without edge"))?;
+                    for eu in brep.edge_edgeuses(tan_edge)? {
+                        if brep.edgeuse_vertex(eu)? != Some(base_vertex) {
+                            continue;
+                        }
+                        let Some(off_eu) = executive.offset_edgeuse(eu) else {
+                            continue;
+                        };
+                        // where its offset's curve starts (its vertex may have been moved to
+                        // the ends of the lens's own offset edges, which go)
+                        let point =
+                            edgeuse_normalized_evaluate(k, brep, off_eu, 0.0, false, false, true)?;
+                        let sols2 = Self::point_solve(
+                            k,
+                            brep,
+                            curve_3d,
+                            SolverOperation::Minimize,
+                            point,
+                            self.this_approx_tol_3d * 10.0,
+                            None,
+                            SolutionRequested::All,
+                        )?;
+                        // the curve's point nearest the vertex, not another local nearest
+                        if let Some(nearest) = sols2.as_slice().iter().min_by(|a, b| {
+                            a.start.solution_value.total_cmp(&b.start.solution_value)
+                        }) {
+                            solutions.add(nearest);
+                        }
+                    }
+                    continue;
+                }
                 // (the mate is dereferenced only when the edge use is marked)
                 if brep.edgeuse_is_marked(k, tan_eu, mark)? && {
                     let tan_mate = brep
@@ -5167,6 +5268,9 @@ impl OffsetGeometryCreation {
             // If we have no candidate TrimPoints found by intersecting the 3DCurve with other
             // geometry, get a candidate TrimPoint by dropping the Vertex->Point onto the 3DCurve
             if solutions.is_empty() {
+                if let Some(d) = dropped.get_mut(i) {
+                    *d = true;
+                }
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let point = brep.vertex_point(base_vertex)?;
                 solutions = Self::point_solve(
@@ -5378,6 +5482,7 @@ impl OffsetGeometryCreation {
             Ok(Some(TrimmedEdge {
                 interval: trim_ivl,
                 inverted,
+                unreached: dropped == [true, true],
                 periodic_ends,
             }))
         } else {
@@ -5725,6 +5830,7 @@ impl OffsetGeometryCreation {
         neighbour: O,
         base_uv: Option<O>,
         tan_tol_deg: f64,
+        curve_faces: [Option<O>; 2],
         tan_eus: &mut Vec<O>,
         tan_uvs: &mut Vec<Option<O>>,
         off_adj_eus: &mut Vec<O>,
@@ -5741,6 +5847,15 @@ impl OffsetGeometryCreation {
                 }
                 return Ok(());
             }
+        }
+        // (not upstream) a neighbour between the curve's own two faces (an edge beside a lens
+        // its two neighbours are mated across, `empty_lens`): its offset lies on the two
+        // surfaces the curve does, so their cuts of the curve are no trim points; its offset
+        // vertices are, as a mated tangent neighbour's are (and nothing else: no UV curve)
+        if between_faces(brep, neighbour, curve_faces)? {
+            tan_eus.push(neighbour);
+            tan_uvs.push(None);
+            return Ok(());
         }
         let n_edge = brep
             .edgeuse_edge(neighbour)?
@@ -5957,6 +6072,8 @@ impl OffsetGeometryCreation {
     /// # Errors
     ///
     /// `SM_ERR` when no trim interval is found or the second UV curve is missing;
+    /// [`OffsetFailure::ExtendedCurveOffDomain`] (`SM_ERR`, not upstream, #21743) when
+    /// the kept piece of the extended UV curve lies outside the extended surface's domain;
     /// `SER` of the geometry calls (`GetCreateExtendedSurface` included);
     /// [`SolidError::Unported`] for the callees of `TrimExtendedEdge` /
     /// `ReplaceEdgeCurves`;
@@ -6116,11 +6233,58 @@ impl OffsetGeometryCreation {
             ivl.evaluate(0.5),
             &ext_domain,
         )?;
+        // Not upstream (#21743): the piece holds the original curve's midpoint and runs
+        // between two crossings of the domain's boundary (or to the curve's ends), so it lies
+        // wholly inside the domain or wholly outside it, as that midpoint does (a piece just
+        // outside, its midpoint within the tolerance below, is still wholly outside: the
+        // whole kept piece is checked after the trim, `uv_piece_in_domain`). Outside, the
+        // UV curve is not in the extended surface's parameters (an edge use whose curve is
+        // on another surface): the surface clamps there, and the lift would run along its
+        // boundary, not over the curve. No piece of the curve is on the extended surface, so
+        // there is nothing to extend the edge along. "Inside" allows the kernel's UV point
+        // tolerance (`EFF_ZERO_SQRT * (1 + |uv|)`, `MapEdgeuses`' UV tolerance): it covers the
+        // knot removal above (`EFF_ZERO_SQRT / 100`) and the fitting noise of a trim that runs
+        // along the domain's boundary (a seam's), where the clamp moves the lift by no more.
+        let mid_uv = ext_curve.evaluate_point(k, ivl.evaluate(0.5))?;
+        let (inside, outside) = ext_domain.contains_point_dist(
+            Point2::new(mid_uv.x, mid_uv.y),
+            EFF_ZERO_SQRT * (1.0 + mid_uv.max_dimension()),
+        );
+        if !inside {
+            let edge = match brep.topology_entity(edge) {
+                Some((_, EntityRef::Edge(e))) => Some(e),
+                _ => None,
+            };
+            return Err(failed(
+                OP_EXTEND,
+                OffsetFailure::ExtendedCurveOffDomain { edge, outside },
+            ));
+        }
         let CurveKind::BSpline(mut uv_curve_extended) = ext_curve.into_kind() else {
             return Err(dangling("extended curve kind"));
         };
         let mut trim_extended = trim_extended;
         uv_curve_extended.trim(k, &mut trim_extended, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
+
+        // Not upstream (#21743): the midpoint test above settles a piece that is clearly
+        // outside, but a midpoint within the tolerance does not bound the rest of the
+        // piece: one that stays just outside the boundary, never crossing it, has no
+        // crossing to cut it, and its ends can lie far outside. The kept piece, as it will
+        // be lifted, must lie inside the domain at every point, within the same
+        // tolerance ([`uv_piece_in_domain`]). One that does not is refused as above; an
+        // undecided one (within its bounds) is lifted, as before.
+        if let PieceInDomain::Outside(outside) =
+            uv_piece_in_domain(&uv_curve_extended, &ext_domain)?
+        {
+            let edge = match brep.topology_entity(edge) {
+                Some((_, EntityRef::Edge(e))) => Some(e),
+                _ => None,
+            };
+            return Err(failed(
+                OP_EXTEND,
+                OffsetFailure::ExtendedCurveOffDomain { edge, outside },
+            ));
+        }
 
         // refresh sExtIvl to trimmed Ivl
         ext_ivl = uv_curve_extended.natural_interval();
@@ -6310,6 +6474,7 @@ impl OffsetGeometryCreation {
         let Some(TrimmedEdge {
             interval: trim_ivl,
             inverted,
+            unreached,
             periodic_ends,
         }) = trimmed
         else {
@@ -6388,6 +6553,12 @@ impl OffsetGeometryCreation {
         executive.note_mated_edgeuse(edgeuse)?;
         if let Some(other) = other_edgeuse {
             executive.note_mated_edgeuse(other)?;
+        }
+        if unreached {
+            executive.note_unreached_edgeuse(edgeuse);
+            if let Some(other) = other_edgeuse {
+                executive.note_unreached_edgeuse(other);
+            }
         }
         for event in periodic_ends {
             executive.note_periodic_boundary_end(event)?;
@@ -6678,6 +6849,7 @@ impl OffsetGeometryCreation {
         let mut min_curve: Option<(O, O, O)> = None;
         let mut trim_ivl = Extent1d::new();
         let mut inverted = false;
+        let mut unreached = false;
         let mut periodic_ends = Vec::new();
         let mut periodic_curve = None;
 
@@ -6748,6 +6920,7 @@ impl OffsetGeometryCreation {
             if let Some(TrimmedEdge {
                 interval: my_trim,
                 inverted: my_inverted,
+                unreached: my_unreached,
                 periodic_ends: my_periodic_ends,
             }) = my_trim
             {
@@ -6762,6 +6935,7 @@ impl OffsetGeometryCreation {
                     min_curve = Some((c3, uv1, uv2));
                     trim_ivl = my_trim;
                     inverted = my_inverted;
+                    unreached = my_unreached;
                     periodic_ends = my_periodic_ends;
                     continue;
                 }
@@ -6782,12 +6956,14 @@ impl OffsetGeometryCreation {
                         min_dist = dist;
                         trim_ivl = my_trim;
                         inverted = my_inverted;
+                        unreached = my_unreached;
                         periodic_ends = my_periodic_ends;
                     }
                 } else {
                     // only 1 curve to check branch - use this curve
                     trim_ivl = my_trim;
                     inverted = my_inverted;
+                    unreached = my_unreached;
                     min_curve = Some((c3, uv1, uv2));
                     periodic_ends = my_periodic_ends;
                 }
@@ -6881,6 +7057,10 @@ impl OffsetGeometryCreation {
 
         executive.note_mated_edgeuse(edgeuse)?;
         executive.note_mated_edgeuse(other_edgeuse)?;
+        if unreached {
+            executive.note_unreached_edgeuse(edgeuse);
+            executive.note_unreached_edgeuse(other_edgeuse);
+        }
         for event in periodic_ends {
             executive.note_periodic_boundary_end(event)?;
         }
@@ -8680,10 +8860,156 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
     }
 }
 
+/// Where a UV curve piece lies against a domain, each point within the kernel's UV
+/// point tolerance `EFF_ZERO_SQRT * (1 + |uv|)` ([`uv_piece_in_domain`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PieceInDomain {
+    /// Every point of the piece is inside, certified by control-point hulls.
+    Inside,
+    /// A point of the piece is outside, at this distance from the domain.
+    Outside(f64),
+    /// Neither was settled within [`PIECE_SPLIT_DEPTH`] and [`PIECE_SEGMENT_BUDGET`].
+    Undecided,
+}
+
+/// The deepest halving of one Bezier segment by [`uv_piece_in_domain`].
+const PIECE_SPLIT_DEPTH: u32 = 40;
+/// The most Bezier segments [`uv_piece_in_domain`] looks at.
+const PIECE_SEGMENT_BUDGET: usize = 4096;
+
+/// Whether every point of `piece` is inside `domain`, each within the UV point
+/// tolerance `EFF_ZERO_SQRT * (1 + |uv|)` (#21743). The check is not upstream.
+///
+/// Each Bezier segment of the curve is checked in turn:
+/// - **Witness.** Its end points are points of the curve. One that is outside its
+///   tolerance proves the piece leaves the domain.
+/// - **Certificate.** With positive weights, the box of its Euclidean control points
+///   holds the segment. Every point `q` of that box has `|q| >= m`, where `m` is the
+///   box's least max-norm, so its tolerance is at least `t = EFF_ZERO_SQRT * (1 + m)`.
+///   A box inside the domain grown by `t` therefore certifies the whole segment.
+/// - **Otherwise** the segment is halved by de Casteljau and both halves are checked.
+///
+/// The work is a loop over an explicit stack, left to right, bounded by
+/// [`PIECE_SPLIT_DEPTH`] and [`PIECE_SEGMENT_BUDGET`].
+fn uv_piece_in_domain(piece: &BSplineCurve, domain: &Extent2d) -> Result<PieceInDomain> {
+    let nurb = piece.nurb_ref()?;
+    let p = nurb.degree();
+    let mut stack: Vec<(Vec<crate::nurbs::math::CPoint>, u32)> = Vec::new();
+    for seg in nurb.decompose_bez()?.into_iter().rev() {
+        stack.push((seg.cpts().to_vec(), 0));
+    }
+    let point_tol = |q: Vec3| EFF_ZERO_SQRT * (1.0 + q.max_dimension());
+    // the least |x| over [a, b]
+    let nearest = |a: f64, b: f64| {
+        if a > 0.0 {
+            a
+        } else if b < 0.0 {
+            -b
+        } else {
+            0.0
+        }
+    };
+    let (lo_d, hi_d) = (domain.min(), domain.max());
+    let mut visited = 0usize;
+    let mut undecided = false;
+    while let Some((pw, depth)) = stack.pop() {
+        visited += 1;
+        for q in [pw.first(), pw.last()].into_iter().flatten() {
+            let q = q.to_euclid();
+            let (inside, outside) = domain.contains_point_dist(Point2::new(q.x, q.y), point_tol(q));
+            if !inside {
+                return Ok(PieceInDomain::Outside(outside));
+            }
+        }
+        if pw.iter().any(|c| c.w != NOW && c.w <= 0.0) {
+            // (no hull property without positive weights)
+            undecided = true;
+            continue;
+        }
+        let (mut lo, mut hi) = (
+            Point2::new(f64::INFINITY, f64::INFINITY),
+            Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+        );
+        for c in &pw {
+            let e = c.to_euclid();
+            lo = Point2::new(lo.x.min(e.x), lo.y.min(e.y));
+            hi = Point2::new(hi.x.max(e.x), hi.y.max(e.y));
+        }
+        let t = EFF_ZERO_SQRT * (1.0 + nearest(lo.x, hi.x).max(nearest(lo.y, hi.y)));
+        if lo.x >= lo_d.x - t && hi.x <= hi_d.x + t && lo.y >= lo_d.y - t && hi.y <= hi_d.y + t {
+            continue;
+        }
+        if depth >= PIECE_SPLIT_DEPTH || visited >= PIECE_SEGMENT_BUDGET {
+            undecided = true;
+            continue;
+        }
+        let (left, right) = crate::nurbs::bezier::split(&pw, p, 0.5)?;
+        stack.push((right, depth + 1));
+        stack.push((left, depth + 1));
+    }
+    Ok(if undecided {
+        PieceInDomain::Undecided
+    } else {
+        PieceInDomain::Inside
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
+
+    /// The quadratic `UV(t) = (t, -d - (t - 1/2)^2)` on `[0, 1]`, as a Bezier curve.
+    fn dipping_uv_piece(d: f64) -> BSplineCurve {
+        let pw = [
+            CPoint::new(0.0, -d - 0.25, NOZ, NOW),
+            CPoint::new(0.5, -d + 0.25, NOZ, NOW),
+            CPoint::new(1.0, -d - 0.25, NOZ, NOW),
+        ];
+        BSplineCurve::from_data(2, 2, 5, 2, &pw, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+            .expect("a quadratic")
+    }
+
+    /// #21744 review (CodeRabbit): the piece `(t, -d - (t - 1/2)^2)`, `d = EFF_ZERO_SQRT /
+    /// 4`, stays below the domain `[0, 1]^2` and never crosses its boundary, so no crossing
+    /// cuts it, and its midpoint `(1/2, -d)` is inside within the UV point tolerance. Its
+    /// ends `(0, -d - 1/4)` and `(1, -d - 1/4)` are `d + 1/4` outside, and the whole-piece
+    /// test finds one of them. Without it the midpoint test alone kept the piece.
+    #[test]
+    fn a_piece_outside_with_its_midpoint_within_tolerance_is_refused() {
+        let d = EFF_ZERO_SQRT / 4.0;
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let piece = dipping_uv_piece(d);
+        let mid = piece.evaluate_point(0.5).expect("the midpoint");
+        let (inside, _) = domain.contains_point_dist(
+            Point2::new(mid.x, mid.y),
+            EFF_ZERO_SQRT * (1.0 + mid.max_dimension()),
+        );
+        assert!(inside, "the midpoint {mid:?} passes the midpoint test");
+        assert_eq!(
+            uv_piece_in_domain(&piece, &domain).expect("checked"),
+            PieceInDomain::Outside(d + 0.25)
+        );
+    }
+
+    /// The same parabola raised wholly into the domain (`d = -1/2`: `v` in `[1/4, 1/2]`)
+    /// is certified inside. So is one whose control polygon leaves the domain while the
+    /// curve does not: `d = -1/4 - 1e-3` puts the curve's `v` in `[1e-3, 1/4 + 1e-3]` and
+    /// its middle control point at `v = 1/2 + 1e-3`, above a domain topped at `0.3`; one
+    /// halving brings each half's control points to `v <= 1/4 + 1e-3`.
+    #[test]
+    fn a_piece_inside_is_certified_inside() {
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert_eq!(
+            uv_piece_in_domain(&dipping_uv_piece(-0.5), &domain).expect("checked"),
+            PieceInDomain::Inside
+        );
+        let low_top = Extent2d::from_bounds(0.0, 0.0, 1.0, 0.3);
+        assert_eq!(
+            uv_piece_in_domain(&dipping_uv_piece(-0.25 - 1e-3), &low_top).expect("checked"),
+            PieceInDomain::Inside
+        );
+    }
 
     /// [`remove_joint_copies`] with no cap: the bound alone.
     fn remove_exact_joint_knot(curve: &mut BSplineCurve, at: f64) -> Result<f64> {
