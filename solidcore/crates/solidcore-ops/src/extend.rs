@@ -667,7 +667,16 @@ mod tests {
         // the straight side at angle 90, through (0, 10, 10)
         let side = edge_at(&sheet, &order, [0.0, 10.0, 10.0]);
         let out = extend_sheet(&sheet, &order, side, 3.0, Continuation::Tangent).unwrap();
-        assert!(matches!(step_box(&out).0, SurfaceKind::BSpline(_)));
+        // the kernel's Tangent run-off round the axis is the quarter's B-spline with its end
+        // span mirrored, straight along the axis; given back its analytic kind (as SolidCraft's
+        // Extend Sheet does) it is that spline section extruded along the axis, on the same
+        // parameters, not the cylinder: the mirrored arc turns about another axis
+        let kind = step_box(&out).0;
+        assert!(
+            matches!(kind, SurfaceKind::SurfOfExtrusion(_)),
+            "{:?}",
+            std::mem::discriminant(&kind)
+        );
     }
 
     /// A body whose edge list is not in id order (as an importer may leave it): the record's
