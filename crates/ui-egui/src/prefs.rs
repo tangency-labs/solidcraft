@@ -3828,10 +3828,16 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     for grants in p.plugin_grants.values_mut() {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
+    // Each installed shader has at most four sliders; a hand-edited file keeps a bounded few.
+    p.shader_settings.retain(|key, value| key.len() <= 200 && value.is_finite());
+    p.shader_settings = std::mem::take(&mut p.shader_settings).into_iter().take(crate::plugins::MAX_DISABLED * 4).collect();
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    p.background_shader_pictures.retain(|key, path| crate::plugin_shaders::valid_picture(key, path));
+    p.background_shader_pictures = p.background_shader_pictures.into_iter().take(crate::plugins::MAX_PICTURES).collect();
     p
 }
 
@@ -4070,6 +4076,24 @@ fn prepare_preferences(
     }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
         return Err(format!("`disabled_plugins` must be at most {} ids of lowercase letters, digits and hyphens", crate::plugins::MAX_DISABLED));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if !crate::plugin_shaders::valid_pictures(&new.background_shader_pictures) {
+        return Err(format!(
+            "`background_shader_pictures` maps `plugin/shader/<texture name>` to absolute picture paths: at most {} entries, paths of at most {} characters",
+            crate::plugins::MAX_PICTURES,
+            crate::plugins::MAX_PICTURE_PATH
+        ));
+    }
+    // A scoped caller may not point a background at a file outside its own scope, as with grants.
+    for (key, path) in &new.background_shader_pictures {
+        if app.preferences.background_shader_pictures.get(key) != Some(path) {
+            solidcraft_engine::io::vfs::check(path).map_err(|e| format!("`background_shader_pictures` for `{key}`: {e}"))?;
+            // The picture is read again on later frames, beyond this request's scope (as `theme_follow`).
+            if solidcraft_engine::io::vfs::current_scope().is_some() {
+                return Err("`background_shader_pictures` cannot choose a picture while file access is confined".into());
+            }
+        }
     }
     if new.max_step_file_mb != app.preferences.max_step_file_mb || new.max_design_file_mb != app.preferences.max_design_file_mb {
         let mb = solidcraft_engine::io::limits::MB;
@@ -6705,6 +6729,7 @@ mod tests {
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("command_search_centred", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
@@ -7636,6 +7661,61 @@ mod tests {
         assert_eq!(stopped["ok"], true, "{stopped}");
         assert!(h.app.preferences.theme_follow.is_empty());
         assert!(stopped["result"]["theme_followed"].is_null());
+    }
+
+    /// A chosen background picture is read again on later frames, like a followed theme.
+    #[test]
+    fn scoped_background_pictures_cannot_persist_reads_beyond_the_request() {
+        use serde_json::json;
+        use solidcraft_engine::io::vfs;
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("allowed-pictures");
+        let outside = h.dir.join("private-pictures");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let inside = root.join("pick.png");
+        let private = outside.join("pick.png");
+        for path in [&inside, &private] {
+            std::fs::write(path, b"not read").unwrap();
+        }
+        let set = |path: &std::path::Path| json!({"background_shader_pictures": {"own/own/picture": path.to_string_lossy()}});
+        let before = h.app.prefs();
+        let refused = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", set(&private)));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("outside the folders this agent may use"), "{refused}");
+        assert_eq!(h.app.prefs(), before);
+        #[cfg(unix)]
+        {
+            let link = root.join("escape.png");
+            std::os::unix::fs::symlink(&private, &link).unwrap();
+            let refused = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", set(&link)));
+            assert_eq!(refused["ok"], false, "{refused}");
+            assert!(refused["error"].as_str().unwrap().contains("outside the folders this agent may use"), "{refused}");
+            assert_eq!(h.app.prefs(), before);
+        }
+        let refused = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", set(&inside)));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("while file access is confined"), "{refused}");
+        assert_eq!(h.app.prefs(), before);
+        // Unconfined desktop callers can still choose a picture.
+        let chosen = h.call("ui.prefs", set(&inside));
+        assert_eq!(chosen["ok"], true, "{chosen}");
+        assert_eq!(h.app.preferences.background_shader_pictures.len(), 1);
+        let chosen_prefs = h.app.prefs();
+        let other = root.join("other.png");
+        std::fs::write(&other, b"not read").unwrap();
+        let refused = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", set(&other)));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("while file access is confined"), "{refused}");
+        assert_eq!(h.app.prefs(), chosen_prefs, "a confined request cannot change a chosen picture");
+        // Clients that echo the preferences back unchanged still succeed.
+        let echoed = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", set(&inside)));
+        assert_eq!(echoed["ok"], true, "{echoed}");
+        assert_eq!(h.app.prefs(), chosen_prefs);
+        // Forgetting a chosen picture remains possible in a confined request.
+        let cleared = vfs::scoped(Some(vfs::PathScope::new([root])), || h.call("ui.prefs", json!({"background_shader_pictures": {}})));
+        assert_eq!(cleared["ok"], true, "{cleared}");
+        assert!(h.app.preferences.background_shader_pictures.is_empty());
     }
 
     #[test]
