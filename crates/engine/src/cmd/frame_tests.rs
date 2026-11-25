@@ -8389,32 +8389,29 @@ fn separate_curves_and_point_pairs_keep_none_member_identity_and_analytic_volume
 
 #[test]
 fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
-    use solidcraft_kernel::services::frame_member::{self as stock, Failure, Refusal};
-    use solidcraft_kernel::services::{Error, FailureCode, session};
+    use solidcraft_kernel::services::{FailureCode, session};
+    use solidcraft_kernel::{PathFailure, PathRefusal, orient_stock, stock_line};
 
     let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember" };
     let origin = solidcore_record::Vec3::ZERO;
-    let error = stock::line(origin, origin).unwrap_err();
-    assert!(matches!(&error, Failure::Geometry(Refusal::Line)), "{error:?}");
+    let error = stock_line(origin, origin).unwrap_err();
+    assert!(matches!(&error, PathFailure::Refused { why: PathRefusal::Line, .. }), "{error:?}");
     assert_eq!(error.to_string(), "the line has no length or has invalid coordinates");
     assert_eq!(session::take_failure_code(), Some(expected_code));
 
-    let first = stock::line(origin, [10.0, 0.0, 0.0].into()).unwrap();
-    let second = stock::line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
+    let first = stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
+    let second = stock_line([20.0, 0.0, 0.0].into(), [30.0, 0.0, 0.0].into()).unwrap();
     assert_eq!(session::take_failure_code(), None, "a successful query clears the previous refusal");
     let mut path = [first, second];
     let before = path;
-    let error = stock::orient(&mut path).unwrap_err();
-    let Failure::Geometry(reason) = &error else { panic!("geometry refusal was reclassified: {error:?}") };
-    assert_eq!(*reason, Refusal::Connection(1));
+    let error = orient_stock(&mut path).unwrap_err();
+    let PathFailure::Refused { why, .. } = &error else { panic!("geometry refusal was reclassified: {error:?}") };
+    assert_eq!(*why, PathRefusal::Connection(1));
     assert_eq!(path, before, "a refused traversal leaves its input unchanged");
-    let typed = Error::FrameMember(reason.clone());
-    assert_eq!(typed.name(), "FrameMember");
-    assert_eq!(typed.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
-    assert_eq!(error.to_string(), typed.to_string(), "the public error and session diagnostic agree");
+    assert_eq!(error.to_string(), "curve 1 is not connected end to end in path order; pick the curves in order along the path");
     assert_eq!(session::take_failure_code(), Some(expected_code), "the code contains no curve index or model data");
 
-    stock::line(origin, [10.0, 0.0, 0.0].into()).unwrap();
+    stock_line(origin, [10.0, 0.0, 0.0].into()).unwrap();
     assert_eq!(session::take_failure_code(), None);
 }
 
