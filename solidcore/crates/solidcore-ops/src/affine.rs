@@ -319,6 +319,25 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
     Some([d.x, d.y, d.z])
 }
 
+/// Express a planar point in units of an axis-aligned chord, with its nose at x = 0, through the
+/// kernel's [`solidcore::prism::transform::chord_coordinates`].
+///
+/// # Errors
+/// [`crate::Error::Refused`] for a non-finite input, invalid chord or non-finite result.
+pub fn chord_coordinates(
+    point: solidcore_record::Vec2,
+    leading_x: f64,
+    trailing_x: f64,
+) -> Result<solidcore_record::Vec2> {
+    solidcore::prism::transform::chord_coordinates(
+        solidcore_convert::vec2(point),
+        leading_x,
+        trailing_x,
+    )
+    .map(solidcore_convert::record_vec2)
+    .map_err(crate::error::status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
