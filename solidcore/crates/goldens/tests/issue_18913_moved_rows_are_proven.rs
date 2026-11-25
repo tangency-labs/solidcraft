@@ -17,8 +17,9 @@
 //!   within tolerance of its curve's ends. A body that fails one of these fails it no more
 //!   often than main's body of the same case does ([`MAIN_FAILURES`], main replayed with
 //!   this test): those failures are main's own, unchanged by the flags, and pinned so that
-//!   any new one fails here. A row main refused is held to main's failures of its sibling
-//!   case ([`SIBLING_ON_MAIN`]: the same body and radius, another edge of the same kind).
+//!   any new one fails here. A row main refused has no body on main, so its body is held
+//!   to its input body's failures instead ([`HELD_TO_INPUT`]): each as often, and an edge
+//!   off a face's surface only on the very curve of an input edge off it.
 //!   Each moved `mass_properties` entry is classified
 //!   against a certified enclosure of the body's true value ([`MASS_ROWS`], `harness::Table`:
 //!   CLOSER, EQUAL or FARTHER, pinned in [`EXPECTED`], none FARTHER); a row that was a
@@ -57,13 +58,16 @@
 //!   enclosed by Cramer's rule in outward-rounded intervals ([`rail_eu_root`]); it lies
 //!   strictly inside the solve's box (so a root exists: found is right) and each new
 //!   unknown is within `1e-9` relative of it.
-//! * **A chamfer turned about an arc (PROVEN, closed form).** [`Class::ArcChamferCone`]
+//! * **A chamfer turned about an arc (PROVEN, closed form, for the values the row records).**
+//!   [`Class::ArcChamferCone`]
 //!   (`gen0224_torus`, a refusal before): `CalcTorusFilletGeom` called directly with a
 //!   linear section on an arc edge, which upstream refuses and WR-421 revolves into its
 //!   cone. The section runs from the floor foot `(big - r, 0, 0)` to `(big, 0, r)`, so the
 //!   cone about the arc's axis `z` is `rho(z) = big - r + z`. Every recorded point of the
 //!   fillet surface's grid lies on it and each rail's points on one of its end circles, to
-//!   `1e-9` ([`certify_arc_chamfer_cone`]).
+//!   `1e-9` ([`certify_arc_chamfer_cone`]). The row records only those 3 x 3 grid points
+//!   and the rails' points, so every value that moved is proven; points of the surface
+//!   between the grid points are in no row and this claims nothing of them.
 //!
 //! A later change that legitimately moves one of these rows again updates the tables with
 //! that change's derivation: the replay fails until it does.
@@ -272,6 +276,9 @@ struct Found {
     kinds: BTreeMap<String, usize>,
     /// Failures.
     failures: Vec<String>,
+    /// Each edge off a face's surface: its failure's index in `failures` and its curve
+    /// (`{:?}`, which writes every coordinate exactly, so equal text is the same curve).
+    off_surface: Vec<(usize, String)>,
 }
 
 /// The result-body certificate (see the module docs).
@@ -329,6 +336,9 @@ fn certify(body: &Brep) -> Found {
             if on.iter().all(|o| *o == Some(true)) {
                 found.exact_edges += 1;
             } else if on.iter().all(Option::is_some) {
+                found
+                    .off_surface
+                    .push((found.failures.len(), format!("{curve:?}")));
                 found.failures.push(format!(
                     "edge {e:?} ({}) off a face's surface: {on:?}",
                     curve.kind().name()
@@ -366,22 +376,12 @@ fn certify_into(tag: &str, body: &Brep, bad: &mut Vec<String>) -> Found {
     certify_against_main(tag, "", body, bad)
 }
 
-/// The rows main refused, each with the case whose body main built of the same B-rep and
-/// radius, its filleted edge another of the same kind (the stubs' cylinders): the failures
-/// it is held to.
-const SIBLING_ON_MAIN: [(&str, &str); 3] = [
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-    ),
+/// The rows main refused (status 1001, so main has no body of theirs): each failure of
+/// its body is held to its input body's ([`certify_against_input`]).
+const HELD_TO_INPUT: [&str; 3] = [
+    "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
 ];
 
 /// A failure as [`MAIN_FAILURES`] writes it: its edge ids `EdgeId(_)` (a rebuilt body
@@ -405,17 +405,14 @@ fn without_ids(failure: &str) -> String {
 }
 
 /// Certifies `body` into `bad` as [`certify_into`], except that the failures main's body
-/// of `case` (or of its [`SIBLING_ON_MAIN`]) has, each as often, are main's own and pass.
+/// of `case` has, each as often, are main's own and pass.
 fn certify_against_main(tag: &str, case: &str, body: &Brep, bad: &mut Vec<String>) -> Found {
     let found = certify(body);
     eprintln!(
         "I18913 {tag}: {} faces ({} analytic, proved), {} exact edges, kinds {:?}",
         found.faces, found.analytic_faces, found.exact_edges, found.kinds
     );
-    let on_main = SIBLING_ON_MAIN
-        .iter()
-        .find(|(row, _)| *row == case)
-        .map_or(case, |(_, sibling)| sibling);
+    let on_main = case;
     let mut allowed: BTreeMap<&str, usize> = MAIN_FAILURES
         .iter()
         .filter(|(c, _, _)| *c == on_main)
@@ -432,6 +429,69 @@ fn certify_against_main(tag: &str, case: &str, body: &Brep, bad: &mut Vec<String
         }
     }
     found
+}
+
+/// Certifies the body of a [`HELD_TO_INPUT`] row into `bad`, holding its failures to its
+/// input body's: a failure passes only as one the input body read from `case`'s file has,
+/// each as often, and an edge off a face's surface only where the input has an edge off a
+/// face's surface on the same curve (exactly: the same `{:?}` text), so the failure is that
+/// unchanged input edge's, not one the fillet made.
+fn certify_against_input(tag: &str, case: &goldens::Case, body: &Brep, bad: &mut Vec<String>) {
+    let path = source_file(&case.inputs).unwrap_or_else(|| panic!("{tag}: no file source"));
+    let input = goldens::read_source_file(&mut Kernel::default(), &path).unwrap();
+    let (found, before) = (certify(body), certify(&input));
+    eprintln!(
+        "I18913 {tag}: {} faces ({} analytic, proved), {} exact edges, kinds {:?}; input: {} \
+         failures",
+        found.faces,
+        found.analytic_faces,
+        found.exact_edges,
+        found.kinds,
+        before.failures.len()
+    );
+    let mut allowed: BTreeMap<String, usize> = BTreeMap::new();
+    for f in &before.failures {
+        *allowed.entry(without_ids(f)).or_default() += 1;
+    }
+    let mut input_curves: Vec<(String, &str)> = before
+        .off_surface
+        .iter()
+        .map(|(i, curve)| (without_ids(&before.failures[*i]), curve.as_str()))
+        .collect();
+    for (i, f) in found.failures.iter().enumerate() {
+        let key = without_ids(f);
+        let tied = match found.off_surface.iter().find(|(j, _)| *j == i) {
+            Some((_, curve)) => input_curves
+                .iter()
+                .position(|(k, c)| *k == key && c == curve)
+                .map(|at| input_curves.remove(at))
+                .is_some(),
+            None => true,
+        };
+        match allowed.get_mut(&key) {
+            Some(n) if *n > 0 && tied => {
+                *n -= 1;
+                eprintln!("I18913 {tag}: the input's own: {f}");
+            }
+            _ => bad.push(format!("{tag}: {f} (not the input's own)")),
+        }
+    }
+}
+
+/// The path of the `{"kind": "file", "path": ..}` source anywhere in a case's inputs.
+fn source_file(inputs: &Value) -> Option<String> {
+    match inputs {
+        Value::Object(m) => {
+            if m.get("kind").and_then(Value::as_str) == Some("file") {
+                if let Some(p) = m.get("path").and_then(Value::as_str) {
+                    return Some(p.to_owned());
+                }
+            }
+            m.values().find_map(source_file)
+        }
+        Value::Array(a) => a.iter().find_map(source_file),
+        _ => None,
+    }
 }
 
 // ---- closed forms ------------------------------------------------------------------------
@@ -1030,7 +1090,8 @@ fn certify_rail_eu(case: &goldens::Case, out: &Output, bad: &mut Vec<String>) {
 /// the revolution is the cone `|xy| = rho + z` about `z`, between the circles `|xy| = rho,
 /// z = 0` and `|xy| = big, z = r`. Every point of the fillet surface's 3 x 3 grid lies on
 /// that cone with `0 <= z <= r`, and each rail's three points on one end circle, the two
-/// rails on different circles, each to `1e-9 max(big, 1)`. Flat layout: `0 0`, the surface
+/// rails on different circles, each to `1e-9 max(big, 1)`. These are every point the row
+/// records, so the proof covers the row, not the surface between its grid points. Flat layout: `0 0`, the surface
 /// `1 u0 v0 u1 v1` and its 27 grid coordinates, two rails `1 t0 t1` and 9 coordinates each,
 /// the four interval values, the centre line `-1` (none).
 fn certify_arc_chamfer_cone(case: &goldens::Case, out: &Output, bad: &mut Vec<String>) {
@@ -1108,7 +1169,11 @@ fn issue_18913_moved_rows_replay_and_are_proven() {
         match class {
             Class::Body | Class::BodyFromRefusal => {
                 let body = the_body(&bodies, "mass", name);
-                certify_against_main(&tag, name, body, &mut bad);
+                if HELD_TO_INPUT.contains(&name) {
+                    certify_against_input(&tag, &case, body, &mut bad);
+                } else {
+                    certify_against_main(&tag, name, body, &mut bad);
+                }
                 if name == "issue_2020_mitred_put_back_d9_full" {
                     let vs = p1::vertices(body, None).unwrap();
                     full_vertices = Some(
@@ -1336,8 +1401,8 @@ fn check_chamfered_cylinder(
 
 /// The pinned table is the moved entries of [`MASS_ROWS`], in order, and every row is in a
 /// part.
-/// [`MAIN_FAILURES`] names only result-body rows main built, and [`SIBLING_ON_MAIN`] maps
-/// rows main refused to such rows.
+/// [`MAIN_FAILURES`] names only result-body rows main built, and [`HELD_TO_INPUT`] only
+/// rows main refused.
 #[test]
 fn main_failures_name_rows_main_built() {
     let class = |case: &str| {
@@ -1352,9 +1417,9 @@ fn main_failures_name_rows_main_built() {
             "{case}: {failure}"
         );
     }
-    for (row, sibling) in SIBLING_ON_MAIN {
+    for row in HELD_TO_INPUT {
         assert_eq!(class(row), Some(Class::BodyFromRefusal), "{row}");
-        assert_eq!(class(sibling), Some(Class::Body), "{sibling}");
+        assert!(MAIN_FAILURES.iter().all(|(c, _, _)| *c != row), "{row}");
     }
     assert_eq!(
         without_ids("edge EdgeId(47) (line) EdgeId(5)"),
