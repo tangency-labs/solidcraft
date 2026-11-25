@@ -166,6 +166,8 @@ pub(crate) struct Layout {
     pub(crate) collapsible: bool,
     /// The choice field whose current value is this field's unit.
     pub(crate) unit_from: Option<String>,
+    /// The field's own unit, drawn while that choice has nothing chosen.
+    pub(crate) unit: Option<String>,
     /// An `https` page the field's help link opens.
     pub(crate) help: Option<String>,
 }
@@ -177,7 +179,9 @@ impl Layout {
         Self {
             collapsible: collapsible && section.as_ref().is_some_and(|s| !s.is_empty()),
             section,
-            unit_from: text(UNIT_FROM).filter(|s| !s.is_empty()),
+            // A property name, matched exactly as the manifest check matched it.
+            unit_from: property.get(UNIT_FROM).and_then(Value::as_str).map(str::to_owned),
+            unit: ["unit", "x-unit", "units"].into_iter().find_map(|key| text(key).filter(|u| !u.is_empty())),
             help: text(HELP).filter(|url| help_url(url)),
         }
     }
@@ -2712,7 +2716,7 @@ fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
 
 /// Draws the dialog. Returns the key of a directory field whose Browse button was pressed.
 /// Give each field with `x-solidcraft-unit-from` the current value of the choice it names as
-/// its unit suffix. A choice with nothing chosen leaves the field's own unit.
+/// its unit suffix, or its own unit while that choice has nothing chosen.
 fn follow_units(fields: &mut [(Field, Input)]) {
     let chosen: Vec<(String, String)> = fields
         .iter()
@@ -2723,9 +2727,9 @@ fn follow_units(fields: &mut [(Field, Input)]) {
         .collect();
     for (field, _) in fields.iter_mut() {
         let Some(source) = field.layout.unit_from.as_deref() else { continue };
-        let Some((_, value)) = chosen.iter().find(|(key, _)| key == source) else { continue };
+        let value = chosen.iter().find(|(key, _)| key == source).map(|(_, value)| value.clone());
         if let Kind::Number { unit, .. } | Kind::Integer { unit, .. } = &mut field.kind {
-            *unit = Some(value.clone());
+            *unit = value.or_else(|| field.layout.unit.clone());
         }
     }
 }
@@ -2781,20 +2785,22 @@ fn body(
                 let mut folded = false;
                 for (field, input) in fields.iter_mut() {
                     let pick_index = picks;
-                    if field.visible
-                        && let Some(title) = field.layout.section.as_deref()
-                    {
+                    // A heading ends the previous section even while a condition hides it.
+                    if let Some(title) = field.layout.section.as_deref() {
                         folded = false;
-                        if title.is_empty() {
+                        // The heading itself hides with its field.
+                        if field.visible && title.is_empty() {
                             ui_kit::divider(ui, &format!("plugin_dialog:{}", field.key));
-                        } else if field.layout.collapsible {
-                            folded = ui_kit::section(ui, ("plugin_dialog_section", id, title), title, true, |_| ()).is_none();
-                        } else {
+                        } else if field.visible && field.layout.collapsible {
+                            let salt = ("plugin_dialog_section", id, &field.key);
+                            folded = ui_kit::section(ui, salt, title, true, |_| ()).is_none();
+                        } else if field.visible {
                             ui_kit::section_heading(ui, title);
                         }
                     }
-                    // A folded field with a problem is still drawn, so its error is never hidden.
-                    if !field.visible || (folded && !field_errors.contains_key(&field.key)) {
+                    // A folded field that Run would refuse is still drawn, so its problem is never hidden.
+                    let refused = || field_errors.contains_key(&field.key) || params(&[(field.clone(), input.clone())]).is_err();
+                    if !field.visible || (folded && !refused()) {
                         if matches!(input, Input::Selection(_)) {
                             picks += 1;
                         }

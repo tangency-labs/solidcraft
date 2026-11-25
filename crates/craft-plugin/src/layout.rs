@@ -52,7 +52,6 @@ pub(crate) fn validate(schema: &Value, field: &str) -> Result<()> {
 
 /// A help link the dialog may open: `https`, with a host, no spaces or control characters.
 pub fn help_url(url: &str) -> bool {
-    url.len() <= MAX_URL
-        && url.strip_prefix("https://").is_some_and(|rest| !rest.is_empty() && !rest.starts_with('/'))
-        && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+    let host = url.strip_prefix("https://").and_then(|rest| rest.split(['/', '?', '#']).next());
+    url.len() <= MAX_URL && host.is_some_and(|host| !host.is_empty()) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
 }

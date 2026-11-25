@@ -701,7 +701,7 @@ fn layout_annotations_draw_headings_fold_sections_follow_units_and_link_help() {
     // Alphabetical keys: without a recorded declaration order the dialog sorts optional fields by name.
     let schema = json!({"type":"object","x-solidcraft-sections":"collapsible","properties":{
         "a_units":{"type":"string","title":"Units","enum":["mm","in"],"default":"in","x-solidcraft-section":"Carcass"},
-        "b_width":{"type":"number","title":"Width","default":20,"unit":"mm","x-solidcraft-unit-from":"a_units",
+        "b_width":{"type":"number","title":"Width","default":20,"unit":"cm","x-solidcraft-unit-from":"a_units",
             "x-solidcraft-help":"https://example.com/width"},
         "c_drawers":{"type":"integer","title":"Drawers","default":2,"x-solidcraft-section":"Drawers"},
         "d_labels":{"type":"boolean","title":"Labels","x-solidcraft-section":""}
@@ -740,6 +740,11 @@ fn layout_annotations_draw_headings_fold_sections_follow_units_and_link_help() {
     }
     h.frames(2);
     assert_eq!(unit(&h), Some("mm".into()));
+    if let Some((_, input)) = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "a_units") {
+        *input = Input::Choice(None);
+    }
+    h.frames(2);
+    assert_eq!(unit(&h), Some("cm".into()), "nothing chosen: the field's own unit again");
     assert!(crate::scenario::rect_of("dialog:section:Carcass").is_some() && crate::scenario::rect_of("dialog:section:Drawers").is_some());
     assert!(crate::scenario::rect_of("dialog:divider:plugin_dialog:d_labels").is_some());
     assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_some());
@@ -751,6 +756,15 @@ fn layout_annotations_draw_headings_fold_sections_follow_units_and_link_help() {
     assert!(crate::scenario::handle_at("plugin_dialog:field:b_width").is_some());
     assert!(crate::scenario::handle_at("plugin_dialog:field:d_labels").is_some(), "a divider ends the folded section");
     assert_eq!(params(h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap()).unwrap()["c_drawers"], 2, "folded fields are still sent");
+    let drawers = |h: &mut crate::scenario::Harness, value: Input| {
+        let fields = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap();
+        fields.iter_mut().find(|(f, _)| f.key == "c_drawers").unwrap().1 = value;
+        h.frames(2);
+    };
+    drawers(&mut h, Input::Typed("many".into()));
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_some(), "a folded field Run refuses stays drawn");
+    drawers(&mut h, Input::Integer(2));
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_none());
 
     let at = crate::scenario::handle_at("plugin_dialog:help:b_width").expect("help link");
     let (x, y) = (f64::from(at.x), f64::from(at.y));
