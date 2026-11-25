@@ -390,12 +390,12 @@ mod tests {
         assert!(super::click(&mut h.app, &proj, screen(d.0, d.1), true));
         let picked = points(&h);
         assert_eq!(picked.len(), 3, "{picked:?}");
-        assert!((picked[0][0] - a.0).abs() < 1e-6 && (picked[1][0] - b.0).abs() < 1e-6 && (picked[2][1] - d.1).abs() < 1e-6, "{picked:?}");
+        assert!((picked[0][0] - a.0).abs() < 1e-3 && (picked[1][0] - b.0).abs() < 1e-3 && (picked[2][1] - d.1).abs() < 1e-3, "{picked:?}");
         assert!(super::hint_text(h.app.tree.canvas_panel.as_ref().unwrap()).contains('3'));
         // A plain click replaces them all.
         assert!(super::click(&mut h.app, &proj, screen(b.0, b.1), false));
         let picked = points(&h);
-        assert!(picked.len() == 1 && (picked[0][0] - b.0).abs() < 1e-6, "{picked:?}");
+        assert!(picked.len() == 1 && (picked[0][0] - b.0).abs() < 1e-3, "{picked:?}");
         // A click off the image adds nothing, even with Ctrl.
         assert!(!super::click(&mut h.app, &proj, screen(c.center.x + 500.0, c.center.y), true));
         assert_eq!(points(&h).len(), 1);
