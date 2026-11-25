@@ -104,21 +104,33 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
 /// box that its edge nearest `point` (within `tol`) runs along, as `how` says: solidcore-ops'
 /// Extend ([`solidcore_ops::extend::extend_sheet`]), the face and each side carrying the
 /// attributes of those they continue. The edge is picked as the capi picked it: the nearest by
-/// the kernel's closest point, the first of equal ones, within `tol`. A sheet ops cannot extend is
-/// [`Error::Unsupported`]; an extension that cannot be made `distance` long across the side
-/// (within 1e-9 of it), or one below the side's resolution, is [`Error::NotExact`], as before.
+/// the kernel's closest point, the first of equal ones in the face's loop order (a sheet of one
+/// face; another sheet's edges in the body's order), within `tol`. A sheet ops cannot extend is
+/// [`Error::Unsupported`]; a distance below the side's resolution, or one the extension cannot
+/// meet, is [`Error::NotExact`], as before. How exactly an accepted extension meets `distance`
+/// is ops' rule for its route: a surface continued past its box measures `distance` across the
+/// side to within 1e-9, while a plane whose trim grows moves a line or arc edge out exactly and a
+/// spline edge to within a tenth of the body's tolerance (the kernel's offset gate).
 pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f64, how: Continuation) -> Result<Body> {
     const CALL: &str = "smlib_extend_sheet";
     if !point.iter().all(|x| x.is_finite()) || !tol.is_finite() || !(tol > 0.0) || !distance.is_finite() || !(distance > 0.0) {
         return Err(Error::Argument);
     }
     let order = sheet.own_order();
-    let mut distances = Vec::with_capacity(order.edges.len());
-    for e in 0..order.edges.len() {
+    // The candidates in the order the capi met them: one face's loops in its loop order, so a
+    // pick at a corner keeps the edge it always kept.
+    let candidates: Vec<usize> = if order.faces.len() == 1 {
+        ops_as(CALL, &[("sheet", sheet)], extend_error, || sheet.face_loops(&order, 0))?.concat()
+    } else {
+        (0..order.edges.len()).collect()
+    };
+    let mut distances = Vec::with_capacity(candidates.len());
+    for &e in &candidates {
         let at = ops_as(CALL, &[("sheet", sheet)], extend_error, || sheet.edge_closest_point(&order, e, point))?;
         distances.push(at.map(|c| c.distance));
     }
-    let edge = nearest_within(distances, tol).ok_or(Error::NoMatch { point: 0 })?;
+    let picked = nearest_within(distances, tol).ok_or(Error::NoMatch { point: 0 })?;
+    let edge = *candidates.get(picked).ok_or(Error::NoMatch { point: 0 })?;
     let how = match how {
         Continuation::Natural => solidcore_ops::extend::Continuation::Natural,
         Continuation::Tangent => solidcore_ops::extend::Continuation::Tangent,
