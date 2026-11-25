@@ -224,6 +224,7 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    face_intersections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
 }
@@ -461,6 +462,16 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
+    /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
+    /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
+    /// faces near each other's plane, the spans of a curved face's control net. Not the
+    /// fork's.
+    #[must_use]
+    pub fn face_intersections(&self) -> u64 {
+        self.face_intersections.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -505,6 +516,7 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.face_intersections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
     }
@@ -531,6 +543,12 @@ impl WorkCounters {
     pub(crate) fn add_trim_deviation_bound(&self) {
         self.trim_deviation_bounds
             .set(self.trim_deviation_bounds.get().saturating_add(1));
+    }
+
+    /// Counts one pair of faces intersected.
+    pub(crate) fn add_face_intersection(&self) {
+        self.face_intersections
+            .set(self.face_intersections.get().saturating_add(1));
     }
 
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
