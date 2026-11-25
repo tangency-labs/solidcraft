@@ -486,6 +486,12 @@ point: the curve stays smooth along its whole length. The Control Point Spline t
 tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
 kind of spline as a path or a rail.
 
+**3D Sketch**, in the menu of the Model tab's Sketch panel, starts such a sketch in one step: it
+asks for no plane, turns 3D Sketch on and starts 3D Line, and the view stays as it is. The sketch
+rests on the XY origin plane of the active component, so a click in empty space lands there. To
+leave that plane, snap to a vertex, edge or face of the model or to a point already drawn in 3D,
+or finish the line, click one of its points and drag the X, Y or Z arrow.
+
 **Fillet** rounds the corner where two 3D lines share an end point, for the bends of a tube or
 pipe path: pick the two lines and give the radius. Both lines are shortened and a 3D arc in
 their plane joins them, tangent to both. The radius is a dimension with its own parameter, so

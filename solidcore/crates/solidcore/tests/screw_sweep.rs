@@ -31,7 +31,8 @@ use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::screw::{
-    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body,
+    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, screw_sweep_with,
+    Walls,
 };
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::face;
@@ -410,6 +411,7 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     assert_eq!(d.screw().unwrap().origin(), O);
     assert_eq!(d.screw().unwrap().law().is_some(), !law.is_empty());
     assert!(d.half_angle() > 0.0 && d.half_angle() <= MAX_HALF_ANGLE);
+    assert_eq!(d.half_angles().len() + 1, d.stations().len());
     let ([_, a1], [_, b1], swapped) = d.definition_map();
     // the definition's stations are the net's knots across the turns, through the map
     let can = net.canonical().unwrap();
@@ -428,10 +430,10 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     let profile = d.profile().natural_interval();
     let r = 1.0 / 3f64.sqrt();
     let mut farthest: f64 = 0.0;
-    for span in d.stations().windows(2) {
+    for (span, &half) in d.stations().windows(2).zip(d.half_angles()) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            let theta = arc_angle(span[0], span[1], d.half_angle(), t);
+            let theta = arc_angle(span[0], span[1], half, t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
                 let w = profile.min() + a * (profile.max() - profile.min());
@@ -485,6 +487,77 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
         bounds.push(c.bound);
     }
     println!("M10x1.5 groove walls: bounds {bounds:?}");
+}
+
+/// Joined walls: each flank of an M10 groove is one face across its half turns (the
+/// cylinders keep theirs), its net the pieces' spans joined, so spans of the last, shorter
+/// piece keep their own half angle; every wall is still its definition within the
+/// tolerance, and the solid is the pieces' (the same volume, the same cylinders).
+#[test]
+fn joined_walls_run_on_across_the_half_turns() {
+    let mut k = Kernel::default();
+    // 2.7 turns: five half turns, then a shorter piece of 0.2 turns
+    let (p, turns) = (1.5, 2.7);
+    let tol = p * 1e-4;
+    let m = m10_groove(p);
+    let mut pieces = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    let mut joined = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&joined).unwrap());
+    let flanks = walls(&joined);
+    assert_eq!(flanks.len(), 2, "one face per flank");
+    for wall in &flanks {
+        let c = check_wall(wall, p, &[]);
+        assert!(c.bound <= tol, "bound {} past the tolerance {tol}", c.bound);
+        let d = wall.procedural_sweep().unwrap();
+        let mut halves = d.definition().half_angles().to_vec();
+        halves.dedup();
+        assert_eq!(
+            halves.len(),
+            2,
+            "the half turns' spans and the last piece's: {halves:?}"
+        );
+        let (first, last) = (
+            d.definition().stations()[0],
+            *d.definition().stations().last().unwrap(),
+        );
+        assert!(first == 0.0 && (last - turns * 2.0 * PI).abs() <= 1e-12);
+    }
+    let (dev, cylinders) = screw_deviation(&k, &joined, &m, p, turns, &[]);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
+    let (_, piece_cylinders) = screw_deviation(&k, &pieces, &m, p, turns, &[]);
+    assert_eq!(cylinders.len(), piece_cylinders.len());
+    let (vj, vp) = (volume(&k, &mut joined), volume(&k, &mut pieces));
+    assert!((vj - vp).abs() <= 1e-9 * vp, "joined {vj}, pieces {vp}");
+    // a law's angle still ends a face: over the first turn, where the offset changes, the
+    // axial lines sweep B-spline walls too (four), then the two flanks run on (two)
+    let law = [(0.0, -0.3), (1.0, 0.0)];
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        Some(&law),
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    assert_eq!(walls(&b).len(), 6);
+    let (dev, _) = screw_deviation(&k, &b, &m, p, turns, &law);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the

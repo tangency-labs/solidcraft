@@ -28,6 +28,8 @@ solidcraft-control-egui = { workspace = true }
 # The UI kit and its components (ribbon, app bar, history bar, navigation bar, view compass,
 # preferences window, start page, window chrome, theme files), drawn from SolidCraft's data.
 solidcraft-ui-kit = { workspace = true }
+# App-neutral panel placement core.
+solidcraft-panel-layout = { workspace = true }
 # SolidCraft's look, installed into the kit: its icon set, glyphs, interface faces and built-in themes.
 solidcraft-look = { workspace = true }
 # The widget registry (handles, rects, counts) the UI kit publishes into.
@@ -84,6 +86,9 @@ syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
 # crates/derive and the workspace lockfile.
 proc-macro2 = { workspace = true }
+# Prints the colour guard's parsed source without its test-only items; already in the tree
+# through syn and crates/derive.
+quote = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
 # egui-winit's clipboard.

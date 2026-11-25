@@ -237,6 +237,26 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
     Ok(r.with_checked_history(h, &record::counts(&[b])))
 }
 
+/// [`crate::offset_solid`] through SMLib: the closed solid `b` grown by `distance` along its
+/// faces' outward normals (negative: shrunk), the convex edges extended or (`round`) rounded with
+/// `distance` as the radius. Each moved face is the face itself, moved (Modified); a round SMLib
+/// makes along an edge or at a corner is new.
+pub(crate) fn offset_solid(b: &Body, distance: f64, round: bool) -> Result<Body> {
+    if !(distance.is_finite() && distance.abs() > 1e-9 && distance.abs() <= 1e6) {
+        return Err(KernelError::Invalid("the offset distance must be non-zero and at most 1e6 mm".into()));
+    }
+    let (r, h) = run("offset", b, None, |s| s.offset_solid(distance, round))?;
+    let h = h.map(|mut h| {
+        for f in &mut h.faces {
+            if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { operand: 0, .. })) {
+                f.change = Change::Modified;
+            }
+        }
+        h
+    });
+    Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
 /// [`crate::draft`] through SMLib: the faces under the points `at` (flat, parallel to `pull`)
 /// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
 /// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).

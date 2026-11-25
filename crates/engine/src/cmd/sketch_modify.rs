@@ -205,6 +205,9 @@ fn curve_arg(sk: &Sketch, p: &Value, cmd: &str) -> Result<usize> {
 
 fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+    if sk.is_control_polygon_segment(c) {
+        return Err(bad(cmd, "control polygon sides cannot be trimmed, split, or extended"));
+    }
     if sk.curves.get(c).is_some_and(|curve| curve.spline_handle_of.is_some()) {
         return Err(bad(cmd, "spline tangent construction lines cannot be trimmed, split, or extended"));
     }
@@ -358,6 +361,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<us
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         pieces.push(sk.curves.len() - 1);
         Ok(())
@@ -1326,7 +1330,7 @@ fn line_end(sk: &Sketch, ci: usize, toward: Vec2) -> Result<Option<LineEnd>> {
 
     // A neighbour running on the same way as the extension has it nowhere to go.
     for (oi, c) in sk.curves.iter().enumerate() {
-        if oi == ci || c.spline_handle_of.is_some() || !uses(c, end) {
+        if oi == ci || c.spline_guide_owner().is_some() || !uses(c, end) {
             continue;
         }
         // Arcs do not block a line: the line runs past the point they share.
@@ -1353,7 +1357,7 @@ fn line_aim(sk: &Sketch, ci: usize, at: Vec2) -> Result<Option<LineAim>> {
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, other) in sk.curves.iter().enumerate() {
-        if oi == ci || other.spline_handle_of.is_some() {
+        if oi == ci || other.spline_guide_owner().is_some() {
             continue;
         }
         let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
@@ -1487,7 +1491,7 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci || curve.spline_handle_of.is_some() {
+        if oi == ci || curve.spline_guide_owner().is_some() {
             continue;
         }
         // A circle passes over arcs lying on it, so no intersection reports them: an arc on the
@@ -1597,7 +1601,7 @@ fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
     sk.curves
         .iter()
         .enumerate()
-        .filter(|(i, c)| *i != ci && c.spline_handle_of.is_none())
+        .filter(|(i, c)| *i != ci && c.spline_guide_owner().is_none())
         .find_map(|(_, c)| {
             let (a, b) = c.kind.ends()?;
             [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
@@ -1744,7 +1748,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
     let end = aim.end;
     let (q, cutter, stop) = (aim.hit, aim.cutter, aim.stop);
-    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && c.spline_handle_of.is_none() && uses(c, end)).collect();
+    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && c.spline_guide_owner().is_none() && uses(c, end)).collect();
 
     // The end joined to other geometry stays where it is: add a line from it.
     if !neighbors.is_empty() {
@@ -2878,9 +2882,12 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
             return round_corner(sk, p, r, cmd)?.ok_or(e);
         }
     };
+    if [la, lb].into_iter().any(|line| sk.is_control_polygon_segment(line)) {
+        return Err(bad(cmd, "control polygon sides cannot be filleted"));
+    }
     // A spline's tangent handle is a construction line from a fit point, never a side. Where one
     // ends at the corner, the spline has handles (#9178).
-    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.clone())) {
+    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.as_deref())) {
         return Err(bad(cmd, format!("`{spline}` has tangent handles: reset them first (sketch.spline.reset_handles)")));
     }
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -4468,7 +4475,7 @@ fn copy_through(
         sk.curves
             .iter()
             .enumerate()
-            .filter_map(|(index, curve)| curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)),
+            .filter_map(|(index, curve)| curve.spline_guide_owner().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)),
     );
     let mut seen = std::collections::BTreeSet::new();
     sources.retain(|source| seen.insert(*source));
@@ -4490,7 +4497,7 @@ fn copy_through(
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
         let mut kind = cu.kind.clone();
         kind.map_points(&m);
-        let helper_line = cu.spline_handle_of.is_some();
+        let helper_line = cu.spline_guide_owner().is_some();
         let (kind, prefix) = match cu.kind {
             CurveKind::Ellipse { r, .. } => {
                 if let CurveKind::Ellipse { r: slot, .. } = &mut kind {
@@ -4522,13 +4529,16 @@ fn copy_through(
             centerline: false,
             fixed: false,
             infinite,
-            spline_handle_of: cu.spline_handle_of.clone(),
+            spline_handle_of: cu.spline_handle_of,
+            spline_control_polygon_of: cu.spline_control_polygon_of,
         };
         curve_map.insert(cu.id, clone.id.clone());
         clones.push(clone);
     }
     for clone in &mut clones {
-        clone.spline_handle_of = clone.spline_handle_of.as_ref().and_then(|parent| curve_map.get(parent).cloned());
+        for owner in [&mut clone.spline_handle_of, &mut clone.spline_control_polygon_of] {
+            *owner = owner.as_ref().and_then(|parent| curve_map.get(parent).cloned());
+        }
         sk.curves.push(clone.clone());
         made.push(sk.curves.len() - 1);
     }

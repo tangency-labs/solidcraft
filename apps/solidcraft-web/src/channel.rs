@@ -58,4 +58,12 @@ mod tests {
         assert_eq!(name_in("rc", "solidcraft.prefs"), "rc:solidcraft.prefs");
         assert_ne!(name_in("rc", "x"), name_in("edge", "x"));
     }
+
+    #[test]
+    fn recovery_leave_intents_and_reload_identity_are_separate_between_channels() {
+        for key in ["solidcraft.recovery.left.0", "solidcraft.recovery.page"] {
+            assert_ne!(name_in("", key), name_in("rc", key));
+            assert_ne!(name_in("rc", key), name_in("edge", key));
+        }
+    }
 }

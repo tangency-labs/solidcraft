@@ -1,0 +1,110 @@
+{
+  "en": {
+    "ui.design_properties.material": "Material",
+    "ui.design_properties.finish": "Finish",
+    "ui.finish.pick": "Choose",
+    "ui.finish.common.powder_coat_matt": "Powder coat, RAL 9005, matt",
+    "ui.finish.common.powder_coat_gloss": "Powder coat, RAL 9016, gloss",
+    "ui.finish.common.zinc_plate": "Zinc plate, clear",
+    "ui.finish.common.anodized_clear": "Anodized, clear",
+    "ui.finish.common.anodized_black": "Anodized, black",
+    "ui.finish.common.passivated": "Passivated",
+    "ui.finish.common.brushed": "Brushed, #4, grain along length",
+    "ui.finish.common.mill": "Mill finish"
+  },
+  "en-GB": {
+    "ui.finish.common.anodized_clear": "Anodised, clear",
+    "ui.finish.common.anodized_black": "Anodised, black"
+  },
+  "ar": {
+    "ui.design_properties.material": "المادة",
+    "ui.design_properties.finish": "التشطيب",
+    "ui.finish.pick": "اختيار",
+    "ui.finish.common.powder_coat_matt": "طلاء بودرة، RAL 9005، مطفي",
+    "ui.finish.common.powder_coat_gloss": "طلاء بودرة، RAL 9016، لامع",
+    "ui.finish.common.zinc_plate": "طلاء بالزنك، شفاف",
+    "ui.finish.common.anodized_clear": "أنودة، شفاف",
+    "ui.finish.common.anodized_black": "أنودة، أسود",
+    "ui.finish.common.passivated": "تخميل",
+    "ui.finish.common.brushed": "مصقول بالفرشاة رقم 4، اتجاه الحبيبات على الطول",
+    "ui.finish.common.mill": "تشطيب المصنع"
+  },
+  "he": {
+    "ui.design_properties.material": "חומר",
+    "ui.design_properties.finish": "גימור",
+    "ui.finish.pick": "בחירה",
+    "ui.finish.common.powder_coat_matt": "צבע באבקה, RAL 9005, מט",
+    "ui.finish.common.powder_coat_gloss": "צבע באבקה, RAL 9016, מבריק",
+    "ui.finish.common.zinc_plate": "ציפוי אבץ, שקוף",
+    "ui.finish.common.anodized_clear": "אנודייז, שקוף",
+    "ui.finish.common.anodized_black": "אנודייז, שחור",
+    "ui.finish.common.passivated": "פסיבציה",
+    "ui.finish.common.brushed": "מוברש #4, כיוון הסיב לאורך",
+    "ui.finish.common.mill": "גימור מפעלי"
+  },
+  "ja": {
+    "ui.design_properties.material": "材料",
+    "ui.design_properties.finish": "表面仕上げ",
+    "ui.finish.pick": "選択",
+    "ui.finish.common.powder_coat_matt": "粉体塗装、RAL 9005、つや消し",
+    "ui.finish.common.powder_coat_gloss": "粉体塗装、RAL 9016、光沢",
+    "ui.finish.common.zinc_plate": "亜鉛めっき、クリア",
+    "ui.finish.common.anodized_clear": "アルマイト、クリア",
+    "ui.finish.common.anodized_black": "アルマイト、黒",
+    "ui.finish.common.passivated": "不動態化処理",
+    "ui.finish.common.brushed": "ヘアライン（#4）、目の向きは長手方向",
+    "ui.finish.common.mill": "ミルフィニッシュ（圧延のまま）"
+  },
+  "vi": {
+    "ui.design_properties.material": "Vật liệu",
+    "ui.design_properties.finish": "Hoàn thiện bề mặt",
+    "ui.finish.pick": "Chọn",
+    "ui.finish.common.powder_coat_matt": "Sơn tĩnh điện, RAL 9005, mờ",
+    "ui.finish.common.powder_coat_gloss": "Sơn tĩnh điện, RAL 9016, bóng",
+    "ui.finish.common.zinc_plate": "Mạ kẽm, trong",
+    "ui.finish.common.anodized_clear": "Anode hóa, trong",
+    "ui.finish.common.anodized_black": "Anode hóa, đen",
+    "ui.finish.common.passivated": "Thụ động hóa",
+    "ui.finish.common.brushed": "Chải xước #4, hướng vân dọc theo chiều dài",
+    "ui.finish.common.mill": "Bề mặt nguyên bản (mill finish)"
+  },
+  "zh": {
+    "ui.design_properties.material": "材质",
+    "ui.design_properties.finish": "表面处理",
+    "ui.finish.pick": "选择",
+    "ui.finish.common.powder_coat_matt": "粉末喷涂，RAL 9005，哑光",
+    "ui.finish.common.powder_coat_gloss": "粉末喷涂，RAL 9016，亮光",
+    "ui.finish.common.zinc_plate": "镀锌，透明",
+    "ui.finish.common.anodized_clear": "阳极氧化，透明",
+    "ui.finish.common.anodized_black": "阳极氧化，黑色",
+    "ui.finish.common.passivated": "钝化",
+    "ui.finish.common.brushed": "拉丝 #4，纹理沿长度方向",
+    "ui.finish.common.mill": "轧制原色（未处理）"
+  },
+  "de": {
+    "ui.design_properties.material": "Material",
+    "ui.design_properties.finish": "Oberfläche",
+    "ui.finish.pick": "Auswahl",
+    "ui.finish.common.powder_coat_matt": "Pulverbeschichtet, RAL 9005, matt",
+    "ui.finish.common.powder_coat_gloss": "Pulverbeschichtet, RAL 9016, glänzend",
+    "ui.finish.common.zinc_plate": "Verzinkt, transparent",
+    "ui.finish.common.anodized_clear": "Eloxiert, farblos",
+    "ui.finish.common.anodized_black": "Eloxiert, schwarz",
+    "ui.finish.common.passivated": "Passiviert",
+    "ui.finish.common.brushed": "Gebürstet, #4, Schliffrichtung längs",
+    "ui.finish.common.mill": "Walzblank"
+  },
+  "ko": {
+    "ui.design_properties.material": "재질",
+    "ui.design_properties.finish": "표면 처리",
+    "ui.finish.pick": "선택",
+    "ui.finish.common.powder_coat_matt": "분체 도장, RAL 9005, 무광",
+    "ui.finish.common.powder_coat_gloss": "분체 도장, RAL 9016, 유광",
+    "ui.finish.common.zinc_plate": "아연 도금, 투명",
+    "ui.finish.common.anodized_clear": "아노다이징, 투명",
+    "ui.finish.common.anodized_black": "아노다이징, 검정",
+    "ui.finish.common.passivated": "부동태화",
+    "ui.finish.common.brushed": "헤어라인 #4, 결 방향은 길이 방향",
+    "ui.finish.common.mill": "밀 피니시(압연 상태)"
+  }
+}

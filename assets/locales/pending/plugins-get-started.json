@@ -38,5 +38,10 @@
     "prefs.plugins_get_started": "Cài đặt gói plugin .zip để thêm công cụ. Xem lại quyền truy cập trước khi chấp thuận cài đặt.",
     "prefs.plugins_guide": "Đọc hướng dẫn plugin",
     "prefs.plugins_advanced_limits": "Hiện giới hạn nhiên liệu và bộ nhớ nâng cao"
+  },
+  "fr": {
+    "prefs.plugins_get_started": "Installez un paquet de plugiciel .zip pour ajouter des outils. Examinez ses autorisations avant d’approuver l’installation.",
+    "prefs.plugins_guide": "Lire le guide des plugiciels",
+    "prefs.plugins_advanced_limits": "Afficher les limites avancées de carburant et de mémoire"
   }
 }

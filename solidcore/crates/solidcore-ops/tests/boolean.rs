@@ -239,7 +239,8 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
                     );
                 }
             }
-            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f).unwrap()
+            let Some(bx) =
+                solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
             else {
                 continue;
             };
@@ -863,46 +864,55 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
 /// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
 /// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
-/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
-/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
-/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
-/// the kernel's call). Any further poll would be work done after the cancel.
+/// check, `whole`; a token cancelled from a quarter of them then stops the check of the same
+/// cut moved up by 1 there. It returns `Cancelled`, and the token is polled exactly once after
+/// the poll that cancelled it: by the session as the call returns, asking whether it was
+/// cancelled (`run_with`, after the kernel's call). Any further poll would be work done after
+/// the cancel. (The second check is of the moved cut, not of the same one: a check skips the
+/// geometric tests of neighbourhoods an earlier check on the kernel found clean,
+/// `solidcore::geom::check_memo`, so the same cut checked again polls far fewer times. The
+/// moved cut has no neighbourhood in common with it, so its check is as whole as the first.)
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    let corners = [
-        [19.0, 0.0, 12.0],
-        [32.0, 0.0, 12.0],
-        [32.0, 0.0, 25.0],
-        [19.0, 0.0, 25.0],
-    ];
-    let square: Vec<Curve> = (0..4)
-        .map(|i| Curve::Line {
-            start: corners[i],
-            end: corners[(i + 1) % 4],
-        })
-        .collect();
-    let coil = screw_sweep(
-        &square,
-        [0.0; 3],
-        [0.0, 0.0, 1.0],
-        15.24,
-        20.0,
-        None,
-        15.24e-4,
-    )
-    .unwrap();
-    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
-    let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
+    // (the cut, moved up by `dz`)
+    let cut_at = |dz: f64| {
+        let corners = [
+            [19.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 25.0 + dz],
+            [19.0, 0.0, 25.0 + dz],
+        ];
+        let square: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        let coil = screw_sweep(
+            &square,
+            [0.0, 0.0, dz],
+            [0.0, 0.0, 1.0],
+            15.24,
+            20.0,
+            None,
+            15.24e-4,
+        )
+        .unwrap();
+        let stock = solidcore_ops::make_cylinder([0.0, 0.0, dz], 20.0, 304.5).unwrap();
+        boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let cut = cut_at(0.0);
     let probe = CancelToken::after_polls(u64::MAX);
     within(&probe, || cut.check(CheckLevel::All)).unwrap();
     let whole = probe.polls().unwrap();
     let n = whole / 4;
     // cancelled well inside the check, not at its last poll
     assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let moved = cut_at(1.0);
     let token = CancelToken::after_polls(n);
-    let r = within(&token, || cut.check(CheckLevel::All));
+    let r = within(&token, || moved.check(CheckLevel::All));
     eprintln!(
         "the check polls {whole} times; cancelled at {n}, polled {:?}",
         token.polls()

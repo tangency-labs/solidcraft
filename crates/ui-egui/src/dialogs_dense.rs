@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -597,6 +598,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             wall_side,
             wall2,
         } => {
+            // The feature's name (#18668): what it is called, or will be. Blank is the default name.
+            let mut name = d.extra.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+            let before = name.clone();
+            form_row(ui, "Name", |ui| {
+                enter |= ui_kit::text_field(ui, &mut name, "").0;
+            });
+            if name != before {
+                d.extra.insert("name".into(), json!(name));
+            }
             form_row(ui, "Direction", |ui| {
                 // One Side, Two Sides, Symmetric (a flip is a negative distance).
                 let order = [0usize, TWO_SIDES, 2];
@@ -1179,6 +1189,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_FACES) {
                 inp.multi = true;
             }
+            // The whole surface body cuts with more surface bodies, picked several at once (#13303).
+            let bodies = face_tool && *sheet == 2;
+            set_object_accepting(&mut d.inputs, &mut d.active, SPLIT_TOOL_BODIES, BODIES, bodies);
+            if let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == SPLIT_TOOL_BODIES) {
+                inp.multi = true;
+            }
         }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
@@ -1422,12 +1438,31 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             crate::op_auto::op_row(ui, "pr_op", operation);
         }
-        Kind::Combine { operation, keep_tools } => {
+        Kind::Combine { operation, keep_tools, offset, round_edges, picked_faces, radius } => {
             form_row(ui, "Operation", |ui| {
                 let mut op = operation.saturating_sub(1);
                 combo(ui, "cb_op", &OP_LABELS[1..], &mut op);
                 *operation = op + 1;
             });
+            // A cut's clearance: the tools grow by the offset before they cut (#3774).
+            if *operation == 2 {
+                enter |= expr_row(ui, "ui.combine_offset", offset);
+                let mut which = usize::from(*picked_faces);
+                choice_row(
+                    ui,
+                    "ui.combine_offset_which",
+                    "cb_offset_which",
+                    &mut which,
+                    &["ui.combine_offset_all_faces", "ui.combine_offset_picked_faces"],
+                );
+                *picked_faces = which == 1;
+                ui_kit::checkbox_grid(ui, &mut [("ui.combine_offset_round_edges", round_edges)], 1);
+                if *round_edges {
+                    // Empty: the rounds take the offset's size, as the hint says.
+                    enter |= hint_row_positive(ui, "ui.combine_offset_radius", radius, tr("ui.combine_offset_radius_hint"));
+                }
+            }
+            crate::dialogs::set_combine_offset_faces(&mut d.inputs, &mut d.active, *operation == 2 && *picked_faces);
             ui_kit::section(ui, "combine_options", "Options", true, |ui| {
                 let mut new_component = d.extra.get("new_component").and_then(Value::as_bool).unwrap_or(false);
                 let before = new_component;
@@ -1451,6 +1486,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
@@ -1475,6 +1511,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         _ => {}
     }
+    // A Cut with bodies in several components lists the ones it may cut (#20647).
+    crate::cut_bodies::rows(app, d, ui);
     enter
 }
 
