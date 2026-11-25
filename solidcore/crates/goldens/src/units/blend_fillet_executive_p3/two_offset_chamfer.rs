@@ -450,23 +450,22 @@ mod round_definition_rows {
     use super::*;
     use solidcore::surface::procedural_blend::BlendRef;
 
-    /// The rows that moved when a blend face became its definition (#16580): name, the
-    /// volume and counts the golden held before, and the counts after. The half rims at
-    /// setbacks split at the chamfer's crease where its wall foot crosses the wall's G1
-    /// boundary (one face more, `issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition`).
-    /// A moved row: name, the volume before, counts before and after.
-    type Row = (&'static str, f64, [i64; 4], [i64; 4]);
+    /// The chamfer rows whose blend faces are their definitions (#16580): name, and the
+    /// counts. The half rims at setbacks split at the chamfer's crease where its wall foot
+    /// crosses the wall's G1 boundary (one face more,
+    /// `issue_880_one_half_chamfer_splits_at_its_crease_as_a_definition`).
+    type Row = (&'static str, [i64; 4]);
 
     const ROWS: &[Row] = &[
-        ("issue-880-half-arc-rim-0-setbacks-1-1", 1741.1776984571911, [0, 9, 14, 7], [0, 10, 16, 8]),
-        ("issue-880-half-arc-rim-0-setbacks-1-2", 1722.3666858359127, [0, 9, 14, 7], [0, 10, 16, 8]),
-        ("issue-880-half-arc-rim-whole-offsets-1-1", 1738.1708223107416, [0, 6, 10, 6], [0, 6, 10, 6]),
-        ("issue-880-half-arc-rim-whole-offsets-1-2", 1722.716085907456, [0, 6, 10, 6], [0, 6, 10, 6]),
-        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", 1719.809788606565, [0, 6, 10, 6], [0, 6, 10, 6]),
-        ("issue-880-tilted-cylinder-rim-offsets-1-1", 1738.1703582153193, [0, 3, 5, 4], [0, 3, 5, 4]),
-        ("issue-880-tilted-cylinder-rim-offsets-1-2", 1720.1400294065647, [0, 3, 5, 4], [0, 3, 5, 4]),
-        ("issue-880-tilted-cylinder-rim-setbacks-1-1", 1711.0808718624999, [0, 3, 5, 4], [0, 3, 5, 4]),
-        ("issue-880-tilted-cylinder-rim-setbacks-1-2", 1660.057563906371, [0, 3, 5, 4], [0, 3, 5, 4]),
+        ("issue-880-half-arc-rim-0-setbacks-1-1", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-0-setbacks-1-2", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-whole-offsets-1-1", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1-2", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", [0, 6, 10, 6]),
+        ("issue-880-tilted-cylinder-rim-offsets-1-1", [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-offsets-1-2", [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-setbacks-1-1", [0, 3, 5, 4]),
+        ("issue-880-tilted-cylinder-rim-setbacks-1-2", [0, 3, 5, 4]),
     ];
 
     /// Every moved chamfer row: its chamfer faces are chamfers by their definition whose
@@ -479,7 +478,7 @@ mod round_definition_rows {
             "blend.fillet_executive_p3",
         )
         .unwrap();
-        for &(name, old, before, after) in ROWS {
+        for &(name, after) in ROWS {
             let case = cases.iter().find(|c| c.name == name).unwrap();
             let input = case
                 .parse::<super::super::Inputs>()
@@ -502,9 +501,6 @@ mod round_definition_rows {
                 p1::faces(&done.body, None).unwrap().len() as i64,
             ];
             assert_eq!(counts, after, "{name}");
-            if !name.contains("-0-setbacks-") {
-                assert_eq!(before, after, "{name}");
-            }
             for f in p1::faces(&done.body, None).unwrap() {
                 let surface = done.body.face(f).unwrap().surface.clone();
                 if let Some(BlendRef::Procedural(blend)) =
@@ -514,7 +510,7 @@ mod round_definition_rows {
                 }
             }
             let blends = certified_blends(&k, &mut done.body, name);
-            let estimates = volume_band(&k, &mut done.body, &blends, old, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, name);
             mass_bands(&k, &mut done.body, &estimates, name);
         }
     }

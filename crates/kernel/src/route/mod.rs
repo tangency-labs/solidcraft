@@ -1,5 +1,5 @@
 //! The router: which kernel runs each operation (`docs/design/kernel-layer.md`), one module per
-//! family of the interface ([`modelling`]).
+//! family of the interface ([`modelling`], [`cell_grid`], [`exchange`]).
 //!
 //! These are the application's entry points for the operations of the kernel interface
 //! ([`OpKind`]). Each asks [`which`] kernel runs it and calls that kernel's adapter. Which kernels
@@ -8,13 +8,19 @@
 
 use solidcraft_kernel_api::OpKind;
 
+mod cell_grid;
+mod exchange;
 mod modelling;
 
+pub use cell_grid::*;
+pub use exchange::*;
 pub use modelling::*;
 
 /// A kernel compiled into this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Which {
+    /// solidcore, through its adapter (`crate::backend::Solidcore`): the kernel SolidCraft
+    /// maintains, and the default.
     Solidcore,
 }
 
