@@ -6452,12 +6452,50 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
         sc.trans_tri(w(b), [0.0; 3], col);
         sc.trans_tri(w(c), [0.0; 3], col);
     }
-    for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
-        for part in crate::sketch_display::boundary_parts(lp, &plane, &proj, app.viewport.pixels_per_point()) {
+    profile_outline(sc, app, &p.region, &plane, lift, edge, false);
+}
+
+/// A profile's outline: its outer loop and its holes, `on_top` of everything else or not.
+fn profile_outline(
+    sc: &mut GpuScene,
+    app: &SolveApp,
+    region: &solidcore_record::Region2,
+    plane: &Plane,
+    lift: Vec3,
+    col: crate::gpu::PaletteIndex,
+    on_top: bool,
+) {
+    let proj = display_proj(app);
+    for lp in std::iter::once(&region.outer).chain(&region.holes) {
+        for part in crate::sketch_display::boundary_parts(lp, plane, &proj, app.viewport.pixels_per_point()) {
             for pair in part.windows(2) {
-                sc.line((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32(), edge, 2.0, false);
+                sc.line((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32(), col, 2.0, on_top);
             }
         }
+    }
+}
+
+/// The outlines of the profiles picked with others of their sketch, over the fills. Neighbours
+/// picked together are filled on both sides of the line that parts them, in the colour of that
+/// line; drawn in the sketch's own line colour, it stays visible to pick one out again (#21638).
+pub(crate) fn picked_profile_partings(sc: &mut GpuScene, app: &SolveApp, picked: &[(u64, usize)], col: Color32) {
+    let st = crate::open_meshing::shown_world(app);
+    let col = sc.color(c4(col));
+    for (sketch, index) in picked {
+        if picked.iter().filter(|(other, _)| other == sketch).count() < 2 {
+            continue;
+        }
+        let Some(p) = st.sketch(*sketch).and_then(|ss| ss.profiles.get(*index)) else { continue };
+        let plane = match crate::dialogs::emboss_profile_plane(app, *sketch) {
+            Ok(Some(plane)) => plane,
+            Ok(None) => match st.sketch(*sketch) {
+                Some(ss) => ss.plane,
+                None => continue,
+            },
+            Err(_) => continue,
+        };
+        let lift = if lies_on_section(app, plane.origin, plane.normal()) { Vec3::ZERO } else { app.cam.back() * (app.cam.half_height() * 0.002) };
+        profile_outline(sc, app, &p.region, &plane, lift, col, true);
     }
 }
 
@@ -7467,6 +7505,18 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             _ => {}
         }
     }
+    let picked: Vec<(u64, usize)> = sel
+        .iter()
+        .filter_map(|x| match x {
+            Sel::Profile { sketch, index }
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch) && solidcraft_engine::view::sketch_shown(&app.session, *sketch) =>
+            {
+                Some((*sketch, *index))
+            }
+            _ => None,
+        })
+        .collect();
+    picked_profile_partings(&mut feedback, app, &picked, t.sketch_fixed);
     // A sketch picked in the Browser or the timeline: all its curves in their line types, over
     // the model, also while the sketch is hidden or inside a body, so it is easy to find.
     let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
@@ -10919,7 +10969,7 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 fn loose_end_markers(
     sk: &solidcraft_engine::sketch::Sketch,
     ends: &solidcraft_engine::sketch::EndReport,
-    plane: &solidcore_record::Plane,
+    plane: &Plane,
     painter: &egui::Painter,
     proj: &Proj,
     t: &Tokens,
@@ -16557,6 +16607,41 @@ mod tests {
         crate::browser::set_sketch_visible(&mut app, sketch, false);
         assert!(!solidcraft_engine::view::sketch_shown(&app.session, sketch));
         assert!(build_highlight(&app).merged().trans.is_empty(), "a hidden sketch leaves no filled profile behind");
+    }
+
+    /// A square inside a circle, both regions picked: the square is filled and the ring around it
+    /// too, so the line between them would be the selection colour on the selection colour. It is
+    /// drawn over the fills in the sketch's own line colour; one region picked alone keeps its
+    /// outline as before (#21638).
+    #[test]
+    fn neighbouring_picked_profiles_keep_the_line_between_them_visible() {
+        let mut app = hover_app(true);
+        let sketch = app.session.active_sketch.unwrap();
+        app.run("sketch.circle.center", json!({"center":[0,0],"radius":40})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0":[-15,-15],"p1":[15,15]})).unwrap();
+        app.finish_sketch();
+        crate::browser::set_sketch_visible(&mut app, sketch, true);
+        let profiles = crate::open_meshing::shown_world(&app).sketch(sketch).map_or(0, |ss| ss.profiles.len());
+        assert_eq!(profiles, 2, "the square and the ring around it");
+        let parting = c4(Tokens::get().sketch_fixed);
+        let on_top_in = |scene: &GpuScene, rgba: [u8; 4]| {
+            scene
+                .overlay
+                .as_chunks::<{ crate::gpu::LINE_SIZE }>()
+                .0
+                .iter()
+                .filter(|line| {
+                    let index = line.get(24..28).and_then(|w| w.try_into().ok()).map_or(u32::MAX, u32::from_le_bytes);
+                    scene.palette.get(crate::gpu::PaletteIndex(index)) == Some(rgba)
+                })
+                .count()
+        };
+        app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+        assert_eq!(on_top_in(&build_highlight(&app).merged(), parting), 0, "one picked region: its outline as before");
+        app.session.selection = vec![Sel::Profile { sketch, index: 0 }, Sel::Profile { sketch, index: 1 }];
+        let both = build_highlight(&app).merged();
+        assert!(on_top_in(&both, parting) > 0, "the line between two picked regions is drawn over their fills");
+        assert!(!both.trans.is_empty(), "both regions are still filled");
     }
 
     #[test]
