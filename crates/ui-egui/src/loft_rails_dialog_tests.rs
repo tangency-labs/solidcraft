@@ -387,3 +387,120 @@ fn a_loft_to_a_point_keeps_the_point_section_when_reopened_for_editing() {
     ok(&mut h);
     assert_eq!(sections(&h), stored);
 }
+
+/// The rail rows of a Loft or Surface Loft dialog, by label, in order.
+fn rail_labels(h: &Harness) -> Vec<&'static str> {
+    h.app.dialog.as_ref().unwrap().inputs.iter().skip(1).map(|i| i.label).collect()
+}
+
+/// Picks the curve `out` into rail row `i` of the open dialog.
+fn pick_rail(h: &mut Harness, i: usize) {
+    h.app.dialog.as_mut().unwrap().inputs[i].items = vec![Sel::SketchCurve { id: "out".into(), sketch: None }];
+    h.frames(3);
+}
+
+#[test]
+fn a_new_loft_dialog_shows_two_rail_rows() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail"]);
+}
+
+#[test]
+fn picking_the_last_rail_row_adds_the_next_and_the_list_stops_at_sixteen() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    for n in 0..14 {
+        let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;
+        pick_rail(&mut h, last);
+        assert_eq!(rail_labels(&h).len(), (n + 3).min(16), "after pick {n}: {:?}", rail_labels(&h));
+    }
+    assert_eq!(rail_labels(&h).len(), 16, "sixteen rail rows is the most");
+    assert_eq!(rail_labels(&h).last().copied(), Some("Rail 16"));
+}
+
+#[test]
+fn clearing_the_last_picked_rail_leaves_one_empty_row_at_the_end() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.loft"}})).unwrap();
+    h.frames(3);
+    pick_rail(&mut h, 1);
+    pick_rail(&mut h, 2);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"]);
+    pick_rail(&mut h, 3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3", "Rail 4"]);
+    // Clear Rail 3, the last picked row: the empty Rail 4 goes, and Rail 3 stays as the one empty row.
+    h.app.dialog.as_mut().unwrap().inputs[3].items.clear();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"], "one empty row at the end, not two");
+    assert!(h.app.dialog.as_ref().unwrap().inputs.last().unwrap().items.is_empty());
+}
+
+#[test]
+fn the_surface_loft_grows_its_rail_rows_the_same_way() {
+    let mut h = Harness::new();
+    setup(&mut h);
+    h.step(&json!({"call":"ui.start","params":{"command":"surface.loft"}})).unwrap();
+    h.frames(3);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail"]);
+    pick_rail(&mut h, 2);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3"]);
+}
+
+/// A loft of five rails (the fifth on a plane turned 45 degrees about Z, so it meets the circles
+/// at their diagonal) edits with five filled rail rows and one empty row, and OK keeps all five.
+/// Only the solid loft: the kernel refuses a sheet loft of closed sections along three or more rails.
+#[test]
+fn a_loft_of_five_rails_edits_with_five_filled_rows_and_one_empty() {
+    let mut h = Harness::new();
+    for (name, z) in [("Base", 0), ("Top", 40)] {
+        let plane = json!({"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+        h.app.run("sketch.create", json!({"name": name, "plane": plane})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10, "id": "c"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    // Each rail's sketch has its y running down world Z.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    for (name, x_dir) in [("RX", [1.0, 0.0, 0.0]), ("RY", [0.0, 1.0, 0.0]), ("RD", [s, s, 0.0])] {
+        h.app.run("sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, -1]}})).unwrap();
+        h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [10, -40], "through": [13, -20], "id": "plus"})).unwrap();
+        h.app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [-10, -40], "through": [-13, -20], "id": "minus"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+    let (rx, ry, rd) = (id(&h, "RX"), id(&h, "RY"), id(&h, "RD"));
+    let rails: Vec<SweepRail> = [(rx, "plus"), (ry, "plus"), (rx, "minus"), (ry, "minus"), (rd, "plus")]
+        .iter()
+        .map(|(sketch, c)| SweepRail { sketch: SketchId(*sketch), curves: vec![(*c).into()] })
+        .collect();
+    let given: Vec<_> = rails.iter().map(|r| json!({"sketch": r.sketch.0, "curves": r.curves})).collect();
+    let sections = json!([{"sketch": id(&h, "Base")}, {"sketch": id(&h, "Top")}]);
+    h.app.run("solid.loft", json!({"sections": sections, "rails": given})).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let stored = |h: &Harness| match &h.app.session.doc.find_feature(&name).unwrap().kind {
+        FeatureKind::Loft { rails, .. } => rails.clone(),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(stored(&h), rails);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+    h.frames(8);
+    assert_eq!(rail_labels(&h), vec!["Rail", "Second Rail", "Rail 3", "Rail 4", "Rail 5", "Rail 6"]);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs[5].items.len() == 1 && d.inputs[6].items.is_empty());
+    ok(&mut h);
+    assert_eq!(stored(&h), rails);
+}
+
+/// A rail row's label is looked up by its English text, so a translated locale must show the
+/// translated "Rail 3" (German "Leitkurve 3"), not the English one.
+#[test]
+fn loft_rail_row_labels_are_translated() {
+    crate::i18n::install();
+    let _de = solidcraft_ui_text::scope("de");
+    assert_eq!(solidcraft_ui_text::tr_label("Rail 3"), "Leitkurve 3");
+}
