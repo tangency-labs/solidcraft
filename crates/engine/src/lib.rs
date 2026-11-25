@@ -215,6 +215,12 @@ pub struct FeatureFailure {
     /// The kernel call's stable code.
     pub code: solidcraft_kernel::ErrorCode,
 }
+impl From<serde_json::Error> for EngineError {
+    fn from(e: serde_json::Error) -> Self {
+        EngineError::Other(e.to_string())
+    }
+}
+
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
         EngineError::Other(e.to_string())
@@ -297,7 +303,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,
@@ -313,6 +319,14 @@ pub enum Sel {
     },
     SketchPoint {
         id: String,
+    },
+    /// A point of a component sketch, picked on another copy of its part than the one the sketch
+    /// is edited at: the copy's placement (occurrence ids from the root), as a joint's origin
+    /// takes it.
+    PlacedSketchPoint {
+        sketch: u64,
+        id: String,
+        path: Vec<u64>,
     },
     /// The associative midpoint of a line in the active sketch. Selection alone creates no geometry.
     SketchMidpoint {
@@ -2101,18 +2115,19 @@ impl Session {
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
         let drag = self.drag_moves();
-        let w = if drag.is_empty() {
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &self.pending_moves, &mut reuse)
+        // A drag's frame places its occurrences over any move not captured yet.
+        let dragged;
+        let moves = if drag.is_empty() {
+            &self.pending_moves
         } else {
-            // A drag's frame places its occurrences over any move not captured yet.
-            let mut moves = self.pending_moves.clone();
-            moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &moves, &mut reuse)
+            dragged = self.pending_moves.iter().chain(drag).map(|(o, m)| (*o, *m)).collect();
+            &dragged
         };
+        let w = solidcraft_doc::world_state_moved_reusing(&self.doc, &st, moves, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
-        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(w, moves)).map(Arc::new);
         if let Ok(mut c) = self.world_cache.lock() {
             *c = Some(WorldCache {
                 doc: self.doc.clone(),
@@ -2169,6 +2184,57 @@ impl Session {
             }
         }
         Ok(w)
+    }
+
+    /// `w` with the other placements of each component sketch ([`solidcraft_doc::SketchCopy`]):
+    /// each placement of its component under `moves`, but the one it is drawn at
+    /// ([`Session::feature_path`]), as a move from there.
+    fn sketch_copies(
+        &self,
+        mut w: solidcraft_doc::ModelState,
+        moves: &std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    ) -> solidcraft_doc::ModelState {
+        let mut owners: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for sketch in &w.sketches {
+            if let Some(f) = self.doc.feature(sketch.feature)
+                && f.component != 0
+            {
+                owners.entry(f.component).or_default().push(sketch.feature);
+            }
+        }
+        if owners.is_empty() {
+            return w;
+        }
+        let mut of: std::collections::BTreeMap<u64, Vec<(Vec<u64>, solidcraft_doc::Mat)>> = std::collections::BTreeMap::new();
+        for (component, path, m) in self.doc.placements_moved(moves) {
+            if owners.contains_key(&component) {
+                of.entry(component).or_default().push((path, m));
+            }
+        }
+        for (component, sketches) in owners {
+            let placements = of.remove(&component).unwrap_or_default();
+            if placements.len() < 2 {
+                continue;
+            }
+            // Where the sketch is drawn: the placement being authored, at its frame as
+            // `authored_sketches` put it there, else the first, where the world state placed it.
+            let shown = self.feature_path(component);
+            let drawn = if self.active_occurrence_path.is_some() && self.active_component == component {
+                Some(self.active_component_frame())
+            } else {
+                placements.iter().find(|(path, _)| *path == shown).map(|(_, m)| *m)
+            };
+            let Some(inverse) = drawn.and_then(|m| solidcraft_doc::mat_inverse(&m)) else { continue };
+            let copies: Arc<[solidcraft_doc::SketchCopy]> = placements
+                .into_iter()
+                .filter(|(path, _)| *path != shown)
+                .map(|(path, m)| solidcraft_doc::SketchCopy { path, delta: solidcraft_doc::mat_mul(&m, &inverse) })
+                .collect();
+            for sketch in sketches {
+                w.sketch_copies.insert(sketch, copies.clone());
+            }
+        }
+        w
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
