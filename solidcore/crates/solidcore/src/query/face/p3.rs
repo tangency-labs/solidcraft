@@ -3930,8 +3930,9 @@ mod tests {
 
     /// #21660: the enclosure of the offset cylinder's definition holds the surface over a
     /// cell, and its first partials decide monotony. Over an eighth of the face's trim box in
-    /// u, x (`1.5 cos a`) falls with the angle and z (`v`) rises: both monotone, z bounded by
-    /// the cell's own v to rounding. Over the whole box `(x + y) / sqrt 2` peaks at 45
+    /// u, x (`1.5 cos a`) falls with the angle and z (`v`) rises: both monotone, z bounded
+    /// from its greatest 0.75 by at most the offset's distance 0.5 (the enclosure of the
+    /// normal is not the normal: it is first order in the cell). Over the whole box `(x + y) / sqrt 2` peaks at 45
     /// degrees, inside it: not monotone, and bounded by at least 1.5.
     #[test]
     fn the_offsets_enclosure_bounds_a_cell_and_decides_its_monotony() {
@@ -3960,7 +3961,7 @@ mod tests {
         let x = on(&cell, Vec3::new(1.0, 0.0, 0.0));
         assert!(x.monotone && x.top >= corner.x, "{x:?} {corner:?}");
         let z = on(&cell, Vec3::new(0.0, 0.0, 1.0));
-        assert!(z.monotone && (z.top - 0.75).abs() <= 1e-9, "{z:?}");
+        assert!(z.monotone && z.top >= 0.75 && z.top <= 1.25, "{z:?}");
         let diagonal = on(
             &whole,
             Vec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2,
