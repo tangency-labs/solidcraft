@@ -774,6 +774,33 @@ impl Body {
         body.face_normals_are_parallel(order, face_a, face_b).map_err(|e| KernelError::Failed(e.to_string()))
     }
 
+    /// Whether face `index` is the current output of an `OffsetFace` feature whose recorded
+    /// pick point is `pick_point` and whose offset distance is `distance` (in the same units).
+    /// Verifies that the pick point lies `|distance|` from the face's current plane, projects
+    /// inside the face's 2D bounds (bounding circle from area/centroid), and that the face's
+    /// normal is parallel to itself (an offset moves along the normal, never flips it).
+    /// Returns `Ok(false)` when the face is not planar, not the offset's output, or the body
+    /// has no solidcore-ops representation.
+    pub fn is_offset_face_output(&self, index: usize, pick_point: solidcore_record::Vec3, distance: f64, tolerance: f64) -> Result<bool> {
+        let Some(plane) = self.planar_face(index) else { return Ok(false) };
+        let signed_dist = (pick_point - plane.origin).dot(plane.normal());
+        if (signed_dist.abs() - distance.abs()).abs() > tolerance {
+            return Ok(false);
+        }
+        // Project the pick point onto the face plane and check it lies inside the face's
+        // 2D bounds (bounding circle from area/centroid).
+        let local = pick_point - plane.origin - plane.normal() * signed_dist;
+        let local_2d = (local.dot(plane.x), local.dot(plane.y));
+        let face_infos = self.faces(tolerance)?;
+        let Some(info) = face_infos.iter().find(|f| f.index == index) else { return Ok(false) };
+        let centroid_2d = (info.centroid.dot(plane.x), info.centroid.dot(plane.y));
+        let radius = (info.area / std::f64::consts::PI).sqrt();
+        if ((local_2d.0 - centroid_2d.0).powi(2) + (local_2d.1 - centroid_2d.1).powi(2)).sqrt() > radius + tolerance {
+            return Ok(false);
+        }
+        self.face_normals_are_parallel(index, index)
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {

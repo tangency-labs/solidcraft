@@ -828,7 +828,6 @@ impl Document {
     /// The pick point is NOT moved twice: it is compared directly against the current (already
     /// offset) plane, whose distance from the original pick point is exactly `offset_dist`.
     fn is_current_offset_face(&self, body: &ModelBody, index: usize, _point: solidcore_record::Vec3) -> Option<FaceCertificate> {
-        let plane = body.body.planar_face(index)?;
         let tolerance = (body.body.size() * 1e-3).max(1e-3);
 
         for feature in &self.features {
@@ -846,31 +845,15 @@ impl Document {
                 }
 
                 // The pick point was on the original face; after offsetting by `d`,
-                // the face moves by `d` along its normal, so the pick point is `|d|`
-                // away from the current plane. Verify geometric continuity: this face
-                // is the offset's output only if a recorded pick point lies at that
-                // distance from its plane, AND the projected point falls inside the
-                // face (bounding circle from area/centroid), AND the face's normal is
-                // parallel to itself (the offset moves along the normal, never flips it).
+                // the face moves by `d` along its normal. Verify geometric continuity:
+                // this face is the offset's output only if a recorded pick point lies
+                // at that distance from its plane, projects inside the face's 2D bounds,
+                // and its normal is parallel to itself (an offset never flips the normal).
+                // All geometry is computed in the kernel; the app holds no geometry.
                 for face_pick in faces {
                     let pick_point: solidcore_record::Vec3 = (*face_pick).into();
-                    let signed_dist = (pick_point - plane.origin).dot(plane.normal());
-                    if (signed_dist.abs() - d.abs()).abs() > tolerance {
-                        continue;
-                    }
-                    // Project the pick point onto the face plane and check it lies
-                    // inside the face's 2D bounds (bounding circle from area/centroid).
-                    let local = pick_point - plane.origin - plane.normal() * signed_dist;
-                    let local_2d = solidcore_record::Vec2::new(local.dot(plane.x), local.dot(plane.y));
-                    if let Ok(face_infos) = body.body.faces(tolerance)
-                        && let Some(info) = face_infos.iter().find(|f| f.index == index)
-                    {
-                        let centroid_2d = solidcore_record::Vec2::new(info.centroid.dot(plane.x), info.centroid.dot(plane.y));
-                        let radius = (info.area / std::f64::consts::PI).sqrt();
-                        if (local_2d - centroid_2d).len() <= radius + tolerance && body.body.face_normals_are_parallel(index, index).unwrap_or(false)
-                        {
-                            return Some(FaceCertificate::Lineage);
-                        }
+                    if body.body.is_offset_face_output(index, pick_point, d, tolerance).unwrap_or(false) {
+                        return Some(FaceCertificate::Lineage);
                     }
                 }
             }
