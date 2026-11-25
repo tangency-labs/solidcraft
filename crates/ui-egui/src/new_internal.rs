@@ -88,7 +88,8 @@ pub(crate) fn make(app: &mut SolveApp, kind: &str) -> bool {
             if let Some(component) = reply["component"].as_u64() {
                 app.new_internal.pending.push(Pending { session: app.session.uid, component, assembly });
                 let name = reply["name"].as_str().unwrap_or_default().to_string();
-                app.set_status(solidcraft_ui_text::format("new_internal.made", &[("name", &name), ("design", &design_name(app))]), false);
+                let made = if assembly { "new_internal.made_assembly" } else { "new_internal.made" };
+                app.set_status(solidcraft_ui_text::format(made, &[("name", &name), ("design", &design_name(app))]), false);
             }
         }
         Err(e) => app.set_status(e, true),
@@ -197,7 +198,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
-    let title = solidcraft_ui_text::tr("new_internal.name_title");
+    let assembly =
+        app.new_internal.pending.iter().any(|pending| pending.session == prompt.session && pending.component == prompt.component && pending.assembly);
+    let title = solidcraft_ui_text::tr(if assembly { "new_internal.name_title_assembly" } else { "new_internal.name_title" });
     let detail = solidcraft_ui_text::format("new_internal.name_detail", &[("design", &design_name(app))]);
     let valid = !prompt.name.trim().is_empty();
     let mut entered = false;
