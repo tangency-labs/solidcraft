@@ -4437,8 +4437,8 @@ pub struct DesignLink {
 
 /// The importer a linked source was read with: enough to read the file again, or to say what is
 /// missing when it can't. An importer plugin names its package, so a different or missing one is
-/// told apart. This build reads only records that name a plugin (Insert Design always writes
-/// one); a built-in reader for another format would add its own rule beside `format`.
+/// told apart. A record without a plugin is the built-in KiCad board reader's
+/// ([`LinkImporter::is_kicad`], with the board's options); any other is not read again.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LinkImporter {
     /// What reads the file: an installed importer's id (`plugin.entry`), or a built-in format's.
@@ -4452,6 +4452,17 @@ pub struct LinkImporter {
     /// The options the importer was given, read again with the same ones. Null: none.
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub options: serde_json::Value,
+}
+
+impl LinkImporter {
+    /// The `format` of the built-in KiCad board reader, which has no plugin.
+    pub const KICAD: &'static str = "kicad";
+
+    /// Whether this is the built-in KiCad reader's record: a board SolidCraft reads itself, with
+    /// the options it was opened with.
+    pub fn is_kicad(&self) -> bool {
+        self.plugin.is_none() && self.format == Self::KICAD
+    }
 }
 
 impl DesignLink {

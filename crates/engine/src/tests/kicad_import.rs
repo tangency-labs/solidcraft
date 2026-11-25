@@ -228,3 +228,66 @@ fn a_bad_option_is_refused_before_the_board_is_read() {
     assert!(s.doc.features.is_empty(), "a refused option left a feature behind");
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
+
+fn rewrite_board(path: &std::path::Path, width: f64) {
+    std::fs::write(
+        path,
+        format!(
+            r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 0 0) (end {width} 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1)))"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn an_opened_board_stays_linked_and_update_links_reads_it_again_with_its_options() {
+    let path = board_file("live-link", 2.0);
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "copper": "mesh", "silkscreen": false, "thickness": 1.0}));
+    let component = *s.doc.links.keys().next().expect("the board is linked");
+    let listed = run(&mut s, "component.links", json!({}));
+    let link = &listed["links"][0];
+    assert_eq!(link["component"], json!(component), "{listed}");
+    assert_eq!(link["importer"]["format"], json!("kicad"), "{listed}");
+    assert_eq!(link["changed"], json!(false), "{listed}");
+    let kept = s.doc.links[&component].importer.as_ref().expect("the options are kept").options.clone();
+    assert_eq!(kept["copper"], json!("mesh"), "{kept}");
+    assert_eq!(kept["thickness"], json!(1.0), "{kept}");
+    let unchanged = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(unchanged["unchanged"].as_array().map(Vec::len), Some(1), "{unchanged}");
+
+    // The board file changes: the link says so, and Update Links brings the new board in.
+    rewrite_board(&path, 30.5);
+    let listed = run(&mut s, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], json!(true), "{listed}");
+    let done = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(done["updated"].as_array().map(Vec::len), Some(1), "{done}");
+    // The same options: the overriding 1 mm thickness and the modelled copper, not the file's 2 mm.
+    let got = volume(&mut s);
+    assert!((got - (30.5 * 10.0 * 1.0 + 9.0 * 0.3 * 0.035)).abs() < 1e-3, "{got}");
+    assert_eq!(s.doc.links.keys().copied().collect::<Vec<_>>(), [component], "the component keeps its link");
+    assert_eq!(s.doc.features.iter().filter(|f| f.component == component).count(), 2, "one board feature and its solid, not two of each");
+    let listed = run(&mut s, "component.links", json!({}));
+    assert_eq!(listed["links"][0]["changed"], json!(false), "{listed}");
+    let again = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(again["unchanged"].as_array().map(Vec::len), Some(1), "{again}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_board_that_cannot_be_read_again_keeps_its_bodies() {
+    let path = board_file("live-link-broken", 2.0);
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    let before = volume(&mut s);
+    let features = s.doc.features.len();
+    std::fs::write(&path, "(kicad_pcb (general").unwrap();
+    let error = s.execute("component.update_links", &json!({})).unwrap_err();
+    assert!(format!("{error}").contains("board.kicad_pcb"), "{error}");
+    assert_eq!(s.doc.features.len(), features);
+    assert!((volume(&mut s) - before).abs() < 1e-9);
+    assert_eq!(s.doc.links.len(), 1, "the link stays");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

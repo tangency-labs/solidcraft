@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          files in this design's folder or the linked design's own, and a linked design reaching further is not read) — reads the linked design or STEP files again and replaces \
          their bodies where they changed, and their part properties (part number, revision…) where the design changed them and this \
          design did not, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
-         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed",
+         joints whose faces are gone or that no longer solve); a file an importer plugin read is read again by that plugin when its bytes changed, not when they did not, and not at all, with no plugin run, while it is outside the design's folder and its folder is not allowed (Preferences, General); a plugin that is gone, turned off or not the one named keeps the bodies and is named in failed; a KiCad board opened from a .kicad_pcb is read again by SolidCraft with the options it was opened with, replacing the component's bodies, under the same folder rule",
     ),
     CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
         .icon("update")
@@ -120,7 +120,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LINKS_CONTRACT)
         .output(output_schema_for::<LinksResult>)
         .params(
-        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step` or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
+        "→ linked components: component, name, path, importer? ({format, plugin?, version?}: `step`, `kicad` (a board SolidCraft read, with no plugin) or the importer plugin that read the file; for a plugin also available (it is installed and on), installed_version (when it differs or it can't be used) and needs (which plugin and version the link needs and why it can't be used)), configuration (selected row id, omitted when following the saved source state), file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
          reads it again; null when not found or the link is older than this record), then host (the network location); state (missing, \
          unreadable, not_allowed: a network location not allowed or outside the folders this agent may use) and reason when the file \
@@ -867,6 +867,32 @@ fn linked_importer(s: &Session, importer: &solidcraft_doc::LinkImporter) -> Resu
         let what = needs.unwrap_or_else(|| format!("the importer `{}` is not offered by plugin `{plugin}`", importer.format));
         EngineError::Other(format!("{what}; the component keeps its last bodies"))
     })
+}
+
+/// The caller named `file` for a link: Update Links may read it again in this session, wherever it is.
+pub(super) fn allow_linked_file(s: &mut Session, file: &Path) {
+    s.plugin_state.linked_files.insert(link_target(&absolute(file)));
+}
+
+/// Read the KiCad board a link names again, when its file changed. Whether the component's
+/// bodies were replaced (`true`) or the board is the one the link read (`false`). Nothing
+/// changes when the board can't be read.
+fn update_kicad_link(s: &mut Session, comp: u64, link: &DesignLink, importer: &solidcraft_doc::LinkImporter) -> std::result::Result<(bool, Vec<String>), String> {
+    link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
+    let file = resolve(s.path.as_deref(), &link.path);
+    if let Some(why) = importer_file_refusal(s, &file) {
+        return Err(why);
+    }
+    let bytes = read_link(&file, s.path.as_deref(), true).map_err(|e| e.to_string())?;
+    let read = DesignLink::file_digest(&bytes);
+    if link.file_sha256.as_deref() == Some(read.as_str()) {
+        return Ok((false, Vec::new()));
+    }
+    let done = super::file::replace_kicad(s, comp, &file.to_string_lossy(), &importer.options).map_err(|e| e.to_string())?;
+    if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
+        kept.file_sha256 = Some(done.digest);
+    }
+    Ok((true, done.warnings))
 }
 
 /// Why an importer plugin may not read `file` for a link now, judged from its place alone: it is
@@ -1959,6 +1985,26 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             warnings.push(format!("{cname} keeps its bodies: its design came from this session and has no file yet"));
             continue;
         }
+        // A KiCad board is read by SolidCraft itself, with the options it was opened with.
+        if let Some(importer) = link.importer.as_ref().filter(|i| i.is_kicad()) {
+            match update_kicad_link(s, comp, &link, importer) {
+                Ok((true, notes)) => {
+                    warnings.extend(notes);
+                    updated.push(cname);
+                    read_components.push(comp);
+                }
+                Ok((false, _)) => {
+                    unchanged.push(cname);
+                    read_components.push(comp);
+                }
+                Err(e) if go_on => {
+                    failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
+                    warnings.push(format!("{cname} keeps its bodies: {e}"));
+                }
+                Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
+            }
+            continue;
+        }
         let (old, file, bytes) = match read_linked(s, comp, &link) {
             Ok(read) => read,
             Err(e) if go_on => {
@@ -2653,6 +2699,7 @@ fn link_source(s: &Session, link: &DesignLink) -> Option<LinkSource> {
     let plain =
         |format: &str| LinkSource { format: format.into(), plugin: None, version: None, available: None, installed_version: None, needs: None };
     match (&link.importer, &link.step_names) {
+        (Some(i), _) if i.is_kicad() => Some(plain(&i.format)),
         (Some(i), _) => {
             let Some(plugin) = &i.plugin else {
                 return Some(LinkSource {
