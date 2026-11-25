@@ -805,7 +805,13 @@ pub(super) fn fillet_3d(s: &mut Session, p: &Value, cmd: &str, radius: &str, cor
             );
             arcs.push(made.arc);
             corners.extend(made.corner);
-            moved.extend(made.moved);
+            // A constraint that held two of the corners (the length of the line between them)
+            // is named once.
+            for id in made.moved {
+                if !moved.contains(&id) {
+                    moved.push(id);
+                }
+            }
         }
         Ok((arcs, constraints, param, corners, moved))
     })?;
