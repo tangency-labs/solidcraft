@@ -267,6 +267,12 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_trim
+  inputs:
+    Angle = frame_trim.angle (Angle)
+    Offset = frame_trim.offset (Length)
+    Gap = frame_trim.gap (Length)
+  expressions: frame_trim.angle, frame_trim.offset, frame_trim.gap, 0, 0, 0
 frame_plate
   inputs:
     Angle = plate.angle (Angle)
@@ -355,6 +361,17 @@ sheet_path
     Bend radius = path.radius (Length)
   expressions: path.radius
 sheet_tab
+sheet_bead
+  inputs:
+    Depth = bead.depth (Length)
+    Width = bead.width (Length)
+    Angle = bead.angle (Angle)
+    Crown width = bead.crown (Length)
+    Base radius = bead.rb (Length)
+    Crown radius = bead.rc (Length)
+    End length = bead.end (Length)
+    Margin = bead.margin (Length)
+  expressions: bead.depth, bead.width, bead.angle, bead.crown, bead.rb, bead.rc, bead.end, bead.margin
 sheet_unfold
 sheet_convert
 sheet_surface_convert

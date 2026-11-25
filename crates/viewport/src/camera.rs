@@ -166,6 +166,7 @@ pub struct CameraAnim {
     pub to: Camera,
     pub start: f64,
     pub duration: f64,
+    screen_up_turn: Option<f64>,
 }
 
 impl CameraAnim {
@@ -182,7 +183,25 @@ impl CameraAnim {
             2.0 * from.orientation().dot(to.orientation()).abs().clamp(0.0, 1.0).acos()
         };
         let k = if turn.is_finite() { (turn / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0) } else { 1.0 };
-        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k }
+        CameraAnim { from, to, start: now, duration: CameraAnim::DURATION * k, screen_up_turn: None }
+    }
+    /// Animate a signed turn about screen up, as measured by the caller's kernel service.
+    /// `None` retains ordinary interpolation. A duration multiplier already applied by the
+    /// caller stays; this shared renderer does not select or compute the geometric angle.
+    pub fn around_screen_up(mut self, angle: Option<f64>) -> Self {
+        let Some(angle) = angle.filter(|angle| angle.is_finite()) else {
+            self.screen_up_turn = None;
+            return self;
+        };
+        let duration = |angle: f64| CameraAnim::DURATION * (angle.abs() / std::f64::consts::FRAC_PI_2).clamp(1.0, 2.0);
+        let previous = self.screen_up_turn.map_or_else(|| Self::new(self.from, self.to, self.start).duration, duration);
+        self.duration *= duration(angle) / previous;
+        self.screen_up_turn = Some(angle);
+        self
+    }
+    /// Whether this move keeps the screen's vertical axis fixed.
+    pub fn is_screen_up_turn(&self) -> bool {
+        self.screen_up_turn.is_some()
     }
     /// The camera at time `now`, and whether the move has finished.
     pub fn sample(&self, now: f64) -> (Camera, bool) {
@@ -190,7 +209,19 @@ impl CameraAnim {
         if !(t < 1.0) {
             return (self.to, true);
         }
-        (Camera::interpolate(&self.from, &self.to, ease_in_out(t)), false)
+        let eased = ease_in_out(t);
+        let mut camera = Camera::interpolate(&self.from, &self.to, eased);
+        if let Some(angle) = self.screen_up_turn
+            && eased > 0.0
+            && eased < 1.0
+        {
+            let mut orientation = self.from;
+            orientation.rotate_in_view(Vec3::new(0.0, angle * eased, 0.0));
+            camera.yaw = orientation.yaw;
+            camera.pitch = orientation.pitch;
+            camera.roll = orientation.roll;
+        }
+        (camera, false)
     }
 }
 
@@ -806,6 +837,84 @@ mod tests {
         cam.rotate_in_view(motion);
         cam.rotate_in_view(-motion);
         assert!(cam.basis().0.dist(initial.basis().0) < 1e-12 && cam.back().dist(initial.back()) < 1e-12);
+    }
+
+    #[test]
+    fn screen_up_half_turn_animations_keep_the_axis_at_every_frame() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (pitch, roll) in [(0.6, 0.4), (0.0, 0.0), (FRAC_PI_2, 0.7), (-FRAC_PI_2, -1.2)] {
+                let from = Camera { target: Vec3::new(4.0, 8.0, -3.0), distance: 120.0, yaw: 0.3, pitch, roll, up, ..Default::default() };
+                let mut to = from;
+                to.rotate_in_view(Vec3::new(0.0, PI, 0.0));
+                let anim = CameraAnim::new(from, to, 7.0).around_screen_up(Some(PI));
+                assert!(anim.is_screen_up_turn());
+                assert!((anim.duration - 1.0).abs() < 1e-12, "a half turn takes twice the quarter-turn duration");
+                assert_eq!(anim.sample(6.0), (from, false));
+                assert_eq!(anim.sample(7.0), (from, false));
+                assert_eq!(anim.sample(8.0), (to, true));
+                assert_eq!(anim.sample(9.0), (to, true));
+                assert_eq!(anim.sample(f64::NAN), (to, true));
+                assert_eq!(anim.sample(f64::INFINITY), (to, true));
+                assert_eq!(anim.sample(f64::NEG_INFINITY), (to, false), "retain the ordinary non-finite-time fallback");
+                let (right, screen_up, back) = from.basis();
+                for frame in 1..60 {
+                    let fraction = f64::from(frame) / 60.0;
+                    let (at, done) = anim.sample(7.0 + fraction);
+                    let angle = PI * ease_in_out(fraction);
+                    let (_, at_up, at_back) = at.basis();
+                    assert!(!done && at.is_valid());
+                    assert!(at_up.dist(screen_up) < 1e-9, "{up:?}, pitch {pitch}, roll {roll}, frame {frame}");
+                    assert!((at_back.dot(back) - angle.cos()).abs() < 1e-9);
+                    assert!((at_back.dot(right) - angle.sin()).abs() < 1e-9);
+                    assert_eq!((at.target, at.distance, at.fov, at.up), (from.target, from.distance, from.fov, from.up));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn screen_up_animations_keep_fit_interpolation_and_the_callers_speed() {
+        let from = Camera { roll: 0.9, target: Vec3::new(10.0, 20.0, 30.0), distance: 120.0, ..Default::default() };
+        let mut to = from;
+        to.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        to.target = Vec3::new(20.0, -10.0, 40.0);
+        to.distance = 80.0;
+        to.fov = 0.6;
+        let mut anim = CameraAnim::new(from, to, 3.0);
+        anim.duration /= 2.5;
+        let anim = anim.around_screen_up(Some(std::f64::consts::PI));
+        assert!((anim.duration - 0.4).abs() < 1e-12);
+        assert_eq!(anim.around_screen_up(Some(std::f64::consts::PI)), anim, "applying the policy twice does not change the speed");
+        let (at, done) = anim.sample(3.2);
+        assert!(!done);
+        assert!(at.target.dist(Vec3::new(15.0, 5.0, 35.0)) < 1e-9);
+        assert!((at.distance - 100.0).abs() < 1e-9);
+        assert!((at.fov - 0.3).abs() < 1e-9);
+        assert!(at.back().dist(from.basis().0) < 1e-9, "at halfway, back points along the old screen right");
+        assert!(at.basis().1.dist(from.basis().1) < 1e-9);
+        assert_eq!(anim.sample(3.5), (to, true));
+    }
+
+    #[test]
+    fn a_second_screen_up_turn_can_return_from_the_middle_of_the_first() {
+        let from = Camera { roll: -0.7, up: UpAxis::Y, ..Default::default() };
+        let mut opposite = from;
+        opposite.rotate_in_view(Vec3::new(0.0, std::f64::consts::PI, 0.0));
+        let first = CameraAnim::new(from, opposite, 0.0).around_screen_up(Some(std::f64::consts::PI));
+        let middle = first.sample(0.35).0;
+        let reverse_angle = -std::f64::consts::PI * ease_in_out(0.35 / first.duration);
+        let reverse = CameraAnim::new(middle, from, 0.35).around_screen_up(Some(reverse_angle));
+        assert!(reverse.is_screen_up_turn());
+        let mut previous = middle.back().dist(from.back());
+        for frame in 1..=60 {
+            let (at, _) = reverse.sample(0.35 + reverse.duration * f64::from(frame) / 60.0);
+            assert!(at.basis().1.dist(from.basis().1) < 1e-9);
+            let remaining = at.back().dist(from.back());
+            assert!(remaining <= previous + 1e-9, "the new click returns directly instead of adding another half turn");
+            previous = remaining;
+        }
+        assert_eq!(reverse.sample(0.35 + reverse.duration), (from, true));
     }
 
     #[test]
