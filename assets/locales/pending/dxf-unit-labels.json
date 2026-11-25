@@ -1,0 +1,10 @@
+{
+  "en": { "unit.inch.short": "in", "unit.mm.short": "mm" },
+  "ar": { "unit.inch.short": "بوصة", "unit.mm.short": "مم" },
+  "de": { "unit.inch.short": "Zoll", "unit.mm.short": "mm" },
+  "he": { "unit.inch.short": "אינץ׳", "unit.mm.short": "מ״מ" },
+  "ja": { "unit.inch.short": "インチ", "unit.mm.short": "mm" },
+  "ko": { "unit.inch.short": "인치", "unit.mm.short": "mm" },
+  "vi": { "unit.inch.short": "in", "unit.mm.short": "mm" },
+  "zh": { "unit.inch.short": "英寸", "unit.mm.short": "毫米" }
+}

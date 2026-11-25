@@ -793,7 +793,9 @@ fn export_button(ui: &mut egui::Ui, handle: &str) -> bool {
 }
 
 fn dxf_options_rows(ui: &mut egui::Ui, options: &mut DxfExportOptions) {
-    let response = choice_row(ui, solidcraft_ui_text::tr("ui.units"), "sheet_dxf_units", &mut options.units, &["mm", "in"]);
+    use solidcraft_ui_text::tr;
+    let units = [tr("unit.mm.short"), tr("unit.inch.short")];
+    let response = choice_row(ui, tr("ui.units"), "sheet_dxf_units", &mut options.units, &units);
     crate::scenario::publish_target("dialog:sheet_dxf:units", response.rect);
     for (label, handle, value) in [
         ("sheet.dxf.bend_lines", "dialog:sheet_dxf:bend_lines", &mut options.bend_lines),
