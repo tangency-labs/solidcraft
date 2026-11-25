@@ -47,6 +47,7 @@ pub use solidcore_ops::query;
 pub use solidcore_ops::session;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
+pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`
 /// (`solidcore_ops::flush_contact_points`). `None` where either body's record doesn't convert or

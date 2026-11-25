@@ -8061,6 +8061,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let painter = ui.painter_at(paint);
     solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, paint);
+    // A plugin's background effect (`shaders@0.1`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::plugin_shaders::paint(app, &painter, paint, &t);
 
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");

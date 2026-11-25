@@ -8635,10 +8635,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             {
                 d.extra.insert("corner".into(), json!("g2"));
             }
-            if let FeatureKind::Fillet { turn, .. } = &f.kind
-                && !turn.is_mitre()
-            {
-                d.extra.insert("turn".into(), json!("swept"));
+            // the fillet's own turn, so editing it keeps it: Auto, the dialog's default, is not sent
+            if let FeatureKind::Fillet { turn, .. } = &f.kind {
+                use solidcraft_engine::doc::FilletTurn;
+                match turn {
+                    // Auto is the default, so it is not sent.
+                    FilletTurn::Auto => {
+                        d.extra.remove("turn");
+                    }
+                    FilletTurn::Mitre => {
+                        d.extra.insert("turn".into(), json!("mitre"));
+                    }
+                    FilletTurn::Swept => {
+                        d.extra.insert("turn".into(), json!("swept"));
+                    }
+                }
             }
             // A fillet that reduces or tapers a radius too large for its edges.
             if let FeatureKind::Fillet { fit, .. } = &f.kind {
