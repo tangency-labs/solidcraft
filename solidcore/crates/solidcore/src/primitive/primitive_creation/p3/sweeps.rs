@@ -121,7 +121,7 @@ fn split(a: &impl PrimitiveAccess, b: BrepId, curves: &mut Vec<Option<Curve>>) -
         // result's check (test 14) is cut there exactly, so each edge passes it with the
         // profile's own geometry.
         if spline {
-            let mut cut = Vec::with_capacity(pieces.len());
+            let mut cut = Vec::new();
             for piece in pieces {
                 match piece.split_sharp_ends(k)? {
                     Some(more) => cut.extend(more),
