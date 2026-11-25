@@ -419,8 +419,19 @@ fn write_container(
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
-    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    let mut container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    if let Some(generator) = &doc.container_generator {
+        if !is_generator_metadata(generator) {
+            return Err(invalid("container generator must be a string or object"));
+        }
+        if let Some(fields) = container.as_object_mut() {
+            fields.insert("generator".into(), generator.clone());
+        }
+    }
     let container_bytes = serde_json::to_vec(&container).map_err(invalid)?;
+    if container_bytes.len() > 4096 {
+        return Err(invalid("container metadata too large"));
+    }
     writer.part("container.json", &container_bytes, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
         // A signed save writes the chain the caller carries; older raw records cannot be checked
@@ -1312,11 +1323,19 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
     }
 }
 
-/// A `container.json` that says only a format this build writes or wrote.
+/// An optional, self-declared generator label or record.
+fn is_generator_metadata(value: &Value) -> bool {
+    value.is_string() || value.is_object()
+}
+
+/// A `container.json` whose format and fields this build understands.
 fn is_known_container(container: &Value) -> bool {
-    *container == json!({"format": VERSION})
-        || *container == json!({"format": LEGACY_VERSION})
-        || container.get("content").is_some_and(|c| c == "drawing")
+    container.get("content").is_some_and(|c| c == "drawing")
+        || container.as_object().is_some_and(|fields| {
+            matches!(fields.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION))
+                && fields.keys().all(|key| matches!(key.as_str(), "format" | "generator"))
+                && fields.get("generator").is_none_or(is_generator_metadata)
+        })
 }
 
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
@@ -1342,7 +1361,18 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
     // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     let newer_container = !is_known_container(&container);
-    let newer = newer_container || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
+    // Recognizing generator must not lose extension parts that previously went through
+    // the newer-file preservation path. A generator by itself needs no such path.
+    let unknown_parts = !newer_container
+        && container.get("generator").is_some()
+        && reader.part_names().iter().any(|name| {
+            !matches!(name.as_str(), "document.json" | "container.json" | provenance::ENTRY)
+                && !name.starts_with("blobs/")
+                && !name.starts_with("cache/")
+                && !name.starts_with("drawings/")
+                && plugin_part(name).is_none()
+        });
+    let newer = newer_container || unknown_parts || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
     // container-only blob fields may reach the document deserializer. A newer build's section that
     // doesn't pass stays as it is, which the document reader then leaves out.
@@ -1381,6 +1411,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = solidcraft_doc::render_resources::with_container_parts(parts, || Document::from_json(text))?;
+    doc.container_generator = container.get("generator").filter(|value| is_generator_metadata(value)).cloned();
     if !doc.drawings.is_empty() {
         return Err(invalid("ambiguous drawings in document.json and in their own entries"));
     }
@@ -1396,9 +1427,14 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
             cloud.insert("complex".into(), complex);
         }
     }
-    if newer_container && doc.newer_file.is_none() {
+    if (newer_container || unknown_parts) && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
-        let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
+        let says = if newer_container {
+            container.get("format").and_then(Value::as_str).unwrap_or("a later container")
+        } else {
+            "unknown container parts"
+        }
+        .to_string();
         let file = solidcraft_doc::newer_file::newer_file(&solidcraft_doc::format::Newer {
             format: current,
             reads_up_to: current,
@@ -4061,6 +4097,58 @@ mod tests {
         }
         let e = read(&header, MAX_COLUMNS).unwrap_err();
         assert!(e.to_string().contains("invalid point cloud complex lengths"), "{e}");
+    }
+
+    #[test]
+    fn generator_metadata_round_trips_without_a_newer_file_warning() {
+        let original = Document::new("Generated");
+        let mut entries = parts(&write_design_container(&original).unwrap());
+        for generator in [
+            json!("ExampleTool 1.2.3"),
+            json!({"name": "ExampleTool", "version": "1.2.3", "source": {"id": 7, "tags": ["example"]}}),
+        ] {
+            let header = json!({"format": VERSION, "generator": generator});
+            entries.insert("container.json".into(), serde_json::to_vec(&header).unwrap());
+            let mut opened = crate::read_design(&package(&entries)).unwrap();
+            assert!(opened.newer_file.is_none());
+            assert_eq!(opened.container_generator.as_ref(), Some(&generator));
+            opened.name = "Renamed".into();
+            let resaved = parts(&write_design_container(&opened).unwrap());
+            assert_eq!(serde_json::from_slice::<Value>(&resaved["container.json"]).unwrap(), header);
+            let document: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+            assert!(document.get("generator").is_none());
+            assert!(document.get("container_generator").is_none());
+            let reopened = crate::read_design(&package(&resaved)).unwrap();
+            assert_eq!(reopened, opened);
+        }
+    }
+
+    #[test]
+    fn generator_does_not_hide_unknown_container_fields_or_versions() {
+        let mut entries = parts(&write_design_container(&Document::new("Generated")).unwrap());
+        for header in [
+            json!({"format": VERSION, "generator": {"name": "ExampleTool"}, "future": {"value": 42}}),
+            json!({"format": VERSION, "generator": "ExampleTool"}),
+            json!({"format": "solidcraft-container/999", "generator": "ExampleTool"}),
+            json!({"format": VERSION, "generator": 42}),
+        ] {
+            entries.insert("container.json".into(), serde_json::to_vec(&header).unwrap());
+            entries.insert("extra/note.txt".into(), b"keep me".to_vec());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            assert!(opened.newer_file.is_some());
+            let resaved = parts(&write_design_container(&opened).unwrap());
+            assert_eq!(serde_json::from_slice::<Value>(&resaved["container.json"]).unwrap(), header);
+            assert_eq!(resaved["extra/note.txt"], b"keep me");
+        }
+    }
+
+    #[test]
+    fn invalid_or_oversized_generator_cannot_be_written() {
+        let mut doc = Document::new("Generated");
+        doc.container_generator = Some(json!(42));
+        assert!(write_design_container(&doc).is_err());
+        doc.container_generator = Some(json!("x".repeat(4096)));
+        assert!(write_design_container(&doc).is_err());
     }
 
     #[test]
