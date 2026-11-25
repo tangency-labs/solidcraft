@@ -32,6 +32,9 @@ macro_rules! mouse3d_preferences {
             /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
             /// (off, the default) turns it around the view's centre, as it did before.
             space_mouse_model_pivot: bool = false, PAGE_MOUSE3D;
+            /// What the 3D mouse's cap moves: the model (object, the default, as before) or the camera
+            /// looking at the point the view turns around (target camera), which reverses every axis.
+            space_mouse_motion: SpaceMouseMotion = SpaceMouseMotion::default(), PAGE_MOUSE3D;
             /// The user turned the calibration offer off for good ("Never show again"). Unlike closing the
             /// card, which only records that device, this stops every offer, for every device: it is one flag,
             /// not kept per device key. Like the settings beside it, the dialog's Restore Defaults puts it back

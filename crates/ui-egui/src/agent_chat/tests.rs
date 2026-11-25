@@ -979,6 +979,7 @@ struct Script {
     events: Arc<Mutex<Vec<Event>>>,
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
+    allow_paths: Arc<Mutex<Vec<Vec<std::path::PathBuf>>>>,
 }
 
 impl Script {
@@ -987,6 +988,9 @@ impl Script {
     }
     fn prompts(&self) -> Vec<Vec<PromptPart>> {
         self.prompts.lock().unwrap().clone()
+    }
+    fn allow_paths(&self) -> Vec<Vec<std::path::PathBuf>> {
+        self.allow_paths.lock().unwrap().clone()
     }
     fn report(&self, e: Event) {
         self.events.lock().unwrap().push(e);
@@ -1007,6 +1011,9 @@ impl ChatBackend for Script {
     }
     fn new_session(&mut self) {
         self.calls.lock().unwrap().push("new_session".into());
+    }
+    fn set_allow_paths(&mut self, paths: &[std::path::PathBuf]) {
+        self.allow_paths.lock().unwrap().push(paths.to_vec());
     }
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
@@ -1263,6 +1270,204 @@ fn an_agents_opened_design_keeps_its_conversation_and_undo_ownership() {
             assert!(app.agent_chat.backend.is_some());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Opting into `agent_shared_session` (#16282) preserves one Assistant conversation and backend
+/// across tab creation, tab switching, and tab closing, and informs the agent on its next turn
+/// when the active design changed.
+#[test]
+fn shared_session_keeps_conversation_and_backend_across_tab_switches() {
+    let (mut app, script, ctx) = app_with_script();
+    app.preferences.agent_shared_session = true;
+    app.session.doc_mut().name = "MasterAssembly".into();
+    send(&mut app, &ctx, "inspect master".into());
+    assert!(app.agent_chat.state() == State::Busy);
+    script.report(Event::Text { thought: false, text: "Master inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+
+    let mut sub = solidcraft_engine::Session::default();
+    sub.doc_mut().name = "SubAssembly".into();
+    sub.path = Some("sub_assembly.sc".into());
+    crate::documents::open_tab(&mut app, sub).unwrap();
+    assert!(app.agent_chat.backend.is_some());
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "inspect master")));
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Agent { text, .. } if text == "Master inspected.")));
+
+    crate::documents::switch(&mut app, 0);
+    assert!(app.agent_chat.backend.is_some());
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.backend.is_some());
+
+    send(&mut app, &ctx, "inspect sub".into());
+    let prompt = script.calls().pop().unwrap_or_default();
+    assert!(prompt.contains("The active design tab changed from \"MasterAssembly\" to \"SubAssembly\""), "{prompt}");
+    assert!(prompt.contains("(sub_assembly.sc)"), "{prompt}");
+    script.report(Event::Text { thought: false, text: "Sub inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    crate::documents::close(&mut app, 0, true);
+    assert!(app.agent_chat.backend.is_some());
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+}
+
+/// With `agent_shared_session` enabled (#16282), `doc.open` on a design already open in another
+/// tab switches cleanly to that tab in the same conversation while each tab keeps its own undo.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shared_session_allows_doc_open_to_switch_to_already_open_tab() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-shared-chat-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let next_path = dir.join("next.solidcraft");
+    let first_path = dir.join("first.solidcraft");
+    let mut next = solidcraft_engine::Session::default();
+    next.execute("solid.box", &boxed(100.0)["params"]).unwrap();
+    next.execute("file.save_as", &json!({"path": next_path})).unwrap();
+
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.preferences.agent_shared_session = true;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    app.run("file.save_as", json!({"path": first_path})).unwrap();
+
+    send(&mut app, &ctx, "work across both tabs".into());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": next_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.count(), 2);
+    assert_eq!(app.docs.active, 1);
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(130.0))["ok"], true);
+
+    // Switching back to the already-open first tab via `doc.open` succeeds in shared-session mode.
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": first_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.active, 0);
+    assert!(app.agent_chat.backend.is_some());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+
+    assert_eq!(app.session.doc.features.len(), 3);
+    crate::documents::switch(&mut app, 1);
+    assert_eq!(app.session.doc.features.len(), 2);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Toggling Preferences -> Assistant -> Keep one chat across design tabs (`agent_shared_session`)
+/// flips the preference and stops any parked background tab conversations.
+#[test]
+fn shared_session_preference_checkbox_toggles_and_disconnects_background_chats() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let bg_script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(bg_script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    assert!(!h.app.preferences.agent_shared_session);
+    assert!(h.app.agent_chat.backend.is_none());
+
+    h.call("ui.resize", json!({"width": 1280, "height": 800}));
+    h.call("ui.prefs", json!({"open": "AI"}));
+    h.frames(3);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_shared_session");
+    h.step(&json!({"click": {"handle": "prefs:agent_shared_session"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_shared_session);
+    assert!(bg_script.calls().iter().any(|c| c == "cancel"), "parked tab backend must disconnect when enabling shared chat");
+
+    h.app.preferences.agent_shared_session = false;
+    crate::documents::switch(&mut h.app, 0);
+    assert!(h.app.agent_chat.backend.is_none());
+    assert_eq!(h.app.agent_chat.state(), State::Off);
+}
+
+/// Switching tabs while `agent_shared_session` is enabled must never transfer a parked tab's
+/// transcript or draft into another tab's slot once sharing is turned off again.
+#[test]
+fn shared_session_keeps_parked_conversations_with_their_owning_tabs() {
+    let (mut app, script_a, ctx) = app_with_script();
+    app.session.doc_mut().name = "TabA".into();
+    send(&mut app, &ctx, "message in A".into());
+    script_a.report(Event::Text { thought: false, text: "reply in A".into() });
+    ended(&script_a, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in A".into();
+
+    // Open Tab B while sharing is off, giving Tab B its own conversation and draft.
+    let mut sess_b = solidcraft_engine::Session::default();
+    sess_b.doc_mut().name = "TabB".into();
+    crate::documents::open_tab(&mut app, sess_b).unwrap();
+    let script_b = Script::default();
+    app.agent_chat.backend = Some(Box::new(script_b.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "message in B".into());
+    script_b.report(Event::Text { thought: false, text: "reply in B".into() });
+    ended(&script_b, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in B".into();
+
+    // Return to Tab A, enable sharing, run A -> B -> A, then turn sharing off.
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = true;
+    crate::documents::disconnect_background_chats(&mut app, false);
+    crate::documents::switch(&mut app, 1);
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = false;
+
+    // Tab A still owns its transcript and draft.
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert_eq!(app.agent_chat.input, "draft in A");
+
+    // Switching back to Tab B restores Tab B's own transcript and draft, never Tab A's.
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert_eq!(app.agent_chat.input, "draft in B");
+}
+
+/// With `agent_shared_session` enabled, a prompt queued while the agent is still Starting or
+/// waiting for sign-in must be held when switching tabs so a late Ready event cannot run it on
+/// the newly active design.
+#[test]
+fn shared_session_holds_queued_startup_prompt_on_tab_switch() {
+    for state in [State::Starting, State::NeedsAuth] {
+        let (mut app, script, ctx) = app_with_script();
+        app.preferences.agent_shared_session = true;
+        app.session.doc_mut().name = "TabA".into();
+        let mut sess_b = solidcraft_engine::Session::default();
+        sess_b.doc_mut().name = "TabB".into();
+        crate::documents::open_tab(&mut app, sess_b).unwrap();
+        crate::documents::switch(&mut app, 0);
+
+        app.agent_chat.state = Some(state);
+        send(&mut app, &ctx, "change tab A".into());
+        assert!(app.agent_chat.queued.is_some(), "prompt must queue in {state:?}");
+
+        crate::documents::switch(&mut app, 1);
+        assert!(app.agent_chat.queued.is_none(), "tab switch must hold queued prompt in {state:?}");
+        assert_eq!(app.agent_chat.pending.len(), 1, "queued prompt moves to pending in {state:?}");
+        assert!(app.agent_chat.stopped, "pending queue must stay paused after tab switch in {state:?}");
+
+        script.report(Event::Ready { agent: "fake".into(), images: false });
+        poll(&mut app, &ctx);
+        assert!(
+            !script.calls().iter().any(|c| c.starts_with("prompt:")),
+            "late Ready on Tab B must not auto-send Tab A's prompt in {state:?}: {:?}",
+            script.calls()
+        );
     }
 }
 
@@ -1943,7 +2148,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878 };
+    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878, allow_paths: Vec::new() };
     let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
@@ -6553,6 +6758,98 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20326: folders configured under Assistant preferences (`agent_allowed_paths`) appear as chips
+/// that can be added, removed and cleared, and are appended to `allow_paths` on chat tool requests.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn allowed_folders_preference_manages_chips_and_extends_chat_scope() {
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-chat-allow-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sub_a = dir.join("proj_a");
+    let sub_b = dir.join("proj_b");
+    std::fs::create_dir_all(&sub_a).unwrap();
+    std::fs::create_dir_all(&sub_b).unwrap();
+    let a_str = sub_a.to_string_lossy().into_owned();
+    let b_str = sub_b.to_string_lossy().into_owned();
+
+    // UI flow: pick folder, verify chip, add second folder, remove first chip, then clear all.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let picked = std::sync::Arc::new(std::sync::Mutex::new(Some(a_str.clone())));
+    let p_clone = std::sync::Arc::clone(&picked);
+    h.app.services.pick_folder = Some(Box::new(move |_| {
+        let v = p_clone.lock().ok().and_then(|g| g.clone());
+        Box::pin(std::future::ready(v))
+    }));
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone()]);
+    *picked.lock().unwrap() = Some(b_str.clone());
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone(), b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folder:0:remove");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folder:0:remove"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:clear");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:clear"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_allowed_paths.is_empty());
+
+    // Runtime scope: `pump_tools` appends `agent_allowed_paths` to requests that carry `allow_paths`
+    // (bridged MCP) as well as requests without one (API backend), letting `doc.open` reach them.
+    let design = sub_a.join("part.sc");
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    let design_str = design.to_string_lossy().into_owned();
+
+    let (mut app, _script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    send(&mut app, &ctx, "open a design in an allowed folder".into());
+
+    // Without `sub_a` in `agent_allowed_paths`, a request confined to `sub_b` refuses `sub_a`.
+    let denied_reply =
+        chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str]}));
+    assert_eq!(denied_reply["ok"], false, "unconfigured folder stays refused: {denied_reply}");
+
+    // With `sub_a` configured, the same bridged request succeeds.
+    app.preferences.agent_allowed_paths = vec![a_str.clone()];
+    let allowed_reply = chat_tool(
+        &mut app,
+        &tx,
+        &ctx,
+        "engine.execute",
+        json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str.clone()]}),
+    );
+    assert_eq!(allowed_reply["ok"], true, "configured allowed folder succeeds: {allowed_reply}");
+
+    // New chat refreshes the backend's bridge allow_paths before starting the next session,
+    // dropping any folder removed in Preferences.
+    let (mut app2, script2, _ctx2) = app_with_script();
+    app2.preferences.agent_allowed_paths = vec![a_str.clone(), b_str.clone()];
+    new_chat(&mut app2);
+    app2.agent_chat.state = Some(State::Ready);
+    app2.preferences.agent_allowed_paths = vec![b_str.clone()];
+    new_chat(&mut app2);
+    assert_eq!(script2.calls(), vec!["new_session".to_string(), "new_session".to_string()]);
+    assert_eq!(
+        script2.allow_paths(),
+        vec![vec![std::path::PathBuf::from(&a_str), std::path::PathBuf::from(&b_str)], vec![std::path::PathBuf::from(&b_str)]]
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }
 

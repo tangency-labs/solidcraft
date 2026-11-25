@@ -91,6 +91,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
+        "solid.dome" => &[("face", Pick), ("body", Body)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body), ("face_body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],

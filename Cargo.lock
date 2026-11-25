@@ -1392,6 +1392,7 @@ dependencies = [
  "image",
  "naga",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -6295,6 +6296,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-dynamics",
  "solidcraft-geom",
+ "solidcraft-icon-svg",
  "solidcraft-io",
  "solidcraft-kernel",
  "solidcraft-panel-layout",
@@ -6356,6 +6358,13 @@ dependencies = [
  "solidcraft-viewport-gpu",
  "thiserror 2.0.21",
  "wgpu",
+]
+
+[[package]]
+name = "solidcraft-icon-svg"
+version = "0.49.1"
+dependencies = [
+ "tiny-skia",
 ]
 
 [[package]]
@@ -6545,6 +6554,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
+ "winreg",
 ]
 
 [[package]]
@@ -6587,6 +6597,7 @@ name = "solidcraft-ui-egui"
 version = "0.49.1"
 dependencies = [
  "arboard",
+ "craft-plugin",
  "egui",
  "egui-wgpu",
  "flate2",
@@ -6599,6 +6610,7 @@ dependencies = [
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
+ "quote",
  "semver",
  "serde",
  "serde_json",
@@ -6642,6 +6654,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-color",
+ "solidcraft-icon-svg",
  "solidcraft-theme",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
