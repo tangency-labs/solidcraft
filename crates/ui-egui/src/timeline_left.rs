@@ -160,7 +160,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
         *drag = Some(Drag::Marker);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
     rect.center().y
@@ -986,8 +986,9 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
     crate::dialogs_assembly::timeline_joints_vertical(app, ui);
 
     let mut drag = rows.drag.take();
-    if drag.is_some() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // The marker moves up and down, so it keeps its arrows; dragged rows show the closed hand.
+    if let Some(active) = &drag {
+        ui.ctx().set_cursor_icon(if matches!(active, Drag::Marker) { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::Grabbing });
     }
     // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(active), Some(pointer)) = (drag.as_ref(), pointer)
