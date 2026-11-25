@@ -1889,6 +1889,8 @@ pub(super) mod round_definition_proof {
         pub(in super::super) golden: MassProperties,
         /// At [`ESTIMATE_ACCURACY_FINEST`].
         converged: MassProperties,
+        /// The certified volume band `[lo, hi]`.
+        pub(in super::super) band: (f64, f64),
     }
 
     /// The faces of `b` whose surface is a blend by its definition, each with the proved
@@ -1957,14 +1959,17 @@ pub(super) mod round_definition_proof {
         let mut at = |accuracy: f64| {
             brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap()
         };
-        let estimates = Estimates {
-            golden: at(MASS_ACCURACY),
-            converged: at(ESTIMATE_ACCURACY_FINEST),
-        };
-        let new = estimates.golden.properties.volume;
-        let converged = estimates.converged.properties.volume;
+        let golden = at(MASS_ACCURACY);
+        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let new = golden.properties.volume;
         let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
         let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
+        let estimates = Estimates {
+            golden,
+            converged,
+            band: (lo, hi),
+        };
+        let converged = estimates.converged.properties.volume;
         assert!(
             (lo..=hi).contains(&converged),
             "{name}: the converged volume {converged} is off the certified [{lo}, {hi}]"
@@ -2100,10 +2105,10 @@ pub(super) mod round_definition_rows {
         ("stubs4-coons_01_03_29-e3-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
         ("stubs4-coons_01_03_29-e6-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
         ("stubs4-delete-edge-bottle-e8-r0.1", Some(11.065538784092405), [0, 30, 46, 18], [0, 31, 47, 18]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", Some(169498.77345473654), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", Some(169488.15759245612), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", Some(169498.7688211253), [0, 27, 42, 10], [0, 27, 42, 10]),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", Some(169488.16356054693), [0, 27, 42, 10], [0, 27, 42, 10]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", Some(169498.77345473654), [0, 27, 42, 10], [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", Some(169488.15759245612), [0, 27, 42, 10], [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", Some(169498.7688211253), [0, 27, 42, 10], [0, 29, 46, 11]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", Some(169488.16356054693), [0, 27, 42, 10], [0, 29, 46, 11]),
         ("stubs4-sphere_plane-e3-r0.5", None, [0, 4, 6, 3], [0, 4, 6, 3]),
         ("stubs4-test8-e3-r0.5", None, [0, 6, 9, 3], [0, 6, 9, 3]),
         ("stubs4-torii_unioned-e2-r0.5", Some(8906.398139766763), [0, 4, 7, 3], [0, 4, 7, 3]),
@@ -2205,8 +2210,10 @@ pub(super) mod round_definition_rows {
 
     /// The [`ROWS`] row named `row`: its blend faces are definitions whose nets
     /// re-certify, its counts are the golden's (unchanged but for the bottle's rail, split
-    /// at the shoulder face's C1 knot), and a closed result's converged volume and mass
-    /// values lie in their certified bands.
+    /// at the shoulder face's C1 knot, and the `sphere_diff_3cylinders` rows, which keep
+    /// the target's two sphere patches, WR-459), and a closed result's converged volume
+    /// and mass values lie in their certified bands (on the sphere rows, main's volume
+    /// too).
     fn check(row: &str) {
         let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
         assert_eq!(picked.len(), 1, "{row}: one row of that name");
@@ -2221,7 +2228,12 @@ pub(super) mod round_definition_rows {
             assert!(result.is_ok(), "{name}: {result:?}");
             no_bare_blend_face(&k, &body, name);
             assert_eq!(counts(&body, 0), after, "{name}");
-            if name != "stubs4-delete-edge-bottle-e8-r0.1" {
+            // the bottle's rail splits at a C1 knot; the sphere rows keep the target's two
+            // sphere patches and the edges between them (WR-459, `wr459_sphere_rows`)
+            let sphere = name.starts_with("stubs4-delete-edge-sphere_diff_3cylinders-");
+            if sphere {
+                assert_eq!((before, after), ([0, 27, 42, 10], [0, 29, 46, 11]), "{name}");
+            } else if name != "stubs4-delete-edge-bottle-e8-r0.1" {
                 assert_eq!(before, after, "{name}");
             }
             if name == "stubs4-delete-edge-bottle-e8-r0.1" {
@@ -2230,6 +2242,12 @@ pub(super) mod round_definition_rows {
             let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
                 let estimates = volume_band(&k, &mut body, &blends, old, name);
+                if sphere {
+                    // one solid, so one volume: main's body (the patches merged) and this
+                    // one bound the same region, and main's value lies in this band
+                    let (lo, hi) = estimates.band;
+                    assert!((lo..=hi).contains(&old), "{name}: main's {old} is off [{lo}, {hi}]");
+                }
                 mass_bands(&k, &mut body, &estimates, name);
             }
         }
@@ -2359,7 +2377,7 @@ mod wr457_certificates {
     use solidcore::mass::enclosure::enclose_volume;
     use solidcore::surface::surface::p2::SurfaceKind;
     use solidcore::topology::brep::p1;
-    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::p2::{create_missing_uv_trim_curves, is_manifold_solid};
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
     /// The moved rows: (fixture file, case name).
@@ -2534,6 +2552,11 @@ mod wr457_certificates {
             }
             apply(&mut k, &mut body, &selected, &input)
                 .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            // The round keeps the union's own faces (WR-459), which come without UV trims,
+            // so the trims are made once here, as the enclosure would make them: the check
+            // then runs on the body itself (#21105) and the trims its walk repairs, the
+            // corner patch's edges among them, stay on the body the enclosure measures.
+            create_missing_uv_trim_curves(&k, &mut body).expect("trims");
             let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
                 .expect("check")
                 .lines();
@@ -3559,13 +3582,14 @@ mod wr664_near_knot_trims {
 
     /// The rows whose results the near-knot snap (WR-664) moves: name, the golden's status
     /// and vertex, edge and face counts, which the snap leaves as they were, and the number
-    /// of rail edges.
+    /// of rail edges. (The `sphere_diff` rows keep the target's two sphere patches since
+    /// WR-459's retirement, `wr459_sphere_rows`: 29/46/11, main's 27/42/10.)
     const ROWS: [(&str, [i64; 4], usize); 5] = [
         ("stubs4-delete-edge-bottle-e8-r0.1", [0, 31, 47, 18], 5),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 27, 42, 10], 2),
-        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 29, 46, 11], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 29, 46, 11], 2),
     ];
 
     /// `name` builds with the golden's counts and `rails` rail edges (an edge between a blend
@@ -3724,5 +3748,452 @@ mod wr664_near_knot_trims {
     #[test]
     fn sphere_diff_3cylinders_e4_r0_5() {
         check(ROWS[4].0, ROWS[4].1, ROWS[4].2);
+    }
+}
+
+/// WR-459 (#17169): the four `sphere_diff_3cylinders` rows the kept target faces move from
+/// main's 27/42/10 to 29/46/11. The target is a sphere less three cylinders, in two sphere
+/// patches on one surface; the round splits one patch and the clean-up now keeps both, so
+/// their boundary (the input's own same-surface edge) stays. These tests check, row by
+/// row, that this is the only change: every face but the round's has a target face's
+/// surface, the round's surface is main's, the near-seam vertices and the other Level 2
+/// failures are main's (constants printed on main a2b7ec60e2 by a one-off probe of the
+/// same rows, not a recorder kept here), and the kept boundary adds exactly one
+/// `check_brep` Level 2 failure, a
+/// "Face Near missing Seam" whose cause is a vertex the round places a few nanometres off
+/// the sphere's seam on main too (bit-identical), well inside that vertex's tolerance
+/// (that placement is #21421). The volume is certified in `round_definition_rows`.
+#[cfg(test)]
+mod wr459_sphere_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::math::EFF_ZERO;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::{vertex, FaceId, VertexId};
+
+    /// A Level 2 failure: its label and its reporter's key (the object space in the high
+    /// 32 bits, the arena index in the low).
+    type Failure = (&'static str, Option<(u64, u64)>);
+
+    const SEAM: &str = "Face Near missing Seam";
+    const FACE: u64 = 16002;
+    const EDGE: u64 = 20001;
+    const EDGEUSE: u64 = 20003;
+
+    /// One row: the case; main's (a2b7ec60e2) Level 2 failures of its result, less the three
+    /// of edgeuse 142's trim that the clamped-sliver drop rule (#21353) took out of the
+    /// target itself (the target's own failures are checked in `check`); the sphere
+    /// face whose seam failure the kept boundary adds; the round's vertex near the seam,
+    /// with main's coordinate bits and the bound on its distance from the seam (the
+    /// measured distance rounded up); the other vertices within 1e-4 of the seam that the
+    /// check may be reporting, each with main's bits; and the hash of main's round surface
+    /// (`fnv1a64` of its `Debug` form) and of main's other faces (`fnv1a64` of their
+    /// sorted `geometry_text`s, joined by newlines); and main's one sphere face.
+    struct Row {
+        name: &'static str,
+        main_failures: &'static [Failure],
+        added_on: usize,
+        vertex: (usize, [u64; 3], f64),
+        others: &'static [(usize, [u64; 3])],
+        round_surface: u64,
+        main_faces: u64,
+        main_sphere: u64,
+    }
+
+    /// The failures every row's body shares with the target (`check_brep` of the target:
+    /// the cone faces 4, 5 and 7 near their seams) less face 4,
+    /// which the round splits, plus the round's rail on the cone (edge and edgeuse).
+    const fn shared(rail: u64, rail_use: u64, cone: u64) -> [Failure; 5] {
+        [
+            (SEAM, Some((FACE, 5))),
+            (SEAM, Some((FACE, 7))),
+            (SEAM, Some((FACE, cone))),
+            ("Bad Repeated CPts", Some((EDGE, rail))),
+            ("Bad Repeated CPts", Some((EDGEUSE, rail_use))),
+        ]
+    }
+
+    const E1: [Failure; 5] = shared(40, 162, 9);
+    const E4_R01: [Failure; 5] = [
+        (SEAM, Some((FACE, 0))),
+        (SEAM, Some((FACE, 4))),
+        (SEAM, Some((FACE, 7))),
+        ("Bad Repeated CPts", Some((EDGE, 43))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 172))),
+    ];
+    const E4_R05: [Failure; 7] = [
+        (SEAM, Some((FACE, 0))),
+        (SEAM, Some((FACE, 4))),
+        (SEAM, Some((FACE, 7))),
+        ("Bad Repeated CPts", Some((EDGE, 41))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 164))),
+        ("Bad Repeated CPts", Some((EDGE, 43))),
+        ("Bad Repeated CPts", Some((EDGEUSE, 172))),
+    ];
+
+    /// e4's vertex 2, the target's patch corner on the seam (4.4e-14 off it in the
+    /// target), which the round leaves 9.5e-7 off the seam on main too.
+    const E4_V2: (usize, [u64; 3]) = (2, [0x4036026500000000, 0x3eafffffffc57405, 0x4045540c8e2b6b68]);
+
+    const ROWS: [Row; 4] = [
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+            main_failures: &E1,
+            added_on: 8,
+            vertex: (27, [0x403627cf90d5c75d, 0xbe31ee9f830c0a25, 0xc0454a5b0aeac7b9], 4.2e-9),
+            others: &[],
+            round_surface: 13763335099436623647,
+            main_faces: 14750437352760065621,
+            main_sphere: 8,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+            main_failures: &E1,
+            added_on: 8,
+            vertex: (27, [0x4036bf0d23081593, 0xbe56aa7ba247c332, 0xc0452256756ad4f1], 2.12e-8),
+            others: &[],
+            round_surface: 14051174420061070167,
+            main_faces: 14750437352760065621,
+            main_sphere: 8,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+            main_failures: &E4_R01,
+            added_on: 1,
+            vertex: (25, [0x403627cf90d5c76b, 0xbe31ee9f8404242c, 0x40454a5b0aeac7b6], 4.2e-9),
+            others: &[E4_V2],
+            round_surface: 2325416645222036088,
+            main_faces: 16065100554185304934,
+            main_sphere: 0,
+        },
+        Row {
+            name: "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+            main_failures: &E4_R05,
+            added_on: 1,
+            vertex: (25, [0x4036bf0d230815a1, 0xbe56aa7bab70d538, 0x40452256756ad4ed], 2.12e-8),
+            others: &[E4_V2],
+            round_surface: 744541229302824343,
+            main_faces: 16065100554185304934,
+            main_sphere: 0,
+        },
+    ];
+
+    fn failures(b: &mut Brep) -> Vec<Failure> {
+        let check = check_brep(&mut Kernel::default(), b, CheckLevel::Level2).unwrap();
+        let mut out: Vec<Failure> = check
+            .failures()
+            .map(|f| (f.name, f.reporter.map(|r| (r.0 >> 32, r.0 & 0xffff_ffff))))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The face's whole surface object, as `Debug` prints it (its kind and its owner,
+    /// tolerance and cache state).
+    fn surface_text(b: &Brep, f: FaceId) -> String {
+        format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap())
+    }
+
+    /// The face's surface geometry, as `Debug` prints its kind (the surface's type and
+    /// its defining data), less the lazily built NURBS form (`NurbSlot`, a cache the
+    /// first evaluation fills, so it differs with what has been evaluated).
+    fn geometry_text(b: &Brep, f: FaceId) -> String {
+        let text = format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap().kind());
+        let mut out = String::new();
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("NurbSlot(") {
+            out.push_str(&rest[..at]);
+            out.push_str("NurbSlot(..)");
+            let mut depth = 0usize;
+            let mut end = rest.len();
+            for (i, c) in rest[at + "NurbSlot".len()..].char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = at + "NurbSlot".len() + i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            rest = &rest[end..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn is_sphere(b: &Brep, f: FaceId) -> bool {
+        let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+        matches!(surface.kind(), SurfaceKind::Sphere(_))
+    }
+
+    /// The vertices of the sphere face `f` within 1e-4 of its seam (the half-plane of
+    /// its frame's x axis, u = 0) but at least the near-miss distance (`EFF_ZERO * 1000`,
+    /// `CurveClassification::has_near_misses`) off it: each with its distance from the
+    /// seam's plane, its tolerance and its coordinate bits.
+    fn near_seam(b: &Brep, f: FaceId) -> Vec<(usize, f64, f64, [u64; 3])> {
+        let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else {
+            panic!("{f:?} is not a sphere face")
+        };
+        let frame = sphere.base().position();
+        let mut out = Vec::new();
+        for v in solidcore::topology::face::p4::vertices(b, f, None, false, None).unwrap() {
+            let p = vertex::point(b, v).unwrap();
+            let local = p - frame.origin();
+            let (x, y) = (local.dot(frame.x_axis()), local.dot(frame.y_axis()).abs());
+            if x > 0.0 && (EFF_ZERO * 1000.0..1e-4).contains(&y) {
+                let bits = [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+                out.push((v.index() as usize, y, vertex::tolerance(b, v).unwrap(), bits));
+            }
+        }
+        out.sort_by_key(|n| n.0);
+        out
+    }
+
+    /// The edges of `b` between two distinct sphere faces, each with its 3D curve's
+    /// interval, its tolerance and its end points.
+    fn sphere_seams(b: &Brep) -> Vec<(EdgeId, Extent1d, f64, [Vec3; 2])> {
+        let mut out = Vec::new();
+        for e in p1::edges(b, None).unwrap() {
+            let mut faces = edge::faces(b, e, None).unwrap();
+            faces.sort();
+            faces.dedup();
+            if faces.len() == 2 && faces.iter().all(|&f| is_sphere(b, f)) {
+                let (s, t) = edge::start_end_vertices(b, e).unwrap();
+                let ends = [s.unwrap(), t.unwrap()].map(|v| vertex::point(b, v).unwrap());
+                out.push((e, edge::interval(b, e).unwrap(), edge::tolerance(b, e).unwrap(), ends));
+            }
+        }
+        out
+    }
+
+    /// The result's boundary between the two sphere patches is the target's: the target's
+    /// sphere patches meet along arcs of one great circle of the sphere (each sampled
+    /// point within its edge's tolerance of the circle); the result keeps at least one
+    /// edge between its two sphere patches, and every point sampled on every such edge
+    /// lies on that circle within the edge's tolerance and inside the span of one of the
+    /// target's arcs (by angle, the round shortening an arc at its end); and the edges kept
+    /// on every target arc form one chain from one of the arc's own end points (bit for
+    /// bit) to its other end point (bit for bit) or to a vertex of the round.
+    /// Compared by geometry, not by arena ids, so a boundary split into more edges over
+    /// the same span passes too.
+    fn shares_the_target_boundary(name: &str, target: &Brep, body: &Brep) {
+        const SAMPLES: usize = 32;
+        let k = Kernel::default();
+        let sample = |b: &Brep, e: EdgeId, iv: &Extent1d| -> Vec<Vec3> {
+            let curve = edge::curve(b, e).unwrap().unwrap();
+            (0..=SAMPLES)
+                .map(|i| {
+                    let t = iv.min() + (iv.max() - iv.min()) * (i as f64 / SAMPLES as f64);
+                    curve.evaluate_point(&k, t).unwrap()
+                })
+                .collect()
+        };
+        let sphere_face = p1::faces(target, None).unwrap().into_iter().find(|&f| is_sphere(target, f)).unwrap();
+        let surface = target.face(sphere_face).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else { unreachable!() };
+        let c = sphere.base().position().origin();
+        let arcs = sphere_seams(target);
+        assert!(!arcs.is_empty(), "{name}: the target's sphere patches share no edge");
+        // the circle's plane, through the centre and the first arc's ends
+        let [a0, b0] = arcs[0].3;
+        let n = (a0 - c).cross(b0 - c);
+        let n = n * (1.0 / n.length());
+        let radius = (a0 - c).length();
+        let off_circle = |p: Vec3| {
+            let d = p - c;
+            let h = d.dot(n);
+            let r = (d - n * h).length();
+            (h * h + (r - radius) * (r - radius)).sqrt()
+        };
+        let angle = |p: Vec3, q: Vec3| (p - c).cross(q - c).length().atan2((p - c).dot(q - c));
+        for (e, iv, tol, _) in &arcs {
+            for p in sample(target, *e, iv) {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: target edge {e:?} is {d:e} off its circle, past {tol:e}");
+            }
+        }
+        let seams = sphere_seams(body);
+        assert!(!seams.is_empty(), "{name}: the result's sphere patches share no edge");
+        let within = |p: Vec3, tol: f64, (_, _, atol, [s, t]): &(EdgeId, Extent1d, f64, [Vec3; 2])| {
+            let excess = angle(*s, p) + angle(p, *t) - angle(*s, *t);
+            excess * radius <= tol + atol
+        };
+        // each result edge lies on the circle and inside one target arc
+        let mut on_arc = vec![Vec::new(); arcs.len()];
+        for (e, iv, tol, _) in &seams {
+            let points = sample(body, *e, iv);
+            for &p in &points {
+                let d = off_circle(p);
+                assert!(d <= *tol, "{name}: edge {e:?} is {d:e} off the target's circle, past {tol:e}");
+            }
+            let arc = arcs.iter().position(|a| points.iter().all(|&p| within(p, *tol, a)));
+            let arc = arc.unwrap_or_else(|| panic!("{name}: edge {e:?} leaves the target's arcs"));
+            on_arc[arc].push(*e);
+        }
+        // the round's vertices
+        let mut round_vertices = Vec::new();
+        for f in p1::faces(body, None).unwrap() {
+            if body.face(f).unwrap().surface.as_ref().unwrap().procedural_blend().is_some() {
+                round_vertices.extend(solidcore::topology::face::p4::vertices(body, f, None, false, None).unwrap());
+            }
+        }
+        // and the edges kept on every target arc run as one chain, with no gap or overlap,
+        // from one of the arc's own ends (bit for bit) to its other end (bit for bit) or to
+        // a vertex of the round: the round only shortens an arc at its other end, and never
+        // further than the round reaches
+        for ((e, _, _, [s, t]), kept) in arcs.iter().zip(&on_arc) {
+            let ends: Vec<[VertexId; 2]> = kept
+                .iter()
+                .map(|&k| {
+                    let (a, b) = edge::start_end_vertices(body, k).unwrap();
+                    [a.unwrap(), b.unwrap()]
+                })
+                .collect();
+            let point = |v: VertexId| vertex::point(body, v).unwrap();
+            let start = ends.iter().flatten().copied().find(|&v| point(v) == *s || point(v) == *t);
+            let start = start.unwrap_or_else(|| panic!("{name}: the target's arc {e:?} keeps no edge from its own ends"));
+            let other = if point(start) == *s { *t } else { *s };
+            let mut used = vec![false; ends.len()];
+            let mut at = start;
+            while let Some(i) = (0..ends.len()).find(|&i| !used[i] && ends[i].contains(&at)) {
+                used[i] = true;
+                at = if ends[i][0] == at { ends[i][1] } else { ends[i][0] };
+            }
+            assert!(used.iter().all(|&u| u), "{name}: the edges kept on the target's arc {e:?} are not one chain");
+            assert!(
+                point(at) == other || round_vertices.contains(&at),
+                "{name}: the edges kept on the target's arc {e:?} end at {:?}, neither the arc's other end nor the round",
+                point(at)
+            );
+        }
+    }
+
+    /// The row's target and its rounded result.
+    fn bodies(name: &str) -> (Brep, Brep) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let target = build(&mut k, &input).unwrap().unwrap();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        (target, body)
+    }
+
+    fn check(row: &Row) {
+        let name = row.name;
+        let (target, mut body) = bodies(name);
+        let counts = |b: &Brep| {
+            [
+                p1::vertices(b, None).unwrap().len(),
+                p1::edges(b, None).unwrap().len(),
+                p1::faces(b, None).unwrap().len(),
+            ]
+        };
+        assert_eq!(counts(&body), [29, 46, 11], "{name}");
+
+        // the faces but the round's are main's (fnv1a64 of their sorted geometry texts,
+        // printed on main a2b7ec60e2) plus one more patch of the target's sphere: the
+        // sphere both patches share is the target's, with the `swap_uv` bit the round's
+        // set-up clears (main's merged patch has it cleared too); the round's surface is
+        // main's
+        let target_sphere: Vec<String> = p1::faces(&target, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| is_sphere(&target, f))
+            .map(|f| geometry_text(&target, f).replace("swap_uv: true", "swap_uv: false"))
+            .collect();
+        let sphere = target_sphere.first().unwrap().clone();
+        assert!(target_sphere.iter().all(|t| *t == sphere), "{name}: one sphere in the target");
+        let mut rounds = Vec::new();
+        let mut others = Vec::new();
+        for f in p1::faces(&body, None).unwrap() {
+            if body.face(f).unwrap().surface.as_ref().unwrap().procedural_blend().is_some() {
+                rounds.push(crate::rng::fnv1a64(&surface_text(&body, f)));
+            } else {
+                if is_sphere(&body, f) {
+                    assert_eq!(geometry_text(&body, f), sphere, "{name}: {f:?} is not the target's sphere");
+                }
+                others.push(geometry_text(&body, f));
+            }
+        }
+        let extra = others.iter().position(|t| *t == sphere).unwrap();
+        others.remove(extra);
+        others.sort();
+        assert_eq!(
+            crate::rng::fnv1a64(&others.join("\n")),
+            row.main_faces,
+            "{name}: the faces but the round's and the added patch are not main's"
+        );
+        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not main's");
+
+        // the round's vertex near the seam is main's, bit for bit, within its bound of the
+        // seam and inside its own tolerance
+        let added = FaceId::from_index(row.added_on as u32);
+        let near = near_seam(&body, added);
+        let (vertex, bits, bound) = row.vertex;
+        let mut expected: Vec<(usize, [u64; 3])> = row.others.to_vec();
+        expected.push((vertex, bits));
+        expected.sort_by_key(|n| n.0);
+        let found: Vec<(usize, [u64; 3])> = near.iter().map(|n| (n.0, n.3)).collect();
+        assert_eq!(found, expected, "{name}: the vertices near the seam of {added:?}");
+        for &(v, d, tol, _) in &near {
+            if v == vertex {
+                assert!(d <= bound, "{name}: vertex {v} is {d:e} off the seam, past {bound:e}");
+            }
+            assert!(d <= tol, "{name}: vertex {v} is {d:e} off the seam, past its tolerance {tol:e}");
+        }
+
+        shares_the_target_boundary(name, &target, &body);
+        // the target's own failures: the cone faces 4, 5 and 7 near their seams (edgeuse
+        // 142's trim failures went with the clamped-sliver drop rule, #21353, which leaves
+        // the trim's folded end span out on read)
+        let target_failures = failures(&mut target.clone_standing_for_self().unwrap());
+        assert_eq!(
+            target_failures,
+            [(SEAM, Some((FACE, 4))), (SEAM, Some((FACE, 5))), (SEAM, Some((FACE, 7)))],
+            "{name}: the target's Level 2 failures"
+        );
+
+        // the kept boundary adds exactly one failure: the seam near miss on that patch
+        let mut with_one: Vec<Failure> = row.main_failures.to_vec();
+        with_one.push((SEAM, Some((FACE, row.added_on as u64))));
+        with_one.sort();
+        assert_eq!(failures(&mut body), with_one, "{name}: Level 2 failures");
+
+        // on main the two patches were one face (main_sphere, holding the same vertices
+        // at the same bits: printed by a one-off probe on main a2b7ec60e2); on e4
+        // main's merged patch already fails the seam check, so the near-seam placement is
+        // main's, which the kept boundary exposes on e1 too and does not cause
+        let main_fails_seam = row.main_failures.contains(&(SEAM, Some((FACE, row.main_sphere))));
+        assert_eq!(main_fails_seam, name.contains("-e4-"), "{name}: main's merged patch");
+    }
+
+    #[test]
+    fn e1_r0_1() {
+        check(&ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5() {
+        check(&ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1() {
+        check(&ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5() {
+        check(&ROWS[3]);
     }
 }

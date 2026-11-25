@@ -184,6 +184,15 @@ fn vec_status<T>(r: Result<T>) -> Result<T> {
 
 // ---- unported callees -------------------------------------------------------------------
 
+/// Not upstream (tangency-labs/solidcore#3399): the share of its fit tolerance a trim that
+/// would raise its edge's tolerance is fitted again at ([`refit_raising_trim`]).
+const REFIT_SHARE: f64 = 1e-3;
+
+/// Not upstream (tangency-labs/solidcore#3399): the share of the first trim's raise a refit
+/// trim's raise must lie within to replace it ([`refit_raising_trim`]): a trim whose fit error
+/// adds less than 1% to the raise keeps its first fit.
+const REFIT_GAIN: f64 = 0.99;
+
 /// What `SmSurface::DropCurve` produced.
 #[derive(Debug)]
 struct DropCurveOut {
@@ -493,13 +502,26 @@ pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> 
 /// upstream dereferences null; `SM_ERR` when every attempt fails (no sample point
 /// drops); the cascading errors of the evaluators; [`SolidError::Unported`] (module
 /// docs).
-#[allow(clippy::too_many_lines)]
 pub fn create_uv_trim_curve(
     k: &Kernel,
     b: &mut Brep,
     eu: EdgeuseId,
     want_deviation: bool,
     opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
+) -> Result<CreatedUvTrimCurve> {
+    create_uv_trim_curve_fitted(k, b, eu, want_deviation, opt_drop_curve_fail, None)
+}
+
+/// [`create_uv_trim_curve`] with its drops fitted at `fit` where given, in place of the edge's
+/// fit tolerance ([`fit_tolerance`]).
+#[allow(clippy::too_many_lines)]
+fn create_uv_trim_curve_fitted(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    want_deviation: bool,
+    opt_drop_curve_fail: Option<&mut DropCurveFail<ObjectHandle>>,
+    fit: Option<f64>,
 ) -> Result<CreatedUvTrimCurve> {
     k.work_counters.add_uv_trim_build();
     // always collect DropCurveData
@@ -520,7 +542,10 @@ pub fn create_uv_trim_curve(
         .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeUseNotOnFace))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
     // not upstream: the fit tolerance, the edge tolerance unless that only covers a gap
-    let fit_tol = fit_tolerance(k, b, e)?;
+    let fit_tol = match fit {
+        Some(fit) => fit,
+        None => fit_tolerance(k, b, e)?,
+    };
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
@@ -1758,6 +1783,9 @@ pub fn get_or_create_uv_trim_curve(
             return Ok(out);
         }
     };
+    // Not upstream (tangency-labs/solidcore#3399): in a cover test that grows no tolerance, a
+    // trim that would raise its edge is fitted again, tighter ([`refit_raising_trim`]).
+    let created = refit_raising_trim(k, b, eu, want_deviation, created)?;
 
     // Save max edge to projected TrimCurve distances. If one is Null and the other is
     // non-Null, return the whole distance in the non-Null one. (If pdOptDistToSurf is
@@ -1808,6 +1836,73 @@ pub fn get_or_create_uv_trim_curve(
     Ok(out)
 }
 
+/// Not upstream (tangency-labs/solidcore#3399): while a boolean's cleanup tests two faces for
+/// a cover that grows no tolerance (`Caches::refit_raising_trims`), `created`, the new trim of
+/// `eu`, or the same trim fitted again at [`REFIT_SHARE`] of the fit tolerance where the raise
+/// it gives its edge ([`trim_raise_distance`]) is within [`REFIT_GAIN`] of `created`'s, when
+/// `created` lies far enough from the edge to raise its tolerance (`SetUVTrimCurve` raises a
+/// tolerance below twice the distance). The drop's fit error (up to the fit tolerance, the
+/// edge's own) is part of that distance, and the edge is raised to cover the trim, not the
+/// curve it was fitted from: a line dropped onto a cylinder at 4e-5 gave a trim 2.7e-5 from
+/// the line where the line is 2.5e-5 from the cylinder, and raised the edge and its two
+/// vertices to 5.4e-5 instead of 5.0e-5. A validate-only pass raises nothing
+/// (`Kernel::with_held_trim_raise`, `bValidateOnly`), so it fits once. The refit leaves the
+/// edge and its vertices at the tolerances they had (a drop at a larger tolerance raises
+/// them); the caller raises them for the trim kept.
+///
+/// # Errors
+///
+/// Those of [`fit_tolerance`] and [`trim_raise_distance`]; the hard statuses of
+/// [`create_uv_trim_curve`].
+fn refit_raising_trim(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    want_deviation: bool,
+    created: CreatedUvTrimCurve,
+) -> Result<CreatedUvTrimCurve> {
+    if !k.caches.refit_raising_trims.get() || k.caches.hold_trim_raise || b.validate_only() {
+        return Ok(created);
+    }
+    let Some(e) = edge(b, eu)? else {
+        return Ok(created);
+    };
+    if b.edge(e)?.tolerance >= 2.0 * created.max_dist_to_surf {
+        return Ok(created);
+    }
+    let fit = zone_tol3d(k, REFIT_SHARE * fit_tolerance(k, b, e)?);
+    let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
+    let mut held = Vec::new();
+    for v in [v0, v1].into_iter().flatten() {
+        held.push((v, b.vertex(v)?.tolerance));
+    }
+    let edge_tol = b.edge(e)?.tolerance;
+    let tight = ignored(create_uv_trim_curve_fitted(
+        k,
+        b,
+        eu,
+        want_deviation,
+        None,
+        Some(fit),
+    ))?;
+    crate::topology::edge::set_tolerance(b, e, edge_tol, false, false)?;
+    for (v, t) in held {
+        crate::topology::vertex::set_tolerance(b, v, t, false, false)?;
+    }
+    let Some(tight) = tight else {
+        return Ok(created);
+    };
+    // (each judged by the raise it would give, [`trim_raise_distance`], not by its sampled
+    // distance alone: a proved bound past twice that distance raises to the bound)
+    let first = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
+    let refit = trim_raise_distance(k, b, eu, &tight.curve, tight.max_dist_to_surf)?;
+    Ok(if refit <= REFIT_GAIN * first {
+        tight
+    } else {
+        created
+    })
+}
+
 /// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
 /// cover (to twice it) for the new trim `trim` of `eu`, given upstream's distance `upstream`
 /// (the drop's reported error, or what the caller passes): the trim's proved distance from
@@ -1815,7 +1910,9 @@ pub fn get_or_create_uv_trim_curve(
 /// counts its fit tolerance, which is the edge's own tolerance, so upstream raises the edge
 /// from its own tolerance on every refit, whatever the trim's real distance; `B` bounds that
 /// distance, so the raise covers the trim by proof. Where `B` is not enclosed, or `upstream`
-/// raises nothing (the tolerance already covers twice it), `upstream`, as upstream.
+/// raises nothing (the tolerance already covers twice it), `upstream`, as upstream. A trim that
+/// is a UV line (`MateEdges`' exact mate between two planes, WR-495) is bounded by
+/// [`line_trim_bound`], as the stitch's cover bounds it.
 ///
 /// Where `B` is above twice `upstream`, upstream's raise (to `2 * upstream`) would leave the
 /// edge below a trim it is proved to be farther from: a tolerance below the trim's real
@@ -1878,11 +1975,17 @@ pub(crate) fn trim_raise_distance(
     // (a bound at most half the tolerance raises nothing, whatever its value: the bisection
     // stops tightening it there; any other is the whole bisection's, not stopped at a cutoff,
     // so a loose enclosure is tightened as far as it goes before the edge is raised to it)
-    let raise_by =
-        match trim_deviation_bound(k, b, eu, trim, fit, [0.5 * tol, f64::INFINITY], None)? {
-            Some(bound) if bound.is_finite() => bound,
-            _ => return Ok(upstream),
-        };
+    // (a UV line, as `MateEdges` attaches between two planes (WR-495), is bounded as its NURB
+    // plus its evaluation's slack, as the stitch's cover bounds it: [`line_trim_bound`])
+    let bounds = [0.5 * tol, f64::INFINITY];
+    let bound = match trim.kind() {
+        CurveKind::Line(l) => line_trim_bound(k, b, eu, l, fit, bounds)?,
+        _ => trim_deviation_bound(k, b, eu, trim, fit, bounds, None)?,
+    };
+    let raise_by = match bound {
+        Some(bound) if bound.is_finite() => bound,
+        _ => return Ok(upstream),
+    };
     if raise_by > 2.0 * upstream {
         // UNPROVED fallback (#18166): a `B` the B-rep check refuses as an edge tolerance is
         // the enclosure's limit, not a distance to raise to. The raise is upstream's, from
@@ -2243,12 +2346,8 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId, within: bool) -> Resu
 /// shown within `tol` where `within`; in full otherwise, except that a bound within `tol` that
 /// the trim's structure gives at once, whatever the fit, is taken as it is
 /// ([`structured_trim_deviation_bound`]: the trim is covered either way, and the bisection it
-/// spares is the cost #20373 removed), for [`cover_raised_trims`]. A UV line is bounded as
-/// its NURB, plus how far the line's
-/// analytic evaluation can be from that NURB in UV (`line_evaluation_slack`) carried to the
-/// surface where it is a plane (`plane_uv_lipschitz`): its own rounding moves its parameters,
-/// which `trim_image_gap_bound` refuses. `None` where it is not enclosed (a UV line on
-/// another surface).
+/// spares is the cost #20373 removed), for [`cover_raised_trims`]. A UV line is bounded by
+/// [`line_trim_bound`]. `None` where it is not enclosed (a UV line on another surface).
 ///
 /// # Errors
 ///
@@ -2261,7 +2360,6 @@ fn raised_trim_bound(
     tol: f64,
     within: bool,
 ) -> Result<Option<f64>> {
-    use crate::query::curve_surface_gap::{line_evaluation_slack, plane_uv_lipschitz};
     let reach = if within { tol } else { 0.0 };
     let over = [reach, f64::INFINITY];
     let CurveKind::Line(l) = trim.kind() else {
@@ -2274,6 +2372,30 @@ fn raised_trim_bound(
         }
         return trim_deviation_bound(k, b, eu, trim, tol, over, None);
     };
+    line_trim_bound(k, b, eu, l, tol, over)
+}
+
+/// Not upstream (#18166): [`trim_deviation_bound`] of the UV line `l`, a trim of `eu`, at the
+/// fit `fit` and with its `[enough, over]`. A UV line is evaluated analytically, so its points
+/// can be off its NURB's by its rounding: [`trim_deviation_bound`] refuses it as it stands. It
+/// is bounded as its NURB, plus how far the line's analytic evaluation can be from that NURB in
+/// UV ([`line_evaluation_slack`]) carried to the surface where it is a plane
+/// ([`plane_uv_lipschitz`]). The NURB's bound is shown within `enough` less that slack, so a
+/// bound found within it still leaves the line within `enough` up to its rounding. `None`
+/// where it is not enclosed (a UV line on another surface).
+///
+/// # Errors
+///
+/// Those of [`trim_deviation_bound`].
+fn line_trim_bound(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    l: &crate::curve::line::Line,
+    fit: f64,
+    [enough, over]: [f64; 2],
+) -> Result<Option<f64>> {
+    use crate::query::curve_surface_gap::{line_evaluation_slack, plane_uv_lipschitz};
     let Some(fu) = faceuse(b, eu)? else {
         return Ok(None);
     };
@@ -2292,10 +2414,10 @@ fn raised_trim_bound(
         return Ok(None);
     };
     let slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
-    // (the NURB's bound is shown within the tolerance less the slack, so that a bound found
-    // within `enough` still leaves the line within the tolerance)
-    let enough = ((reach - slack) * (1.0 - 4.0 * f64::EPSILON)).max(0.0);
-    let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), tol, [enough, over[1]], None)?
+    // (the NURB's bound is shown within `enough` less the slack, so that a bound found within
+    // it still leaves the line within `enough` up to its rounding)
+    let enough = ((enough - slack) * (1.0 - 4.0 * f64::EPSILON)).max(0.0);
+    let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), fit, [enough, over], None)?
     else {
         return Ok(None);
     };
