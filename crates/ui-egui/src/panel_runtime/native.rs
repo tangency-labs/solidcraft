@@ -5,11 +5,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use solidcraft_engine::panels::{
+use solidcraft_panel_layout::{
     HostCapabilities, HostEffect, HostId, InstanceId, MAX_INSTANCES, MAX_LOGICAL, MAX_SECTIONS, PanelResult, Rule, SectionId, Size, error, valid_id,
 };
 
-use super::NativeHostAdapter;
+use super::host::NativeHostAdapter;
 
 const MAX_MONITORS: usize = 64;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(2);

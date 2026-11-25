@@ -9204,7 +9204,10 @@ fn late_first_appearance_window_blocks_nested_popup_navigation() {
                             environment.document = Some(DocumentId::new("new-popup-context").unwrap());
                             h.runtime.set_environment(environment, services.local).unwrap();
                             assert_eq!(
-                                raw.host.finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut CatalogueLayoutStore(&mut h.catalogue)).unwrap_err().rule,
+                                raw.host
+                                    .finish(ui, &mut h.runtime, &mut h.native, &mut services, &mut CatalogueLayoutStore(&mut h.catalogue))
+                                    .unwrap_err()
+                                    .rule,
                                 Rule::Placement
                             );
                         },
@@ -15137,13 +15140,7 @@ fn direct_layout_store_captures_reservations_shows_and_commits_with_context_vali
         h.tick().unwrap();
         time += 1.0 / 60.0;
         let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui_rect(capacity())),
-                events,
-                time: Some(time),
-                focused: true,
-                ..Default::default()
-            },
+            egui::RawInput { screen_rect: Some(egui_rect(capacity())), events, time: Some(time), focused: true, ..Default::default() },
             |ui| {
                 host.capture_metrics(&h.runtime, &h.models).unwrap();
                 host.capture_reservations(&h.runtime, &DirectLayoutStore).unwrap();

@@ -44,8 +44,6 @@ impl NavCaps {
     }
 }
 
-pub(crate) use solidcraft_ui_kit::panel_scroll_offset;
-
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
 #[derive(Default)]
 pub struct WebWheelGestures {
@@ -2112,6 +2110,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     use solidcraft_engine::geom::prelude::*;
+    use solidcraft_ui_kit::panel_scroll_offset;
 
     #[test]
     fn panel_wheel_consumes_only_axes_that_move_and_clamps_to_their_limits() {
@@ -2125,7 +2124,7 @@ mod tests {
         ] {
             crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                 ui.input_mut(|input| input.smooth_scroll_delta = delta);
-                assert_eq!(super::panel_scroll_offset(ui.ctx(), previous, maximum), expected);
+                assert_eq!(panel_scroll_offset(ui.ctx(), previous, maximum), expected);
                 assert_eq!(ui.input(|input| input.smooth_scroll_delta), remaining);
             });
         }
@@ -2140,7 +2139,7 @@ mod tests {
             // A child has already consumed Y; only its unclaimed X reaches the host.
             ui.input_mut(|input| input.smooth_scroll_delta = vec2(-12.0, 0.0));
             let events = ui.input(|input| input.events.clone());
-            assert_eq!(super::panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
+            assert_eq!(panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
             assert_eq!(ui.input(|input| input.smooth_scroll_delta), egui::Vec2::ZERO);
             assert_eq!(ui.input(|input| input.events.clone()), events, "raw fallback ownership stays with the host");
         });

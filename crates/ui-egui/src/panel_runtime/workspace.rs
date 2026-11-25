@@ -2,14 +2,29 @@
 //! runtime action sink; resolved geometry and drag previews are observational.
 use std::collections::BTreeMap;
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
+use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _, HostChrome};
 
 #[cfg(not(target_arch = "wasm32"))]
 use super::drag_paint::WindowCard;
 use super::drag_paint::{CardPaint, DragPaint, shape_count};
-use super::runtime::{RuntimeHostProposal, standalone_header_action};
-use super::*;
-use crate::ui_kit::{self, BackingTooltipExt as _, HostChrome};
+use super::host::{
+    ContentSlot, FramePanelContent, LocalRequest, LocalScope, Motion, NativeHostAdapter, PanelContext, PanelHost, PanelLocalServices,
+    PanelPresentation,
+};
+use super::interaction::{
+    HostDragOut, HostDropTargetId, HostInteraction, HostPointerEvent, HostPointerTarget, HostPreview, HostResizeEdge, PreparedHostLayout,
+    prepare_host_layout,
+};
+use super::layout::{
+    HostGeometryPolicy, HostIdentityReservations, HostLayout, HostMetrics, HostSection, HostSurfaceAlpha, host_identity_reservations,
+    next_host_section_id, resolve_host_layout_in_domain, resolve_usable_region,
+};
+use super::runtime::{
+    ContentOwner, ContentServices, ControllerKey, PanelController, PanelModels, PanelRuntime, RuntimeActionSink, RuntimeHostProposal,
+    standalone_header_action,
+};
+use super::surfaces::HostSurfaceStyle;
 
 // Raw input plus per-control focus, gesture and command outcomes, with room for
 // pass diagnostics. Repeated passes replace a snapshot rather than growing it.
@@ -2832,7 +2847,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     if let HostPointerTarget::HeaderAction { instance, action } = target
                         && response.interact_rect.is_positive()
                     {
-                        crate::scenario::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
+                        solidcraft_ui_registry::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
                     }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();

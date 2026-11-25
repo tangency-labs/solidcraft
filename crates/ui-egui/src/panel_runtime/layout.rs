@@ -3,10 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
 
-use super::HostSurfaceStyle;
 use super::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
+use super::surfaces::HostSurfaceStyle;
 
 /// Compatibility constant only; the host never allocates rails.
 pub const HOST_RAIL_THICKNESS: f32 = 32.0;
