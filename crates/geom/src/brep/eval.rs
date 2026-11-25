@@ -15,9 +15,24 @@ use crate::prelude::*;
 use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, from_kernel, from_kernel3, to_kernel};
-use solidcore_ops::pcurve::Error;
 use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
+
+/// Why a record's point could not be had: the record is malformed or out of bounds (`Invalid`),
+/// the evaluation failed or the geometry is not supported (`Failed`), or it would exceed its caps
+/// (`TooLarge`). The same three cases and words as solidcore's record errors.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+pub enum Error {
+    /// The record is malformed or out of bounds.
+    #[error("{0}")]
+    Invalid(String),
+    /// The evaluation failed, or the geometry is not supported.
+    #[error("{0}")]
+    Failed(String),
+    /// The evaluation would exceed its caps.
+    #[error("{0}")]
+    TooLarge(String),
+}
 
 /// Newton steps of one intersection point.
 const MAX_NEWTON: usize = 64;

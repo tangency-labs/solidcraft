@@ -901,6 +901,87 @@ fn classify_points_honours_tolerance_trim_and_face_selection() {
     assert!(s.execute(id, &json!({"body":"Block", "points":[[2,2,10]], "face":[5,5,10]})).is_err());
 }
 
+/// A hollow rectangular tube (60x25x238 mm, 2.5 mm walls) with a batch containing points
+/// squarely on outer/inner planar faces, edges, vertices and within the `(tol, 2*tol)`
+/// B-rep classification band must classify every point cleanly when `face` is omitted,
+/// while still rejecting points off an explicitly selected face.
+#[test]
+fn classify_points_handles_hollow_tube_boundary_grid_and_tolerance_band() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    run(&mut s, "solid.box", json!({"corner": [1000.0, 360.0, 0.0], "length": 60.0, "width": 25.0, "height": 238.0, "body_name": "Tube"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({
+            "corner": [1002.5, 362.5, 0.0],
+            "length": 55.0,
+            "width": 20.0,
+            "height": 238.0,
+            "operation": "cut",
+            "targets": ["Tube"],
+        }),
+    );
+    let tol = s.model.state().body("Tube").unwrap().body.record().tolerance;
+    let id = "inspect.classify_points";
+    let points = vec![
+        [1001.25, 372.5, 119.0],
+        [1030.0, 372.5, 119.0],
+        [990.0, 372.5, 119.0],
+        [1000.0, 372.5, 119.0],
+        [1060.0, 372.5, 119.0],
+        [1002.5, 372.5, 119.0],
+        [1057.5, 372.5, 119.0],
+        [1030.0, 362.5, 119.0],
+        [1030.0, 382.5, 119.0],
+        [1001.25, 372.5, 0.0],
+        [1002.5, 362.5, 119.0],
+        [1000.0, 360.0, 119.0],
+        [1002.5, 372.5, 0.0],
+        [1002.5, 362.5, 0.0],
+        [1000.0, 360.0, 238.0],
+        [1002.5 + tol * 0.4, 372.5, 119.0],
+        [1000.0 - tol * 0.7, 360.0 - tol * 0.7, -tol * 0.7],
+        [1002.5 + tol * 0.7, 362.5 + tol * 0.7, -tol * 0.7],
+    ];
+    let expected_classes = ["inside", "outside", "outside", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on"];
+    let r = run(&mut s, id, json!({"body": "Tube", "points": points}));
+    matches::<ClassifyPointsResult>(id, &r, false);
+    assert_eq!(r["results"].as_array().unwrap().len(), expected_classes.len());
+    let faces = run(&mut s, "model.faces", json!({"body": "Tube"}));
+    for (i, class) in expected_classes.into_iter().enumerate() {
+        let row = &r["results"][i];
+        assert_eq!(row["class"], class, "point {i}: {row}");
+        if class == "on" {
+            let n = crate::params::vec3(&row["normal"]).unwrap();
+            assert!((n.len() - 1.0).abs() < 1e-12, "point {i}: {row}");
+            assert!(faces["faces"].as_array().unwrap().iter().any(|f| f["name"] == row["face"]), "point {i}: {row}");
+        }
+    }
+    for (i, expected) in [
+        (3, [-1.0_f64, 0.0, 0.0]),
+        (4, [1.0, 0.0, 0.0]),
+        (5, [1.0, 0.0, 0.0]),
+        (6, [-1.0, 0.0, 0.0]),
+        (7, [0.0, 1.0, 0.0]),
+        (8, [0.0, -1.0, 0.0]),
+        (9, [0.0, 0.0, -1.0]),
+        (15, [1.0, 0.0, 0.0]),
+    ] {
+        let row = &r["results"][i];
+        let n = crate::params::vec3(&row["normal"]).unwrap();
+        let want = solidcore_record::Vec3::from(expected);
+        assert!((n - want).len() < 1e-12, "point {i}: {row}");
+    }
+    // Selecting the matching inner face works for a point on it, including a vertex hit within
+    // the per-axis box band whose Euclidean distance exceeds `tol`.
+    let inner_x_face = r["results"][5]["face"].clone();
+    let on_inner = run(&mut s, id, json!({"body": "Tube", "points": [[1002.5 + tol * 0.4, 372.5, 119.0]], "face": inner_x_face}));
+    matches::<ClassifyPointsResult>(id, &on_inner, false);
+    assert_eq!(on_inner["results"][0], r["results"][5]);
+    // Selecting an unrelated face still rejects a boundary point on a different face.
+    assert!(s.execute(id, &json!({"body": "Tube", "points": [[1002.5, 372.5, 119.0]], "face": [1000.0, 372.5, 119.0]})).is_err());
+}
+
 #[test]
 fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
     let schema = input_schema_for::<ClassifyPointsParams>();
