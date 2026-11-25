@@ -650,6 +650,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
         v.push(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
+        v.push(rule.one(Item::action("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).

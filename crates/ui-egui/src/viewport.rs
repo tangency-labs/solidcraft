@@ -386,6 +386,9 @@ pub struct ViewportState {
     /// past the circle's own size from the centre ([`WOKEN_CENTRE_FAR`]), or until a click on
     /// empty space clears the selection (#16346).
     pub woken_centre: Option<(u64, String)>,
+    /// The finished sketch whose dimensions Edit Dimensions shows for now (#6642): view state
+    /// only, never saved. Esc, a click on empty space or the start of a command hides them.
+    pub edit_dimensions: Option<u64>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
 
@@ -8743,6 +8746,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                             };
                             // A pen tap on geometry toggles it. A tap on empty space clears.
                             let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
+                            // Not the first click of a double-click on a shown dimension's value.
+                            if sel.is_none() && !add && !crate::dim_view::model_text_at(p) {
+                                app.viewport.edit_dimensions = None;
+                            }
                             select(app, sel.clone(), add, allow_toggle);
                             crate::select_other::note_click(app, p, if add || pen_select { None } else { sel });
                         }
