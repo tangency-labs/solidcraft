@@ -545,7 +545,7 @@ impl crate::Feature {
                     remap_geo(&mut p.b, ids, bodies, 0, placements)?;
                 }
             }
-            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, occurrences, doc)?,
+            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, placements)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {
