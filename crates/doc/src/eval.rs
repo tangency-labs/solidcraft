@@ -2927,6 +2927,36 @@ struct EvalKey {
     relative: Option<u64>,
 }
 
+/// A straight extrusion of an exact whole boundary uses the selected regions for its solid,
+/// and every non-construction curve for its face names and certificates. Projected construction
+/// geometry can move without changing any of these. The curve count still limits certification.
+fn whole_extrude_sketch_key(f: &Feature, st: &ModelState) -> Option<(u64, u64)> {
+    let FeatureKind::Extrude { sketch, profiles: profiles @ ProfileSel::WholeBoundaries { .. }, thin: None, .. } = &f.kind else {
+        return None;
+    };
+    let ss = st.sketch(sketch.0)?;
+    if !ss.sketch.curves.iter().any(|c| c.construction) {
+        return None;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    "whole extrusion profile".hash(&mut h);
+    serde_json::to_vec(&ss.plane).ok()?.hash(&mut h);
+    ss.report.ok().hash(&mut h);
+    let indices = crate::profile_selection_indices(ss, profiles).ok()?;
+    for index in indices {
+        serde_json::to_vec(&ss.profiles.get(index)?.region).ok()?.hash(&mut h);
+    }
+    ss.sketch.curves.len().hash(&mut h);
+    for curve in ss.sketch.curves.iter().filter(|c| !c.construction) {
+        serde_json::to_vec(curve).ok()?.hash(&mut h);
+        for point in curve.kind.point_ids() {
+            let pos = ss.sketch.point(point)?;
+            (pos.x.to_bits(), pos.y.to_bits()).hash(&mut h);
+        }
+    }
+    Some((sketch.0, h.finish()))
+}
+
 impl EvalKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -2946,7 +2976,10 @@ impl EvalKey {
             ^ turns_digest(doc, vals, f).unwrap_or(0)
             ^ depth_digest(st);
         let whole = cache_key(f, fp, local, ctx, st);
-        let reads = f.reads(doc, st).map(|read| {
+        let read = f.reads(doc, st);
+        let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
+        let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
+        let reads = read.map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             if read.import {
                 // An import reads only the file or records it holds (`local`), the context
@@ -2973,7 +3006,7 @@ impl EvalKey {
             }
             for id in &read.sketches {
                 id.hash(&mut h);
-                st.sketch_keys.get(id).hash(&mut h);
+                sketch_key(id).hash(&mut h);
             }
             st.body_counter.hash(&mut h);
             // A body numbered from the counter skips the numbers reserved past it.
@@ -3012,7 +3045,7 @@ impl EvalKey {
             }
             for id in &read.sketches {
                 id.hash(&mut h);
-                st.sketch_keys.get(id).hash(&mut h);
+                sketch_key(id).hash(&mut h);
             }
             // A body takes the name the feature stores for it only while no other body has it.
             for n in &f.body_names {
