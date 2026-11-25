@@ -111,6 +111,8 @@ pub struct Unwrapped {
     pub points: Vec<Vec2>,
     pub seam_direction: Vec3,
     pub circumference: f64,
+    /// The tube's outside diameter (mm), as the kernel gave it.
+    pub outer_diameter: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -211,7 +213,7 @@ impl RoundMember {
             c.origin = fit.origin;
             depth = depth.max(fit.depth);
         }
-        if self.straight && self.cuts.iter().any(|c| c.depth_bound + depth >= t.length - 1e-5) {
+        if self.straight && self.cuts.iter().any(|c| ops::ends_cross(c.depth_bound, depth, t.length)) {
             return Err(invalid("the two end treatments may cross"));
         }
         Ok(Cut { end, cylinders, depth_bound: depth })
@@ -246,6 +248,7 @@ impl RoundMember {
             points: unwrapped.points.into_iter().map(|[x, y]| Vec2::new(x, y)).collect(),
             seam_direction: unwrapped.seam_direction,
             circumference: unwrapped.circumference,
+            outer_diameter: unwrapped.outer_diameter,
         })
     }
 }

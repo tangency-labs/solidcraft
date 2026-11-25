@@ -17,6 +17,7 @@
 //! | [`terminal_at`]   | (none)   |
 //! | [`fit`]           | (none)   |
 //! | [`template`]      | (none)   |
+//! | [`ends_cross`]    | (none)   |
 //! | [`line_box`]      | (none)   |
 //! | [`arc_box`]       | (none)   |
 //!
@@ -127,6 +128,18 @@ pub fn arc_box(a: Vec3, center: Vec3, pad: f64) -> Box3 {
 
 fn unit(v: Vec3) -> bool {
     v.is_finite_vec() && (v.length() - 1.0).abs() <= 1e-8
+}
+
+/// `t` with its axes rescaled to exactly unit length. [`terminal_ok`] accepts axes up to 1e-8 off
+/// unit length, but the cut's formulas assume unit axes, and near [`MIN_SINE`] the sine taken from
+/// `1 - cosine^2` magnifies that error.
+fn unit_axes(t: &Terminal) -> Result<Terminal> {
+    Ok(Terminal {
+        axis: t.axis.unitize()?,
+        x: t.x.unitize()?,
+        y: t.y.unitize()?,
+        ..*t
+    })
 }
 
 trait Finite {
@@ -268,10 +281,12 @@ pub fn fit(
             "a tube end, mate cylinder or tube radius is out of range",
         ));
     }
+    let t = &unit_axes(t)?;
+    let axis = m.axis.unitize()?;
     let q = t.origin - m.origin;
-    let along = q.dot(m.axis);
-    let distance = (q - m.axis * along).length();
-    let cosine = t.axis.dot(m.axis);
+    let along = q.dot(axis);
+    let distance = (q - axis * along).length();
+    let cosine = t.axis.dot(axis);
     let sine = sqrt(1.0 - cosine * cosine);
     if distance > AXIS_SNAP {
         return Ok(Err(Refusal::OffAxis { distance }));
@@ -285,7 +300,7 @@ pub fn fit(
     if sine < MIN_SINE {
         return Ok(Err(Refusal::Parallel { sine }));
     }
-    let origin = t.origin - m.axis * along;
+    let origin = t.origin - axis * along;
     let depth = (m.radius + cosine.abs() * radius) / sine;
     if depth >= t.length - CLEAR {
         return Ok(Err(Refusal::PastTerminal));
@@ -298,7 +313,7 @@ pub fn fit(
     if lo <= m.coped_start + CLEAR || hi >= m.length - m.coped_end - CLEAR {
         return Ok(Err(Refusal::MateCope));
     }
-    let tool = line_box(origin, origin + m.axis * m.length, m.radius);
+    let tool = line_box(origin, origin + axis * m.length, m.radius);
     if others.iter().any(|b| b.meets(&tool)) {
         return Ok(Err(Refusal::MeetsOther));
     }
@@ -315,6 +330,8 @@ pub struct Template {
     pub seam_direction: Vec3,
     /// The tube's outside circumference (mm).
     pub circumference: f64,
+    /// The tube's outside diameter (mm).
+    pub outer_diameter: f64,
 }
 
 /// Why a cope cannot be unwrapped.
@@ -382,11 +399,17 @@ pub fn template(
             "a cope template's end, radius, mates, seam, tolerance or depth is out of range",
         ));
     }
+    let t = &unit_axes(t)?;
     let mut lipschitz = 0.0_f64;
     for &(axis, r) in mates {
-        let cosine = t.axis.dot(axis).clamp(-1.0, 1.0);
+        if !unit(axis) {
+            return Err(invalid(
+                "a cope template's mate is not a unit axis at least the tube's size, off parallel",
+            ));
+        }
+        let cosine = t.axis.dot(axis.unitize()?).clamp(-1.0, 1.0);
         let sine = sqrt(1.0 - cosine * cosine);
-        if !unit(axis) || !r.is_finite() || sine < MIN_SINE || r < radius {
+        if !r.is_finite() || sine < MIN_SINE || r < radius {
             return Err(invalid(
                 "a cope template's mate is not a unit axis at least the tube's size, off parallel",
             ));
@@ -409,6 +432,7 @@ pub fn template(
         let radial = (t.x * theta.cos() + t.y * theta.sin()) * radius;
         let mut station = 0.0_f64;
         for &(axis, r) in mates {
+            let axis = axis.unitize()?;
             let cosine = t.axis.dot(axis);
             let a = 1.0 - cosine * cosine;
             let w = radial.dot(axis);
@@ -424,7 +448,16 @@ pub fn template(
         points,
         seam_direction: t.x * seam.cos() + t.y * seam.sin(),
         circumference: TAU * radius,
+        outer_diameter: 2.0 * radius,
     }))
+}
+
+/// Whether the two end cuts of one straight tube, reaching `start` and `end` mm in from its two
+/// ends, may cross: within its straight `length` they must stay [`CLEAR`] apart. Anything not
+/// finite counts as crossing.
+#[must_use]
+pub fn ends_cross(start: f64, end: f64, length: f64) -> bool {
+    !(start.is_finite() && end.is_finite() && length.is_finite()) || start + end >= length - CLEAR
 }
 
 #[cfg(test)]
@@ -565,5 +598,66 @@ mod tests {
             template(&shallow, 0.0, 0.05, 65_536, &|| false).unwrap(),
             Err(TemplateRefusal::OutsideDepth)
         );
+    }
+
+    /// A mate axis 1e-8 short of unit length, nearly along the tube (sine 0.0014), from `-axis`
+    /// so its axis passes through the endpoint. Unnormalised, the cut's depth comes out as
+    /// 7.1067 and its station at radial +Y as 7.0707; with the axis rescaled both are
+    /// `(R + c*r)/sine = 7.1428536` for equal radii 0.005.
+    fn near_unit_mate() -> Mate {
+        let axis = Vec3::new(0.999_999_01, 0.0014, 0.0);
+        Mate {
+            origin: -axis,
+            axis,
+            radius: 0.005,
+            length: 20.0,
+            coped_start: 0.0,
+            coped_end: 0.0,
+        }
+    }
+
+    #[test]
+    fn a_mate_axis_a_hair_off_unit_length_is_rescaled_before_the_cut() {
+        let m = near_unit_mate();
+        assert!(unit(m.axis) && (m.axis.length() - 1.0).abs() > 9e-9);
+        let n = m.axis / m.axis.length();
+        let sine = sqrt(1.0 - n.x * n.x);
+        let exact = (0.005 + n.x * 0.005) / sine;
+        assert!((exact - 7.142_853_57).abs() < 1e-8, "{exact}");
+        // The terminal is 7.12 long: the true cut reaches past it.
+        let t = terminal_at(Vec3::new(0.0, 0.0, 0.0), Y, Z, 7.12, false).unwrap();
+        assert_eq!(fit(&t, 0.005, &m, &[]).unwrap(), Err(Refusal::PastTerminal));
+        // Long enough, the fit's depth is the normalised one.
+        let t = terminal_at(Vec3::new(0.0, 0.0, 0.0), Y, Z, 7.2, false).unwrap();
+        let f = fit(&t, 0.005, &m, &[]).unwrap().unwrap();
+        assert!((f.depth - exact).abs() < 1e-9, "{}", f.depth);
+        // The template's first point is the seam at radial +Y (the end's x): the same station.
+        let mates = [(m.axis, 0.005)];
+        let cope = Cope {
+            end: &t,
+            radius: 0.005,
+            mates: &mates,
+            depth: f.depth,
+        };
+        let tpl = template(&cope, 0.0, 0.01, 65_536, &|| false)
+            .unwrap()
+            .unwrap();
+        assert!(
+            (tpl.points[0][1] - exact).abs() < 1e-9,
+            "{}",
+            tpl.points[0][1]
+        );
+        assert!((tpl.outer_diameter - 0.01).abs() < 1e-15);
+    }
+
+    #[test]
+    fn end_cuts_cross_when_they_meet_within_the_clearance() {
+        // Separated, touching and overlapping cuts on a 100 mm straight.
+        assert!(!ends_cross(30.0, 40.0, 100.0));
+        assert!(ends_cross(50.0, 50.0, 100.0));
+        assert!(ends_cross(50.0, 50.0 - CLEAR / 2.0, 100.0));
+        assert!(ends_cross(60.0, 50.0, 100.0));
+        assert!(ends_cross(f64::NAN, 0.0, 100.0));
+        assert!(ends_cross(0.0, 0.0, f64::INFINITY));
     }
 }

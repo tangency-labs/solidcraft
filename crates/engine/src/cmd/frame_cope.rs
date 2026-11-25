@@ -85,7 +85,12 @@ pub(super) fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let coordinates = |p: solidcore_record::Vec3| format!("({:.6}, {:.6}, {:.6})", p.x, p.y, p.z);
     let seam_direction = unwrapped.seam_direction;
     let labels = [
-        format!("SolidCraft | {member} | {} end | mm | 1:1 | OD {:.6} | circumference {:.6} mm", end.label(), data.radius * 2.0, circumference),
+        format!(
+            "SolidCraft | {member} | {} end | mm | 1:1 | OD {:.6} | circumference {:.6} mm",
+            end.label(),
+            unwrapped.outer_diameter,
+            circumference
+        ),
         format!("Datum: component {} original endpoint {}; +Y inward {}", mb.component, coordinates(terminal.origin), coordinates(terminal.axis)),
         format!("Seam {:.9} rad; radial {}; +X right-hand wrap about inward axis", seam, coordinates(seam_direction)),
         format!("CUT_PROFILE: keep +Y side; interpolation error <= {tolerance} mm; no kerf allowance"),
@@ -113,7 +118,7 @@ pub(super) fn export(s: &mut Session, p: &Value) -> Result<Value> {
         end: end.label().into(),
         units: "mm".into(),
         scale: 1.0,
-        outer_diameter: data.radius * 2.0,
+        outer_diameter: unwrapped.outer_diameter,
         circumference,
         seam,
         origin: vector(terminal.origin),

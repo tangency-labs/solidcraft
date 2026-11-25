@@ -86,6 +86,8 @@ pub struct Template {
     pub seam_direction: Vec3,
     /// The tube's outside circumference (mm).
     pub circumference: f64,
+    /// The tube's outside diameter (mm).
+    pub outer_diameter: f64,
 }
 
 fn kernel_terminal(t: &Terminal) -> k::Terminal {
@@ -222,5 +224,13 @@ pub fn template(
         points: t.points,
         seam_direction: record_vec3(t.seam_direction),
         circumference: t.circumference,
+        outer_diameter: t.outer_diameter,
     }))
+}
+
+/// Whether the two end cuts of one straight tube, reaching `start` and `end` mm in from its two
+/// ends, may cross within its straight `length` ([`k::ends_cross`]).
+#[must_use]
+pub fn ends_cross(start: f64, end: f64, length: f64) -> bool {
+    k::ends_cross(start, end, length)
 }

@@ -8899,9 +8899,9 @@ fn cope_follows_stock_parameters_and_checks_real_container_roundtrip() {
 fn cope_dxf_scoped_output_is_atomic_and_errors_leave_old_file() {
     use solidcraft_io::vfs::{PathScope, scoped};
     let mut s = coped_joint(60., [0., 1., 0.]);
-    let folder = std::env::temp_dir().join(format!("solidcraft-cope-export-{}", std::process::id()));
-    std::fs::create_dir_all(&folder).unwrap();
-    let folder = std::fs::canonicalize(folder).unwrap();
+    // Removed when the test ends, a failure included, and never shared with another run.
+    let dir = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(dir.path()).unwrap();
     let path = folder.join("template.dxf");
     let text = path.to_string_lossy().to_string();
     std::fs::write(&path, "previous drawing").unwrap();
@@ -8918,8 +8918,6 @@ fn cope_dxf_scoped_output_is_atomic_and_errors_leave_old_file() {
     });
     assert!(std::fs::read_to_string(&path).unwrap().contains("CUT_PROFILE"));
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "no temporary file remains");
-    std::fs::remove_file(path).unwrap();
-    std::fs::remove_dir(folder).unwrap();
 }
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -8952,17 +8950,22 @@ fn cope_station(axis: [f64; 3], radial: [f64; 3], mates: &[([f64; 3], f64)]) -> 
 
 /// Each entity of a DXF's ENTITIES section: its type, its layer and the points of its 10/20
 /// and 11/21 group codes, in order.
-fn dxf_entities(text: &str) -> Vec<(String, String, Vec<[f64; 2]>)> {
+/// Each entity of a DXF's ENTITIES section: its type, layer, points and first group-70 flags.
+fn dxf_entities(text: &str) -> Vec<(String, String, Vec<[f64; 2]>, Option<i32>)> {
     let lines: Vec<&str> = text.lines().map(str::trim).collect();
     let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.parse().ok()?, *c.get(1)?))).collect();
     let start = pairs.iter().position(|&(c, v)| c == 2 && v == "ENTITIES").unwrap();
-    let mut out: Vec<(String, String, Vec<[f64; 2]>)> = Vec::new();
+    let mut out: Vec<(String, String, Vec<[f64; 2]>, Option<i32>)> = Vec::new();
     let mut x = None;
     for &(code, value) in &pairs[start + 1..] {
         match code {
             0 if value == "ENDSEC" => break,
-            0 => out.push((value.to_string(), String::new(), Vec::new())),
+            0 => out.push((value.to_string(), String::new(), Vec::new(), None)),
             8 => out.last_mut().unwrap().1 = value.to_string(),
+            70 => {
+                let flags = &mut out.last_mut().unwrap().3;
+                flags.get_or_insert(value.parse().unwrap());
+            }
             10 | 11 => x = Some(value.parse::<f64>().unwrap()),
             20 | 21 => out.last_mut().unwrap().2.push([x.take().unwrap(), value.parse().unwrap()]),
             _ => {}
@@ -9015,6 +9018,10 @@ fn check_cope(s: &Session, member: &str, out: &Value, stock: (f64, f64, f64), ma
     assert_eq!(kinds("SCALE_CHECK"), ["LINE", "LINE", "LINE"]);
     assert_eq!(kinds("NOTES"), ["TEXT"; 5]);
     assert!((length("DATUM") - TAU * r).abs() < 1e-6 && (length("SCALE_CHECK") - 108.0).abs() < 1e-6);
+    // The two seam copies end the profile: it is open (LWPOLYLINE flag bit 1 clear), so no reader
+    // joins them across the sheet.
+    let flags = on("CUT_PROFILE")[0].3.unwrap();
+    assert_eq!(flags & 1, 0, "CUT_PROFILE is closed: flags {flags}");
     let drawn = &on("CUT_PROFILE")[0].2;
     assert_eq!(drawn.len(), profile.len());
     assert!(drawn.iter().zip(&profile).all(|(a, b)| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6));

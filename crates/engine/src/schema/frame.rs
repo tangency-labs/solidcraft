@@ -1377,15 +1377,54 @@ pub struct TrimParams {
 #[path = "frame_tests.rs"]
 mod tests;
 
+/// Which end of the original ordered member path a cope treats: required, never chosen by
+/// proximity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CopeEnd {
+    Start,
+    End,
+}
+
+/// `frame.export_cope_dxf`'s `seam`: unlike [`AngleExpr`], a bare number is radians, measured
+/// from the end's section x, as the handler and the template's closed form read it. Text is an
+/// angle expression. It accepts exactly what [`AngleExpr`] accepts; only the unit of a bare
+/// number differs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeamAngle(pub Expr);
+
+impl<'de> Deserialize<'de> for SeamAngle {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = json!({ "v": Value::deserialize(d)? });
+        params::expr(&v, "v").map(SeamAngle).ok_or_else(|| D::Error::custom(params::expr_problem(v.get("v"))))
+    }
+}
+
+impl JsonSchema for SeamAngle {
+    fn schema_name() -> Cow<'static, str> {
+        "SeamAngle".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The seam's angle from the end's section x, right-handed about the inward axis: a number of radians, or an angle expression such as \"30 deg\".",
+            "anyOf": [
+                {"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9},
+                {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": not_blank_pattern()}
+            ]
+        })
+    }
+}
+
 /// `frame.cope`: cut a round-tube member's end to fit the outside of its mating members.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CopeParams {
     pub member: String,
     /// One to sixteen distinct straight round-tube mating members.
+    #[schemars(length(min = 1, max = 16))]
     pub tools: Vec<String>,
-    /// start or end of the original ordered path; required, never chosen by proximity.
-    pub end: String,
+    /// start or end of the original ordered path.
+    pub end: CopeEnd,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1395,12 +1434,14 @@ pub struct CopeParams {
 #[serde(deny_unknown_fields)]
 pub struct CopeDxfParams {
     pub member: String,
-    pub end: String,
-    /// Angle in radians or an angle expression, measured from the terminal's x datum.
+    /// start or end of the original ordered path.
+    pub end: CopeEnd,
+    /// Default 0: the end's section x.
     #[serde(default)]
-    pub seam: Option<AngleExpr>,
+    pub seam: Option<SeamAngle>,
     /// Millimetres, independent of the design's display units: 0.001..1, default 0.01.
     #[serde(default)]
+    #[schemars(range(min = 0.001, max = 1.0))]
     pub tolerance: Option<f64>,
     /// Optional DXF destination; without it the reply contains the drawing text.
     #[serde(default)]
