@@ -3828,6 +3828,9 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     for grants in p.plugin_grants.values_mut() {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
+    // Each installed shader has at most four sliders; a hand-edited file keeps a bounded few.
+    p.shader_settings.retain(|key, value| key.len() <= 200 && value.is_finite());
+    p.shader_settings = std::mem::take(&mut p.shader_settings).into_iter().take(crate::plugins::MAX_DISABLED * 4).collect();
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
