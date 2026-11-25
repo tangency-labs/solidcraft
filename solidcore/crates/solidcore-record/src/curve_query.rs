@@ -1,9 +1,8 @@
 //! Curve queries as data: where a curve is nearest a point or a ray ([`CurvePoint`],
-//! [`CurveRayPoint`]), where two curves
-//! cross ([`Crossing`]), where a curve meets a plane ([`PlaneSection`], [`PlanePart`]), what an
-//! imported cubic Bézier stands as ([`CubicStanding`], [`CubicPiece`]) and what a fit spline's
-//! bounds certify ([`FitSplineBounds`]). Plain data: the queries themselves are the kernel's,
-//! through solidcore-ops' `curve` and `curve_fit`.
+//! [`CurveRayPoint`]), where two curves cross ([`Crossing`]), where a curve meets a plane
+//! ([`PlaneSection`], [`PlanePart`]), what an imported cubic Bézier stands as ([`CubicStanding`],
+//! [`CubicPiece`]) and what a fit spline's bounds certify ([`FitSplineBounds`]). Plain data: the
+//! queries themselves are the kernel's, through solidcore-ops' `curve` and `curve_fit`.
 use serde::{Deserialize, Serialize};
 
 use crate::{Vec2, Vec3};
