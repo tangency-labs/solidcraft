@@ -6189,13 +6189,13 @@ impl Document {
     }
 
     /// Give the texts of a sketch the numbers and words their expressions come to (in place): a
-    /// text's height, place and angle that were typed as expressions, and its words built from
+    /// text's height, place, angle and spacing that were typed as expressions, and its words built from
     /// text parameters. A text's outlines are rebuilt from them when the sketch's links are
     /// refreshed, so this comes before that. What was typed as such is left as it is.
     pub fn apply_text_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         use crate::eval::val;
         for link in &mut sk.links {
-            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, exprs, .. } = &mut link.source else { continue };
+            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, style, exprs, .. } = &mut link.source else { continue };
             let number = |e: &Option<String>, kind: Kind, what: &str| -> Result<Option<f64>> {
                 match e {
                     None => Ok(None),
@@ -6216,6 +6216,18 @@ impl Document {
             }
             if exprs.height.is_some() && !(*height > 1e-6 && *height < 1e5) {
                 return Err(DocError::Invalid("a text's height must be positive".into()));
+            }
+            if let Some(v) = number(&exprs.letter_spacing, Kind::Length, "text letter spacing")? {
+                style.letter_spacing = v;
+            }
+            if let Some(v) = number(&exprs.line_spacing, Kind::Unitless, "text line spacing")? {
+                style.line_spacing = v;
+            }
+            if exprs.letter_spacing.is_some() && !style.letter_spacing.is_finite() {
+                return Err(DocError::Invalid("a text's letter spacing must be a finite length".into()));
+            }
+            if exprs.line_spacing.is_some() && !(style.line_spacing.is_finite() && style.line_spacing > 0.0) {
+                return Err(DocError::Invalid("a text's line spacing must be a positive factor".into()));
             }
             if let Some(e) = &exprs.text {
                 let words = self.eval_words(e, vals).map_err(|error| DocError::Expr(format!("text: {error}")))?;

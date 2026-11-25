@@ -101,14 +101,15 @@ pub enum LinkSource {
         /// Bold or italic, alignment, spacing and the curve the text follows.
         #[serde(default, skip_serializing_if = "crate::text::TextStyle::is_plain")]
         style: crate::text::TextStyle,
-        /// The expressions behind the numbers above that were typed as expressions.
+        /// The expressions behind the numbers above that were typed as expressions (boxed: most
+        /// texts have none, and the other links stay small).
         #[serde(default, skip_serializing_if = "TextExprs::is_empty")]
-        exprs: TextExprs,
+        exprs: Box<TextExprs>,
     },
 }
 
 /// The expressions behind a text's numbers that were typed as expressions: its place (`x`, `y`),
-/// its height and its angle; and behind its words (`text`), an expression of the design's text
+/// its height, its angle and its spacing (`letter_spacing` in mm, `line_spacing` a factor); and behind its words (`text`), an expression of the design's text
 /// parameters. A number or text without an expression is the one typed. The numbers and words
 /// of `LinkSource::Text` are what the expressions gave last: the document evaluates them against
 /// its parameters before the text's outlines are rebuilt (`Document::apply_text_values`), and
@@ -123,6 +124,10 @@ pub struct TextExprs {
     pub height: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<String>,
     /// The words: text parameters and quoted texts joined by `+` (`Label + '-L'`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -136,14 +141,24 @@ impl TextExprs {
     /// The expressions of numbers set, each with what it sets (the words' expression is of
     /// texts, not numbers: [`TextExprs::text`]).
     pub fn list(&self) -> Vec<(&'static str, &String)> {
-        [("Text X", &self.x), ("Text Y", &self.y), ("Text height", &self.height), ("Text angle", &self.angle)]
-            .into_iter()
-            .filter_map(|(what, e)| e.as_ref().map(|e| (what, e)))
-            .collect()
+        [
+            ("Text X", &self.x),
+            ("Text Y", &self.y),
+            ("Text height", &self.height),
+            ("Text angle", &self.angle),
+            ("Text letter spacing", &self.letter_spacing),
+            ("Text line spacing", &self.line_spacing),
+        ]
+        .into_iter()
+        .filter_map(|(what, e)| e.as_ref().map(|e| (what, e)))
+        .collect()
     }
 
     pub fn list_mut(&mut self) -> Vec<&mut String> {
-        [&mut self.x, &mut self.y, &mut self.height, &mut self.angle].into_iter().filter_map(Option::as_mut).collect()
+        [&mut self.x, &mut self.y, &mut self.height, &mut self.angle, &mut self.letter_spacing, &mut self.line_spacing]
+            .into_iter()
+            .filter_map(Option::as_mut)
+            .collect()
     }
 }
 

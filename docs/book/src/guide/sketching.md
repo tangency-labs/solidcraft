@@ -239,11 +239,14 @@ adds folders to the ones searched for installed fonts. On Windows, SolidCraft al
 font files from the current user's and machine's `Software\Microsoft\Windows NT\CurrentVersion\Fonts`
 registry keys, including absolute file paths outside the standard Windows and per-user Fonts
 folders. Restart SolidCraft after installing fonts to refresh the cached list. A text's `height`, its
-`angle` and each coordinate of its `at` can be expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
-`"at": ["plate_width / 2", 5]`): the text keeps the expression and follows the parameters when they change, and
+`angle`, each coordinate of its `at`, its `letter_spacing` and its `line_spacing` (a factor) can be
+expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
+`"at": ["plate_width / 2", 5]`, `"line_spacing": "leading"`), in the commands and in the **Edit Text**
+dialog's fields: the text keeps the expression and follows the parameters when they change, and
 saves it with the design. A number takes the place of an expression, and so does moving the text or dragging its
-handles (what moves becomes a number; turning a text leaves its height as it was). A string that names no
-parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
+handles (what moves becomes a number; turning a text leaves its height as it was). A value typed as
+`name = value` (`"letter_spacing": "gap = 2 mm"`) adds that parameter and the text follows it. Any other string
+that names no parameter is the number it comes to. The same two commands refuse a `text` that is not a string, an `at` that is
 not two numbers or expressions, a `height` or `angle` that is neither (or a `height` that is not positive) and an
 expression that cannot be worked out with a message, instead of drawing the text with a default; left out, they
 keep their defaults.

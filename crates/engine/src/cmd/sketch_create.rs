@@ -9,7 +9,7 @@ use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
     () => {
-        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
+        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, or an expression, line_spacing?: times the font's line distance (default 1), or an expression, path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
     };
 }
 
@@ -320,13 +320,19 @@ fn text_style(p: &Value, cmd: &str, old: TextStyle) -> Result<TextStyle> {
         }
         Some(_) => return Err(bad(cmd, VERTICAL_MUST)),
     }
-    if p.get("letter_spacing").is_some_and(|v| !v.is_null()) {
-        style.letter_spacing =
-            num(p, "letter_spacing").filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`letter_spacing` must be a length in mm"))?;
+    // An expression (a string) is `text_source`'s to read.
+    if p.get("letter_spacing").is_some_and(|v| !v.is_null() && !v.is_string()) {
+        style.letter_spacing = num(p, "letter_spacing")
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| bad(cmd, "`letter_spacing` must be a length in mm, or an expression"))?;
     }
-    if p.get("line_spacing").is_some_and(|v| !v.is_null()) {
-        style.line_spacing =
-            num(p, "line_spacing").filter(|v| v.is_finite() && *v > 0.0).ok_or_else(|| bad(cmd, "`line_spacing` must be a positive factor"))?;
+    if p.get("line_spacing").is_some_and(|v| !v.is_null() && !v.is_string()) {
+        let s =
+            num(p, "line_spacing").filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`line_spacing` must be a positive factor, or an expression"))?;
+        if s <= 0.0 {
+            return Err(bad(cmd, "`line_spacing` must be a positive factor"));
+        }
+        style.line_spacing = s;
     }
     match p.get("path") {
         None | Some(Value::Null) => {}
@@ -347,7 +353,8 @@ pub(crate) const AT_MUST: &str = "`at` must be the baseline start [x, y], each a
 /// to. Returns the value (mm or radians) and the expression kept. Anything else is refused with
 /// `must`.
 pub(super) fn text_number(doc: &solidcraft_doc::Document, v: &Value, cmd: &str, key: &str, must: &str, angle: bool) -> Result<(f64, Option<String>)> {
-    text_number_in(doc, v, cmd, key, must, angle, false)
+    use solidcraft_doc::expr::Kind;
+    text_number_in(doc, v, cmd, key, must, if angle { Kind::Angle } else { Kind::Length }, false)
 }
 
 /// Shared numeric parsing with explicit paper defaults. The source parameter
@@ -358,11 +365,11 @@ pub(super) fn text_number_in(
     cmd: &str,
     key: &str,
     must: &str,
-    angle: bool,
+    kind: solidcraft_doc::expr::Kind,
     paper: bool,
 ) -> Result<(f64, Option<String>)> {
     use solidcraft_doc::expr::{self, Kind};
-    let kind = if angle { Kind::Angle } else { Kind::Length };
+    let angle = kind == Kind::Angle;
     match v {
         Value::Number(n) => {
             let x = n.as_f64().and_then(crate::params::finite).ok_or_else(|| bad(cmd, must))?;
@@ -381,6 +388,24 @@ pub(super) fn text_number_in(
         }
         _ => Err(bad(cmd, must)),
     }
+}
+
+/// A text field's number and expression: [`text_number_in`], and a value typed as a definition
+/// (`gap = 2 mm`, #4071) is kept too, so the design stores that parameter and the text follows it.
+fn text_value(
+    doc: &solidcraft_doc::Document,
+    v: &Value,
+    cmd: &str,
+    key: &str,
+    must: &str,
+    kind: solidcraft_doc::expr::Kind,
+) -> Result<(f64, Option<String>)> {
+    let (x, e) = text_number_in(doc, v, cmd, key, must, kind, false)?;
+    let defined = match v {
+        Value::String(t) if solidcraft_doc::expr::definition(t.trim()).is_some() => Some(doc.with_design_unit(t.trim(), kind)),
+        _ => None,
+    };
+    Ok((x, e.or(defined)))
 }
 
 /// A text's values as `text_source` works on them: text, place, height, angle (radians), font,
@@ -418,8 +443,8 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         None | Some(Value::Null) => {}
         Some(Value::Array(a)) => {
             let [x, y] = a.as_slice() else { return Err(bad(cmd, AT_MUST)) };
-            (at.x, exprs.x) = text_number(doc, x, cmd, "`at` x", AT_MUST, false)?;
-            (at.y, exprs.y) = text_number(doc, y, cmd, "`at` y", AT_MUST, false)?;
+            (at.x, exprs.x) = text_value(doc, x, cmd, "`at` x", AT_MUST, solidcraft_doc::expr::Kind::Length)?;
+            (at.y, exprs.y) = text_value(doc, y, cmd, "`at` y", AT_MUST, solidcraft_doc::expr::Kind::Length)?;
         }
         Some(v) => {
             at = crate::params::vec2(v).ok_or_else(|| bad(cmd, AT_MUST))?;
@@ -427,13 +452,15 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         }
     }
     if let Some(v) = p.get("height").filter(|v| !v.is_null()) {
-        (height, exprs.height) = text_number(doc, v, cmd, "`height`", "`height` must be a length in mm, or an expression", false)?;
+        (height, exprs.height) =
+            text_value(doc, v, cmd, "`height`", "`height` must be a length in mm, or an expression", solidcraft_doc::expr::Kind::Length)?;
     }
     if !(height > 1e-6 && height < 1e5) {
         return Err(bad(cmd, "`height` must be positive"));
     }
     if let Some(v) = p.get("angle").filter(|v| !v.is_null()) {
-        (angle, exprs.angle) = text_number(doc, v, cmd, "`angle`", "`angle` must be an angle in degrees, or an expression", true)?;
+        (angle, exprs.angle) =
+            text_value(doc, v, cmd, "`angle`", "`angle` must be an angle in degrees, or an expression", solidcraft_doc::expr::Kind::Angle)?;
     }
     let font = match p.get("font") {
         None | Some(Value::Null) => f0,
@@ -442,11 +469,44 @@ fn text_source(doc: &solidcraft_doc::Document, design: Option<&str>, p: &Value, 
         Some(Value::String(f)) => Some(super::design_link::whole_font(design, f).unwrap_or_else(|| f.trim().to_string())),
         Some(_) => return Err(bad(cmd, "`font` must be a font family name or a font file path")),
     };
-    let style = text_style(p, cmd, s0)?;
+    let mut style = text_style(p, cmd, s0)?;
+    // The spacing: a number replaces an expression, a string is one (in the design's units for
+    // the letter spacing; the line spacing is a factor).
+    match p.get("letter_spacing") {
+        None | Some(Value::Null) => {}
+        Some(v @ Value::String(_)) => {
+            (style.letter_spacing, exprs.letter_spacing) = text_value(
+                doc,
+                v,
+                cmd,
+                "`letter_spacing`",
+                "`letter_spacing` must be a length in mm, or an expression",
+                solidcraft_doc::expr::Kind::Length,
+            )?;
+        }
+        Some(_) => exprs.letter_spacing = None,
+    }
+    match p.get("line_spacing") {
+        None | Some(Value::Null) => {}
+        Some(v @ Value::String(_)) => {
+            (style.line_spacing, exprs.line_spacing) = text_value(
+                doc,
+                v,
+                cmd,
+                "`line_spacing`",
+                "`line_spacing` must be a positive factor, or an expression",
+                solidcraft_doc::expr::Kind::Unitless,
+            )?;
+            if style.line_spacing <= 0.0 {
+                return Err(bad(cmd, "`line_spacing` must be a positive factor"));
+            }
+        }
+        Some(_) => exprs.line_spacing = None,
+    }
     // An unknown font, an unreadable file or a style the font lacks is an error now, not a lost
     // link later; so is a font file outside an agent's folders (the font reader asks `vfs`).
     solidcraft_sketch::font_data_styled(font.as_deref(), style.bold, style.italic).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(LinkSource::Text { text, at, height, angle, font, style, exprs })
+    Ok(LinkSource::Text { text, at, height, angle, font, style, exprs: Box::new(exprs) })
 }
 
 /// The expressions behind a text's numbers, for a command's reply (`{"height": "plate_h / 10"}`).
@@ -457,9 +517,11 @@ fn text_exprs(src: &LinkSource) -> Option<TextExpressions> {
         y: exprs.y.clone(),
         height: exprs.height.clone(),
         angle: exprs.angle.clone(),
+        letter_spacing: exprs.letter_spacing.clone(),
+        line_spacing: exprs.line_spacing.clone(),
         text: exprs.text.clone(),
     };
-    let any = [&out.x, &out.y, &out.height, &out.angle, &out.text].iter().any(|e| e.is_some());
+    let any = [&out.x, &out.y, &out.height, &out.angle, &out.letter_spacing, &out.line_spacing, &out.text].iter().any(|e| e.is_some());
     any.then_some(out)
 }
 
@@ -603,7 +665,7 @@ fn apply_text_edits(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Opt
     match p.get("edits") {
         None | Some(Value::Null) => {
             let change = apply_text_edit(sk, doc, design, p)?;
-            Ok(EditTextResult::One(TextResult { change, created: None, param_warnings: Vec::new() }))
+            Ok(EditTextResult::One(Box::new(TextResult { change, created: None, param_warnings: Vec::new() })))
         }
         Some(Value::Array(edits)) => {
             if edits.is_empty() || edits.len() > MAX_TEXT_EDITS {
@@ -626,7 +688,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, design: Opti
         _ => return Err(bad(cmd, "give `link` or `entity`")),
     };
     let old = match sk.link(&l).map(|x| (x.kind, x.source.clone())) {
-        Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, exprs),
+        Some((LinkKind::Text, LinkSource::Text { text, at, height, angle, font, style, exprs })) => (text, at, height, angle, font, style, *exprs),
         _ => return Err(bad(cmd, format!("`{l}` is not text"))),
     };
     let src = text_source(doc, design, p, cmd, Some(old))?;
