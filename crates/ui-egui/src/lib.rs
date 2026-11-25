@@ -314,6 +314,7 @@ mod rule_editor;
 mod rule_editor_tests;
 pub mod safe_graphics;
 pub mod save_job;
+mod scale_bar;
 pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
@@ -2119,6 +2120,9 @@ impl SolveApp {
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.scale_bar" {
+                self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
             if id == "select.mode"
                 && let Some(mode) = v.get("mode").and_then(|m| serde_json::from_value(m.clone()).ok())
             {
@@ -2794,6 +2798,10 @@ impl SolveApp {
         }
         if id == "view.origin_axes_across_view" {
             let _ = self.run(id, json!({"enabled": !self.preferences.origin_axes_across_view}));
+            return;
+        }
+        if id == "view.scale_bar" {
+            let _ = self.run(id, json!({"enabled": !self.preferences.scale_bar}));
             return;
         }
         // Another command ends Edit Text (its dialog is not a feature edit to keep).

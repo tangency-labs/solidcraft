@@ -8275,8 +8275,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let card = app.viewport.card;
     let notice = app.viewport.window.unwrap_or(rect);
     let overlay_rect = crate::shell::bottom_readout_rect(app, notice);
+    let mut legends = Vec::new();
     if !card {
-        crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+        legends.extend(crate::viewport_details::legacy_legends(app, ui, overlay_rect));
         placement_note(app, &painter, overlay_rect);
         crate::frame_rate::paint(app, ui, &painter, overlay_rect);
     }
@@ -9022,6 +9023,20 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let readout = if card { None } else { quick_measure_readout(app, ui, overlay_rect) };
     let mut toasts = if card { Vec::new() } else { transient_messages(app, ui, notice, readout) };
     toasts.extend(app.operations.rect.filter(|_| !card));
+    // The scale bar in the opposite corner, clear of all of the above (#375).
+    if !card {
+        let scale_bar = {
+            let mut taken = crate::shell::covered_rects(app);
+            if let Some(layout) = &app.viewport.layout {
+                taken.extend([layout.navigation, layout.axis_view]);
+            }
+            taken.extend(readout);
+            taken.extend(toasts.iter().copied());
+            taken.extend(legends);
+            crate::scale_bar::show(app, ui, &proj, crate::shell::content_rect(app, overlay_rect), &taken)
+        };
+        toasts.extend(scale_bar);
+    }
     if !card
         && app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
@@ -9342,6 +9357,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     {
         crate::scenario::publish_rect("toast:placement", r);
         obstacles.push(r);
+        shown.push(r);
         free.max.y = r.top() - t.space_8;
     }
     if let Some((msg, at, error)) =
