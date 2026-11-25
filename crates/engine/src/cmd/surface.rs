@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_trim")
         .contract(&SURFACE_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|face_normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction; face_normal: projected along the surface's own normal, each point of a curve to its nearest point of the surface, and `keep` picks regions)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
+        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body} (the whole bounded cutting sheet) | {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|face_normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction; face_normal: projected along the surface's own normal, each point of a curve to its nearest point of the surface, and `keep` picks regions)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", crate::checked!("surface.extrude", surface_extrude)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
@@ -767,6 +767,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
             body: BodyName(body),
             plane: xy(),
             tool: None,
+            tool_body: None,
             keep: Position(keep),
             keep_more: keep_more.into_iter().map(Position).collect(),
             curves: None,
@@ -780,12 +781,22 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     if given("keep_with") || given("stitch") || given("extend") {
         return Err(bad(cmd, "`keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)"));
     }
-    let (plane, tool, curves) = match (p.get("tool").filter(|t| !t.is_null()), p.get("curves").filter(|c| !c.is_null())) {
+    let (plane, tool, tool_body, curves) = match (p.get("tool").filter(|t| !t.is_null()), p.get("curves").filter(|c| !c.is_null())) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `tool` or `curves`, not both")),
         (Some(t), None) => {
             let tb = t.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`tool.body` must name a body"))?.to_string();
-            let point = t.get("point").and_then(vec3).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
-            (xy(), Some(FaceAt { body: BodyName(tb), point: Position(point) }), None)
+            match t.get("point") {
+                None => {
+                    if tb == body {
+                        return Err(bad(cmd, "the cutting sheet must be another body"));
+                    }
+                    (xy(), None, Some(BodyName(tb)), None)
+                }
+                Some(v) => {
+                    let point = vec3(v).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
+                    (xy(), Some(FaceAt { body: BodyName(tb), point: Position(point) }), None, None)
+                }
+            }
         }
         (None, Some(c)) => {
             let sketch = sketch_id(s, c.get("sketch"), cmd, "curves.sketch")?;
@@ -810,14 +821,15 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
                     (Some(d), false)
                 }
             };
-            (xy(), None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir), face_normal }))
+            (xy(), None, None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir), face_normal }))
         }
-        (None, None) => (plane_param(s, p.get("plane"), cmd)?, None, None),
+        (None, None) => (plane_param(s, p.get("plane"), cmd)?, None, None, None),
     };
     let kind = FeatureKind::SurfaceTrim {
         body: BodyName(body),
         plane,
         tool,
+        tool_body,
         keep: Position(keep),
         keep_more: keep_more.into_iter().map(Position).collect(),
         curves,
@@ -2201,6 +2213,63 @@ mod tests {
             .to_string();
         assert!(e.contains("normal, face_normal or [x, y, z]"), "{e}");
         assert_eq!(s.doc.to_json(), before);
+    }
+
+    /// The cutter bends at (5, 3): the lower part of a 10 × 10 square is
+    /// 5·3 + 5·(3+5)/2 = 35. Extending either face alone gives the wrong cut.
+    #[test]
+    fn trim_by_a_whole_sheet_preserves_face_tools_and_rebuilds() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Floor", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cutter sketch"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[-5, 3], [5, 3], [15, 7]]}));
+        let ids = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "surface.extrude",
+            json!({"sketch": "Cutter sketch", "curves": ids,
+            "start_offset": -5, "distance": 10, "body_name": "Cutter"}),
+        );
+        assert_eq!(s.model.state().body("Cutter").unwrap().body.face_count(), 2);
+        s.param_check = crate::schema::ParamCheck::Strict;
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Cutter"}, "keep": [2, 1, 0]}));
+        assert!((area(&s, "Floor") - 35.0).abs() < 1e-9);
+        let saved = s.doc.to_json();
+        let cold = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!((area(&cold, "Floor") - 35.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((area(&s, "Floor") - 100.0).abs() < 1e-9);
+        run(&mut s, "edit.redo", json!({}));
+        assert!((area(&s, "Floor") - 35.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Cutter", "point": [0, 3, 0]}, "keep": [2, 1, 0]}));
+        assert!((area(&s, "Floor") - 30.0).abs() < 1e-9, "an explicit face still extends that face");
+    }
+
+    /// A cutting sheet in a component placed 50 mm along X cuts where it is shown. The wall is
+    /// drawn at local x = -47 (y from -5 to 15, z from -5 to 5), so it is shown at x = -47 + 50 = 3,
+    /// across the root's 10 × 10 floor (x 0 to 10, y 0 to 10): the kept side x > 3 is 7 × 10 = 70.
+    /// At its local x = -47 it would miss the floor, which would stay 100 or be refused. The
+    /// tool-face form picks the wall at its shown point (3, 5, 0) and keeps the same 70.
+    #[test]
+    fn trim_by_a_cutting_body_in_a_placed_component_cuts_where_it_is_shown() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Floor", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "component.create", json!({"name": "CutPart", "grounded": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Wall sketch"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[-47, -5], [-47, 15]]}));
+        let ids = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Wall sketch", "curves": ids, "start_offset": -5, "distance": 10, "body_name": "Wall"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "CutPart:1", "space": "world", "translate": [50, 0, 0]}));
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall"}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((area(&s, "Floor") - 100.0).abs() < 1e-9);
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall", "point": [3, 5, 0]}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
     }
 
     /// A U-shaped sheet (legs at x = 0 and 10, 10 high; base along y = 0; 10 deep) cut by the
