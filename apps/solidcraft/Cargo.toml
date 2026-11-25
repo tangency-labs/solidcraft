@@ -31,6 +31,11 @@ todo = "warn"
 too_many_arguments = "allow"
 type_complexity = "allow"
 neg_cmp_op_on_partial_ord = "allow"
+# `eprintln!` and `eprint!` panic when stderr is a pipe whose reader has closed, which an agent
+# running `solidcraft mcp` (and the app that one starts) can leave behind (#10111). Write through
+# `solidcraft_geom::note!` (`solidcraft_engine::note!`), which ignores a failed write. Tests are
+# exempt (clippy.toml `allow-print-in-tests`); examples and build scripts allow it at the top.
+print_stderr = "deny"
 
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
@@ -79,14 +84,15 @@ hidapi = { version = "2.6.7", default-features = false, features = ["windows-nat
 # The main window's handle for src/native_frame.rs (already in the tree through eframe and winit).
 raw-window-handle = "0.6"
 # Native crash capture (src/native_crash.rs): the exception filter, the faulting module, a minidump.
-# The window's resize border, DPI size and class icon (src/native_frame.rs): the window procedure, hit
-# test, DPI, the exe's icon.
+# The window's resize border, DPI size, class icon and DWM frame (src/native_frame.rs): the window
+# procedure, hit test, DPI, the exe's icon, the shadow.
 # Finding 3D mice through Plug and Play without asking other devices anything (src/space_mouse/windows_hid.rs).
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_HumanInterfaceDevice",
     "Win32_Devices_Properties",
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
@@ -96,7 +102,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
     "Win32_System_Threading",
+    "Win32_UI_Controls",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }

@@ -60,6 +60,7 @@ Query replies contain no new host effects.
 | `panel.reset_pair` | `{first,second,expected_revision?}`. Resets adjacent sections to the registered default ratio within intersected bounds. |
 | `panel.native_close` | `{target:{type:"native_host",id:HostId},expected_revision?}`. Native window close redocks its whole section; it does not explicitly close/cancel content. |
 | `layout.save` | `{name,overwrite?:false,expected_revision?}` → `{name,overwritten,state}`. Saves the complete current envelope in the injected catalogue. |
+| `layout.delete` | `{name,expected_revision?}` → `{name,state}`. Deletes a user layout from the injected catalogue. Built-ins return a capability error, unknown names a missing-target error. The panels stay where they are, even when they match the deleted layout. |
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
@@ -202,7 +203,7 @@ trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
 
 With application panel preferences enabled, the existing Layout preferences page
-uses these commands for workspace selection, named layout save/apply and reset.
+uses these commands for workspace selection, named layout save/apply/delete and reset.
 Reset changes only the current workspace and keeps the named layout library.
 Preferences Cancel restores the layout and catalogue through runtime admission;
 if restoration is refused, the dialog and its saved baseline stay open. Periodic
@@ -555,7 +556,11 @@ run, so nothing is queued to apply unseen behind it. `control.pending` belongs t
 connection: a new connection has nothing pending. The bridged MCP server does this itself
 ([mcp.md](mcp.md#long-running-requests)).
 
-`control.pending` answers only for its own connection. `control.running` answers for the whole
+`control.pending` answers only for its own connection, but both it and `control.running` add a
+`background` list while the app runs work no connection owns that holds others out: a plugin package
+job (`plugin.install`, `plugin.remove`) with its `command`, `subject` (the archive or plugin),
+`running_s` and `ends_by_itself_in_s`. Such a job is abandoned after five minutes and the next
+install or removal then runs. `control.running` answers for the whole
 app, the same on every connection, at once (it never waits behind a running request, and a
 connection may ask it while it is `busy`): every request the app has been sent and has not
 answered yet, oldest first, from any connection, including a timed-out one whose connection has
@@ -665,7 +670,8 @@ a menu (neither describes the open one).
 | `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: `true` only when a rollback was asked for and the design is where the batch started, `false` when `rollback: false` or when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, `document.activate`, and `file.new` or `doc.open` with `new_tab: true`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `rolled_back` as after a rollback that went back (`true`, or `false` when `rollback: false`: the design is where the batch started), `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
-| `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
+| `document.selection` | — | `{selection}`: what the user has selected, as the block of text the chat's Attach selection sends (faces and edges with the names and indices the tools take, features and bodies by name, at most 64 items with the rest counted); `null` when nothing is selected. The MCP server adds it to every tool reply |
+| `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change, and `design.opened`, `design.closed` and `design.saved` events when a design opens, closes or is saved ([Following the design](#following-the-design)) |
 | `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false), `timeline?`: `true` (default), `"summary"` (each feature as `id`, `name`, `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when set) or `false` (left out), `bodies?`: `true` (default), `"names"` (only the body names, nothing measured) or `false` (left out) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
 | `mcp.options` | — | `{"compact": bool}`: the output the MCP server bridged to this app should give its agents (Preferences › AI › Agents through MCP, `ui.prefs` `mcp_compact`, default false; [MCP](mcp.md#compact-output)) |
 | `document.export` | — | `{name, revision, dirty, format, text}`: the active design as its file holds it, for a host that keeps the files itself ([browser command API](browser-api.md)). `text` is the design's JSON, what a `.json` design file holds; `format` is `"json"`; `revision` is the one `document.revision` answers for this state. Only reads |
@@ -875,13 +881,15 @@ application preference/session setting, never saved design-format data. Policy c
 the view revision only when visible effects or their declarations change.
 
 A client need not ask again and again: after `control.subscribe` on its connection, the app
-sends it a line whenever the active design changes (#6985):
+sends it a line whenever the active design changes (#6985), and an event when a design opens,
+closes or is saved (#21184):
 
 ```text
 {"id":1,"method":"control.subscribe","token":"…"}
 → {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3}}
-{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-1","revision":4}}
-{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-2","revision":5}}
+{"event":"design.opened","params":{"document_id":"18f3a0c2d4e5b6a7-2","path":"/work/Bracket.solidcraft","read_only":false}}
+{"event":"design.saved","params":{"document_id":"18f3a0c2d4e5b6a7-2","path":"/work/Bracket.solidcraft","previous_path":null,"disk":{"len":5120,"modified_ns":"1763900000000000000"}}}
+{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-2","revision":4}}
 ```
 
 - The reply is what `document.revision` answers then (and, like it, does not wait behind design
@@ -899,6 +907,34 @@ sends it a line whenever the active design changes (#6985):
   second `control.subscribe` on a subscribed connection is refused with `already subscribed`;
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
+- `design.opened` has `{document_id, path, read_only}`. It is sent when a design's id joins the
+  open tabs: a second tab, a recovered design, a design started in place of a blank. `path` is
+  null for a design with no file yet. `design.closed` has `{document_id, path}`, sent when an id
+  leaves the open tabs, with the path it last had. A design swapped in place reports a close for
+  the old id and an open for the new one. Opening a file that is already open only switches tabs,
+  so nothing is sent.
+- `design.saved` has `{document_id, path, previous_path, disk}`. It is sent when a save of the
+  design file finishes successfully: Save, Save As, Save a Copy (the tab moves to the copy), and
+  `file.save` or `file.save_as` from any caller. `previous_path` is the file the design had before
+  the save when the path changed, and null otherwise (a first save of an untitled design, or a save
+  to the same file). `disk` is `{len, modified_ns}`, with `modified_ns` as a decimal string, and
+  null when there is no file stamp.
+- These events are one-off, in order, and never combined: each is a line of its own. The opened,
+  closed and saved events from a moment come before the `design.changed` line for it. Only
+  `design.changed` is coalesced.
+- A client can get an event for a state it has already read, but it never misses one, except as
+  the next point says. So it subscribes first, then reads `ui.documents` for its starting point.
+  No event comes before the subscribe reply.
+- The open designs are compared after each request, before each save is reported, and at the end
+  of each frame, so a design's `design.opened` always comes before its `design.saved`. A design
+  that the steps of one `engine.script` or `engine.batch` open and close again without saving it
+  gives no event. A rolled-back batch that saved nothing sends none. One that saved a file reports
+  the saved design as opened, saved and closed, since the file was written, and a design it
+  replaced as closed and opened again.
+- A connection more than 256 events behind is sent `{"event":"events.dropped","params":{"count":N}}`
+  before the events it still gets. The client then reads `ui.documents` again to catch up.
+- Nothing sends these events for autosave or recovery files, exports, `document.saved` (which
+  writes no file), or quitting the app, which closes the connection instead.
 
 ### Example: driving a hinge and reading its angle (#17909)
 
@@ -1166,6 +1202,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
 - `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
 - `design_views_as_tabs` (default false: each design keeps one tab, with a view switcher menu while it has more than one view; true: a design's views are tabs inside its tab)
+- `designs_folder` (string, default empty: Save and Save As open in the folder last used; otherwise the folder they open in for a design that has never been saved. Save As for a saved design still opens beside it. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_rim` (default true: dimension lines and arrows, and fully constrained sketch lines, are drawn over a rim in the theme's halo colour so they read on a lit face in the Dark theme; false draws them bare, #17575)
@@ -1175,6 +1212,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_text_scale` (default 1, 0.5…2.5: how far a sketch dimension's text is scaled; it applies in the open sketch and to Show Dimensions, #14121)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
+- `exports_folder` (string, default empty: export dialogs open in the folder last used; otherwise the folder File › Export, Save As Mesh and other saved files open in, until another folder is chosen in one of them. Desktop app only; [default folders](book/src/guide/files.md#default-folders), #5522)
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `extrude_custom_distance` (string, default `10 mm`: the length a new Extrude starts at when `extrude_start` is `custom`; any length expression, and one that doesn't read as a length gives the fixed 10)
@@ -1236,6 +1274,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
 - `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` and `plugin.revoke` delete the record. The app also keeps the records in the plugins folder's grant store, shared with the command line and headless MCP when they run with `--keep-plugin-approvals` ([Headless use](plugins.md#headless-use)). Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
+- `preview_reselect_modifier` (`primary_at_least` (default: Command on macOS or Control elsewhere, with extra modifiers allowed), `control` (physical Control alone), `primary` (Command on macOS or Control elsewhere, alone), `alt`, `shift`, or `disabled`: temporarily hide the feature preview for geometry reselect; see Preview Reselect Modifier below)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `region_pick_takes_holes` (default false: a click inside a closed profile for the Entities of Sketch Transform, Move/Copy, Scale, Mirror and the sketch patterns picks the curves of its outline, and a shape inside it is picked by a click inside that shape, #14496; true also picks the curves of its holes, as before)
@@ -1247,9 +1286,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `legacy_surface_toolbar` (Layout, default false): restore the Surface tab's Convert section with Thicken and Convert Mesh. Off puts Thicken in Create and mesh commands in Mesh.
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
-- `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back) or `extra2` (side forward), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
+- `nav_button_map` (default `{}`: every button follows the mouse mapping): what dragging a button does, by `left`, `middle`, `right`, `extra1` (side back), `extra2` (side forward) or `button6` to `button16` (the further buttons of a mouse with many), as `orbit`, `pan`, `zoom` or `none`, after any keys held (`shift+`, `ctrl+`, `alt+`), e.g. `{"extra1": "orbit", "extra2": "shift+pan"}`. A mapped button replaces the preset's bindings for it; a plain click on a side button still goes Back
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
-- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
+- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in any visual style, including Fillet and Chamfer inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
@@ -1274,13 +1313,17 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `stand_up_unknown` (`note` (default: a file whose header names no program known to save Y up and whose bodies seem to lie on their back (their flat area across Y outweighs their flat area facing down Z) gets a small note over the view, "Did this part open the wrong way up?", with Stand it up and Don't ask again as the handles `stand_up:stand` and `stand_up:never`, and its close (×) as `toast:stand_up:close` (also `stand_up:dismiss`); it goes by itself after 10 seconds and never blocks input), `ask` (the "Stand this part up?" dialog for every file from another program, SolidWorks too, without looking at how it rests, as before #7717), `off` (no offer); otherwise a SolidWorks file gets the dialog, or the note when its bodies clearly stand on Z already)
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
-- `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before)
+- `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before; either way a tab's right-click menu offers Rename, handle `tab_menu:ui.renameTab`, which shows that design and edits its name the same way)
 - `theme` (`dark`, `light`, `system` or a theme file's id: a built-in one such as `gruvbox-dark`, or an imported one; the reply's `theme_ids` lists them)
 - `theme_export: true` (the reply's `theme_file` is the active theme, including a followed file; themes with options retain their authored definitions, defaults and overlays, while older themes keep the complete snapshot shape; saved option values are excluded; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
 - `theme_follow` (desktop only, default `""`: a `solidcraft-theme/1` file's path to follow as the theme, reloaded within about a second whenever it changes and when the window gains the focus; the file is read at once, and a file that doesn't read keeps the last good theme; `""` stops following, as does setting `theme`; in the browser it is an error; the launch flag `--theme-file PATH` follows a file for one run without saving it; the reply's `theme_followed` is the path followed now or null, and `theme_follow_error` why its last read was not applied, or null)
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
 - `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
 - `theme_remove` (an imported theme's id; also removes its saved option values)
+- `timeline_2d` (default false: the History at the bottom is the 2D Timeline, with a row for each component in a Modeling track and an Assembly track; false keeps the 1D timeline)
+- `timeline_2d_cell_dots` (default true: empty cells in the 2D Timeline show a small alignment dot)
+- `timeline_2d_component_activation` (default true: a click on a component's row label or radio dot in the 2D Timeline makes that component active)
+- `timeline_2d_unsuppress_mode` (`restore_state` (default), `unsuppress_all`: unsuppressing a feature in the 2D Timeline keeps the dependents suppressed separately there in this session suppressed, or unsuppresses all dependents)
 - `timeline_origin_bodies` (default false: the History on the left or under the browser starts with the active component's Bodies folder and the Origin, the browser's rows with their eyes, folds and menus; the bottom History is unchanged)
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
@@ -1385,6 +1428,24 @@ Pan and orbit take `delta: [dx,dy]` in screen points (each within ±10000); pan 
 viewport size. Zoom takes `factor` (0.05..20, below 1 zooms in) and an optional world-space
 `anchor`. The returned `camera` is applied immediately by the UI, without animation,
 document edits, undo steps or a success-log entry per movement.
+
+### Preview Reselect Modifier
+
+Preferences > Keyboard Shortcuts > Modifier Keys controls **Hide preview for reselect**.
+The default keeps the old platform-primary behaviour: Command on macOS or Control elsewhere
+hides the preview even when extra modifiers are held. The modifier temporarily hides an active
+feature preview so obscured geometry can be selected; it does not suppress the saved feature.
+Manipulator drags prevent rollback for every choice.
+
+`ui.prefs {"preview_reselect_modifier":"primary_at_least"}` selects the default, labelled
+**Cmd + modifiers** or **Ctrl + modifiers**. It retains the old interaction with macOS
+screenshot chords. To avoid that interaction, select `control` (physical Control alone),
+`primary` (Command on macOS or Control elsewhere, alone), `alt` (Option on macOS), `shift`,
+or `disabled`. These opt-in key choices require an exact match: extra modifiers, including
+physical Control with Command on macOS, prevent rollback.
+
+The setting follows Apply/OK/Cancel, the per-row Reset button and Restore page defaults, and
+is included in shortcut exports. Older settings without it retain `primary_at_least`.
 
 ## MCP
 

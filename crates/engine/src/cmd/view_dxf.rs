@@ -180,7 +180,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 fn refused(e: Refused) -> String {
     match e {
         Refused::Cancelled => "DXF export cancelled".into(),
-        Refused::Work | Refused::Memory => format!("{e}: hide bodies or sketches, or increase tolerance"),
+        Refused::Work | Refused::MeshBuffers(_) | Refused::MeshTriangles(_) | Refused::ViewNodes(_) | Refused::SketchPoints(_) => {
+            format!("{e}: hide bodies or sketches, or increase tolerance")
+        }
         Refused::EyePlane => format!("{e}: zoom out before exporting"),
         Refused::Invalid(_) => e.to_string(),
     }
