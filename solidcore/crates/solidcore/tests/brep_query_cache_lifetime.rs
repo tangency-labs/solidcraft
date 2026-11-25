@@ -1,12 +1,12 @@
-//! WR-732 (#2503): with `UpstreamFixes::brep_ray_classifies_current_trims`, a B-rep
-//! point classification classifies against each face's current trims, also while the
-//! B-rep is being edited. `SmTrimSrfCache::BuildTree` implants no trims while editing
-//! is on, so upstream counts a face it builds a cache for then as its untrimmed
-//! surface, and answers right only when it reuses a cache it built before the edit.
-//! The rays build their caches afresh, so once editing was on (the fillet session's
-//! trim step, #2365) points inside the bar classified as outside. With the flag the
-//! ray's tree of a face whose loops close is built against the face as it is,
-//! whatever the editing flag; a face whose loops are open mid-edit is refused (#2624).
+//! WR-732 (#2503): a B-rep point classification classifies against each face's
+//! current trims, also while the B-rep is being edited. `SmTrimSrfCache::BuildTree`
+//! implants no trims while editing is on, so upstream counts a face it builds a cache
+//! for then as its untrimmed surface, and answers right only when it reuses a cache it
+//! built before the edit. The rays build their caches afresh, so once editing was on
+//! (the fillet session's trim step, #2365) points inside the bar classified as outside.
+//! In solidcore the ray's tree of a face whose loops close is built against the face as
+//! it is, whatever the editing flag; a face whose loops are open mid-edit is refused
+//! (#2624).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
 use solidcore::boolean::api_brep::boolean_union;
@@ -51,13 +51,6 @@ fn key_of(entity: EntityRef) -> ObjectRef {
     }
 }
 
-/// A kernel with the WR-732 fix on.
-fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.brep_ray_classifies_current_trims = true;
-    k
-}
-
 /// Points in the bar, in the post, and outside both.
 const POINTS: [[f64; 3]; 6] = [
     [5.0, 4.0, 3.15],
@@ -95,7 +88,7 @@ fn in_material_at(k: &Kernel, b: &mut Brep, points: &[[f64; 3]]) -> Vec<bool> {
 
 #[test]
 fn classification_is_unchanged_once_editing_is_on() {
-    let mut k = kernel();
+    let mut k = Kernel::default();
     let mut b = bar_into_post(&mut k);
     let expected = [true, true, true, true, false, false];
     assert_eq!(in_material_at(&k, &mut b, &POINTS), expected, "editing off");
@@ -125,7 +118,7 @@ fn face_at(k: &Kernel, b: &mut Brep, p: Point3) -> Result<Option<FaceId>, SolidE
 /// first.
 #[test]
 fn a_face_edited_mid_session_classifies_against_its_new_trims() {
-    let mut k = kernel();
+    let mut k = Kernel::default();
     let mut b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
     let in_cap = Point3::new(-5.0, 0.0, 0.0);
     let off_cap = Point3::new(0.0, -5.0, 0.0);
@@ -208,17 +201,9 @@ fn a_face_edited_mid_session_classifies_against_its_new_trims() {
     );
 }
 
-/// The classification of `p` in `b`, its region or face and whether it failed.
-fn classified(k: &Kernel, b: &mut Brep, p: Point3, boundaries: bool) -> String {
-    match BrepQuery::of_brep(b).point_3d_classify(k, b, p, 1e-6, boundaries) {
-        Ok(pc) => format!("{:?} {:?}", pc.point_class(), pc.object()),
-        Err(e) => format!("error {e:?}"),
-    }
-}
-
-/// While editing, a face whose loop does not close has no boundary to implant: with the
-/// fix, a classification whose ray meets it is refused naming the face, not answered
-/// against its untrimmed surface. Without the fix, upstream's answer is unchanged.
+/// While editing, a face whose loop does not close has no boundary to implant: a
+/// classification whose ray meets it is refused naming the face, not answered against
+/// its untrimmed surface.
 #[test]
 fn an_open_loop_mid_edit_is_refused_naming_its_face() {
     let broken = |k: &mut Kernel| {
@@ -244,10 +229,8 @@ fn an_open_loop_mid_edit_is_refused_naming_its_face() {
         b.set_editing_enabled(true);
         (b, side)
     };
-    let mut k = kernel();
-    let mut upstream = Kernel::default();
+    let mut k = Kernel::default();
     let (mut b, side) = broken(&mut k);
-    let (mut c, _) = broken(&mut upstream);
     // the region's ray fires and the boundary solve
     for boundaries in [false, true] {
         let p = Point3::new(0.0, 0.0, 5.0);
@@ -259,8 +242,6 @@ fn an_open_loop_mid_edit_is_refused_naming_its_face() {
             ),
             "{refused:?}"
         );
-        let unflagged = classified(&upstream, &mut c, p, boundaries);
-        assert!(!unflagged.starts_with("error"), "{unflagged}");
     }
 }
 
@@ -272,7 +253,7 @@ fn an_open_loop_mid_edit_is_refused_naming_its_face() {
 /// region rays at such faces).
 #[test]
 fn a_stale_edge_end_pair_mid_edit_still_closes_its_faces() {
-    let mut k = kernel();
+    let mut k = Kernel::default();
     let mut b = bar_into_post(&mut k);
     let expected = [true, true, true, true, false, false];
     assert_eq!(in_material_at(&k, &mut b, &POINTS), expected, "editing off");

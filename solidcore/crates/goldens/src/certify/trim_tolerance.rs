@@ -36,7 +36,10 @@
 //! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
-//! cover an edge end that `n` does.
+//! cover an edge end that `n` does. One raise is upstream's margin instead, in the units and
+//! numbers [`VERTEX_MARGIN`] pins: a vertex at twice its gap to its edge uses' starts, to the
+//! bit (`topology::face::p3`'s UV trim gaps, which the stitch reaches while it edits since
+//! WR-732's retirement, #18934), still covering every end ([`vertex_is_twice_its_end_gap`]).
 
 mod gap_samples;
 mod p6_split;
@@ -84,11 +87,12 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `invalid-input`: a vertex of `gen0195`, whose input holds a non-finite coordinate
 ///   (`y = -inf`), so no tolerance covers its edge ends with their error bounds;
 /// - `no-estimate`: the trim's image could not be sampled;
-/// - `line-trim`: a lowered edge with a UV trim that is a line on a B-spline surface, which
-///   is not enclosed (the line's own rounding moves its parameter, and only a plane carries
-///   that to the surface: [`plane_uv_lipschitz`]), its other trims enclosed within the new
+/// - `line-trim`: a lowered edge with a UV trim that is a line on a B-spline surface, whose
+///   enclosure on any surface ([`uv_line_slack_on_surface`]: the line's own rounding moves its
+///   parameter, carried to the surface by the net's bound rather than a plane's
+///   [`plane_uv_lipschitz`]) is past both tolerances, its other trims enclosed within the new
 ///   tolerance (`topology.brep_local_operation`'s `fc0000`, `fc0006`, `fc0008` and `fc0025`:
-///   edge 89, lowered to 1e-5, its other trim's `B` 4.1e-8);
+///   edge 89, lowered to 1e-5, the line's `B` 6.4e-3, its other trim's 4.1e-8);
 /// - `loose-raise`: the one class a raise may be open in: an edge raised to the kernel's
 ///   bound of a trim at the raise, where that bound is loose (its reparametrisation off the
 ///   correspondence over a short stretch, #19784's trim 3), so this test's enclosure of the
@@ -210,13 +214,7 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
 ///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
-///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before);
-/// - `vertex-box`: a corner coordinate of a result's vertex box (`offset.offset_executive_p2`'s
-///   `result.geometry`: the body's tolerance, then the box of its vertex points), of a case
-///   that writes no bodies, that moved by less than that tolerance, which did not move: EQUAL
-///   within the body's own tolerance, MEASURED, not proved (the three shelled cylinders, whose
-///   marched rim vertex moved about 5e-8 straight outward under a 1e-6 tolerance, its radial
-///   error halved).
+///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before).
 const OTHER: &str = include_str!("trim_tolerance_other.tsv");
 
 /// The accuracy `blend.fillet_executive_p3`'s runner asks of the mass integrator
@@ -880,8 +878,16 @@ fn face_bound(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId, n: f64) -> Option<f64>
 /// edge: the `B` of each UV trim the edge's uses on that face hold ([`use_bound`]), or, on a
 /// face where none holds one, its curve's distance to the face's surface ([`face_bound`]);
 /// `None` where a gap is not enclosed, and a single `None` for an edge on no face. With the
-/// number of faces bounded without a trim.
-fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, usize) {
+/// number of faces bounded without a trim. With `any_surface`, a UV line trim on a surface
+/// other than a plane is enclosed too ([`use_bound_on`], the certificate
+/// [`trim_bounds_any_surface`] gives `wr450_rows`).
+fn edge_bounds(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    n: f64,
+    any_surface: bool,
+) -> (Vec<Option<f64>>, usize) {
     let rec = b.edge(e).expect("edge");
     let faces = edge::faces(b, e, None).expect("faces");
     if faces.is_empty() {
@@ -895,7 +901,7 @@ fn edge_bounds(k: &Kernel, b: &Brep, e: EdgeId, n: f64) -> (Vec<Option<f64>>, us
             if eu1::face(b, eu).expect("face") != Some(f) {
                 continue;
             }
-            match use_bound(k, b, e, eu) {
+            match use_bound_on(k, b, e, eu, any_surface) {
                 UseBound::NoTrim => {}
                 UseBound::Open => on_face.push(None),
                 UseBound::Bound(x) => on_face.push(Some(x)),
@@ -1025,6 +1031,50 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     true
 }
 
+/// The units whose vertices the stitch raises to upstream's margin while it edits
+/// (#18934), with how many raised vertices each row set holds there; a raise of that kind
+/// anywhere else, or another count, fails.
+const VERTEX_MARGIN: &[(&str, usize)] = &[("heal.stitch_p1", 24), ("heal.stitch_p2", 14)];
+
+/// Whether `n` is upstream's margin on the gap of `v`, bit for bit as the kernel computes
+/// it: `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a vertex below
+/// `2 gap` to `2 gap`, `gap` the distance from its point to the 3D point of an edge use
+/// that starts there, at the use's start (`NormalizedEvaluate(0)`). So `n` is twice the
+/// largest such gap of `v`'s edge uses, to the bit (doubling is exact), and every gap is
+/// finite (a NaN fails). The stitch reaches those gaps while it edits since WR-732's
+/// retirement (#18934), where main kept the gap plus the zone tolerance.
+fn vertex_is_twice_its_end_gap(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
+    let Ok(mut b) = b.clone_standing_for_self() else {
+        return false;
+    };
+    let at = b.vertex(v).expect("vertex").point;
+    let starts: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(_, u)| {
+            u.vertexuse
+                .and_then(|vu| b.vertexuse(vu).ok())
+                .and_then(|vu| vu.vertex)
+                == Some(v)
+        })
+        .map(|(eu, _)| eu)
+        .collect();
+    let mut gap = None::<f64>;
+    for eu in starts {
+        let Ok(e) = solidcore::topology::edgeuse::p3::normalized_evaluate(
+            k, &mut b, eu, 0.0, false, false, true,
+        ) else {
+            return false;
+        };
+        let d = at.distance(e.point);
+        if !d.is_finite() {
+            return false;
+        }
+        gap = Some(gap.map_or(d, |g| if d > g { d } else { g }));
+    }
+    gap.is_some_and(|g| g > 0.0 && (2.0 * g).to_bits() == n.to_bits())
+}
+
 /// What one unit's moved values were certified by.
 #[derive(Debug, Default)]
 struct Tally {
@@ -1035,6 +1085,10 @@ struct Tally {
     edges: usize,
     /// Moved vertices within their tolerance of their edges' ends.
     vertices: usize,
+    /// Raised vertices at upstream's margin, twice their gap to their edge uses' starts
+    /// ([`vertex_is_twice_its_end_gap`]), still covering every end; as many as
+    /// [`VERTEX_MARGIN`] pins.
+    vertex_margin: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
     /// Faces of moved edges on which the edge holds no UV trim, bounded against the face's
@@ -1050,14 +1104,13 @@ struct Tally {
     /// tolerance.
     drop_margin: usize,
     /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
-    /// `domain` and `vertex-box`.
+    /// and `domain`.
     rounding: usize,
     quadrature: usize,
     integration: usize,
     padding: usize,
     trim_values: usize,
     domain: usize,
-    vertex_box: usize,
     /// The largest `B / n`.
     worst: f64,
 }
@@ -1268,27 +1321,6 @@ fn certify(unit: &str) -> Tally {
                         Err(why) => failures.push(format!("{at}: {why}")),
                     }
                 }
-                "vertex-box"
-                    if key.ends_with("result.geometry")
-                        && *index > 0
-                        && bodies.is_empty()
-                        && !row.moved.iter().any(|m| m.0 == *key && m.1 == 0) =>
-                {
-                    let tol = out
-                        .values
-                        .get(key)
-                        .and_then(|v| v.first())
-                        .copied()
-                        .unwrap_or(f64::NAN);
-                    // (written so a NaN fails)
-                    if tol.is_finite() && tol > 0.0 && (new - old).abs() < tol {
-                        tally.vertex_box += 1;
-                    } else {
-                        failures.push(format!(
-                            "{at}: {old:e} -> {new:e} moved past the body's tolerance {tol:e}"
-                        ));
-                    }
-                }
                 _ => failures.push(format!("{at}: {old:e} -> {new:e} is not `{class}`")),
             }
         }
@@ -1308,8 +1340,12 @@ fn certify(unit: &str) -> Tally {
                     .unwrap_or_else(|| panic!("{at}: no edge"));
                 assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
                 // (each face of the edge: its trims' bounds, or the curve's distance to its
-                // surface where the edge holds no trim on it)
-                let (bounds, trimless) = edge_bounds(&k, b, e, new);
+                // surface where the edge holds no trim on it; for a lowered edge a UV line on
+                // any surface with an exact net is enclosed too, as `fc0000`'s edge 73, whose
+                // line trim on its B-spline face 27 is enclosed at 1.0e-8 once WR-495's mate
+                // leaves it there, tangency-labs/solidcraft#21301; a raise keeps the plane-only
+                // enclosure its `loose-raise` entries are recorded against)
+                let (bounds, trimless) = edge_bounds(&k, b, e, new, !raised);
                 tally.trimless += trimless;
                 let mut bad = Vec::new();
                 for x in &bounds {
@@ -1431,7 +1467,17 @@ fn certify(unit: &str) -> Tally {
                         "{at}: certified, remove it from OPEN"
                     );
                 } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
-                    failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                    // (upstream's margin: a vertex the UV trim gaps raise to twice its gap to
+                    // an end of its edges, which the old tolerance covered already; the new
+                    // one must still cover every end)
+                    if VERTEX_MARGIN.iter().any(|m| m.0 == unit)
+                        && vertex_is_twice_its_end_gap(&k, b, v, new)
+                        && vertex_covers_its_ends(&k, b, v, new)
+                    {
+                        tally.vertex_margin += 1;
+                    } else {
+                        failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                    }
                 } else if vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
                     assert!(
@@ -1457,6 +1503,14 @@ fn certify(unit: &str) -> Tally {
     }
     println!("{unit}: {tally:?}");
     assert_eq!(
+        tally.vertex_margin,
+        VERTEX_MARGIN
+            .iter()
+            .find(|m| m.0 == unit)
+            .map_or(0, |m| m.1),
+        "{unit}: vertices at upstream's margin (VERTEX_MARGIN)"
+    );
+    assert_eq!(
         open_seen,
         open.keys().cloned().collect(),
         "{unit}: OPEN entries not reached"
@@ -1481,7 +1535,7 @@ macro_rules! certified_units {
             #[test]
             fn $name() {
                 let t = certify($unit);
-                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain + t.vertex_box > 0, "{t:?}");
+                assert!(t.values + t.rounding + t.quadrature + t.integration + t.padding + t.trim_values + t.domain > 0, "{t:?}");
             }
         )*
     };
@@ -1493,7 +1547,6 @@ certified_units! {
     fillet_executive_p3: "blend.fillet_executive_p3",
     feature_executive: "blend.feature_executive",
     offset_geometry_creation: "offset.offset_geometry_creation",
-    offset_executive_p2: "offset.offset_executive_p2",
     stitch_p1: "heal.stitch_p1",
     stitch_p2: "heal.stitch_p2",
     brep: "query.brep",
@@ -1994,7 +2047,7 @@ fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
     assert!(!on_second(&b), "the second face holds no trim");
     let tol = b.edge(e).expect("edge").tolerance;
     let certified = |bounds: &[Option<f64>]| bounds.iter().all(|x| x.is_some_and(|x| x <= tol));
-    let (bounds, trimless) = edge_bounds(&k, &b, e, tol);
+    let (bounds, trimless) = edge_bounds(&k, &b, e, tol, false);
     assert_eq!(trimless, 1, "{bounds:?}");
     assert!(bounds.len() >= 2 && certified(&bounds), "{bounds:?}");
     let others: Vec<FaceId> = b
@@ -2008,7 +2061,7 @@ fn an_edge_face_without_a_trim_is_bounded_against_its_surface() {
         let mut moved = b.clone_standing_for_self().expect("a copy");
         let surface = moved.face(o).expect("face").surface.clone();
         moved.face_mut(faces[1]).expect("face").surface = surface;
-        let (bounds, trimless) = edge_bounds(&k, &moved, e, tol);
+        let (bounds, trimless) = edge_bounds(&k, &moved, e, tol, false);
         assert_eq!(trimless, 1);
         assert!(!certified(&bounds), "face {}: {bounds:?}", o.index());
         // (the trims alone still certify)

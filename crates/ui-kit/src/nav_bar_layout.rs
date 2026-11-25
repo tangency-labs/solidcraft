@@ -53,7 +53,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, shown: impl Fn(&Slot) -> bo
                 + NAV_CHEVRON
                 + NAV_MENU_GAP
                 + if values && prefs.menu_display(slot.id) == MenuDisplay::IconAndValue { label_width(slot).max(0.0) + NAV_MENU_GAP } else { 0.0 }
-        } else if labels {
+        } else if labels && !navigation_bar::strong(slot.id) {
             (metrics.icon + NAV_LABEL_GAP + label_width(slot).max(0.0) + 2.0 * NAV_LABEL_PADDING).max(metrics.button)
         } else {
             metrics.button
@@ -69,20 +69,38 @@ fn measure_row(content: Rect, prefs: &NavigationBar, shown: impl Fn(&Slot) -> bo
     if total(result.labels, result.values) > available {
         result.labels = false;
     }
-    let mut visible = slots.len();
+    let mut row = slots.clone();
     let mut row_width = total(result.labels, result.values);
     if row_width > available {
-        visible = 0;
-        row_width = metrics.button + 2.0 * inset;
-        for slot in &slots {
+        // A strong slot (`Catalogue::strong`) never folds into More: room is kept for it first,
+        // and the others fold from the end. With no room even for that, it folds like the rest.
+        let base = metrics.button + 2.0 * inset;
+        let reserved = slots.iter().filter(|slot| navigation_bar::strong(slot.id)).map(|slot| width(slot, false, false) + NAV_GAP).sum::<f32>();
+        let keep = base + reserved <= available;
+        let strong = |slot: &Slot| keep && navigation_bar::strong(slot.id);
+        row_width = if keep { base + reserved } else { base };
+        let mut fits = 0;
+        for slot in slots.iter().filter(|slot| !strong(slot)) {
             let next = row_width + width(slot, false, false) + NAV_GAP;
             if next > available {
                 break;
             }
             row_width = next;
-            visible += 1;
+            fits += 1;
         }
-        result.overflow.extend(slots.iter().skip(visible).copied());
+        let mut others = 0;
+        let on_row: Vec<bool> = slots
+            .iter()
+            .map(|slot| {
+                if strong(slot) {
+                    return true;
+                }
+                others += 1;
+                others <= fits
+            })
+            .collect();
+        row = slots.iter().zip(&on_row).filter(|(_, on)| **on).map(|(slot, _)| *slot).collect();
+        result.overflow.extend(slots.iter().zip(&on_row).filter(|(_, on)| !**on).map(|(slot, _)| *slot));
     }
     let left = match prefs.position {
         Position::Centre => content.center().x - row_width / 2.0,
@@ -96,7 +114,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, shown: impl Fn(&Slot) -> bo
     };
     result.rect = Rect::from_min_size(pos2(left, top), vec2(row_width, height));
     let mut x = left + inset;
-    for slot in slots.iter().take(visible) {
+    for slot in &row {
         let w = width(slot, result.labels, result.values);
         result.slots.push((*slot, Rect::from_min_size(pos2(x, result.rect.top() + inset), vec2(w, metrics.button))));
         x += w + NAV_GAP;

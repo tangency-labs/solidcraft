@@ -455,6 +455,7 @@ fn sweep_schemas_and_the_key_check_agree() {
         "path_sketch",
         "profiles",
         "sketch",
+        "stays_surface",
     ];
     surface.extend(shape);
     surface.sort_unstable();
