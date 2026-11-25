@@ -1,0 +1,541 @@
+//! Whether a sheet metal part meets a fabrication shop's rules (#20113). [`part_of`] reads what
+//! the rules ask about from a sheet: its thickness, flat size, each round hole's diameter and
+//! clearances (the measurement the press-in hardware notes share, `sheet_hardware::clearance`),
+//! the threads and hardware it records. [`check`] holds that against a [`Profile`]: a plain
+//! comparison of numbers, so a rule is tested without a model.
+//!
+//! A rule whose pages disagree uses the strictest value and reports a warning, never an error. A
+//! rule the shop gives no value for, and what the check cannot measure, is listed as not checked,
+//! with the reason: a part is never called fine for a rule that was not looked at.
+
+use solidcraft_kernel::services::prism::loop_circle;
+
+use crate::sheet_hardware::{clearance, mm};
+use crate::shop_rules::{Limit, Measured, Profile, Rule, RuleId, Wanted};
+use crate::{Document, FeatureKind, SurfaceSheet};
+
+/// How near a hole is to a bend.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BendGap {
+    /// The bend's number in the bend table, from 1.
+    pub number: usize,
+    /// The bend's inside radius (mm).
+    pub radius: f64,
+    /// The hole's centre is inside the bend.
+    pub inside: bool,
+    /// The distance to where the bend starts (mm); 0 inside the bend.
+    pub from_start: f64,
+    /// The distance to the bend's centre line (mm).
+    pub from_line: f64,
+}
+
+/// A round hole of the flat, in the flat as it is read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hole {
+    pub at: [f64; 2],
+    pub diameter: f64,
+    /// The distance to the nearest edge, cut-out or other hole (mm).
+    pub edge: f64,
+    pub bends: Vec<BendGap>,
+}
+
+/// A threaded feature of the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThreadFact {
+    pub feature: u64,
+    pub name: String,
+    /// The thread is cut into the wall, not only listed.
+    pub modelled: bool,
+}
+
+/// A hole that is the mounting hole of press-in hardware.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HardwareHole {
+    pub feature: u64,
+    /// `M3 nut`.
+    pub label: String,
+    pub at: [f64; 2],
+}
+
+/// What the rules ask about a part.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Part {
+    pub thickness: f64,
+    /// The material of the sheet's rule, as written; may be empty.
+    pub material: String,
+    /// The flat's bounding box (mm).
+    pub flat_size: [f64; 2],
+    /// Every body of the design.
+    pub bodies: Vec<String>,
+    /// Recesses cut part-way through the sheet.
+    pub recesses: usize,
+    pub holes: Vec<Hole>,
+    /// Cut-outs that are not round.
+    pub cutouts: usize,
+    /// Perforation fields: the feature and its hole diameter (mm).
+    pub perforations: Vec<(u64, f64)>,
+    /// A free-form edge's distance was left unmeasured.
+    pub free_form: bool,
+    pub threads: Vec<ThreadFact>,
+    pub hardware: Vec<HardwareHole>,
+}
+
+/// Reads `sheet` of `doc` for the rules: `bodies` are all the design's bodies and `flat_size` the
+/// flat's bounding box.
+pub fn part_of(doc: &Document, sheet: &SurfaceSheet, bodies: Vec<String>, flat_size: [f64; 2]) -> Part {
+    // The flat as it is read, the way a flat pattern is shown.
+    let sk = sheet.shown();
+    let mut part = Part {
+        thickness: sk.thickness,
+        material: doc.sheet_rule(Some(sk.rule.as_str())).material,
+        flat_size,
+        bodies,
+        recesses: sk.pockets.len(),
+        perforations: sk.perforations.iter().map(|p| (p.feature, p.diameter)).collect(),
+        ..Part::default()
+    };
+    for region in &sk.regions {
+        for hole in &region.holes {
+            let Some((c, r)) = loop_circle(hole) else {
+                part.cutouts += 1;
+                continue;
+            };
+            let near = clearance(&sk, region, hole, c);
+            part.free_form |= near.free_form;
+            let bends = near
+                .bends
+                .iter()
+                .enumerate()
+                .map(|(i, b)| BendGap { number: i + 1, radius: b.radius, inside: b.inside, from_start: b.from_start, from_line: b.from_line })
+                .collect();
+            part.holes.push(Hole { at: [c.x, c.y], diameter: 2.0 * r, edge: near.edge, bends });
+        }
+    }
+    part.hardware = sk
+        .hardware_holes()
+        .into_iter()
+        .map(|h| HardwareHole { feature: h.feature, label: format!("{} {}", h.thread, h.kind.label()), at: [h.center.x, h.center.y] })
+        .collect();
+    let live = doc.marker.unwrap_or(doc.features.len());
+    for f in doc.features.iter().take(live).filter(|f| !f.suppressed) {
+        let modelled = match &f.kind {
+            FeatureKind::Hole { thread: Some(_), modeled, .. } => *modeled,
+            FeatureKind::Thread { modeled, .. } => *modeled,
+            _ => continue,
+        };
+        part.threads.push(ThreadFact { feature: f.id, name: f.name.clone(), modelled });
+    }
+    part
+}
+
+/// How serious a finding is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    /// The part breaks a rule the shop states.
+    Error,
+    /// The shop's pages disagree, or the note is advice.
+    Warning,
+}
+
+/// One rule a part breaks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Finding {
+    pub rule: String,
+    pub severity: Severity,
+    pub message: String,
+    pub feature: Option<u64>,
+    /// Where, in the flat as it is read.
+    pub at: Option<[f64; 2]>,
+    pub value: Option<f64>,
+    pub limit: Option<f64>,
+    /// The shop's pages the rule comes from.
+    pub sources: Vec<String>,
+}
+
+/// A rule the check did not look at, or not wholly, and why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotChecked {
+    pub rule: String,
+    pub why: String,
+}
+
+/// What a check found.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Report {
+    pub findings: Vec<Finding>,
+    pub checked: Vec<String>,
+    pub not_checked: Vec<NotChecked>,
+}
+
+struct Ctx<'a> {
+    shop: &'a str,
+    part: &'a Part,
+    rule: &'a Rule,
+    severity: Severity,
+}
+
+impl Ctx<'_> {
+    fn finding(&self, message: String) -> Finding {
+        Finding {
+            rule: self.rule.id.as_str().to_string(),
+            severity: self.severity,
+            message,
+            feature: None,
+            at: None,
+            value: None,
+            limit: None,
+            sources: self.rule.urls(),
+        }
+    }
+
+    /// The shop, and its process when the rule names one: `PCBWay's laser cutting`.
+    fn who(&self) -> String {
+        match &self.rule.process {
+            Some(p) => format!("{}'s {p}", self.shop),
+            None => self.shop.to_string(),
+        }
+    }
+
+    /// What a warning from disagreeing pages adds.
+    fn note(&self) -> &'static str {
+        if self.rule.disagreement { " (the strictest of the values its pages give, which differ)" } else { "" }
+    }
+}
+
+fn at_text(at: [f64; 2]) -> String {
+    format!("({}, {})", mm(at[0]), mm(at[1]))
+}
+
+fn not_checked(r: &mut Report, rule: RuleId, why: String) {
+    r.not_checked.push(NotChecked { rule: rule.as_str().to_string(), why });
+}
+
+fn names(list: &[String], material: &str) -> bool {
+    let m = material.to_lowercase();
+    list.iter().any(|n| m.contains(&n.to_lowercase()))
+}
+
+/// The limits that apply to `material`: those for any material, and those that name it; when
+/// none does, every limit, and `false`.
+fn applicable<'a>(limits: &'a [Limit], material: &str) -> (Vec<&'a Limit>, bool) {
+    let chosen: Vec<&Limit> = limits.iter().filter(|l| l.materials.is_empty() || names(&l.materials, material)).collect();
+    if chosen.is_empty() { (limits.iter().collect(), false) } else { (chosen, true) }
+}
+
+fn unmatched(r: &mut Report, ctx: &Ctx<'_>) {
+    let m = if ctx.part.material.is_empty() { "none given".to_string() } else { ctx.part.material.clone() };
+    not_checked(r, ctx.rule.id, format!("the sheet rule's material ({m}) is not one {} names, so every value it gives was applied", ctx.shop));
+}
+
+fn most(values: impl Iterator<Item = f64>) -> Option<f64> {
+    values.fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.max(v))))
+}
+
+fn least(values: impl Iterator<Item = f64>) -> Option<f64> {
+    values.fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.min(v))))
+}
+
+/// Holds `part` against `profile`. The findings come in the order of [`RuleId::ALL`], then the
+/// order of the part's holes.
+pub fn check(profile: &Profile, part: &Part) -> Report {
+    let mut r = Report::default();
+    for id in RuleId::ALL {
+        let Some(rule) = profile.rule(id) else {
+            not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
+            continue;
+        };
+        if id == RuleId::FlangeMin {
+            let why = "the shortest flange needs a measurement from a bend to the far edge that solidcore does not offer yet, so the value is in the profile and not applied";
+            not_checked(&mut r, id, why.to_string());
+            continue;
+        }
+        r.checked.push(id.as_str().to_string());
+        let severity = if rule.disagreement { Severity::Warning } else { Severity::Error };
+        let ctx = Ctx { shop: &profile.name, part, rule, severity };
+        match id {
+            RuleId::OneBody => one_body(&ctx, &mut r),
+            RuleId::UniformThickness => uniform(&ctx, &mut r),
+            RuleId::StockThickness => stock(&ctx, &mut r),
+            RuleId::MaxFlat => max_flat(&ctx, &mut r),
+            RuleId::HoleMinDiameter => min_diameter(&ctx, &mut r),
+            RuleId::HoleToEdge => to_edge(&ctx, &mut r),
+            RuleId::HoleToBend => to_bend(&ctx, &mut r),
+            RuleId::ThreadModelling => threads(&ctx, &mut r),
+            RuleId::HardwareModelling => hardware(&ctx, &mut r),
+            RuleId::FlangeMin => {}
+        }
+    }
+    r
+}
+
+fn one_body(ctx: &Ctx<'_>, r: &mut Report) {
+    let n = ctx.part.bodies.len();
+    if n > 1 {
+        let list: Vec<&str> = ctx.part.bodies.iter().take(5).map(String::as_str).collect();
+        let more = if n > 5 { ", ..." } else { "" };
+        r.findings.push(ctx.finding(format!(
+            "the design has {n} bodies ({}{more}); {} takes one body in a file{}",
+            list.join(", "),
+            ctx.who(),
+            ctx.note()
+        )));
+    }
+}
+
+fn uniform(ctx: &Ctx<'_>, r: &mut Report) {
+    let n = ctx.part.recesses;
+    if n > 0 {
+        let message =
+            format!("{n} recess(es) cut part-way into the sheet make it thinner there; {} wants one thickness all over{}", ctx.who(), ctx.note());
+        r.findings.push(ctx.finding(message));
+    }
+}
+
+fn stock(ctx: &Ctx<'_>, r: &mut Report) {
+    let t = ctx.part.thickness;
+    let named: Vec<_> = ctx.rule.stock.iter().filter(|s| !s.materials.is_empty() && names(&s.materials, &ctx.part.material)).collect();
+    let any: Vec<_> = ctx.rule.stock.iter().filter(|s| s.materials.is_empty()).collect();
+    let mut entries: Vec<_> = any.into_iter().chain(named).collect();
+    let matched = !entries.is_empty();
+    if !matched {
+        entries = ctx.rule.stock.iter().collect();
+        unmatched(r, ctx);
+    }
+    if entries.iter().any(|s| s.admits(t)) {
+        return;
+    }
+    let mut listed: Vec<f64> = entries.iter().flat_map(|s| s.thicknesses_mm.iter().copied()).collect();
+    listed.sort_by(f64::total_cmp);
+    let below = listed.iter().copied().rfind(|v| *v < t);
+    let above = listed.iter().copied().find(|v| *v > t);
+    let mut parts: Vec<String> = Vec::new();
+    for s in &entries {
+        if s.min_mm.is_some() || s.max_mm.is_some() {
+            let lo = s.min_mm.map_or(String::new(), mm);
+            let hi = s.max_mm.map_or(String::new(), mm);
+            parts.push(format!("{lo} to {hi} mm"));
+        }
+    }
+    match (below, above) {
+        (Some(a), Some(b)) => parts.push(format!("the nearest stock sizes are {} and {} mm", mm(a), mm(b))),
+        (Some(a), None) => parts.push(format!("its thickest stock is {} mm", mm(a))),
+        (None, Some(b)) => parts.push(format!("its thinnest stock is {} mm", mm(b))),
+        (None, None) => {}
+    }
+    let mut f = ctx.finding(format!("the sheet is {} mm thick, which {} does not stock: {}{}", mm(t), ctx.shop, parts.join("; "), ctx.note()));
+    f.value = Some(t);
+    r.findings.push(f);
+}
+
+fn max_flat(ctx: &Ctx<'_>, r: &mut Report) {
+    let (limits, matched) = applicable(&ctx.rule.limits, &ctx.part.material);
+    if !matched {
+        unmatched(r, ctx);
+    }
+    let [x, y] = ctx.part.flat_size;
+    let (long, short) = if x >= y { (x, y) } else { (y, x) };
+    let long_max = least(limits.iter().filter_map(|l| l.value));
+    let short_max = least(limits.iter().filter_map(|l| l.short_value));
+    let long_over = long_max.is_some_and(|m| long > m + 1e-9);
+    let short_over = short_max.is_some_and(|m| short > m + 1e-9);
+    if long_over || short_over {
+        let size = match short_max {
+            Some(s) => format!("{} x {} mm", mm(long_max.unwrap_or(f64::INFINITY)), mm(s)),
+            None => format!("{} mm long", mm(long_max.unwrap_or(f64::INFINITY))),
+        };
+        let mut f = ctx.finding(format!("the flat is {} x {} mm; {} takes at most {size}{}", mm(long), mm(short), ctx.who(), ctx.note()));
+        f.value = Some(long);
+        f.limit = long_max;
+        r.findings.push(f);
+    }
+}
+
+/// The least a hole's diameter, edge distance or bend distance may be: the strictest of the
+/// limits that apply.
+fn strictest(ctx: &Ctx<'_>, r: &mut Report) -> Option<f64> {
+    let (limits, matched) = applicable(&ctx.rule.limits, &ctx.part.material);
+    if !matched {
+        unmatched(r, ctx);
+    }
+    most(limits.iter().filter_map(|l| l.needed(ctx.part.thickness, 0.0)))
+}
+
+fn cutouts_note(ctx: &Ctx<'_>, r: &mut Report) {
+    let n = ctx.part.cutouts;
+    if n > 0 {
+        let why = format!("{n} cut-out(s) that are not round were not measured: the rule is checked for round holes only");
+        not_checked(r, ctx.rule.id, why);
+    }
+}
+
+fn min_diameter(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(need) = strictest(ctx, r) else { return };
+    let t = mm(ctx.part.thickness);
+    for h in &ctx.part.holes {
+        if h.diameter + 1e-9 < need {
+            let message = format!(
+                "the hole at {} is \u{d8}{} mm; {} needs at least \u{d8}{} mm for {t} mm sheet{}",
+                at_text(h.at),
+                mm(h.diameter),
+                ctx.who(),
+                mm(need),
+                ctx.note()
+            );
+            let mut f = ctx.finding(message);
+            f.at = Some(h.at);
+            f.value = Some(h.diameter);
+            f.limit = Some(need);
+            r.findings.push(f);
+        }
+    }
+    for (feature, d) in &ctx.part.perforations {
+        if *d + 1e-9 < need {
+            let message = format!(
+                "the perforation holes are \u{d8}{} mm; {} needs at least \u{d8}{} mm for {t} mm sheet{}",
+                mm(*d),
+                ctx.who(),
+                mm(need),
+                ctx.note()
+            );
+            let mut f = ctx.finding(message);
+            f.feature = Some(*feature);
+            f.value = Some(*d);
+            f.limit = Some(need);
+            r.findings.push(f);
+        }
+    }
+    cutouts_note(ctx, r);
+}
+
+fn to_edge(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(need) = strictest(ctx, r) else { return };
+    for h in &ctx.part.holes {
+        if h.edge + 1e-9 < need {
+            let message = format!(
+                "the hole at {} is {} mm from the nearest edge, cut-out or other hole; {} needs at least {} mm{}",
+                at_text(h.at),
+                mm(h.edge),
+                ctx.who(),
+                mm(need),
+                ctx.note()
+            );
+            let mut f = ctx.finding(message);
+            f.at = Some(h.at);
+            f.value = Some(h.edge);
+            f.limit = Some(need);
+            r.findings.push(f);
+        }
+    }
+    cutouts_note(ctx, r);
+    if ctx.part.free_form {
+        not_checked(r, ctx.rule.id, "a free-form edge was not measured".to_string());
+    }
+}
+
+fn to_bend(ctx: &Ctx<'_>, r: &mut Report) {
+    let (limits, matched) = applicable(&ctx.rule.limits, &ctx.part.material);
+    if !matched {
+        unmatched(r, ctx);
+    }
+    let t = ctx.part.thickness;
+    for h in &ctx.part.holes {
+        // The bend and the limit the hole falls shortest of: (shortfall, need, distance, bend, how).
+        let mut worst: Option<(f64, f64, f64, &BendGap, Measured)> = None;
+        for b in &h.bends {
+            for l in &limits {
+                let Some(need) = l.needed(t, b.radius) else { continue };
+                let from = l.measured_from();
+                let d = if from == Measured::BendLine { b.from_line } else { b.from_start };
+                let short = need - d;
+                if d + 1e-9 < need && worst.as_ref().is_none_or(|w| short > w.0) {
+                    worst = Some((short, need, d, b, from));
+                }
+            }
+        }
+        let Some((_, need, d, b, from)) = worst else { continue };
+        let message = if b.inside && from == Measured::BendStart {
+            format!(
+                "the hole at {} is inside bend {}; {} needs holes at least {} mm from a bend{}",
+                at_text(h.at),
+                b.number,
+                ctx.who(),
+                mm(need),
+                ctx.note()
+            )
+        } else {
+            let to = if from == Measured::BendLine { "the bend line" } else { "where the bend starts" };
+            format!(
+                "the hole at {} is {} mm from bend {} (to {to}); {} needs at least {} mm{}",
+                at_text(h.at),
+                mm(d),
+                b.number,
+                ctx.who(),
+                mm(need),
+                ctx.note()
+            )
+        };
+        let mut f = ctx.finding(message);
+        f.at = Some(h.at);
+        f.value = Some(d);
+        f.limit = Some(need);
+        r.findings.push(f);
+    }
+    cutouts_note(ctx, r);
+    if ctx.part.free_form {
+        not_checked(r, ctx.rule.id, "a free-form edge was not measured".to_string());
+    }
+}
+
+fn threads(ctx: &Ctx<'_>, r: &mut Report) {
+    let wanted = ctx.rule.wanted.unwrap_or(Wanted::Plain);
+    for t in &ctx.part.threads {
+        let message = match (wanted, t.modelled) {
+            (Wanted::Plain, true) => format!(
+                "{} cuts a modelled thread; {} wants a plain hole at the tap size, with the thread named on the order{}",
+                t.name,
+                ctx.who(),
+                ctx.note()
+            ),
+            (Wanted::Modelled, false) => {
+                format!("{} is a thread that is only listed; {} wants threads modelled in the file{}", t.name, ctx.who(), ctx.note())
+            }
+            _ => continue,
+        };
+        let mut f = ctx.finding(message);
+        f.feature = Some(t.feature);
+        r.findings.push(f);
+    }
+}
+
+fn hardware(ctx: &Ctx<'_>, r: &mut Report) {
+    match ctx.rule.wanted.unwrap_or(Wanted::Plain) {
+        Wanted::Plain => {
+            for h in &ctx.part.hardware {
+                let message = format!(
+                    "the hole at {} is the mounting hole of an {}; {} takes press-in hardware as an order option, not from the file: name it on the order",
+                    at_text(h.at),
+                    h.label,
+                    ctx.who()
+                );
+                let mut f = ctx.finding(message);
+                f.severity = Severity::Warning;
+                f.feature = Some(h.feature);
+                f.at = Some(h.at);
+                r.findings.push(f);
+            }
+        }
+        Wanted::Modelled => {
+            if !ctx.part.hardware.is_empty() {
+                let why = format!(
+                    "{} wants hardware modelled in the file; a hardware hole is a plain hole with a record of the hardware, and what the shop reads there was not checked",
+                    ctx.shop
+                );
+                not_checked(r, ctx.rule.id, why);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "shop_check_tests.rs"]
+mod tests;

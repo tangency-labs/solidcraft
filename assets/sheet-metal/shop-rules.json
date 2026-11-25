@@ -1,0 +1,1037 @@
+{
+  "format": "solidcraft-shop-rules",
+  "version": 1,
+  "note": "Fabrication shop rules read 2026-11-25. Each value carries the page it came from, in our own words. The values came from page summaries: spot check each against the shop's page before relying on it.",
+  "profiles": [
+    {
+      "id": "generic",
+      "name": "Generic",
+      "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly: a part that passes should be accepted by any of them. It has no stock list or sheet size, which differ. Values came from page summaries and need a spot check against the shops' pages before you rely on them.",
+      "rules": [
+        {
+          "id": "file.one_body",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+              "read": "2026-11-25",
+              "says": "one solid sheet-metal body per STEP file"
+            },
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "one solid sheet-metal body per file"
+            }
+          ]
+        },
+        {
+          "id": "file.uniform_thickness",
+          "sources": [
+            {
+              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+              "read": "2026-11-25",
+              "says": "one thickness for every feature of a one-piece bent part"
+            },
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "uniform thickness, modelled at stock thickness"
+            }
+          ]
+        },
+        {
+          "id": "hole.min_diameter",
+          "unit": "mm",
+          "process": "laser cutting",
+          "limits": [
+            {
+              "value": 0.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "laser holes at least half the thickness"
+                },
+                {
+                  "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+                  "read": "2026-11-25",
+                  "says": "laser holes at least half the material thickness"
+                },
+                {
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
+                  "read": "2026-11-25",
+                  "says": "at least half the thickness"
+                }
+              ]
+            },
+            {
+              "value": 1.0,
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
+                  "read": "2026-11-25",
+                  "says": "and at least 1 mm for cutting"
+                },
+                {
+                  "url": "https://jlccnc.com/sheet-metal-fabrication",
+                  "read": "2026-11-25",
+                  "says": "1 mm floor on the capability page"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_edge",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 1.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "1.5 times the thickness (blog)"
+                }
+              ]
+            },
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/5052-aluminum/",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness (one material page)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_bend",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness"
+                },
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness in its rules table"
+                }
+              ]
+            },
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "plus_radius": 1.0,
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness plus the bend radius"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "flange.min",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 3.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "3 times the thickness, varies with tooling"
+                }
+              ]
+            },
+            {
+              "value": 4.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "4 times the thickness"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "thread.modelling",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
+              "read": "2026-11-25",
+              "says": "model the pilot hole, not the thread"
+            },
+            {
+              "url": "https://sendcutsend.com/services/tapping/",
+              "read": "2026-11-25",
+              "says": "threads are not modelled; a plain hole at the tap size"
+            }
+          ],
+          "wanted": "plain"
+        }
+      ]
+    },
+    {
+      "id": "pcbway",
+      "name": "PCBWay",
+      "note": "From PCBWay's sheet metal pages. Values came from page summaries and need a spot check. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used.",
+      "rules": [
+        {
+          "id": "file.one_body",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+              "read": "2026-11-25",
+              "says": "one solid sheet-metal body per STEP file"
+            },
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "one single-part file per upload"
+            }
+          ]
+        },
+        {
+          "id": "stock.thickness",
+          "disagreement": true,
+          "stock": [
+            {
+              "min_mm": 0.5,
+              "max_mm": 6.0,
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+                  "read": "2026-11-25",
+                  "says": "cutting 0.1 to 10 mm, bending 0.1 to 6 mm"
+                },
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "bending 0.1 to 10 mm"
+                },
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/sheet-metal/",
+                  "read": "2026-11-25",
+                  "says": "table gives 0.5 to 10 mm cutting and 0.5 to 6 mm bending; no list of stock sizes is published"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "size.max_flat",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 3000.0,
+              "short_value": 1500.0,
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "3000 by 1500 mm"
+                },
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "3000 by 1500 mm; smaller sheets for aluminium, titanium and copper"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.min_diameter",
+          "unit": "mm",
+          "process": "laser cutting",
+          "limits": [
+            {
+              "value": 0.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "at least half the thickness; no absolute minimum stated"
+                },
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+                  "read": "2026-11-25",
+                  "says": "at least half the thickness"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_edge",
+          "unit": "mm",
+          "process": "laser cutting",
+          "limits": [
+            {
+              "value": 0.5,
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "0.5 mm in a table; the general edge rule is an image that could not be read"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_bend",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness"
+                }
+              ]
+            },
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "plus_radius": 1.0,
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness plus the bend radius"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "flange.min",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 4.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
+                  "read": "2026-11-25",
+                  "says": "4 times the thickness"
+                }
+              ]
+            },
+            {
+              "value": 2.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
+                  "read": "2026-11-25",
+                  "says": "2.5 to 4 times the thickness"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "thread.modelling",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
+              "read": "2026-11-25",
+              "says": "model a pilot hole, not the thread; give the thread at the quote"
+            }
+          ],
+          "wanted": "plain"
+        },
+        {
+          "id": "hardware.modelling",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/hardware-insertion.html",
+              "read": "2026-11-25",
+              "says": "hardware is named at the order: part, place, material, side"
+            }
+          ],
+          "wanted": "plain"
+        }
+      ]
+    },
+    {
+      "id": "jlccnc",
+      "name": "JLCCNC",
+      "note": "From JLCCNC's help pages and design blog. Values came from page summaries and need a spot check. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used.",
+      "rules": [
+        {
+          "id": "file.one_body",
+          "sources": [
+            {
+              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+              "read": "2026-11-25",
+              "says": "no extra reference parts or hidden solids in the model"
+            }
+          ]
+        },
+        {
+          "id": "file.uniform_thickness",
+          "sources": [
+            {
+              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+              "read": "2026-11-25",
+              "says": "one thickness for every feature of a one-piece bent part, from the listed stock"
+            }
+          ]
+        },
+        {
+          "id": "stock.thickness",
+          "stock": [
+            {
+              "thicknesses_mm": [
+                0.5,
+                0.8,
+                1.0,
+                1.2,
+                1.5,
+                2.0,
+                2.5,
+                3.0,
+                4.0,
+                5.0,
+                6.0
+              ],
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/sheet-metal-fabrication",
+                  "read": "2026-11-25",
+                  "says": "0.5 to 6 mm"
+                },
+                {
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+                  "read": "2026-11-25",
+                  "says": "thicknesses limited to the listed stock"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "size.max_flat",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 800.0,
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/sheet-metal-fabrication",
+                  "read": "2026-11-25",
+                  "says": "longest side 800 mm; no width given"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.min_diameter",
+          "unit": "mm",
+          "process": "laser cutting",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 0.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
+                  "read": "2026-11-25",
+                  "says": "at least half the thickness"
+                }
+              ]
+            },
+            {
+              "value": 1.0,
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
+                  "read": "2026-11-25",
+                  "says": "and at least 1 mm"
+                },
+                {
+                  "url": "https://jlccnc.com/sheet-metal-fabrication",
+                  "read": "2026-11-25",
+                  "says": "1 mm floor"
+                }
+              ]
+            },
+            {
+              "value": 1.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "blog: at least the thickness"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_edge",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 1.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "1.5 times the thickness (blog; the help page keeps it in an image)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_bend",
+          "unit": "mm",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness in its rules table"
+                }
+              ]
+            },
+            {
+              "value": 1.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "1.5 to 2 times the thickness in its mistakes table"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "flange.min",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 3.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://jlccnc.com/blog/sheet-metal-design",
+                  "read": "2026-11-25",
+                  "says": "3 times the thickness, varies with tooling and die width"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hardware.modelling",
+          "sources": [
+            {
+              "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
+              "read": "2026-11-25",
+              "says": "clinch nuts, studs and weld nuts are modelled in the file with their full shape"
+            }
+          ],
+          "wanted": "modelled"
+        }
+      ]
+    },
+    {
+      "id": "sendcutsend",
+      "name": "SendCutSend",
+      "note": "From SendCutSend's guidelines, material pages and calculators; inch sizes are converted to mm. Values came from page summaries and need a spot check. Mild steel sizes were inferred from calculator rows. The bend distances use the 5052, mild steel and 304 die tables.",
+      "rules": [
+        {
+          "id": "file.one_body",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "one solid sheet-metal body per file"
+            }
+          ]
+        },
+        {
+          "id": "file.uniform_thickness",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "uniform thickness, modelled at stock thickness"
+            },
+            {
+              "url": "https://sendcutsend.com/services/cnc-bending/",
+              "read": "2026-11-25",
+              "says": "modelled at stock thickness with the calculator's K-factor and radius"
+            }
+          ]
+        },
+        {
+          "id": "stock.thickness",
+          "stock": [
+            {
+              "materials": [
+                "5052"
+              ],
+              "thicknesses_mm": [
+                1.016,
+                1.6002,
+                2.032,
+                2.286,
+                2.54,
+                3.175,
+                4.7498,
+                6.35,
+                7.9502,
+                9.525,
+                12.7
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/min-max/",
+                  "read": "2026-11-25",
+                  "says": "5052 aluminium sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "6061"
+              ],
+              "thicknesses_mm": [
+                1.016,
+                1.6002,
+                2.032,
+                2.54,
+                3.175,
+                4.7498,
+                6.35,
+                7.9502,
+                9.525,
+                12.7,
+                15.875,
+                19.05
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/min-max/",
+                  "read": "2026-11-25",
+                  "says": "6061 aluminium sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "mild"
+              ],
+              "thicknesses_mm": [
+                0.762,
+                1.2192,
+                1.4986,
+                1.8796,
+                2.6416,
+                3.0226,
+                3.429,
+                4.7498,
+                6.35,
+                7.9502,
+                9.525,
+                12.7
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "mild steel sizes (some inferred from calculator rows)"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "304"
+              ],
+              "thicknesses_mm": [
+                0.762,
+                1.2192,
+                1.524,
+                1.8796,
+                2.54,
+                3.175,
+                4.7498,
+                6.35,
+                9.525,
+                12.7
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "304 stainless sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "316"
+              ],
+              "thicknesses_mm": [
+                1.524,
+                3.175,
+                4.7498,
+                6.35
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "316 stainless sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "g90",
+                "galvan"
+              ],
+              "thicknesses_mm": [
+                0.762,
+                1.2192,
+                1.4986,
+                1.8796
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "G90 galvanised steel sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "brass",
+                "c260"
+              ],
+              "thicknesses_mm": [
+                1.016,
+                1.6002,
+                3.175,
+                4.7498,
+                6.35
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "brass sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "copper",
+                "c110"
+              ],
+              "thicknesses_mm": [
+                0.8128,
+                1.016,
+                1.6002,
+                3.175,
+                4.7498,
+                6.35
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "copper sizes"
+                }
+              ]
+            },
+            {
+              "materials": [
+                "7075"
+              ],
+              "thicknesses_mm": [
+                3.175,
+                4.826,
+                6.35
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/",
+                  "read": "2026-11-25",
+                  "says": "7075 aluminium sizes"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "size.max_flat",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 1117.6,
+              "short_value": 762.0,
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/services/cnc-bending/",
+                  "read": "2026-11-25",
+                  "says": "bending up to 30 by 44 in"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.min_diameter",
+          "unit": "mm",
+          "process": "laser cutting",
+          "disagreement": true,
+          "limits": [
+            {
+              "value": 0.5,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+                  "read": "2026-11-25",
+                  "says": "at least half the material thickness"
+                }
+              ]
+            },
+            {
+              "value": 1.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/5052-aluminum/",
+                  "read": "2026-11-25",
+                  "says": "about the thickness (5052 page)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_edge",
+          "unit": "mm",
+          "limits": [
+            {
+              "value": 2.0,
+              "relative_to": "thickness",
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/materials/5052-aluminum/",
+                  "read": "2026-11-25",
+                  "says": "2 times the thickness; one material page only"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "hole.to_bend",
+          "unit": "mm",
+          "limits": [
+            {
+              "steps": [
+                {
+                  "up_to_mm": 2.29,
+                  "value": 6.0
+                },
+                {
+                  "up_to_mm": 3.18,
+                  "value": 8.0
+                },
+                {
+                  "up_to_mm": 4.75,
+                  "value": 12.5
+                },
+                {
+                  "up_to_mm": 6.35,
+                  "value": 20.0
+                }
+              ],
+              "materials": [
+                "5052"
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/bending-calculator/",
+                  "read": "2026-11-25",
+                  "says": "half the die width from the bend centre line; 5052 dies 12, 16, 25 and 40 mm by thickness"
+                },
+                {
+                  "url": "https://sendcutsend.com/guidelines/bend-deformation/",
+                  "read": "2026-11-25",
+                  "says": "half the die width"
+                }
+              ],
+              "from": "bend_line"
+            },
+            {
+              "steps": [
+                {
+                  "up_to_mm": 1.88,
+                  "value": 6.0
+                },
+                {
+                  "up_to_mm": 3.03,
+                  "value": 8.0
+                },
+                {
+                  "up_to_mm": 4.75,
+                  "value": 12.5
+                },
+                {
+                  "up_to_mm": 6.35,
+                  "value": 20.0
+                }
+              ],
+              "materials": [
+                "mild"
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/bending-calculator/",
+                  "read": "2026-11-25",
+                  "says": "half the die width; mild steel dies by thickness, pattern read from the calculator tables"
+                }
+              ],
+              "from": "bend_line"
+            },
+            {
+              "steps": [
+                {
+                  "up_to_mm": 1.88,
+                  "value": 6.0
+                },
+                {
+                  "up_to_mm": 4.75,
+                  "value": 12.5
+                },
+                {
+                  "up_to_mm": 6.35,
+                  "value": 20.0
+                }
+              ],
+              "materials": [
+                "304"
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/bending-calculator/",
+                  "read": "2026-11-25",
+                  "says": "half the die width; 304 dies by thickness, pattern read from the calculator tables"
+                }
+              ],
+              "from": "bend_line"
+            }
+          ]
+        },
+        {
+          "id": "flange.min",
+          "unit": "mm",
+          "limits": [
+            {
+              "steps": [
+                {
+                  "up_to_mm": 1.02,
+                  "value": 7.26
+                },
+                {
+                  "up_to_mm": 1.6,
+                  "value": 7.7
+                },
+                {
+                  "up_to_mm": 3.18,
+                  "value": 12.09
+                },
+                {
+                  "up_to_mm": 6.35,
+                  "value": 34.82
+                }
+              ],
+              "materials": [
+                "5052"
+              ],
+              "sources": [
+                {
+                  "url": "https://sendcutsend.com/bending-calculator/",
+                  "read": "2026-11-25",
+                  "says": "smallest formed flange, 5052, from the calculator table; mild steel and 304 have their own"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "thread.modelling",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/services/tapping/",
+              "read": "2026-11-25",
+              "says": "model a plain hole at the tap size; threads are not modelled"
+            }
+          ],
+          "wanted": "plain"
+        },
+        {
+          "id": "hardware.modelling",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/services/hardware/",
+              "read": "2026-11-25",
+              "says": "hardware is chosen at the order; the hole is resized to the catalogue's"
+            }
+          ],
+          "wanted": "plain"
+        }
+      ]
+    }
+  ]
+}

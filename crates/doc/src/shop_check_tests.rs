@@ -1,0 +1,181 @@
+use super::*;
+use crate::shop_rules::profile;
+
+/// A 2 mm bracket: one round hole 30 mm from every edge and 20 mm from a bend of radius 2 mm.
+fn bracket() -> Part {
+    Part {
+        thickness: 2.0,
+        flat_size: [100.0, 60.0],
+        bodies: vec!["Body1".into()],
+        holes: vec![hole([50.0, 30.0], 6.0, 30.0, 20.0)],
+        ..Part::default()
+    }
+}
+
+fn hole(at: [f64; 2], diameter: f64, edge: f64, from_bend: f64) -> Hole {
+    let gap = BendGap { number: 1, radius: 2.0, inside: false, from_start: from_bend, from_line: from_bend + 2.0 };
+    Hole { at, diameter, edge, bends: vec![gap] }
+}
+
+fn run(shop: &str, part: &Part) -> Report {
+    check(profile(shop).unwrap(), part)
+}
+
+fn rule<'a>(r: &'a Report, id: &str) -> Vec<&'a Finding> {
+    r.findings.iter().filter(|f| f.rule == id).collect()
+}
+
+#[test]
+fn a_clean_bracket_passes_generic() {
+    // Needs for T = 2, R = 2: a hole at least max(0.5 T, 1) = 1 mm wide, 2 T = 4 mm from an edge
+    // (the larger of 1.5 T and 2 T), and max(2 T, 2 T + R) = 6 mm from a bend. The hole is 6 mm
+    // wide, 30 mm from the edges and 20 mm from the bend.
+    let r = run("generic", &bracket());
+    assert!(r.findings.is_empty(), "{:?}", r.findings);
+    assert!(r.checked.contains(&"hole.to_bend".to_string()));
+    let flange = r.not_checked.iter().find(|n| n.rule == "flange.min").map(|n| n.why.as_str()).unwrap_or("");
+    assert!(flange.contains("solidcore"), "{flange}");
+    let stock = r.not_checked.iter().find(|n| n.rule == "stock.thickness").map(|n| n.why.as_str()).unwrap_or("");
+    assert!(stock.contains("Generic's pages give no value"), "{stock}");
+}
+
+#[test]
+fn a_small_hole_is_a_finding_with_the_shops_limit() {
+    let mut part = bracket();
+    part.holes.push(hole([12.0, 8.0], 0.6, 8.0, 20.0));
+    let f = rule(&run("generic", &part), "hole.min_diameter").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    // max(0.5 * 2, 1) = 1 mm.
+    assert_eq!((f[0].value, f[0].limit, f[0].severity, f[0].at), (Some(0.6), Some(1.0), Severity::Error, Some([12.0, 8.0])));
+    assert_eq!(f[0].message, "the hole at (12, 8) is \u{d8}0.6 mm; Generic's laser cutting needs at least \u{d8}1 mm for 2 mm sheet");
+    assert!(f[0].sources.iter().all(|u| u.starts_with("https://")) && !f[0].sources.is_empty());
+    let pcb = run("pcbway", &part);
+    // PCBWay: half the thickness, 1 mm.
+    assert_eq!(rule(&pcb, "hole.min_diameter")[0].limit, Some(1.0));
+    assert!(rule(&pcb, "hole.min_diameter")[0].message.starts_with("the hole at (12, 8) is \u{d8}0.6 mm; PCBWay's laser cutting needs"));
+}
+
+#[test]
+fn a_hole_near_a_bend_is_a_warning_where_the_pages_disagree() {
+    let mut part = bracket();
+    part.holes = vec![hole([50.0, 5.0], 6.0, 5.0, 1.0)];
+    // Generic: 2 T = 4 and 2 T + R = 6 mm; the strictest, 6.
+    let f = rule(&run("generic", &part), "hole.to_bend").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert_eq!((f[0].value, f[0].limit, f[0].severity), (Some(1.0), Some(6.0), Severity::Warning));
+    assert!(f[0].message.contains("1 mm from bend 1 (to where the bend starts)") && f[0].message.contains("which differ"), "{}", f[0].message);
+    // A hole inside a bend is told so.
+    part.holes[0].bends[0].inside = true;
+    part.holes[0].bends[0].from_start = 0.0;
+    assert!(rule(&run("generic", &part), "hole.to_bend")[0].message.contains("is inside bend 1"));
+}
+
+#[test]
+fn a_hole_near_an_edge_is_a_finding() {
+    let mut part = bracket();
+    part.holes = vec![hole([3.0, 30.0], 6.0, 3.0, 20.0)];
+    // JLCCNC: 1.5 T = 3 mm, met; SendCutSend: 2 T = 4 mm, not met.
+    assert!(rule(&run("jlccnc", &part), "hole.to_edge").is_empty());
+    let f = rule(&run("sendcutsend", &part), "hole.to_edge").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].limit, f[0].severity), (1, Some(4.0), Severity::Error));
+}
+
+#[test]
+fn a_thickness_outside_the_stock_list_is_a_finding() {
+    let mut part = bracket();
+    part.thickness = 7.0;
+    let r = run("jlccnc", &part);
+    let f = rule(&r, "stock.thickness");
+    assert_eq!(f.len(), 1);
+    assert_eq!((f[0].value, f[0].severity), (Some(7.0), Severity::Error));
+    assert!(f[0].message.contains("7 mm thick") && f[0].message.contains("its thickest stock is 6 mm"), "{}", f[0].message);
+    part.thickness = 2.0;
+    assert!(rule(&run("jlccnc", &part), "stock.thickness").is_empty());
+    // PCBWay's pages disagree on the range: 0.5 to 6 mm is the strictest, so 7 mm is a warning.
+    part.thickness = 7.0;
+    assert_eq!(rule(&run("pcbway", &part), "stock.thickness")[0].severity, Severity::Warning);
+}
+
+#[test]
+fn stock_is_looked_up_by_the_sheet_rules_material() {
+    let mut part = bracket();
+    // 0.080 in = 2.032 mm: 5052 stocks it, 304 stainless does not (0.074 and 0.100 in).
+    part.thickness = 2.032;
+    part.material = "Aluminium 5052-H32".into();
+    assert!(rule(&run("sendcutsend", &part), "stock.thickness").is_empty());
+    part.material = "Stainless steel 304".into();
+    assert_eq!(rule(&run("sendcutsend", &part), "stock.thickness").len(), 1);
+    // An unknown material tries every list, and says so.
+    part.material = "Unobtainium".into();
+    let r = run("sendcutsend", &part);
+    assert!(rule(&r, "stock.thickness").is_empty());
+    assert!(r.not_checked.iter().any(|n| n.rule == "stock.thickness" && n.why.contains("Unobtainium")));
+}
+
+#[test]
+fn half_the_die_depends_on_the_material_and_is_measured_to_the_bend_line() {
+    let mut part = bracket();
+    part.holes = vec![hole([50.0, 5.0], 6.0, 5.0, 3.0)];
+    // from_line = 3 + 2 = 5 mm. 5052 at 2 mm: half of a 12 mm die, 6 mm: a finding.
+    part.material = "Aluminium 5052-H32".into();
+    let f = rule(&run("sendcutsend", &part), "hole.to_bend").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].limit, f[0].value), (1, Some(6.0), Some(5.0)));
+    assert!(f[0].message.contains("(to the bend line)"));
+    // Mild steel at 2 mm is in its 0.104 to 0.119 in step: a 16 mm die, 8 mm.
+    part.material = "Mild steel (cold-rolled)".into();
+    assert_eq!(rule(&run("sendcutsend", &part), "hole.to_bend")[0].limit, Some(8.0));
+}
+
+#[test]
+fn a_flat_over_the_shops_largest_sheet_is_a_finding() {
+    let mut part = bracket();
+    part.flat_size = [300.0, 900.0];
+    // JLCCNC: the longest side at most 800 mm.
+    let f = rule(&run("jlccnc", &part), "size.max_flat").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!((f.len(), f[0].value, f[0].limit), (1, Some(900.0), Some(800.0)));
+    assert!(f[0].message.contains("900 x 300 mm") && f[0].message.contains("at most 800 mm long"), "{}", f[0].message);
+    // PCBWay: 3000 by 1500 mm, in either way round.
+    assert!(rule(&run("pcbway", &part), "size.max_flat").is_empty());
+    part.flat_size = [1600.0, 3100.0];
+    assert_eq!(rule(&run("pcbway", &part), "size.max_flat").len(), 1);
+}
+
+#[test]
+fn threads_and_hardware_follow_what_the_shop_wants() {
+    let mut part = bracket();
+    part.threads =
+        vec![ThreadFact { feature: 7, name: "Hole 3".into(), modelled: true }, ThreadFact { feature: 8, name: "Hole 4".into(), modelled: false }];
+    part.hardware = vec![HardwareHole { feature: 9, label: "M3 nut".into(), at: [20.0, 20.0] }];
+    let scs = run("sendcutsend", &part);
+    let f = rule(&scs, "thread.modelling");
+    assert_eq!((f.len(), f[0].feature, f[0].severity), (1, Some(7), Severity::Error), "only the modelled thread");
+    let h = rule(&scs, "hardware.modelling");
+    assert_eq!((h.len(), h[0].feature, h[0].severity), (1, Some(9), Severity::Warning));
+    // JLCCNC gives no thread rule, and wants hardware modelled: nothing found, and both said.
+    let jlc = run("jlccnc", &part);
+    assert!(rule(&jlc, "thread.modelling").is_empty() && rule(&jlc, "hardware.modelling").is_empty());
+    assert!(jlc.not_checked.iter().any(|n| n.rule == "thread.modelling"));
+    assert!(jlc.not_checked.iter().any(|n| n.rule == "hardware.modelling" && n.why.contains("plain hole with a record")));
+}
+
+#[test]
+fn one_body_one_thickness_and_what_was_not_measured() {
+    let mut part = bracket();
+    part.bodies = vec!["Body1".into(), "Body2".into()];
+    part.recesses = 2;
+    part.cutouts = 1;
+    part.perforations = vec![(5, 0.4)];
+    let r = run("jlccnc", &part);
+    assert_eq!(rule(&r, "file.one_body").len(), 1);
+    assert_eq!(rule(&r, "file.uniform_thickness").len(), 1);
+    // The perforation's holes are held to the hole minimum like any hole: JLCCNC's strictest is 2 mm.
+    assert!(rule(&r, "hole.min_diameter").iter().any(|f| f.feature == Some(5)));
+    assert!(r.not_checked.iter().any(|n| n.rule == "hole.min_diameter" && n.why.contains("not round")));
+}
+
+#[test]
+fn the_report_is_the_same_every_time() {
+    let mut part = bracket();
+    part.holes.push(hole([12.0, 8.0], 0.6, 3.0, 1.0));
+    assert_eq!(run("pcbway", &part), run("pcbway", &part));
+}

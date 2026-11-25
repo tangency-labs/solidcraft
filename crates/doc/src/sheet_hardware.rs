@@ -7,7 +7,7 @@
 //! cut-outs for an edge, and the boundary of a bend's zone, where the flat sheet ends and the bend
 //! starts, for a bend (docs/hardware-catalogue.md, "Near a bend").
 
-use solidcore_record::{Loop2, Region2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_kernel::services::prism::{loop_circle, loop_holds, same_circle, segment_distance};
 
 use crate::hardware_catalog::{HardwareSize, hardware_size};
@@ -30,7 +30,7 @@ fn nearest<'a>(p: Vec2, loops: impl Iterator<Item = &'a Loop2>) -> (f64, bool) {
 }
 
 /// A length for a message: millimetres to two places.
-fn mm(v: f64) -> String {
+pub(crate) fn mm(v: f64) -> String {
     let t = format!("{v:.2}");
     t.trim_end_matches('0').trim_end_matches('.').to_string()
 }
@@ -137,24 +137,66 @@ impl SurfaceSheet {
     }
 }
 
+/// How near a hole's centre is to what bounds it in the flat: the one measurement the hardware
+/// notes and the shop rules check (`shop_check`) share.
+pub(crate) struct Clearance {
+    /// The least distance to an edge, a cut-out or another hole of the flat (mm).
+    pub edge: f64,
+    /// For each bend of the flat, in order.
+    pub bends: Vec<BendClearance>,
+    /// A free-form edge was left unmeasured.
+    pub free_form: bool,
+}
+
+/// How near a hole's centre is to one bend.
+pub(crate) struct BendClearance {
+    /// The bend's inside radius (mm).
+    pub radius: f64,
+    /// The centre is inside the bend's zone, however wide the zone: its distance to the zone's
+    /// boundary says nothing of it (a wide bend's middle is farther from both sides than the minimum).
+    pub inside: bool,
+    /// The distance to where the bend starts, the boundary of its zone, where the flat sheet ends
+    /// (mm); 0 for a centre inside the zone.
+    pub from_start: f64,
+    /// The distance to the bend's centre line (mm); infinite when it cannot be measured.
+    pub from_line: f64,
+}
+
+/// The clearance of the hole `hole`, of `region`'s flat in `sheet`, whose centre is `centre`.
+pub(crate) fn clearance(sheet: &SurfaceSheet, region: &Region2, hole: &Loop2, centre: Vec2) -> Clearance {
+    let (edge, mut free_form) = nearest(centre, region.loops().filter(|l| !std::ptr::eq(*l, hole)));
+    let mut bends = Vec::new();
+    for b in &sheet.bends {
+        let (from_start, skipped) = nearest(centre, b.zone.loops());
+        free_form |= skipped;
+        let inside = loop_holds(&b.zone.outer, centre) == Some(true);
+        let from_line = segment_distance(&Seg2::Line { a: b.start, b: b.end }, centre).unwrap_or(f64::INFINITY);
+        bends.push(BendClearance { radius: b.radius, inside, from_start: if inside { 0.0 } else { from_start }, from_line });
+    }
+    Clearance { edge, bends, free_form }
+}
+
 fn distances(before: Option<&SurfaceSheet>, after: &SurfaceSheet, size: &HardwareSize, what: &str) -> Vec<String> {
     let mut out = Vec::new();
     for (region, hole, c) in new_circles(before, after) {
         // Seen as the flat pattern is read: the flat's y runs the other way.
         let at = format!("({}, {})", mm(c.0.x), mm(-c.0.y));
-        let (edge, free_form) = nearest(c.0, region.loops().filter(|l| !std::ptr::eq(*l, hole)));
-        let (bend, bend_free_form) = nearest(c.0, after.bends.iter().flat_map(|b| b.zone.loops()));
-        if edge + 1e-9 < size.edge {
-            out.push(format!("The hole at {at} is {} mm from the nearest edge, cut-out or other hole: {what} needs {} mm", mm(edge), mm(size.edge)));
+        let near = clearance(after, region, hole, c.0);
+        let bend = near.bends.iter().map(|b| b.from_start).fold(f64::INFINITY, f64::min);
+        if near.edge + 1e-9 < size.edge {
+            out.push(format!(
+                "The hole at {at} is {} mm from the nearest edge, cut-out or other hole: {what} needs {} mm",
+                mm(near.edge),
+                mm(size.edge)
+            ));
         }
-        // A centre inside a bend's zone is in the bend, however wide the zone: its distance to the
-        // zone's boundary says nothing of it (a wide bend's middle is farther from both sides than the minimum).
-        if after.bends.iter().any(|b| loop_holds(&b.zone.outer, c.0) == Some(true)) {
+        // A centre inside a bend's zone is in the bend, however wide the zone.
+        if near.bends.iter().any(|b| b.inside) {
             out.push(format!("The hole at {at} is in a bend: {what} needs its centre {} mm from where a bend starts", mm(size.edge)));
         } else if bend + 1e-9 < size.edge {
             out.push(format!("The hole at {at} is {} mm from a bend (to where the bend starts): {what} needs {} mm", mm(bend), mm(size.edge)));
         }
-        if free_form || bend_free_form {
+        if near.free_form {
             out.push(format!("The hole at {at}: its distance to a free-form edge was not checked"));
         }
     }
