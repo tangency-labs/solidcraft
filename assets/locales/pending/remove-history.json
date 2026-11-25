@@ -54,5 +54,12 @@
     "browser.remove_history_kept": "已移除 {removed} 个特征。以下特征因其他实体在使用而保留：{features}",
     "browser.remove_history_broken": "已移除 {removed} 个特征。以下特征因引用了实体的历史记录，现已失败：{features}",
     "browser.remove_history_unmoved": "已移除 {removed} 个特征。部分对实体面的引用无法移到基础特征：{notes}"
+  },
+  "fr": {
+    "cmd.body_remove_history": "Supprimer l’historique",
+    "browser.remove_history_done": "Historique supprimé : {removed} fonctions ont été remplacées par une seule fonction de base",
+    "browser.remove_history_kept": "{removed} fonctions supprimées. Les suivantes sont conservées, car d’autres corps les utilisent : {features}",
+    "browser.remove_history_broken": "{removed} fonctions supprimées. Les suivantes échouent désormais, car elles faisaient référence à l’historique du corps : {features}",
+    "browser.remove_history_unmoved": "{removed} fonctions supprimées. Certaines références aux faces du corps n’ont pas pu être transférées vers la fonction de base : {notes}"
   }
 }

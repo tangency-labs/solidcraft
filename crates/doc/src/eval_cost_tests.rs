@@ -56,6 +56,7 @@ pub(crate) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub run_on_probes: usize,
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
@@ -63,6 +64,8 @@ pub(crate) struct Counts {
     pub hole_points: usize,
     /// Contact tests a join made to find which bodies its tool meets.
     pub contact_tests: usize,
+    /// Kernel union calls (`union` or `union_all`) made by `join`.
+    pub join_unions: usize,
 }
 
 thread_local! {
@@ -93,12 +96,14 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            run_on_probes: 0,
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
             classifications: 0,
             hole_points: 0,
             contact_tests: 0,
+            join_unions: 0,
         })
     };
 }
@@ -468,6 +473,68 @@ fn a_boundary_surface_keeps_its_result_when_another_sketch_changes() {
     assert_eq!(model.last_recomputed, 2, "the square and the patch");
     assert!(model.result(patch).unwrap().error.is_none());
     assert!(model.state().bodies[0].body.size() > size, "the patch reaches the moved corner");
+}
+
+/// Construction geometry can follow another part in a sketch while the whole boundary extruded
+/// from it stays put. A shared point still moves the drawn curve, and a missing boundary fails.
+#[test]
+fn a_whole_profile_extrusion_reads_its_boundary_and_naming_curves() {
+    let mut doc = Document::new("Construction geometry");
+    block(&mut doc, "Other", Vec3::new(30.0, 30.0, 30.0), [2.0; 3]);
+    let other = doc.features[0].id;
+    let mut sketch = Sketch::new();
+    let center = sketch.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+    sketch.add_circle(Vec2::ZERO, 4.0, Some(center), Some("rim")).unwrap();
+    let end = sketch.add_point(Vec2::new(20.0, 2.0), None).unwrap();
+    let guide = sketch.add_line_pts(center, end, None).unwrap();
+    sketch.curves[guide].construction = true;
+    let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let extrude = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                thin: None,
+                sketch: id.into(),
+                profiles: ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer: vec!["rim".into()], holes: Vec::new() }] },
+                extent: serde_json::from_value(serde_json::json!({"distance": "2"})).unwrap(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(extrude).unwrap().body_names = vec!["Disk".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let first = model.state();
+    let disk = first.body("Disk").unwrap();
+    let names = crate::naming::face_names(disk);
+    let mut reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+    // With another body gone, only the relative cache entry can give back the disk.
+    doc.feature_mut(other).unwrap().suppressed = true;
+    doc.sketch_mut(id).unwrap().points[end].pos.x = 25.0;
+    for session in [&mut model, &mut reopened] {
+        let before = session.state();
+        session.evaluate(&doc);
+        assert_eq!(session.last_recomputed, 1, "only the sketch");
+        assert_eq!(session.last_restored, 1);
+        let next = session.state();
+        assert!(next.body("Other").is_none());
+        assert_eq!(next.sketch(id).unwrap().sketch.point(end).unwrap().x, 25.0);
+        let disk = next.body("Disk").unwrap();
+        assert!(disk.body.same(&before.body("Disk").unwrap().body));
+        assert_eq!(crate::naming::face_names(disk), names);
+    }
+
+    doc.sketch_mut(id).unwrap().points[center].pos.x = 8.0;
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the guide and rim share the moved point");
+    assert!((centroid_of(&model, extrude).x - 8.0).abs() < 1e-7);
+    assert_eq!(crate::naming::face_names(model.state().body("Disk").unwrap()), names);
+
+    doc.sketch_mut(id).unwrap().curves[0].id = "other".into();
+    model.evaluate(&doc);
+    assert!(model.result(extrude).unwrap().error.is_some(), "the old pick no longer resolves");
+    assert!(model.state().body("Disk").is_none());
 }
 
 #[test]
@@ -1193,7 +1260,16 @@ fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are
     let st = model.state();
     let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
     let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
-    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let kind = FeatureKind::Combine {
+        target: board.clone().into(),
+        tools: vec![tool.into()],
+        operation: Operation::Cut,
+        keep_tools: true,
+        offset: None,
+        offset_edges: OffsetEdges::Sharp,
+        offset_faces: Vec::new(),
+        offset_radius: None,
+    };
     let combine = doc.add_feature(kind, None).unwrap();
     model.evaluate(&doc);
     assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
@@ -3724,6 +3800,8 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     assert_eq!(volumes.len(), 2, "{volumes:?}");
     assert!((volumes[0] - 400.0).abs() < 1e-6, "{volumes:?}");
     assert!((volumes[1] - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
+    // Each block piece already lies in the full-width run-on of the first tool.
+    assert_eq!(work.run_on_probes, 0, "{work:?}");
     // The three copies under the block build theirs, and so does a copy in the clear after one.
     assert!(work.hole_tools > 4 && work.hole_tools < 90, "{work:?}");
 }
@@ -4051,6 +4129,29 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     assert!(near.is_empty());
 }
 
+/// A cover can shorten the run-on below a nearer piece. The hole still checks whether its
+/// shortened tool reaches the piece before subtracting it.
+#[test]
+fn a_shortened_run_on_checks_its_first_piece() {
+    let mut state = ModelState::default();
+    for (name, low, high) in [("Plate", -5.0, 0.0), ("Near", 0.15, 0.18), ("Cover", 0.25, 0.5)] {
+        let body = kernel::box_solid(Vec3::new(-50.0, -50.0, low), Vec3::new(50.0, 50.0, high)).unwrap();
+        state.bodies.push(ModelBody::new(name.into(), body, 0));
+    }
+    let vals = Default::default();
+    let depth = Some("2".into());
+    let reach = super::hole_reach(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, false, &[]).unwrap();
+    assert!((reach.top - 0.125).abs() < 1e-6);
+    assert_eq!(reach.above.len(), 1);
+    let work = counted(|| {
+        let tools = super::hole_tools_reaching(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, &reach).unwrap();
+        let volume = kernel::measure(&tools[0].0.body).unwrap().volume;
+        let expected = std::f64::consts::PI * 1.5_f64.powi(2) * (2.0 + reach.top);
+        assert!((volume - expected).abs() < 1e-6, "{volume}");
+    });
+    assert_eq!(work.run_on_probes, 1);
+}
+
 /// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one
 /// Combine: the model, and the Combine.
 fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
@@ -4078,6 +4179,10 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 tools: tools.iter().map(|t| t.clone().into()).collect(),
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -4515,20 +4620,42 @@ fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) ->
 /// search for the largest radius that fits (#4282): the search cannot be guided then, and it
 /// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
 /// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
-/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
-/// any radius there.
+/// took 77 s, fifteen times the blend that failed, and they found nothing. That round now builds
+/// ([`the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds`]); the refusal here is
+/// one the kernel still cannot size.
 #[test]
 fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
-    // The design of #4282 at a third of its size (the round and the holes keep their
-    // proportions): a cube with a hole through each axis, a round of every one of its edges.
-    // The kernel refuses the radius and cannot size the refusal.
-    let mut doc = Document::new("holed cube");
-    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 2 mm
+    // round of its four top edges (solidcore-ops'
+    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused`).
+    // The top face is the rectangle less its corners outside the circle of radius
+    // rho = sqrt(35.75^2 - 12.5^2) = 33.49, so the four edges end on the ball and share no
+    // corner. Past their ends the rails of two neighbouring rounds run on as the lines
+    // x = 30 - r and y = 20 - r and cross on the top face while (30 - r)^2 + (20 - r)^2 < rho^2,
+    // so no round larger than r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850 fits. The kernel
+    // finds the bands overlapping past the edges' ends and refuses the round as having no room
+    // there, without naming a radius that fits.
+    let mut doc = Document::new("ball-trimmed block");
+    block(&mut doc, "Part", Vec3::new(-30.0, -20.0, 0.0), [60.0, 40.0, 25.0]);
+    let ball = FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, 12.5)), radius: "35.75".into(), operation: Operation::Intersect };
+    doc.add_feature(ball, None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let body = model.state().bodies[0].body.clone();
-    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let top = [Vec3::new(30.0, -10.0, 25.0), Vec3::new(-30.0, 10.0, 25.0), Vec3::new(-15.0, -20.0, 25.0), Vec3::new(15.0, 20.0, 25.0)];
+    let kind = FeatureKind::Fillet {
+        edges: top.into_iter().map(Position).collect(),
+        radius: "2".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    let fillet = doc.add_feature(kind, None).unwrap();
     let work = counted(|| model.evaluate(&doc));
     let r = model.result(fillet);
     let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
@@ -4536,6 +4663,40 @@ fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
     // The blend the kernel refused, and no search for a radius that fits.
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// The design of #4282 at a third of its size: a 10 mm cube with a hole of radius 5/3 through
+/// its centre along each axis, and a round R = 2/3 of every one of its edges. The round builds
+/// one valid body (the kernel refused it without a radius to try until #21715: rail ends whose
+/// feet straddle a hole's seam at the three-hole corners), and it removes the volume derived here:
+/// - 11.04862 for the 12 cube edges with their 8 corners, exact: the cube less the rounded box
+///   of b = a - 2R, a^3 - (b^3 + 6 b^2 R + 3 pi b R^2 + 4/3 pi R^3).
+/// - 6.52825 for the 6 hole rims, exact: each a quarter-torus spandrel by Pappus, the area
+///   R^2 (1 - pi/4) about the hole's axis at r + R (10 - 3 pi) / (12 - 3 pi).
+/// - 2.15652 for the 12 edges where two holes meet, approximate: R^2 (tan(t/2) - t/2) along each
+///   2.840 mm edge, the angle t between the walls going from 90 to 60 degrees, the walls taken as
+///   flat and the three-hole corners left out.
+///
+/// Together 19.73339. The tolerance, 0.02 mm3, is about 1% of the approximate 2.157: the kernel's
+/// 19.72604 is 0.0073 below the sum.
+#[test]
+fn the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds() {
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let before = kernel::measure(&body).unwrap().volume;
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    model.evaluate(&doc);
+    assert_eq!(model.result(fillet).and_then(|r| r.error.clone()), None);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let rounded = &st.bodies[0].body;
+    kernel::check_kept(rounded).unwrap();
+    let removed = before - kernel::measure(rounded).unwrap().volume;
+    assert!((removed - 19.73339).abs() < 0.02, "{removed}");
 }
 
 /// A round the kernel refuses naming the radius that fits still searches for it: the search is
@@ -4708,4 +4869,191 @@ fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
     assert!(result.error.is_none(), "{result:?}");
     assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("9 of 9 cut copies remove no material")), "{result:?}");
     assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// Add a sketch on XY with disjoint rectangles `(x, y, w, h)` and extrude all of them to `height`
+/// with `Operation::Join`.
+fn join_rects(doc: &mut Document, rects: &[(f64, f64, f64, f64)], height: f64) -> u64 {
+    let mut sk = Sketch::new();
+    for &(x, y, w, h) in rects {
+        let pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)].map(|(px, py)| sk.add_point(Vec2::new(px, py), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(pts[k], pts[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": height.to_string()})).unwrap(),
+        operation: Operation::Join,
+        targets: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// Multi-target join batches all tools hitting each target into one kernel union per target,
+/// preserving body names, exact volumes, and exact traced face lineage.
+#[test]
+fn multi_target_join_batches_tools_per_target() {
+    let mut doc = Document::new("multi-target batch");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [40.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [40.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    // Three bosses on A and three bosses on B in one feature: 6 tools across 2 targets.
+    let rects =
+        [(2.0, 3.0, 4.0, 4.0), (14.0, 3.0, 4.0, 4.0), (26.0, 3.0, 4.0, 4.0), (2.0, 33.0, 4.0, 4.0), (14.0, 33.0, 4.0, 4.0), (26.0, 33.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 2, "one batched union per target: {work:?}");
+    assert!(work.contact_tests > 0, "{work:?}");
+
+    let st = model.state();
+    let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["A", "B"]);
+    assert!((volume(&model, "A") - 4192.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - 4192.0).abs() < 1e-6, "{}", volume(&model, "B"));
+    for b in &st.bodies {
+        assert!((0..b.body.face_count()).all(|i| crate::naming::face_name_exact(b, i)), "exact lineage lost on {}", b.name);
+    }
+}
+
+/// A bridging tool meeting two or more targets merges them in one batched union call, preserving
+/// exact volume, thread re-attribution, and face lineage; a chain of overlapping tools in one
+/// feature also bridges targets cleanly.
+#[test]
+fn multi_target_join_batches_bridging_tool_with_threads_and_lineage() {
+    let mut doc = Document::new("bridge three targets");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(30.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(60.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(40.0, 5.0, 10.0)),
+            axis: crate::dir_expr(Vec3::Z),
+            radius: "3".into(),
+            height: "6".into(),
+            operation: Operation::Join,
+            references: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    doc.add_feature(marking(Vec3::new(43.0, 5.0, 13.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().threads.len(), 1);
+    assert_eq!(model.state().threads[0].body, "B");
+    let before_sum = volume(&model, "A") + volume(&model, "B") + volume(&model, "C");
+
+    // One bar spanning from A across B into C merges all three into A in one batched union.
+    let bridge = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(15.0, 2.0, 2.0)),
+                length: "50".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(bridge).is_some_and(|r| r.error.is_none()), "{:?}", model.result(bridge));
+    assert_eq!(work.join_unions, 1, "bridging A, B, and C must run one batched union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - (before_sum + 720.0)).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert_eq!(st.threads.len(), 1);
+    assert_eq!(st.threads[0].body, "A", "thread on absorbed B must move to A");
+    assert!((0..st.bodies[0].body.face_count()).all(|i| crate::naming::face_name_exact(&st.bodies[0], i)));
+
+    // A chain of two overlapping tools in one pattern feature: copy 1 extends A, copy 2 meets
+    // copy 1 and B (without touching A's base body), so both merge A and B into one body.
+    let mut doc = Document::new("chained bridge");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(26.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let seed = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(8.0, 2.0, 2.0)),
+                length: "8".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [seed],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "6"},
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pattern, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "chained bridge merges A, queued copy, bridging copy, and B in one union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - 2576.0).abs() < 1e-4, "{}", volume(&model, "A"));
+}
+
+/// Multi-target join fast-paths apart tools that miss every target via `union_all_apart`, and
+/// batches multiple tools hitting one target while keeping a sheet metal body's identity intact.
+#[test]
+fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() {
+    // Four apart bosses that miss both A and B fall back to A and join without any kernel union.
+    let mut doc = Document::new("apart fallback");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    let apart_rects = [(40.0, 0.0, 4.0, 4.0), (50.0, 0.0, 4.0, 4.0), (60.0, 0.0, 4.0, 4.0), (70.0, 0.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &apart_rects, 4.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.joined_apart, 1, "apart fallback tools must join without intersection work: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.body("A").unwrap().body.lumps().unwrap().len(), 5);
+    assert!((volume(&model, "A") - 1256.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert_eq!(st.body("B").unwrap().body.lumps().unwrap().len(), 1);
+    assert!((volume(&model, "B") - 1000.0).abs() < 1e-6, "{}", volume(&model, "B"));
+
+    // Sheet metal identity rule: multiple tools meeting A (including one reaching across a sheet
+    // metal body) batch into A without absorbing the sheet.
+    let mut doc = Document::new("sheet kept");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 20.0, 10.0]);
+    flat_sheet(&mut doc, Vec2::new(25.0, 0.0), 20.0, 20.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let sheets = sheet_bodies(&model);
+    assert_eq!(sheets.len(), 1);
+    let sheet_name = sheets[0].clone();
+    let sheet_vol = volume(&model, &sheet_name);
+
+    let rects = [(2.0, 2.0, 4.0, 4.0), (10.0, 2.0, 4.0, 4.0), (18.0, 12.0, 10.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 1, "all three tools joining A must batch into one union: {work:?}");
+    assert_eq!(sheet_bodies(&model), vec![sheet_name.clone()]);
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
 }

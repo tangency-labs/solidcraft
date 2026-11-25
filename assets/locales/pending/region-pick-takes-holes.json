@@ -30,5 +30,9 @@
   "zh": {
     "prefs.region_pick_takes_holes": "在轮廓内单击时也选择其中的形状",
     "prefs.region_pick_takes_holes_note": "适用于变换、移动/复制、缩放、镜像和草图阵列。关闭时：在两个嵌套矩形之间单击只选择外侧矩形；在内侧矩形内单击可将其一并选择。"
+  },
+  "fr": {
+    "prefs.region_pick_takes_holes": "Un clic à l’intérieur d’un profil sélectionne également les formes qu’il contient",
+    "prefs.region_pick_takes_holes_note": "Pour Transformer, Déplacer/Copier, Échelle, Symétrie et les motifs d’esquisse. Désactivé : un clic entre deux rectangles imbriqués sélectionne uniquement le rectangle extérieur ; cliquez à l’intérieur du rectangle intérieur pour le sélectionner également."
   }
 }

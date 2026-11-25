@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="500" viewBox="0 0 1280 500">
+  <title>WR-21697 combined walk</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="1280" height="500" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 60 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Before: the V extent stays at the V seam</tspan></text>
+    <text transform="matrix(1 0 0 1 60 80)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">V (period 12)</tspan></text>
+    <rect x="60" y="90" width="300" height="300" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="90" y="215" width="150" height="150" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 165 268)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">face</tspan></text>
+    <text transform="matrix(1 0 0 1 165 288)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">U [0.1, 0.6]</tspan></text>
+    <text transform="matrix(1 0 0 1 165 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">V [1, 7]</tspan></text>
+    <circle cx="90" cy="365" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="340" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="315" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="290" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="265" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="240" r="2.5" fill="#000000"/>
+    <circle cx="90" cy="215" r="2.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 54 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">V = 12</tspan></text>
+    <text transform="matrix(1 0 0 1 54 394)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">V = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 60 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">U = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 360 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">U = 1</tspan></text>
+    <text transform="matrix(1 0 0 1 210 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">old V seam: the bottom edge, V = 0</tspan></text>
+    <line x1="60" y1="315" x2="360" y2="315" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 250 308)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">new V seam, V = 3</tspan></text>
+    <circle cx="386" cy="390" r="4" fill="#000000"/>
+    <line x1="386" y1="365" x2="386" y2="215" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <text transform="matrix(1 0 0 1 405 394)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">V extent: the point at V = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 405 286)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">V spans [1, 7]: disjoint</tspan></text>
+    <text transform="matrix(1 0 0 1 405 302)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">from it, dropped</tspan></text>
+    <text transform="matrix(1 0 0 1 700 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">After: the V extent starts at the first sample</tspan></text>
+    <text transform="matrix(1 0 0 1 700 80)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">V (period 12)</tspan></text>
+    <rect x="700" y="90" width="300" height="300" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="730" y="215" width="150" height="150" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 805 268)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">face</tspan></text>
+    <text transform="matrix(1 0 0 1 805 288)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">U [0.1, 0.6]</tspan></text>
+    <text transform="matrix(1 0 0 1 805 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">V [1, 7]</tspan></text>
+    <circle cx="730" cy="365" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="340" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="315" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="290" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="265" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="240" r="2.5" fill="#000000"/>
+    <circle cx="730" cy="215" r="2.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 694 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">V = 12</tspan></text>
+    <text transform="matrix(1 0 0 1 694 394)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">V = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 700 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">U = 0</tspan></text>
+    <text transform="matrix(1 0 0 1 1000 408)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">U = 1</tspan></text>
+    <text transform="matrix(1 0 0 1 850 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">old V seam: the bottom edge, V = 0</tspan></text>
+    <line x1="700" y1="165" x2="1000" y2="165" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 890 158)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">new V seam, V = 9</tspan></text>
+    <rect x="1020" y="215" width="12" height="150" fill="#dce9f5" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 1045 294)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">V extent [1, 7]</tspan></text>
+    <text transform="matrix(1 0 0 1 1045 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">unused [7, 1] across the seam:</tspan></text>
+    <text transform="matrix(1 0 0 1 1045 176)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">middle 10, snapped to knot 9</tspan></text>
+    <text transform="matrix(1 0 0 1 60 462)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Square torus, U period 1, V period 12; a sample on the face&apos;s V edges steps 1 in V (dots). Before, each V span was also measured against the U period,</tspan></text>
+    <text transform="matrix(1 0 0 1 60 478)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">so a step of 1 (over half of 1) was taken the long way round, and the spans that did not touch the point at V = 0 were refused.</tspan></text>
+  </g>
+</svg>

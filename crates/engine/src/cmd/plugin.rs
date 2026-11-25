@@ -225,6 +225,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch_exits: vec![],
                 view: None,
                 param_warnings: vec![],
+                messages: vec![],
             })
             .map_err(|e| bad("plugin.run", e.to_string()));
         }

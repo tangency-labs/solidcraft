@@ -4326,6 +4326,8 @@ mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
 #[cfg(test)]
+mod midsurface_samples_tests;
+#[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
 mod pattern_suppress_tests;
@@ -4490,10 +4492,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
         notes,
         visibility,
         drawings,
         next_component_color_index,
+        plane_extents,
         plugin_data,
         linked_bodies_left_out,
     } = a;
@@ -4533,10 +4537,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *saved_sections == b.saved_sections
         && *notes == b.notes
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+        && *plane_extents == b.plane_extents
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link
