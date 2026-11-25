@@ -1,4 +1,4 @@
-//! One cumulative budget for preparation, clipping and pattern expansion.
+//! One cumulative budget for preparation, clipping and dash expansion.
 
 use super::Invalid;
 
