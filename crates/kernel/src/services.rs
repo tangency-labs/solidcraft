@@ -51,6 +51,7 @@ pub use solidcore_ops::session;
 pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
+pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`
