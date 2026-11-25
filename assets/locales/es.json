@@ -5527,7 +5527,6 @@
   "sketch.status_fully_constrained": "totalmente restringido",
   "sketch.untied_ends": "Sin vincular {count}",
   "sketch_mode.announcement": "{view}, modo boceto",
-  "sketch_mode.editing": "Editando",
   "sketch_mode.model_card_unavailable": "Abre una vista de Modelo antes de empezar un boceto aquí",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Vinculado a {body} / {path}",

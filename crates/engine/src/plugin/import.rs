@@ -170,6 +170,22 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
     convert(session, importer, path, options, consent.as_ref()).map_err(super::messages::named(&importer.name, Some(&file)))
 }
 
+/// All callers receive schema defaults for omitted options. User preferences belong to the
+/// interactive form only; explicit values (including null) stay the caller's own, and the schema checks them.
+fn with_schema_defaults(schema: &Value, options: &Value) -> Value {
+    let mut defaults = options.clone();
+    if let Some(values) = defaults.as_object_mut()
+        && let Some(properties) = schema.get("properties").and_then(Value::as_object)
+    {
+        for (key, property) in properties {
+            if let Some(default) = property.get("default") {
+                values.entry(key.clone()).or_insert_with(|| default.clone());
+            }
+        }
+    }
+    defaults
+}
+
 fn convert(
     session: &mut Session,
     importer: &Importer,
@@ -192,9 +208,9 @@ fn convert(
         if let Some(warning) = update.warning {
             session.echo(warning);
         }
-        craft_plugin::prepare_input(&schema, &update.values)?
+        craft_plugin::prepare_input(&schema, &with_schema_defaults(&schema, &update.values))?
     } else {
-        craft_plugin::prepare_input(&schema, options)?
+        craft_plugin::prepare_input(&schema, &with_schema_defaults(&schema, options))?
     };
     let options = &prepared;
     let input_folders = folders::for_entry(session, &package, &importer.entry, options, consent)?;
