@@ -51,6 +51,9 @@
   "click": {"handle": "appbar:file"}
  },
  {
+  "click": {"handle": "menu:Export"}
+ },
+ {
   "widget": "Export STEP\u2026"
  },
  {
