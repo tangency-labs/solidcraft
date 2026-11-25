@@ -57,6 +57,12 @@
 //! - **UB-290** (unconditional, the fork's tangency-labs/smlib@8d0fbff): [`is_topological`]
 //!   refuses an edge with one face on both sides whose primary edge use and its radial
 //!   are in two loop uses, which `SmBrep::DeleteEdge` would merge into itself.
+//! - **A clear point first** (not upstream). [`find_radial_sector_between`] looks first for a
+//!   point of the edge where every candidate classifies from the faces' binormals at the
+//!   edge (`query::edge::radial_sector_classify_at_edge`), in upstream's order of points,
+//!   and steps the faces off the edge, as upstream, only where the edge has no such point.
+//!   Where the first point decides at the edge, as it does unless the faces are within 10
+//!   degrees of each other there, the answer is upstream's.
 //! - **Surface identity.** Upstream compares `SmSurface*` pointers (the target of
 //!   `GetUVTrimCurveOfSurface`, `IsSeam(const SmSurface&)`, `IsTopological`'s two
 //!   surfaces). A port face owns its surface, so a surface is named by the face holding
@@ -137,7 +143,10 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
-use crate::query::edge::{radial_sector_of_curve_classify, CurveSectorClass, RadialSectorClass};
+use crate::query::edge::{
+    radial_sector_classify_at_edge, radial_sector_of_curve_classify, CurveSectorClass,
+    RadialSectorClass,
+};
 use crate::surface::surface::p2::PLANE_TYPE;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p2::{self as brep_p2, NotifyArg as BrepNotifyArg};
@@ -771,7 +780,9 @@ fn failed(e: SolidError) -> Result<()> {
 /// `FindRadialSector`: the radial sector of this edge containing the face of
 /// `classify_eu`, among the edge uses of `region` (all regions when `None`) with
 /// orientation `required_orientation`. Up to ten edge points are tried until a
-/// classification is unique. `inside_faceuses` is passed on unused, as upstream.
+/// classification is unique: first one where the faces' binormals at the edge decide (not
+/// upstream), then, as upstream, with the faces stepped off the edge. `inside_faceuses` is
+/// passed on unused, as upstream.
 ///
 /// # Errors
 ///
@@ -851,6 +862,48 @@ pub fn find_radial_sector_between(
         let eu = eu.ok_or_else(|| null("FindRadialSector: null radial edge use"))?;
         eu1::faceuse(b, eu)
     };
+
+    // (not upstream) First a point where every candidate's faces leave the edge at a clear
+    // angle, read at the edge alone; only where the edge has none are the faces stepped off
+    // it. Near tangent, the steps read the faces where they part, and a stretch of face that
+    // runs within the tolerance of the other can lead them past the face to where the
+    // surfaces cross back: where two equal holes cross a hair off each other's axes, the
+    // midpoint of an edge round the tip of one hole's lens in the other's wall sits in a
+    // neck 0.018 mm wide, the walls within 1e-5 of each other, and the steps that ran on past
+    // the next tip put the face in the holes' space.
+    for ii in 0u32..10 {
+        let param = if ii == 0 { 0.5 } else { f64::from(ii) / 11.0 };
+        let mut inside = None;
+        let mut clear = true;
+        for &eu in &cands {
+            match radial_sector_classify_at_edge(
+                k,
+                b,
+                e,
+                param,
+                eu,
+                other.as_deref_mut(),
+                classify_eu,
+            ) {
+                Ok(Some(RadialSectorClass::Inside)) => {
+                    inside = Some(eu);
+                    break;
+                }
+                Ok(Some(_)) => {}
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
+                // a point that does not classify at the edge is left to the steps below,
+                // which report its failure where they reach it
+                Ok(None) | Err(_) => {
+                    clear = false;
+                    break;
+                }
+            }
+        }
+        if let (true, Some(eu)) = (clear, inside) {
+            out.radial_edgeuse = Some(eu);
+            return Ok(out);
+        }
+    }
 
     // for 10 points along the edge until one classifies uniquely
     for ii in 0u32..10 {
@@ -2199,15 +2252,23 @@ fn is_topological_with(
             approx_tol = gain.plane(half_min);
         }
 
-        // See if this surface can 'cover' the part of the other surface that its face uses
-        let (dist, keep, merged) =
-            match cover_other_coincident_face(k, b, face1, face2_, approx_tol, false) {
-                Ok(r) => r,
-                Err(err) => {
-                    failed(err)?;
-                    return Ok(out);
-                }
-            };
+        // See if this surface can 'cover' the part of the other surface that its face uses.
+        // Not upstream (tangency-labs/solidcore#3399): a test that grows no tolerance fits the
+        // trims it builds for the faces' domains tightly where a loose fit would raise an edge
+        // (`Caches::refit_raising_trims`).
+        let refit = k
+            .caches
+            .refit_raising_trims
+            .replace(matches!(gain, CoverTolerance::NoGrowth));
+        let covered = cover_other_coincident_face(k, b, face1, face2_, approx_tol, false);
+        k.caches.refit_raising_trims.set(refit);
+        let (dist, keep, merged) = match covered {
+            Ok(r) => r,
+            Err(err) => {
+                failed(err)?;
+                return Ok(out);
+            }
+        };
         out.dist_between = dist;
         out.surf_to_keep = keep;
         if keep.is_none() {

@@ -155,25 +155,15 @@ fn top_edges(k: &Kernel, b: &Brep) -> Vec<EdgeId> {
 /// SolidCraft's preset of fixes (all 182 of `solidcraft-flags/612ac9a36`) on.
 fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
-    k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
-    k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);

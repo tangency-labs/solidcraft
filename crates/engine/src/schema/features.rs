@@ -94,7 +94,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub exact_regions: Option<bool>,
     /// A point on a planar body face to extrude instead of a sketch profile.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
     pub face: Option<Point3>,
     /// Several coplanar faces of one body to extrude together, by a point on each. Not with
     /// `face`, `sketch` or `profiles`.
@@ -150,6 +151,13 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
+    /// On a Join To Object, leave the body the `to` pick is on as its own body, so the join
+    /// changes only the bodies in `targets`. Needs a Join with `to`. Default: a call that names
+    /// its targets leaves that body apart; a call that names none takes it too.
+    // `skip_serializing_if` keeps schemars from writing `default: null`, which `bool` refuses.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub to_body_apart: Option<bool>,
     /// Start at this face or point (From Object). On a flat face at a slant the start follows the
     /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
@@ -619,6 +627,24 @@ pub struct BoundingSolidParams {
     pub common: FeatureCommon,
 }
 
+/// What a Scale grows its bodies about: the bodies' centre, or a reference.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ScaleAboutParam {
+    /// The bodies' centre.
+    Centre(ScaleCentre),
+    /// A vertex, face, edge, sketch or construction point.
+    Pick(GeoRefParam),
+}
+
+/// The bodies' centre, in either spelling.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScaleCentre {
+    Centre,
+    Center,
+}
+
 /// Scale bodies about a point.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -632,9 +658,15 @@ pub struct ScaleParams {
     /// the scale; a `factor` given too has no effect but must still evaluate.
     #[serde(default)]
     pub factors: Option<ScaleFactors>,
-    /// The point that stays where it is, in mm. Default: the origin.
+    /// A fixed point that stays where it is, in mm. Default: the origin. Not with `about`.
     #[serde(default)]
     pub origin: Option<Point3>,
+    /// What stays where it is, found again each time the design updates: `"centre"` (the centre
+    /// of the bodies' box as the features before the Scale leave them) or a reference (a vertex,
+    /// a sketch or construction point, a circular edge's centre, a flat face's middle or a round
+    /// face's end), which follows the model. Not with `origin`.
+    #[serde(default)]
+    pub about: Option<ScaleAboutParam>,
     // Not `FeatureCommon`: a scale makes no body, so `body_name` and `body_names` would do nothing.
     // `participants` stays because `timeline.redefine` passes a feature's own back.
     /// The feature's name in the timeline.
@@ -1141,7 +1173,8 @@ pub struct MoveParams {
     pub axis: Option<Point3>,
     /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
     /// the move keeps turning about it where it is, when an earlier step moves the body
-    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    /// (#17974). `axis` gives the turn's sense, and with `origin` the line used when the edge
+    /// is not found.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "GeoRefParam")]
     pub about: Option<GeoRefParam>,

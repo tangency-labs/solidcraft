@@ -131,7 +131,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check_new(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+            // Only the write holds the lock: the archive was read and checked above without it.
+            let _write = plugin::install::write_lock();
+            plugin::install::install_locked(&plugin, &dir, p.replace).map_err(failed)?;
             std::mem::swap(&mut s.plugin_state.grants, &mut approved_state.grants);
             // Installed: a later session finds the approvals bound to this exact package.
             s.plugin_state.persist_stored().map_err(|e| crate::EngineError::Other(format!("“{}” is installed, but {e}", manifest.name)))?;
@@ -140,6 +142,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         s.plugin_state.packages.insert(manifest.id.clone(), folder.to_string_lossy().into_owned());
     }
     let runtime = manifest.runtime.as_ref();
+    let keys = |kind: craft_plugin::shader::ShaderKind| -> Vec<String> {
+        manifest.shaders.iter().filter(|shader| shader.kind == kind).map(|shader| format!("{}/{}", manifest.id, shader.id)).collect()
+    };
     serde_json::to_value(InstallResult {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
@@ -162,6 +167,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Exporter).flat_map(|e| e.extensions.iter().cloned()).collect())
             .unwrap_or_default(),
         listeners: runtime.map(|r| r.listeners.clone()).unwrap_or_default(),
+        shaders: keys(craft_plugin::shader::ShaderKind::Background),
+        tints: keys(craft_plugin::shader::ShaderKind::Tint),
+        panel_shaders: keys(craft_plugin::shader::ShaderKind::Panel),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),

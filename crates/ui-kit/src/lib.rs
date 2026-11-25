@@ -22,6 +22,7 @@ pub mod ribbon;
 pub mod start_page;
 pub mod theme_files;
 pub mod theme_options;
+pub mod tint;
 pub mod toast;
 pub mod view_compass;
 pub mod view_layout_menu;

@@ -241,6 +241,31 @@ pub fn project_fit(
     Ok(coalesce_linear(out))
 }
 
+/// Project the circular arcs `arcs` of the `source` plane onto `target` exactly: a full circle
+/// as an ellipse, arcs as rational quadratic conics, and a circle or arc seen edge on as the
+/// whole line it covers, out to its own extremes (not to those of samples of it). The arcs must be
+/// one chain on one circle, as a sketch circle or arc gives them: the same centre and radius,
+/// each starting where the one before ends, turning one way, at most a full turn in all. `None`
+/// when a piece is not an arc or the arcs are not such a chain (two arcs over the same half turn
+/// cover half the circle, not the whole of it).
+pub fn project_arcs(
+    source: &Plane,
+    target: &Plane,
+    arcs: &[solidcore_record::Seg2],
+    max_coord: f64,
+) -> Result<Option<Vec<Projection>>> {
+    let pieces: Vec<_> = arcs
+        .iter()
+        .map(|s| solidcore::prism::read::PlanarPiece::Seg(solidcore_convert::seg2(s)))
+        .collect();
+    if !k::one_arc_chain(&pieces) {
+        return Ok(None);
+    }
+    k::project_arcs(&plane(target), &plane(source), &pieces, max_coord)
+        .map(|g| g.map(|g| g.into_iter().map(record_projection).collect()))
+        .map_err(status)
+}
+
 /// Classify already projected native pieces, using the kernel's exact spline splitting.
 pub fn classify_pieces(
     target: &Plane,
@@ -267,4 +292,60 @@ pub fn classify_pieces(
     k::classify_pieces(&plane(target), &pieces, limit, max_coord)
         .map(|g| g.into_iter().map(record_projection).collect())
         .map_err(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore_record::{Seg2, Vec3};
+    use std::f64::consts::{FRAC_1_SQRT_2, PI};
+
+    fn half(start: f64) -> Seg2 {
+        Seg2::Arc {
+            center: Vec2::new(-35.0, 0.0),
+            radius: 6.0,
+            start,
+            sweep: PI,
+        }
+    }
+
+    /// A plane tilted 45 degrees about X, so a circle on XY is seen as an ellipse.
+    fn tilted() -> Plane {
+        Plane {
+            origin: Vec3::ZERO,
+            x: Vec3::X,
+            y: Vec3::new(0.0, FRAC_1_SQRT_2, FRAC_1_SQRT_2),
+        }
+    }
+
+    #[test]
+    fn two_identical_semicircles_are_not_a_full_circle() {
+        let got = project_arcs(&Plane::XY, &tilted(), &[half(0.0), half(0.0)], 1e6).unwrap();
+        assert!(got.is_none(), "{got:?}");
+        let gap = project_arcs(&Plane::XY, &tilted(), &[half(0.0), half(PI + 0.1)], 1e6).unwrap();
+        assert!(gap.is_none(), "{gap:?}");
+    }
+
+    #[test]
+    fn two_halves_end_to_end_are_the_whole_circle() {
+        let got = project_arcs(&Plane::XY, &tilted(), &[half(0.0), half(PI)], 1e6).unwrap();
+        assert!(
+            matches!(got.as_deref(), Some([Projection::Ellipse { .. }])),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn a_circle_seen_edge_on_is_its_whole_diameter() {
+        let got = project_arcs(&Plane::XY, &Plane::XZ, &[half(0.0), half(PI)], 1e6).unwrap();
+        let Some([Projection::Line(a, b)]) = got.as_deref() else {
+            panic!("{got:?}");
+        };
+        let (lo, hi) = (a.x.min(b.x), a.x.max(b.x));
+        assert!(
+            (lo + 41.0).abs() < 1e-9 && (hi + 29.0).abs() < 1e-9,
+            "{a:?} {b:?}"
+        );
+        assert!(a.y.abs() < 1e-9 && b.y.abs() < 1e-9, "{a:?} {b:?}");
+    }
 }
