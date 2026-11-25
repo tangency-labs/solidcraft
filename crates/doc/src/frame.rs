@@ -45,7 +45,7 @@ pub fn within_profile_size(v: f64) -> bool {
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::services::frame_member::VERTICAL_TOLERANCE;
+pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::FRAME_VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -1053,7 +1053,7 @@ pub fn mirrored(region: &Region2) -> Region2 {
 /// looking back from its end. `None` for a direction of no length. The kernel's member axes take
 /// world +Z as up; another up axis turns the world so that it is +Z and `across` is +X, and back.
 pub fn member_axes(d: Vec3, angle: f64, up: UpAxis) -> Option<(Vec3, Vec3)> {
-    let axes = |d| solidcraft_kernel::services::frame_member::member_axes(d, angle).ok().flatten();
+    let axes = |d| solidcraft_kernel::member_axes(d, angle).ok().flatten();
     if up.is_z() {
         return axes(d);
     }
