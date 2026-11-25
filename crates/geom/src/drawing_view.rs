@@ -14,7 +14,8 @@
 //!   scales at which a view fits a space.
 //! - A **[`ViewFrame`]** places a view on paper: the point of the view's plane at `centre` lands at
 //!   `position_mm`, everything scaled by the scale. Its [`ViewFrame::paper_map`] moves the view's
-//!   curves ([`Seg2Geom::similar`]) and their accuracy ([`CurveAccuracy::scaled`]) onto paper.
+//!   curves ([`Seg2Geom::similar`]) onto paper; their accuracy follows by the kernel adapter's
+//!   `hlr::accuracy_on_paper`.
 
 use crate::prelude::*;
 use std::fmt;
@@ -24,7 +25,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cell::Projection;
 use crate::paper::MAX_SIDE_MM;
-use crate::section::{CurveAccuracy, MAX_NUMBER, validate_plane};
+use crate::section::{MAX_NUMBER, validate_plane};
 use crate::{Aabb2, Similarity2};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 
@@ -365,11 +366,6 @@ impl ViewFrame {
     /// A curve of the view's plane (in plane coordinates, as [`Self::paper_map`]'s), on paper.
     pub fn seg_to_paper(&self, seg: &Seg2) -> Seg2 {
         seg.similar(&self.map)
-    }
-
-    /// A curve's accuracy on paper: its deviation scaled as the curve is.
-    pub fn accuracy_on_paper(&self, accuracy: CurveAccuracy) -> CurveAccuracy {
-        solidcore_ops::hlr::scaled(accuracy, self.map.scale())
     }
 }
 
