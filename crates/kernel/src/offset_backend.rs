@@ -109,21 +109,21 @@ pub(crate) fn run_ordered(
     wall: Option<f64>,
     op: impl FnOnce(&Brep, Option<&solidcraft_smlib::history::Order>) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
-    use crate::validation::{Checked, Step};
+    use crate::validation::Step;
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
     let r = op(&tagged, ob.as_ref()).map_err(|e| refused(name, wall, e))?;
     let step = crate::validation::step();
-    if step == Step::Check {
-        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-        if !check.is_valid() {
-            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-            return Err(failed(name, what, check));
-        }
-    }
     let (body, or) = body_from_smlib_ordered(&r)?;
+    if step == Step::Check
+        && let crate::validation::DecodedCheck::Refused(detail) =
+            crate::validation::check_decoded(body.record()).map_err(|e| KernelError::Failed(format!("SMLib {name}: {e}")))?
+    {
+        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+        return Err(failed(name, what, detail));
+    }
     let history = match (ob, or) {
         (Some(ob), Some(or)) => r.history().map_err(|e| failed(name, "history", e))?.history(&[ob], &or).map(Some).unwrap_or_else(|e| {
             log::debug!(target: "smlib", "{name} history: {e}");
@@ -131,7 +131,7 @@ pub(crate) fn run_ordered(
         }),
         _ => None,
     };
-    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), &[b]) } else { body };
     Ok((body, history))
 }
 

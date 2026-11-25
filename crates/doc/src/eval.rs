@@ -2730,12 +2730,9 @@ fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)
 /// ([`kernel::failing_check`]), since the result's check reports their defects too. Checked only
 /// here, once the result is refused.
 ///
-/// That is a check of each input as it is now, not a replay of the check that kept it at the end
-/// of its own feature, which ran on that step's own result ([`kernel::check_kept`]; for a
-/// boolean, as the separate solids a non-manifold result exports to). The body decoded from a
-/// result is a different SMLib form, which can fail where the result passed, so the message says
-/// what was checked: the body as it was before this feature, not that its own feature let a
-/// failure through.
+/// That is a check of each input as it is now: an imported STEP part or a body built under
+/// `Validation::Off` can enter a feature already failing SMLib's check, so the message says what
+/// was checked — the body as it was before this feature.
 fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
     let failing: Vec<&str> = inputs
         .iter()

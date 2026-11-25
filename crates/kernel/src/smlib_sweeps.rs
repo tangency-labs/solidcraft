@@ -122,8 +122,8 @@ mod imp {
 
     use solidcore_ops::sweep::Curve as SkinCurve;
     use solidcore_ops::sweep::railed::{RailFit as SkinFit, RailLoft, RailSection as SkinSection};
+    use solidcraft_smlib::Brep;
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
-    use solidcraft_smlib::{Brep, CheckLevel};
 
     use solidcore_record::{Loop2, Vec2};
 
@@ -364,16 +364,17 @@ mod imp {
     /// checks each step, left with the body for the feature's end when it checks each feature,
     /// and not checked otherwise (`crate::validation`).
     fn body_of(brep: Brep, what: &str) -> Result<Body> {
-        use crate::validation::{Checked, Step};
+        use crate::validation::Step;
         let step = crate::validation::step();
-        if step == Step::Check {
-            let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
-            if !check.is_valid() {
-                return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
-            }
-        }
         let body = crate::native::body_from_smlib(&brep)?;
-        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep, &[]) } else { body })
+        drop(brep);
+        if step == Step::Check
+            && let crate::validation::DecodedCheck::Refused(detail) =
+                crate::validation::check_decoded(body.record()).map_err(|e| KernelError::Failed(format!("SMLib {what}: {e}")))?
+        {
+            return Err(failed(what, format!("SMLib's check refuses the result: {detail}")));
+        }
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), &[]) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a

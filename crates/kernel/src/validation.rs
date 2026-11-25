@@ -1,10 +1,9 @@
 //! How often SMLib's full check runs while a model is evaluated. An evaluation leaves the checks
 //! of the sweeps, booleans and blends a feature runs to one check of each body the feature keeps
 //! ([`Validation::EachFeature`], the default), can check every step's result as it is made
-//! ([`Validation::EachStep`]), or skips them ([`Validation::Off`]). A body kept straight from a
-//! step is checked at the end as that step would have checked it, on the step's own result (kept
-//! with the body until then): the record a result is decoded to can pass SMLib's check where the
-//! result itself fails it (a surface of revolution's polar curve, rebuilt on import).
+//! ([`Validation::EachStep`]), or skips them ([`Validation::Off`]). Every check runs once on the
+//! body's decoded record as SMLib imports it (`Brep::from_record(record, true)`), the exact form
+//! every later operation receives ([`Body::smlib`], #22138).
 //!
 //! The evaluation installs its mode around a feature with [`validating`], as [`crate::watch`]
 //! installs a watch: the operations a feature runs are reached through hundreds of public kernel
@@ -134,59 +133,60 @@ pub(crate) fn skipped() -> bool {
     CURRENT.with(|c| matches!(c.borrow().as_deref(), Some(Scope { mode: Validation::Off, .. })))
 }
 
-/// How a step's own check takes its result.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Checked {
-    /// As it is.
-    AsIs,
-    /// A boolean's: solids touching each other along an edge or at a vertex come back as one
-    /// non-manifold body, checked as the separate solids its export holds (the boolean's rule).
-    Combined,
-}
-
-/// A step's SMLib result whose check was left to the end of its feature: kept with the body
-/// decoded from it (and only for that body's record) until [`check_kept`] takes it, so the check
-/// at the end is the step's own, of the result the step made.
+/// A step whose check was left to the end of its feature: kept with the body decoded from it (and
+/// only for that body's record) until [`check_kept`] or [`detach_kept`] takes it, so the check at
+/// the end names the step and any operand that already failed the check.
 #[derive(Debug)]
 pub(crate) struct Unchecked {
     record: std::sync::Weak<solidcore_record::brep::Brep>,
     /// The step, as its own refusal names it (`SMLib fillet`).
     what: String,
-    how: Checked,
-    /// The result, with the records of the bodies the step combined (to name one that already
-    /// fails the check): let go together once the check takes them.
-    result: std::sync::Mutex<Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)>>,
+    /// The records of the bodies the step combined (to name one that already fails the check): let
+    /// go once the check takes them.
+    operands: std::sync::Mutex<Option<Vec<Arc<Record>>>>,
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<Record>, what: &str, how: Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Unchecked {
+    pub(crate) fn new(record: &Arc<Record>, what: &str, operands: &[&Body]) -> Unchecked {
         let operands = operands.iter().map(|b| b.record.arc().clone()).collect();
-        Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some((result, operands))) }
+        Unchecked { record: Arc::downgrade(record), what: what.to_string(), operands: std::sync::Mutex::new(Some(operands)) }
     }
 
-    /// The step's result and its operands, taken (once), when this is `record`'s.
-    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<(solidcraft_smlib::Brep, Vec<Arc<Record>>)> {
+    /// The step's operands, taken (once), when this is `record`'s.
+    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<Vec<Arc<Record>>> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
             return None;
         }
-        self.result.lock().ok().and_then(|mut r| r.take())
+        self.operands.lock().ok().and_then(|mut r| r.take())
     }
 }
 
-/// SMLib's full check of `r` as a step takes it (`how`): the check's report.
-pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    let check = match separate(r, how)? {
-        Some(record) => solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check(CheckLevel::All),
-        None => r.check(CheckLevel::All),
-    };
-    check.map_err(|e| format!("check: {e}"))
+/// Outcome of checking a decoded record as [`Body::smlib`] imports it
+/// (`Brep::from_record(record, true)`).
+pub(crate) enum DecodedCheck {
+    /// SMLib's full check accepted the body.
+    Valid,
+    /// SMLib refused the body — either its check failed or `Brep::from_record` rejected the
+    /// record itself (for example a vertex or edge tolerance grown past 1 mm).
+    Refused(String),
 }
 
-/// The record of the separate solids a boolean's result `r` exports to where it is not one
-/// manifold solid ([`Checked::Combined`]), which its check takes; `None`: `r` is checked as it is.
-fn separate(r: &solidcraft_smlib::Brep, how: Checked) -> std::result::Result<Option<Record>, String> {
-    let split = matches!(how, Checked::Combined) && !r.is_manifold_solid().map_err(|e| format!("check: {e}"))?;
-    split.then(|| r.to_native().map_err(|e| format!("export: {e}"))).transpose()
+impl DecodedCheck {
+    fn of(check: solidcraft_smlib::CheckReport) -> Self {
+        if check.is_valid() { Self::Valid } else { Self::Refused(check.to_string()) }
+    }
+}
+
+/// SMLib's full check of a decoded record as [`Body::smlib`] imports it for every later operation
+/// (`Brep::from_record(record, true)`): the token over this thread's work stops it
+/// ([`solidcraft_smlib::Brep::check_owned`]).
+pub(crate) fn check_decoded(record: &Record) -> std::result::Result<DecodedCheck, String> {
+    let brep = match solidcraft_smlib::Brep::from_record(record, true) {
+        Ok(b) => b,
+        Err(solidcraft_smlib::Error::Record(u)) => return Ok(DecodedCheck::Refused(u.to_string())),
+        Err(e) => return Err(format!("re-import: {e}")),
+    };
+    brep.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}"))
 }
 
 /// What a step says of a result SMLib's check refuses, naming the operands (the input of a
@@ -198,33 +198,36 @@ pub(crate) fn refuses(checks: impl ExactSizeIterator<Item = solidcraft_smlib::Re
         2 => ["the first operand", "the second operand"][i.min(1)].to_string(),
         _ => format!("operand {i}"),
     };
-    let failing: Vec<String> = checks.enumerate().filter(|(_, c)| c.as_ref().is_ok_and(|c| !c.is_valid())).map(|(i, _)| name(i)).collect();
+    let failing: Vec<String> = checks
+        .enumerate()
+        .filter(|(_, c)| matches!(c, Ok(r) if !r.is_valid()) || matches!(c, Err(solidcraft_smlib::Error::Record(_))))
+        .map(|(i, _)| name(i))
+        .collect();
     let whose = if failing.is_empty() { String::new() } else { format!(" ({} already fails it)", failing.join(" and ")) };
     format!("SMLib's check refuses the result{whose}")
 }
 
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
-/// the end: an error with the check's reason unless it passes. A body decoded from a step's
-/// result is checked as that step would have checked it, on its result; any other (a copy moved
-/// into place, pieces joined without an operation) as SMLib takes it for the operations after it.
-/// A mesh body has nothing to check.
+/// the end: an error with the check's reason unless it passes. Checked on the body's decoded
+/// record as SMLib imports it for every later operation (`Brep::from_record(record, true)`). A
+/// mesh body has nothing to check.
 pub fn check_kept(body: &Body) -> Result<()> {
     if body.is_mesh() {
         return Ok(());
     }
-    match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
-        Some((u, (r, operands))) => verdict(&u.what, check_result_owned(r, u.how), &operands),
-        None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
+    match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|o| (u, o))) {
+        Some((u, operands)) => verdict(&u.what, check_decoded(body.record()), &operands),
+        None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}")), &[]),
     }
 }
 
 /// What [`check_kept`] makes of SMLib's check of what step `what` made of `operands`.
-fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>, operands: &[Arc<Record>]) -> Result<()> {
+fn verdict(what: &str, check: std::result::Result<DecodedCheck, String>, operands: &[Arc<Record>]) -> Result<()> {
     match check {
-        Ok(c) if c.is_valid() => Ok(()),
-        Ok(c) => {
+        Ok(DecodedCheck::Valid) => Ok(()),
+        Ok(DecodedCheck::Refused(detail)) => {
             let checks = operands.iter().map(|o| solidcraft_smlib::Brep::from_record(o, true).and_then(|s| s.check_owned(CheckLevel::All)));
-            Err(KernelError::Failed(format!("{what}: {}: {c}", refuses(checks))))
+            Err(KernelError::Failed(format!("{what}: {}: {detail}", refuses(checks))))
         }
         Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
     }
@@ -320,19 +323,6 @@ impl std::fmt::Display for CheckFailure {
     }
 }
 
-/// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
-/// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
-fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
-    let check = match separate(&r, how)? {
-        Some(record) => {
-            drop(r);
-            solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| format!("the separate solids: {e}"))?.check_owned(CheckLevel::All)
-        }
-        None => r.check_owned(CheckLevel::All),
-    };
-    check.map_err(|e| format!("check: {e}"))
-}
-
 /// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]), under the token
 /// of the work that detached it: stopping that work stops the check too.
 pub struct KeptCheck(Kept, Option<solidcraft_smlib::stop::Stop>);
@@ -340,24 +330,24 @@ pub struct KeptCheck(Kept, Option<solidcraft_smlib::stop::Stop>);
 enum Kept {
     /// A mesh body: nothing to check.
     Nothing,
-    /// The step's own result, taken from the body.
-    Step { what: String, how: Checked, result: solidcraft_smlib::Brep, operands: Vec<Arc<Record>> },
+    /// A step's decoded record, taken from the body with its operands.
+    Step { what: String, record: Arc<Record>, operands: Vec<Arc<Record>> },
     /// A copy of the body's SMLib form, made when the check was detached.
-    Copy(Result<solidcraft_smlib::Brep>),
+    Copy(Box<Result<solidcraft_smlib::Brep>>),
 }
 
-/// [`check_kept`] of `body`, detached from it: the step's result is taken now, or the body's SMLib
-/// form is copied now, so the check reads nothing the operations after it use and can run on
-/// another thread beside them ([`KeptCheck::run`]).
+/// [`check_kept`] of `body`, detached from it: the step's record and operands are taken now, or
+/// the body's SMLib form is copied now, so the check reads nothing the operations after it use and
+/// can run on another thread beside them ([`KeptCheck::run`]).
 pub fn detach_kept(body: &Body) -> KeptCheck {
     let stop = solidcraft_smlib::stop::current();
     if body.is_mesh() {
         return KeptCheck(Kept::Nothing, stop);
     }
-    if let Some((u, (result, operands))) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
-        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result, operands }, stop);
+    if let Some((u, operands)) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|o| (u, o))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), record: body.record.arc().clone(), operands }, stop);
     }
-    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
+    KeptCheck(Kept::Copy(Box::new(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e))))), stop)
 }
 
 impl KeptCheck {
@@ -372,9 +362,9 @@ impl Kept {
     fn run(self) -> Result<()> {
         match self {
             Kept::Nothing => Ok(()),
-            // The step's result and the copy are the check's own: the work's token stops it.
-            Kept::Step { what, how, result, operands } => verdict(&what, check_result_owned(result, how), &operands),
-            Kept::Copy(copy) => verdict("SMLib", copy?.check_owned(CheckLevel::All).map_err(|e| format!("check: {e}")), &[]),
+            // Both branches own the SMLib form they check: the work's token stops them.
+            Kept::Step { what, record, operands } => verdict(&what, check_decoded(&record), &operands),
+            Kept::Copy(copy) => verdict("SMLib", (*copy)?.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}")), &[]),
         }
     }
 }
@@ -568,6 +558,34 @@ mod tests {
             let (moved, _) = validating(mode, || offset(&good));
             assert!(moved.as_ref().is_ok_and(|m| m.face_count() == 1 && check_kept(m).is_ok()), "{mode:?}: {moved:?}");
         }
+    }
+
+    /// #22138: a step whose decoded record fails SMLib's check on re-import is refused by
+    /// [`check_kept`] and [`detach_kept`] without blaming a valid operand, and stopping a detached
+    /// step check cancels it.
+    #[test]
+    fn kept_check_refuses_a_steps_invalid_decoded_record() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+
+        let bad_inline = bad.clone().left_unchecked("SMLib chamfer", &[&good]);
+        let e = check_kept(&bad_inline).unwrap_err().to_string();
+        assert!(e.contains("SMLib chamfer: SMLib's check refuses the result") && !e.contains("already fails it"), "{e}");
+
+        let bad_detached = bad.clone().left_unchecked("SMLib chamfer", &[&good]);
+        let e = detach_kept(&bad_detached).run().unwrap_err().to_string();
+        assert!(e.contains("SMLib chamfer: SMLib's check refuses the result") && !e.contains("already fails it"), "{e}");
+
+        // Stopping a detached step check cancels it.
+        let stop = solidcraft_smlib::stop::Stop::new();
+        let good_step = good.clone().left_unchecked("SMLib chamfer", &[]);
+        let detached = stop.within(|| detach_kept(&good_step));
+        stop.stop();
+        let r = crate::par::kernel_thread("check").spawn(move || detached.run()).unwrap().join().unwrap();
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
     }
 
     #[test]

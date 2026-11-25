@@ -510,16 +510,16 @@ mod imp {
                 }
                 e => failed(what, "operation", e),
             })?;
-            // Checked here when the evaluation's validation mode checks each step
-            // (`crate::validation`).
             let step = crate::validation::step();
-            if step == crate::validation::Step::Check {
-                let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
-                if !check.is_valid() {
-                    return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), check));
-                }
-            }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
+            // Checked here when the evaluation's validation mode checks each step
+            // (`crate::validation`), on the decoded record every later operation imports (#22138).
+            if step == crate::validation::Step::Check
+                && let crate::validation::DecodedCheck::Refused(detail) =
+                    crate::validation::check_decoded(out.record()).map_err(|e| KernelError::Failed(format!("SMLib {what}: {e}")))?
+            {
+                return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), detail));
+            }
             let history = match (order, &result_order) {
                 (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], ro) {
                     Ok(mut h) => {
@@ -536,11 +536,7 @@ mod imp {
                 _ => None,
             };
             let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
-            let out = if step == crate::validation::Step::Defer {
-                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r, &[body])
-            } else {
-                out
-            };
+            let out = if step == crate::validation::Step::Defer { out.left_unchecked(&format!("SMLib {what}"), &[body]) } else { out };
             Ok((out, extra, result_order))
         })
     }
