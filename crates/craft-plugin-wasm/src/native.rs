@@ -398,7 +398,7 @@ impl<H: PluginHost> design_state::Host for State<H> {
     }
 }
 impl<H: PluginHost> log::Host for State<H> {
-    fn log(&mut self, _level: log::Level, message: String) {
+    fn log(&mut self, level: log::Level, message: String) {
         if self.check().is_err() {
             return;
         }
@@ -407,7 +407,20 @@ impl<H: PluginHost> log::Host for State<H> {
             self.fail(limit("log size"));
             return;
         }
-        self.host.log(&message.chars().filter(|c| !c.is_control()).collect::<String>());
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
+        match level {
+            log::Level::Debug => ::log::debug!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Info => ::log::info!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Warn => ::log::warn!(target: "craft_plugin_wasm", "{clean}"),
+            log::Level::Error => ::log::error!(target: "craft_plugin_wasm", "{clean}"),
+        }
+        let host_level = match level {
+            log::Level::Debug => craft_plugin::LogLevel::Debug,
+            log::Level::Info => craft_plugin::LogLevel::Info,
+            log::Level::Warn => craft_plugin::LogLevel::Warn,
+            log::Level::Error => craft_plugin::LogLevel::Error,
+        };
+        self.host.log_level(host_level, &clean);
     }
 }
 impl<H: PluginHost> control::Host for State<H> {

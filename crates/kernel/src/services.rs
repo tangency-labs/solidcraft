@@ -26,10 +26,13 @@ pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
 pub use solidcore_ops::dxf;
+pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
+pub use solidcore_ops::mid_joint;
+pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
 pub use solidcore_ops::pcurve;
@@ -45,6 +48,7 @@ pub use solidcore_ops::session;
 pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
+pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`

@@ -37,9 +37,15 @@ pub(super) fn uses(st: &ModelState, kind: &FeatureKind) -> Result<bool> {
 /// Path stock has no straight corner/cut model yet. Refuse saved settings too;
 /// none of the ordinary finishing options may silently disappear on this route.
 fn check_options(kind: &FeatureKind) -> Result<()> {
-    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, groups, .. } = kind else {
+    let FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, continuous, pairs, groups, up, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
+    if !up.is_z() {
+        return Err(DocError::Invalid(
+            "not supported yet: curved or continuous members take world Z as up; use separate Frame Members for straight lines with another up axis"
+                .into(),
+        ));
+    }
     if !groups.is_empty() {
         return Err(DocError::Invalid(
             "not supported yet: curved or continuous members cannot be combined with groups; use separate Frame Members".into(),
@@ -137,11 +143,11 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
 }
 
 fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option<f64>) -> Option<Plane> {
-    let (x, y) = frame::member_axes(b - a, turn)?;
+    let (x, y) = frame::member_axes(b - a, turn, frame::UpAxis::Z)?;
     let origin = a - x * at.x - y * at.y;
     let Some(t) = own else { return Plane::new(origin, x, y) };
     let pivot = origin + x * centre.x + y * centre.y;
-    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
+    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU), frame::UpAxis::Z)?;
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
 
