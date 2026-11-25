@@ -575,7 +575,8 @@ impl Bounded {
         let (ma, mb) = (self.f.max_abs_coefficient(), other.f.max_abs_coefficient());
         let (du, dv) = f.degrees();
         let carried = ma * other.err + self.err * mb + self.err * other.err;
-        let err = rounded_up(carried + gamma(product_rounding(du, dv)) * ma * mb);
+        // `ma * mb` first: `gamma * ma` alone can underflow before the larger factor
+        let err = rounded_up(carried + gamma(product_rounding(du, dv)) * (ma * mb));
         Ok(Self { f, err })
     }
 
@@ -928,6 +929,16 @@ mod tests {
         for &c in q.f.coefficients() {
             assert!((c - t).abs() <= q.err, "{c} {}", q.err);
         }
+        // `3 t` times `(1 + 2^-52) 2^1023` is `3 2^-51 + 3 2^-103` exactly, rounded by
+        // `2^-103`, while `gamma * 3 t` alone underflows to 0
+        let (a, b) = (3.0 * t, (1.0 + f64::EPSILON) * 2f64.powi(1023));
+        let p = Bounded::exact(Bernstein2::constant(a))
+            .mul(&Bounded::exact(Bernstein2::constant(b)), &Binomials::new())
+            .unwrap();
+        let exact = [3.0 * 2f64.powi(-103), 3.0 * 2f64.powi(-51)];
+        let c = p.f.coefficients()[0];
+        assert!(!within(c, &exact, 1.0, 0.0));
+        assert!(within(c, &exact, 1.0, p.err), "{}", p.err);
     }
 
     /// [`Bounded::add_scaled`], [`Bounded::scale`], the derivatives and [`Bounded::mul`] of
