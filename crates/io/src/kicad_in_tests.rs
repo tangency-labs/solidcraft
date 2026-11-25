@@ -1783,7 +1783,7 @@ fn a_stackup_places_the_inner_layers_and_even_spacing_is_the_fallback() {
     let placed = depths(source(stackup));
     assert!((placed[0].1 - 0.105 / 1.0).abs() < 1e-9 && (placed[1].1 - 0.895).abs() < 1e-9, "{placed:?}");
     // A stackup with sublayers is not simple: the even spacing stands.
-    let complex = stackup.replace("(type \"core\")", "(type \"core\") (addsublayer (thickness 0.1))");
+    let complex = stackup.replace("(thickness 0.78)", "(thickness 0.78) addsublayer (thickness 0.1)");
     assert_eq!(depths(source(&complex)), even);
 }
 
@@ -1816,4 +1816,34 @@ fn only_real_inner_layer_names_count_as_copper() {
     for name in ["In0.Cu", "In31.Cu", "In.Cu", "Inx.Cu", "In1.Cu ", "In+1.Cu", "F.SilkS", "In99999999999999999999.Cu"] {
         assert_eq!(copper_layer(name), None, "{name}");
     }
+}
+
+#[test]
+fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_reported() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 10 5) (layer "F.Cu")
+        (fp_rect (start -2 -1) (end 2 1) (layer "In1.Cu") (width 0.2) (fill solid))
+        (pad "1" thru_hole circle (at 5 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask"))))"#;
+    let (meshes, warnings) = modelled_copper(source);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let xs: Vec<f64> = meshes
+        .iter()
+        .filter(|mesh| mesh.name.starts_with("Copper In1.Cu"))
+        .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0])))
+        .collect();
+    assert!(xs.iter().any(|x| (*x - 8.0).abs() < 0.05), "the footprint's rectangle is on In1: {xs:?}");
+    // A board with only wildcard pads on its inner layers still says the overlay leaves them out,
+    // and a board thinner than the foil says it has no room.
+    let mut load = |_: &str| Err("not used".to_string());
+    let overlay = KicadOptions { components: false, silkscreen: false, ..Default::default() };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &overlay, &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("inner copper")), "{:?}", imported.feature.warnings);
+    let thin = source.replace("(thickness 1.6)", "(thickness 0.02)");
+    let modelled = KicadOptions { copper: KicadCopper::Mesh, ..overlay };
+    let imported = read_kicad(thin.as_bytes(), "board.kicad_pcb", &modelled, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert!(!meshes.iter().any(|mesh| mesh.name.contains("In1")), "no inner copper in a board thinner than the foil");
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("thinner")), "{:?}", imported.feature.warnings);
 }

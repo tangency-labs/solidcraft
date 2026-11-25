@@ -595,7 +595,8 @@ fn stackup_depths(root: &Expr<'_>, inner: &std::collections::BTreeSet<u32>) -> O
     let stackup = field(field(root, "setup")?, "stackup")?;
     let mut rows: Vec<(&str, f64)> = Vec::new();
     for layer in children(stackup).iter().filter(|e| head(e) == Some("layer")) {
-        if field(layer, "addsublayer").is_some() {
+        // KiCad 9 writes it as a bare word, older files as a field.
+        if field(layer, "addsublayer").is_some() || children(layer).iter().any(|c| atom(c) == Some("addsublayer")) {
             return None;
         }
         let name = children(layer).get(1).and_then(atom)?;
@@ -3054,7 +3055,9 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         (thickness, thickness + COPPER_THICKNESS, -COPPER_THICKNESS, 0.0)
     }; // Inner layers sit inside the board, where an overlay (a look for the faces) would not show:
     // they come in only as modelled copper, each at the depth the board's stackup gives it.
-    let modelled = mode == KicadCopper::Mesh;
+    // A board thinner than the foil has no room inside it for an inner layer.
+    let thin = thickness < COPPER_THICKNESS;
+    let modelled = mode == KicadCopper::Mesh && !thin;
     let mut inner: BTreeMap<u32, Plate> = BTreeMap::new();
     let inner_skipped = std::cell::Cell::new(false);
     let inner_depth: HashMap<u32, f64> = board.inner_layers.iter().copied().collect();
@@ -3078,6 +3081,17 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         }
         !skip
     };
+    // Pads are never counted by `wanted`: a board whose only inner copper is its through-hole
+    // pads (on `*.Cu`) still has inner copper to report as left out.
+    if !modelled
+        && board
+            .footprints
+            .iter()
+            .flat_map(|footprint| footprint.pads.iter())
+            .any(|pad| board.inner_layers.iter().any(|(n, _)| pad_on_inner(pad, *n)))
+    {
+        inner_skipped.set(true);
+    }
     let mut items = 0usize;
     let mut too_many = false;
     let mut add = |plate: &mut Plate, f: &dyn Fn(&mut Plate)| {
@@ -3194,9 +3208,16 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
             }
         }
     }
-    for graphic in &board.graphics {
+    // Board graphics and the graphics of footprints (in their footprint's frame) on copper layers.
+    let board_frame = board_to_world();
+    let graphics = board
+        .graphics
+        .iter()
+        .map(|graphic| (graphic, board_frame))
+        .chain(board.footprints.iter().flat_map(|footprint| footprint.graphics.iter().map(move |graphic| (graphic, footprint_world(footprint)))));
+    for (graphic, frame) in graphics {
         let Some(layer) = copper_layer(&graphic.layer).filter(|layer| wanted(*layer)) else { continue };
-        let points: Vec<[f64; 2]> = graphic.points.iter().map(|p| [p[0], -p[1]]).collect();
+        let points: Vec<[f64; 2]> = graphic.points.iter().map(|p| apply2(&frame, p[0], p[1])).collect();
         let (z0, z1) = heights(layer);
         let plate = plate_of(layer, &mut front, &mut back, &mut inner);
         if graphic.filled && points.len() >= 3 {
@@ -3257,7 +3278,11 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         }
     }
     if inner_skipped.get() {
-        warnings.push("the inner copper layers are left out: they come in only with copper modelled".into());
+        warnings.push(if thin {
+            "the inner copper layers are left out: the board is thinner than the copper".into()
+        } else {
+            "the inner copper layers are left out: they come in only with copper modelled".into()
+        });
     }
     out
 }
