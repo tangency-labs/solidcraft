@@ -22,5 +22,9 @@
   "zh": {
     "cmd.component_physical_override": "质量覆盖",
     "Mass override": "质量覆盖"
+  },
+  "fr": {
+    "cmd.component_physical_override": "Remplacement de la masse",
+    "Mass override": "Remplacement de la masse"
   }
 }

@@ -276,6 +276,10 @@ pub struct Documents {
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
+    /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
+    /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
+    /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
+    parked_agent_chat: Option<Box<crate::agent_chat::AgentChat>>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -509,6 +513,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     if !presenting {
         crate::select_other::close(app);
     }
+    let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
         crate::select_other::close(app);
@@ -525,7 +530,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.viewport.hover = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
-        crate::agent_chat::leave_document(app);
+        if shared_chat && app.agent_chat.following_document {
+            crate::agent_chat::merge_active_turn_for_switch(app);
+        } else {
+            crate::agent_chat::leave_document(app);
+        }
         app.edit_anchor_hint = None;
     }
     if !presenting {
@@ -549,7 +558,13 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.agent_chat.swap_document(&mut slot.agent_chat);
+    let outgoing_chat = if shared_chat {
+        app.docs.parked_agent_chat.replace(Box::new(slot.agent_chat)).map_or_else(Default::default, |chat| *chat)
+    } else {
+        app.docs.parked_agent_chat = None;
+        app.agent_chat.swap_document(&mut slot.agent_chat);
+        slot.agent_chat
+    };
     let out_rev = app.session.revision;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
@@ -562,7 +577,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         reveals,
-        agent_chat: slot.agent_chat,
+        agent_chat: outgoing_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
@@ -600,6 +615,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
             pending.view_changed(before, app.session.revision);
         }
         app.jobs_view_changed(before, app.session.revision);
+    }
+    if !presenting && shared_chat {
+        crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
@@ -1870,7 +1888,7 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
         app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
     };
     let Some(index) = index else { return Ok(false) };
-    if app.agent_chat.following_document && index != app.docs.active {
+    if app.agent_chat.following_document && index != app.docs.active && !app.preferences.agent_shared_session {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
     }
     if app.file_picker_busy() {
@@ -2339,6 +2357,12 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
         crate::agent_chat::continue_in_document(app);
         return;
     }
+    if app.preferences.agent_shared_session {
+        crate::agent_chat::leave_document(app);
+        app.docs.parked_agent_chat = None;
+        crate::agent_chat::continue_in_document(app);
+        return;
+    }
     // A chat not asked anything yet (an agent connected at start, say) holds nothing of the old
     // design: it starts over in place, and its agent stays connected.
     if !app.agent_chat.items.iter().any(|i| matches!(i, crate::agent_chat::Item::User { .. })) {
@@ -2352,6 +2376,9 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 
 /// Hidden conversations must also stop when AI is disabled or the application quits.
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_document(&mut app.session, wait);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
     }
@@ -2359,6 +2386,9 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
 
 /// Stop only the hidden conversations whose endpoint permission was revoked.
 pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_endpoint(&mut app.session, id);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }
@@ -2802,6 +2832,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
             let keep = i.unwrap_or(app.docs.active);
             close_many(app, (0..app.docs.count()).filter(|k| *k != keep).collect());
         }
+        Some("duplicate") => duplicate(app, i.unwrap_or(app.docs.active)),
         Some("close_all") => close_many(app, (0..app.docs.count()).collect()),
         Some("move") => {
             let at = |k: &str| p.get(k).and_then(Value::as_u64).map(|x| x as usize);
@@ -2967,19 +2998,23 @@ fn view_tab<'a>(
     }
 }
 
-/// The translated labels of a tab's Rename and Save rows, and the Save As shortcut shown beside it.
+/// The translated labels of a tab's Rename, Duplicate and Save rows, and the Save As shortcut
+/// shown beside it.
 struct TabMenuText {
     rename: String,
+    duplicate: String,
     save: String,
     save_as: String,
     save_as_key: String,
 }
 
-/// A tab's menu: rename its design, save it, save it under another name, close it, the others, or
-/// all of them. Save and Save As show their shortcuts on the shown design's tab, where they apply.
-fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 6] {
+/// A tab's menu: rename its design, open a copy of it, save it, save it under another name, close
+/// it, the others, or all of them. Save and Save As show their shortcuts on the shown design's tab,
+/// where they apply.
+fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 7] {
     [
         crate::app_bar::TabMenuRow::new("ui.renameTab", &text.rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.duplicateTab", &text.duplicate, ""),
         crate::app_bar::TabMenuRow::new("ui.saveTab", &text.save, "Ctrl+S"),
         crate::app_bar::TabMenuRow::new("ui.saveTabAs", &text.save_as, &text.save_as_key),
         crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
@@ -3026,6 +3061,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let new_tip = app.tr("ui.start_page").to_string();
     let menu_text = TabMenuText {
         rename: app.tr("ui.rename_design_tab").to_string(),
+        duplicate: app.tr("ui.duplicate_design_tab").to_string(),
         save: app.tr("ui.save").to_string(),
         save_as: format!("{}…", app.tr("ui.save_as")),
         save_as_key: crate::keymap::effective(app, "file.save_as").unwrap_or_default(),
@@ -3292,7 +3328,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut saved) = (None, None, None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut copied, mut saved) = (None, None, None, None, None, None, None);
     let mut window_drop = false;
     for action in actions {
         match action {
@@ -3300,6 +3336,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
                 "ui.renameTab" => renamed = Some(tab),
+                "ui.duplicateTab" => copied = Some(tab),
                 "ui.saveTab" => saved = Some((tab, false)),
                 "ui.saveTabAs" => saved = Some((tab, true)),
                 "ui.closeTab" => shut = Some(tab),
@@ -3355,6 +3392,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    if let Some(tab) = copied.filter(|_| idle) {
+        duplicate(app, tab);
+    }
     if let Some((tab, as_new)) = saved.filter(|_| idle) {
         save_tab(app, tab, as_new);
     }
@@ -3388,6 +3428,42 @@ fn save_tab(app: &mut SolveApp, i: usize, as_new: bool) {
     } else {
         crate::toolbar::save(app);
     }
+}
+
+/// Open a copy of design `i` in a new tab right after it, and show the copy: its design as it
+/// is now (unsaved changes, parameters, components and what is hidden included), named
+/// "<name> copy", with the same view. The copy has no file yet, so it counts as unsaved and
+/// closing it asks first. Its evaluated model goes with it when it is current, so a large design
+/// is not evaluated again; otherwise the copy is evaluated as an opened file is.
+pub fn duplicate(app: &mut SolveApp, i: usize) {
+    // A pending close, quit, batch or group save holds tab numbers that a new tab would shift.
+    if app.file_picker_busy()
+        || i >= app.docs.count()
+        || app.docs.closing.is_some()
+        || app.docs.quitting.is_some()
+        || app.docs.batch.is_some()
+        || app.docs.group.is_some()
+    {
+        return;
+    }
+    let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    if i != shown || app.home.open {
+        switch(app, i);
+    }
+    let source = &app.session;
+    let mut doc = (*source.doc).clone();
+    let saved = source.model.saved(&source.doc);
+    doc.visibility = source.visibility.clone();
+    doc.name = solidcraft_ui_text::format("document.copy_name", &[("name", &doc.name)]);
+    let mut copy = Session::opened_validating(doc, saved.as_ref(), source.validation());
+    copy.mark_unsaved();
+    let cam = app.cam;
+    if let Err(e) = open_tab(app, copy) {
+        app.set_status(e, true);
+        return;
+    }
+    app.cancel_view_animation();
+    app.cam = cam;
 }
 
 /// The longest name a design takes (as `component.rename` accepts).
@@ -5348,6 +5424,63 @@ mod tests {
         menu(&mut h, 1, "ui.saveTab");
         assert!(!h.app.home.open, "the start page gives way to the design");
         assert!(!h.app.session.is_dirty(), "and it is saved");
+    }
+
+    /// Duplicate in a tab's menu opens a copy of that design right after it: the same features
+    /// and hidden bodies, named "<name> copy", unsaved, with the same view; the original is
+    /// untouched, and an edit in the copy stays in the copy.
+    #[test]
+    fn duplicate_in_a_tabs_menu_opens_a_copy_after_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 3, "width": 4, "height": 5, "body_name": "Plate"})).unwrap();
+        h.app.run("component.rename", json!({"component": 0, "name": "Bracket"})).unwrap();
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Spare"})).unwrap();
+        h.app.run("browser.visibility", json!({"items": ["Spare"], "visible": false})).unwrap();
+        assert!(!h.app.session.body_visible("Spare"), "a body hidden in the original");
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        switch(&mut h.app, 0);
+        h.frames(2);
+        let (features, hidden, cam) = (h.app.session.doc.features.clone(), h.app.session.visibility.clone(), h.app.cam);
+        // From the other tab's menu: the original is shown first, and the copy lands after it.
+        switch(&mut h.app, 1);
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.duplicateTab"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 3);
+        assert_eq!(h.app.docs.active, 1, "the copy is shown, right after its original");
+        assert_eq!(h.app.session.doc.name, "Bracket copy");
+        assert_eq!(h.app.session.doc.features, features, "the same design");
+        assert_eq!(h.app.session.visibility, hidden, "with the same bodies hidden");
+        assert!(h.app.session.path.is_none() && h.app.session.is_dirty(), "unsaved: closing it asks first");
+        assert_eq!(h.app.cam, cam, "seen from the same view");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 2, "its bodies are there");
+        // An edit in the copy stays in the copy.
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Extra"})).unwrap();
+        switch(&mut h.app, 0);
+        assert_eq!(h.app.session.doc.name, "Bracket");
+        assert_eq!(h.app.session.doc.features, features, "the original is untouched");
+    }
+
+    /// `ui.documents {"action": "duplicate"}` does what the menu does, for scripts.
+    #[test]
+    fn the_control_channel_duplicates_a_design() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let v = control(&mut a, &json!({"action": "duplicate", "index": 0}));
+        assert_eq!(v["documents"].as_array().map(Vec::len), Some(2));
+        assert_eq!(a.docs.active, 1);
+        assert_eq!(a.session.doc.name, "Untitled copy");
+        // While a close waits on its "save changes?" answer, no copy shifts the tabs it holds.
+        a.docs.closing = Some(0);
+        control(&mut a, &json!({"action": "duplicate", "index": 0}));
+        assert_eq!(a.docs.count(), 2, "no copy while a close is pending");
+        a.docs.closing = None;
     }
 
     /// The menu's Rename edits the design's name in its tab, as a double-click does; on a tab
