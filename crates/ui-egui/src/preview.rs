@@ -113,6 +113,8 @@ pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
     pub points: Vec<usize>,
+    /// The drawn 3D curves that are new or changed (a Fillet on two 3D lines, #21319).
+    pub wires: Vec<usize>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -1521,7 +1523,8 @@ fn on_surface(index: &SurfaceIndex, [a, b, c]: [Vec3; 3]) -> bool {
 const FACE_SAMPLES: usize = 24;
 
 /// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
-/// or points moved and the points that moved (`None`: nothing did).
+/// or points moved, the points that moved and the drawn 3D curves that changed (`None`: nothing
+/// did).
 pub(crate) fn sketch_changes(
     old: Option<&solidcraft_engine::doc::SolvedSketch>,
     sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
@@ -1548,7 +1551,19 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
-    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
+    let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| (w.id.as_str(), &w.pts))).collect::<std::collections::HashMap<_, _>>();
+    let wires = sketch
+        .sketch
+        .wires
+        .iter()
+        .enumerate()
+        .filter_map(|(i, w)| if old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() && wires.is_empty() {
+        None
+    } else {
+        Some(SketchPreview { sketch: sketch.clone(), curves: indices, points, wires })
+    }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -1708,8 +1723,8 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     crate::scenario::publish_count("sketch_preview_curves", curves as f64);
 }
 
-/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
-/// how many curves it drew.
+/// Draw what a change moves in a sketch, its curves, points and 3D curves, in the preview colour;
+/// returns how many curves it drew.
 pub(crate) fn paint_sketch(
     preview: &SketchPreview,
     painter: &egui::Painter,
@@ -1726,7 +1741,11 @@ pub(crate) fn paint_sketch(
             painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    preview.curves.len()
+    for wire in preview.wires.iter().filter_map(|index| sketch.sketch.wires.get(*index)) {
+        let line: Vec<egui::Pos2> = wire.pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        painter.add(egui::Shape::line(line, stroke));
+    }
+    preview.curves.len() + preview.wires.len()
 }
 
 #[cfg(test)]

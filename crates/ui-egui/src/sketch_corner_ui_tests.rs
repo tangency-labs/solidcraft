@@ -1130,8 +1130,8 @@ fn line_arc_fillet_preview_and_apply_work_in_both_pick_orders() {
     }
 }
 
-/// #21319: the Fillet tool takes two drawn 3D lines and rounds the corner they share with a 3D
-/// arc tangent to both, in one undo step.
+/// #21319: the Fillet tool takes two drawn 3D lines, previews the round, and rounds the corner
+/// they share with a 3D arc tangent to both, in one undo step.
 #[test]
 fn fillet_tool_rounds_the_corner_of_two_picked_3d_lines() {
     use solidcraft_engine::sketch::WireConstraintKind;
@@ -1150,6 +1150,8 @@ fn fillet_tool_rounds_the_corner_of_two_picked_3d_lines() {
     }
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "{:?}", h.app.status);
     set_size(&mut h.app, "20 mm");
+    // The preview draws the arc and the two shortened lines.
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
     apply(&mut h);
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
     assert_eq!(h.app.session.undo.len(), undo + 1);
