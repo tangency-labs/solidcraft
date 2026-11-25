@@ -8038,9 +8038,14 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     }
     let anywhere = hole_on_surface(st, p, dir, &[]);
     // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
-    // at all); the B-rep also says whether it is on a face within the chord tolerance.
-    if anywhere == p || on_a_brep_face(st, p, &[]) {
+    // at all).
+    if anywhere == p {
         return p;
+    }
+    // A point within a body's chord tolerance of a face (a pick on its display mesh) starts on
+    // that face, where the axis meets its exact surface (#20741).
+    if let Some(q) = brep_face_start(st, p, dir) {
+        return q;
     }
     let targets = hole_targets(st, f);
     if targets.len() == st.bodies.len() {
@@ -8059,6 +8064,35 @@ fn on_a_brep_face(st: &ModelState, p: Vec3, scope: &[String]) -> bool {
     faces_near(st, p, reach, scope)
         .into_iter()
         .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
+}
+
+/// Where a hole at `p` along `dir` starts when `p` lies on a face of a B-rep body within the
+/// body's chord tolerance ([`ModelBody::display_tol`], so the face's mesh is within reach, as a
+/// pick on the display mesh is), `None` when it lies on none. solidcore decides that on the face's
+/// surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]; the mesh only names the
+/// faces to ask), and the start is where the axis meets that face's exact surface within the same
+/// reach ([`solidcraft_kernel::Body::face_line_hit`]), never the facet under `p`, which lies up to
+/// the display sag inside a curved face (#20741). Of several such faces (near an edge) the meeting
+/// nearest `p` wins; an axis that meets none of them so near (one grazing the face) keeps `p`.
+fn brep_face_start(st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
+    let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
+    let mut on = false;
+    let mut best: Option<Vec3> = None;
+    for (_, i, face, _) in faces_near(st, p, reach, &[]) {
+        let Some(b) = st.bodies.get(i) else { continue };
+        let tol = b.display_tol();
+        let Ok(Some(foot)) = b.body.point_lies_on_face(face as usize, p, tol) else { continue };
+        on = true;
+        // How far the meeting may lie from `p` is bounded across the surface (the same gap the
+        // membership test allows), not along an oblique axis.
+        if let Ok(Some(q)) = b.body.face_line_hit(face as usize, p, dir)
+            && solidcraft_kernel::Body::distance_across_surface(p, foot, q) <= tol
+            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
+        {
+            best = Some(q);
+        }
+    }
+    on.then(|| best.unwrap_or(p))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
@@ -12234,11 +12268,15 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
                 }
                 match (k, hole_axis) {
                     (0, Some(axis)) => match hit.along(input, from, axis) {
-                        Some(q) => *p = q,
+                        Ok(Some(q)) => *p = q,
                         // The place still lies on the face (the axis may run along it).
-                        None if hit.on_point => {}
-                        None => notes.push(format!(
+                        Ok(None) if hit.on_point => {}
+                        Ok(None) => notes.push(format!(
                             "the hole's position [{}, {}, {}] is no longer on face `{n}`: it stays where it was placed",
+                            from.x, from.y, from.z
+                        )),
+                        Err(e) => notes.push(format!(
+                            "the hole's axis could not be met with face `{n}` ({e}): it stays at [{}, {}, {}]",
                             from.x, from.y, from.z
                         )),
                     },
