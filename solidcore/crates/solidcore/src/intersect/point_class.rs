@@ -91,13 +91,18 @@
 //!   vertex to its `m_vSSSPoint` and leaves its edges ending where they did, up to tens of
 //!   units off a vertex of tolerance `1e-7`, which `AssertValid`'s edge-end test refuses.
 //!   [`PointClassification::merge_into_brep`] moves each such end (one outside the vertex's
-//!   ball) to the vertex (`vertex::carry_far_edge_ends`): a line stays the line to its kept
-//!   end, a B-spline or conic becomes a B-spline with that end's control point moved (both
-//!   ends knots it passes through). The change is notified, deleting the edge uses' UV trim
-//!   curves as upstream's own surf/surf/surf edge edit does (`sm_SetXSectEdgeThroughPoint`),
-//!   and kept only when certified to put the end within half the vertex tolerance without
-//!   pushing another valid end out; otherwise, and for a curve kind with no B-spline form,
-//!   the edge stays as upstream leaves it.
+//!   ball) to the vertex (`vertex::carry_far_edge_ends`). When the curve passes the point
+//!   inside its natural interval (one traversal; a bounded line is not extended), the edge
+//!   is re-trimmed: its curve kept exactly and only the far end's parameter moved there, so
+//!   a line or conic through the point (an intersection edge of exact surfaces) keeps its
+//!   class. Otherwise only a wire edge (no face uses it) may have its curve edited:
+//!   a line becomes the line to its kept end, a B-spline or conic a B-spline with that end's
+//!   control point moved (both ends knots it passes through). An edge a face uses is never
+//!   edited that way, so a face's conic never becomes a spline. The change is notified,
+//!   deleting the edge uses' UV trim curves as upstream's own surf/surf/surf edge edit does
+//!   (`sm_SetXSectEdgeThroughPoint`), and kept only when certified to put the end within
+//!   half the vertex tolerance without pushing another valid end out; otherwise, and for a
+//!   curve kind neither edit applies to, the edge stays as upstream leaves it.
 //! - **Mutable topology.** [`BrepMerge`] supplies an arena, resolved target,
 //!   handle mapping and notification environment for [`PointClassification::merge_into_brep`],
 //!   and [`CombineBrep`] the arena and notifications
@@ -382,6 +387,16 @@ pub trait ClassObject: Copy + PartialEq {
 pub trait ClassGeometry<O> {
     /// The curve of a [`ClassObjectKind::Curve`] handle.
     fn curve(&self, o: O) -> Option<&Curve>;
+    /// Not upstream (tangency-labs/solidcraft#11574): a curve that is the curve of
+    /// handle `o`, parameter for parameter, in a form the curve/curve intersection
+    /// solves in closed form (a seam's ruling,
+    /// [`Surface::seam_ruling`](crate::surface::surface::Surface::seam_ruling)), which a
+    /// classification's edge intersection takes in the curve's place. Nothing else reads
+    /// it. `None` (the default): the curve itself.
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        let _ = o;
+        None
+    }
     /// The surface of a [`ClassObjectKind::Surface`] handle.
     fn surface(&self, o: O) -> Option<&Surface>;
     /// The volume of a [`ClassObjectKind::Volume`] handle.
