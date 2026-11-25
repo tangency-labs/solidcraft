@@ -44,27 +44,6 @@ impl NavCaps {
     }
 }
 
-/// Give a panel the wheel delta left by its children, one movable axis at a time.
-/// Boundary deltas remain available to the panel host's input fallback.
-pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, maximum: egui::Vec2) -> egui::Vec2 {
-    let mut offset = previous;
-    ctx.input_mut(|input| {
-        if maximum.x > 0.0 && input.smooth_scroll_delta.x != 0.0 {
-            offset.x = (previous.x - input.smooth_scroll_delta.x).clamp(0.0, maximum.x);
-            if offset.x != previous.x {
-                input.smooth_scroll_delta.x = 0.0;
-            }
-        }
-        if maximum.y > 0.0 && input.smooth_scroll_delta.y != 0.0 {
-            offset.y = (previous.y - input.smooth_scroll_delta.y).clamp(0.0, maximum.y);
-            if offset.y != previous.y {
-                input.smooth_scroll_delta.y = 0.0;
-            }
-        }
-    });
-    offset
-}
-
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
 pub struct WebWheelGestures {
     last_scroll: Option<f64>,
@@ -2200,6 +2179,7 @@ fn orbit_camera_styled(app: &mut SolveApp, dx: f64, dy: f64, free_style: bool) {
 #[cfg(test)]
 mod tests {
     use solidcraft_engine::geom::prelude::*;
+    use solidcraft_ui_kit::panel_scroll_offset;
 
     #[test]
     fn panel_wheel_consumes_only_axes_that_move_and_clamps_to_their_limits() {
@@ -2213,7 +2193,7 @@ mod tests {
         ] {
             crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                 ui.input_mut(|input| input.smooth_scroll_delta = delta);
-                assert_eq!(super::panel_scroll_offset(ui.ctx(), previous, maximum), expected);
+                assert_eq!(panel_scroll_offset(ui.ctx(), previous, maximum), expected);
                 assert_eq!(ui.input(|input| input.smooth_scroll_delta), remaining);
             });
         }
@@ -2228,7 +2208,7 @@ mod tests {
             // A child has already consumed Y; only its unclaimed X reaches the host.
             ui.input_mut(|input| input.smooth_scroll_delta = vec2(-12.0, 0.0));
             let events = ui.input(|input| input.events.clone());
-            assert_eq!(super::panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
+            assert_eq!(panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
             assert_eq!(ui.input(|input| input.smooth_scroll_delta), egui::Vec2::ZERO);
             assert_eq!(ui.input(|input| input.events.clone()), events, "raw fallback ownership stays with the host");
         });
