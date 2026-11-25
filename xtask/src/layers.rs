@@ -42,6 +42,8 @@ impl Class {
 /// prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
+    // the kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md); solidcore-record only
+    ("kernel-api", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
     ("space-mouse", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
@@ -50,7 +52,11 @@ pub const TABLE: &[(&str, Class)] = &[
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
+    // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
+    ("design-preview", Class::Standalone),
     ("sketch", Class::Layer(1)),
+    // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
+    ("develop", Class::Layer(1)),
     // the B-rep kernel, solidcore (the Rust port of NVIDIA's SMLib, ADR 0002); only the kernel uses it
     ("smlib", Class::Layer(1)),
     // STEP (ISO 10303) exchange structure and geometry, no modelling backend
@@ -71,6 +77,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
+    // length display: a millimetre value in a design unit with its decimal places (no dependencies)
+    ("display-units", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
@@ -83,6 +91,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("theme", Class::Shared),
     // the UI kit and its components (ribbon, app bar, history and navigation bars, view compass, window chrome, theme files), drawn from host data (#14251)
     ("ui-kit", Class::Shared),
+    // the app-neutral panel placement core: panels by id, dock, floating and window placement, saved layout values (#17363)
+    ("panel-layout", Class::Shared),
     // SolidCraft's look, ready to install into the kit: icon masters and roles, code-drawn glyphs, IBM Plex faces, built-in themes
     ("look", Class::Shared),
     // the control channel: the per-launch token and its files, what a request still running does (#12946)
@@ -95,17 +105,24 @@ pub const TABLE: &[(&str, Class)] = &[
     ("viewport-gpu", Class::Shared),
     // the viewport in an egui window: egui-wgpu paint callbacks and install (#12943)
     ("viewport-egui", Class::Shared),
+    // the views of a design as plain data: kinds, the set a design keeps open, the saved form (no UI toolkit)
+    ("views", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
+    // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
+    ("ui-kit-gallery", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
 /// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"]];
+/// Sketch and sheet development reach solidcore's services through the kernel, its adapter.
+pub const INTRA_LAYER_ORDER: &[&[&str]] =
+    &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"], &["kernel", "sketch"], &["kernel", "develop"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

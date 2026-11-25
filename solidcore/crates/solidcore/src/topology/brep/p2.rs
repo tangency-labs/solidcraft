@@ -13,6 +13,7 @@
 //! | [`min_edge_bbox_size`]       | `SmBrep::GetMinEdgeBBoxSize`              |
 //! | [`set_tolerance`]            | `SmBrep::SetTolerance` (`SM_USE_OLDTOL`)  |
 //! | [`rebuild_uv_trim_curves`]   | `SmBrep::RebuildUVTrimCurves`             |
+//! | [`create_missing_uv_trim_curves`] | (not upstream) the kernel's own UV trim curve for every edge use on a face that holds none |
 //! | [`check_and_fix_uv_trim_curves`] | `sm_CheckAndFixUVTrimCurves` (file static) |
 //! | [`swap_uv`]                  | `SmBrep::SwapUV`                          |
 //! | [`notify`], [`NotifyArg`], [`brep_ref`] | `SmBrep::Notify`               |
@@ -79,7 +80,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::p2::is_curve_class;
 use crate::curve::curve::{p8::CurveIntersectOptions, Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object::{self, BREP_TYPE};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{MarkLock, ALL_MARKS};
@@ -397,7 +401,7 @@ pub fn set_tolerance(
             BoundingBoxOptions::default(),
         ))?;
         // fork 60a8a51: a box that cannot be computed is no size, as an absurd one is not
-        let no_box = bbox.is_none() && k.fixes.brep_edit_statuses_pass_on;
+        let no_box = bbox.is_none();
         let mut size = bbox.unwrap_or_default().size().length();
         if no_box || size >= 1.0e15 || size <= 0.0 {
             size = 1.0;
@@ -475,6 +479,41 @@ pub fn rebuild_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
     ret
 }
 
+/// (Not upstream) Gives every edge use on a face that holds no UV trim curve the kernel's
+/// own, the step a body takes before it is written out as data.
+///
+/// The walk is [`edgeuses`]`(b, None)`, listed once before any trim is made: the edges in
+/// B-rep edge list order, each edge's uses in its radial list order from its head. An edge
+/// use is skipped when it has no face use ([`eu1::faceuse`]: a wire edge use) or when its
+/// own slot already holds a curve ([`eu1::uv_trim_curve_pointer`]; the mate's slot is not
+/// looked at). Every other one gets
+/// [`get_or_create_uv_trim_curve`](eu3::get_or_create_uv_trim_curve)`(k, b, eu, false,
+/// false, true)`: no distance and no deviation wanted, a UV-space curve allowed. Where the
+/// mate holds a curve that call builds nothing (the pair shares the mate's curve) and
+/// returns the status of the edge use's own drop record; otherwise it builds a curve and
+/// attaches it as that routine does, with whatever tolerance the attaching raises.
+///
+/// The walk stops at the first failure and nothing is undone: the edge uses before the
+/// failing one keep the curves (and tolerances) they were given, the failing one is as its
+/// call left it, and the ones after it are not visited. Afterwards, on success, every edge
+/// use on a face has a UV trim curve ([`eu1::uv_trim_curve`]: its own or its mate's), and a
+/// second call changes nothing.
+///
+/// # Errors
+///
+/// The first failure of the walk: an error of a read or of
+/// [`get_or_create_uv_trim_curve`](eu3::get_or_create_uv_trim_curve), or the failing
+/// status it returned ([`eu3::UvTrimCurveFetch::status`]).
+pub fn create_missing_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+    for eu in edgeuses(b, None)? {
+        if eu1::faceuse(b, eu)?.is_none() || eu1::uv_trim_curve_pointer(b, eu)?.is_some() {
+            continue;
+        }
+        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+    }
+    Ok(())
+}
+
 /// `sm_CheckAndFixUVTrimCurves` (file static, called by `SmBrep::ReadFromFile`):
 /// checks every edge use's UV trim curve with `sm_CheckUVTrimCurve` and, as `siRemove`
 /// is defined, deletes it when the check fails. Always succeeds upstream.
@@ -490,7 +529,145 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
             let _ = eu1::set_uv_trim_curve(b, eu, UvTrimCurveArg::Null, 0.0, true, None)?;
         }
     }
+    // not upstream: the check compares only a trim's ends with its edge's, so a kept trim
+    // could stray from its edge inside by more than the edge tolerance
+    cover_kept_uv_trim_curves(k, b)
+}
+
+/// Not upstream: after [`check_and_fix_uv_trim_curves`]'s end check, every edge whose kept
+/// UV trim curves run off it by more than its tolerance has its tolerance raised to the
+/// proved distance. `sm_CheckUVTrimCurve` compares only a trim's two ends with the edge's
+/// ends and vertices, so a trim whose image on the face leaves the edge between its ends was
+/// kept with a tolerance that does not cover it (`Solids/fillet_ts.smb` edge 29: 2.1e-2 off
+/// under 1.9e-5).
+///
+/// The distance is geometric: how far the face's image `S(W(s))` of the trim, over the
+/// trim's own interval, runs from the edge's curve `C` over the edge interval
+/// ([`trim_distance_bound`], plus the net's own bound for a surface kept as a definition's
+/// net). A trim and its edge need not share a parameterisation (upstream reads a trim over
+/// its own interval, normalised), so a trim that lies on its edge with another
+/// parameterisation is within tolerance however far `C(t)` and `S(W(t))` are apart at equal
+/// `t` (`fillet_ts.smb` edge 27: 3.1e-2 apart at equal `t`, 4.5e-14 off its edge).
+///
+/// A trim whose distance cannot be enclosed tightly (a curve or surface with no NURB form,
+/// a trim that cannot be evaluated, a bound that does not close within the budget) is left
+/// as the end check left it: a raise is made only to a bound closed on the distance itself.
+/// No trim and no other geometry changes; a tolerance is only raised.
+///
+/// Each raise, and each vertex tolerance it cascades to, is recorded with the value before
+/// it ([`Brep::trim_cover_raises`]): the fit tolerance along a raised edge
+/// (`topology::edgeuse::p3::fit_tolerance`) stays the one the read had made, so covering a
+/// stray trim does not loosen the geometry fitted later (`Fillet/corner_box.smb` edge 13:
+/// its fillet is the one made without the raise).
+///
+/// A part file's read (`part_file::read_part_from_db`) runs no end check; each B-rep it
+/// builds is covered the same way.
+///
+/// Every distance is enclosed before any tolerance is raised, so a raise does not change
+/// what another use is measured against.
+///
+/// # Errors
+///
+/// Those of [`trim_distance_bound`] (a cancelled kernel among them) and of
+/// [`edge::set_tolerance`].
+///
+/// [`trim_distance_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound
+pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
+    let mut raises = Vec::new();
+    for eu in edgeuses(b, None)? {
+        k.check_cancelled(COVER_OP)?;
+        if let KeptTrimGap::Bounded(e, gap) = kept_trim_gap(k, b, eu)? {
+            raises.push((e, gap));
+        }
+    }
+    let mut record = crate::topology::TrimCoverRaises::default();
+    // (every vertex tolerance as the read made it, to record those a raise cascades to)
+    let vertices: Vec<_> = b.vertices().iter().map(|(v, r)| (v, r.tolerance)).collect();
+    for (e, gap) in raises {
+        let before = edge::tolerance(b, e)?;
+        if gap > before {
+            edge::set_tolerance(b, e, gap, true, true)?;
+            let after = edge::tolerance(b, e)?;
+            record.edges.entry(e).or_insert((before, after)).1 = after;
+        }
+    }
+    for (v, before) in vertices {
+        let after = b.vertex(v)?.tolerance;
+        if after.to_bits() != before.to_bits() {
+            record.vertices.insert(v, (before, after));
+        }
+    }
+    b.set_trim_cover_raises(record);
     Ok(())
+}
+
+/// The operation [`cover_kept_uv_trim_curves`] polls cancellation as.
+const COVER_OP: &str = "topology::brep::cover_kept_uv_trim_curves";
+
+/// What [`kept_trim_gap`] finds for an edge use.
+enum KeptTrimGap {
+    /// The edge use holds no trim of its own.
+    NoTrim,
+    /// The proved bound on the distance of the trim's image from its edge's curve.
+    Bounded(EdgeId, f64),
+    /// The distance is not enclosed.
+    Unbounded,
+}
+
+/// The proved distance of edge use `eu`'s own UV trim curve's image from its edge's curve
+/// ([`cover_kept_uv_trim_curves`]).
+fn kept_trim_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<KeptTrimGap> {
+    use crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound;
+    use edge as ed;
+
+    let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? else {
+        return Ok(KeptTrimGap::NoTrim);
+    };
+    let (Some(e), Some(f)) = (eu1::edge(b, eu)?, eu1::face(b, eu)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    let (Some(curve), Some(surface)) = (ed::curve(b, e)?, face2::surface(b, f)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    let (Some(c), Some(w)) = (nurb_form(curve)?, nurb_form(trim)?) else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    // the net's own distance from a definition it is kept for (0 for a plain net)
+    let net_bound = surface.procedural_definition().map_or(0.0, |d| d.bound());
+    if !(net_bound >= 0.0 && net_bound.is_finite()) {
+        return Ok(KeptTrimGap::Unbounded);
+    }
+    let tol = ed::tolerance(b, e)?;
+    let ivl = ed::interval(b, e)?;
+    let floor = tol / 100.0;
+    // a distance this small is all the cover needs to know: with the net's bound and the
+    // sum's rounding below, it is within the tolerance
+    let accept = tol / (1.0 + 8.0 * f64::EPSILON) - net_bound;
+    let edge_range = [ivl.min(), ivl.max()];
+    let own = trim.natural_interval();
+    let trim_range = [own.min(), own.max()];
+    let gap = trim_distance_bound(k, &c, edge_range, &w, trim_range, surface, floor, accept)?;
+    let Some(gap) = gap else {
+        return Ok(KeptTrimGap::Unbounded);
+    };
+    // the sum's rounding, covered
+    let bound = (gap + net_bound) * (1.0 + 4.0 * f64::EPSILON);
+    if !bound.is_finite() {
+        return Ok(KeptTrimGap::Unbounded);
+    }
+    Ok(KeptTrimGap::Bounded(e, bound))
+}
+
+/// The B-spline form of `c` that [`trim_distance_bound`] encloses: a line's B-spline part
+/// made with its NURB, the B-spline part of any other curve that is one (`None` for the
+/// rest).
+///
+/// [`trim_distance_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound
+fn nurb_form(c: &Curve) -> Result<Option<std::borrow::Cow<'_, BSplineCurve>>> {
+    Ok(match c.kind() {
+        CurveKind::Line(l) => Some(l.base_with_nurb()?),
+        _ => c.b_spline_base().map(std::borrow::Cow::Borrowed),
+    })
 }
 
 /// `SwapUV`: claims an unlocked mark and swaps the UV parameterisation of every face
@@ -585,6 +762,26 @@ pub enum NotifyArg {
     Entity(EntityRef),
     /// Any other object.
     Object(ObjectRef),
+}
+
+/// What [`ArenaNotifyState::seed`] has visited, for the tests of the callers that must not
+/// seed a whole B-rep for each edit they make (solidcraft#15786). Compiled only for tests.
+#[cfg(test)]
+pub(crate) mod seeded {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+    static CALLS: AtomicU64 = AtomicU64::new(0);
+    static ENTITIES: AtomicU64 = AtomicU64::new(0);
+
+    pub(crate) fn note(entities: usize) {
+        CALLS.fetch_add(1, Relaxed);
+        ENTITIES.fetch_add(entities as u64, Relaxed);
+    }
+
+    /// The calls and the entities they visited since the last [`take`].
+    pub(crate) fn take() -> (u64, u64) {
+        (CALLS.swap(0, Relaxed), ENTITIES.swap(0, Relaxed))
+    }
 }
 
 impl NotifyArg {
@@ -837,6 +1034,8 @@ impl ArenaNotifyState {
         all.extend(b.edges().iter().map(|(x, _)| EntityRef::Edge(x)));
         all.extend(b.vertexuses().iter().map(|(x, _)| EntityRef::Vertexuse(x)));
         all.extend(b.vertices().iter().map(|(x, _)| EntityRef::Vertex(x)));
+        #[cfg(test)]
+        seeded::note(all.len());
         if self.records.is_empty() {
             // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
             self.records = all
@@ -903,15 +1102,6 @@ impl ArenaNotifyState {
         let mut state = Self::new(b);
         state.attributes = b.take_attributes();
         state
-    }
-
-    /// A default record for every object of `b` (and the B-rep itself) under its
-    /// [`copy_source_ref`] identity, disjoint from the arena identities [`Self::seed`]
-    /// gives: for a second B-rep notified in the same state.
-    pub(crate) fn seed_tagged(&mut self, b: &Brep) {
-        for e in brep_entities(b) {
-            self.records.or_default(copy_source_ref(e).key);
-        }
     }
 
     /// Gives `b` the attributes this state's notifications left on its live objects
@@ -1670,9 +1860,9 @@ pub fn local_curve_sector(
                 orientation,
                 true,
             )?;
-            let found = sector.radial_edgeuse.ok_or_else(|| {
-                SolidError::topology_failed(OP, "the curve's radial sector has no edge use")
-            })?;
+            let found = sector
+                .radial_edgeuse
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoRadialSector))?;
 
             // region of point is region of classification sector
             edgeuse_region(b, found)
@@ -1739,9 +1929,13 @@ pub fn local_curve_sector(
                             p1::find_sector_of_face(k, b, f, None, test_pnt, test_dir)?;
                         p1::vote_for_region(&mut regions, &mut votes, found);
                     } else {
-                        return Err(SolidError::topology_failed(
+                        return Err(SolidError::topology(
                             OP,
-                            "the vertex use is neither on an edge nor in a loop",
+                            TopologyFailure::Defect {
+                                why: "a use of a vertex that is not a shell vertex belongs to \
+                                      neither an edge nor a loop, though the kernel gives every \
+                                      use of such a vertex to one of them",
+                            },
                         ));
                     }
                 }
@@ -1749,11 +1943,97 @@ pub fn local_curve_sector(
 
             p1::find_highest_vote(&regions, &votes)
         }
-        _ => Err(SolidError::topology_failed(
-            OP,
-            "the curve does not hit a face, an edge or a vertex",
-        )),
+        _ => Err(SolidError::topology(OP, TopologyFailure::HitNotOnBoundary)),
     }
+}
+
+/// Where a point on faces' common boundary lies: an edge of the faces or a vertex of it.
+struct SharedBoundary {
+    class: PointClassType,
+    object: EntityRef,
+    /// The edge's curve parameter of the point (of the edge the point is on, or ends in).
+    parameter: f64,
+}
+
+/// The edge, or the vertex at an end of it, that `point` lies on and that `face` shares with
+/// one of `others`: the edge of `face` that borders another of those faces and is nearest
+/// `point`, when `point` is within `tolerance` of its curve. `None` when `face` shares no
+/// edge with them or the point is not on one.
+///
+/// A ray aimed at an edge can meet both faces ending there, each in a point of its boundary,
+/// and report no hit on the edge itself: the faces are then at one distance. Which side of
+/// either face alone the ray start is on says nothing about the region it is in (it can be
+/// the far side of the one and the near side of the other), but the radial sectors of the edge
+/// do.
+///
+/// # Errors
+///
+/// Those of the topology reads and the point drops.
+fn shared_boundary_of_faces(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    others: &[FaceId],
+    point: Point3,
+) -> Result<Option<SharedBoundary>> {
+    // The point is on an edge only within the edge's own tolerance (the body's linear tolerance
+    // at least), not within the distance by which two face hits count as tied.
+    let mut nearest: Option<(f64, EdgeId, f64)> = None;
+    for e in crate::topology::topology_traverser::face_edges(b, face)? {
+        let faces = edge::faces(b, e, None)?;
+        if !faces.iter().any(|f| others.contains(f)) {
+            continue;
+        }
+        let record = b.edge(e)?;
+        let Some(curve) = record.curve.as_ref() else {
+            continue;
+        };
+        let tolerance = record.tolerance.max(b.tolerance());
+        let dropped = curve.drop_point(
+            k,
+            &record.interval,
+            point,
+            None,
+            tolerance,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if dropped.success
+            && dropped.distance <= tolerance
+            && nearest.is_none_or(|(d, ..)| dropped.distance < d)
+        {
+            nearest = Some((dropped.distance, e, dropped.parameter));
+        }
+    }
+    let Some((_, e, parameter)) = nearest else {
+        return Ok(None);
+    };
+    // At an end of the edge the point is at its vertex, which the faces around it classify.
+    let record = b.edge(e)?;
+    let tolerance = record.tolerance.max(b.tolerance());
+    let curve = record
+        .curve
+        .as_ref()
+        .ok_or_else(|| null_deref("edge without curve"))?;
+    for (end, vertex) in [
+        (record.interval.min(), edge::start_vertex(b, e)?),
+        (record.interval.max(), edge::end_vertex(b, e)?),
+    ] {
+        if let Some(vertex) = vertex {
+            if curve.evaluate_point(k, end)?.distance(point) <= tolerance {
+                return Ok(Some(SharedBoundary {
+                    class: PointClassType::Vertex,
+                    object: EntityRef::Vertex(vertex),
+                    parameter,
+                }));
+            }
+        }
+    }
+    Ok(Some(SharedBoundary {
+        class: PointClassType::Edge,
+        object: EntityRef::Edge(e),
+        parameter,
+    }))
 }
 
 /// What [`ray_fire`] found.
@@ -1933,9 +2213,12 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
     // check solution tolerance for an error
     let tol = EFF_ZERO * (1.0 + start.max_dimension());
     if best.start.solution_value < tol {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the nearest hit is at the ray's start",
+            TopologyFailure::HitAtRayStart {
+                distance: best.start.solution_value,
+                tolerance: tol,
+            },
         ));
     }
     let _ = region;
@@ -1949,6 +2232,31 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
         0,
         best.start.solution_value,
     )?;
+
+    // Not upstream: a ray that meets the B-rep on a boundary shared by faces is classified
+    // against that boundary, not against one of the faces it ends.
+    if let EntityRef::Face(face) = hit {
+        let scaled_zero = EFF_ZERO_SQRT * 100.0 * (1.0 + radius);
+        let others: Vec<FaceId> = (0..solutions.len())
+            .filter_map(|ii| solutions.get(ii))
+            .filter(|this| {
+                (this.start.solution_value - best.start.solution_value).abs() < scaled_zero
+            })
+            .filter(|this| this.num_variables == best.num_variables)
+            .filter_map(|this| match this.objects[0].map(cache_entity) {
+                Some(Ok(EntityRef::Face(f))) if f != face => Some(f),
+                _ => None,
+            })
+            .collect();
+        if !others.is_empty() {
+            let point = start + best.start.solution_value * ray;
+            if let Some(found) = shared_boundary_of_faces(k, b, face, &others, point)? {
+                intersection.set_class_object(found.class, Some(found.object));
+                intersection.set_gap_3d(best.start.solution_value);
+                intersection.set_t_param(found.parameter, false);
+            }
+        }
+    }
 
     // make temporary [StartPoint,IntersectionPoint] line segement
     let end = start + best.start.solution_value * ray;
@@ -2289,7 +2597,7 @@ pub fn make_edge_vertex_topology(
 
     // Find the shell corresponding to the region from the Start vertex.
     let s = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
-        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+        SolidError::topology(OP, TopologyFailure::VertexNotInRegion { at_end: false })
     })?;
 
     // Put Vertex into Brep's vertex list and edge into edge list
@@ -2329,10 +2637,10 @@ pub fn make_edge_topology(
 
     // Find the shells corresponding to the region from the Start vertex and end vertex.
     let mut start_shell = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
-        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+        SolidError::topology(OP, TopologyFailure::VertexNotInRegion { at_end: false })
     })?;
     let mut end_shell = vertex::shell_in_region(b, end, Some(region))?.ok_or_else(|| {
-        SolidError::topology_failed(OP, "the end vertex has no shell in the region")
+        SolidError::topology(OP, TopologyFailure::VertexNotInRegion { at_end: true })
     })?;
 
     // Transfer stuff from end shell to start shell if they are different.
@@ -2575,7 +2883,7 @@ pub fn merge_curves_on_surface<O: ClassObject + Copy>(
 ) -> Result<MergedCurves> {
     // check state - m_bEditingEnabled must be on
     if !objects.brep().editing_enabled() {
-        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
+        return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
     }
 
     let saved = k.context.doing_boolean();
@@ -2649,9 +2957,9 @@ fn merge_curves_body<O: ClassObject + Copy>(
                 let (coin, pos) = cc.are_coincident_maybe(k, &*objects, &cc, kk, false)?;
                 if coin == CoincidentMaybe::Unsure {
                     // This signals an unrecoverable error.
-                    return Err(SolidError::topology_failed(
+                    return Err(SolidError::topology(
                         OP,
-                        "a coincident interval could not be resolved",
+                        TopologyFailure::CoincidenceUndecided,
                     ));
                 }
                 if coin == CoincidentMaybe::Fixable {
@@ -2766,9 +3074,10 @@ fn merge_intervals<O: ClassObject + Copy>(
 fn into_bspline(c: Curve) -> Result<BSplineCurve> {
     match c.into_kind() {
         CurveKind::BSpline(b) => Ok(b),
-        _ => Err(SolidError::topology_missing(
+        // (an intersection curve: no owner yet)
+        _ => Err(SolidError::topology(
             OP,
-            "the B-spline form of the curve",
+            TopologyFailure::CurveNotBSpline { entity: None },
         )),
     }
 }
@@ -2858,20 +3167,26 @@ pub fn mate_lamina_edge_to_surface(
     let _ = uv_curve_extension_factor;
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
+        return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
     }
 
     // no work - not lamina edge
     if !eu1::edge_is_lamina(b, lamina)? {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the edge is not a lamina edge",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NotLamina));
     }
 
     let eu = eu1::primary_edgeuse(b, lamina)?.ok_or(null_deref("edge without edge use"))?;
-    let face = eu1::face(b, eu)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the lamina edge use's face"))?;
+    let face = eu1::face(b, eu)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the lamina edge's edge use has no face, though a lamina edge bounds one \
+                      face, whose loop holds its edge use",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let face_ref = (env.key_of)(EntityRef::Face(face));
     face_notify(b, env, face, face_ref, NotifyOperation::PreEdit)?;
 
@@ -2888,9 +3203,9 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_ccw)? && !edge::is_seam_of_surface(k, b, e_ccw, face)? {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edge's CCW neighbour is neither lamina nor a seam",
+            TopologyFailure::LaminaNeighbourBound,
         ));
     }
     let eu_cw = b.edgeuse(eu)?.cw.ok_or(null_deref("edge use without CW"))?;
@@ -2899,9 +3214,9 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_cw)? && !edge::is_seam_of_surface(k, b, e_cw, face)? {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the edge's CW neighbour is neither lamina nor a seam",
+            TopologyFailure::LaminaNeighbourBound,
         ));
     }
 
@@ -3060,10 +3375,7 @@ pub fn mate_lamina_edge_to_surface(
 
     // If we did not find the solutions we are done with an error
     let Some((sol_ccw, sol_cw, mut found_3d, mut found_uv)) = found else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "no intersection curve meets both neighbouring edges",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoMatingCurve));
     };
 
     // Here we found solutions to things - do some trimming and to get the proper
@@ -3076,10 +3388,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         ccw_trim_ivl.set_min_max(ccw_trim_ivl.min(), ccw_trim)
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    set?;
     // may snap sIvl by tol to existing knots
     match ccw_ext.trim(k, &mut ccw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
@@ -3094,10 +3403,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         cw_trim_ivl.set_min_max(cw_trim, cw_trim_ivl.max())
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    set?;
     match cw_ext.trim(k, &mut cw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -3228,23 +3534,21 @@ pub fn mate_lamina_edge_to_surface(
                     true,
                 )?
             } else {
-                // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
-                // made on the B-rep: an exact evaluation copy of the surface meanwhile
+                // the face's surface (an exact evaluation copy, as the B-rep is borrowed
+                // meanwhile); the lift reads its continuities and makes no cache
                 let surface = b
                     .face(face)?
                     .surface
                     .as_ref()
                     .ok_or(null_deref("face without surface"))?
                     .clone_for_evaluation()?;
-                surface.lift_curve_with_context(
+                surface.lift_curve(
                     k,
                     &face_domain,
                     &side_curve,
                     &side_curve.natural_interval(),
                     tol,
                     true,
-                    &mut crate::query::brep::BrepFaceServices::new(b),
-                    Some(CacheObject::Surface(face)),
                 )?
             };
             let new_3d = lifted.curve;
@@ -3282,19 +3586,16 @@ fn set_vertex_point(b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId, p: Point
     )
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored; header defaults `NULL`, `NULL`,
-/// `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge use's UV trim curve. A
-/// missing curve is dereferenced upstream (after its `SM_ASSERT`). UV trim curves are
+/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored upstream, passed on here, WR-658;
+/// header defaults `NULL`, `NULL`, `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge
+/// use's UV trim curve. A missing curve is dereferenced upstream (after its `SM_ASSERT`). UV trim curves are
 /// made as B-splines (the `SmBSplineCurve*&` overload casts). An `SmLine` is an
 /// `SmBSplineCurve`: its copy serves `CreateExtendedCurve` through its B-spline part,
 /// whose NURB `GetOrCreateGwNurbPointer` makes (`MakeNurb`, the `SmLine` override; status
 /// ignored) when missing. A curve of another kind is [`SolidError::InvalidInput`].
 fn uv_trim_curve_copy(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<BSplineCurve> {
-    let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    // (fork 60a8a51 passes this status on: `SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        fetched.status?;
-    }
+    // (status ignored upstream; fork 60a8a51 passes it on: `SER`)
+    eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
     let curve = eu1::uv_trim_curve(b, eu)?
         .0
         .ok_or(null_deref("edge use without UV trim curve"))?;
@@ -3315,7 +3616,7 @@ fn uv_trim_curve_copy(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<BSpline
 }
 
 /// `SER(pEU->GetOrCreateUVTrimCurve(pUV))` then `pUV->Trim(ivl)` (`bNotify` default
-/// `TRUE`; status ignored, only [`SolidError::Unported`] propagates). The curve is the
+/// `TRUE`; status ignored upstream, passed on as the fork does). The curve is the
 /// one of the edge use or its mate (the owner of the pair's curve); a missing curve is
 /// dereferenced upstream.
 fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -> Result<()> {
@@ -3330,12 +3631,9 @@ fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -
         .ok_or(null_deref("edge use without UV trim curve"))?;
     // may snap sIvl by tol to existing knots
     let mut trim_ivl = *ivl;
-    match curve.trim(k, &mut trim_ivl, TrimMode::Notify) {
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        // (fork 60a8a51 passes the trim's status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => Err(e),
-        _ => Ok(()),
-    }
+    // (status ignored upstream; fork 60a8a51 passes the trim's status on: `SER`)
+    curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
+    Ok(())
 }
 
 /// `SER(pEU->NormalizedEvaluate(t, FALSE, pnt))` (3D; header defaults: no derivative,
@@ -3445,9 +3743,7 @@ mod tests {
         assert_eq!(err.operation(), OP);
         assert_eq!(
             err.topology_failure(),
-            Some(&crate::error::topology::TopologyFailure::Failed(
-                "editing is not enabled"
-            ))
+            Some(&TopologyFailure::EditingDisabled)
         );
     }
 
@@ -3570,5 +3866,363 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    /// The bytes of the upstream test file `name`.
+    fn test_file(name: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../upstream/TestFiles/pt_TestFiles")
+            .join(name);
+        std::fs::read(path).unwrap()
+    }
+
+    /// B-rep file `name` as a read leaves it.
+    fn read_brep_file(k: &mut Kernel, name: &str) -> Brep {
+        use crate::topology::database_io::FileType;
+        use crate::topology::loopuse::notify_ref;
+        use crate::topology::topology::NotifyRecords;
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::brep::p10::TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut attributes,
+            key_of: &notify_ref,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let bytes = test_file(name);
+        crate::topology::brep::p7::read_from_file(
+            k,
+            &mut b,
+            bytes,
+            FileType::Ascii,
+            false,
+            &mut env,
+        )
+        .unwrap();
+        b
+    }
+
+    /// The B-reps of part file `name` as a read leaves them.
+    fn read_part_file(k: &mut Kernel, name: &str) -> Vec<Brep> {
+        use crate::topology::database_io::FileType;
+        use crate::topology::loopuse::notify_ref;
+        use crate::topology::topology::NotifyRecords;
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let key_of = |_: usize, e: EntityRef| notify_ref(e);
+        let mut env = crate::topology::part_file::PartEnv {
+            attributes: &mut attributes,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        crate::topology::part_file::read_part_from_file(
+            k,
+            test_file(name),
+            FileType::Ascii,
+            &mut env,
+        )
+        .unwrap()
+        .breps
+    }
+
+    /// The bound [`trim_distance_bound`] proves on how far edge use `eu`'s own trim's image
+    /// runs from its edge, closed on the distance (`accept` 0), plus the net's own bound;
+    /// `None` without a trim, infinite when it is not enclosed.
+    ///
+    /// [`trim_distance_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound
+    fn proved_distance(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Option<f64> {
+        use crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound;
+        let trim = eu1::uv_trim_curve_pointer(b, eu).unwrap()?;
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let s = face2::surface(b, f).unwrap().unwrap();
+        let c = edge::curve(b, e).unwrap().unwrap();
+        let tol = edge::tolerance(b, e).unwrap();
+        let i = edge::interval(b, e).unwrap();
+        let own = trim.natural_interval();
+        let net = s.procedural_definition().map_or(0.0, |d| d.bound());
+        Some(match (nurb_form(c).unwrap(), nurb_form(trim).unwrap()) {
+            (Some(c), Some(w)) => trim_distance_bound(
+                k,
+                &c,
+                [i.min(), i.max()],
+                &w,
+                [own.min(), own.max()],
+                s,
+                tol / 1000.0,
+                0.0,
+            )
+            .unwrap()
+            .map_or(f64::INFINITY, |g| g + net),
+            _ => f64::INFINITY,
+        })
+    }
+
+    /// The largest distance, over `n + 1` points of edge use `eu`'s own trim's image, to the
+    /// nearest of 4097 points of its edge refined by golden-section search: a check that
+    /// can disprove a bound (it is below the true distance up to the search), never prove
+    /// one.
+    fn sampled_distance(k: &Kernel, b: &Brep, eu: EdgeuseId, n: u32) -> f64 {
+        let trim = eu1::uv_trim_curve_pointer(b, eu).unwrap().unwrap();
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let s = face2::surface(b, f).unwrap().unwrap();
+        let c = edge::curve(b, e).unwrap().unwrap();
+        let i = edge::interval(b, e).unwrap();
+        let own = trim.natural_interval();
+        let at = |t: f64, p: Point3| c.evaluate_point(k, t).unwrap().distance(p);
+        let mut worst = 0.0_f64;
+        for j in 0..=n {
+            let w = trim
+                .evaluate_point(k, own.evaluate(f64::from(j) / f64::from(n)))
+                .unwrap();
+            let p = s.evaluate_point(k, Point2::new(w.x, w.y)).unwrap();
+            let grid = 4096;
+            let (mut best, mut at_best) = (f64::INFINITY, 0);
+            for g in 0..=grid {
+                let d = at(i.evaluate(f64::from(g) / f64::from(grid)), p);
+                if d < best {
+                    (best, at_best) = (d, g);
+                }
+            }
+            let (mut lo, mut hi) = (
+                i.evaluate(f64::from(at_best.max(1) - 1) / f64::from(grid)),
+                i.evaluate(f64::from((at_best + 1).min(grid)) / f64::from(grid)),
+            );
+            for _ in 0..80 {
+                let m1 = lo + (hi - lo) * 0.381_966;
+                let m2 = hi - (hi - lo) * 0.381_966;
+                if at(m1, p) < at(m2, p) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            worst = worst.max(best.min(at(0.5 * (lo + hi), p)));
+        }
+        worst
+    }
+
+    /// Every UV trim curve a read keeps lies within its edge's tolerance of the edge, the
+    /// tolerance raised where the cover proved a trim farther. `Defeature/LShape_I.smb`'s
+    /// trims of edge uses 242 and 246 lie on their edges (4.5e-14 off) with another
+    /// parameterisation (1.1e-5 apart at equal parameters, over the tolerance of 1e-5):
+    /// their edges keep that tolerance. Each proved bound is checked against a dense sample
+    /// of the distance, which could disprove it.
+    #[test]
+    fn every_kept_trim_is_within_its_edge_tolerance() {
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, "Defeature/LShape_I.smb");
+        let mut kept = 0;
+        let mut failures = Vec::new();
+        for eu in edgeuses(&b, None).unwrap() {
+            let Some(bound) = proved_distance(&k, &b, eu) else {
+                continue;
+            };
+            kept += 1;
+            let e = eu1::edge(&b, eu).unwrap().unwrap();
+            let tol = edge::tolerance(&b, e).unwrap();
+            let sampled = sampled_distance(&k, &b, eu, 64);
+            if !(bound <= tol && sampled <= bound) {
+                failures.push(format!(
+                    "eu {}: bound {bound:e} sampled {sampled:e} tolerance {tol:e}",
+                    eu.index()
+                ));
+            }
+        }
+        assert!(kept > 0 && failures.is_empty(), "{kept}: {failures:#?}");
+        for (eu, e) in [(242, 32), (246, 60)] {
+            let eu = EdgeuseId::from_index(eu);
+            let e = EdgeId::from_index(e);
+            assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
+            assert_eq!(edge::tolerance(&b, e).unwrap(), 1e-5);
+            assert!(sampled_distance(&k, &b, eu, 64) < 1e-12);
+        }
+    }
+
+    /// `Solids/fillet_ts.smb`: the trim of edge use 58 leaves edge 29 by about 2.63e-5 between
+    /// its ends (sampled), above the edge's tolerance in the file (1.86e-5), and the cover
+    /// raises the tolerance to the proved distance, which the dense sample stays under. (The
+    /// face keeps the file's B-spline surface, an exact copy of its analytic surface (WR-450,
+    /// #18923), so the trim is measured on the surface it was written on; when the analytic
+    /// surface replaced it, the same trim sat 2.14e-2 off.) Edge 27's
+    /// trim lies on its edge with another parameterisation (3.1e-2 apart at equal
+    /// parameters): its tolerance stays 1e-5.
+    #[test]
+    fn a_trim_off_its_edge_raises_the_tolerance_to_its_distance() {
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, "Solids/fillet_ts.smb");
+        let (eu, e) = (EdgeuseId::from_index(58), EdgeId::from_index(29));
+        assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
+        let tol = edge::tolerance(&b, e).unwrap();
+        let sampled = sampled_distance(&k, &b, eu, 1024);
+        let (before, after) = b.trim_cover_raises().edges[&e];
+        assert_eq!(after.to_bits(), tol.to_bits());
+        assert!(
+            before < sampled && sampled <= tol,
+            "{before:e} {sampled:e} {tol:e}"
+        );
+        assert!(tol <= sampled * 1.01, "{sampled:e} {tol:e}");
+        let bound = proved_distance(&k, &b, eu).unwrap();
+        assert!(
+            sampled <= bound && bound <= tol,
+            "{sampled:e} {bound:e} {tol:e}"
+        );
+        let (eu, e) = (EdgeuseId::from_index(54), EdgeId::from_index(27));
+        assert_eq!(eu1::edge(&b, eu).unwrap(), Some(e));
+        assert_eq!(edge::tolerance(&b, e).unwrap(), 1e-5);
+        assert!(sampled_distance(&k, &b, eu, 256) < 1e-12);
+    }
+
+    /// `ss_plane_sph1.smp`'s sheet on the sphere about (10, 2, 2) of radius 2: a part file's
+    /// read covers its kept trims as a B-rep file's does. Every kept trim is within its
+    /// edge's tolerance ([`proved_distance`], checked by a dense sample).
+    ///
+    /// The face's area, enclosed, is then that of the region the edges' own 3D curves bound,
+    /// `EDGES_AREA`, up to a strip along the loop as wide as the widest tolerance (with the
+    /// curves' 1e-7 off the sphere added). The loop is no longer than `8 pi`: the cut circle
+    /// on the sphere of radius 2 (at most a great circle, `4 pi`) and the seam, a meridian
+    /// (at most `2 pi`), traversed twice.
+    ///
+    /// `EDGES_AREA` (25.144566844852648) was computed outside the kernel (review r1 of
+    /// tangency-labs/solidcraft#19295): each edge's 3D curve (within 1e-7 of the sphere about
+    /// (10, 2, 2) of radius 2) projected radially onto the sphere, and the region the
+    /// projected loop bounds integrated by quadrature in the sphere's angles.
+    #[test]
+    fn the_plane_sphere_sheet_area_is_bounded_by_its_edges() {
+        const EDGES_AREA: f64 = 25.144566844852648;
+        let mut k = Kernel::default();
+        let mut breps = read_part_file(&mut k, "ss_plane_sph1.smp");
+        let b = breps.first_mut().unwrap();
+        // (the sheet's sphere keeps the file's NURB, so its kept trims are the file's on
+        // their own surface: each is within its edge's tolerance as read, proved below, and
+        // the cover raises nothing)
+        assert!(b.trim_cover_raises().edges.is_empty());
+        let mut widest = 0.0_f64;
+        let (mut failures, mut kept) = (Vec::new(), 0);
+        for eu in edgeuses(b, None).unwrap() {
+            let Some(bound) = proved_distance(&k, b, eu) else {
+                continue;
+            };
+            kept += 1;
+            let e = eu1::edge(b, eu).unwrap().unwrap();
+            let tol = edge::tolerance(b, e).unwrap();
+            let sampled = sampled_distance(&k, b, eu, 256);
+            if !(bound <= tol && sampled <= bound) {
+                failures.push(format!("eu {}: {bound:e} {sampled:e} {tol:e}", eu.index()));
+            }
+        }
+        // (the sheet's eight edges each have one trimmed use: four B-spline trims, four lines)
+        assert!(kept == 8 && failures.is_empty(), "{kept}: {failures:#?}");
+        for (e, _) in b.edges().iter() {
+            widest = widest.max(edge::tolerance(b, e).unwrap());
+        }
+        let faces: Vec<FaceId> = b.faces().iter().map(|(f, _)| f).collect();
+        let area = crate::mass::enclosure::enclose_face_area_relative(&k, b, &faces, 1e-9).unwrap();
+        let strip = 8.0 * PI * (widest + 1e-7);
+        assert!(
+            area.lo - strip <= EDGES_AREA && EDGES_AREA <= area.hi + strip,
+            "[{}, {}] strip {strip:e}",
+            area.lo,
+            area.hi
+        );
+    }
+
+    /// `Fillet/corner_box.smb` edge 13: the healer raised it to cover its edge/face gap,
+    /// and the kept-trim cover raises it again (its trims run 3.2e-5 from it, sampled),
+    /// recording the healer's value. The tolerance geometry is fitted at along the edge is
+    /// the one the healer's tolerance gives, so the cover's raise does not loosen a fit;
+    /// once the edge's tolerance moves off the raised value, the record no longer applies.
+    #[test]
+    fn a_cover_raise_does_not_loosen_the_fit() {
+        use crate::topology::edgeuse::p3::fit_tolerance;
+        let mut k = Kernel::default();
+        let mut b = read_brep_file(&mut k, "Fillet/corner_box.smb");
+        let e = p1::edges(&b, None).unwrap()[13];
+        let raises = b.trim_cover_raises();
+        let &(before, after) = raises.edges.get(&e).unwrap_or_else(|| panic!("{raises:?}"));
+        assert_eq!(edge::tolerance(&b, e).unwrap(), after);
+        assert!(before > 1.7e-5 && after > 3e-5, "{before:e} {after:e}");
+        let sampled = edgeuses(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&eu| eu1::edge(&b, eu).unwrap() == Some(e))
+            .filter(|&eu| eu1::uv_trim_curve_pointer(&b, eu).unwrap().is_some())
+            .map(|eu| sampled_distance(&k, &b, eu, 1024))
+            .fold(0.0, f64::max);
+        assert!(sampled > before && sampled <= after, "{sampled:e}");
+        let fit = fit_tolerance(&k, &mut b, e).unwrap();
+        // a copy carries the record, and fits along the copied edge as the source does
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attrs = AttributeStore::default();
+        let key_of = crate::topology::loopuse::notify_ref;
+        let mut env = NotifyEnv {
+            records: &mut records,
+            attributes: &mut attrs,
+            context: None,
+            key_of: &key_of,
+        };
+        let mut copy =
+            crate::topology::brep::p3::api_brep_copy(&mut k, &mut env, Some(&b), &key_of).unwrap();
+        assert_eq!(
+            copy.trim_cover_raises().edges.len(),
+            b.trim_cover_raises().edges.len()
+        );
+        assert_eq!(
+            copy.trim_cover_raises().vertices.len(),
+            b.trim_cover_raises().vertices.len()
+        );
+        let copied: Vec<EdgeId> = copy
+            .trim_cover_raises()
+            .edges
+            .iter()
+            .filter(|(_, &r)| r == (before, after))
+            .map(|(&c, _)| c)
+            .collect();
+        assert_eq!(copied.len(), 1, "{:?}", copy.trim_cover_raises());
+        assert_eq!(fit_tolerance(&k, &mut copy, copied[0]).unwrap(), fit);
+        b.edge_mut(e).unwrap().tolerance = before;
+        assert_eq!(fit, fit_tolerance(&k, &mut b, e).unwrap());
+        assert!(fit < before);
+        b.edge_mut(e).unwrap().tolerance = after * 2.0;
+        assert_eq!(fit_tolerance(&k, &mut b, e).unwrap(), after * 2.0);
+    }
+
+    /// A cancelled kernel stops the cover with the cancelled status, and it raises no
+    /// tolerance: `Solids/fillet_ts.smb`'s edge 29, which the cover raises on a read, keeps
+    /// its tolerance from the file.
+    #[test]
+    fn a_cancelled_cover_raises_nothing() {
+        let mut k = Kernel::default();
+        let mut b = read_brep_file(&mut k, "Solids/fillet_ts.smb");
+        let e = EdgeId::from_index(29);
+        let &(before, after) = b.trim_cover_raises().edges.get(&e).unwrap();
+        assert!(after > before, "{before:e} {after:e}");
+        b.edge_mut(e).unwrap().tolerance = before;
+        let tolerances = |b: &Brep| -> Vec<u64> {
+            let edges = p1::edges(b, None).unwrap().into_iter();
+            let edges = edges.map(|e| edge::tolerance(b, e).unwrap().to_bits());
+            let vertices = b.vertices().iter().map(|(_, r)| r.tolerance.to_bits());
+            edges.chain(vertices).collect()
+        };
+        let held = tolerances(&b);
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = cover_kept_uv_trim_curves(&cancelled, &mut b);
+        assert!(
+            matches!(&stopped, Err(err) if err.is_cancelled()),
+            "{stopped:?}"
+        );
+        assert_eq!(tolerances(&b), held);
+        // (not cancelled, the same cover raises the edge again)
+        cover_kept_uv_trim_curves(&k, &mut b).unwrap();
+        assert_eq!(edge::tolerance(&b, e).unwrap(), after);
     }
 }

@@ -21,6 +21,30 @@ const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", 
 /// The paging arrows' names a host passes to [`theme_browser`].
 const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
 
+/// The grid specimen's rows: names, units, expressions and a read-only value.
+struct GallerySheet;
+
+impl GridSource for GallerySheet {
+    fn columns(&self) -> Vec<GridColumn> {
+        vec![
+            GridColumn::new("name", "Name", 1.0, CellKind::Text).flex(),
+            GridColumn::new("unit", "Unit", 0.6, CellKind::Choice(vec!["mm".into(), "in".into()])),
+            GridColumn::new("expression", "Expression", 1.4, CellKind::Expression).flex(),
+            GridColumn::new("value", "Value", 1.0, CellKind::ReadOnly).flex(),
+        ]
+    }
+    fn row_count(&self) -> usize {
+        2
+    }
+    fn row_key(&self, row: usize) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(if row == 0 { "width" } else { "height" })
+    }
+    fn text(&self, row: usize, col: usize) -> std::borrow::Cow<'_, str> {
+        let cells = [["width", "mm", "40 mm", "40 mm"], ["height", "mm", "width / 2", "20 mm"]];
+        std::borrow::Cow::Borrowed(cells.get(row).and_then(|r| r.get(col)).copied().unwrap_or(""))
+    }
+}
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub struct Element {
@@ -68,6 +92,8 @@ fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 #[cfg(any(test, feature = "test-support"))]
 pub const ELEMENTS: &[Element] = &[
+    element!("cell_selection", "dialog:table:cell_sample:selection", None, |ui, _| selection_sample(ui, "cell_sample", SelectionMode::Cell)),
+    element!("range_selection", "dialog:table:range_sample:selection", None, |ui, _| selection_sample(ui, "range_sample", SelectionMode::Range)),
     element!("theme_mode_segments", |ui, _| {
         theme_segments(
             ui,
@@ -429,6 +455,38 @@ pub const ELEMENTS: &[Element] = &[
                 ..Default::default()
             },
         );
+    }),
+    element!("browser", |ui, _| {
+        let mut state = browser::BrowserState::default();
+        let header = browser::Header { title: "Objects", count: "2 objects", collapsible: true, search: Some("Search objects") };
+        let _ = browser::Browser::new(&mut state, browser::Style::default(), 0).header(header).show(ui, |rows| {
+            rows.row(browser::Node {
+                id: 1,
+                key: "layer",
+                row: Row { fold: Some(true), eye: Some(true), icon: "folder", label: "Default", radio: Some(true), count: "2", ..Default::default() },
+                click_folds: true,
+                ..Default::default()
+            });
+            for (id, label, selected) in [(2, "Body 1", true), (3, "Body 2", false)] {
+                rows.row(browser::Node {
+                    id,
+                    key: label,
+                    row: Row {
+                        depth: 1,
+                        eye: Some(true),
+                        icon: "body",
+                        label,
+                        name: true,
+                        selected,
+                        mark: if selected { Mark::Here } else { Mark::None },
+                        ..Default::default()
+                    },
+                    select: browser::Selectable::Yes(0),
+                    rename: browser::Rename::Inline,
+                    ..Default::default()
+                });
+            }
+        });
     }),
     element!("tree_row_disabled_actions", |ui, _| {
         let actions =
@@ -1121,6 +1179,7 @@ pub const ELEMENTS: &[Element] = &[
                         workspace: "Design",
                         thumbnail: None,
                         thumbnail_failed: false,
+                        security: None,
                     },
                 );
             }
@@ -1137,6 +1196,7 @@ pub const ELEMENTS: &[Element] = &[
                 workspace: "Design",
                 thumbnail: None,
                 thumbnail_failed: false,
+                security: None,
             },
         );
     }),
@@ -1403,11 +1463,11 @@ pub const ELEMENTS: &[Element] = &[
             sort_header(ui, "Name", &mut Sort::Ascending);
         });
     }),
-    element!("plus_header", |ui, _| {
-        ui.allocate_ui(vec2(140.0, row_height()), |ui| {
-            ui.set_min_size(vec2(140.0, row_height()));
-            plus_header(ui, |_| {});
-        });
+    element!("add_column_button", |ui, _| {
+        add_column_button(ui, |_| {});
+    }),
+    element!("grid", |ui, _| {
+        Grid::new("gallery_grid").empty("Empty").show(ui, &mut GallerySheet);
     }),
     element!("table_custom", |ui, _| {
         table_custom(ui, "custom", &[Column::new("Name", 1.0)], "Empty", |ui, table| {
@@ -1425,6 +1485,11 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("compact_button", |ui, _| {
         compact_button(ui, "▲", "Move up", true, false);
+    }),
+    element!("compact_toggle", |ui, s| {
+        if compact_toggle(ui, if s.checked { "★" } else { "☆" }, "Favourite", true, s.checked).clicked() {
+            s.checked = !s.checked;
+        }
     }),
     element!("error", |ui, _| {
         text(ui, "Invalid expression", Text::Error("gallery"));
@@ -1451,6 +1516,44 @@ pub const ELEMENTS: &[Element] = &[
                 table.add_prompt(ui, "Add parameter", "Add parameter");
             },
         );
+    }),
+    element!("table_groups", |ui, s| {
+        table_custom(ui, "groups", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            if table.group(ui, "parameters", solidcraft_ui_text::tr("ui.table.gallery.parameters"), 2, &mut s.checked).clicked() {
+                ui.ctx().request_repaint();
+            }
+            if s.checked {
+                for (name, value) in [("Width", "12 mm"), ("Height", "25 mm")] {
+                    table.row(ui, name, false, |row| {
+                        row.cell(|ui| text(ui, name, Text::Cell));
+                        row.cell(|ui| text(ui, value, Text::MonoCell));
+                    });
+                }
+            }
+            let key = ui.scope_id().with("gallery_collapsed_group");
+            let mut open = ui.data_mut(|data| *data.get_temp_mut_or(key, false));
+            table.group(ui, "configurations", solidcraft_ui_text::tr("ui.table.gallery.configurations"), 1, &mut open);
+            ui.data_mut(|data| data.insert_temp(key, open));
+            if open {
+                table.row(ui, "Default", false, |row| {
+                    row.cell(|ui| text(ui, "Default", Text::Cell));
+                    row.cell(|ui| text(ui, "Active", Text::Cell));
+                });
+            }
+            table.add_prompt(ui, "Add parameter", "Add parameter");
+        });
+    }),
+    element!("table_selection", "dialog:table:selection:Width", None, |ui, _| {
+        table_custom(ui, "selection", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            for (name, value, selected) in [("Width", "12 mm", true), ("Height", "25 mm", true), ("Depth", "10 mm", false)] {
+                table.row(ui, name, selected, |row| {
+                    row.cell(|ui| text(ui, name, Text::Cell));
+                    row.cell(|ui| text(ui, value, Text::MonoCell));
+                });
+            }
+        });
     }),
     element!("cell_name", |ui, _| {
         text(ui, "Width", Text::NameCell(false));
@@ -1485,7 +1588,7 @@ pub const ELEMENTS: &[Element] = &[
         slider(ui, &mut 12.0, 0.0..=100.0, Slider { show_value: false, integer: true, ..Default::default() });
     }),
     element!("canvas_value_field", |ui, s| {
-        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false);
+        canvas_value_field(ui, ui.scope_id().with("canvas_value"), &mut s.value, false, "");
     }),
     element!("placement_field", |ui, s| {
         placement_field(ui, ui.scope_id().with("placement"), &mut s.value, "Distance");
@@ -1557,7 +1660,7 @@ pub const ELEMENTS: &[Element] = &[
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
         table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
             table.headers(ui, |_, _| false);
-            table.row(ui, "row", true, |row| {
+            table.row(ui, "row", false, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
                 });
@@ -1596,6 +1699,9 @@ pub const ELEMENTS: &[Element] = &[
     element!("text", "dialog:report:gallery", Some("dialog:report:gallery"), |ui, _| {
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
     }),
+    element!("shell_search_field", |ui, s| {
+        shell_search_field(ui, ui.scope_id().with("shell_search"), &mut s.value, "Search");
+    }),
     element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
     }),
@@ -1610,6 +1716,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
+    }),
+    element!("expandable_cell_preview", "gallery:comment-preview", Some("gallery:comment-preview:expand"), |ui, s| {
+        expandable_cell_preview(ui, ui.scope_id().with("comment-preview"), &s.value, "gallery:comment-preview");
+    }),
+    element!("expandable_cell_editor", "gallery:comment", Some("gallery:comment:expand"), |ui, s| {
+        expandable_cell_editor(ui, ui.scope_id().with("comment"), &mut s.value, "Comment", "gallery:comment");
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -1710,6 +1822,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
+    }),
+    element!("action_row", "dialog:action:gallery", Some("dialog:action:gallery"), |ui, _| {
+        action_row(ui, "gallery", "Option");
+    }),
+    element!("value_row", "dialog:row:Gallery", None, |ui, _| {
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();
@@ -2013,6 +2131,21 @@ pub const ELEMENTS: &[Element] = &[
             [PairButton { key: "look_at", label: "ui.look_at", icon: Some("lookat") }, PairButton { key: "slice", label: "Slice", icon: None }],
         );
     }),
+    element!("button_row_in_card", "library:insert_mesh", Some("library:insert_mesh"), |ui, _| {
+        button_row_in_card(
+            ui,
+            "library",
+            [
+                PairButton { key: "insert_step", label: "STEP", icon: Some("insert_step") },
+                PairButton { key: "insert_iges", label: "IGES", icon: Some("insert_step") },
+                PairButton { key: "insert_mesh", label: "Mesh", icon: Some("insert_mesh") },
+            ],
+        );
+    }),
+    element!("icon_button_colored", |ui, _| {
+        let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
+        icon_button_colored(ui, rect, "refresh", "Refresh", Some(solidcraft_theme::Tokens::get().text));
+    }),
     element!("icon_button_at", |ui, _| {
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         icon_button_at(ui, rect, "close", "Close");
@@ -2119,6 +2252,31 @@ pub const ELEMENTS: &[Element] = &[
 ];
 
 #[cfg(any(test, feature = "test-support"))]
+fn selection_sample(ui: &mut Ui, id: &str, mode: SelectionMode) {
+    let state = ui.make_persistent_id((id, "selection"));
+    let mut selection = ui
+        .data_mut(|data| data.get_temp::<CellSelection>(state))
+        .unwrap_or_else(|| CellSelection { anchor: Some((1, 1)), focus: Some(if mode == SelectionMode::Cell { (1, 1) } else { (3, 3) }) });
+    let columns = ["Name", "Expression", "Value", "Status", "Unit"].map(|label| Column::new(label, 1.0).flex());
+    table_custom(ui, id, &columns, "Empty", |ui, table| {
+        table.cell_selection(&mut selection, mode);
+        table.headers(ui, |_, _| false);
+        for row in 0..6 {
+            table.row(ui, &row.to_string(), false, |cells| {
+                cells.cell(|ui| text(ui, "Width", Text::Cell));
+                cells.cell(|ui| text(ui, "20 mm", Text::Cell));
+                cells.cell(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| text(ui, "20.00", Text::MonoCell));
+                });
+                cells.cell(active_pill);
+                cells.cell(|ui| text(ui, "mm", Text::Cell));
+            });
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(state, selection));
+}
+
+#[cfg(any(test, feature = "test-support"))]
 pub fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str>) {
     let mut sample = Sample { value: "12 mm".into(), second: "25 mm".into(), selected: 0, checked: true };
     let rect = ui.scope(|ui| (element.draw)(ui, &mut sample)).response.rect;
@@ -2154,6 +2312,8 @@ pub fn check_elements(elements: &[Element], context: fn() -> egui::Context) {
             for pass in 0..3 {
                 let events = if element.name.starts_with("checkbox_hovered") && pass > 0 {
                     vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("gallery:allocation").expect("hover allocation").center())]
+                } else if element.name == "table_selection" && pass > 0 {
+                    vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("dialog:table:selection:Depth").expect("hover row").center())]
                 } else {
                     vec![]
                 };
@@ -2475,6 +2635,7 @@ fn gallery_covers_every_inline_element() {
         "disclosure.rs",
         "fields.rs",
         "framing.rs",
+        "grid.rs",
         "layout.rs",
         "look_chain.rs",
         "menu.rs",
@@ -2516,6 +2677,56 @@ fn gallery_covers_every_inline_element() {
             }
         }
     }
+}
+
+#[test]
+fn compact_star_toggle_uses_ink_hover_and_focus_without_a_selected_square() {
+    let t = solidcraft_theme::Tokens::get();
+    for enabled in [false, true] {
+        let ctx = crate::test_support::context();
+        let id = std::cell::Cell::new(egui::Id::NULL);
+        let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut draw = |ui: &mut Ui| {
+            scope(ui, |ui| {
+                let response = compact_toggle(ui, "★", "Favourite", enabled, true);
+                id.set(response.id);
+                rect.set(response.rect);
+            });
+        };
+        let idle = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+        assert!(!idle.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill.a() > 0)));
+        assert!(crate::test_support::text_shapes(&idle).any(|text| text.galley.job.text == "★"
+            && text.galley.job.sections[0].format.color == if enabled { t.form_primary } else { t.form_dim.gamma_multiply(0.35) }));
+        let events = vec![egui::Event::PointerMoved(rect.get().center())];
+        crate::test_support::raw_frame(&ctx, egui::RawInput { events: events.clone(), ..Default::default() }, &mut draw);
+        let hovered = crate::test_support::raw_frame(&ctx, egui::RawInput { events, ..Default::default() }, &mut draw);
+        assert_eq!(hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.06))), enabled);
+        assert!(!hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)));
+        if enabled {
+            ctx.memory_mut(|m| m.request_focus(id.get()));
+            let focused = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            assert_eq!(
+                focused
+                    .shapes
+                    .iter()
+                    .filter(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == rect.get() && r.stroke == egui::Stroke::new(1.5, t.form_primary)
+                    && r.stroke_kind == egui::StrokeKind::Inside && r.corner_radius == egui::CornerRadius::same(t.control_radius)))
+                    .count(),
+                1
+            );
+        }
+    }
+    let ctx = crate::test_support::context();
+    let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        scope(ui, |ui| {
+            compact_button(ui, "▲", "Move up", true, true);
+        });
+    });
+    assert!(
+        output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)),
+        "ordinary selected compact actions retain their fill"
+    );
 }
 
 /// CPU-rendered review board using the actual gallery widgets, without a window.
@@ -2664,6 +2875,53 @@ fn preset_card_and_help_icon_behave() {
         let help = help_icon(ui, "Help text");
         assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
     });
+}
+
+/// The (i) shows its text after a click or a key, not only on hover: a click opens the popover, a
+/// click outside closes it, and Enter or Space on the focused icon opens it again until Escape closes it.
+#[test]
+fn help_icon_opens_its_text_on_a_click_or_a_key() {
+    use super::preferences_cards::help_icon;
+    use super::test_support::{frame, frame_cursor, key, pointer};
+    let ctx = super::test_support::context();
+    let focus = std::cell::Cell::new(false);
+    let mut draw = |ui: &mut Ui| {
+        let response = help_icon(ui, "Help text");
+        if focus.replace(false) {
+            response.request_focus();
+        }
+    };
+    let popover = || solidcraft_ui_registry::rect_of("prefs:help_icon:popover");
+    frame(&ctx, vec![], &mut draw);
+    let at = solidcraft_ui_registry::handle_at("prefs:help_icon").expect("the icon publishes its handle");
+    assert_eq!(frame_cursor(&ctx, at, &mut draw), egui::CursorIcon::PointingHand);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(at, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "a click on the icon opens the popover");
+    let outside = egui::pos2(300.0, 390.0);
+    for pressed in [true, false] {
+        frame(&ctx, pointer(outside, pressed), &mut draw);
+    }
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "a click outside closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Enter on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover");
+    focus.set(true);
+    frame(&ctx, vec![], &mut draw);
+    frame(&ctx, key(egui::Key::Space), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_some(), "Space on the focused icon opens the popover");
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert!(popover().is_none(), "Escape closes the popover again");
 }
 
 /// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.

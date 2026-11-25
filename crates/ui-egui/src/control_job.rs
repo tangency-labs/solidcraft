@@ -47,7 +47,7 @@ use crate::control::ControlRequest;
 pub use solidcraft_control::{Cancel, Ticket};
 
 /// A stop flag for the work computing `ticket`'s request, which its cancel sets.
-fn progress_of(ticket: &Ticket) -> Arc<Progress> {
+pub(crate) fn progress_of(ticket: &Ticket) -> Arc<Progress> {
     let progress = Arc::new(Progress::default());
     let stop = Arc::clone(&progress);
     ticket.on_stop(move || stop.cancel());
@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -116,8 +117,17 @@ const AHEAD_AREAS: &[&str] = &[
 const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: &[&str] =
-    &["file.export", "file.export_3mf", "file.export_obj", "file.export_step", "file.export_stl", "file.export_urdf", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] = &[
+    "file.export",
+    "file.export_3mf",
+    "file.export_obj",
+    "file.export_sdf",
+    "file.export_step",
+    "file.export_stl",
+    "file.export_urdf",
+    "file.export_urdf_options",
+    "file.save_mesh",
+];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
@@ -126,11 +136,17 @@ const ANSWERED_ON_A_COPY: &[&str] =
 const READ_ON_A_COPY: &[&str] = &[
     "model.mesh",
     "plugin.inspect",
+    // Compiles the package's component to check it: tens of seconds for a large importer.
+    "plugin.check",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
     "inspect.interference",
     "inspect.parameter_variants",
+    // The collisions of a motion study: the study plays on a copy, and the check of a slow pair
+    // took the window thread minutes, so the window stopped answering and the app was closed
+    // as not responding (#15333).
+    "motion.interference",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",
@@ -182,9 +198,26 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
     }
 }
 
+/// An `engine.execute` of `document.list`, in any spelling the engine takes: it only reads which
+/// designs are open, so it answers while a file loads or a save is written.
+pub(crate) fn lists_designs(req: &ControlRequest) -> bool {
+    matches!(req.method.as_str(), "engine.execute" | "command")
+        && executed(&req.params).and_then(|(command, _)| spec_id(command)) == Some("document.list")
+}
+
 /// Requests that change the design: they wait while one computes.
 pub(crate) fn changes_the_design(method: &str) -> bool {
-    matches!(method, "engine.execute" | "command" | "engine.script" | "engine.batch" | "document.import" | "document.saved")
+    matches!(
+        method,
+        "engine.execute"
+            | "command"
+            | "engine.script"
+            | "engine.batch"
+            | "document.import"
+            | "document.saved"
+            | "document.close"
+            | crate::control_joint_drive::METHOD
+    )
 }
 
 /// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
@@ -211,8 +244,13 @@ enum Work {
     Plugin {
         prepared: Receiver<Result<solidcraft_engine::ComputedCommands, String>>,
         disabled: std::collections::BTreeSet<String>,
+        grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants>,
         limits: solidcraft_engine::plugin::HostLimits,
         level: Option<solidcraft_engine::schema::ParamCheck>,
+        /// What the plugin reports as it runs (`control.progress`): its step and how far, in per cent.
+        progress: Arc<Progress>,
+        /// The plugin's name and the entry's, for the operations panel.
+        names: (String, String),
     },
 }
 
@@ -244,18 +282,43 @@ impl ControlJob {
 /// the screen.
 pub(crate) const MAX_NEXT_SHOWN: usize = 12;
 
+/// A plugin run's names in the operations panel: the plugin's and the entry's, from the dialog that
+/// runs it, else the plugin's folder and the entry as the request names them (an agent's run).
+fn plugin_names(app: &SolveApp, params: &Value) -> (String, String) {
+    let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+    let entry = params.get("entry").and_then(Value::as_str).unwrap_or_default();
+    if let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.plugin.path == path && d.entry == entry) {
+        return (dialog.plugin.name.clone(), dialog.label.clone());
+    }
+    let folder = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    (folder, entry.to_string())
+}
+
+/// "Gears: Pocket", with the step the plugin reports ("Gears: Pocket, roughing"). A plugin with
+/// one command titles it with the plugin's own name: that name is said once.
+fn plugin_label((plugin, entry): &(String, String), step: Option<&str>) -> String {
+    let step = step.map(str::trim).filter(|s| !s.is_empty());
+    match step {
+        _ if entry.is_empty() || entry == plugin => match step {
+            Some(step) => solidcraft_ui_text::format("operations.plugin_job", &[("plugin", plugin), ("entry", step)]),
+            None => plugin.clone(),
+        },
+        Some(step) => solidcraft_ui_text::format("operations.plugin_job_step", &[("plugin", plugin), ("entry", entry), ("step", step)]),
+        None => solidcraft_ui_text::format("operations.plugin_job", &[("plugin", plugin), ("entry", entry)]),
+    }
+}
+
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
+    crate::agent_label::name_in(solidcraft_ui_text::Locale::for_language(&app.preferences.language), command)
 }
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
 /// is cancelled), answering on the returned channel. `None` without threads (the web).
-fn spawn(
+pub(crate) fn spawn<T: Send + 'static>(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     progress: Arc<Progress>,
-    f: impl FnOnce() -> Option<Value> + Send + 'static,
-) -> Option<Receiver<Option<Value>>> {
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Option<Receiver<T>> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::Builder::new()
         .name("agent".into())
@@ -483,8 +546,23 @@ impl SolveApp {
     pub fn agent_computing(&self) -> Option<(f64, String)> {
         self.control_job
             .as_ref()
-            .map(|j| (j.started, j.steps.as_ref().map_or_else(|| j.label.clone(), |s| s.shown())))
+            .map(|j| {
+                let label = match (&j.work, &j.steps) {
+                    (Work::Plugin { progress, names, .. }, _) => plugin_label(names, progress.item().as_ref().map(|(step, _, _)| step.as_str())),
+                    (_, Some(steps)) => steps.shown(),
+                    (_, None) => j.label.clone(),
+                };
+                (j.started, label)
+            })
             .or_else(|| self.agent.computing())
+    }
+
+    /// How far the plugin running as the agent's command says it is, in per cent, once it says.
+    pub(crate) fn agent_plugin_percent(&self) -> Option<usize> {
+        match self.control_job.as_ref().map(|j| &j.work) {
+            Some(Work::Plugin { progress, .. }) => progress.item().map(|(_, done, total)| done.saturating_mul(100).checked_div(total).unwrap_or(0)),
+            _ => None,
+        }
     }
 
     /// How far the agent's design change computing off the window thread is, when it counts its
@@ -508,6 +586,19 @@ impl SolveApp {
                 "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
                 _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
             };
+            let is_batch = matches!(r.method.as_str(), "engine.batch" | "engine.script");
+            let steps: Vec<String> = if is_batch {
+                let all = r.params.get("commands").and_then(Value::as_array);
+                all.into_iter().flatten().take(4).filter_map(crate::control::batch_step_command).map(|c| label(self, c)).collect()
+            } else {
+                Vec::new()
+            };
+            if steps.len() > 1 {
+                let count = r.params.get("commands").and_then(Value::as_array).map_or(0, Vec::len);
+                let names = if count > steps.len() { steps[..3.min(steps.len())].iter().cloned().chain(["…".into()]).collect() } else { steps };
+                let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                return (r.serial, crate::agent_label::batch_in(language, &names));
+            }
             (r.serial, label(self, first.unwrap_or(&r.method)))
         })
         .collect()
@@ -555,6 +646,7 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
+        let req = crate::plugins::offload_control(self, ctx, req)?;
         crate::plugins::sync_policy(self);
         if cfg!(not(target_arch = "wasm32"))
             && matches!(req.method.as_str(), "engine.execute" | "command")
@@ -576,7 +668,10 @@ impl SolveApp {
             if crate::control_params::parse::<crate::control_params::Execute>(&req.params).is_err() {
                 return Some(req);
             }
+            // Frame discovery must not add inert panel state after the worker's source snapshot.
+            solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
+            copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -586,6 +681,8 @@ impl SolveApp {
             let gate = self.apply_gate.clone();
             let progress = progress_of(&req.ticket);
             let warm_progress = progress.clone();
+            let reported = progress.clone();
+            let names = plugin_names(self, &params);
             let Some(done) = spawn(scope, progress, move || {
                 #[cfg(test)]
                 if let Some(gate) = gate {
@@ -606,9 +703,17 @@ impl SolveApp {
             };
             req.ticket.computing(true);
             self.control_job = Some(ControlJob {
-                label: label(self, "plugin.run"),
+                label: plugin_label(&names, None),
                 req,
-                work: Work::Plugin { prepared, disabled: self.preferences.disabled_plugins.clone(), limits: self.session.plugin_limits, level },
+                work: Work::Plugin {
+                    prepared,
+                    disabled: self.preferences.disabled_plugins.clone(),
+                    grants: self.preferences.plugin_grants.clone(),
+                    limits: self.session.plugin_limits,
+                    level,
+                    progress: reported,
+                    names,
+                },
                 done,
                 started: crate::now_ms(),
                 steps: None,
@@ -707,6 +812,9 @@ impl SolveApp {
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
     /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
+        // What the copy evaluated to answer is done with: its bodies let go of their kernel
+        // forms now, not at this session's next command (#19629).
+        self.session.release_left();
         if job.req.refuse_cancelled_chat() {
             return;
         }
@@ -725,10 +833,10 @@ impl SolveApp {
             let current = match job.work {
                 Work::Answer { inspection: Some((uid, version)) } if uid == self.session.uid => {
                     let key = (uid, id.to_owned());
-                    if self.plugin_inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
+                    if self.plugins.inspection_versions.get(&key).is_some_and(|latest| *latest > version) {
                         false
                     } else {
-                        self.plugin_inspection_versions.insert(key, version);
+                        self.plugins.inspection_versions.insert(key, version);
                         true
                     }
                 }
@@ -793,14 +901,16 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         ctx.request_repaint();
-        if let Work::Plugin { prepared, disabled, limits, level } = &job.work {
+        if let Work::Plugin { prepared, disabled, grants, limits, level, .. } = &job.work {
             if !job.req.ticket.back() {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
             }
+            let mut stale_revision = None;
             let result = if self.file_load_holds()
                 || self.file_picker.is_some()
                 || disabled != &self.preferences.disabled_plugins
+                || grants != &self.preferences.plugin_grants
                 || *limits != crate::plugins::host_limits(&self.preferences)
             {
                 Err(self.tr("ui.plugin_context_changed").to_string())
@@ -814,10 +924,23 @@ impl SolveApp {
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
                         let replies = self.session.accept_commands(prepared);
-                        if replies.is_err() || Arc::ptr_eq(&before, &self.session.doc) {
+                        // A read or a failed run leaves this design's document as it was, so the
+                        // Start page stays up. An edit that landed shows this design, as clicking
+                        // its tab does (`documents::switch`). The dialog only runs on the session
+                        // it was opened on, so the cover that closes is that design's.
+                        if replies.is_ok() && !Arc::ptr_eq(&before, &self.session.doc) {
+                            self.home.open = false;
+                        } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|error| {
+                            if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
+                                stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else {
+                                self.tr("ui.plugin_context_changed").to_string()
+                            }
+                        })
                     })
                     .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
             };
@@ -829,13 +952,27 @@ impl SolveApp {
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
+                // After the new geometry is in the live session, including a run that did not
+                // change the document. `accept_computed` does not copy the camera.
+                self.apply_plugin_view(&reply, None);
                 Ok(reply)
             });
             let result = self.command_completed("plugin.run", result);
             let mut reply = match result {
                 Ok(result) => json!({"ok":true,"result":result}),
-                Err(error) => json!({"ok":false,"error":error}),
+                Err(error) => {
+                    let mut reply = json!({"ok":false,"error":error});
+                    if let Some((expected, actual)) = stale_revision {
+                        reply["kind"] = json!("stale_revision");
+                        reply["expected"] = json!(expected);
+                        reply["actual"] = json!(actual);
+                    }
+                    reply
+                }
             };
+            if let Some(reason) = reply.get("error").and_then(Value::as_str).and_then(solidcraft_engine::plugin::structured_tool_error) {
+                reply["plugin_error"] = reason;
+            }
             if let Some(level) = level {
                 reply["param_check"] = json!(level.name());
             }
@@ -910,6 +1047,33 @@ impl SolveApp {
                 }
                 Err(TryRecvError::Empty) => i += 1,
             }
+        }
+    }
+
+    /// Move the camera the way the matching button does, for the last view command the plugin called.
+    pub(crate) fn apply_plugin_view(&mut self, reply: &Value, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
+        let Some(kind) = reply.get("view").and_then(|view| view.get("kind")).and_then(Value::as_str) else { return };
+        match kind {
+            "fit" | "home" => {
+                if let Some(bounds) = preview_bounds {
+                    self.frame_view_bounds(kind == "home", Some(bounds));
+                } else {
+                    let id = if kind == "home" { "view.home" } else { "view.fit" };
+                    let _ = self.command_completed(id, Ok(json!({})));
+                }
+            }
+            "camera" => {
+                let Some(value) = reply.pointer("/view/camera").filter(|value| !value.is_null()) else { return };
+                let Ok(camera) = serde_json::from_value::<solidcraft_viewport::Camera>(value.clone()) else { return };
+                self.session.camera = Some(camera);
+                self.follow_view_request(true);
+            }
+            "navigate" => {
+                if let Some(inner) = reply.pointer("/view/reply").cloned() {
+                    let _ = self.command_completed("view.navigate", Ok(inner));
+                }
+            }
+            _ => {}
         }
     }
 }

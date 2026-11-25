@@ -8,12 +8,19 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["usage-stats"]
+# Anonymous usage statistics (docs/privacy.md, src/usage_stats.rs). Without it none of the
+# counting, the notice, the network code or the endpoint is compiled in.
+usage-stats = ["dep:getrandom", "solidcraft-engine/usage-stats"]
+
 [dependencies]
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
+solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-tess = { workspace = true }
+solidcraft-kernel = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-control-egui = { workspace = true }
@@ -52,6 +59,9 @@ minisign-verify = "0.3"
 zip = { workspace = true }
 # Rasterises the icon SVGs (crates/look/icons/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
+# The random installation id of usage statistics (MIT/Apache-2.0; already in the tree, `js` for
+# the browser's crypto).
+getrandom = { version = "0.2", features = ["js"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 # Ends an agent's process group with the system call (MIT; already in the tree through zip).
@@ -63,6 +73,8 @@ nix = { workspace = true }
 winreg = "0.56"
 
 [dev-dependencies]
+# Tests report a context locked inside its own lock (#21091).
+egui = { workspace = true, features = ["lock_nesting_report"] }
 # The kit's test fixtures for SolidCraft's tests of the kit with its data.
 solidcraft-ui-kit = { workspace = true, features = ["test-support"] }
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
@@ -85,3 +97,5 @@ pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
+# Packs the message catalogs the app embeds (build.rs).
+flate2 = { workspace = true }

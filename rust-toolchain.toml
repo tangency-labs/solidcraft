@@ -1,9 +1,9 @@
 # One Rust for every build, local and CI: newer clippy lints must not break CI unannounced, and
 # builds on one rustc share their compiler cache. The workflows install the same version
-# (dtolnay/rust-toolchain@1.98.0); change them together. Cargo.toml's rust-version stays the
+# (dtolnay/rust-toolchain@1.99.1); change them together. Cargo.toml's rust-version stays the
 # oldest release the code builds on. solidcore/ keeps its own rust-toolchain.toml.
 [toolchain]
-channel = "1.98.0"
+channel = "1.99.1"
 components = ["rustfmt", "clippy"]
 targets = ["wasm32-unknown-unknown"]
 profile = "minimal"

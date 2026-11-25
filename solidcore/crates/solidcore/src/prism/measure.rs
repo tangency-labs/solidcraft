@@ -21,6 +21,9 @@
 //! Not upstream: SolidCraft's `prism_measure.rs`, read off the kernel's body instead of a record
 //! (docs/layers.md §1).
 //!
+//! Reference: Shewchuk, *Lecture Notes on Geometric Robustness* (2026), §2: anchor area
+//! calculations near the object so their rounding bounds depend on its extent.
+//!
 //! Deviations: none (no upstream counterpart). No recursion.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
@@ -153,8 +156,17 @@ fn net_of(s: &Surface) -> Option<Net> {
 
 /// A whole bound on how far the wall strays across the direction `d` over `height`: a plane's
 /// normal against `d`, a cylinder's axis against it, a ruled net's rows against it (positive
-/// weights make the hull a bound on the surface). `None` where none is proved.
-fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
+/// weights make the hull a bound on the surface). With `reach`, a net's rows must also run
+/// monotonically along `d` for at least half of `height`, as a prism's wall from cap to cap does
+/// ([`section`]); without it any rows do (the face then lies within the bound of its first row's
+/// curve swept along `d`). `None` where none is proved.
+fn wall_error(
+    surface: &Surface,
+    d: Vec3,
+    height: f64,
+    work: &mut usize,
+    reach: bool,
+) -> Option<f64> {
     if let Some((_, n)) = plane_of(surface) {
         let error = 1024.0
             * f64::EPSILON
@@ -230,7 +242,7 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
                 monotone = false;
             }
         }
-        if !monotone || axial_sign == 0.0 {
+        if reach && (!monotone || axial_sign == 0.0) {
             continue;
         }
         // rank-one weights keep the normalized convex coefficients; their error is bounded by the
@@ -460,6 +472,16 @@ fn wall_supports_cap(
             .all(|s| matches!(*s, Seg2::Arc { center: c, radius: r, .. } if c.distance(center) + (r - radius).abs() <= tol * 8.0))
     };
     if let Some((o, axis, radius)) = cylinder_of(surface) {
+        let SurfaceKind::Cone(cylinder) = surface.kind() else {
+            return None;
+        };
+        // Boundary vertices alone cannot prove incidence: the bounded cylinder support must
+        // reach both caps too, even when its infinite extension is the same cylinder.
+        let h0 = height(frame, o + axis * cylinder.bot_height());
+        let h1 = height(frame, o + axis * cylinder.top_height());
+        if !h0.is_finite() || !h1.is_finite() || !spans(h0, h1) {
+            return Some(false);
+        }
         let (_, _, _, n) = axes(frame);
         if axis.cross(n).length() * radius > tol {
             return None;
@@ -684,7 +706,7 @@ fn certificate(k: &Kernel, b: &Brep, size: f64, frame: &Frame, tol: f64) -> Opti
     for &wall in &walls {
         let info = faces.get(wall)?;
         let surface = b.face(info.id).ok()?.surface.as_ref()?;
-        let variation = wall_error(surface, d, height_, &mut controls)?;
+        let variation = wall_error(surface, d, height_, &mut controls, true)?;
         if variation > tol * 8.0 {
             return None;
         }
@@ -866,10 +888,42 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps (its cap vertices lie within it of them).
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
+}
+
+/// A whole bound on how far face `f` of `b` strays across the direction `d`: the face lies
+/// within the bound of a surface swept along `d`. It is the bound [`section`] proves for each of a
+/// prism's walls (a plane by its normal against `d`, a cylinder by its axis, a ruled spline net by
+/// its rows, however far they run along `d`), taken over the face's own size: the diagonal of its
+/// tight box, curved edges included (a cylinder's cap has one seam vertex, whose vertex box omits
+/// the circle). A net kept for a procedural definition adds its certified distance from it
+/// (`DefinitionRef::bound`, 0 for a definition it matches exactly). A face whose bound is within
+/// the zone tolerance runs straight along `d`.
+///
+/// `None` where no bound is proved: a face with no surface or whose tight box is not found; a
+/// surface that is not a plane, a cylinder or a ruled spline net (an extruded surface among
+/// them); a net past the size or work budget, or whose weights are not positive; a definition
+/// whose distance is not finite; a `d` that is zero or not finite (any finite length else, scaled
+/// before it is squared).
+#[must_use]
+pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
+    let (_, d) = d.length_and_unit()?;
+    let surface = b.face(f).ok()?.surface.as_ref()?;
+    let definition = surface
+        .procedural_definition()
+        .map_or(0.0, |def| def.bound());
+    if !(definition >= 0.0 && definition.is_finite()) {
+        return None;
+    }
+    let bounds = crate::query::api_queries::face_bounding_box(k, b, f, true).ok()?;
+    let size = (bounds.max() - bounds.min()).length();
+    if !size.is_finite() {
+        return None;
+    }
+    Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
 }
 
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).
@@ -900,14 +954,58 @@ pub fn section(k: &Kernel, b: &Brep, frame: &Frame) -> Option<PrismSection> {
     if !super::profile::frame_is_orthonormal(frame) {
         return None;
     }
-    let size = body_size(b)?;
+    // Apply the certificate's topology budgets before asking for curve and face extrema.
+    if get_faces(b).ok()?.len() > 16_384
+        || crate::query::api_queries::get_edges(b).ok()?.len() > 65_536
+    {
+        return None;
+    }
+    // Include curved boundaries in the object scale: a closed circular edge can have just
+    // one seam vertex, whose vertex box omits the circle's diameter entirely.
+    let bounds = crate::query::api_queries::brep_bounding_box(k, b, true).ok()?;
+    let size = (bounds.max() - bounds.min()).length();
+    if !size.is_finite() {
+        return None;
+    }
+    let size = size.max(1.0);
     let tol = size * 1e-10;
-    let c = certificate(k, b, size, frame, tol)?;
+    // The query's origin is arbitrary. Prove area, volume and matching supports near the
+    // body, then express the answer in the requested coordinates. Keep the axes unchanged.
+    let origin = face_points_of_first(b)?;
+    let local = Frame {
+        origin: [origin.x, origin.y, origin.z],
+        x_axis: frame.x_axis,
+        y_axis: frame.y_axis,
+    };
+    let c = certificate(k, b, size, &local, tol)?;
+    let shift = to_local(frame, origin);
+    let level = height(frame, origin);
+    let (o, _, _, _) = axes(frame);
+    // Subtraction of the origins and projection (three products, two sums, and the normal's
+    // cross product): 64 eps times the input lengths bounds their accumulated rounding.
+    let projection_error = 64.0 * f64::EPSILON * (o.length() + origin.length()).max(1.0);
+    let translate = |p: Point2| {
+        let q = p + shift;
+        let error = projection_error + 8.0 * f64::EPSILON * (p.length() + shift.length()).max(1.0);
+        // Refuse an unrepresentable section instead of widening the certificate's corridor.
+        (error <= tol && q.x.is_finite() && q.y.is_finite()).then_some(q)
+    };
     let mut outer = None;
     let mut holes = Vec::new();
     for lp in c.loops {
         let positive = lp.area.lo > 0.0;
-        let lp = Loop2 { segs: lp.segments };
+        let mut segs = lp.segments;
+        for segment in &mut segs {
+            match segment {
+                Seg2::Line { a, b } => {
+                    *a = translate(*a)?;
+                    *b = translate(*b)?;
+                }
+                Seg2::Arc { center, .. } => *center = translate(*center)?,
+                _ => return None,
+            }
+        }
+        let lp = Loop2 { segs };
         if positive {
             if outer.replace(lp).is_some() {
                 return None;
@@ -916,13 +1014,18 @@ pub fn section(k: &Kernel, b: &Brep, frame: &Frame) -> Option<PrismSection> {
             holes.push(lp);
         }
     }
-    let o = Vec3::new(frame.origin[0], frame.origin[1], frame.origin[2]);
-    // cap vertices within twice the tolerance of their levels, the levels worked from the origin
-    let tolerance =
-        2.0 * tol + 128.0 * f64::EPSILON * (o.length() + c.lo.abs() + c.hi.abs()).max(1.0);
+    let (lo, hi) = (c.lo + level, c.hi + level);
+    // Cap vertices are within twice tol of the centered levels. Include projection and the
+    // final additions; the section's conversion error above is also bounded by this allowance.
+    let tolerance = 2.0 * tol
+        + projection_error
+        + 8.0 * f64::EPSILON * (c.lo.abs() + c.hi.abs() + level.abs()).max(1.0);
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && tolerance.is_finite()) {
+        return None;
+    }
     Some(PrismSection {
-        lo: c.lo,
-        hi: c.hi,
+        lo,
+        hi,
         region: Region2 {
             outer: outer?,
             holes,

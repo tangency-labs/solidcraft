@@ -124,3 +124,52 @@ fn a_midplane_shows_round_the_part_when_zoomed_in() {
         assert!((side - 2.0 * h_side).abs() < 1e-6 * h_side.max(1.0), "distance {distance}: a plane clear of the box keeps its square: {above:?}");
     }
 }
+
+/// A plane offset from a face is drawn over that face, not round its origin, the plane's point
+/// nearest the world origin, which is far from this box (#4345). So is a plane offset from that
+/// plane, and both follow the face when the box grows. A plane clear of the box keeps its square.
+#[test]
+fn a_plane_offset_from_a_face_is_drawn_over_the_face() {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name":"len","expression":"20 mm"})).unwrap();
+    h.app.run("solid.box", json!({"length":"len","width":20,"height":10,"corner":[40,30,0],"body_name":"Box"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":{"face":[50,40,10]},"offset":5,"name":"Above"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"Above","offset":5,"name":"Higher"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":50,"name":"Clear"})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    let bounds = |q: [Vec3; 4]| {
+        let lo = q.iter().fold(Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), |a, p| Vec3::new(a.x.min(p.x), a.y.min(p.y), a.z.min(p.z)));
+        let hi = q
+            .iter()
+            .fold(Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec3::new(a.x.max(p.x), a.y.max(p.y), a.z.max(p.z)));
+        (lo, hi)
+    };
+    let fitted = h.app.cam.distance;
+    for (len, x1) in [(None, 60.0), (Some("40 mm"), 80.0)] {
+        if let Some(len) = len {
+            h.app.run("parameters.change", json!({"name":"len","expression":len})).unwrap();
+            h.settle();
+        }
+        for distance in [fitted, 25.0] {
+            h.app.cam.distance = distance;
+            h.settle();
+            let quads = crate::viewport::construction_quads(&h.app);
+            let quad = |name: &str| quads.iter().find(|q| q.0 == name).map(|q| q.2).unwrap_or_else(|| panic!("{name} is drawn: {quads:?}"));
+            for (name, z) in [("Above", 15.0), ("Higher", 20.0)] {
+                let (lo, hi) = bounds(quad(name));
+                let at = format!("{name}, box to x {x1}, distance {distance}: {lo:?} {hi:?}");
+                assert!((lo.z - z).abs() < 1e-9 && (hi.z - z).abs() < 1e-9, "{at}");
+                assert!(lo.x <= 40.0 && hi.x >= x1 && lo.y <= 30.0 && hi.y >= 50.0, "covers the top face: {at}");
+                let (cx, cy) = (0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y));
+                assert!((cx - 0.5 * (40.0 + x1)).abs() < 1e-6 && (cy - 40.0).abs() < 1e-6, "centred on the top face: {at}");
+            }
+            let h_side = crate::selection::origin_size(h.app.cam.half_height()) * 1.2;
+            let clear = quad("Clear");
+            assert!((clear[0].dist(clear[1]) - 2.0 * h_side).abs() < 1e-6 * h_side.max(1.0), "distance {distance}: {clear:?}");
+            let (lo, hi) = bounds(clear);
+            assert!((0.5 * (lo.x + hi.x)).abs() < 1e-9 && (0.5 * (lo.y + hi.y)).abs() < 1e-9, "distance {distance}: round its origin: {clear:?}");
+        }
+    }
+}

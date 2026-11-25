@@ -256,8 +256,10 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
+                dynamics: Vec::new(),
             };
             if let Some(q) = solidcraft_doc::joints::relation_values(&s.doc, &s.model.state(), &j) {
                 j.values = q;
@@ -538,6 +540,67 @@ fn concentric_and_insert_leave_a_slide_and_a_turn_or_a_turn() {
     assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 40.0)), Vec3::new(0.0, 0.0, 30.0), 1e-6), "standing on the shaft, not through it");
 }
 
+/// A round face given as a `face` (a point on its wall, or its name) is its axis where the rule
+/// needs one, as the Constrain dialog takes a click on it (#21549): concentric takes the shaft's
+/// and the collar's walls, and a planar face is still refused. A rule that takes a plane keeps
+/// the plane a cylinder's `face` meant before.
+#[test]
+fn a_round_face_given_as_a_face_is_its_axis_where_the_rule_needs_one() {
+    let shaft = || {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Shaft"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 5, "height": 20, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "Collar"}));
+        run(&mut s, "solid.cylinder", json!({"base": [50, 10, 30], "axis": [0, 0, 1], "radius": 5, "height": 10, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let o = occ(&s, "Shaft");
+        run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+        s
+    };
+    let shaft_wall = json!({"occurrence": "Shaft", "face": [5, 0, 10]});
+    let collar_wall = json!({"occurrence": "Collar", "face": [55, 10, 35]});
+    let mut s = shaft();
+    let r = constrain(&mut s, "concentric", shaft_wall.clone(), collar_wall.clone(), json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");
+    let c = place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0));
+    assert!(c.x.abs() < 1e-6 && c.y.abs() < 1e-6, "on the shaft's axis: {c:?}");
+    // Each side keeps the face the roundness check saw, as a round origin.
+    let st = s.model.state();
+    let wall =
+        |s: &Session, part: &str, p: Vec3| solidcraft_doc::joints::face_name_at(&s.doc, &st, s.doc.find_component(part).unwrap(), p, false).unwrap();
+    let (shaft_name, collar_name) = (wall(&s, "Shaft", Vec3::new(5.0, 0.0, 10.0)), wall(&s, "Collar", Vec3::new(55.0, 10.0, 35.0)));
+    let j = s.doc.assembly.joints.first().unwrap();
+    let kept: Vec<_> = [&j.a, &j.b]
+        .iter()
+        .map(|o| match &o.snap {
+            solidcraft_doc::joints::Snap::CircleCenter { face, .. } => face.clone(),
+            other => panic!("a round origin, not {other:?}"),
+        })
+        .collect();
+    assert_eq!(kept, vec![Some(shaft_name), Some(collar_name.clone())], "{r}");
+    // The wall by its name, as `model.faces` lists it.
+    let mut s = shaft();
+    let name = collar_name;
+    let r = constrain(&mut s, "concentric", shaft_wall.clone(), json!({"occurrence": "Collar", "face": name}), json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");
+    // A cylinder's end cap is planar: still refused, and nothing is added.
+    let mut s = shaft();
+    let cap = json!({"occurrence": "Collar", "face": [52, 10, 40]});
+    let e =
+        s.execute("assembly.constraint.create", &json!({"type": "concentric", "a": shaft_wall.clone(), "b": cap})).expect_err("a cap").to_string();
+    assert!(e.contains("two round faces"), "{e}");
+    assert!(s.doc.assembly.joints.is_empty());
+    // A mate takes planes: the collar's wall as a `face` means the planar face it meant before.
+    let mut s = shaft();
+    let top = json!({"occurrence": "Shaft", "face": [2, 0, 20]});
+    let r = constrain(&mut s, "mate", top, collar_wall, json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(s.doc.assembly.joints.first().map(|j| j.kind), Some(solidcraft_doc::joints::JointKind::Planar), "{r}");
+}
+
 /// The rules' remaining freedoms: parallel 4, perpendicular and angle 5, point on axis 4, tangent
 /// 4 (a roller on the panel: it rolls, slides and turns), each made where the parts are.
 #[test]
@@ -718,6 +781,23 @@ fn edit_rule(s: &mut Session, p: Value) -> Value {
     run(s, "assembly.constraint.edit", p)
 }
 
+/// A constraint's new name over 128 characters is refused by the constraint command, in its own
+/// name, and changes nothing.
+#[test]
+fn a_constraints_new_long_name_is_refused_in_the_commands_name() {
+    let mut s = plate_and_block();
+    let doc = s.doc.clone();
+    let error = s.execute("assembly.constraint.edit", &json!({"constraint": "Mate1", "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("assembly.constraint.edit") && error.contains("at most 128 characters"), "{error}");
+    assert_eq!(s.doc, doc);
+    // With a new rule and a turn over in the same edit, the joint keeps its sides, rule and name.
+    let before = s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").cloned();
+    let p = json!({"constraint": "Mate1", "type": "flush", "flip": true, "name": "ł".repeat(129)});
+    assert!(s.execute("assembly.constraint.edit", &p).is_err());
+    assert_eq!(s.doc.assembly.joints.iter().find(|j| j.name == "Mate1").cloned(), before);
+    assert_eq!(s.doc, doc);
+}
+
 /// One constraint changed from Mate to Distance to Flush: each rule places the block where its
 /// numbers say, the gap carries over to the next rule, and the joint is the kind its rule needs.
 #[test]
@@ -833,4 +913,44 @@ fn a_rule_change_keeps_the_tag_where_joint_edit_drops_it() {
     assert!(near_z(block_z(&s), (10.0, 30.0)), "{:?}", block_z(&s));
     run(&mut s, "joint.edit", json!({"joint": "Mate1", "type": "planar"}));
     assert_eq!(rule(&s), Some((JointKind::Planar, None)));
+}
+
+/// Joint-only lateral parameters must not move the references kept by an assembly constraint.
+#[test]
+fn assembly_constraints_keep_their_reference_axes_when_given_lateral_offsets() {
+    for kind in ["concentric", "insert", "point_on_axis"] {
+        let mut s = Session::default();
+        for (name, base, height) in [("Shaft", [0, 0, 0], 20), ("Collar", [50, 10, 30], 10)] {
+            run(&mut s, "component.activate", json!({"component":"root"}));
+            run(&mut s, "component.create", json!({"name":name}));
+            run(&mut s, "solid.cylinder", json!({"base":base,"axis":[0,0,1],"radius":5,"height":height}));
+        }
+        let shaft = occ(&s, "Shaft");
+        run(&mut s, "occurrence.ground", json!({"occurrence":shaft,"grounded":true}));
+        let a = json!({"occurrence":"Shaft","circle":[5,0,20]});
+        let b = if kind == "point_on_axis" {
+            json!({"occurrence":"Collar","point":[50,10,30]})
+        } else {
+            json!({"occurrence":"Collar","circle":[55,10,30]})
+        };
+        // Default parameter checking is off. Unknown keys must keep their previous inert meaning.
+        let reply = constrain(&mut s, kind, a, b, json!({"name":"Seat","offset_x":12,"offset_y":-8}));
+        assert!(clean(&reply), "{reply}");
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [0.0; 2]);
+        let z = if kind == "insert" { 20.0 } else { 30.0 };
+        assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0)), Vec3::new(0.0, 0.0, z), 1e-6));
+        let before = s.doc.to_json();
+        let joint_type = serde_json::to_value(s.doc.assembly.joints[0].kind).unwrap();
+        run(&mut s, "joint.edit", json!({"joint":"Seat","type":joint_type,"offset_x":0,"offset_y":0}));
+        assert_eq!(s.doc.to_json(), before, "unchanged dialog fields preserve the constraint");
+        for key in ["offset_x", "offset_y"] {
+            let mut edit = json!({"joint":"Seat","name":"Wrong"});
+            edit[key] = json!(1);
+            assert!(s.execute("joint.edit", &edit).is_err());
+            assert_eq!(s.doc.to_json(), before, "a refused lateral edit is atomic");
+        }
+        run(&mut s, "joint.edit", json!({"joint":"Seat","type":"rigid","offset_x":2,"offset_y":3}));
+        assert_eq!(s.doc.assembly.joints[0].constraint, None);
+        assert_eq!(s.doc.assembly.joints[0].offset_xy, [2.0, 3.0]);
+    }
 }

@@ -1,4 +1,4 @@
-//! WR-665 (`fillet_corner_per_vertex_fan`; the fork's tangency-labs/smlib `4ecfbab` and
+//! WR-665 (once the opt-in `fillet_corner_per_vertex_fan`; the fork's tangency-labs/smlib `4ecfbab` and
 //! `e418750`): a vertex where the body touches itself is split into one vertex per fan of
 //! faces before the blends, so that each fan is a corner of its own.
 //!
@@ -12,9 +12,9 @@
 //!   two vertices of three edges each, a closed solid of the same volume (6000), and
 //!   joins back as it was; a box's corner stays one vertex.
 //! - `e418750`: chamfering the two concave edges on the line x = y = 0 (one in each fan)
-//!   with leg 1 fails without the flag (`SmFilletCorner::Create` walks one fan's faces,
+//!   with leg 1 failed upstream (`SmFilletCorner::Create` walks one fan's faces,
 //!   finds the blended edges of both and builds an Nx2 corner of edges that share no
-//!   face: status 1001); with it each chamfer ends on its own fan's end face and the
+//!   face: status 1001); now each chamfer ends on its own fan's end face and the
 //!   volume is the fork's `6000 + 10` (each chamfer of a 10 long right-angled concave
 //!   edge adds a triangle of legs 1, area 1/2, along 10).
 #![allow(
@@ -24,7 +24,6 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::blend::fillet_corner::p3::FilletCornerKind;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p5::is_knife_edge;
 use solidcore::boolean::api_brep::boolean_difference;
@@ -148,9 +147,8 @@ fn fork_4ecfbab_join_refuses_neighbours() {
 
 /// Chamfers the axis edges `which` (of the two, sorted) with leg 1; `Err` is the fillet
 /// error code. Also gives the number of vertices left at the origin.
-fn chamfer_axis_edges(per_fan: bool, which: &[usize]) -> Result<(f64, usize), i32> {
+fn chamfer_axis_edges(which: &[usize]) -> Result<(f64, usize), i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = per_fan;
     let mut b = up_down_squares(&mut k);
     let all = axis_edges(&b);
     assert_eq!(all.len(), 2);
@@ -166,14 +164,11 @@ fn chamfer_axis_edges(per_fan: bool, which: &[usize]) -> Result<(f64, usize), i3
     Ok((volume(&k, &mut b), at_origin))
 }
 
-/// `e418750`: without the flag the chamfers fail at the origin's corner; with it each
-/// ends on its own fan's end face, `V = 6000 + 10`.
+/// `e418750`: each chamfer ends on its own fan's end face, `V = 6000 + 10` (upstream
+/// failed at the origin's corner, code 3).
 #[test]
 fn fork_e418750_each_fan_is_its_own_corner() {
-    let off = chamfer_axis_edges(false, &[0, 1]);
-    eprintln!("without the flag: {off:?}");
-    assert_eq!(off, Err(3), "fails at the corner without the flag");
-    let (v, at_origin) = chamfer_axis_edges(true, &[0, 1]).unwrap_or_else(|code| panic!("{code}"));
+    let (v, at_origin) = chamfer_axis_edges(&[0, 1]).unwrap_or_else(|code| panic!("{code}"));
     eprintln!(
         "up-down squares, axis edges chamfered 1: {v:.12} ({at_origin} vertices at the origin)"
     );
@@ -181,13 +176,12 @@ fn fork_e418750_each_fan_is_its_own_corner() {
 }
 
 /// One axis edge alone: one fan's corner is blended, the other fan's vertex stays at the
-/// origin. Both with and without the flag (the flag joins what is left at the point).
+/// origin (the join puts back together what is left at the point).
 #[test]
 fn fork_e418750_one_fan_blended() {
     for which in [0, 1] {
-        let off = chamfer_axis_edges(false, &[which]);
-        let on = chamfer_axis_edges(true, &[which]);
-        eprintln!("axis edge {which} alone: without the flag {off:?}, with it {on:?}");
+        let on = chamfer_axis_edges(&[which]);
+        eprintln!("axis edge {which} alone: {on:?}");
         let (v, at_origin) = on.unwrap_or_else(|code| panic!("{code}"));
         assert!((v - 6005.0).abs() < 1e-9 * 6005.0, "{v}");
         assert!(at_origin <= 1, "{at_origin} vertices at the origin");
@@ -200,7 +194,6 @@ fn fork_e418750_one_fan_blended() {
 #[test]
 fn fork_e418750_failed_blend_joins_the_fans_again() {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_per_vertex_fan = true;
     let mut b = up_down_squares(&mut k);
     let ids = axis_edges(&b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();
@@ -209,6 +202,26 @@ fn fork_e418750_failed_blend_joins_the_fans_again() {
     let result = s.do_fillet(&mut k);
     eprintln!("leg 30: {result:?}, code {}", s.error_info().code);
     assert!(result.is_err());
+    drop(s);
+    let origin = vertices_at(&b, Point3::ZERO);
+    assert_eq!(origin.len(), 1, "{origin:?}");
+    assert_eq!(vertex::edges(&b, origin[0], None).unwrap().len(), 6);
+}
+
+/// The same failed blend prepared twice on one session: the second preparation finds the
+/// origin split already and splits nothing, so the first one's split point must survive
+/// it for the join to put the origin back together (#17401 review).
+#[test]
+fn fork_e418750_second_preparation_keeps_the_split_points() {
+    let mut k = Kernel::default();
+    let mut b = up_down_squares(&mut k);
+    let ids = axis_edges(&b);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    for _ in 0..2 {
+        s.prepare_constant_radius_edges(&mut k, &ids, 30.0, 0, 1, 1.0)
+            .unwrap();
+    }
+    assert!(s.do_fillet(&mut k).is_err());
     drop(s);
     let origin = vertices_at(&b, Point3::ZERO);
     assert_eq!(origin.len(), 1, "{origin:?}");
@@ -284,13 +297,12 @@ fn fork_e418750_is_knife_edge() {
 }
 
 /// `e418750`'s `SmFilletCorner::Create`: the two cap edges at the knife edge's end
-/// vertex blended together make a two-edge corner there without the flag; with it no
-/// corner is built at that vertex ("Corner Case Not Implemented").
+/// vertex blended together made a two-edge corner there upstream; no corner is built at
+/// that vertex ("Corner Case Not Implemented").
 #[test]
 fn fork_e418750_no_two_edge_corner_at_a_knife_edge() {
-    let kinds = |per_fan: bool| {
+    let kinds = || {
         let mut k = Kernel::default();
-        k.fixes.fillet_corner_per_vertex_fan = per_fan;
         let mut b = knife_part(&mut k);
         let (knife, others) = tip_edges(&b);
         let tip = edge::start_end_vertices(&b, others[0]).unwrap();
@@ -312,9 +324,7 @@ fn fork_e418750_no_two_edge_corner_at_a_knife_edge() {
             .map(|c| c.kind)
             .collect::<Vec<_>>()
     };
-    let off = kinds(false);
-    let on = kinds(true);
-    eprintln!("corners at the knife edge's end: without the flag {off:?}, with it {on:?}");
-    assert_eq!(off, vec![FilletCornerKind::NByTwo]);
+    let on = kinds();
+    eprintln!("corners at the knife edge's end: {on:?}");
     assert!(on.is_empty(), "{on:?}");
 }

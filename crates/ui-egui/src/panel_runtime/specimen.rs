@@ -457,6 +457,8 @@ impl PanelController for VisibleSpecimen {
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
             }
+            // The specimen never asks for header content.
+            ContentSlot::Title => {}
         }
         Ok(())
     }
@@ -746,6 +748,7 @@ fn drop_target_observation(target: &HostDropTargetId) -> Value {
         HostDropTargetId::Dock { zone, before } => json!({"type":"dock","zone":zone,"before":before}),
         HostDropTargetId::Tab { section, before } => json!({"type":"tab","section":section,"before":before}),
         HostDropTargetId::Relative { section, placement } => json!({"type":"relative","section":section,"placement":placement}),
+        HostDropTargetId::Window => json!({"type":"window"}),
     }
 }
 
@@ -786,6 +789,7 @@ fn target_observation(target: &HostControlTarget) -> Value {
                 HostSharedAction::Focus => json!({"type":"focus"}),
                 HostSharedAction::Close => json!({"type":"close"}),
                 HostSharedAction::Collapse => json!({"type":"collapse"}),
+                HostSharedAction::ResetHeight => json!({"type":"reset_height"}),
                 HostSharedAction::Move(zone) => json!({"type":"move","zone":zone}),
                 HostSharedAction::Join(section) => json!({"type":"join","section":section}),
                 HostSharedAction::Popout => json!({"type":"popout"}),

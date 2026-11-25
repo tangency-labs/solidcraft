@@ -1,6 +1,17 @@
 //! Test-only scanner behind every typed-errors ratchet: it finds the bare statuses
 //! (`SolidError::sm_err(`, `SolidError::null_pointer(`, `SolidError::Upstream {`,
-//! `SolidError::nl_ser(`) that an area's library code still builds.
+//! `SolidError::nl_ser(`) that an area's library code still builds, and reads the files the
+//! other site counts ([`super::site_scan`]) read.
+//!
+//! A bare status counts where it is written, and through a local wrapper at each call: a
+//! private `fn`, a `let` closure or a `macro_rules!` whose body is one expression that
+//! builds it (`fn sm_err() -> SolidError { SolidError::sm_err(OP) }`,
+//! `|v| v.ok_or_else(|| SolidError::null_pointer(OP))`) counts once per call and per use of
+//! its name as a value (`x.ok_or_else(sm_err)`), and its body does not
+//! ([`super::site_scan::Wrappers::Thin`]). A pattern that names one, a function visible
+//! outside its file and a wrapper never called count where they stand. The
+//! conversion guide (`docs/failure-codes-and-reproduction.md` §6) says how a site is
+//! converted.
 //!
 //! A file's library code is what is left once comments, string, raw-string and char
 //! literals are blanked and every `#[cfg(test)]` (or `#[cfg(all(test, ..))]`) item is
@@ -9,18 +20,22 @@
 //! the whole file test code. Blanking keeps every byte offset and line break, so the
 //! braces of what is left still balance.
 
+use super::site_scan::{sites_in, Builder, Scan, Wrappers};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
-/// The constructions of a bare status.
-const NEEDLES: [&str; 4] = [
-    "SolidError::sm_err(",
-    "SolidError::null_pointer(",
-    "SolidError::Upstream {",
-    "SolidError::nl_ser(",
-];
+/// The constructions of a bare status, seen through local wrappers.
+pub(in crate::error) const BARE: Scan = Scan {
+    builders: &[
+        Builder::Text("SolidError::sm_err("),
+        Builder::Text("SolidError::null_pointer("),
+        Builder::Text("SolidError::Upstream {"),
+        Builder::Text("SolidError::nl_ser("),
+    ],
+    wrappers: Wrappers::Thin,
+};
 
-fn is_ident(b: u8) -> bool {
+pub(in crate::error) fn is_ident(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
@@ -136,7 +151,7 @@ fn blank(text: &str, ranges: &[Range<usize>]) -> String {
 }
 
 /// The offset just past the closer matching the opener at `i` of `s`.
-fn match_close(s: &[u8], mut i: usize) -> usize {
+pub(in crate::error) fn match_close(s: &[u8], mut i: usize) -> usize {
     let mut depth = 0usize;
     while let Some(&ch) = s.get(i) {
         match ch {
@@ -281,12 +296,10 @@ pub(in crate::error) fn library_text(text: &str) -> String {
     blank(&text, &split(&code).tests)
 }
 
-/// The bare statuses library code (from [`library_code`]) builds.
+/// The bare statuses library code (from [`library_code`]) builds, each call of a local
+/// wrapper counted ([`BARE`]).
 pub(in crate::error) fn bare_sites(code: &str) -> usize {
-    NEEDLES
-        .iter()
-        .map(|needle| code.matches(needle).count())
-        .sum()
+    sites_in(&BARE, code, "library code").len()
 }
 
 /// The library files of an area, `src/<area>.rs` and everything under `src/<area>/`,
@@ -297,7 +310,27 @@ pub(in crate::error) fn bare_sites(code: &str) -> usize {
 pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut paths: Vec<PathBuf> = vec![root.join(format!("{area}.rs"))];
-    let mut dirs = vec![root.join(area)];
+    rust_files_under(&root.join(area), &mut paths);
+    library_files_at(&root, &paths, least)
+}
+
+/// The library files of a whole crate, everything under `<crate_dir>/src`, as
+/// (path relative to `src` with `/` separators, text with LF line ends), sorted by path,
+/// with the same files skipped as [`library_files`]. At least `least` `.rs` files must be
+/// found.
+pub(in crate::error) fn crate_library_files(
+    crate_dir: &Path,
+    least: usize,
+) -> Vec<(String, String)> {
+    let root = crate_dir.join("src");
+    let mut paths = Vec::new();
+    rust_files_under(&root, &mut paths);
+    library_files_at(&root, &paths, least)
+}
+
+/// Every `.rs` file under `dir`, appended to `paths`.
+fn rust_files_under(dir: &Path, paths: &mut Vec<PathBuf>) {
+    let mut dirs = vec![dir.to_path_buf()];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(dir).expect("read dir") {
             let path = entry.expect("entry").path();
@@ -308,12 +341,17 @@ pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, 
             }
         }
     }
+}
+
+/// The library files among `paths` (all under `root`), relative to `root`: see
+/// [`library_files`].
+fn library_files_at(root: &Path, paths: &[PathBuf], least: usize) -> Vec<(String, String)> {
     assert!(paths.len() >= least, "{paths:?}");
     let mut files: Vec<(String, String)> = paths
         .iter()
         .map(|path| {
             let relative = path
-                .strip_prefix(&root)
+                .strip_prefix(root)
                 .expect("under src")
                 .to_string_lossy()
                 .replace('\\', "/");
@@ -328,13 +366,18 @@ pub(in crate::error) fn library_files(area: &str, least: usize) -> Vec<(String, 
     let mut test_only: Vec<String> = Vec::new();
     for (relative, text) in &files {
         let stem = relative.trim_end_matches(".rs");
+        // a crate root's modules sit at the top of `src`
         let dir = match stem.strip_suffix("/mod") {
-            Some(parent) => parent.to_owned(),
-            None => stem.to_owned(),
+            Some(parent) => Some(parent.to_owned()),
+            None if stem == "lib" || stem == "main" => None,
+            None => Some(stem.to_owned()),
         };
         let code = blank(text, &literal_ranges(text));
         for name in split(&code).test_mods {
-            test_only.push(format!("{dir}/{name}"));
+            test_only.push(match &dir {
+                Some(dir) => format!("{dir}/{name}"),
+                None => name,
+            });
         }
     }
     files.retain(|(relative, _)| {
@@ -355,7 +398,7 @@ pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(Strin
     library_files(area, least)
         .into_iter()
         .filter_map(|(relative, text)| {
-            let bare = bare_sites(&library_code(&text));
+            let bare = sites_in(&BARE, &library_code(&text), &relative).len();
             (bare > 0).then_some((relative, bare))
         })
         .collect()
@@ -450,6 +493,73 @@ fn d() -> E {{ SolidError::nl_ser(OP) }}
         let text = library_text(&fixture);
         assert!(text.contains("a string SolidError::sm_err(OP)"));
         assert!(!text.contains("fn t()"));
+    }
+
+    /// A call of a local wrapper whose one expression builds a bare status counts at each
+    /// call, and the wrapper's body does not; a function that does more than build it, a
+    /// definition that only calls a wrapper, and a pattern are counted where they stand.
+    #[test]
+    fn a_local_wrapper_counts_at_each_call() {
+        let fixture = r"
+fn sm_err() -> SolidError { SolidError::sm_err(OP) }
+fn sm_err_of(operation: &'static str) -> SolidError {
+    SolidError::sm_err(operation)
+}
+fn ner<T>(v: Option<T>) -> Result<T> { v.ok_or_else(|| SolidError::null_pointer(OP)) }
+fn edge_of(b: &Brep, e: EdgeuseId) -> Result<EdgeId> { ner(b.edgeuse(e)?.edge) }
+fn does_more(x: f64) -> Result<f64> {
+    let y = x * 2.0;
+    if y > 1.0 { return Err(SolidError::sm_err(OP)); }
+    Ok(y)
+}
+fn is_status(e: &SolidError) -> bool { matches!(e, SolidError::Upstream { code: 1001, .. }) }
+macro_rules! bare { () => { SolidError::nl_ser(OP) }; }
+fn a() -> Result<()> {
+    let err = || SolidError::sm_err(OP);
+    let _ = (sm_err(), sm_err(), sm_err_of(OP), err(), err());
+    ner(Some(1))?;
+    edge_of(b, e)?;
+    edge_of(b, e)?;
+    let _ = bare!();
+    Err(SolidError::sm_err(OP))
+}
+pub(crate) fn shared(x: f64) -> SolidError { let _ = x; SolidError::sm_err(OP) }
+";
+        let code = library_code(fixture);
+        let lines: Vec<(usize, String)> = sites_in(&BARE, &code, "fixture")
+            .into_iter()
+            .map(|s| (s.line, s.via))
+            .collect();
+        let wraps = |name: &str, what: &str| format!("{name} (wraps SolidError::{what})");
+        assert_eq!(
+            lines,
+            vec![
+                (7, wraps("ner", "null_pointer")),
+                (10, "SolidError::sm_err".to_owned()),
+                (13, "SolidError::Upstream".to_owned()),
+                (17, wraps("err", "sm_err")),
+                (17, wraps("err", "sm_err")),
+                (17, wraps("sm_err", "sm_err")),
+                (17, wraps("sm_err", "sm_err")),
+                (17, wraps("sm_err_of", "sm_err")),
+                (18, wraps("ner", "null_pointer")),
+                (21, wraps("bare", "nl_ser")),
+                (22, "SolidError::sm_err".to_owned()),
+                (24, "SolidError::sm_err".to_owned()),
+            ]
+        );
+        assert_eq!(bare_sites(&code), 12);
+    }
+
+    /// A function visible outside its file is not a wrapper, as its calls elsewhere are
+    /// unseen: its body is the site, and its calls in the file are not.
+    #[test]
+    fn a_public_function_is_counted_at_its_body() {
+        let code = library_code(
+            "pub(crate) fn sm_err() -> SolidError { SolidError::sm_err(OP) }\n\
+             fn a() { let _ = (sm_err(), sm_err()); }\n",
+        );
+        assert_eq!(bare_sites(&code), 1);
     }
 
     /// An inner `#![cfg(test)]` makes the whole file test code.

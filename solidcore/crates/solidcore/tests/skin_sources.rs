@@ -5,6 +5,8 @@
 //! sections, its surface at the start of the loft (u min) and across the middle of its
 //! profile span passes through that curve's midpoint in the first section, and at the
 //! end of the loft (u max) through the matching curve's midpoint in the second.
+//! A flat wall is a plane (WR-782), whose u and v are its own, so it is checked by both
+//! midpoints lying in it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,6 +18,8 @@ use solidcore::curve::curve::Curve;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::primitive::api_curves::create_arc;
+use solidcore::surface::surface::p2::SurfaceKind;
+use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_surfaces::{
     create_skin_primitive, create_skin_primitive_with_sources, SkinPrimitive, SkinSources,
 };
@@ -92,10 +96,33 @@ fn traced(s: SkinSources) -> Vec<(FaceId, Vec<usize>)> {
     }
 }
 
+/// How far `p` is from `surface` when the surface is a plane, `None` for any other
+/// surface. A skin's flat walls are planes (WR-782), whose u and v are the plane's own,
+/// not the loft's, so a flat wall is checked by its points lying in it.
+fn off_plane(surface: &Surface, p: Point3) -> Option<f64> {
+    let SurfaceKind::Plane(plane) = surface.kind() else {
+        return None;
+    };
+    let (origin, normal, _) = plane.is_planar();
+    Some((p - origin).dot(normal).abs() / normal.length())
+}
+
 /// A wall holding curve `a` of the first section and `b` of the second passes through
-/// their midpoints at its two ends, across the middle of its span.
+/// their midpoints at its two ends, across the middle of its span; a flat wall, a plane,
+/// holds both midpoints.
 fn wall_runs_from(k: &Kernel, skin: &SkinPrimitive, f: FaceId, a: &Curve, b: &Curve) {
     let surface = face2::surface(&skin.brep, f).unwrap().unwrap();
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        for c in [a, b] {
+            let m = midpoint(k, c);
+            let off = off_plane(surface, m).unwrap();
+            assert!(
+                off <= 1e-9 * (1.0 + m.length()),
+                "{f:?}: {m:?} is {off} off the plane"
+            );
+        }
+        return;
+    }
     let d = surface.natural_uv_domain_with_nurb(k).unwrap();
     for (u, c) in [(0.0, a), (1.0, b)] {
         let p = surface.evaluate_point(k, d.evaluate(u, 0.5)).unwrap();
@@ -164,8 +191,9 @@ fn off_segment(k: &Kernel, c: &Curve, p: Point3) -> f64 {
 /// at least one curve of each section, every curve is on some wall, and, by closed form,
 /// across the middle of each wall's span its surface lies on one of its first section's
 /// curves at the start of the loft and on one of its second's at the end, within the B-rep's
-/// tolerance. The two collinear halves meet straight on, a join the skin does not split at,
-/// so one wall holds both. The walls themselves are pinned as run fmt-13632-3 traced them.
+/// tolerance; a flat wall, a plane, by each of its curves' midpoints lying in it. The two
+/// collinear halves meet straight on, a join the skin does not split at, so one wall holds
+/// both. The walls themselves are pinned as run fmt-13632-3 traced them.
 #[test]
 fn sections_whose_knots_differ_are_traced_through_the_skin_s_maps() {
     let mut k = Kernel::default();
@@ -195,6 +223,18 @@ fn sections_whose_knots_differ_are_traced_through_the_skin_s_maps() {
             seen[c] = true;
         }
         let surface = face2::surface(&made.brep, *f).unwrap().unwrap();
+        // a flat wall is a plane (WR-782): each of its curves' midpoints lies in it
+        if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+            for &c in of {
+                let m = midpoint(&k, &curves[c]);
+                let off = off_plane(surface, m).unwrap();
+                assert!(
+                    off <= tol,
+                    "{f:?}: curve {c} is {off} off the plane (tol {tol})"
+                );
+            }
+            continue;
+        }
         let d = surface.natural_uv_domain_with_nurb(&k).unwrap();
         for (u, these) in [(0.0, &first), (1.0, &second)] {
             let p = surface.evaluate_point(&k, d.evaluate(u, 0.5)).unwrap();

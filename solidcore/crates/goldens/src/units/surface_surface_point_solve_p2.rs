@@ -1024,3 +1024,64 @@ impl UnitDiff for Runner {
     }
 }
 
+
+#[cfg(test)]
+mod review_geometry_tests {
+    use super::super::surface_surface_point_solve_p3::witness;
+    use super::*;
+
+    /// Every `Solve` case of the unit that claims an optimum is challenged by a grid of
+    /// in-domain witnesses over its domain, as the p3 runner's global solves are
+    /// ([`witness`]: one witness refutes an optimum, none proves one). A `Solve` claims
+    /// one when its operation [`witness::ranks`] points and it succeeded with a solution;
+    /// the unit's other operations are the solver's internals (guesses, refinements, seam
+    /// partners, single steps and their tests), which claim no optimum. A witness better
+    /// by more than the case's distance tolerance refutes the solve, and the case must be
+    /// listed known failing under [`witness::MAXIMUM_ISSUE`] (maximise) or
+    /// [`witness::REACHED_ISSUE`] (minimise, directed maximise); a case listed under either
+    /// must still be refuted. This unit's record of a `Solve` does not hold the
+    /// out-of-bounds restoration flag the p3 runner records.
+    #[test]
+    fn review_every_claimed_optimum_survives_its_witnesses() {
+        let k = Kernel::default();
+        let known =
+            crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let mut claims = Vec::new();
+        for case in Runner.cases(&context).unwrap() {
+            let input: Inputs = case.parse().unwrap();
+            let op = solver_op(input.solver).unwrap();
+            if !witness::ranks(op) || !matches!(input.op, OpIn::Solve) {
+                continue;
+            }
+            let output = rust(&input).unwrap();
+            if output.deferred.is_some() || output.values["status"] != [0.0] {
+                continue;
+            }
+            let values = &output.values["out"];
+            let n = values[0] as usize;
+            if n == 0 {
+                continue;
+            }
+            let solutions: Vec<([f64; 2], f64)> = (0..n)
+                .map(|j| ([values[1 + 6 * j], values[2 + 6 * j]], values[3 + 6 * j]))
+                .collect();
+            let surface = any_surface(&k, input.wrap, &input.surf).unwrap();
+            claims.push(witness::global(
+                &k,
+                &surface,
+                &case.name,
+                op,
+                "global".to_owned(),
+                input.test,
+                input.dom,
+                input.tol,
+                &solutions,
+            ));
+        }
+        witness::check(Runner.id(), &claims, &known);
+    }
+}

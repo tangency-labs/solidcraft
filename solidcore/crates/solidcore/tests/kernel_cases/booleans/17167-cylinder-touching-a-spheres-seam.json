@@ -1,0 +1,208 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 5.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                30.0,
+                20.0,
+                20.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 2.5,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "make_sphere",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "center": [
+          25.0,
+          17.5,
+          10.0
+        ],
+        "radius": 12.5
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    }
+  ],
+  "case": "17167-cylinder-touching-a-spheres-seam",
+  "expected": {
+    "body_count": 1,
+    "method": "cylinder r 2.5 from x 30 to 35 on the axis y 20, z 20; sphere r 12.5 at (25, 17.5, 10). With y, z measured from the cylinder axis, a point of the section is inside the sphere for x up to 25 + q, q = sqrt(156.25 - (2.5 + y)^2 - (10 + z)^2), which is under 35 everywhere (q <= 7.1), so the length inside both is q - 5 where q > 5. V = the integral of (q - 5) over the disk r 2.5 where q > 5: 37.385197 (midpoint rule in polar coordinates, 1000^2, 2000^2 and 4000^2 cells agree to 1e-7). The intersection curve touches the sphere seam (its meridian in the plane y 17.5 on the +x side) at (32.5, 17.5, 20), since 7.5^2 + 10^2 = 12.5^2.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#17167"
+    ],
+    "volume_mm3": 37.385197,
+    "what": "a cylinder intersected with a sphere whose seam its side touches at one point (fuzz seed 660): refused as SmFace Test #29 Face crosses Seam, because the boolean joined the two intersection edges at the touch point"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 3,
+      "vertices": 3
+    }
+  },
+  "records": "17167-cylinder-touching-a-spheres-seam.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 71.43385121863258,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 37.38514488011903
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#17167"
+  ],
+  "traced_ops": [
+    "extrude",
+    "make_sphere",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a cylinder intersected with a sphere whose seam its side touches at one point (fuzz seed 660): refused as SmFace Test #29 Face crosses Seam, because the boolean joined the two intersection edges at the touch point",
+  "why_not": []
+}

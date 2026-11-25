@@ -1,6 +1,6 @@
 # Contributing to SolidCraft
 
-Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`skills/`](skills/README.md) for each kind of work. This page stays the full human guide.
+Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`.agents/skills/`](.agents/skills/README.md) for each kind of work. This page stays the full human guide.
 
 SolidCraft is an open-source parametric 3D CAD app written in pure Rust.
 You sketch on a plane, constrain the sketch, turn profiles into solids, and
@@ -22,7 +22,7 @@ Questions, ideas or want to say what you're working on? Join the [Discord](https
 Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
 threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
 solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
-`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`.agents/skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
 A kernel pull request targets `main` like any other; there is no kernel branch, and the
@@ -58,7 +58,7 @@ contributors without write access can't push to them. To update one:
 
 ## Get it running (about 10 minutes on a fast machine)
 
-You need [rustup](https://rustup.rs/). The repository pins Rust 1.98.0 in
+You need [rustup](https://rustup.rs/). The repository pins Rust 1.99.1 in
 `rust-toolchain.toml`, the version CI builds with, and rustup installs it with rustfmt, clippy and
 the `wasm32-unknown-unknown` target the first time you run `cargo` here. The code itself builds on
 Rust 1.95 or newer (`rust-version` in Cargo.toml, required by egui/eframe 0.36). For the web build
@@ -69,6 +69,7 @@ you also need [`trunk`](https://github.com/trunk-rs/trunk)
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
 cargo run --release -p solidcraft -- --sample      # desktop app with a sample part
 cargo xtask test                                   # unit, engine and UI-scenario tests
+cargo xtask fast                                   # before a commit: what your change touches
 cargo xtask ci                                     # everything a PR must pass (see below)
 ```
 
@@ -186,6 +187,10 @@ to commands, with no geometry math.
    `NavCaps` saying whether it can orbit (off for flat 2D pages) and pick. New canvases must use
    `navigation::handle`; never read drags, the wheel or pinch to move the camera yourself. The
    `hand_rolled_camera_input_is_rejected` test fails if a page does.
+7. **Build UI from the kit.** See the component gallery at
+   [docs.solidcraft.io/kit/](https://docs.solidcraft.io/kit/) before adding UI: every `ui_kit`
+   component live, with how to call it and its do's and don'ts (`cargo run -p ui-kit-gallery`
+   opens it on the desktop).
 
 Labels, parameter docs, messages and docs use the terms in the
 [glossary](https://docs.solidcraft.io/reference/glossary.html): one term for each idea. A change that adds a new
@@ -397,8 +402,12 @@ and a fresh CI run:
      comment on it first, then open your own claim.
    - Mark the PR ready for review when it is done.
 2. Branch from `main` and keep the PR to one topic.
-3. Run `cargo xtask ci` before pushing. It runs fmt, the asset, licence and layer checks,
-   clippy (`-D warnings`), then the tests with the wasm build check alongside. A PR has to pass it.
+3. Run `cargo xtask fast` before pushing: it checks what your change touches (for a kernel change
+   in `solidcore/`, add `--units <id,...>` from your PR's `Units:` line to run their goldens). CI
+   runs the rest of `cargo xtask ci` (fmt, the asset, licence and layer checks, clippy
+   `-D warnings`, the tests and the wasm build check), so you need not run that locally. The pull
+   request runs the tests of the packages your change affects; the wasm build, the doc tests and
+   the heavy tests run in the merge queue, so a green pull request run does not show that they pass.
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,
@@ -408,6 +417,13 @@ and a fresh CI run:
    passes the review gates: CodeRabbit's threads are resolved, and a change to CI or workflow files
    has the owner's approval. The merge queue tests each group of queued PRs together before it
    lands on `main`.
+   You don't have to wait for the label to see the full CI: run it on your fork, on GitHub's free
+   runners. On the fork, set two repository variables (Settings, Secrets and variables, Actions,
+   Variables): `CI_RUNNER` to `ubuntu-24.04` and `CI_RUNNER_WINDOWS` to `windows-latest`. Then
+   open Actions, CI, Run workflow, pick your branch and tick "Also check WebAssembly and RISC-V"
+   (or `gh workflow run ci.yml --ref <branch> -f cross_compile=true -R <you>/solidcraft`). That
+   runs the jobs the merge queue runs, plus the RISC-V build, more slowly than the project's
+   runners, so each job's time limit is three times the usual one while `CI_RUNNER` is set.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
 5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
@@ -465,8 +481,10 @@ the agent or a maintainer can attach it.
 Keep an eye on your PR's status, but don't push to it only to catch up with `main`: every push
 restarts the whole CI run for everyone waiting behind it, and `main`'s own run catches what lands in
 between. When you push a change anyway, or GitHub reports a conflict, bring your branch up to date
-with the latest `main` by rebasing or by merging `main` in; both are fine. Rebasing is preferred for
-your own branch (push it with `--force-with-lease`). Never force-push `main` or a branch someone else
+with the latest `main` by merging `main` in or by rebasing; both are fine. Merging costs less: when
+the PR already passed and the merge leaves your own change as it was, CI carries the passing run and
+repeats only the repository checks (`scripts/ci/main_merge.py`). A rebase always re-runs the full
+suite, and you must push it with `--force-with-lease`. Never force-push `main` or a branch someone else
 works on. When the project's automation updates your pull request, it merges `main` into your branch
 and never force-pushes over your history. Resolve conflicts without losing others' changes.
 Don't re-run CI on an unchanged commit either: a real failure fails again.
@@ -523,7 +541,7 @@ In order of how much they'd help users:
 2. **Boolean robustness.** A random-design fuzzer currently gets about half of its designs
    through without a kernel error. Each failing seed is a reproducible bug.
 3. **Drawings, CAM and mesh tools.** These are out of scope for now (see
-   [ROADMAP.md](docs/roadmap-detail.md)), but anyone who wants to own one is welcome.
+   [docs/roadmap-detail.md](docs/roadmap-detail.md)), but anyone who wants to own one is welcome.
 
 ## Updating the generated feature list
 

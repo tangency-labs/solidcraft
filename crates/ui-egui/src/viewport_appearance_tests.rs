@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -90,7 +90,10 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut document = doc::Document::default();
     let component = document.add_component(Some("Imported part"), 0).unwrap();
     let feature = document
-        .add_feature(doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+        .add_feature(
+            doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
         .unwrap();
     document.features.iter_mut().find(|f| f.id == feature).unwrap().component = component;
     let mut session = Session::new(document);
@@ -132,7 +135,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
 
 /// The colour of a built triangle vertex: its palette index resolves through the scene.
 fn vertex_color(scene: &crate::gpu::GpuScene, v: &[u8]) -> [u8; 4] {
-    let index = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
+    let index = v.get(24..28).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
     scene.palette.get(crate::gpu::PaletteIndex(index)).unwrap_or([0; 4])
 }
 
@@ -156,7 +159,7 @@ fn selection_does_not_rebuild_the_model_scene() {
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
-        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     h.frame();
     let key = h.app.viewport.key;
     let highlight = h.app.viewport.hl_key;
@@ -264,8 +267,14 @@ fn appearance_edits_upload_palette_rows_only() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
-    app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     app.fit_view();
     let name = app.session.world_state().unwrap().bodies[0].name.clone();
@@ -290,6 +299,94 @@ fn appearance_edits_upload_palette_rows_only() {
     let glass = draw(&app);
     assert_eq!(glass.geometry, 0, "a see-through body's colour edit uploads no geometry: {glass:?}");
     assert!(glass.palette > 0, "it writes the palette: {glass:?}");
+}
+
+/// A part placed many times goes to the GPU once: drawn indirectly, its triangles are uploaded
+/// to the indirect draws' buffer alone, not to buffers of their own as well, and its shared
+/// edges (where the device draws them) to the edges' buffer; a scene adding a part that fits
+/// the buffers' room uploads that part's triangles and edges alone, not again every part before
+/// it (a design being opened adds parts at every scene); and the same parts again upload none,
+/// nor a highlight lighting a placement's edges. Every placement is drawn each time. Skipped
+/// without a GPU adapter.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_after() {
+    const SIZE: u32 = 64;
+    let Some(mut frames) = crate::gpu::OffscreenFrames::new(SIZE, false) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.viewport.gpu = frames.target();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.cylinder", json!({"radius": 5, "height": 10, "base": [30, 0, 0]})).unwrap();
+    app.fit_view();
+    // The cylinder first: the buffers made for it have room for half as much again, which the
+    // box added after fits in (a part that does not fit makes them again, with every part).
+    let meshes: Vec<_> = app.session.model.state().bodies.iter().rev().map(|b| std::sync::Arc::new(crate::gpu::SharedTris::new(&b.mesh()))).collect();
+    assert_eq!(meshes.len(), 2, "a cylinder and a box");
+    assert!(meshes[1].vertices.len() * 2 < meshes[0].vertices.len(), "the box is the smaller");
+    let with_edges = frames.target().is_some_and(|t| t.edges);
+    let edges: Vec<_> = app
+        .session
+        .model
+        .state()
+        .bodies
+        .iter()
+        .rev()
+        .map(|b| std::sync::Arc::new(solidcraft_viewport_gpu::view::SharedEdges::new(&b.mesh(), |_| true, Vec::new())))
+        .collect();
+    let edge_bytes = |k: usize| if with_edges { edges[k].levels.iter().map(|(r, _)| r.len() as u64).sum() } else { 0 };
+    let bytes = |k: usize| (meshes[k].vertices.len() + meshes[k].indices.len() * 4) as u64 + edge_bytes(k);
+    // Each part placed three times, close together (all in view).
+    let scene = |parts: usize| {
+        let mut sc = crate::gpu::GpuScene::default();
+        let red = sc.color([200, 30, 30, 255]);
+        for (k, tris) in meshes.iter().take(parts).enumerate() {
+            let mut inst = solidcraft_viewport_gpu::view::InstancedMesh {
+                key: k as u64 + 1,
+                tris: tris.clone(),
+                instances: Vec::new(),
+                look: solidcraft_viewport_gpu::view::InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+                edges: with_edges.then(|| edges[k].clone()),
+            };
+            for i in 0..3 {
+                inst.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.5 * i as f32], [0.0, 0.0, 1.0, 0.0]], red);
+            }
+            sc.instanced.push(inst);
+        }
+        sc
+    };
+    let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut key = 0;
+    let mut draw = |parts: usize| {
+        key += 1;
+        let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene(parts))));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &slot), (0, &none)));
+        (frames.uploads(), frames.stats().triangles)
+    };
+    let drawn = |parts: usize| meshes.iter().take(parts).map(|t| 3 * (t.indices.len() as u64 / 3)).sum::<u64>();
+    let (one, triangles) = draw(1);
+    assert_eq!(one.geometry, bytes(0), "the first part's triangles and edges, once");
+    assert_eq!(triangles, drawn(1), "its three placements are drawn");
+    let (two, triangles) = draw(2);
+    assert_eq!(two.geometry, bytes(1), "the part added alone");
+    assert_eq!(triangles, drawn(2), "every placement of both parts is drawn");
+    let (again, triangles) = draw(2);
+    assert_eq!(again.geometry, 0, "the same parts upload no triangles or edges");
+    assert_eq!(triangles, drawn(2), "and are drawn as before");
+    // A placement lit (hovered or selected) draws its edges again from the model's segment
+    // buffer: the highlight uploads none of them.
+    if with_edges {
+        let lit = crate::gpu::GpuScene { lit_instanced_edges: scene(1).instanced, ..Default::default() };
+        let lit: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(lit)));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &none), (1, &lit)));
+        assert_eq!(frames.highlight_uploads().geometry, 0, "a lit part's edges are the model's");
+    }
 }
 
 /// A body out of the view is left out of its block's draws: two boxes far apart, drawn with
@@ -345,7 +442,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
-        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
     h.frame();
@@ -612,4 +709,285 @@ fn the_ambient_occlusion_radius_follows_what_is_drawn() {
     app.ui.visual_style = 0;
     app.preferences.ambient_occlusion = false;
     assert_eq!(super::ao_radius(&app), 0.0, "off");
+}
+
+/// A body whose appearance has a PBR finish (brass) carries it in the model scene's palette on
+/// its body, instance and face slots; a plain body has none (the shader gives it a satin finish).
+/// The finish is shown by default, and the preference that turns it off reaches the shader.
+#[test]
+fn a_pbr_appearance_reaches_the_model_palette_and_the_finish_preference_the_shader() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10, "body_name": "Part"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Plain", "operation": "new"})).unwrap();
+    app.run("render.library.appearance.apply", json!({"id": "SURF-010", "variant": "uniform_opaque", "bodies": ["Part"]})).unwrap();
+    assert!(app.preferences.viewport_material_finish, "on by default");
+    let scene = build_scene(&app);
+    let slots = |name: &str| app.viewport.palette.lock().unwrap().slots(name).unwrap();
+    let at =
+        |scene: &crate::gpu::GpuScene, slot: crate::gpu::PaletteIndex| scene.palette.materials().get(slot.0 as usize).copied().unwrap_or_default();
+    let (part, plain) = (slots("Part"), slots("Plain"));
+    for slot in [part.body, part.instance, part.face(0), part.face(5)] {
+        let m = at(&scene, slot);
+        assert!(m.pbr && m.metallic == 1.0 && (m.roughness - 0.29).abs() < 1e-6, "brass on slot {slot:?}: {m:?}");
+    }
+    for slot in [plain.body, plain.instance, plain.face(0)] {
+        assert!(!at(&scene, slot).pbr, "a plain body has no finish");
+    }
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+    assert!(old.viewport_material_finish, "older preferences get the finish too (a changed default)");
+    let up = solidcraft_viewport::UpAxis::Z;
+    let sky = |app: &SolveApp| super::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, up);
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 2.0]);
+    crate::prefs::set(&mut app, &json!({"viewport_material_finish": false})).unwrap();
+    assert_eq!(sky(&app), [0.0, 0.0, 1.0, 0.0], "off: shaded flat, as before");
+}
+
+/// A part holding 40 x 20 x 10 blocks `Block` (from rectangle `Base`) and `Block2` (at x = 60),
+/// and sketch Outline on a construction plane 30 off XZ projecting both front faces beside a circle;
+/// then the block's front side drawn again, so its face takes a new name and Outline fails for
+/// its projection. `peg`: Peg is extruded from the circle first, so Outline is used by a feature.
+/// Returns (harness, Outline, the part's placement).
+fn part_lost(peg: bool) -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let part = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"body_name":"Block"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base2"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[60,0],"p1":[100,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base2","distance":10,"body_name":"Block2"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Guide"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"Guide","name":"Outline"})).unwrap();
+    let outline = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"face":[20,0,5],"body":"Block"}]})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"face":[80,0,5],"body":"Block2"}]})).unwrap();
+    let circle = h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap()["created"]["curves"][0].clone();
+    h.app.finish_sketch();
+    if peg {
+        h.app.run("solid.extrude", json!({"sketch":"Outline","profiles":[{"curves":[circle]}],"distance":5,"name":"Peg"})).unwrap();
+    }
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[40,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(3);
+    let error = h.app.session.model.result(outline).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("projected face of Block"), "{error}");
+    (h, outline, part)
+}
+
+/// The sketch scene's lines drawn in `colour`.
+fn sketch_lines_in(app: &SolveApp, colour: egui::Color32) -> usize {
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let scene = super::build_sketch_scene(app, &super::projection(app, rect));
+    [&scene.lines, &scene.overlay]
+        .into_iter()
+        .flat_map(|buffer| buffer.as_chunks::<{ crate::gpu::LINE_SIZE }>().0)
+        .filter(|line| line_color(&scene, &line[..]) == super::c4(colour))
+        .count()
+}
+
+/// A sketch that failed for a lost projection, shown, draws its last geometry with the
+/// projection in the lost colour; used by the extrude built on it, or hidden, it draws nothing.
+/// Display only: it is no sketch of the model's, so nothing in it can be picked or framed.
+#[test]
+fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
+    let (mut h, outline, _) = part_lost(true);
+    let t = solidcraft_theme::Tokens::get();
+    assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, outline), "used by Peg");
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "used by Peg");
+    h.app.session.visibility.shown_sketches.push(outline);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "the lost projection is drawn");
+    assert!(sketch_lines_in(&h.app, t.sketch_projected) > 0, "so is the projection still found");
+    assert!(!super::visible_sketches(&h.app).contains(&outline), "not one to pick or frame");
+    assert!(crate::open_meshing::session_world(&h.app.session).sketch(outline).is_none());
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
+}
+
+/// A sketch that failed for a lost projection marks where the lost face was on the model: the
+/// point the face was picked at, with the point under it in the sketch's plane (#5048). Shown
+/// or open for editing it is marked once; used by another feature, or hidden, it isn't. The mark
+/// follows its component when the component moves.
+#[test]
+fn a_lost_projection_marks_where_its_face_was_on_the_model() {
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, outline, part) = part_lost(true);
+    assert!(super::lost_sources(&h.app).is_empty(), "used by Peg, not shown");
+    h.app.session.visibility.shown_sketches.push(outline);
+    let marked = |h: &crate::scenario::Harness| super::lost_sources(&h.app);
+    let check = |sources: &[super::LostSource], at: Vec3| {
+        let [source] = sources else { panic!("{sources:?}") };
+        assert!(source.at.dist(at) < 1e-6, "picked on the block's front face: {source:?}");
+        // Guide is 30 off XZ: the foot is straight across from the pick, in the sketch's plane.
+        let across = source.foot - source.at;
+        assert!(across.x.abs() < 1e-6 && across.z.abs() < 1e-6 && (across.len() - 30.0).abs() < 1e-6, "{source:?}");
+    };
+    // Only Block's face lost its name: Block2's projection is still found.
+    check(&marked(&h), Vec3::new(20.0, 0.0, 5.0));
+    h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 0, 50]})).unwrap();
+    h.frames(2);
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert!(marked(&h).is_empty(), "hidden");
+    h.app.session.visibility.hidden_sketches.retain(|s| *s != outline);
+    h.app.run("sketch.edit", json!({"sketch": "Outline"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+}
+
+/// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,
+/// Outline2, ...) on a plane `offset` off XZ, each projecting the block's front face beside a
+/// circle; then the block's front side drawn again, so each fails for its projection. Returns
+/// (harness, the sketches).
+fn lost_without_components(offset: f64, copies: usize) -> (crate::scenario::Harness, Vec<u64>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":10,"body_name":"Block"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":offset,"name":"Guide"})).unwrap();
+    let mut sketches = Vec::new();
+    for n in 0..copies {
+        let name = if n == 0 { "Outline".to_string() } else { format!("Outline{}", n + 1) };
+        h.app.run("sketch.create", json!({"plane":"Guide","name":name})).unwrap();
+        sketches.push(h.app.session.active_sketch.unwrap());
+        h.app.run("sketch.project", json!({"refs":[{"face":[20,0,5],"body":"Block"}]})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.app.run("sketch.edit", json!({"sketch":"Base"})).unwrap();
+    h.app.run("sketch.delete", json!({"entities":["l1"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[40,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.frames(3);
+    assert!(h.app.session.doc.occurrences.is_empty());
+    for sketch in &sketches {
+        let error = h.app.session.model.result(*sketch).and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(error.contains("projected face of Block"), "{error}");
+    }
+    (h, sketches)
+}
+
+/// Without components the world is the model's own state, and a failing sketch evaluated
+/// again leaves it as it was: what is drawn follows the shown failed sketch all the same,
+/// after an edit of it and after Redefine Sketch Plane.
+#[test]
+fn a_shown_failed_sketch_follows_its_edits_in_a_design_without_components() {
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let outline = sketches[0];
+    let t = solidcraft_theme::Tokens::get();
+    let drawn = |h: &crate::scenario::Harness| {
+        let (shown, _) = super::failed_sketches(&h.app);
+        shown.iter().find(|ss| ss.feature == outline).map(|ss| (ss.sketch.curves.len(), ss.plane.origin))
+    };
+    let (curves, origin) = drawn(&h).expect("shown");
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    h.app.edit_sketch(outline);
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    h.app.run("sketch.circle.center", json!({"center":[10,5],"radius":2})).unwrap();
+    h.app.finish_sketch();
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&world, &crate::open_meshing::session_world(&h.app.session)), "the same world as before the edit");
+    assert!(h.app.session.model.result(outline).is_some_and(|r| r.error.is_some()), "it still fails");
+    assert_eq!(drawn(&h).map(|(n, _)| n), Some(curves + 1), "the edit's circle is drawn");
+    h.app.run("sketch.redefine", json!({"sketch":outline,"plane":"XZ"})).unwrap();
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&world, &crate::open_meshing::session_world(&h.app.session)));
+    let moved = drawn(&h).expect("still shown").1;
+    assert!((moved.y - origin.y).abs() > 1.0, "drawn on its new plane: {moved:?} {origin:?}");
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+}
+
+/// Dragging in a sketch that comes after a failed one builds the failed one no more: it is
+/// built for its own result and the model before it, which the drag leaves as they were.
+#[test]
+fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
+    let (mut h, _) = lost_without_components(30.0, 1);
+    let t = solidcraft_theme::Tokens::get();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":50,"name":"Later"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.edit", json!({"sketch":"Later"})).unwrap();
+    h.frames(2);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    let (builds, _) = super::failed_sketch_counts(&h.app);
+    for i in 0..5 {
+        let (from, to) = ([10 + i, i], [11 + i, i + 1]);
+        h.app.run("sketch.drag", json!({"entity":"l1.end","from":from,"to":to,"live":true})).unwrap();
+        h.frames(1);
+    }
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "still drawn");
+    assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
+}
+
+/// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn
+/// with, so it is not clipped away; Fit frames the bodies and the sketches it can pick only.
+#[test]
+fn a_failed_sketch_far_from_the_bodies_is_in_the_depth_range_not_in_fit() {
+    let (h, _) = lost_without_components(10_000.0, 1);
+    let (shown, far) = super::failed_sketches(&h.app);
+    assert_eq!(shown.len(), 1);
+    let inside = |b: &solidcraft_engine::geom::Aabb3| {
+        [(b.min.x, b.max.x, far.min.x, far.max.x), (b.min.y, b.max.y, far.min.y, far.max.y), (b.min.z, b.max.z, far.min.z, far.max.z)]
+            .into_iter()
+            .all(|(lo, hi, flo, fhi)| lo <= flo + 1e-6 && fhi <= hi + 1e-6)
+    };
+    assert!(far.min.y.abs() > 9_000.0, "{far:?}");
+    assert!(inside(&super::scene_bounds(&h.app)), "{:?} {far:?}", super::scene_bounds(&h.app));
+    assert!(!inside(&super::view_bounds(&h.app)), "{:?}", super::view_bounds(&h.app));
+}
+
+/// Each failed sketch drawn is sampled with a budget of its own (#6524): two alike, under a
+/// budget one of them uses up, both draw their lost projection.
+#[test]
+fn failed_sketches_drawn_each_have_their_own_sampling_budget() {
+    let (mut h, sketches) = lost_without_components(30.0, 2);
+    let t = solidcraft_theme::Tokens::get();
+    h.app.session.visibility.hidden_sketches.push(sketches[1]);
+    let one = sketch_lines_in(&h.app, t.sketch_lost);
+    assert!(one > 0);
+    let (shown, _) = super::failed_sketches(&h.app);
+    let ss = &shown[0];
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = super::projection(&h.app, rect);
+    let ppp = h.app.viewport.pixels_per_point();
+    let mut all = solidcraft_engine::render::SamplingBudget::new(131_072, 1_048_576);
+    let need: usize = (0..ss.sketch.curves.len())
+        .filter(|i| solidcraft_engine::view::sketch_curve_visible(&ss.sketch, *i))
+        .map(|i| crate::sketch_display::curve_with_budget(&ss.sketch, i, &ss.plane, &proj, ppp, &mut all).vertex_count)
+        .sum();
+    h.app.session.visibility.hidden_sketches.clear();
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(Some(need)));
+    let both = sketch_lines_in(&h.app, t.sketch_lost);
+    crate::sketch_display::UNCACHED_VERTICES.with(|v| v.set(None));
+    assert_eq!(both, 2 * one, "a budget of {need} vertices each");
+}
+
+/// While the model can't be placed (here an uncaptured move that is no rigid motion) no
+/// failed sketch is drawn or placed, on any call; placed again once it can be.
+#[test]
+fn a_failed_sketch_is_not_drawn_while_the_model_cannot_be_placed() {
+    let (mut h, outline, part) = part_lost(false);
+    let t = solidcraft_theme::Tokens::get();
+    assert!(solidcraft_engine::view::sketch_shown(&h.app.session, outline));
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0);
+    h.app.session.pending_moves.insert(part, [[0.0; 4]; 4]);
+    assert!(h.app.session.world_state().is_err(), "the model can't be placed");
+    let (_, placements) = super::failed_sketch_counts(&h.app);
+    for _ in 0..3 {
+        assert!(super::failed_sketches(&h.app).0.is_empty());
+    }
+    assert_eq!(super::failed_sketch_counts(&h.app).1, placements, "nothing placed while it can't be");
+    assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0);
+    h.app.session.pending_moves.remove(&part);
+    assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "placed again");
 }

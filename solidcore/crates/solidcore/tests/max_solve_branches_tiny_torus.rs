@@ -7,7 +7,7 @@
 //! the default `2^23` covers them, and this test checks both booleans finish. It asserts
 //! only success, not the result geometry: the C++ reaches UB-175 on these inputs, so they
 //! cannot be compared with it (`plan/findings/geom.global_solver--tiny-torus-c-reaches-ub175-2026-10-26.md`).
-//! Run with `cargo test -p solidcore --release --test max_solve_branches_tiny_torus -- --ignored`.
+//! Run with `cargo test -p solidcore --release --test geometry -- --ignored max_solve_branches_tiny_torus::`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

@@ -26,6 +26,43 @@ fn a_box_measures_exactly() {
     assert!((v - 6000.0).abs() < 6000.0 * 1e-9, "{v}");
 }
 
+/// A failed face lookup in feature discovery cannot confirm a groove. Public record
+/// indices are checked before this step; here the executive itself refuses the selection.
+#[test]
+fn a_failed_feature_lookup_leaves_ring_removal_unmatched() {
+    let mut k = solidcore::Kernel::default();
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let face = solidcore::FaceId::from_index(0);
+    assert!(!crate::trim::remove_selected_ring(&mut k, &mut b, &[face]).unwrap());
+}
+
+#[test]
+fn an_unmatched_ring_does_not_export_the_input_for_history() {
+    use solidcore::curve::line::Line;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::topology::brep::p5::create_wire_edge_from_curve;
+    use solidcore::{Kernel, Vec3};
+
+    let body = make_box([0.0; 3], [1.0; 3]).unwrap();
+    let (_, order) = body.to_record().unwrap();
+    let mut brep = body.into_inner();
+    // The box faces keep their indices. The separate wire is valid in the kernel,
+    // but the record exporter cannot represent it.
+    let line = Line::create_canonical(Vec3::new(4.0, 4.0, 4.0), Vec3::new(1.0, 0.0, 0.0));
+    create_wire_edge_from_curve(
+        &mut Kernel::default(),
+        &mut brep,
+        line.into(),
+        Extent1d::from_min_max(0.0, 1.0),
+    )
+    .unwrap();
+    let body = Body::new(brep);
+    assert!(body.to_record().is_err());
+    assert!(crate::trim::remove_ring_groove(&body, &order, &[0])
+        .unwrap()
+        .is_none());
+}
+
 /// The accuracy goes to the kernel as given: one it refuses is its status.
 #[test]
 fn a_volume_accuracy_is_the_kernels_to_refuse() {
@@ -36,9 +73,10 @@ fn a_volume_accuracy_is_the_kernels_to_refuse() {
         (at - 4.0 / 3.0 * std::f64::consts::PI * 125.0).abs() < 1e-6,
         "{at}"
     );
-    assert_eq!(
-        ball.volume(f64::INFINITY).err(),
-        Some(Error::Status(crate::error::INVALID_INPUT))
+    let refused = ball.volume(f64::INFINITY).err();
+    assert!(
+        matches!(refused, Some(Error::Refused { reason, .. }) if !reason.is_empty()),
+        "{refused:?}"
     );
 }
 
@@ -144,9 +182,10 @@ fn every_primitive_is_valid_at_every_level() {
 fn a_failed_check_reports_its_lines() {
     all_fixes();
     let b = make_box([0.0; 3], [1.0; 3]).unwrap();
-    with_body("loosen", &b, |_, br| {
+    with_body("shrink", &b, |_, br| {
         let v = br.vertex_list()[0];
-        br.vertex_mut(v)?.tolerance = 0.5;
+        let tolerance = br.tolerance() * 0.5;
+        br.vertex_mut(v)?.tolerance = tolerance;
         Ok(())
     })
     .unwrap();
@@ -197,6 +236,21 @@ fn first_point(b: &Body) -> [f64; 3] {
     let br = b.lock();
     let p = br.vertex(br.vertex_list()[0]).unwrap().point;
     [p.x, p.y, p.z]
+}
+
+#[test]
+fn source_chord_coordinates_cross_the_import_geometry_seam() {
+    use crate::import_geometry::chord_coordinates;
+    use solidcore_record::Vec2;
+
+    assert_eq!(
+        chord_coordinates(Vec2::new(0.875, 0.15625), 0.25, 1.5).unwrap(),
+        Vec2::new(0.5, 0.125)
+    );
+    assert!(matches!(
+        chord_coordinates(Vec2::ZERO, 0.0, 0.0),
+        Err(Error::Refused { .. })
+    ));
 }
 
 /// A translation, a rotation, a mirror and a non-uniform scale each move the body they are given
@@ -599,8 +653,9 @@ fn a_face_merge_by_delete_edge_keeps_both_faces_provenance() {
     );
 }
 
-/// A solid input must give a solid: an empty result is `Empty`, a box turned inside out is
-/// `NotSolid`, a box is a solid. What is expected comes from the input.
+/// A solid input must give a solid: an empty result is `Empty`, a box with its faces flipped
+/// is `NotSolidBecause` naming the pointer check, a box is a solid. What is expected comes
+/// from the input.
 #[test]
 fn the_result_contract() {
     all_fixes();
@@ -639,13 +694,66 @@ fn the_result_contract() {
     .unwrap();
     assert_eq!(
         out,
-        Some((Some(Error::Empty), Some(Error::NotSolid), true, true))
+        Some((
+            Some(Error::Empty),
+            Some(Error::NotSolidBecause(crate::SolidTest::PointersInvalid)),
+            true,
+            true
+        ))
     );
+}
+
+/// The result check of a proved operation names the test it fails, as `check_solid` does
+/// (#15035's rule for every result check): `finish_under` under [`Contract::Proved`] returns
+/// `NotSolidBecause(test)`, and `not_solid_test` reads the test. The helper is the check every
+/// proved operation's result runs; no cheap operation makes its own result fail here.
+#[test]
+fn a_proved_result_names_the_test_it_fails() {
+    use crate::body::{finish_under, Contract};
+    use crate::SolidTest;
+    use solidcore::primitive::api_primitives::create_box;
+    use solidcore::topology::brep::p1::regions;
+    all_fixes();
+    let out = run("proved result", |k| {
+        let mut flipped = create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for f in flipped.face_list().to_vec() {
+            flip_face_orientation(&mut flipped, f)?;
+        }
+        let mut inside_out = create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)?;
+        for r in regions(&inside_out, None)? {
+            let g = inside_out.region_mut(r)?;
+            g.is_void = 1 - g.is_void;
+        }
+        let proven =
+            |k: &mut solidcore::Kernel, b| finish_under(k, b, Expect::SOLID, Contract::Proved);
+        Ok(Some([
+            proven(k, flipped)?.err(),
+            proven(k, inside_out)?.err(),
+        ]))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        out,
+        [
+            Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
+            Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(
+        out.each_ref()
+            .map(|e| e.as_ref().and_then(Error::not_solid_test)),
+        [
+            Some(SolidTest::PointersInvalid),
+            Some(SolidTest::VolumeNegative)
+        ]
+    );
+    assert_eq!(Error::Argument.not_solid_test(), None);
 }
 
 /// `check_solid` names the test a body fails (#15035): a box passes; a sheet is not manifold; a
 /// box with every face flipped fails the pointer check; a box with its material outside is
-/// proved inside out. The body checked is unchanged.
+/// proved inside out. The body checked is unchanged, and `not_solid_test` reads each test.
 #[test]
 fn check_solid_names_the_test_a_body_fails() {
     use crate::SolidTest;
@@ -680,6 +788,16 @@ fn check_solid_names_the_test_a_body_fails() {
             Some(Error::NotSolidBecause(SolidTest::NotManifold)),
             Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
             Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(
+        tests
+            .each_ref()
+            .map(|e| e.as_ref().and_then(Error::not_solid_test)),
+        [
+            Some(SolidTest::NotManifold),
+            Some(SolidTest::PointersInvalid),
+            Some(SolidTest::VolumeNegative),
         ]
     );
     assert_eq!(bodies.each_ref().map(|b| b.to_smb(true).unwrap()), before);
@@ -779,7 +897,7 @@ fn scramble(br: &mut Brep) {
 }
 
 /// A refused edit leaves the body exactly as it came in: a result with no faces
-/// ([`Error::Empty`]), a solid's result that is no solid ([`Error::NotSolid`]), and a kernel
+/// ([`Error::Empty`]), a solid's result that is no solid ([`Error::NotSolidBecause`]), and a kernel
 /// error after the body was edited. Each edit first changes what the body carries.
 #[test]
 fn a_refused_edit_leaves_the_body_as_it_was() {
@@ -804,7 +922,10 @@ fn a_refused_edit_leaves_the_body_as_it_was() {
         Ok(finish(k, sheet, expect)?.map(|r| *br = r))
     })
     .unwrap();
-    assert_eq!(opened, Err(Error::NotSolid));
+    assert_eq!(
+        opened,
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(as_it_is(&b), before);
     let failed: crate::Result<()> = with_body("fails after an edit", &b, |_, br| {
         scramble(br);
@@ -868,7 +989,7 @@ fn an_edit_without_a_snapshot_is_refused_up_front() {
 }
 
 /// An operation that makes a solid from a sheet states it ([`Expect::SOLID`]): a sheet's
-/// result that is no solid is `NotSolid`, the body as it came in.
+/// result that is no solid is `NotSolidBecause(NotManifold)`, the body as it came in.
 #[test]
 fn a_result_stated_solid_must_be_one() {
     all_fixes();
@@ -880,7 +1001,10 @@ fn a_result_stated_solid_must_be_one() {
         Ok(finish(k, sheet, Expect::SOLID)?.map(|r| *br = r))
     })
     .unwrap();
-    assert_eq!(r, Err(Error::NotSolid));
+    assert_eq!(
+        r,
+        Err(Error::NotSolidBecause(crate::SolidTest::NotManifold))
+    );
     assert_eq!(b.to_smb(false).unwrap(), before);
 }
 
@@ -913,6 +1037,527 @@ fn a_body_goes_to_the_record_and_back_in_record_order() {
         Body::from_record(&bad, true),
         Err(Error::Record(_))
     ));
+}
+
+/// A real boundary crossing the cylinder's base cut must be split on both rims. The
+/// 90-degree, radius-5, height-3 sheet becomes two 45-degree faces on one shell, sharing
+/// the new ruling; its four original boundaries become six pieces, none discarded.
+#[test]
+fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2);
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    // De Casteljau at half of the quarters on either side of the cut: these are
+    // pieces of the surface's own circle, on its parameters 3.5 .. 4.5, not a fit.
+    let average = |a: [f64; 3], b: [f64; 3]| std::array::from_fn(|d| 0.5 * (a[d] + b[d]));
+    let (left, right) = (average(ring[7], ring[8]), average(ring[0], ring[1]));
+    let (lo, hi) = (
+        average(average(ring[6], ring[7]), left),
+        average(right, average(ring[1], ring[2])),
+    );
+    let arc = |z: f64| Curve::RationalSpline {
+        knots: vec![3.5, 3.5, 3.5, 4.0, 4.0, 4.5, 4.5, 4.5],
+        homogeneous: [lo, left, ring[8], right, hi]
+            .map(|p| [p[0], p[1], z * p[2], p[2]])
+            .to_vec(),
+    };
+    let point = |p: [f64; 3], z| [p[0] / p[2], p[1] / p[2], z];
+    let vertices = [point(lo, 0.0), point(hi, 0.0), point(hi, h), point(lo, h)]
+        .map(|point| Vertex {
+            point,
+            tolerance: 1e-6,
+        })
+        .to_vec();
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    // Degree-one B-splines keep the ruling's parameter in [0, h], just like v.
+    // A record Line's vector is end - start per unit parameter: [0, h] would
+    // otherwise traverse this height-h vector h times.
+    let ruling = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    let curves = [arc(0.0), ruling(1, 2), arc(h), ruling(0, 3)];
+    let intervals = [[3.5, 4.5], [0.0, h], [3.5, 4.5], [0.0, h]];
+    let ends = [[0, 1], [1, 2], [3, 2], [0, 3]];
+    let directions = [true, true, false, false];
+    let pc = [
+        [[3.5, 0.0], [4.5, 0.0]],
+        [[4.5, 0.0], [4.5, h]],
+        [[3.5, h], [4.5, h]],
+        [[3.5, 0.0], [3.5, h]],
+    ];
+    let edges = curves
+        .into_iter()
+        .enumerate()
+        .map(|(i, curve)| Edge {
+            curve,
+            nurbs: None,
+            interval: intervals[i],
+            vertices: ends[i],
+            tolerance: 1e-6,
+            uses: vec![EdgeUseRef {
+                face: 0,
+                r#loop: 0,
+                position: i as u32,
+                upper: !directions[i],
+            }],
+        })
+        .collect();
+    let boundary = (0..4)
+        .map(|i| OrientedEdge {
+            edge: i as u32,
+            forward: directions[i],
+            pcurve: Curve2::Spline {
+                knots: vec![
+                    intervals[i][0],
+                    intervals[i][0],
+                    intervals[i][1],
+                    intervals[i][1],
+                ],
+                points: pc[i].to_vec(),
+            },
+        })
+        .collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: boundary }],
+        }],
+        edges,
+        vertices,
+    };
+    crate::record_check::validate(&source).unwrap();
+    crate::record_check::agreement(&source).unwrap();
+    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
+        .unwrap()
+        .unwrap();
+    assert_eq!(origins, [0, 0]);
+    assert_eq!(completed.shells.len(), 1);
+    assert_eq!(
+        (
+            completed.faces.len(),
+            completed.edges.len(),
+            completed.vertices.len()
+        ),
+        (2, 7, 6)
+    );
+    crate::record_check::validate(&completed).unwrap();
+    crate::record_check::agreement(&completed).unwrap();
+    // The two 45-degree patches occupy [3.5, 4] and [0, 0.5], respectively.
+    // A seam copy left on the opposite side would inflate a face's UV domain
+    // to a full period even though its 3D boundary still encloses only 45 degrees.
+    for face in &completed.faces {
+        assert!((face.domain[0][1] - face.domain[0][0] - 0.5).abs() < 1e-9);
+        assert!(face.domain[0][0] >= -1e-9 && face.domain[0][1] <= 4.0 + 1e-9);
+    }
+    let seam = completed.edges.iter().find(|e| e.uses.len() == 2).unwrap();
+    assert_ne!(seam.uses[0].face, seam.uses[1].face);
+    // The inserted curve-on-surface must be stored as its exact iso B-spline,
+    // retaining its own edge parameter rather than the surface's [0, h].
+    assert!(matches!(
+        seam.nurbs.as_ref().unwrap_or(&seam.curve),
+        Curve::Spline { .. } | Curve::RationalSpline { .. }
+    ));
+    if let Curve::Spline { knots, .. } | Curve::RationalSpline { knots, .. } =
+        seam.nurbs.as_ref().unwrap_or(&seam.curve)
+    {
+        // This clamped ruling's form must retain the seam parameter, not height.
+        assert_eq!(knots.first(), Some(&seam.interval[0]));
+        assert_eq!(knots.last(), Some(&seam.interval[1]));
+    }
+    assert_eq!(seam.interval, [0.0, 1.0]);
+    for &v in &seam.vertices {
+        let [x, y, z] = completed.vertices[v as usize].point;
+        assert!((x - r).abs() < 1e-9 && y.abs() < 1e-9);
+        assert!(z.abs() < 1e-9 || (z - h).abs() < 1e-9);
+    }
+    assert!(crate::pcurve::complete_periodic_seams(&completed)
+        .unwrap()
+        .is_none());
+    let (body, _) = Body::from_record(&completed, true).unwrap();
+    let check = body.check(CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+}
+
+/// #20575: a seam whose pcurve overshoots the base cut by a sliver (a surface fitted a little
+/// off its edges) is marked for replacement. Here deleting it leaves a missing seam the
+/// classification does find, so the natural seam is inserted in its place: the face stays one
+/// face of five edges, a seam used twice, and the completed record is valid and agrees with
+/// itself. (Where deleting it finds nothing missing the seam is kept; see the coil-wire tests
+/// in the kernel's STEP import.)
+#[test]
+fn periodic_seam_completion_replaces_a_seam_that_overshoots_the_cut() {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w, over) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2, 5e-5);
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    let arc = |from: usize, z: f64| Curve::RationalSpline {
+        knots: [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0]
+            .map(|k| k + 2.0 * (from / 4) as f64)
+            .to_vec(),
+        homogeneous: ring[from..=from + 4]
+            .iter()
+            .map(|p| [p[0], p[1], z * p[2], p[2]])
+            .collect(),
+    };
+    let vertices = [[r, 0.0, 0.0], [-r, 0.0, 0.0], [r, 0.0, h], [-r, 0.0, h]]
+        .map(|point| Vertex {
+            point,
+            tolerance: 1e-3,
+        })
+        .to_vec();
+    let line = |a: usize, b: usize| Curve::Spline {
+        knots: vec![0.0, 0.0, h, h],
+        points: vec![vertices[a].point, vertices[b].point],
+    };
+    // Edges, numbered as the loop meets them: bottom halves 0 and 1, the seam 2, top halves 3
+    // and 4.
+    let curves = [arc(0, 0.0), arc(4, 0.0), line(0, 2), arc(4, h), arc(0, h)];
+    let intervals = [[0.0, 2.0], [2.0, 4.0], [0.0, h], [2.0, 4.0], [0.0, 2.0]];
+    let ends = [[0, 1], [1, 0], [0, 2], [3, 2], [2, 3]];
+    // The loop: the bottom left to right, the seam up (its use at the cut's high copy), the
+    // top right to left, the seam down (its use at the low copy).
+    let uses = [
+        (0, true),
+        (1, true),
+        (2, true),
+        (3, false),
+        (4, false),
+        (2, false),
+    ];
+    let line2 = |a: [f64; 2], b: [f64; 2], interval: [f64; 2]| Curve2::Spline {
+        knots: vec![interval[0], interval[0], interval[1], interval[1]],
+        points: vec![a, b],
+    };
+    let pcurves = [
+        line2([0.0, 0.0], [2.0, 0.0], [0.0, 2.0]),
+        line2([2.0, 0.0], [4.0, 0.0], [2.0, 4.0]),
+        line2([4.0, 0.0], [4.0 + over, h], [0.0, h]),
+        line2([2.0, h], [4.0, h], [2.0, 4.0]),
+        line2([0.0, h], [2.0, h], [0.0, 2.0]),
+        line2([0.0, 0.0], [0.0, h], [0.0, h]),
+    ];
+    let edges = curves
+        .into_iter()
+        .enumerate()
+        .map(|(e, curve)| Edge {
+            curve,
+            nurbs: None,
+            interval: intervals[e],
+            vertices: ends[e],
+            tolerance: 1e-3,
+            uses: uses
+                .iter()
+                .enumerate()
+                .filter(|(_, u)| u.0 == e)
+                .map(|(position, u)| EdgeUseRef {
+                    face: 0,
+                    r#loop: 0,
+                    position: position as u32,
+                    upper: !u.1,
+                })
+                .collect(),
+        })
+        .collect();
+    let boundary = uses
+        .iter()
+        .zip(pcurves)
+        .map(|(u, pcurve)| OrientedEdge {
+            edge: u.0 as u32,
+            forward: u.1,
+            pcurve,
+        })
+        .collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: boundary }],
+        }],
+        edges,
+        vertices,
+    };
+    crate::record_check::validate(&source).unwrap();
+    let mut kernel = solidcore::Kernel::default();
+    let (mut body, order) = solidcore_convert::brep::to_kernel(&mut kernel, &source, true).unwrap();
+    let face = order.faces[0];
+    let pieces =
+        solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, face)
+            .unwrap();
+    assert_eq!(pieces.map(|p| p.len()), Some(1));
+    let (back, _) = solidcore_convert::brep::to_record(&mut kernel, &mut body).unwrap();
+    assert_eq!((back.faces.len(), back.edges.len()), (1, 5));
+    assert!(
+        back.edges.iter().any(|e| e.uses.len() == 2),
+        "the seam is used twice"
+    );
+    crate::record_check::validate(&back).unwrap();
+    crate::record_check::agreement(&back).unwrap();
+    let domain = back.faces[0].domain;
+    assert!(
+        domain[0][0] >= -1e-9 && domain[0][1] <= 4.0 + 1e-9,
+        "{domain:?}"
+    );
+}
+
+/// A wall of a closed periodic surface, bounded by two rims each made of four quarter arcs. A
+/// rim's trims are lifted continuously from u = 0.5 to u = 4.5, so its last arc crosses the cut
+/// (u = 4) at the middle of its parameter, and the seam has to split it there. Completing the
+/// seams rebuilds the trims of the uses at the cut; every completed trim must still run over its
+/// own edge's interval, which the record's validity check requires (an arc is not shortened, and
+/// no trim covers only part of it).
+#[test]
+fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
+    use solidcore_record::brep::{
+        Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
+        Region, Shell, Surface, Vertex, VERSION,
+    };
+
+    all_fixes();
+    let (r, h, w) = (5.0, 3.0, std::f64::consts::FRAC_1_SQRT_2);
+    // The surface's circle: homogeneous (x, y, weight) at each 45 degrees from the cut.
+    let ring = [
+        [r, 0.0, 1.0],
+        [r * w, r * w, w],
+        [0.0, r, 1.0],
+        [-r * w, r * w, w],
+        [-r, 0.0, 1.0],
+        [-r * w, -r * w, w],
+        [0.0, -r, 1.0],
+        [r * w, -r * w, w],
+        [r, 0.0, 1.0],
+    ];
+    let surface = Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 2., 2., 3., 3., 4., 4., 4.],
+        v_knots: vec![0., 0., h, h],
+        homogeneous: ring
+            .iter()
+            .map(|p| vec![[p[0], p[1], 0.0, p[2]], [p[0], p[1], h * p[2], p[2]]])
+            .collect(),
+    };
+    // Arc `q` is the surface's own circle over u in [q + 0.5, q + 1.5], found by halving its
+    // spans, so each arc of the last crosses nothing but the last, which crosses the cut at its
+    // middle. The edge's parameter is an unrelated affine image of u, as a file's would be.
+    let average =
+        |a: [f64; 3], b: [f64; 3]| -> [f64; 3] { std::array::from_fn(|d| 0.5 * (a[d] + b[d])) };
+    let at = |i: usize| ring[i % 8];
+    let net = |q: usize| {
+        let m = q + 1;
+        let (p0, p1, p2, p3, p4) = (
+            at(2 * m - 2),
+            at(2 * m - 1),
+            at(2 * m),
+            at(2 * m + 1),
+            at(2 * m + 2),
+        );
+        let (left, right) = (average(p1, p2), average(p2, p3));
+        [
+            average(average(p0, p1), left),
+            left,
+            p2,
+            right,
+            average(right, average(p3, p4)),
+        ]
+    };
+    let interval = |_: usize| [0.5, 23.0 / 54.0 + 0.5];
+    let arc = |q: usize, z: f64| {
+        let [t0, t1] = interval(q);
+        let tm = 0.5 * (t0 + t1);
+        Curve::RationalSpline {
+            knots: vec![t0, t0, t0, tm, tm, t1, t1, t1],
+            homogeneous: net(q).map(|p| [p[0], p[1], z * p[2], p[2]]).to_vec(),
+        }
+    };
+    // Records number edges and vertices in first-appearance order: the bottom rim's arcs
+    // 0..4 in loop order, then the top rim's, which runs against u (arc 3 first).
+    let edge_of = |q: usize, top: bool| if top { 7 - q } else { q };
+    let vertex_of = |q: usize, top: bool| if top { [5, 7, 6, 4][q % 4] } else { q % 4 };
+    let vertices = (0..8)
+        .map(|i| {
+            let (q, top) = if i < 4 {
+                (i, false)
+            } else {
+                ([3, 0, 2, 1][i - 4], true)
+            };
+            let p = net(q)[0];
+            Vertex {
+                point: [p[0] / p[2], p[1] / p[2], if top { h } else { 0.0 }],
+                tolerance: 1e-6,
+            }
+        })
+        .collect();
+    let mut edges: Vec<Edge> = Vec::new();
+    for i in 0..8 {
+        let (top, q) = if i < 4 { (false, i) } else { (true, 7 - i) };
+        edges.push(Edge {
+            curve: arc(q, if top { h } else { 0.0 }),
+            nurbs: None,
+            interval: interval(q),
+            vertices: [vertex_of(q, top) as u32, vertex_of(q + 1, top) as u32],
+            tolerance: 1e-6,
+            uses: vec![EdgeUseRef {
+                face: 0,
+                r#loop: u32::from(top),
+                position: if top { i - 4 } else { i } as u32,
+                upper: top,
+            }],
+        });
+    }
+    let used = |q: usize, top: bool| {
+        let [t0, t1] = interval(q);
+        let v = if top { h } else { 0.0 };
+        OrientedEdge {
+            edge: edge_of(q, top) as u32,
+            forward: !top,
+            pcurve: Curve2::Spline {
+                knots: vec![t0, t0, t1, t1],
+                points: vec![[q as f64 + 0.5, v], [q as f64 + 1.5, v]],
+            },
+        }
+    };
+    // The bottom rim runs along u, the top rim against it, the wall on the left of both.
+    let bottom = (0..4).map(|q| used(q, false)).collect();
+    let top = (0..4).rev().map(|q| used(q, true)).collect();
+    let source = Record {
+        version: VERSION,
+        tolerance: 1e-6,
+        regions: vec![Region {
+            shells: vec![0],
+            void: false,
+        }],
+        shells: vec![Shell::Faces {
+            faces: vec![OrientedFace {
+                face: 0,
+                forward: true,
+            }],
+            wires: Vec::new(),
+        }],
+        faces: vec![Face {
+            surface,
+            nurbs: None,
+            domain: [[0.0, 4.0], [0.0, h]],
+            loops: vec![Loop::Edges { edges: bottom }, Loop::Edges { edges: top }],
+        }],
+        edges,
+        vertices,
+    };
+    // (Not `agreement`: a rim lifted round the whole period jumps by it where its loop closes,
+    // which is what the import's completion removes.)
+    crate::record_check::validate(&source).unwrap();
+    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
+        .unwrap()
+        .unwrap();
+    assert!(origins.iter().all(|&face| face == 0));
+    for face in &completed.faces {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let edge = &completed.edges[u.edge as usize];
+                let span = u.pcurve.interval().unwrap();
+                assert!(
+                    (span[0] - edge.interval[0]).abs() < 1e-9
+                        && (span[1] - edge.interval[1]).abs() < 1e-9,
+                    "edge {}: its trim runs over {span:?}, the edge over {:?}",
+                    u.edge,
+                    edge.interval
+                );
+            }
+        }
+    }
+    crate::record_check::validate(&completed).unwrap();
+    crate::record_check::agreement(&completed).unwrap();
+    assert!(crate::pcurve::passes_import_checks(&completed));
+    // A completion that leaves a trim over only the first half of its edge's interval, as
+    // rebuilding a split edge's trim by sampling did for a real model, is refused by the
+    // record's validity check, so the import keeps the record it had.
+    let mut short = completed.clone();
+    let Loop::Edges { edges } = &mut short.faces[0].loops[0] else {
+        panic!("the wall's first loop is an edge loop");
+    };
+    let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+        &mut edges[0].pcurve;
+    let (first, last) = (knots[0], knots[knots.len() - 1]);
+    for t in knots.iter_mut().filter(|t| **t == last) {
+        *t = 0.5 * (first + last);
+    }
+    assert!(crate::record_check::validate(&short).is_err());
+    assert!(!crate::pcurve::passes_import_checks(&short));
+    let (body, _) = Body::from_record(&completed, true).unwrap();
+    let check = body.check(CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
 }
 
 /// A record's structure is checked before the kernel sees it: a use's interval outside its

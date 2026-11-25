@@ -33,12 +33,40 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### 2D Timeline
+
+A view of the timeline that draws each feature in the row of the component it changes, with one
+column for each step.
+
+- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+  behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
+- **Don't use:** 2D history, matrix timeline.
+- **Elsewhere:** multi-track timeline.
+- **For translators:** not a 2D sketch. Keep "2D" as written.
+
 ### abbe number
 
 Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
 
 - **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
 - **For translators:** an optical material quantity, not a sample or photon count.
+
+### airfoil
+
+The cross-section shape of a wing, blade or fin, published as points along its outline with the
+chord running from 0 to 1.
+
+A file of those points (`.dat`, in the Selig or the Lednicer layout) is inserted into a sketch as
+one fit point spline through every point, scaled to the chord. The *chord* is the straight line
+from the leading edge (the nose) to the trailing edge; the *trailing edge* is open when the file's
+first and last point are apart, and a line then closes the profile.
+
+- **In SolidCraft:** `sketch.insert_airfoil`; its `chord`, `pivot`, `flip` and `format` keys; the
+  reply's `trailing_edge`, `te_gap`, `deviation` and `bulge`.
+- **Don't use:** profile (a sketch's closed region), section (a loft's or a view's), wing shape.
+- **Elsewhere:** aerofoil (UK), airfoil section, foil.
+- **For translators:** the aerodynamic shape, not a sketch profile and not a loft section; UK
+  English says aerofoil.
 
 ### appearance
 
@@ -52,6 +80,29 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Don't use:** look, colour (for the whole appearance), render material.
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
+
+### assembly track
+
+The part of the 2D Timeline that lists a design's joints in order, with a row for each component.
+
+- **In SolidCraft:** the "Assembly & Joints" heading of the 2D Timeline.
+- **Don't use:** joint timeline, assembly history.
+- **Elsewhere:** joint track.
+- **For translators:** not an assembly, which is a design with several components.
+
+### base feature
+
+A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
+
+A base feature has no parameters to edit. Its bodies are changed by direct edits after it, such as
+Press Pull, Delete Face and Move Face.
+
+- **In SolidCraft:** the Import feature that `file.insert_step` adds, and the one Remove History
+  (`body.remove_history`) puts in place of the features that built only that body. Its B-rep is
+  kept in the design file as a STEP part of its own.
+- **Don't use:** dumb solid, frozen feature.
+- **Elsewhere:** base feature, dumb solid, imported body.
+- **For translators:** not a base flange of sheet metal, and not a base sketch.
 
 ### bill of materials
 
@@ -81,8 +132,12 @@ There are five:
 - *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
   what it holds, only the purchased components are listed, and only in a list of every part.
 
+One occurrence can have a type of its own, which replaces its component's for that occurrence
+only.
+
 - **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
-  `component.metadata` reads; the `bom_type` of each `assembly.bom` row.
+  `component.metadata` reads; `occurrence.bom_type` and an occurrence's `bom_type` design-file
+  key; the `bom_type` of each `assembly.bom` row.
 - **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
   made").
 - **Elsewhere:** BOM structure, BOM type.
@@ -180,6 +235,16 @@ They are listed together in the browser's *Construction* folder.
 - **Don't use:** "construction" on its own where it could mean a *construction entity*; work plane.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
+
+### continuous member
+
+One physical length of structural stock following a connected tangent path of straight lines
+and circular bends.
+
+- **In SolidCraft:** `frame.member` with `continuous: true`; the selected curves are saved in
+  path order and produce one body, with its name pinned to the feature's `$path` key.
+- **For translators:** a member group can contain several separate stock pieces; selecting a
+  group does not join those pieces into one length of stock.
 
 ### curve
 
@@ -299,6 +364,59 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### item number
+
+The number that names a row of a bill of materials, the one a parts list and a balloon show.
+
+Until a bill of materials view is numbered, it is the row's place in the list and can change.
+Once the view is numbered it is saved with the row, kept when the row's part number changes, and
+a new row takes the next number at its level. A row listed under another reads as both numbers
+(2.1).
+
+- **In SolidCraft:** each `assembly.bom` row's `item`, with `provisional`, `locked` and
+  `duplicate`; `assembly.bom.renumber` and `assembly.bom.item.set`; the design file's
+  `assembly.item_numbers`.
+- **Don't use:** position, balloon number, find number; index.
+- **Elsewhere:** item number, item, find number, balloon number.
+- **For translators:** a label, not a quantity or a count; not a part number.
+
+### leader
+
+The line from a note to what it points at on the model. It is worked out from where that thing is
+now and is never saved: if the thing is lost, the note stays and has no leader.
+
+- **In SolidCraft:** `drawing.note.inspect`'s `point`, where the leader ends.
+- **Don't use:** arrow (the end of the line, on a balloon or a dimension); pointer.
+- **Elsewhere:** leader, leader line.
+- **For translators:** a drawn line; not a person who leads.
+
+### library entry
+
+One material or one appearance kept in a *material library*, known by an id that stays the same
+when the entry is edited.
+
+Each edit gives the entry a new revision. A library folder holds one file per entry; the file's
+name is only a label.
+
+- **In SolidCraft:** `solidcraft_io::library::Listed` and the catalog's `Entry` (`id`, `revision`,
+  `provenance`, `definition`); the `materials/` and `appearances/` folders of a library folder.
+- **Don't use:** item, record, preset (a starter appearance's own word).
+- **Elsewhere:** library material, library appearance, asset.
+- **For translators:** one thing kept in a library; not a line of a list or a table.
+
+### library place
+
+Where SolidCraft reads material libraries from: the built-in library, one library folder, or a
+folder of library folders.
+
+A place that can't be read stays listed, with the reason. Where a library's data came from is
+its provenance, not its place.
+
+- **In SolidCraft:** `solidcraft_io::library::Place` (`built_in`, `library`, `folder`).
+- **Don't use:** source (that is where the data came from), location, path.
+- **Elsewhere:** library location, library path.
+- **For translators:** a place on a disk or a drive; not a place in a design.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.
@@ -311,6 +429,32 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Don't use:** material for a render or visual material.
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
+
+### material library
+
+A named collection of *materials* and *appearances* kept outside any design, which designs copy
+from.
+
+A design keeps its own copy of what it uses, so a change to a library never changes a design by
+itself. A library folder is marked by its `<Library name>.sclibrary.json` file; the built-in
+library can't be changed.
+
+- **In SolidCraft:** `solidcraft_io::library::Library` and `Set`; `library.inspect`, `library.export`
+  and `library.apply`; the `solidcraft-library/2` file and the `solidcraft-library-folder/1`
+  manifest.
+- **Don't use:** catalogue for the library itself (the single-file format is the catalog), pack.
+- **Elsewhere:** material library, material database, appearance library.
+- **For translators:** a collection of materials; not a code library or a book library.
+
+### modeling track
+
+The part of the 2D Timeline that lists a design's features in timeline order, with a row for each
+component.
+
+- **In SolidCraft:** the "Modeling Features" heading of the 2D Timeline.
+- **Don't use:** feature track, feature lane.
+- **Elsewhere:** feature track.
+- **For translators:** not the Model workspace or its toolbar tab.
 
 ### moment of inertia
 
@@ -328,6 +472,44 @@ them. The *first moments* are the mass times the centre of mass.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
 
+### movable corridor
+
+The range of timeline steps where the selected feature can move without coming before a feature
+it depends on or after a feature that depends on it.
+
+- **In SolidCraft:** the green `[ ... ]` brackets of the 2D Timeline; a feature dropped on a step
+  outside its movable corridor stays where it was, and the target cell turns red while the pointer
+  is over such a step. A pointer past either end of the grid counts as the first or last step, so a
+  drop there moves the feature to that step when it is inside the corridor.
+- **Don't use:** safe range, drop range, corridor on its own in labels.
+- **Elsewhere:** reorder range.
+- **For translators:** not a path, a sweep or a hallway.
+
+### multi-trim
+
+Cutting a frame member by the shapes of the other members it meets, so that it fits against them.
+
+A frame's corner cuts, copes, fitted ends, the pieces where members cross and the notches where they
+overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame is finished.
+
+- **In SolidCraft:** `frame.multi_trim` ("Multi-Trim Corner"); the Frame Member's `corners`
+  parameter and design-file key.
+- **Don't use:** cope (one kind of cut it makes), trim on its own.
+- **Elsewhere:** member trim, coping, end fitting.
+- **For translators:** not a sketch's trim of a curve and not a surface trim.
+
+### note
+
+Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
+with a leader. A note on a view moves with the view. Its alignment (left, centre or right, as a title block's) says which end of its text sits at its place, each line standing that way. A note saved before alignments has none: its block is centred and its lines start at the block's left edge, as they always did.
+
+- **In SolidCraft:** `drawing.note.add`, `drawing.note.edit` and `drawing.note.inspect`; a drawing's
+  `notes`.
+- **Don't use:** comment (that is for people working on a design); annotation (the wider kind of
+  thing that includes dimensions and symbols).
+- **Elsewhere:** note, general note, text.
+- **For translators:** text printed on the drawing; not a remark to a colleague.
+
 ### occurrence
 
 One placed copy of a component inside its parent component.
@@ -336,7 +518,8 @@ A component can have several occurrences. Moving an occurrence moves only that c
 component changes every copy. The browser names occurrences with a number, such as `Bolt M20:3`.
 
 - **In SolidCraft:** `occurrence.copy`, `occurrence.move`, `occurrence.drag`, `occurrence.ground`,
-  `occurrence.properties`; the `occurrences` design-file key; the `path` of occurrence ids.
+  `occurrence.properties`, `occurrence.bom_type`; the `occurrences` design-file key; the `path` of
+  occurrence ids.
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
@@ -380,6 +563,17 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
+### pattern extent
+
+The distance from the first pattern instance to the last along one direction of a rectangular
+pattern. With Quantity and Extent the spacing is worked out from it; with Spacing and Extent
+the quantity is.
+
+- **In SolidCraft:** `solid.pattern.rectangular`'s `extent1` and `extent2`, chosen by the
+  direction's Distance Type (`distance1`, `distance2`).
+- **Don't use:** span, length (for the setting); total length is fine in a sentence.
+- **For translators:** a length along the row, not an extrude's Extent (how far it reaches).
+
 ### pattern instance
 
 One copy that a pattern makes of its features, bodies or sketch entities.
@@ -419,6 +613,20 @@ at Z = 0, with the centre of mass over the origin; the design itself does not mo
 - **Elsewhere:** place on face, lay flat, bed face.
 - **For translators:** the face the part stands on while it prints, not the printer's bed.
 
+### quantity
+
+What one placement of a component means in a bill of materials: a number of pieces or a length.
+
+Without one, a placement is one piece and its row's count says it all. With one, a row adds up its
+placements: a 2.5 m cable placed three times is 7.5 m. It is an expression, so it can follow the
+design's parameters.
+
+- **In SolidCraft:** the `bom_quantity` part property, which `component.metadata.set` and
+  `component.create` set; each `assembly.bom` row's `quantity` and `quantity_unit`.
+- **Don't use:** amount, count (for a quantity).
+- **Elsewhere:** quantity, BOM quantity, base quantity.
+- **For translators:** not a count of placements (`count`).
+
 ### reference edge
 
 A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
@@ -435,6 +643,17 @@ feature follows its edges when the part changes.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
 
+### restore state
+
+The unsuppress mode in which unsuppressing a feature in the 2D Timeline leaves suppressed the
+dependents that were suppressed separately there in the same session.
+
+- **In SolidCraft:** `timeline_2d_unsuppress_mode: "restore_state"` (the default); **Unsuppress:
+  Restore State** behind the 2D Timeline's settings button. The other mode is `unsuppress_all`.
+- **Don't use:** restore, undo suppression.
+- **Elsewhere:** keep suppression state.
+- **For translators:** not Undo and not opening a saved version of a design.
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
@@ -447,6 +666,21 @@ are kept, not deleted.
 - **Elsewhere:** rollback bar, rollback marker, end-of-part marker.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
+
+### section plane
+
+A plane of a Section Analysis; the view hides what lies beyond any section plane.
+
+One section plane hides its normal's side, and the view keeps what every plane keeps: two square
+to each other keep a quarter, three an eighth. A section has at most six.
+
+- **In SolidCraft:** `inspect.section` (`plane`, `add`, `replace`, `remove`, `hide`, `show`, `folder`, `clear`); the
+  `section_plane` of a `view.pick` hit on a cut face; the viewport menu's Section View, Edit Section View
+  and Turn Off Section View; the Analysis folder's Section 1, Section 2 rows.
+- **Don't use:** cutting plane, clip plane, section view (for the plane).
+- **Elsewhere:** section plane, cutting plane, clipping plane.
+- **For translators:** a view-only cut that changes no geometry, not a Split Body or a Plane
+  feature.
 
 ### settings profile
 
@@ -498,6 +732,20 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### standard steel size
+
+A named steel section from a published standard, such as the channel `RSC 203x89` or the hollow
+section `SHS 100x100x5`, that a frame member can be made of without typing its dimensions.
+
+Its frame profile carries the standard's dimensions; a taper flange channel's flanges slope by its
+flange slope.
+
+- **In SolidCraft:** `frame.profile.list` (`sizes`), `profile: {"size": …}` in `frame.member`,
+  `frame.profile.properties` and `frame.profile.insert`; a channel's `flange_slope`.
+- **Don't use:** catalogue profile, library profile (for the size).
+- **Elsewhere:** standard section, section size, section designation.
+- **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
 ### thin-film interference
 
 Interference between coherent optical waves reflected at the interfaces of a thin layer.
@@ -542,6 +790,18 @@ and the MCP camera take in radians.
 - **Elsewhere:** view orientation, azimuth and elevation.
 - **For translators:** the view's pitch is a tilt, not a thread's or a pattern's pitch.
 
+### virtual component
+
+A component with no geometry, listed in bills of materials with its quantity: grease, paint, a
+label, packaging.
+
+It holds no bodies, sketches or components and can't be the active component.
+
+- **In SolidCraft:** the `virtual` part property; `component.create {virtual: true}`.
+- **Don't use:** phantom (a phantom has no row), reference, empty component.
+- **Elsewhere:** virtual component, virtual part, non-geometric part.
+- **For translators:** not a *bill of materials type*.
+
 ### web browser
 
 A program that shows web pages, such as the one that runs SolidCraft's web build.
@@ -550,6 +810,16 @@ A program that shows web pages, such as the one that runs SolidCraft's web build
 - **Don't use:** browser on its own.
 - **For translators:** not the *browser* panel. Where a language uses one word for both, use the
   CAD word for the panel.
+
+### weld gap
+
+The space left between frame members where they meet, for a weld to fill.
+
+- **In SolidCraft:** the `gap` parameter of `frame.member` and `frame.multi_trim` and of each
+  `corners` entry, and the same design-file keys; the Frame Member dialog's Gap rows.
+- **Don't use:** clearance; gap on its own where it could mean a hem gap.
+- **Elsewhere:** weld gap, root gap, root opening.
+- **For translators:** not a sheet metal hem gap and not a clearance.
 
 ## Words with more than one meaning
 
@@ -563,7 +833,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
-| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker", "Remove History" (`body.remove_history`) |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
@@ -572,10 +842,16 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
+| | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
+| Tab | flat material a sheet metal Tab adds to a panel | tab (sheet metal) | `sheet.tab`, `cmd.sheet_tab` |
+| | a page of the ribbon or of a document strip | tab (ribbon, document) | the ribbon tabs, the document tabs |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
 | | a fillet | *fillet* | `solid.fillet` |
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
@@ -591,6 +867,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Mounting plate
+
+A separate, constant-thickness plate attached to a structural member's planar face,
+used as a base plate or bolted end plate. A bolt pattern describes the through holes
+in the plate; creating one does not drill or join the supporting member.
 
 ## Two commands, one label
 
@@ -613,3 +895,7 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Gusset
+
+A reinforcing plate fitted between two structural support faces. SolidCraft keeps it as a separate fabrication body with its own dimensions and persistent attachments.

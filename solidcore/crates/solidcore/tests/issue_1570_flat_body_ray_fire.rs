@@ -21,9 +21,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::geom::object::ObjectRef;
 use solidcore::math::Vec3;
 use solidcore::topology::brep::mirror::mirror;
 use solidcore::topology::brep::p10::TopologyEnv;
@@ -31,7 +30,7 @@ use solidcore::topology::brep::p5::transform;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// `Solids/revolution.smb` at the pinned upstream commit, vendored verbatim
 /// (`data/reader-regressions/README.md`).
@@ -43,10 +42,7 @@ fn revolution(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

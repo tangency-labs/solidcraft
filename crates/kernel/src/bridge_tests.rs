@@ -4,6 +4,25 @@
 use super::*;
 use crate::{box_solid, cylinder};
 
+#[test]
+fn nearest_distance_uses_a_point_on_the_curve_not_its_chord() {
+    let curve = solidcore_record::brep::Curve::Circle {
+        frame: solidcore_record::brep::Frame { origin: [0.0, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius: 1.0,
+    };
+    let end = std::f64::consts::FRAC_PI_2;
+    let line = ChainLine {
+        curves: vec![(CurveEval::new(&curve).unwrap(), [0.0, end])],
+        samples: vec![
+            Sample { p: Vec3::new(1.0, 0.0, 0.0), s: 0.0, edge: 0, t: 0.0 },
+            Sample { p: Vec3::new(0.0, 1.0, 0.0), s: 2.0_f64.sqrt(), edge: 0, t: end },
+        ],
+        closed: false,
+    };
+    let distance = line.nearest_with_distance(Vec3::new(0.5, 0.5, 0.0)).1.unwrap();
+    assert!((distance - (1.0 - 0.5_f64.sqrt())).abs() < 1e-12, "{distance}");
+}
+
 /// The shape of a bridge's cross-section at the parameter `u`, measured off the finished face (not
 /// from the construction): position, unit tangent, curvature vector and the arclength derivative
 /// of that curvature vector at the start of the cross-section. The samples run inwards from the
@@ -88,6 +107,29 @@ fn loop_of(body: &Body, face: usize) -> Chain {
 fn face_at(body: &Body, at: Vec3) -> usize {
     let r = body.record();
     r.faces.iter().position(|f| SurfaceEval::new(&f.surface).unwrap().project(at, None, 1e-6).is_some()).unwrap()
+}
+
+/// A 600 by 150 mm sheet with crown in both directions. Its height is
+/// 30(x/600)² + 9(y/150)² + 6(y/150)³. At the origin the requested diagonal
+/// crosses the u edge in one direction and the v edge in the other.
+#[test]
+fn a_double_curvature_panel_corner_keeps_its_g3_frame() {
+    let mut points = Vec::new();
+    for (j, height_y) in [0.0, 0.0, 3.0, 15.0].into_iter().enumerate() {
+        for (i, height_x) in [0.0, 0.0, 30.0].into_iter().enumerate() {
+            points.push(Vec3::new(300.0 * i as f64, 50.0 * j as f64, height_x + height_y));
+        }
+    }
+    let knots = [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]];
+    let panel = crate::surfaces::tensor_sheet(&NurbsSurface::new([2, 3], knots, &points, &[1.0; 12]).unwrap()).unwrap();
+    let boundary = chain(&panel, &[Vec3::new(300.0, 0.0, 7.5)]).unwrap();
+    let leave = Vec3::new(1.0, -1.0, 0.0).normalized().unwrap();
+    let frames = frames(&panel, 0, &boundary, leave, 5).unwrap();
+    let corner = frames.iter().find(|f| f.p.len() < 1e-8).unwrap();
+    let expected_bend = 60.0 * (leave.x / 600.0).powi(2) + 18.0 * (leave.y / 150.0).powi(2);
+    let expected_change = 36.0 * (leave.y / 150.0).powi(3);
+    assert!((corner.bend.z - expected_bend).abs() < 1e-10, "{corner:?}");
+    assert!((corner.bend_change.z - expected_change).abs() < 1e-11, "{corner:?}");
 }
 
 #[test]
@@ -248,6 +290,24 @@ fn worst_turn(body: &Body) -> f64 {
             angle_deg(Vec3::new(a.x, a.y, 0.0), Vec3::new(b.x, b.y, 0.0))
         })
         .fold(0.0, f64::max)
+}
+
+#[test]
+fn a_bridge_on_a_rim_chord_reports_the_circular_gap() {
+    let tube = open_tube(0.0, 0.0, 30.0);
+    let rim = ChainLine::of(&tube, &chain(&tube, &rim_at(30.0)).unwrap()).unwrap();
+    let (a, b) = (rim.samples[0].p, rim.samples[1].p);
+    let mid = (a + b) * 0.5;
+    let expected = 10.0 - mid.x.hypot(mid.y);
+    assert!(expected > 1e-5);
+    let row = |dz: f64| -> Vec<Frame> {
+        (0..5)
+            .map(|i| Frame { p: a + (b - a) * (f64::from(i) / 4.0) + Vec3::Z * dz, leave: Vec3::Z, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+            .collect()
+    };
+    let sheet = bridge(&row(0.0), &row(1.0), [Continuity::G0; 2], [0.0; 2]).unwrap();
+    let gap = boundary_gap(&sheet, &rim, false).unwrap();
+    assert!((gap - expected).abs() < 1e-10, "boundary gap {gap}, circular sagitta {expected}");
 }
 
 #[test]

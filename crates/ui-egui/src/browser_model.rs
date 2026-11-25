@@ -21,6 +21,11 @@ thread_local! {
     pub(super) static PLACES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Placements and bodies a design may hold and still have its placements named in the frame
+/// that asks. The walk names a body per placement at about a microsecond each — 3,000 placements
+/// in 4 ms — so a larger design names them on a worker instead of in a frame.
+pub(super) const BODY_PATHS_AT_ONCE: usize = 2_000;
+
 pub(super) struct Model {
     doc: Arc<Document>,
     state: Arc<ModelState>,
@@ -31,8 +36,11 @@ pub(super) struct Model {
     pub features: HashMap<u64, Vec<usize>>,
     pub children: HashMap<u64, Vec<u64>>,
     placements: HashMap<Vec<u64>, Option<Arc<OccurrencePlacement>>>,
-    /// Each placed body's placement path, by the body's world name (built on first use).
-    body_paths: Option<HashMap<String, Vec<u64>>>,
+    /// Each placed body's placement path, by the body's world name (named on first use, on a
+    /// worker for a large design).
+    body_paths: Option<Arc<HashMap<String, Vec<u64>>>>,
+    /// A worker naming this model's placements, while it runs.
+    body_paths_job: Option<std::sync::mpsc::Receiver<Arc<HashMap<String, Vec<u64>>>>>,
     /// The features that built each body, by its model name (worked out on first use, #11945).
     body_features: Option<BTreeMap<String, Vec<u64>>>,
     /// Where each feature and its result are (built on first use, #14850).
@@ -92,13 +100,13 @@ impl Model {
             }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
-                FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,
+                _ if feature.kind.is_construction() => &mut planes,
                 _ => continue,
             };
             index.entry(feature.component).or_default().push(i);
         }
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
-        for occurrence in &session.doc.occurrences {
+        for occurrence in session.doc.active_occurrences() {
             children.entry(occurrence.parent).or_default().push(occurrence.id);
         }
         // Sub-components in the order the design saved for them; the rest follow in placement order.
@@ -116,6 +124,7 @@ impl Model {
             children,
             placements: HashMap::new(),
             body_paths: None,
+            body_paths_job: None,
             body_features: None,
             places: OnceLock::new(),
             made: None,
@@ -231,34 +240,92 @@ impl Model {
         self.placements.entry(path.to_vec()).or_insert_with(|| session.occurrence_placement(path).ok().map(Arc::new)).clone()
     }
 
-    /// The placement a placed body (by its world name) belongs to, as the browser's occurrence
-    /// rows nest; `None` for a body of the top-level design. Every placement is walked once per
-    /// model, as deep and as far as the browser draws them.
-    pub fn body_path(&mut self, session: &Session, body: &str) -> Option<Vec<u64>> {
-        if self.body_paths.is_none() {
-            let mut paths: HashMap<String, Vec<u64>> = HashMap::new();
-            let mut stack: Vec<Vec<u64>> = self.children.get(&0).into_iter().flatten().map(|o| vec![*o]).collect();
-            let mut walked = 0;
-            while let Some(path) = stack.pop() {
-                walked += 1;
-                if walked > 100_000 {
-                    break;
-                }
-                let Some(placement) = self.placement(session, &path) else { continue };
-                for b in &placement.bodies {
-                    paths.entry(b.world.clone()).or_insert_with(|| path.clone());
-                }
-                if path.len() < 64 {
-                    for child in self.children.get(&placement.component).into_iter().flatten() {
-                        let mut next = path.clone();
-                        next.push(*child);
-                        stack.push(next);
-                    }
-                }
-            }
-            self.body_paths = Some(paths);
+    /// Name this model's placements, if nobody has: here while the design is small (the walk
+    /// names each placed body once), else on a worker that wakes `ctx` when it lands. A body
+    /// hovered in a large assembly must not wait for the walk: it takes seconds there, and one
+    /// frame of it froze the window for 14 s on a 100-printer assembly.
+    pub fn start_body_paths(&mut self, session: &Session, ctx: Option<&egui::Context>) {
+        if self.body_paths.is_some() || self.body_paths_job.is_some() {
+            return;
         }
+        // A live drag moves a placement every frame, and each move makes a new model: naming
+        // them again each frame would start a walk a frame. The rows are marked from what was
+        // named before the drag, and from the walk started when it ends.
+        if !session.pending_moves.is_empty() {
+            return;
+        }
+        let (doc, state) = (session.doc.clone(), session.model.state());
+        // Nothing placed has no paths to name, and a small design names them well inside a frame.
+        // The web has no threads either: there the walk runs on the frame, as the picker's
+        // indexes do.
+        if cfg!(target_arch = "wasm32")
+            || doc.occurrences.is_empty()
+            || (doc.occurrences.len() <= BODY_PATHS_AT_ONCE && state.bodies.len() <= BODY_PATHS_AT_ONCE)
+        {
+            let _ = ctx;
+            self.body_paths = Some(Arc::new(solidcraft_engine::occurrences::body_paths(&doc, &state)));
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let ctx = ctx.cloned();
+            let (worker_doc, worker_state) = (doc.clone(), state.clone());
+            let spawned = std::thread::Builder::new().name("browser-body-paths".into()).spawn(move || {
+                let paths = Arc::new(solidcraft_engine::occurrences::body_paths(&worker_doc, &worker_state));
+                if tx.send(paths).is_ok()
+                    && let Some(ctx) = ctx
+                {
+                    ctx.request_repaint();
+                }
+            });
+            if spawned.is_ok() {
+                self.body_paths_job = Some(rx);
+                return;
+            }
+            // No thread to name them on: name them here, as before.
+            self.body_paths = Some(Arc::new(solidcraft_engine::occurrences::body_paths(&doc, &state)));
+        }
+    }
+
+    /// Install the worker's answer if it has landed: true when it did.
+    pub fn poll_body_paths(&mut self) -> bool {
+        let Some(job) = self.body_paths_job.as_ref() else { return false };
+        match job.try_recv() {
+            Ok(paths) => {
+                self.body_paths = Some(paths);
+                self.body_paths_job = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            // The worker went away without an answer: ask again on the next frame.
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.body_paths_job = None;
+                false
+            }
+        }
+    }
+
+    /// The placement a placed body (by its world name) belongs to, as the browser's occurrence
+    /// rows nest; `None` for a body of the top-level design, and until a large design's names
+    /// land from the worker ([`Model::poll_body_paths`]). Every placement is named once per
+    /// model.
+    pub fn body_path(&mut self, session: &Session, body: &str) -> Option<Vec<u64>> {
+        self.start_body_paths(session, None);
+        self.poll_body_paths();
+        self.placed_path(body)
+    }
+
+    /// [`Model::body_path`] once its walk has run for this model (else None).
+    pub fn placed_path(&self, body: &str) -> Option<Vec<u64>> {
         self.body_paths.as_ref()?.get(body).cloned()
+    }
+
+    /// Whether the placements have been named for this model (a worker's answer may still be on
+    /// its way).
+    #[cfg(test)]
+    pub fn body_paths_ready(&self) -> bool {
+        self.body_paths.is_some()
     }
 
     /// Whether [`Model::body_path`] has walked the placements for this model.

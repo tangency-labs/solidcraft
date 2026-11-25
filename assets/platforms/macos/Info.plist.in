@@ -45,9 +45,8 @@
       <key>CFBundleTypeName</key>
       <string>SolidCraft design</string>
       <key>CFBundleTypeExtensions</key>
-      <!-- solidcraft: designs saved before .sc; solvecraft: before the rename (compatibility
-           shims, docs/compatibility.md). -->
-      <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+      <!-- solidcraft: designs saved before .sc (compatibility shim, docs/compatibility.md). -->
+      <array><string>sc</string><string>solidcraft</string></array>
       <key>LSItemContentTypes</key>
       <array><string>io.tangencylabs.solidcraft.design</string></array>
       <key>CFBundleTypeRole</key>
@@ -66,7 +65,7 @@
       <string>Alternate</string>
     </dict>
   </array>
-  <!-- The design type: .sc, and the older .solidcraft and .solvecraft (docs/compatibility.md). -->
+  <!-- The design type: .sc, and the older .solidcraft (docs/compatibility.md). -->
   <key>UTExportedTypeDeclarations</key>
   <array>
     <dict>
@@ -79,7 +78,7 @@
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>
-        <array><string>sc</string><string>solidcraft</string><string>solvecraft</string></array>
+        <array><string>sc</string><string>solidcraft</string></array>
         <key>public.mime-type</key>
         <array><string>application/x-solidcraft</string></array>
       </dict>

@@ -10,6 +10,47 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn boundary_fill_classifies_cells_on_exact_surfaces() {
+    let mut doc = Document::new("Boundary Fill");
+    let cylinder = serde_json::from_value(serde_json::json!({
+        "type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "5", "height": "10", "operation": "new_body"
+    }))
+    .unwrap();
+    doc.add_feature(cylinder, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let tool = model.state().bodies.first().unwrap().name.clone();
+    // The cylinder axis at half height is strictly inside every bounding surface.
+    let fill = doc
+        .add_feature(
+            FeatureKind::BoundaryFill {
+                tools: vec![BodyName(tool)],
+                cells: vec![Position(Vec3::new(0.0, 0.0, 5.0))],
+                operation: Operation::NewBody,
+                remove_tools: true,
+            },
+            None,
+        )
+        .unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(fill).unwrap().error.is_none(), "{:?}", model.results);
+    assert_eq!(model.state().bodies.len(), 1);
+    // A single solid tool is the entire cell: V = πr²h = 250π mm³.
+    let state = model.state();
+    let body = &state.bodies.first().unwrap().body;
+    assert!(!body.is_surface());
+    assert!(rel(measure(body).unwrap().volume, 250.0 * std::f64::consts::PI) < 1e-9);
+    let FeatureKind::BoundaryFill { cells, .. } = &mut doc.feature_mut(fill).unwrap().kind else { panic!("Boundary Fill") };
+    // 3² + 4² = 5²: a point on the tool cannot identify either adjacent cell.
+    *cells = vec![Position(Vec3::new(3.0, 4.0, 5.0))];
+    model.evaluate(&doc);
+    let error = model.result(fill).unwrap().error.as_ref().unwrap();
+    assert!(error.contains("Boundary Fill cell points must be away from tool boundaries"), "{error}");
+    assert_eq!(model.state().bodies.len(), 1, "the original tool is kept on failure");
+}
+
+#[test]
 fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     let mut doc = Document::new("A");
     let first = doc.add_component(Some("A"), 0).unwrap();
@@ -66,6 +107,7 @@ fn plate_doc() -> (Document, u64) {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -74,6 +116,9 @@ fn plate_doc() -> (Document, u64) {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
+                picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -172,6 +217,7 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -180,6 +226,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
+                picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -356,6 +405,42 @@ fn a_saved_model_with_a_long_warning_is_adopted() {
     features.last_mut().unwrap()["warning"] = warning.clone().into();
     let reopened = Model::adopt(&doc, &saved).unwrap();
     assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
+}
+
+/// A sketch a design file puts on a face by its point alone (no face name, no attachment)
+/// follows the nearest flat face that faces its way. When no face is at its point any more, it
+/// still opens on that face's plane, but with a warning (#20518): the `sketch.create` command
+/// refuses the same point, and the file said nothing. A face that only moved along its normal
+/// (the point still on it, seen square to it) gives no warning.
+#[test]
+fn a_sketch_whose_face_point_is_on_no_face_warns() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: None, anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let z = m.state().sketches.iter().find(|s| s.feature == id).unwrap().plane.origin.z;
+        (result.warning.clone(), z)
+    };
+    let (warning, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a point on the top face: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(15.0, Vec3::new(10.0, 10.0, 15.0));
+    assert!(warning.is_none() && (z - 20.0).abs() < 1e-9, "a top face that moved up 5 mm still holds the point: {warning:?} at z {z}");
+    let (warning, z) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0));
+    let warning = warning.unwrap_or_default();
+    assert!(warning.contains("no face is at the point the sketch was placed on, [60, 60, 20]"), "{warning}");
+    assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
 }
 
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
@@ -769,6 +854,716 @@ fn an_edit_in_one_component_recomputes_only_what_reads_it() {
     }
 }
 
+/// A component deleted, or another added before the rest, changes the bodies before the other
+/// components' features and the design's components, none of which they read: each keeps its
+/// result, made again on the model as it is now, and the bodies match an evaluation from scratch.
+#[test]
+fn a_component_deleted_or_added_keeps_the_others_results() {
+    let doc = three_parts(true);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut without = doc.clone();
+    without.remove_component_tree(without.find_component("A").unwrap()).unwrap();
+    m.evaluate(&without);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0, "B's and C's features after A's are kept");
+    assert_eq!(summary(&m.state()), from_scratch(&without));
+    // A new component first in the timeline: only its own features are computed.
+    let mut with = without.clone();
+    let d = with.add_component(Some("D"), 0).unwrap();
+    circle_extrude(&mut with, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    with.features.rotate_right(2);
+    m.evaluate(&with);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 2, "D's sketch and extrude");
+    assert_eq!(summary(&m.state()), from_scratch(&with));
+    // And back (an undo): every result is kept.
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
+/// A body made under the name its feature stores is not reused under another body of that name:
+/// a component added before it that takes the name makes the feature name its body otherwise.
+#[test]
+fn a_stored_name_taken_by_a_body_before_it_is_not_reused() {
+    let doc = three_parts(false);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut taken = doc.clone();
+    let d = taken.add_component(Some("D"), 0).unwrap();
+    // A feature of its own name (feature names are unique) whose body takes C's post's name.
+    circle_extrude(&mut taken, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    let post = taken.find_feature("D post").unwrap().id;
+    taken.feature_mut(post).unwrap().body_names = vec!["C post".into()];
+    taken.features.rotate_right(2);
+    m.evaluate(&taken);
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&taken);
+    let errors = |m: &Model| m.results.iter().map(|r| r.error.clone()).collect::<Vec<_>>();
+    assert_eq!(errors(&m), errors(&fresh));
+    assert_eq!(summary(&m.state()), summary(&fresh.state()));
+    assert!(fresh.state().bodies.iter().any(|b| b.name == "C post" && b.component == d), "D's body has the name C's post stores");
+}
+
+/// What an evaluation shows: each feature's outcome with the bodies after it, the last bodies in
+/// full and the body counter.
+type Shown = (Vec<(u64, Option<String>, Option<String>, Vec<(String, u64)>)>, Vec<(String, u64, i64, Vec<String>)>, usize);
+
+fn shown(m: &Model) -> Shown {
+    let bodies = |st: &ModelState| st.bodies.iter().map(|b| (b.name.clone(), b.component)).collect();
+    // A failed cut's hint at a body of another component follows where that is placed, which the
+    // key of a failure does not hold. Of a body SMLib's check refuses, which one is compared: its
+    // words can differ between two evaluations.
+    let told = |e: &str| {
+        let cut = if e.contains("SMLib's check refuses") { ": the operation failed: SMLib" } else { " in component '" };
+        e.split(cut).next().unwrap_or(e).to_string()
+    };
+    let error = |r: &FeatureResult| r.error.as_deref().map(told);
+    // An import's warning has what its own check of the parts found once that ended, whenever it does.
+    let warning = |r: &FeatureResult| r.warning.clone().filter(|_| r.import_report.is_none());
+    let results = m.results.iter().map(|r| (r.id, error(r), warning(r), bodies(&r.state))).collect();
+    (results, summary(&m.state()), m.state().body_counter)
+}
+
+/// The session's model is what opening the design's file and evaluating it afresh gives.
+fn same_as_opened(m: &Model, doc: &Document, what: &str) {
+    let mut opened = Model::new();
+    opened.no_cache = true;
+    let read = crate::format::read(&doc.to_json()).unwrap();
+    opened.evaluate(&read);
+    settled(&mut opened, &read);
+    let (kept, fresh) = (shown(m), shown(&opened));
+    for (f, (kept, fresh)) in doc.features.iter().zip(kept.0.iter().zip(&fresh.0)) {
+        assert_eq!(kept, fresh, "{what}: feature {} `{}`", f.id, f.name);
+    }
+    assert_eq!(kept, fresh, "{what}");
+}
+
+fn boxed(doc: &mut Document, component: u64, name: &str, x: f64, body_names: &[&str]) -> u64 {
+    let kind = serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+    add_in(doc, component, name, kind);
+    let id = doc.find_feature(name).unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = body_names.iter().map(|n| n.to_string()).collect();
+    id
+}
+
+/// A cut that names another component's body is refused once a body of its own component was asked
+/// to be called that (#12141): the cut that ran before that body was there is not kept.
+#[test]
+fn a_cut_is_not_kept_once_its_target_s_name_is_ambiguous() {
+    let mut doc = Document::new("ambiguous target");
+    let [a, c] = ["A", "C"].map(|n| doc.add_component(Some(n), 0).unwrap());
+    boxed(&mut doc, a, "A box", 0.0, &["X"]);
+    add_in(
+        &mut doc,
+        c,
+        "C cut",
+        serde_json::json!({"type": "cylinder", "base": [5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "20", "operation": "cut"}),
+    );
+    let cut = doc.find_feature("C cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // An added body that makes nothing ambiguous keeps the cut.
+    let mut other = doc.clone();
+    boxed(&mut other, c, "C other", 100.0, &["Y"]);
+    other.features[1..].rotate_right(1);
+    m.evaluate(&other);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 1, "the added box alone");
+    same_as_opened(&m, &other, "an unrelated body added");
+    let mut taken = doc.clone();
+    boxed(&mut taken, c, "C box", 100.0, &["X"]);
+    taken.features[1..].rotate_right(1);
+    m.evaluate(&taken);
+    assert!(m.result(cut).unwrap().error.as_ref().is_some_and(|e| e.contains("ambiguous")), "{:?}", m.result(cut).unwrap().error);
+    same_as_opened(&m, &taken, "the target's name asked for in the cut's component");
+}
+
+/// A New Body that names a body fails once that body is gone, as it does evaluated afresh.
+#[test]
+fn a_new_body_is_not_kept_once_a_body_it_names_is_gone() {
+    let mut doc = Document::new("named by a new body");
+    let x = boxed(&mut doc, 0, "X box", 0.0, &["X"]);
+    let new = boxed(&mut doc, 0, "New", 20.0, &["New"]);
+    doc.feature_mut(new).unwrap().participants = vec!["X".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    doc.delete_feature(x).unwrap();
+    m.evaluate(&doc);
+    assert!(m.result(new).unwrap().error.is_some());
+    same_as_opened(&m, &doc, "the named body deleted");
+}
+
+/// A body numbered from the counter is not a stored one for a name stored in another slot: what
+/// it is numbered follows the bodies before it (found by the edits below).
+#[test]
+fn a_numbered_body_is_not_kept_for_a_name_stored_in_another_slot() {
+    let mut doc = Document::new("slots");
+    boxed(&mut doc, 0, "Seventh", 0.0, &["Body7"]);
+    boxed(&mut doc, 0, "Numbered", 20.0, &["", "Body8"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body8").is_some());
+    let seventh = doc.find_feature("Seventh").unwrap().id;
+    doc.delete_feature(seventh).unwrap();
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "the body that counted to seven deleted");
+    assert!(m.state().body("Body1").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body made under a stored `BodyN` counts up to N wherever it is made: kept on a model that has
+/// counted less than it had, it still does, so the next body is numbered as in a fresh evaluation.
+#[test]
+fn a_kept_body_of_a_stored_number_still_counts() {
+    let mut doc = Document::new("counted");
+    boxed(&mut doc, 0, "Tenth", 0.0, &["Body10"]);
+    boxed(&mut doc, 0, "Fifth", 20.0, &["Body5"]);
+    boxed(&mut doc, 0, "Next", 40.0, &[]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert!(m.state().body("Body11").is_some());
+    let tenth = doc.find_feature("Tenth").unwrap().id;
+    doc.delete_feature(tenth).unwrap();
+    m.evaluate(&doc);
+    no_errors(&m);
+    same_as_opened(&m, &doc, "the body that counted to ten deleted");
+    assert!(m.state().body("Body6").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// `n` separate boxes, each with one edge rounded, the edge named and recorded as the Fillet
+/// command stores it when it is picked.
+fn rounded_boxes(n: usize) -> Document {
+    let mut doc = Document::new("rounded boxes");
+    for i in 0..n {
+        let (x, name) = (20.0 * i as f64, format!("Block {}", i + 1));
+        boxed(&mut doc, 0, &name, x, &[&name]);
+        add_in(
+            &mut doc,
+            0,
+            &format!("Round {}", i + 1),
+            serde_json::json!({"type": "fillet", "edges": [[x + 10.0, 5.0, 10.0]], "radius": "1", "body": name}),
+        );
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    for f in &mut doc.features {
+        if let FeatureKind::Fillet { edges, body, .. } = &f.kind {
+            let st = m.state_before(f.id);
+            f.edge_refs = crate::edge_refs(&st, body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&st, body, &plain(edges));
+        }
+    }
+    doc
+}
+
+/// The number of a suppressed feature's stored name is not handed out: a body numbered before the
+/// feature was suppressed is not kept under it.
+#[test]
+fn a_numbered_body_is_not_kept_once_its_number_is_reserved() {
+    let mut doc = Document::new("reserved number");
+    // Makes nothing, so suppressing it changes no body: only its stored name counts.
+    let cut = serde_json::json!({"type": "box", "corner": [100.0, 0.0, 0.0], "length": "5", "width": "5", "height": "5", "operation": "cut"});
+    add_in(&mut doc, 0, "Cut", cut);
+    boxed(&mut doc, 0, "Numbered", 0.0, &[]);
+    let cut = doc.find_feature("Cut").unwrap().id;
+    doc.feature_mut(cut).unwrap().body_names = vec!["Body1".into()];
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.state().body("Body1").is_some());
+    doc.feature_mut(cut).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "suppressed");
+    assert!(m.state().body("Body2").is_some(), "{:?}", summary(&m.state()));
+}
+
+/// A body taken back from a saved model counts as deep in the chain of names as it is now, so one
+/// feature fewer before it brings the bodies after it back under the limit.
+#[test]
+fn a_reopened_body_counts_in_the_naming_depth_as_it_stands() {
+    let mut doc = Document::new("reopened at the limit");
+    boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+    for i in 1..397 {
+        add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+    }
+    boxed(&mut doc, 0, "Near", 0.0, &["Near"]);
+    boxed(&mut doc, 0, "Other", 40.0, &["Other"]);
+    boxed(&mut doc, 0, "Last", 80.0, &["Last"]);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let names = |m: &Model| crate::naming::face_names(m.state().body("Last").unwrap()).to_vec();
+    assert!(names(&m).iter().all(|n| n.starts_with("Last:face:")), "{:?}", names(&m));
+    let mut m = Model::adopt(&doc, &m.saved(&doc).unwrap()).unwrap();
+    let id = doc.find_feature("Far 200").unwrap().id;
+    doc.feature_mut(id).unwrap().suppressed = true;
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "one suppressed");
+    assert!(names(&m).iter().all(|n| !n.starts_with("Last:face:")), "{:?}", names(&m));
+}
+
+/// A face of a tool without roles (a coil's end) is named after whatever body it lies on, read or
+/// not: a bevel of its edge, stored by that name, is not kept once another body names the face.
+#[test]
+fn a_bevel_is_not_kept_once_another_body_names_its_face() {
+    let mut doc = Document::new("named from geometry");
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    boxed(&mut doc, 0, "Block", 0.0, &["Block"]);
+    let coil = serde_json::json!({"type": "coil", "base": [5.0, 5.0, 10.5], "axis": [0.0, 0.0, 1.0], "diameter": "6", "pitch": "4", "turns": "1", "section_size": "2", "section": "square", "operation": "join"});
+    add_in(&mut doc, 0, "Coil", coil);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A pick a little off its edge, as one kept from before an edit is: the point alone finds nothing.
+    let edge = Vec3::new(8.0, 4.6, 11.8);
+    let body = Some(BodyName("Block".into()));
+    let (refs, names) = (crate::edge_refs(&m.state(), &body, &[edge]), crate::edge_names_for(&m.state(), &body, &[edge]));
+    add_in(&mut doc, 0, "Bevel", serde_json::json!({"type": "chamfer", "edges": [[8.0, 4.6, 11.8]], "distance": "0.2", "body": "Block"}));
+    let bevel = doc.find_feature("Bevel").unwrap().id;
+    let f = doc.feature_mut(bevel).unwrap();
+    (f.edge_refs, f.edge_names) = (refs, names);
+    m.evaluate(&doc);
+    no_errors(&m);
+    // A block whose side lies on the coil's end.
+    let other = serde_json::json!({"type": "box", "corner": [6.0, 0.0, 8.0], "length": "10", "width": "5", "height": "10", "operation": "new_body"});
+    add_in(&mut doc, b, "Other", other);
+    let id = doc.find_feature("Other").unwrap().id;
+    doc.feature_mut(id).unwrap().body_names = vec!["Other".into()];
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a block on the coil's end");
+}
+
+/// A pick off its edge lies on every body with an edge up to twice as far, and the round says so:
+/// a body added there, beyond the reach the bodies near the pick are looked for in, is named too.
+#[test]
+fn a_round_is_not_kept_without_the_note_of_a_body_added_by_its_pick() {
+    let long = |doc: &mut Document, component: u64, name: &str, x: f64| {
+        let kind =
+            serde_json::json!({"type": "box", "corner": [x, 0.0, 0.0], "length": "10", "width": "1000", "height": "10", "operation": "new_body"});
+        add_in(doc, component, name, kind);
+        let id = doc.find_feature(name).unwrap().id;
+        doc.feature_mut(id).unwrap().body_names = vec![name.into()];
+    };
+    let mut doc = Document::new("a pick off its edge");
+    long(&mut doc, 0, "Rail", 0.0);
+    add_in(&mut doc, 0, "Round", serde_json::json!({"type": "fillet", "edges": [[10.8, 500.0, 10.0]], "radius": "1"}));
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    long(&mut doc, b, "Other", 12.3);
+    doc.features.rotate_right(1);
+    m.evaluate(&doc);
+    same_as_opened(&m, &doc, "a rail added by the pick");
+}
+
+/// The design whose join SMLib's check refuses: an imported block with an edge off its face, and a
+/// box joined to it.
+fn block_with_a_refused_join() -> Document {
+    let mut doc = Document::new("refused join");
+    boxed(&mut doc, 0, "Before", -60.0, &["Before"]);
+    let step: std::sync::Arc<str> = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step").into();
+    let kind = FeatureKind::Import { file: "block.step".into(), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let block = doc.add_feature(kind, Some("Block")).unwrap();
+    doc.feature_mut(block).unwrap().body_names = vec!["Block".into()];
+    let join = serde_json::json!({"type": "box", "corner": [15.0, 25.0, 5.0], "length": "10", "width": "10", "height": "10", "operation": "join"});
+    add_in(&mut doc, 0, "Join", join);
+    let join = doc.find_feature("Join").unwrap().id;
+    doc.feature_mut(join).unwrap().participants = vec!["Block".into()];
+    boxed(&mut doc, 0, "After", 200.0, &["After"]);
+    doc
+}
+
+/// Bring in every check still running, of features and of imported parts, and what it refuses.
+fn settled(m: &mut Model, doc: &Document) {
+    for _ in 0..=doc.features.len() {
+        let refused = m.settle_feature_checks(true);
+        while m.checking_imports() {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if !m.settle_import_checks() && !refused {
+            return;
+        }
+        m.evaluate(doc);
+    }
+    panic!("a check refuses again and again");
+}
+
+/// What a window shows before a check ends ([`Model::set_background_checks`]) is kept neither
+/// for what it read nor whole: an edit made while the check runs, of a body the checked feature
+/// does not read, ends with the failure the design opened afresh has, and so does its undo.
+#[test]
+fn a_result_shown_before_its_check_refuses_it_is_not_kept() {
+    let doc = block_with_a_refused_join();
+    let join = doc.find_feature("Join").unwrap().id;
+    let mut without = doc.clone();
+    without.delete_feature(doc.find_feature("Before").unwrap().id).unwrap();
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -120.0, &["Added"]);
+    added.features.rotate_right(1);
+    let mut m = Model::new();
+    m.set_background_checks(true);
+    for (what, d) in
+        [("shown", &doc), ("one deleted", &without), ("undone", &doc), ("one added", &added), ("undone again", &doc), ("as it was", &doc)]
+    {
+        m.evaluate(d);
+        // Left running as far as the window leaves it, for the next edit to meet.
+        if what != "shown" && what != "undone" {
+            settled(&mut m, d);
+            assert!(m.result(join).unwrap().error.is_some(), "{what}: the join is refused");
+            same_as_opened(&m, d, what);
+        }
+    }
+}
+
+/// Boxes with one rounded edge each, past the 400 features a body's names are worked out from
+/// history for: the bodies after that name their faces by place. Deleting a box, or adding one,
+/// moves bodies across that limit, and a round whose edge was named on the other side of it does
+/// what it does in the design opened afresh: it fails there, so what it did before is not kept
+/// (#20956). What stays on its side is kept: an undo evaluates nothing again.
+#[test]
+fn rounds_past_the_naming_limit_are_as_in_the_design_opened_afresh() {
+    let boxes = 205;
+    let doc = rounded_boxes(boxes);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let without = |boxes: &[usize]| {
+        let mut d = doc.clone();
+        for name in boxes.iter().flat_map(|i| [format!("Block {i}"), format!("Round {i}")]) {
+            let id = d.find_feature(&name).unwrap().id;
+            d.delete_feature(id).unwrap();
+        }
+        d
+    };
+    let mut added = doc.clone();
+    boxed(&mut added, 0, "Added", -20.0, &["Added"]);
+    added.features.rotate_right(1);
+    for (what, d, failed) in [("first deleted", without(&[1]), 0), ("middle deleted", without(&[boxes / 2]), 0), ("one added first", added, 1)] {
+        m.evaluate(&d);
+        assert_eq!(m.results.iter().filter(|r| r.error.is_some()).count(), failed, "{what}");
+        same_as_opened(&m, &d, what);
+        m.evaluate(&doc);
+        assert_eq!(m.last_recomputed, 0, "{what}, undone");
+    }
+    same_as_opened(&m, &doc, "all undone");
+}
+
+/// splitmix64, so each run makes the same edits.
+fn next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    let mut z = *state;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+/// Random edits of a small timeline.
+struct Edits {
+    state: u64,
+    made: u64,
+}
+
+impl Edits {
+    fn below(&mut self, n: usize) -> usize {
+        (next(&mut self.state) % n.max(1) as u64) as usize
+    }
+
+    fn one<'a, T>(&mut self, of: &'a [T]) -> Option<&'a T> {
+        let i = self.below(of.len());
+        of.get(i)
+    }
+
+    fn component(&mut self, doc: &Document) -> u64 {
+        let ids: Vec<u64> = std::iter::once(0).chain(doc.components.iter().map(|c| c.id)).collect();
+        self.one(&ids).copied().unwrap_or(0)
+    }
+
+    /// The name of a body of `m`, or now and then of none.
+    fn body(&mut self, m: &Model) -> String {
+        let names: Vec<String> = m.state().bodies.iter().map(|b| b.name.clone()).collect();
+        match self.below(12) {
+            0 => "Gone".into(),
+            _ => self.one(&names).cloned().unwrap_or_else(|| "Gone".into()),
+        }
+    }
+
+    /// Names as a feature stores them: of its own, a number, one another may have, none.
+    fn names(&mut self) -> Vec<String> {
+        match self.below(6) {
+            0 => Vec::new(),
+            1 => vec![format!("Body{}", 1 + self.below(9))],
+            2 => vec![["X", "Y"][self.below(2)].into()],
+            3 => vec![String::new(), format!("Body{}", 1 + self.below(9))],
+            _ => vec![format!("P{}", self.made)],
+        }
+    }
+
+    /// A feature at the end of `doc`, on bodies of `m`.
+    fn add(&mut self, doc: &mut Document, m: &Model) {
+        use serde_json::json;
+        self.made += 1;
+        let c = self.component(doc);
+        let x = 14.0 * self.below(5) as f64;
+        let op = ["new_body", "new_body", "join", "cut", "cut", "intersect"][self.below(6)];
+        let size = ["w", "10", "12", "9 + bad"][if self.below(20) == 0 { 3 } else { self.below(3) }];
+        let name = format!("F{}", self.made);
+        let (kind, target) = match self.below(13) {
+            0..=2 => (json!({"type": "box", "corner": [x, 0.0, 0.0], "length": size, "width": "10", "height": "10", "operation": "new_body"}), false),
+            3 => (json!({"type": "box", "corner": [x + 2.0, 2.0, 4.0], "length": size, "width": "3", "height": "10", "operation": op}), true),
+            // Across a block: in two pieces.
+            4 => (json!({"type": "box", "corner": [x + 4.0, -5.0, -5.0], "length": "2", "width": "30", "height": "30", "operation": "cut"}), true),
+            5 => (
+                json!({"type": "cylinder", "base": [x + 5.0, 5.0, -1.0], "axis": [0.0, 0.0, 1.0], "radius": "2", "height": "w + 2", "operation": op}),
+                true,
+            ),
+            6 => (json!({"type": "sphere", "center": [x + 5.0, 5.0, 10.0], "radius": "3", "operation": op}), true),
+            7 => (json!({"type": "move", "bodies": [self.body(m)], "translate": ["0", "0", "w / 10"], "copy": self.below(3) == 0}), false),
+            8 => {
+                let pattern = json!({"type": "rectangular", "dir1": [0, 1, 0], "count1": "n", "spacing1": "15"});
+                (json!({"type": "pattern", "features": [], "bodies": [self.body(m)], "pattern": pattern}), false)
+            }
+            9 => {
+                let op = ["join", "cut", "new_body"][self.below(3)];
+                (
+                    json!({"type": "combine", "target": self.body(m), "tools": [self.body(m)], "operation": op, "keep_tools": self.below(2) == 0}),
+                    false,
+                )
+            }
+            10 => {
+                let xy = PlaneRef::Origin { name: "XY".into() };
+                circle_extrude(doc, c, &name, xy, Vec2::new(x + 5.0, 5.0), 2.0 + self.below(3) as f64, "w", op);
+                (serde_json::Value::Null, true)
+            }
+            _ => {
+                let body = (self.below(2) == 0).then(|| self.body(m));
+                let edge = [[x + 10.0, 5.0, 10.0], [x, 5.0, 10.0], [x + 5.0, 0.0, 0.0]][self.below(3)];
+                let (ty, size) = [("fillet", "radius"), ("chamfer", "distance")][self.below(2)];
+                let mut kind = json!({"type": ty, "edges": [edge], size: "r", "tangent_chain": false});
+                if let Some(body) = body {
+                    kind["body"] = json!(body);
+                }
+                (kind, false)
+            }
+        };
+        if !kind.is_null() {
+            add_in(doc, c, &name, kind);
+        }
+        let names = self.names();
+        let to = match self.below(4) {
+            0 => vec![self.body(m)],
+            1 => vec!["*".into()],
+            _ => Vec::new(),
+        };
+        let picked = self.below(2) == 0;
+        let Some(f) = doc.features.iter_mut().find(|f| f.name == name) else { return };
+        f.body_names = names;
+        if target {
+            f.participants = to;
+        }
+        if let FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } = &f.kind
+            && picked
+        {
+            f.edge_refs = crate::edge_refs(&m.state(), body, &plain(edges));
+            f.edge_names = crate::edge_names_for(&m.state(), body, &plain(edges));
+        }
+    }
+
+    /// One edit of `doc`, whose model is `m`: what it was.
+    fn edit(&mut self, doc: &mut Document, m: &Model) -> String {
+        let ids: Vec<u64> = doc.features.iter().map(|f| f.id).collect();
+        let at = self.below(ids.len());
+        let id = ids.get(at).copied().unwrap_or(0);
+        let kind = self.below(17);
+        match kind {
+            0..=2 => {
+                self.add(doc, m);
+                format!("add {:?}", doc.features.last().map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            // Added in the middle, where a rolled-back timeline adds.
+            3 | 4 => {
+                let before = doc.features.len();
+                self.add(doc, m);
+                let added = doc.features.len() - before;
+                if let Some(tail) = doc.features.get_mut(at..) {
+                    tail.rotate_right(added);
+                }
+                format!("add at {at} {:?}", doc.features.get(at + added - 1).map(|f| (&f.name, &f.kind, &f.body_names, &f.participants, f.component)))
+            }
+            5 | 6 => format!("delete {id}: {:?}", doc.delete_feature(id)),
+            7 => {
+                let to = self.below(ids.len());
+                if at < doc.features.len() {
+                    let f = doc.features.remove(at);
+                    doc.features.insert(to.min(doc.features.len()), f);
+                }
+                format!("move {id} to {to}")
+            }
+            8 => {
+                if let Some(f) = doc.feature_mut(id) {
+                    f.suppressed = !f.suppressed;
+                }
+                format!("suppress {id}")
+            }
+            9 => {
+                let names = self.names();
+                if let Some(f) = doc.feature_mut(id) {
+                    f.body_names.clone_from(&names);
+                }
+                format!("names of {id}: {names:?}")
+            }
+            // The names the bodies have, stored as a session stores them.
+            10 => {
+                let made: Vec<(u64, Vec<String>)> = m
+                    .results
+                    .iter()
+                    .filter(|r| r.error.is_none() && !r.skipped)
+                    .map(|r| (r.id, r.state.bodies.iter().filter(|b| b.feature == r.id).map(|b| b.name.clone()).collect()))
+                    .collect();
+                for (id, names) in made {
+                    if let Some(f) = doc.feature_mut(id).filter(|f| f.body_names.is_empty()) {
+                        f.body_names = names;
+                    }
+                }
+                "store names".into()
+            }
+            11 => {
+                let (name, value) =
+                    [("w", "10 mm"), ("w", "13 mm"), ("r", "1 mm"), ("r", "2 mm"), ("r", "40 mm"), ("n", "2"), ("n", "3")][self.below(7)];
+                format!("{name} = {value}: {:?}", doc.set_param(name, value, None, None))
+            }
+            12 => {
+                let c = self.component(doc);
+                if let Some(f) = doc.feature_mut(id) {
+                    f.component = c;
+                }
+                format!("{id} in component {c}")
+            }
+            13 => {
+                let name = format!("C{}", self.made);
+                self.made += 1;
+                let parent = self.component(doc);
+                format!("add component: {:?}", doc.add_component(Some(&name), parent))
+            }
+            14 => {
+                let c = self.component(doc);
+                format!("remove component {c}: {:?}", doc.remove_component_tree(c).map(|_| ()))
+            }
+            15 => {
+                doc.marker = (self.below(2) == 0).then_some(at);
+                format!("marker {:?}", doc.marker)
+            }
+            _ => {
+                let i = self.below(doc.occurrences.len());
+                if let Some(o) = doc.occurrences.get_mut(i) {
+                    o.transform[3][0] += 3.0;
+                }
+                format!("place {i}")
+            }
+        }
+    }
+}
+
+/// Edit a timeline at random for `steps` steps from `seed`, undoing and reopening now and then:
+/// after each the session's model is the design's opened afresh. `before`: features already there.
+fn edited_as_opened(seed: u64, steps: usize, before: usize, running: bool) -> usize {
+    let mut e = Edits { state: seed, made: 0 };
+    let mut doc = if running { block_with_a_refused_join() } else { Document::new("edited") };
+    for (name, value) in [("w", "10 mm"), ("r", "1 mm"), ("n", "2")] {
+        doc.set_param(name, value, None, None).unwrap();
+    }
+    for c in ["A", "B"] {
+        doc.add_component(Some(c), 0).unwrap();
+    }
+    // A body moved over and over, far from the others: each step is one more in the names' depth.
+    if before > 0 {
+        boxed(&mut doc, 0, "Far", -500.0, &["Far"]);
+        for i in 1..before {
+            add_in(&mut doc, 0, &format!("Far {i}"), serde_json::json!({"type": "move", "bodies": ["Far"], "translate": ["0", "0", "0.01"]}));
+        }
+    }
+    let mut m = Model::new();
+    m.set_background_checks(running);
+    m.evaluate(&doc);
+    for _ in 0..5 {
+        e.add(&mut doc, &m);
+        m.evaluate(&doc);
+    }
+    let mut undo: Vec<Document> = Vec::new();
+    let mut done: Vec<String> = Vec::new();
+    for step in 0..steps {
+        let what = match e.below(8) {
+            0 if !undo.is_empty() => {
+                doc = undo.pop().unwrap();
+                "undo".to_string()
+            }
+            1 => match m.saved(&doc).and_then(|s| Model::adopt(&doc, &s).ok()) {
+                Some(opened) => {
+                    m = opened;
+                    m.set_background_checks(running);
+                    "reopen".into()
+                }
+                None => continue,
+            },
+            _ => {
+                undo.push(doc.clone());
+                e.edit(&mut doc, &m)
+            }
+        };
+        done.push(what);
+        m.evaluate(&doc);
+        // The checks of some edits are still running when the next one comes.
+        if running {
+            if step + 1 < steps && e.below(2) == 0 {
+                continue;
+            }
+            settled(&mut m, &doc);
+        }
+        let what = format!("seed {seed}, step {step}:\n{}\n", done.join("\n"));
+        same_as_opened(&m, &doc, &what);
+    }
+    done.len()
+}
+
+/// Whatever is edited, in whatever order, the model a session holds is the one opening its design
+/// gives: the same bodies, names, errors and warnings, however much of it was kept.
+#[test]
+fn any_edits_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 8), env("SOLIDCRAFT_EDIT_STEPS", 25));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, false)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same with the checks a window leaves running, among them ones that refuse a join.
+#[test]
+fn any_edits_with_checks_left_running_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 4), env("SOLIDCRAFT_EDIT_STEPS", 20));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 0, true)).sum();
+    eprintln!("{done} edits compared");
+}
+
+/// The same across the limit of naming from history, which bodies far from it decide.
+#[test]
+fn any_edits_about_the_naming_limit_leave_the_model_of_the_design_opened_afresh() {
+    let env = |name: &str, or: u64| std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(or);
+    let (from, seeds, steps) = (env("SOLIDCRAFT_EDIT_SEED", 1), env("SOLIDCRAFT_EDIT_SEEDS", 3), env("SOLIDCRAFT_EDIT_STEPS", 15));
+    let done: usize = (from..from + seeds).map(|seed| edited_as_opened(seed, steps as usize, 397, false)).sum();
+    eprintln!("{done} edits compared");
+}
+
 /// A construction plane's edit recomputes only the features that use it: a sketch on it and what
 /// is made from that sketch, wherever they are in the timeline, and nothing else.
 #[test]
@@ -777,7 +1572,16 @@ fn a_construction_plane_edit_recomputes_only_its_users() {
     let b = doc.find_component("B").unwrap();
     // A peg in B on A's plane: B now reads A through it.
     let a_top = doc.find_feature("A_top").unwrap().id;
-    circle_extrude(&mut doc, b, "B peg", PlaneRef::Construction { feature: a_top.into() }, Vec2::new(40.0, 20.0), 2.0, "3", "new_body");
+    circle_extrude(
+        &mut doc,
+        b,
+        "B peg",
+        PlaneRef::Construction { feature: a_top.into(), placement: None },
+        Vec2::new(40.0, 20.0),
+        2.0,
+        "3",
+        "new_body",
+    );
     let mut m = Model::new();
     m.evaluate(&doc);
     no_errors(&m);
@@ -797,6 +1601,49 @@ fn a_construction_plane_edit_recomputes_only_its_users() {
     scratch.no_cache = true;
     scratch.evaluate(&doc);
     assert_eq!(st.construct, scratch.state().construct);
+}
+
+/// A part built on another component's plane keeps its creation context through assembly
+/// motion and a cold rebuild, while the plane's defining dimensions remain live.
+#[test]
+fn a_captured_foreign_plane_moves_with_its_part_and_follows_source_dimensions() {
+    use solidcraft_geom::PlaneGeom;
+    let mut doc = Document::new("plane reference");
+    let source = doc.add_component(Some("Skeleton"), 0).unwrap();
+    let part = doc.add_component(Some("Knob"), 0).unwrap();
+    doc.set_param("height", "5 mm", Some("mm"), None).unwrap();
+    let plane = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "height".into() },
+            },
+            Some("Guide"),
+        )
+        .unwrap();
+    doc.feature_mut(plane).unwrap().component = source;
+    let mut sketch = Sketch::new();
+    sketch.add_circle(Vec2::new(10., 0.), 2., None, None).unwrap();
+    let reference: PlaneRef = serde_json::from_value(serde_json::json!({"type":"construction", "feature":plane, "placement":IDENTITY})).unwrap();
+    let id = doc.add_feature(FeatureKind::Sketch { plane: reference, sketch }, Some("Profile")).unwrap();
+    doc.feature_mut(id).unwrap().component = part;
+    let check = |doc: &Document, model: &mut Model, expected: Vec3| {
+        model.evaluate(doc);
+        no_errors(model);
+        let state = model.state();
+        let sketch = state.sketch(id).unwrap();
+        let center = apply_point(&doc.component_transform(part), sketch.plane.to_world(Vec2::new(10., 0.)));
+        assert!(center.dist(expected) < 1e-9, "center {center:?}; expected {expected:?}");
+    };
+    let mut model = Model::new();
+    check(&doc, &mut model, Vec3::new(10., 0., 5.));
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.component == source).unwrap().transform = rigid(Vec3::new(20., 0., 7.), Vec3::ZERO, Vec3::Z, 0.);
+    check(&doc, &mut model, Vec3::new(0., 10., 5.));
+    check(&doc, &mut Model::new(), Vec3::new(0., 10., 5.));
+    let mut reopened = Document::from_json(&doc.to_json()).unwrap();
+    check(&reopened, &mut Model::new(), Vec3::new(0., 10., 5.));
+    reopened.set_param("height", "9 mm", None, None).unwrap();
+    check(&reopened, &mut Model::new(), Vec3::new(0., 10., 9.));
 }
 
 /// A coil sweeping a sketch's profile is made again when that sketch changes, not restored as
@@ -824,6 +1671,7 @@ fn a_coil_follows_its_sketch() {
             position: 0,
             start_angle: None,
             clockwise: false,
+            end_cut: Default::default(),
             operation: Operation::NewBody,
             targets: Vec::new(),
         },
@@ -858,6 +1706,7 @@ fn box_fillet_cut_timeline() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -876,6 +1725,7 @@ fn box_fillet_cut_timeline() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -884,6 +1734,9 @@ fn box_fillet_cut_timeline() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
+                picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -935,6 +1788,7 @@ fn errors_are_reported_not_fatal() {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain: true,
+            edge_radii: Vec::new(),
         },
         None,
     )
@@ -1037,7 +1891,7 @@ fn primitives_and_combine() {
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::new(5.0, 5.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
@@ -1238,20 +2092,20 @@ fn feature_added_with_the_marker_at_the_end_is_active() {
 #[test]
 fn self_referencing_construction_planes_are_errors() {
     // Feature ids are assigned from 1, so each design below knows its own feature's id.
-    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into() } });
+    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into(), placement: None } });
     let xz = || Box::new(construct::GeoRef::Plane { plane: PlaneRef::Origin { name: "XZ".into() } });
 
     // Directly its own first side.
     let mut doc = Document::new("selfplane");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz(), old_frame: false } }, Some("P1")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a plane that is its own side must report an error: {:?}", m.results);
 
     // Two planes that are each other's side.
     let mut doc = Document::new("twoplanes");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(2), b: xz() } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P2")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(2), b: xz(), old_frame: false } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz(), old_frame: false } }, Some("P2")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a two-plane cycle must report an error: {:?}", m.results);
@@ -1260,10 +2114,96 @@ fn self_referencing_construction_planes_are_errors() {
     let mut doc = Document::new("perpplane");
     let line = Box::new(construct::GeoRef::World { axis: "X".into() });
     doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref(1), line } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
+    doc.add_feature(
+        FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into(), placement: None }, sketch: Sketch::new() },
+        Some("Sketch1"),
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);
+}
+
+/// #18260: a midplane between two planes that are parallel to a world plane takes that world
+/// plane's frame: half way between them, with its origin on the world axis and not at the point
+/// the planes were picked, so a sketch keeps its world place when it is redefined onto it.
+#[test]
+fn a_midplane_parallel_to_a_world_plane_takes_that_world_planes_frame() {
+    // A box with a top face at z = 20 and a bottom face at z = 0, both picked away from the
+    // world origin.
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(40., 30., 20.)).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Box".into(), body, 1));
+    let faces = st.bodies[0].body.faces(0.01).unwrap();
+    let face_at = |z: f64| {
+        faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.99) && (f.centroid.z - z).abs() < 1e-6)
+            .map(|f| f.centroid)
+            .unwrap()
+    };
+    let mut doc = Document::new("midplane");
+    let mid = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Midplane {
+                    a: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                    b: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
+                    old_frame: false,
+                },
+            },
+            Some("Mid"),
+        )
+        .unwrap();
+    let vals = doc.param_values().0;
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st)).unwrap();
+    // Half way between the two faces (z = 10), on the world Z axis, in the world XY frame.
+    assert!(built.origin.dist(Vec3::new(0., 0., 10.)) < 1e-9, "the midplane's origin is on the world axis: {built:?}");
+    assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
+}
+
+/// #18260: a design saved before the midplane took a world plane's frame keeps it. The pending
+/// format change marks every midplane of an older design, so the sketch drawn on it opens
+/// where it was drawn; a design saved now takes the world plane's frame.
+#[test]
+fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
+    // Two planes parallel to the world XY, the first picked away from the world axis and with
+    // axes of its own, so the frame it gives the midplane is not the world's.
+    let side = Plane { origin: Vec3::new(10., 20., 0.), x: Vec3::new(0., 1., 0.), y: Vec3::new(-1., 0., 0.) };
+    let other = Plane { origin: Vec3::new(10., 20., 40.), x: Vec3::new(0., 1., 0.), y: Vec3::new(-1., 0., 0.) };
+    let midplane = |old_frame: bool| PlaneRef::Midplane {
+        a: Box::new(crate::construct::GeoRef::Plane { plane: PlaneRef::Custom { plane: side } }),
+        b: Box::new(crate::construct::GeoRef::Plane { plane: PlaneRef::Custom { plane: other } }),
+        old_frame,
+    };
+    let mut doc = Document::new("midplane");
+    let mid = doc.add_feature(FeatureKind::ConstructionPlane { plane: midplane(false) }, Some("Mid")).unwrap();
+    let st = ModelState::default();
+    let plane_of = |doc: &Document| {
+        doc.resolve_plane_in(&doc.param_values().0, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st))
+            .unwrap()
+    };
+
+    // The design as it is saved now: the world plane's frame.
+    let opened = crate::format::read(&doc.to_json()).unwrap();
+    let built = plane_of(&opened);
+    assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
+    assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
+
+    // The design as an older build saved it: before v64 (`midplane-old-frame.rs`), so the
+    // v64 migration step is applied to it as it opens.
+    let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+    saved["format"] = serde_json::json!(crate::format::format_string(63));
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
+    let built = plane_of(&older);
+    // The frame it was saved with: half way between the two planes, at the first plane's own
+    // origin and in its own axes.
+    assert!(built.origin.dist(Vec3::new(10., 20., 20.)) < 1e-9, "the midplane keeps the frame it was saved with: {built:?}");
+    assert!(
+        built.x.dist(Vec3::new(0., 1., 0.)) < 1e-9 && built.y.dist(Vec3::new(-1., 0., 0.)) < 1e-9,
+        "the midplane keeps the frame it was saved with: {built:?}"
+    );
 }
 
 /// A rigid translation, the way the evaluation moves an occurrence.
@@ -1309,6 +2249,35 @@ fn datum_refs_parse_strictly() {
 /// `Document::placement_frame` walks one exact placement the way the engine's occurrence walk
 /// does: the #7313 scenario's parent translated +100, a child +20, a copy of the parent another
 /// +50 - the copied child's XY plane sits at (170, 0, 0) against the original at (120, 0, 0).
+/// A direction of expressions turned by a frame keeps a constant however small it is next to
+/// nothing else: `["sin(t)", "0", "1e-20"]` at t = 0 is still along Z after a turn about Y, not
+/// zero (#18822). A length keeps its cutoff of 1e-12 mm for rounding.
+#[test]
+fn a_turned_direction_keeps_its_small_constants() {
+    let mut doc = Document::new("T");
+    doc.set_param("t", "0 deg", None, None).unwrap();
+    let turn = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_4);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "0".into(), "1e-20".into()];
+    crate::map_dir_expr(&turn, &mut d);
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    let unit = crate::unit_direction(Vec3::new(v[0], v[1], v[2])).expect("a direction, not zero");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    assert!(unit.dist(Vec3::new(h, 0.0, h)) < 1e-9, "{d:?} -> {unit:?}");
+    // Rounding from the turn itself is dropped from a direction of ordinary size, with or
+    // without an expression beside it, and every number is written short.
+    let quarter = crate::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::FRAC_PI_2);
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert_eq!(d[1].to_string(), "0", "{d:?}");
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    let mut d: crate::DirExpr = ["sin(t)".into(), "1e-300".into(), "0".into()];
+    crate::map_dir_expr(&quarter, &mut d);
+    assert!(d.iter().all(|e| e.len() < 40), "{d:?}");
+    doc.set_param("t", "30 deg", None, None).unwrap();
+    let v = d.clone().map(|e| doc.eval(&e, crate::expr::Kind::Unitless).unwrap());
+    assert!((v[0] - 0.5).abs() < 1e-15 && v[1].abs() < 1e-290 && (v[2] - 1e-300).abs() < 1e-310, "{d:?} -> {v:?}");
+}
+
 #[test]
 fn placement_frame_matches_the_occurrence_walk() {
     let mut doc = Document::new("datum frames");
@@ -1404,6 +2373,32 @@ fn construction_plane_name_collisions_leave_the_document_unchanged() {
         assert_eq!(doc.feature(other).unwrap().name, "Upper");
         assert_eq!(other, before.next_id);
     }
+}
+
+#[test]
+fn a_second_sketch_cannot_take_an_existing_sketch_name() {
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    let mut doc = Document::new("names");
+    doc.add_feature(sketch(), Some("Sketch2")).unwrap();
+    let before = doc.clone();
+    let error = doc.add_feature(sketch(), Some("Sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `Sketch2`"), "{error}");
+    assert_eq!(doc, before);
+    // Automatic names skip the taken one.
+    let auto = doc.add_feature(sketch(), None).unwrap();
+    assert_ne!(doc.feature(auto).unwrap().name, "Sketch2");
+    // Lookup ignores case, so a name that differs only in case is the same name.
+    let error = doc.add_feature(sketch(), Some("sketch2")).unwrap_err().to_string();
+    assert!(error.contains("another feature is called `sketch2`"), "{error}");
+    assert_eq!(doc.find_feature("SKETCH2").unwrap().name, "Sketch2");
+    // A free name for a sketch skips the taken ones.
+    assert_eq!(doc.free_sketch_name("Sketch2"), "Sketch2 (2)");
+    assert_eq!(doc.free_sketch_name("Other"), "Other");
+    // Planes keep matching on the exact name, so two planes may differ only in case.
+    let plane = |base: &str| FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: base.into() } };
+    doc.add_feature(plane("XY"), Some("Angled x")).unwrap();
+    doc.add_feature(plane("XY"), Some("Angled X")).unwrap();
+    assert!(doc.add_feature(plane("XY"), Some("Angled X")).is_err());
 }
 
 #[test]
@@ -1579,6 +2574,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 direction: Direction::Positive,
                 distance2: None,
                 start_offset: None,
+                symmetric_offset: false,
                 through_all: false,
                 second_follows_first: false,
                 taper: None,
@@ -1587,6 +2583,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 to_offset: None,
                 from: None,
                 to_body_apart: false,
+                from_level: false,
+                picked_placements: Vec::new(),
+                one_sided_direction: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -1606,6 +2605,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 body: "Body1".into(),
                 plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
                 tool: None,
+                tool_plane: false,
+                tool_sheet: Default::default(),
+                tool_faces: Vec::new(),
                 sketch: None,
                 line: None,
             },
@@ -1658,6 +2660,43 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     assert_eq!(kept, Some(KeptSeparate::AlongEdge));
 }
 
+/// A chamfer or fillet a design file picks by a point alone (no `body`, no edge name), where
+/// the point lies on edges of two bodies, blends the first body as before but warns, naming both
+/// (#20517): the `solid.chamfer` and `solid.fillet` commands refuse the same pick. A pick on one
+/// body's edge alone gives no warning.
+#[test]
+fn a_blend_picked_on_edges_of_two_bodies_warns_and_names_both() {
+    let blended = |kind: serde_json::Value| {
+        let mut doc = Document::new("two cubes");
+        for corner in [["0", "0", "0"], ["10", "0", "0"]] {
+            let cube = serde_json::json!({"type": "box", "corner": corner, "length": "10", "width": "10", "height": "10", "operation": "new_body"});
+            doc.add_feature(serde_json::from_value(cube).unwrap(), None).unwrap();
+        }
+        let blend = doc.add_feature(serde_json::from_value(kind).unwrap(), None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(blend).unwrap();
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let st = m.state();
+        let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+        let volumes: Vec<f64> = st.bodies.iter().map(|b| measure(&b.body).unwrap().volume).collect();
+        (result.warning.clone(), names, volumes)
+    };
+    for kind in ["chamfer", "fillet"] {
+        let size = if kind == "chamfer" { "distance" } else { "radius" };
+        let (warning, names, volumes) = blended(serde_json::json!({"type": kind, "edges": [[10.0, 0.0, 5.0]], size: "1"}));
+        assert_eq!(names.len(), 2, "{names:?}");
+        let warning = warning.unwrap_or_default();
+        let both = format!("[10, 0, 5] lies on edges of 2 bodies, {} and {}: `{}` is blended", names[0], names[1], names[0]);
+        assert!(warning.contains(&both) && warning.contains("with `body`"), "{kind}: {warning}");
+        // The result is the same as before: the first body is blended, the second left alone.
+        assert!(volumes[0] < 999.9 && rel(volumes[1], 1000.0) < 1e-9, "{kind}: {volumes:?}");
+
+        let (warning, _, _) = blended(serde_json::json!({"type": kind, "edges": [[0.0, 0.0, 5.0]], size: "1"}));
+        assert!(warning.is_none(), "{kind} on an edge of one body: {warning:?}");
+    }
+}
+
 /// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a
 /// setback keeps it through a save, its distance an expression.
 #[test]
@@ -1677,9 +2716,36 @@ fn fillet_setbacks_default_to_none_and_round_trip() {
         setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
         turn: Default::default(),
         tangent_chain: true,
+        edge_radii: Vec::new(),
     };
     let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
     assert_eq!(back, set);
+}
+
+/// A frame member saved before pairs reads with its sketch, no pairs and `next_pair` 0, and
+/// saves exactly as it was read (no `pairs`, no `next_pair`); one of pairs only, without a
+/// sketch, keeps them through a save.
+#[test]
+fn frame_member_pairs_default_to_none_and_round_trip() {
+    let profile = serde_json::json!({"source": "library", "profile": {"kind": "rect_tube", "width": "40", "height": "40", "wall": "3"}});
+    let old = serde_json::json!({"type": "frame_member", "path_sketch": 3, "lines": ["l1"], "profile": profile});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, Some(SketchId(3)));
+    assert!(pairs.is_empty());
+    assert_eq!(*next_pair, 0);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), old);
+    let with_pairs = serde_json::json!({"type": "frame_member", "profile": profile, "pairs": [
+        {"id": "pair1", "a": {"type": "vertex", "at": [0.0, 0.0, 0.0]}, "b": {"type": "construct_point", "name": "Top"}},
+        {"id": "pair3", "a": {"type": "sketch_point", "sketch": 3, "point": "p1"}, "b": {"type": "origin"}}
+    ], "next_pair": 4});
+    let kind: FeatureKind = serde_json::from_value(with_pairs.clone()).unwrap();
+    let FeatureKind::FrameMember { path_sketch, pairs, next_pair, .. } = &kind else { panic!("{kind:?}") };
+    assert_eq!(*path_sketch, None);
+    assert_eq!(pairs.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["pair1", "pair3"]);
+    assert_eq!(pairs[1].b, construct::GeoRef::Origin);
+    assert_eq!(*next_pair, 4);
+    assert_eq!(serde_json::to_value(&kind).unwrap(), with_pairs);
 }
 
 /// A fillet saved before turns reads as mitred and writes no `turn`; a swept one saves
@@ -1706,6 +2772,72 @@ fn fillet_turn_defaults_to_mitre_round_trips_and_refuses_unknown_turns() {
     unknown["turn"] = serde_json::json!("round");
     let e = serde_json::from_value::<FeatureKind>(unknown).unwrap_err().to_string();
     assert!(e.contains("unknown variant `round`") && e.contains("mitre") && e.contains("swept"), "{e}");
+}
+
+/// A fillet saved before per-edge radii reads with none and writes no `edge_radii`; one with them
+/// keeps them through a save and an open, each an expression, and evaluates each picked edge at its
+/// own radius. A file whose radii do not match its edges, or that asks for them with another
+/// option, is refused at evaluation, saying why.
+#[test]
+fn fillet_edge_radii_default_to_none_round_trip_and_are_checked() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[20.0, 0.0, 10.0]], "radius": "1"});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::Fillet { edge_radii, .. } = &kind else { panic!("{kind:?}") };
+    assert!(edge_radii.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("edge_radii").is_none());
+    let fillet = |radii: &[&str], tangent_chain: bool, fit: crate::FilletFit| FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(20.0, 0.0, 10.0)), Position(Vec3::new(20.0, 30.0, 10.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit,
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain,
+        edge_radii: radii.iter().map(|r| (*r).into()).collect(),
+    };
+    let each = fillet(&["1", "2 mm"], false, Default::default());
+    let mut doc = Document::new("edge radii");
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::ZERO),
+            length: "40".into(),
+            width: "30".into(),
+            height: "10".into(),
+            centred: false,
+            operation: Operation::NewBody,
+        },
+        None,
+    )
+    .unwrap();
+    let mut at = doc.clone();
+    at.add_feature(each.clone(), None).unwrap();
+    let saved = at.to_json();
+    assert!(saved.contains("\"edge_radii\""), "{saved}");
+    let opened = Document::from_json(&saved).unwrap();
+    assert_eq!(opened.features.last().map(|f| &f.kind), Some(&each));
+    assert_eq!(opened.to_json(), saved);
+    let mut m = Model::new();
+    m.evaluate(&opened);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let v = measure(&m.state().bodies[0].body).unwrap().volume;
+    // A 40 x 30 x 10 block, two 40-long edges rounded at 1 and 2: each round of radius r on a
+    // 90 deg edge of length L removes (1 - pi/4) r^2 L, so 12000 - 40 (1 - pi/4) (1 + 4).
+    let want = 11957.07963267949;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    for (bad, says) in [
+        (fillet(&["1"], false, Default::default()), "gives 1 radii for 2 picked edges"),
+        (fillet(&["1", "2"], true, Default::default()), crate::EDGE_RADII_TAKE),
+        (fillet(&["1", "2"], false, crate::FilletFit::Reduce), crate::EDGE_RADII_TAKE),
+    ] {
+        let mut d = doc.clone();
+        d.add_feature(bad, None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&d);
+        let e = m.results.last().and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(e.contains(says), "{e}");
+    }
 }
 
 #[test]
@@ -1778,7 +2910,16 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
     let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
     let key = sketch.to_string();
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
-    doc.occurrences.push(Occurrence { id: 20, component: 7, parent: 0, name: "Part".into(), transform: IDENTITY, grounded: false });
+    doc.occurrences.push(Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Part".into(),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
     let deep = MAX_GROUP_NESTING as u64 + 2;
     doc.browser_groups = vec![
         browser_group(1, 0, "bodies", Some(2), &[]),
@@ -1844,7 +2985,16 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
     let mut doc = Document::new("nested");
     doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
     for id in [20, 21] {
-        doc.occurrences.push(Occurrence { id, component: 7, parent: 0, name: format!("P{id}"), transform: IDENTITY, grounded: false });
+        doc.occurrences.push(Occurrence {
+            id,
+            component: 7,
+            parent: 0,
+            name: format!("P{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            bom_type: None,
+            expressed_moves: Vec::new(),
+        });
     }
     doc.browser_groups = vec![browser_group(2, 0, "bodies", None, &[item("Lid"), group(3)]), browser_group(3, 0, "bodies", Some(2), &[item("Base")])];
     doc.browser_order.insert("0/bodies".into(), vec![item("Cap"), group(2)]);
@@ -1890,6 +3040,17 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
+    // Convert of picked faces, Convert of a whole body and Recognize: each its own type name,
+    // which leads back to its kind.
+    for kind in [
+        serde_json::json!({"type": "sheet_convert", "body": "B", "face": [0, 0, 0]}),
+        serde_json::json!({"type": "sheet_surface_convert", "body": "B"}),
+        serde_json::json!({"type": "sheet_recognize", "body": "B"}),
+    ] {
+        let key = kind["type"].as_str().unwrap_or_default().to_string();
+        let kind = serde_json::from_value::<FeatureKind>(kind).unwrap();
+        assert_eq!(FeatureKind::type_name_to_kind_key(kind.type_name()), Some(key.as_str()), "{key}");
+    }
 }
 
 /// An extruded ellipse has one side face, and a spline in a profile one wall, each named by its
@@ -1906,6 +3067,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             direction: Direction::Positive,
             distance2: None,
             start_offset: None,
+            symmetric_offset: false,
             through_all: false,
             second_follows_first: false,
             taper: None,
@@ -1914,6 +3076,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             to_offset: None,
             from: None,
             to_body_apart: false,
+            from_level: false,
+            picked_placements: Vec::new(),
+            one_sided_direction: None,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -1985,7 +3150,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     let a = sketch.add_point(Vec2::new(0.0, 0.0), None).unwrap();
     let b = sketch.add_point(Vec2::new(10.0, 5.0), None).unwrap();
     sketch.add_line_pts(a, b, None).unwrap();
-    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into() }, sketch };
+    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into(), placement: None }, sketch };
     let id = doc.add_feature(on_plane, Some("Sketch3")).unwrap();
     doc.feature_mut(id).unwrap().component = sketcher;
 
@@ -2006,4 +3171,93 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
+}
+
+#[test]
+fn thread_additional_faces_preserve_old_single_face_serialization() {
+    let old = serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    assert!(matches!(&kind, FeatureKind::Thread { additional_faces, .. } if additional_faces.is_empty()));
+    assert_eq!(serde_json::to_value(kind).unwrap(), old);
+}
+
+#[test]
+fn thread_additional_faces_round_trip_without_moving_legacy_face_name_slots() {
+    let mut kind: FeatureKind = serde_json::from_value(serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]})).unwrap();
+    if let FeatureKind::Thread { additional_faces, up_to, .. } = &mut kind {
+        *up_to = Some(crate::ThreadLimit::Face(crate::FacePick(Vec3::new(0.0, 0.0, 8.0))));
+        additional_faces.extend([crate::FacePick(Vec3::new(13.0, 0.0, 5.0)), crate::FacePick(Vec3::new(23.0, 0.0, 5.0))]);
+    }
+    let expected = vec![Vec3::new(3.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 8.0), Vec3::new(13.0, 0.0, 5.0), Vec3::new(23.0, 0.0, 5.0)];
+    assert_eq!(kind.face_points(), expected);
+    let saved = serde_json::to_value(&kind).unwrap();
+    assert_eq!(saved["additional_faces"], serde_json::json!([[13.0, 0.0, 5.0], [23.0, 0.0, 5.0]]));
+    let reopened: FeatureKind = serde_json::from_value(saved).unwrap();
+    assert_eq!(reopened.face_points(), expected);
+}
+
+#[test]
+fn thread_target_body_identities_follow_face_slots_and_reference_remapping() {
+    let mut kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type":"thread", "face":[3,0,2],
+        "additional_faces":[[13,0,2],[23,0,2]], "target_bodies":["A","B","A"]
+    }))
+    .unwrap();
+    if let FeatureKind::Thread { up_to, .. } = &mut kind {
+        *up_to = Some(crate::ThreadLimit::Face(crate::FacePick(Vec3::new(0.0, 0.0, 8.0))));
+    }
+    assert_eq!(kind.thread_target_body(0), Some("A"));
+    assert_eq!(kind.thread_target_body(1), None, "Up To is outside the per-target identity list");
+    assert_eq!(kind.thread_target_body(2), Some("B"));
+    assert_eq!(kind.thread_target_body(3), Some("A"));
+    assert_eq!(kind.input_bodies(), ["A", "B", "A"]);
+    kind.remap_bodies(&std::collections::BTreeMap::from([("A".into(), "Renamed".into())]));
+    assert_eq!(kind.input_bodies(), ["Renamed", "B", "Renamed"]);
+    let saved = serde_json::to_value(&kind).unwrap();
+    assert_eq!(saved["target_bodies"], serde_json::json!(["Renamed", "B", "Renamed"]));
+    let reopened: FeatureKind = serde_json::from_value(saved).unwrap();
+    assert_eq!(reopened, kind);
+}
+
+#[test]
+fn restoring_a_thread_pick_preserves_saved_bits_but_follows_an_upstream_move() {
+    for saved in [Vec3::new(3.0, -0.0, 5.0), Vec3::new(1e8, -0.0, 5.0)] {
+        let rounded = Vec3::new(f64::from_bits(saved.x.to_bits() + 1), 0.0, saved.z);
+        let restored = restored_thread_pick(saved, rounded);
+        assert_eq!([restored.x.to_bits(), restored.y.to_bits(), restored.z.to_bits()], [saved.x.to_bits(), saved.y.to_bits(), saved.z.to_bits()]);
+        let moved = Vec3::new(saved.x + 0.01, 0.0, saved.z);
+        assert_eq!(restored_thread_pick(saved, moved), moved);
+    }
+    assert_eq!(restored_thread_pick(Vec3::ZERO, Vec3::new(f64::EPSILON, 0.0, 0.0)), Vec3::ZERO);
+}
+
+#[test]
+fn restoring_a_thread_pick_keeps_the_resolved_point_when_a_distance_is_refused() {
+    let resolved = Vec3::new(3.0, 0.0, 5.0);
+    assert_eq!(restored_thread_pick(Vec3::new(f64::NAN, 0.0, 0.0), resolved), resolved);
+    let resolved = Vec3::new(f64::INFINITY, 0.0, 5.0);
+    assert_eq!(restored_thread_pick(Vec3::ZERO, resolved), resolved);
+    let resolved = Vec3::new(f64::MAX, 0.0, 0.0);
+    assert_eq!(restored_thread_pick(Vec3::new(-f64::MAX, 0.0, 0.0), resolved), resolved);
+}
+
+/// A closed control-point spline (#19337) is a design the loader accepts: it saves, reopens
+/// unchanged and evaluates with no error.
+#[test]
+fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = [(0., 0.), (12., -2.), (20., 8.), (10., 16.), (-3., 12.), (-6., 3.)]
+        .iter()
+        .map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap())
+        .collect();
+    sk.add_curve(solidcraft_sketch::CurveKind::Spline { pts, control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    let mut doc = Document::new("closed control");
+    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let saved = doc.to_json();
+    let reopened = Document::from_json(&saved).expect("a closed control spline design opens");
+    assert_eq!(reopened.to_json(), saved);
+    let mut model = Model::new();
+    model.evaluate(&reopened);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }

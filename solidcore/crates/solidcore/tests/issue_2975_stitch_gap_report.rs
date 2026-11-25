@@ -167,9 +167,39 @@ fn an_interior_vertex_split_reports_the_original_curve_gap() {
 }
 
 /// Two adjacent squares, with one shared edge represented by an exact cubic
-/// Hermite line. Stitching can compare it; this certificate does not support it.
-fn unsupported_shared_edge() -> (Kernel, Brep) {
+/// Hermite line over [0, 1].
+fn hermite_shared_edge() -> (Kernel, Brep) {
     use solidcore::curve::hermite_curve::HermiteCurve;
+    shared_edge_as(|a, z| HermiteCurve::new(a, z - a, z, z - a, 3).into())
+}
+
+/// Two adjacent squares, with one shared edge represented by the zero offset of the
+/// line's B-spline in the squares' plane. Stitching can compare it; this certificate
+/// does not support it (#13724 part (c) takes offset curves; the kind only has to be
+/// unsupported here and writable for the exact binary restore check).
+fn unsupported_shared_edge() -> (Kernel, Brep) {
+    use solidcore::curve::offset_curve::OffsetCurve;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    shared_edge_as(|a, z| {
+        OffsetCurve::new(
+            3,
+            BSplineCurve::create_line_segment(3, a, z).unwrap().into(),
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::Z,
+            0.0,
+            true,
+        )
+        .unwrap()
+        .into()
+    })
+}
+
+/// Two adjacent squares, with the shared edge replaced by `make(start, end)` over
+/// [0, 1].
+fn shared_edge_as(
+    make: impl Fn(solidcore::math::Point3, solidcore::math::Point3) -> solidcore::curve::curve::Curve,
+) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
     add_square(&mut k, &mut b, 0.0, 0.0);
@@ -199,7 +229,7 @@ fn unsupported_shared_edge() -> (Kernel, Brep) {
     let old = data.curve.as_ref().unwrap();
     let a = old.evaluate_point(&k, data.interval.min()).unwrap();
     let z = old.evaluate_point(&k, data.interval.max()).unwrap();
-    let mut curve: solidcore::curve::curve::Curve = HermiteCurve::new(a, z - a, z, z - a, 3).into();
+    let mut curve = make(a, z);
     curve.set_owner(
         old.owner(),
         Some(solidcore::topology::brep::p2::brep_ref(&b)),
@@ -271,9 +301,8 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
         "the direct stitch has already edited the operand"
     );
 
-    for statuses in [false, true] {
+    {
         let (mut k, mut b) = unsupported_shared_edge();
-        k.fixes.brep_edit_statuses_pass_on = statuses;
         let before = binary(&k, &b);
         let ids = (
             b.face_list().to_vec(),
@@ -289,13 +318,9 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
                     ..
                 })
             ),
-            "flag={statuses}: {result:?}"
+            "{result:?}"
         );
-        assert_eq!(
-            binary(&k, &b),
-            before,
-            "flag={statuses}: the full operand must be restored"
-        );
+        assert_eq!(binary(&k, &b), before, "the full operand must be restored");
         assert_eq!(
             (
                 b.face_list().to_vec(),
@@ -305,6 +330,30 @@ fn certificate_failure_propagates_and_rolls_back_earlier_closures_with_flags_off
             ids
         );
     }
+}
+
+#[test]
+fn a_hermite_shared_edge_reports_a_certified_gap() {
+    // The Hermite edge is the exact line its neighbour's edge is (its stored cubic
+    // coefficients are zero), so the closed-form gap is 0; the bound holds it and stays
+    // within rounding of it. Before Hermite enclosures this closure was refused.
+    // Rounding: the squares' coordinates and the cubic's coefficients are at most 4
+    // in magnitude, every interval operation widens by at most |x| 2.3e-16 + 1e-300,
+    // and the pair bound takes well under 100 operations per axis (shift, hull,
+    // difference, norm), so its excess over 0 is under 100 * 4 * 2.3e-16 * sqrt(3)
+    // < 2e-13; 1e-12 is the floor the line-edge tests above use.
+    let (mut k, mut b) = hermite_shared_edge();
+    let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
+        .expect("a Hermite edge has a certified enclosure");
+    for entry in &gaps {
+        check_accounting(entry);
+    }
+    let edges = edge_closures(&gaps);
+    assert_eq!(edges.len(), 1, "{gaps:?}");
+    let (entry, _, _) = edges[0];
+    assert!(entry.gap >= 0.0 && entry.gap < 1e-12, "{entry:?}");
+    b.refresh_cached_topology();
+    assert_eq!(b.edge_list().len(), 7);
 }
 
 /// The edge closures of a report, with their kept and deleted edges.
@@ -642,4 +691,189 @@ fn a_planar_conic_disc_in_a_holed_face_reports_its_gap() {
     // curves differ by exactly (gap, 0) at every parameter.
     assert!(entry.gap >= gap, "{entry:?}");
     check_edge_closure(&b, &gaps, "SmConic_TYPE", gap, 1e-12);
+}
+
+/// Two adjacent sheets whose shared curves are lifted `gap` off their planes, stitched with
+/// `stitch_tol`. The edges carry the zone `edge_zone`, the faces 0.002 and the vertices 0.006.
+/// Returns the body and the number of edges the stitch sewed.
+fn lifted_sheets(k: &mut Kernel, gap: f64, stitch_tol: f64, edge_zone: f64) -> (Brep, usize) {
+    lifted_sheets_beside(k, gap, stitch_tol, edge_zone, None)
+}
+
+/// [`lifted_sheets`] with a third, separate unit square whose low corner is `beside`.
+fn lifted_sheets_beside(
+    k: &mut Kernel,
+    gap: f64,
+    stitch_tol: f64,
+    edge_zone: f64,
+    beside: Option<(f64, f64)>,
+) -> (Brep, usize) {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::heal::gap::{EdgeEdgeGap, EdgeFaceGap, VertexEdgeGap, VertexFaceGap};
+    use solidcore::topology::brep::p4::stitch_faces;
+
+    let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    add_square(k, &mut b, 0.0, 0.0);
+    add_square(k, &mut b, 1.0, 0.0);
+    // A body tolerance of 1e-4 puts the size ratio limit (1000x) at 0.1, above every zone here.
+    b.set_tolerance(1e-4);
+    for f in b.face_list().to_vec() {
+        b.face_mut(f).unwrap().tolerance = 0.002;
+    }
+    for v in b.vertex_list().to_vec() {
+        b.vertex_mut(v).unwrap().tolerance = 0.006;
+    }
+    let translation = Axis2Placement::new(
+        Vec3::new(0.0, 0.0, gap),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    // add_square's domain is in the plane's frame, which need not align
+    // its u coordinate with world x. Select the shared u = 1 edge in that frame.
+    let surface = b.face(b.face_list()[0]).unwrap().surface.as_ref().unwrap();
+    let shared_start = surface.evaluate_point(k, Point2::new(1.0, 0.0)).unwrap();
+    let shared_end = surface.evaluate_point(k, Point2::new(1.0, 1.0)).unwrap();
+    let mut lifted = 0;
+    for e in b.edge_list().to_vec() {
+        let data = b.edge_mut(e).unwrap();
+        data.tolerance = edge_zone;
+        let curve = data.curve.as_mut().unwrap();
+        let a = curve.evaluate_point(k, data.interval.min()).unwrap();
+        let z = curve.evaluate_point(k, data.interval.max()).unwrap();
+        if (a.distance(shared_start) < 1e-12 && z.distance(shared_end) < 1e-12)
+            || (a.distance(shared_end) < 1e-12 && z.distance(shared_start) < 1e-12)
+        {
+            curve.transform(k, &translation, None).unwrap();
+            lifted += 1;
+        }
+    }
+    assert_eq!(lifted, 2);
+    // The fixture edits the stored geometry directly, so clear any gaps the
+    // face constructor measured before that edit.
+    for eu in b.edgeuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
+        let data = b.edgeuse_mut(eu).unwrap();
+        data.max_edge_face_gap = EdgeFaceGap::default();
+        data.edge_ccw_edge_gap = EdgeEdgeGap::default();
+    }
+    for vu in b.vertexuses().iter().map(|(id, _)| id).collect::<Vec<_>>() {
+        let data = b.vertexuse_mut(vu).unwrap();
+        data.vertex_edge_gap = VertexEdgeGap::default();
+        data.vertex_face_gap = VertexFaceGap::default();
+    }
+    let sewed = stitch_faces(k, &mut b, stitch_tol, None, false)
+        .map_or(0, |outcome| outcome.stitched_edges);
+    b.refresh_cached_topology();
+    // the third face comes after the stitch, so nothing sews it
+    if let Some((x, y)) = beside {
+        add_square(k, &mut b, x, y);
+        b.refresh_cached_topology();
+    }
+    // `add_square` names each surface's owner by its arena identity, while `new_brep`
+    // checks under the notification scheme: relabel so the check sees the owners.
+    b.use_arena_naming().unwrap();
+    if sewed == 1 && beside.is_none() {
+        assert_eq!(b.edge_list().len(), 7);
+        assert_eq!(b.vertex_list().len(), 6);
+    }
+    (b, usize::try_from(sewed).unwrap_or(usize::MAX))
+}
+
+/// A stitch tolerance of 0.01 sews gaps up to it, growing the sewn edge's zone to cover the gap
+/// (at most the gap plus the larger zone), and the stitched body is then valid under the stitch's
+/// scope. A gap past the stitch tolerance and past the summed edge zones is not sewn, and the
+/// check reports it.
+#[test]
+fn a_stitch_sews_a_gap_within_its_tolerance_and_leaves_a_larger_one() {
+    use solidcore::topology::brep::validation::{
+        check_brep, check_brep_scoped, CheckLevel, ValidityScope,
+    };
+
+    let mut k = Kernel::default();
+    for gap in [0.004, 0.008] {
+        let (mut b, sewed) = lifted_sheets(&mut k, gap, 0.01, 0.005);
+        assert_eq!(sewed, 1, "gap {gap}");
+        let report =
+            check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+        assert!(report.is_valid(), "gap {gap}: {:?}", report.lines());
+        let grown = b
+            .edge_list()
+            .iter()
+            .map(|&e| b.edge(e).unwrap().tolerance)
+            .fold(0.0, f64::max);
+        assert!(grown >= gap, "gap {gap}: zone {grown}");
+        // The glue widens the sewn edge to the gap plus the larger incident zone, and to at
+        // least twice the gap.
+        assert!(
+            grown <= (2.0 * gap).max(gap + 0.005) + 1e-12,
+            "gap {gap}: zone {grown}"
+        );
+    }
+    let (mut b, sewed) = lifted_sheets(&mut k, 0.012, 0.01, 0.005);
+    assert_eq!(sewed, 0);
+    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert!(!report.is_valid());
+}
+
+/// A gap inside the sum of the incident local zones (here the 0.02 edge zone) is sewn without
+/// growing any zone. The rule for every body still refuses it (a vertex gap past half the vertex
+/// tolerance); the stitch's scope takes it where nothing else lies in the vertex's ball; and the
+/// explicit repair API keeps its stricter targets.
+#[test]
+fn a_gap_inside_the_summed_local_zones_is_taken_only_by_the_stitch_scope() {
+    use solidcore::geom::assert_array::AssertArray;
+    use solidcore::topology::brep::validation::{
+        check_brep, check_brep_scoped, validate_and_update_tolerances, CheckLevel, ValidityScope,
+    };
+
+    let mut k = Kernel::default();
+    // (a check repairs the vertex tolerances it finds short as it runs: one body per check)
+    let (mut every, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
+    assert_eq!(sewed, 1);
+    let body = check_brep(&mut k, &mut every, CheckLevel::Level2).unwrap();
+    assert!(!body.is_valid(), "the rule for every body is unchanged");
+    let (mut b, sewed) = lifted_sheets(&mut k, 0.004, 1e-4, 0.02);
+    assert_eq!(sewed, 1);
+    let report =
+        check_brep_scoped(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Stitched).unwrap();
+    assert!(report.is_valid(), "{:?}", report.lines());
+    assert_eq!(b.tolerance(), 1e-4);
+    for &e in b.edge_list() {
+        assert_eq!(b.edge(e).unwrap().tolerance, 0.02);
+    }
+    // Checking validity must not silently repair the model.
+    let mut repair = AssertArray::default();
+    let gaps = validate_and_update_tolerances(&mut k, &mut b, true, Some(&mut repair), 2).unwrap();
+    assert!((gaps.max_vertex_edge_gap - 0.004).abs() < 1e-12);
+}
+
+/// The stitch's scope takes a gap past the rule for every body only where the tolerance tube that
+/// covers it reaches no topology it does not bound: a separate face 0.01 from the sewn edge's end,
+/// inside its 0.02 tube, is reached; the same face 0.5 away is proven clear. (The vertex ball is
+/// held to the same by Test #82's clearance proof, which excuses topology within the edge zones, so
+/// it does not reach here.)
+#[test]
+fn the_edge_tube_proof_finds_a_face_inside_the_tube_and_clears_one_far_away() {
+    use solidcore::topology::brep::validation::{edge_tube_reaches, vertex_ball_reaches};
+
+    let mut k = Kernel::default();
+    for (distance, reaches) in [(0.5, false), (0.01, true)] {
+        let (mut b, sewed) =
+            lifted_sheets_beside(&mut k, 0.004, 1e-4, 0.02, Some((1.0, 1.0 + distance)));
+        assert_eq!(sewed, 1, "distance {distance}");
+        let mut any = false;
+        for e in b.edge_list().to_vec() {
+            if b.edge(e).unwrap().tolerance == 0.02 {
+                any |= edge_tube_reaches(&k, &mut b, e).unwrap();
+            }
+        }
+        assert_eq!(any, reaches, "distance {distance}");
+        for v in b.vertex_list().to_vec() {
+            if b.vertex(v).unwrap().tolerance == 0.006 {
+                assert!(
+                    !vertex_ball_reaches(&k, &mut b, v).unwrap(),
+                    "distance {distance}"
+                );
+            }
+        }
+    }
 }

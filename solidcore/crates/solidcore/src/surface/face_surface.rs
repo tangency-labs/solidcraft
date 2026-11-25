@@ -28,11 +28,11 @@ use crate::eval::sphere;
 use crate::eval::Curve as RecordCurve;
 use crate::eval::Surface as Record;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::ball_patch::BallPatch;
-use crate::surface::from_parameters::from_parameters;
+use crate::surface::from_parameters::{from_parameters, plane_axes_square};
 use crate::surface::implicit::{AnalyticSupport, SupportKind};
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -278,7 +278,7 @@ fn labelled(k: &Kernel, label: &Record, net: BSplineSurface) -> Result<Surface> 
 /// degrees. A torus's tube start moves only its parametrisation, which is its form's here.
 fn label_support(label: &Record) -> Option<AnalyticSupport> {
     let placement = |f: &crate::eval::Frame| {
-        let v = |a: [f64; 3]| crate::geom::vector3d::Vec3::new(a[0], a[1], a[2]);
+        let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
         crate::geom::axis2_placement::Axis2Placement::from_stored(
             Point3::new(f.origin[0], f.origin[1], f.origin[2]),
             v(f.x_axis),
@@ -337,10 +337,34 @@ pub struct RecordFace {
     pub agrees: bool,
 }
 
+/// A plane placement's y axis as the record writes it: `y` itself when it is square to `x` to
+/// the rounding the reader takes ([`plane_axes_square`]), else `y` with its part along `x`
+/// taken out and made unit again. A placement keeps axes up to 10⁻¹² off square
+/// (`SetCanonical`), and a plane fitted through far corners can be off by 10⁻¹⁴, which the
+/// reader refuses (solidcore#3377); the move is that angle times the face's size. `None` when
+/// two passes do not square it (axes parallel, or NaN); the reader refuses an axis that is
+/// not finite on its own.
+fn square_plane_axis(x: Vec3, y: Vec3) -> Option<Vec3> {
+    let mut y = y;
+    for _ in 0..2 {
+        if plane_axes_square(x, y) {
+            return Some(y);
+        }
+        let off = y - x * (x.dot(y) / x.length_squared());
+        let len = off.length();
+        if !(len.is_finite() && len > 0.0) {
+            return None;
+        }
+        y = off / len;
+    }
+    plane_axes_square(x, y).then_some(y)
+}
+
 /// The record of the kernel's face surface `s` over `uv_domain` (the face's box in the
 /// kernel's parameters), the inverse of [`face_surface`]:
 ///
-/// - **Plane:** its placement's origin and unit axes, copied (no cross product), its box
+/// - **Plane:** its placement's origin and unit axes, copied (no cross product), its y axis
+///   made square to its x to the record's rounding ([`square_plane_axis`]), its box
 ///   and pcurves its kernel parameters times its scales: the kernel's plane is
 ///   `origin + su u x + sv v y` in its NURBS parameters, so the record's parameters are an
 ///   exact image of the kernel's, and their normals agree when `su sv > 0`.
@@ -375,6 +399,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
     if let SurfaceKind::Plane(p) = s.kind_with_nurb(k)? {
         A::check(k, s)?;
         let (o, x, y) = p.position().canonical();
+        let y = square_plane_axis(x, y).ok_or_else(|| bad("a plane's axes are not square"))?;
         let sc = p.uv_scale();
         if !(sc.x.is_finite() && sc.y.is_finite() && sc.x != 0.0 && sc.y != 0.0) {
             return Err(bad("a plane's scale is zero or not finite"));
@@ -401,14 +426,6 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
     }
     let label = match s.kind_with_nurb(k)? {
         SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
-            let frame = |p: &crate::geom::axis2_placement::Axis2Placement| {
-                let (o, x, y) = p.canonical();
-                crate::eval::Frame {
-                    origin: [o.x, o.y, o.z],
-                    x_axis: [x.x, x.y, x.z],
-                    y_axis: [y.x, y.y, y.z],
-                }
-            };
             // The surface's own numbers, proved on its form (`lies_on` and the form's own
             // parametrisation), as [`face_surface`] reads the label back; numbers the form
             // does not prove give no label (owner 22254): the face goes as its exact NURBS.
@@ -421,39 +438,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                 }
                 Err(_) => None,
             };
-            match proved {
-                None => None,
-                Some(proved) => match proved {
-                    A::Cylinder { placement, radius } => Some(Record::Cylinder {
-                        frame: frame(&placement),
-                        radius,
-                    }),
-                    A::Cone {
-                        placement,
-                        base_radius,
-                        semi_angle_deg,
-                    } => Some(Record::Cone {
-                        frame: frame(&placement),
-                        radius_at_origin: base_radius,
-                        half_angle: semi_angle_deg.to_radians(),
-                    }),
-                    A::Sphere { placement, radius } => Some(Record::Sphere {
-                        frame: frame(&placement),
-                        radius,
-                    }),
-                    A::Torus {
-                        placement,
-                        major_radius,
-                        minor_radius,
-                    } => Some(Record::Torus {
-                        frame: frame(&placement),
-                        major_radius,
-                        minor_radius,
-                        tube_start: 0.0,
-                    }),
-                    A::Plane { .. } => return Err(bad("a plane read as another kind")),
-                },
-            }
+            proved.map(support_record).transpose()?
         }
         SurfaceKind::BallPatch(bp) => {
             let c = bp.centre();
@@ -510,6 +495,87 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
         scale: [1.0, 1.0],
         agrees: true,
     })
+}
+
+/// The record's label of an analytic support: its own numbers, frame copied (no cross
+/// product), angles in radians.
+fn support_record(support: AnalyticSupport) -> Result<Record> {
+    use crate::geom::axis2_placement::Axis2Placement;
+    let frame = |p: &Axis2Placement| {
+        let (o, x, y) = p.canonical();
+        crate::eval::Frame {
+            origin: [o.x, o.y, o.z],
+            x_axis: [x.x, x.y, x.z],
+            y_axis: [y.x, y.y, y.z],
+        }
+    };
+    Ok(match support {
+        AnalyticSupport::Cylinder { placement, radius } => Record::Cylinder {
+            frame: frame(&placement),
+            radius,
+        },
+        AnalyticSupport::Cone {
+            placement,
+            base_radius,
+            semi_angle_deg,
+        } => Record::Cone {
+            frame: frame(&placement),
+            radius_at_origin: base_radius,
+            half_angle: semi_angle_deg.to_radians(),
+        },
+        AnalyticSupport::Sphere { placement, radius } => Record::Sphere {
+            frame: frame(&placement),
+            radius,
+        },
+        AnalyticSupport::Torus {
+            placement,
+            major_radius,
+            minor_radius,
+        } => Record::Torus {
+            frame: frame(&placement),
+            major_radius,
+            minor_radius,
+            tube_start: 0.0,
+        },
+        AnalyticSupport::Plane { .. } => {
+            return Err(SolidError::invalid_input(
+                OP_BACK,
+                "a plane read as another kind",
+            ))
+        }
+    })
+}
+
+/// The label of the cylinder, cone, sphere or torus a NURBS form proves, the first of those kinds
+/// that is, with the kernel's own numbers ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`]:
+/// the form lies on the surface and the surface evaluates as the form); `None` where no kind is
+/// proved. For a writer whose format has the surface the form is, where the record holds the face
+/// as that form (a round of a circle class, a blend by its definition): the record is not changed.
+///
+/// # Errors
+///
+/// `InvalidInput` for a form that is not a spline; those of [`from_parameters`], and `Unported`
+/// or `Cancelled` from the proof.
+pub fn analytic_label(k: &Kernel, nurbs: &Record, domain: [[f64; 2]; 2]) -> Result<Option<Record>> {
+    let (net, _) = spline(k, nurbs, domain)?;
+    for kind in [
+        SupportKind::Cylinder,
+        SupportKind::Cone,
+        SupportKind::Sphere,
+        SupportKind::Torus,
+    ] {
+        let support = match AnalyticSupport::derive(k, kind, &net) {
+            Ok(support) => support,
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(_) => continue,
+        };
+        match support.build(k, net.copy()) {
+            Ok(_) => return support_record(support).map(Some),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(_) => {}
+        }
+    }
+    Ok(None)
 }
 
 /// A B-spline surface's NURBS as the record's spline (every weight 1) or rational spline

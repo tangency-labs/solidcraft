@@ -12,7 +12,8 @@ impl Brep {
     /// `self` with faces `faces` (indices in SMLib's face order, distinct) cut where each of
     /// `tools` meets them, the tools in turn, each cutting the pieces the earlier ones left; and
     /// for each face how many faces it became besides itself (0: no tool split it). `None` when
-    /// no face is split. Tagged operands ([`Brep::tagged`]) give the pieces' history.
+    /// no face is split, and [`Error::ToolStopsShort`] when none is but a tool ran into a face and
+    /// ended inside it. Tagged operands ([`Brep::tagged`]) give the pieces' history.
     pub fn split_faces(&self, faces: &[usize], tools: &[&Surface]) -> Result<Option<(Brep, Vec<usize>)>> {
         if faces.is_empty() || faces.len() > core::split::MAX_FACES || tools.is_empty() || tools.len() > core::split::MAX_TOOLS {
             return Err(Error::Argument);
@@ -33,7 +34,8 @@ impl Brep {
     /// part behind the surface (its normal points away) and the part in front, each closed by
     /// the tool's piece inside the body and each possibly several solids. A tool that misses
     /// leaves both parts the whole body, with no face from the tool (tag `self` to tell); `None`
-    /// when a side is left empty.
+    /// when a side is left empty, or when the tool ends inside the body (it only nicks it, and
+    /// neither part would be a closed solid).
     pub fn split_body(&self, tool: &Surface) -> Result<Option<(Brep, Brep)>> {
         let r = core::split::split_body(self.core(), tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
         trace::call(

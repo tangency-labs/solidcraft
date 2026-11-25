@@ -1,0 +1,5 @@
+Updates: WR-536
+
+- **Flag retired:** `Kernel::fixes.boolean2d_plane_covers_far_faces` is gone; its fixed path is the only path. `Surface::cover_coincident_surface_*` on a plane always grows its search domain to the projections of the other surface's tight box, and `boolean_2d` refuses a cover that still fails (`PrimitiveFailure::PlaneCannotCover`).
+- **Why:** SolidCraft ran with the flag on (its `fixes()` preset); `solidcore-ops` calls, which run with no fixes unless an application names some, did not. On the planar region boolean (`solidcore_ops::prism::planar_regions_boolean`), 42 of the operand pairs SolidCraft's sheet tests make failed without it (1001, 1006, 1007, or an edge read off the plane: faces rebuilt on a plane that did not hold them) and every one builds with it.
+- **Tests:** `tests/fork_67b8a1e_four_far_disks.rs` runs on the default kernel (its four-disk join failed with 1006 before); its pinned upstream half (`fork_67b8a1e_four_far_disks_join_fails_by_default`) is deleted. `solidcore-ops/tests/prism.rs` `far_faces_of_recorded_sheet_cuts_build_and_their_areas_agree` runs 35 of the recorded pairs.

@@ -426,6 +426,9 @@ fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1097,13 +1100,43 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::contact_certificate::{certify_gap_move, gap_intersection};
+
+    /// The contacts `(t0, t1)` (each point and both ends of each range) of the
+    /// intersection `trim_gap` runs in the `gap` cases whose answer moved when WR-455's
+    /// contacts at curve ends became the default, as they were before.
+    const OLD_GAP_CONTACTS: [(&str, &[[f64; 2]]); 1] =
+        [("gen0952", &[[6.145018443004455, -0.9998192898087154]])];
+
+    /// WR-455: every moved `gap` row comes from `trim_gap`'s intersection naming a
+    /// contact at a curve's end, certified ([`certify_gap_move`]: each solution now is a
+    /// contact, each one before is joined to one now within the tolerance; no sampling).
+    #[test]
+    fn gap_contacts_at_curve_ends_are_certified() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = Kernel::default();
+        for (name, old) in OLD_GAP_CONTACTS {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let i: Inputs = case.parse().unwrap();
+            let OpIn::Gap { other, dmin, .. } = &i.op else {
+                panic!("{name}: a gap case");
+            };
+            let this = build_this(&i.this).unwrap();
+            let other = build_this(other).unwrap();
+            let g = gap_intersection(&k, &this, &other, *dmin).expect("an intersection");
+            assert!(certify_gap_move(&k, name, &g, old), "{name}: moved");
+        }
+    }
 
     /// WR-668 (tangency-labs/smlib#76 6ca3405) takes a zero-speed end only at a vertex
     /// of the curve's edge, so the free curves of `zero_speed_end.json` report as
-    /// upstream, with and without the minimum radius read (`bspline_check_min_radius`,
-    /// WR-382). Coincident first control points fail test 3. Coincident last ones pass
-    /// test 4, which reports the first pair's values, so the backwards curve fails only
-    /// once the minimum radius is read (tests 13/14).
+    /// upstream, the minimum radius read (WR-382). Coincident first control points fail
+    /// test 3. Coincident last ones pass test 4, which reports the first pair's values, so
+    /// the backwards curve fails on the minimum radius (tests 13/14).
     #[test]
     fn zero_speed_end_fixtures_on_no_edge_report_as_upstream() {
         let fixtures: Value = serde_json::from_str(include_str!(
@@ -1112,21 +1145,14 @@ mod tests {
         .unwrap();
         let cases = fixtures["cases"].as_array().unwrap();
         assert!(cases.len() >= 8);
-        for min_radius in [false, true] {
-            let mut fixes = UpstreamFixes::default();
-            fixes.bspline_check_min_radius = min_radius;
-            for case in cases {
-                let name = case["name"].as_str().unwrap();
-                let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
-                assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
-                let a = rust_with_fixes(&i, &fixes).unwrap();
-                let valid = name.starts_with("zero_speed_end") && !min_radius;
-                assert_eq!(
-                    a.values["flag"],
-                    [f64::from(u8::from(valid))],
-                    "{name}: {a:?}"
-                );
-            }
+        let fixes = UpstreamFixes::default();
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
+            let a = rust_with_fixes(&i, &fixes).unwrap();
+            // every one fails a test: 3 (first points coincide) or 13/14 (the minimum radius)
+            assert_eq!(a.values["flag"], [0.0], "{name}: {a:?}");
         }
     }
 }

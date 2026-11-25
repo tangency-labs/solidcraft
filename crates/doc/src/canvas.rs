@@ -1,5 +1,6 @@
 //! Canvases: reference images placed on a plane (Insert Canvas), kept in the design.
-//! The image bytes travel inside the design file (base64), so it reopens without the original.
+//! The image file travels inside the design, as a part of the container of its own, so it
+//! reopens without the original. The design holds its bytes, never text.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
@@ -16,10 +17,13 @@ pub struct Canvas {
     pub name: String,
     /// `png` or `jpeg`.
     pub format: String,
-    /// The image file, base64. Shared rather than owned: every edit clones the document (the undo
+    /// The image file's bytes. Shared rather than owned: every edit clones the document (the undo
     /// history keeps the old one), and an image of up to 16 MiB copied into each of the 200 undo
-    /// states would hold gigabytes. Serialized as the same JSON string as before.
-    pub data: std::sync::Arc<str>,
+    /// states would hold gigabytes. A container writes them to a part of their own; a plain JSON
+    /// design can't hold them ([`crate::Document::binary_data`]), and an older one's base64 is
+    /// decoded as it opens.
+    #[serde(default, skip_serializing, deserialize_with = "crate::blob::lenient")]
+    pub data: crate::blob::Blob,
     /// Pixel size of the image.
     pub pixels: [u32; 2],
     pub plane: PlaneRef,
@@ -45,6 +49,25 @@ pub struct Canvas {
     /// the component's occurrence); 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]
     pub component: u64,
+    /// The sketch points its corners follow, so dimensions and constraints in that sketch place
+    /// and size the image. `None`: its own centre, width and angle place it, as they also do
+    /// while the sketch or a point is missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<CanvasAnchor>,
+}
+
+/// Sketch points a canvas's corners follow: its bottom-left and bottom-right corners, and its
+/// top-left corner when the image may stretch; without it the height follows the image's shape.
+/// The points are those of the solved sketch, so the image moves as the sketch solves.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CanvasAnchor {
+    /// The sketch's feature id.
+    pub sketch: u64,
+    /// Point ids in that sketch.
+    pub bottom_left: String,
+    pub bottom_right: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_left: Option<String>,
 }
 
 fn is_root(c: &u64) -> bool {
@@ -76,21 +99,109 @@ impl Canvas {
     pub fn world_corners(&self, plane: &Plane) -> [Vec3; 4] {
         self.corners().map(|p| plane.to_world(p))
     }
-    pub fn bytes(&self) -> Option<Vec<u8>> {
-        base64_decode(&self.data)
+    /// The corners, in the order of [`Canvas::corners`], of the frame whose bottom edge runs from
+    /// `bl` to `br` and whose top-left corner is `tl`; without `tl`, the frame is as high as the
+    /// image's shape makes it, its top to the left of the bottom edge's direction. Mirrored left
+    /// to right like the canvas. `None` for a frame with no area.
+    pub fn frame_corners(&self, bl: Vec2, br: Vec2, tl: Option<Vec2>) -> Option<[Vec2; 4]> {
+        let [pw, ph] = self.pixels;
+        let aspect = if pw == 0 { 1.0 } else { f64::from(ph) / f64::from(pw) };
+        // The kernel's frame: both edges long enough and not along one line.
+        let xy = |p: Vec2| [p.x, p.y];
+        let [bl, br, tr, tl] = solidcore_ops::affine::rect_of_aspect(xy(bl), xy(br), tl.map(xy), aspect)?.map(|[x, y]| Vec2::new(x, y));
+        Some(if self.flip { [br, bl, tl, tr] } else { [bl, br, tr, tl] })
+    }
+    /// The image file.
+    pub fn bytes(&self) -> &[u8] {
+        &self.data
     }
 }
 
 impl crate::Document {
     /// A canvas's plane in the world: resolved in its component's frame, then placed where the
-    /// component's occurrence puts it.
-    pub fn canvas_plane(&self, vals: &std::collections::BTreeMap<String, crate::expr::Value>, c: &Canvas) -> crate::Result<Plane> {
-        let p = self.resolve_plane(vals, &c.plane, 0)?;
+    /// component's occurrence puts it. Use the evaluated state so planes built from sketch
+    /// points, paths or other model geometry resolve as they do when the canvas is inserted.
+    /// Face attachments follow the current face in the same frame as attached sketches.
+    pub fn canvas_plane(
+        &self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        c: &Canvas,
+        state: &crate::ModelState,
+    ) -> crate::Result<Plane> {
+        let p = if let Some(anchor) = crate::face_anchor::plane_face_anchor(&c.plane) {
+            // These wrappers need only the resolved face, so avoid copying the model every frame.
+            let mut base = &c.plane;
+            while let PlaneRef::Offset { base: next, .. }
+            | PlaneRef::Flipped { base: next, .. }
+            | PlaneRef::AtAngle { base: next, line: None, pivot: None, .. } = base
+            {
+                base = next;
+            }
+            let framed = if matches!(base, PlaneRef::Face { .. }) {
+                std::borrow::Cow::Borrowed(state)
+            } else {
+                crate::state_in_face_anchor_frame(self, state, anchor, c.component)?
+            };
+            self.resolve_attached_plane(vals, &c.plane, c.component, state, &framed)?
+        } else {
+            self.resolve_plane_in(vals, &c.plane, 0, c.component, Some(state))?
+        };
         let m = self.component_transform(c.component);
         if crate::is_identity(&m) {
             return Ok(p);
         }
         Ok(Plane::new(crate::apply_point(&m, p.origin), crate::apply_vector(&m, p.x), crate::apply_vector(&m, p.y)).unwrap_or(p))
+    }
+
+    /// A canvas's corners in the world: the bottom-left, bottom-right, top-right and top-left of
+    /// the image. An anchored canvas follows its sketch's solved points; while they give no frame
+    /// (the sketch or a point is gone), its own centre, width and angle place it.
+    pub fn canvas_corners(
+        &self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        c: &Canvas,
+        state: &crate::ModelState,
+    ) -> crate::Result<[Vec3; 4]> {
+        if let Some(anchor) = &c.anchor
+            && let Ok(corners) = self.canvas_anchor_corners(c, anchor, state)
+        {
+            return Ok(corners);
+        }
+        let plane = self.canvas_plane(vals, c, state)?;
+        Ok(c.world_corners(&plane))
+    }
+
+    /// The world corners `anchor` gives `c` (as [`Document::canvas_corners`] orders them), or why
+    /// it gives none.
+    pub fn canvas_anchor_corners(&self, c: &Canvas, anchor: &CanvasAnchor, state: &crate::ModelState) -> crate::Result<[Vec3; 4]> {
+        let corners = self.canvas_anchor_frame(c, anchor, state)?;
+        let ss = state.sketch(anchor.sketch).ok_or_else(|| crate::DocError::Invalid(format!("sketch {} is not there", anchor.sketch)))?;
+        // The sketch's points are in its component's frame; the world is where that component's
+        // occurrence puts it, as for the canvas's own plane.
+        let m = self.component_transform(self.feature(anchor.sketch).map_or(c.component, |f| f.component));
+        let placed = |p: Vec2| {
+            let w = ss.plane.to_world(p);
+            if crate::is_identity(&m) { w } else { crate::apply_point(&m, w) }
+        };
+        Ok(corners.map(placed))
+    }
+
+    /// The corners `anchor` gives `c` (as [`Document::canvas_corners`] orders them) in the
+    /// coordinates of the anchor's sketch, or why it gives none.
+    pub fn canvas_anchor_frame(&self, c: &Canvas, anchor: &CanvasAnchor, state: &crate::ModelState) -> crate::Result<[Vec2; 4]> {
+        let invalid = |m: String| crate::DocError::Invalid(m);
+        let ss = state.sketch(anchor.sketch).ok_or_else(|| invalid(format!("{} follows sketch {}, which is not there", c.name, anchor.sketch)))?;
+        let point = |id: &str| {
+            ss.sketch.points.iter().find(|p| p.id == id).map(|p| p.pos).ok_or_else(|| invalid(format!("sketch `{}` has no point `{id}`", ss.name)))
+        };
+        let (bl, br) = (point(&anchor.bottom_left)?, point(&anchor.bottom_right)?);
+        let tl = anchor.top_left.as_deref().map(point).transpose()?;
+        c.frame_corners(bl, br, tl).ok_or_else(|| {
+            invalid(format!(
+                "the corners {} follows in sketch `{}` make a frame with no area: its points coincide or lie on one line",
+                c.name, ss.name
+            ))
+        })
     }
 }
 
@@ -185,5 +296,46 @@ mod tests {
         let jpg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 4, 0, 0, 0xFF, 0xC0, 0, 11, 8, 0, 100, 0, 200, 3, 0, 0, 0];
         assert_eq!(image_info(&jpg), Some(("jpeg", [200, 100])));
         assert_eq!(image_info(b"nope"), None);
+    }
+
+    fn canvas(pixels: [u32; 2], flip: bool) -> Canvas {
+        Canvas {
+            id: 1,
+            name: "Decal1".into(),
+            format: "png".into(),
+            data: b"bytes".into(),
+            pixels,
+            plane: PlaneRef::Origin { name: "XY".into() },
+            center: Vec2::new(0.0, 0.0),
+            width: 10.0,
+            angle: 0.0,
+            opacity: 1.0,
+            flip,
+            visible: true,
+            locked: false,
+            component: 0,
+            anchor: None,
+        }
+    }
+
+    /// A frame from its bottom edge takes its height from the image (2:1 here), its top to the
+    /// left of the edge's direction; a top-left corner given stretches it; mirroring swaps the
+    /// image's left and right.
+    #[test]
+    fn a_frame_follows_its_bottom_edge_and_the_image_shape_or_its_top_corner() {
+        let (bl, br) = (Vec2::new(10.0, 5.0), Vec2::new(10.0, 25.0));
+        // Edge 20 mm along +y: "up" is -x, half as high as wide for a 200 x 100 image.
+        assert_eq!(canvas([200, 100], false).frame_corners(bl, br, None), Some([bl, br, Vec2::new(0.0, 25.0), Vec2::new(0.0, 5.0)]));
+        let tl = Vec2::new(-30.0, 5.0);
+        assert_eq!(canvas([200, 100], false).frame_corners(bl, br, Some(tl)), Some([bl, br, Vec2::new(-30.0, 25.0), tl]));
+        assert_eq!(
+            canvas([200, 100], true).frame_corners(bl, br, Some(tl)),
+            Some([br, bl, tl, Vec2::new(-30.0, 25.0)]),
+            "mirrored: the image's bottom-left is the frame's bottom-right"
+        );
+        // No area: coincident bottom corners, or a top corner on the bottom edge's line.
+        assert_eq!(canvas([200, 100], false).frame_corners(bl, bl, None), None);
+        assert_eq!(canvas([200, 100], false).frame_corners(bl, br, Some(Vec2::new(10.0, 40.0))), None);
+        assert_eq!(canvas([200, 100], false).frame_corners(bl, Vec2::new(f64::NAN, 0.0), None), None);
     }
 }

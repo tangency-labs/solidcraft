@@ -3,11 +3,11 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, MoveParams, MoveResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult,
-    RevolveParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, DraftParams, ExtrudeParams,
+    FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams,
+    PressPullParams, PressPullResult, RevolveParams, ScaleParams, ShellParams, SphereParams, TorusParams,
 };
-use super::{PatternCircularParams, PatternCircularResult};
+use super::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use super::{SurfaceSweepParams, SweepParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -18,6 +18,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<MoveParams>(),
         &[
+            "about",
             "angle",
             "axis",
             "bodies",
@@ -62,6 +63,7 @@ fn schemas_and_the_key_check_agree() {
             "side",
             "sketch",
             "start_offset",
+            "symmetric_offset",
             "taper",
             "targets",
             "thickness",
@@ -69,6 +71,7 @@ fn schemas_and_the_key_check_agree() {
             "thin",
             "through_all",
             "to",
+            "to_body_apart",
             "to_offset",
             "touching",
         ],
@@ -133,10 +136,17 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<PipeParams>(),
         &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
     );
-    assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "name", "participants"]);
+    assert_keys(
+        input_schema_for::<BoundingSolidParams>(),
+        &["bodies", "body_name", "body_names", "component", "margin", "margins", "name", "participants"],
+    );
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(
+        input_schema_for::<MirrorParams>(),
+        &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane", "touching"],
+    );
     assert_keys(
         input_schema_for::<FilletParams>(),
         &[
@@ -144,6 +154,7 @@ fn schemas_and_the_key_check_agree() {
             "body_name",
             "body_names",
             "corner",
+            "edge_radii",
             "edges",
             "fit",
             "knots",
@@ -290,6 +301,19 @@ fn strict_keeps_todays_errors() {
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
+        // #12893: Mirror's lists and plane; neither `features` nor `bodies`, and names the design
+        // lacks, stay the handler's to refuse.
+        ("solid.mirror", json!({"plane": "XY"})),
+        ("solid.mirror", json!({"features": 5, "plane": "XY"})),
+        ("solid.mirror", json!({"features": ["Nope"], "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": 5, "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": ["B", 1], "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": true})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": 7.5})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": null})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": "NoSuchPlane"})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": {"origin": [0, 0, 0]}})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": {"origin": "here", "normal": [0, 0, 1]}})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "round"})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "ROUND"})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "type": "bogus"})),
@@ -396,9 +420,13 @@ fn combine_replies_with_combine_result() {
 fn sweep_schemas_and_the_key_check_agree() {
     let shape = ["orientation", "rail_fit", "rails", "scale", "twist"];
     let mut solid = vec![
+        "body",
         "body_name",
         "body_names",
         "exact_regions",
+        "face",
+        "face_body",
+        "fixed",
         "name",
         "operation",
         "participants",
@@ -858,6 +886,7 @@ fn fillet_replies_match_its_output_schema() {
     assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
     run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10], [20, 30, 10]], "radius": 1, "edge_radii": [1, "2 mm"], "tangent_chain": false}));
     run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
     // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
     // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.
@@ -927,6 +956,82 @@ fn chamfer_replies_with_feature_result() {
     run(json!({"edges": [[40, 15, 10]], "distance": "1 mm", "angle": "30 deg"}));
     run(json!({"edges": [{"body": "B", "index": 0}], "distance": 0.5, "tangent_chain": false}));
     run(json!({"edges": [[20, 30, 10]], "distance": 1, "distance2": null, "angle": null, "flip": null, "body": null, "tangent_chain": null}));
+}
+
+/// #12893: Mirror's contract takes what its input schema allows: each call's check finds no issue
+/// exactly when the call matches the schema. A call with neither `features` nor `bodies` matches
+/// it; the handler refuses it.
+#[test]
+fn mirror_check_takes_what_the_schema_allows() {
+    let schema = input_schema_for::<MirrorParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"features": ["Extrude1"], "plane": "XY"}), true),
+        (json!({"features": "Extrude1", "plane": "top"}), true),
+        (json!({"bodies": ["B"], "plane": 7}), true),
+        (json!({"bodies": "B", "plane": {"origin": [0, "w", 0], "normal": [1, 0, 0]}, "combine": true, "name": "M", "body_name": "C"}), true),
+        (json!({"bodies": ["B"], "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "features": null, "combine": null}), true),
+        (json!({"plane": "XY"}), true),
+        (json!({"bodies": ["B"]}), false),
+        (json!({"bodies": ["B"], "plane": null}), false),
+        (json!({"bodies": ["B"], "plane": true}), false),
+        (json!({"bodies": ["B"], "plane": 7.5}), false),
+        (json!({"bodies": ["B"], "plane": {"origin": [0, 0, 0]}}), false),
+        (json!({"bodies": [1], "plane": "XY"}), false),
+        (json!({"features": 5, "plane": "XY"}), false),
+        (json!({"bodies": ["B"], "plane": "XY", "combine": "yes"}), false),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": "one_body"}), true),
+        (json!({"bodies": ["B"], "plane": "XY", "touching": null}), true),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": "merged"}), false),
+        (json!({"features": ["Join1"], "plane": "XY", "touching": true}), false),
+        (json!({"bodies": ["B"], "plane": "XY", "colour": "red"}), false),
+    ] {
+        let issues = crate::schema::issues("solid.mirror", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+/// #12893: Mirror replies with `FeatureResult`, with the keys it gave before, in each of its forms:
+/// bodies and features, across an origin plane by name and alias, a construction plane by name
+/// and by id, and explicit planes, combined or not, and with `touching`. In Warn, without
+/// warnings, so its contract takes each call.
+#[test]
+fn mirror_replies_with_feature_result() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let before = BTreeSet::from(["feature", "name", "bodies", "created_bodies", "changed_bodies", "removed_bodies", "warning", "ms"]);
+    // A 10 mm cube `B` from the origin, made by the feature `box_name`, and a construction plane
+    // 20 mm above XY; built again for each call, so the copies don't meet one another.
+    let design = || {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        let made = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        let plane = s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 20})).unwrap_or_else(|e| panic!("{e}"));
+        (s, made["name"].clone(), plane["name"].clone(), plane["feature"].clone())
+    };
+    let (_, box_name, plane_name, plane_id) = design();
+    assert!(box_name.is_string() && plane_name.is_string() && plane_id.is_u64(), "{box_name} {plane_name} {plane_id}");
+    let calls = [
+        json!({"bodies": ["B"], "plane": "YZ"}),
+        json!({"bodies": "B", "plane": "front", "name": "Flip"}),
+        json!({"features": [box_name], "plane": plane_name}),
+        json!({"features": [box_name], "plane": plane_id, "touching": "one_body"}),
+        json!({"bodies": ["B"], "plane": "XZ", "touching": null}),
+        json!({"bodies": ["B"], "plane": plane_id}),
+        json!({"bodies": ["B"], "plane": {"origin": [10, 0, "0 mm"], "normal": [1, 0, 0]}, "combine": true}),
+        json!({"bodies": ["B"], "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "features": null, "combine": null}),
+    ];
+    for p in calls {
+        let (mut s, ..) = design();
+        let r = s.execute("solid.mirror", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        let keys: BTreeSet<&str> = r.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, before, "{p}: {r}");
+        let made = (r["created_bodies"].as_array().map(Vec::len), r["changed_bodies"].as_array().map(Vec::len));
+        let combined = p.get("combine") == Some(&json!(true));
+        assert_eq!(made, if combined { (Some(0), Some(1)) } else { (Some(1), Some(0)) }, "{p}: {r}");
+    }
 }
 
 /// The feature commands converted after box and extrude answer with `FeatureResult` too, and
@@ -1187,7 +1292,7 @@ fn circular_pattern_contract_keeps_the_handlers_errors() {
 /// Each form the handler takes passes strict, and every reply matches the output schema.
 #[test]
 fn circular_pattern_replies_match_the_output_schema() {
-    let schema = output_schema_for::<PatternCircularResult>();
+    let schema = output_schema_for::<PatternResult>();
     let schema = schema.as_value();
     let calls = [
         ring(),
@@ -1209,6 +1314,310 @@ fn circular_pattern_replies_match_the_output_schema() {
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
 }
 
+/// A box feature `Post` (body `PostBody`) by the origin, a sketch `Path` with one line `l1` along
+/// X from (0, 20) to (100, 20), and a component `Part` to place more of.
+fn grid_rig(level: ParamCheck) -> Session {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 0], "name": "Post", "body_name": "PostBody"})),
+        ("sketch.create", json!({"plane": "XY", "name": "Path"})),
+        ("sketch.line", json!({"points": [[0, 20], [100, 20]], "ids": ["l1"]})),
+        ("sketch.finish", json!({})),
+        ("component.create", json!({"name": "Part", "activate": false})),
+    ] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    }
+    s.param_check = level;
+    s
+}
+
+/// `base` with each key of `changes` set to its value.
+fn with(base: Value, changes: Value) -> Value {
+    let mut p = base;
+    if let (Some(p), Some(changes)) = (p.as_object_mut(), changes.as_object()) {
+        p.extend(changes.clone());
+    }
+    p
+}
+
+/// `base` without `key`.
+fn without(base: Value, key: &str) -> Value {
+    let mut p = base;
+    if let Some(p) = p.as_object_mut() {
+        p.remove(key);
+    }
+    p
+}
+
+fn row() -> Value {
+    json!({"features": ["Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10})
+}
+
+fn along() -> Value {
+    json!({"features": ["Post"], "path_sketch": "Path", "path": ["l1"], "count": 3, "spacing": 20})
+}
+
+/// Calls that fail today give the same message in strict as with the check off, on the rig.
+fn assert_same_error(id: &str, cases: &[Value]) {
+    for p in cases {
+        let error = |level| grid_rig(level).execute(id, p).err().map(|e| e.to_string());
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{p}");
+    }
+}
+
+#[test]
+fn pattern_schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<PatternRectangularParams>(),
+        &[
+            "alignment",
+            "alignment2",
+            "bodies",
+            "body_name",
+            "body_names",
+            "components",
+            "copy_at_end1",
+            "copy_at_end2",
+            "count1",
+            "count2",
+            "dir1",
+            "dir2",
+            "distance1",
+            "distance2",
+            "extent1",
+            "extent2",
+            "features",
+            "name",
+            "participants",
+            "reversed",
+            "reversed2",
+            "spacing1",
+            "spacing2",
+        ],
+    );
+    assert_keys(
+        input_schema_for::<PatternPathParams>(),
+        &[
+            "bodies",
+            "body_name",
+            "body_names",
+            "components",
+            "count",
+            "distance",
+            "features",
+            "flip",
+            "name",
+            "orientation",
+            "participants",
+            "path",
+            "path_sketch",
+            "sketch",
+            "spacing",
+            "start",
+            "start_fraction",
+        ],
+    );
+}
+
+/// Calls Rectangular Pattern refuses today get the same message in strict, the required keys
+/// left out included; a second direction, count or spacing the handler can't read (and so
+/// ignores) is refused by the contract, and so is a misspelt key.
+#[test]
+fn rectangular_pattern_contract_keeps_the_handlers_errors() {
+    assert_same_error(
+        "solid.pattern.rectangular",
+        &[
+            json!({"dir1": [1, 0, 0], "count1": 3, "spacing1": 10}),
+            with(row(), json!({"features": 5})),
+            with(row(), json!({"features": ["Nope"]})),
+            with(row(), json!({"bodies": ["Nope"]})),
+            with(row(), json!({"components": ["Nope"]})),
+            without(row(), "dir1"),
+            with(row(), json!({"dir1": [1, 0]})),
+            with(row(), json!({"dir1": null})),
+            with(row(), json!({"dir1": "X"})),
+            without(row(), "count1"),
+            with(row(), json!({"count1": true})),
+            with(row(), json!({"count1": null})),
+            with(row(), json!({"count1": "nope"})),
+            with(row(), json!({"count1": 2.5})),
+            without(row(), "spacing1"),
+            with(row(), json!({"spacing1": true})),
+            with(row(), json!({"spacing1": "5 deg"})),
+            with(row(), json!({"dir2": [0, 1, 0], "count2": "nope", "spacing2": 10})),
+            with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": "5 deg"})),
+            with(row(), json!({"alignment": "up"})),
+            with(row(), json!({"alignment": null})),
+            with(row(), json!({"alignment2": "up"})),
+            with(row(), json!({"alignment2": null})),
+            with(row(), json!({"reversed": "yes"})),
+            with(row(), json!({"reversed2": "yes"})),
+            with(row(), json!({"reversed2": null})),
+            with(row(), json!({"distance1": "pitch"})),
+            with(row(), json!({"distance1": 2})),
+            with(row(), json!({"distance2": "pitch"})),
+            with(row(), json!({"copy_at_end1": "yes"})),
+            with(row(), json!({"copy_at_end2": 1})),
+            with(row(), json!({"distance1": "count_extent"})),
+            with(row(), json!({"distance1": "count_extent", "extent1": 0})),
+            with(row(), json!({"distance1": "count_extent", "extent1": "5 deg"})),
+            with(without(row(), "spacing1"), json!({"distance1": "spacing_extent", "extent1": 80})),
+            with(row(), json!({"distance1": "spacing_extent", "spacing1": 90, "extent1": 80})),
+            with(row(), json!({"distance1": "spacing_extent", "spacing1": -15, "extent1": 80})),
+        ],
+    );
+    for p in [
+        with(row(), json!({"extent1": true})),
+        with(row(), json!({"dir2": 5})),
+        with(row(), json!({"dir2": [0, 1, 0], "count2": true, "spacing2": 10})),
+        with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": true})),
+        with(row(), json!({"cuont1": 3})),
+    ] {
+        assert!(grid_rig(ParamCheck::Off).execute("solid.pattern.rectangular", &p).is_ok(), "{p} works today");
+        assert!(grid_rig(ParamCheck::Strict).execute("solid.pattern.rectangular", &p).is_err(), "{p}");
+    }
+}
+
+/// Calls Pattern on Path refuses today get the same message in strict, the required keys left
+/// out included; values the handler ignores are refused by the contract.
+#[test]
+fn path_pattern_contract_keeps_the_handlers_errors() {
+    assert_same_error(
+        "solid.pattern.path",
+        &[
+            json!({"path_sketch": "Path", "path": ["l1"], "count": 3, "spacing": 20}),
+            with(along(), json!({"features": ["Nope"]})),
+            with(along(), json!({"bodies": ["Nope"]})),
+            without(along(), "path_sketch"),
+            with(along(), json!({"path_sketch": true})),
+            with(along(), json!({"path_sketch": null})),
+            with(along(), json!({"path_sketch": "Nope"})),
+            with(without(along(), "path_sketch"), json!({"sketch": true})),
+            with(without(along(), "path_sketch"), json!({"sketch": null})),
+            without(along(), "path"),
+            with(along(), json!({"path": []})),
+            with(along(), json!({"path": null})),
+            with(along(), json!({"path": 5})),
+            with(along(), json!({"path": [1]})),
+            with(along(), json!({"path": vec!["l1"; 1001]})),
+            without(along(), "count"),
+            with(along(), json!({"count": true})),
+            with(along(), json!({"count": "nope"})),
+            without(along(), "spacing"),
+            with(along(), json!({"spacing": "5 deg"})),
+            with(without(along(), "spacing"), json!({"distance": "5 deg"})),
+            with(along(), json!({"orientation": "sideways"})),
+            with(along(), json!({"orientation": "Path"})),
+        ],
+    );
+    for p in [
+        with(along(), json!({"orientation": 5})),
+        with(along(), json!({"flip": "yes"})),
+        with(along(), json!({"distance": true})),
+        with(along(), json!({"sketch": true})),
+        with(along(), json!({"cuont": 3})),
+    ] {
+        assert!(grid_rig(ParamCheck::Off).execute("solid.pattern.path", &p).is_ok(), "{p} works today");
+        assert!(grid_rig(ParamCheck::Strict).execute("solid.pattern.path", &p).is_err(), "{p}");
+    }
+}
+
+/// The check finds no issue in a call exactly when the call matches the input schema.
+#[test]
+fn the_pattern_checks_take_what_the_schemas_allow() {
+    let rect = input_schema_for::<PatternRectangularParams>();
+    let rect = rect.as_value();
+    for (p, takes) in [
+        (row(), true),
+        (with(row(), json!({"dir1": {"x": 1, "y": 0, "z": 0}, "count1": "n + 1", "spacing1": "10 mm"})), true),
+        (with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": 8, "alignment2": "center", "reversed2": true})), true),
+        (with(row(), json!({"dir2": null, "count2": null, "spacing2": null})), true),
+        (with(without(row(), "spacing1"), json!({"distance1": "count_extent", "extent1": "80 mm"})), true),
+        (with(without(row(), "count1"), json!({"distance1": "spacing_extent", "extent1": 80, "copy_at_end1": true})), true),
+        (with(row(), json!({"dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 8, "extent2": 30, "copy_at_end2": false})), true),
+        (with(row(), json!({"distance1": null, "distance2": null, "extent1": null, "copy_at_end1": null})), true),
+        (with(row(), json!({"distance1": "pitch"})), false),
+        (with(row(), json!({"distance2": "Count_Extent"})), false),
+        (with(row(), json!({"extent1": true})), false),
+        (with(row(), json!({"copy_at_end1": "yes"})), false),
+        (with(row(), json!({"bodies": "B", "components": [], "alignment": "left", "reversed": false, "name": "Grid"})), true),
+        (with(row(), json!({"dir1": [1, 0]})), false),
+        (with(row(), json!({"dir1": null})), false),
+        (with(row(), json!({"dir1": [1e9, 0, 0]})), false),
+        (with(row(), json!({"count1": true})), false),
+        (with(row(), json!({"count1": ""})), false),
+        (with(row(), json!({"spacing1": null})), false),
+        (with(row(), json!({"dir2": "Y"})), false),
+        (with(row(), json!({"count2": false})), false),
+        (with(row(), json!({"alignment2": "middle"})), false),
+        (with(row(), json!({"reversed2": null})), false),
+        (with(row(), json!({"features": [5]})), false),
+    ] {
+        let issues = crate::schema::issues("solid.pattern.rectangular", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(rect, rect, &p), takes, "{p}");
+    }
+    let path = input_schema_for::<PatternPathParams>();
+    let path = path.as_value();
+    for (p, takes) in [
+        (along(), true),
+        (with(without(along(), "spacing"), json!({"distance": "80 mm", "orientation": "path", "flip": true})), true),
+        (with(along(), json!({"path_sketch": 7, "path": "l1", "count": "n", "orientation": "along_path", "flip": null})), true),
+        (with(along(), json!({"sketch": "Path", "spacing": null, "distance": 50, "orientation": null})), true),
+        (with(along(), json!({"components": ["Part"], "body_names": ["A"], "participants": ["*"]})), true),
+        (with(along(), json!({"path": []})), false),
+        (with(along(), json!({"path": null})), false),
+        (with(along(), json!({"path": [1]})), false),
+        (with(along(), json!({"path_sketch": null})), false),
+        (with(along(), json!({"sketch": false})), false),
+        (with(along(), json!({"count": null})), false),
+        (with(along(), json!({"spacing": true})), false),
+        (with(along(), json!({"orientation": "Path"})), false),
+        (with(along(), json!({"orientation": 1})), false),
+        (with(along(), json!({"flip": "yes"})), false),
+    ] {
+        let issues = crate::schema::issues("solid.pattern.path", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(path, path, &p), takes, "{p}");
+    }
+}
+
+/// Each form the handlers take passes strict, and every reply matches the shared output schema:
+/// a feature reply for features and bodies, the new occurrences for components.
+#[test]
+fn rectangular_and_path_pattern_replies_match_the_output_schema() {
+    let schema = output_schema_for::<PatternResult>();
+    let schema = schema.as_value();
+    let calls = [
+        ("solid.pattern.rectangular", row()),
+        ("solid.pattern.rectangular", with(row(), json!({"dir1": {"x": 0, "y": 0, "z": 1}, "count1": "1 + 2", "spacing1": "10 mm"}))),
+        (
+            "solid.pattern.rectangular",
+            with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": 10, "alignment2": "center", "reversed2": true})),
+        ),
+        ("solid.pattern.rectangular", with(row(), json!({"alignment": "center", "reversed": true, "name": "Grid"}))),
+        ("solid.pattern.rectangular", json!({"bodies": ["PostBody"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 10})),
+        ("solid.pattern.rectangular", json!({"components": ["Part"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10})),
+        ("solid.pattern.path", along()),
+        ("solid.pattern.path", with(without(along(), "spacing"), json!({"distance": 80, "orientation": "path"}))),
+        ("solid.pattern.path", with(without(along(), "path_sketch"), json!({"sketch": "Path", "flip": true, "count": 2}))),
+        ("solid.pattern.path", json!({"bodies": ["PostBody"], "path_sketch": "Path", "path": "l1", "count": 2, "spacing": 30})),
+        ("solid.pattern.path", json!({"components": ["Part"], "path_sketch": "Path", "path": ["l1"], "count": 3, "spacing": 20})),
+    ];
+    for (id, p) in &calls {
+        let r = grid_rig(ParamCheck::Strict).execute(id, p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{id}: {r} doesn't match {schema}");
+    }
+    for (id, p) in
+        [("solid.pattern.rectangular", with(row(), json!({"colour": "red"}))), ("solid.pattern.path", with(along(), json!({"colour": "red"})))]
+    {
+        let r = grid_rig(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert!(r["param_warnings"].as_array().is_some_and(|w| w.len() == 1) && conforms(schema, schema, &r), "{id}: {r}");
+    }
+}
+
 /// A 40 x 30 x 20 block from the origin, `Block`, with its top front edge rounded (radius 2) when
 /// `rounded` is true.
 fn press_pull_block(level: ParamCheck, rounded: bool) -> Session {
@@ -1224,7 +1633,7 @@ fn press_pull_block(level: ParamCheck, rounded: bool) -> Session {
 /// output schema: a new feature from a flat face and from edges, and a fillet's size edited.
 #[test]
 fn press_pull_contract_and_replies() {
-    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face"]);
+    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face", "face_body"]);
     assert_strict_keeps_todays_errors(&[
         ("solid.press_pull", json!({"face": [0, 0, 0]})),
         ("solid.press_pull", json!({"distance": 1})),
@@ -1296,4 +1705,137 @@ fn move_contract_accepts_component_copies_with_and_without_split_body_features()
     assert_eq!(output["features"].as_array().map(Vec::len), Some(2));
     assert_eq!(output["occurrences"].as_array().map(Vec::len), Some(1));
     assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
+}
+
+// ---- Shell and Draft (#12752) ----
+
+/// A 20 mm cube, `Box`: its top face is at z = 20, a side face at x = 0.
+fn cube(level: ParamCheck) -> Session {
+    let mut s = Session { param_check: level, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"})).unwrap_or_else(|e| panic!("{e}"));
+    s
+}
+
+fn shell() -> Value {
+    json!({"faces": [[10, 10, 20]], "thickness": 2})
+}
+
+fn draft() -> Value {
+    json!({"faces": [[0, 10, 10]], "angle": 3, "neutral": "XY"})
+}
+
+/// `base` with `key` set to `value`.
+fn with_key(base: &Value, key: &str, value: Value) -> Value {
+    let mut p = base.clone();
+    p[key] = value;
+    p
+}
+
+#[test]
+fn the_shell_and_draft_schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<ShellParams>(),
+        &["body", "body_name", "body_names", "direction", "faces", "name", "participants", "tangent_chain", "thickness"],
+    );
+    assert_keys(input_schema_for::<DraftParams>(), &["angle", "body", "body_name", "body_names", "faces", "name", "neutral", "participants", "pull"]);
+}
+
+/// #12752: calls to Shell and Draft that fail today get the same message in strict. The faces
+/// fail on the shared helper's sketch, which has no body; the rest need the cube's faces.
+#[test]
+fn strict_keeps_the_shell_and_draft_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("solid.shell", json!({"thickness": 1})),
+        ("solid.shell", json!({"faces": null, "thickness": 1})),
+        ("solid.shell", json!({"faces": 5, "thickness": 1})),
+        ("solid.shell", json!({"faces": [true], "thickness": 1})),
+        ("solid.shell", json!({"faces": vec![[0, 0, 0]; 1001], "thickness": 1})),
+        ("solid.draft", json!({"angle": 3, "neutral": "XY"})),
+        ("solid.draft", json!({"faces": [], "angle": 3, "neutral": "XY"})),
+        ("solid.draft", json!({"faces": [[1, 2]], "angle": 3, "neutral": "XY"})),
+    ]);
+    for (id, p) in [
+        ("solid.shell", with_key(&shell(), "thickness", json!(null))),
+        ("solid.shell", with_key(&shell(), "thickness", json!("2 deg"))),
+        ("solid.shell", with_key(&shell(), "direction", json!("sideways"))),
+        ("solid.draft", with_key(&draft(), "angle", json!("2 mm"))),
+        ("solid.draft", json!({"faces": [[0, 10, 10]], "angle": 3})),
+        ("solid.draft", with_key(&draft(), "neutral", json!(null))),
+        ("solid.draft", with_key(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", with_key(&draft(), "neutral", json!("Nope"))),
+        ("solid.draft", with_key(&draft(), "neutral", json!({"origin": [0, 0, 0]}))),
+    ] {
+        let off = cube(ParamCheck::Off).execute(id, &p).err().map(|e| e.to_string());
+        assert!(off.is_some(), "{id} {p} should fail today");
+        assert_eq!(cube(ParamCheck::Strict).execute(id, &p).err().map(|e| e.to_string()), off, "{id} {p}");
+    }
+}
+
+/// #12752: keys of the wrong type that Shell and Draft ignore today (a `tangent_chain` that isn't
+/// true or false is read as false, a `pull` that isn't a point as the plane's normal) are refused
+/// by the contracts: in Warn the call still works, with a warning naming the key.
+#[test]
+fn the_shell_and_draft_contracts_refuse_what_the_handlers_ignore() {
+    for (id, p, key) in [
+        ("solid.shell", with_key(&shell(), "tangent_chain", json!("yes")), "tangent_chain"),
+        ("solid.shell", with_key(&shell(), "direction", json!(5)), "direction"),
+        ("solid.shell", with_key(&shell(), "body", json!(5)), "body"),
+        ("solid.draft", with_key(&draft(), "pull", json!("up")), "pull"),
+        ("solid.draft", with_key(&draft(), "body", json!(["Box"])), "body"),
+    ] {
+        assert!(cube(ParamCheck::Off).execute(id, &p).is_ok(), "{id} {p} works today");
+        let warned = cube(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(warned["param_warnings"].to_string().contains(key), "{warned}");
+        let error = cube(ParamCheck::Strict).execute(id, &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(&format!("`{key}`")), "{id} {p}: {error}");
+    }
+}
+
+/// #12752: the Shell and Draft schemas take what the handlers take. Each call is checked against
+/// both the schema and the handler on the cube, with the check off, so the two can't drift apart.
+#[test]
+fn the_shell_and_draft_schemas_take_what_the_handlers_take() {
+    let shell_schema = input_schema_for::<ShellParams>();
+    let draft_schema = input_schema_for::<DraftParams>();
+    for (id, schema, p) in [
+        ("solid.shell", &shell_schema, shell()),
+        ("solid.shell", &shell_schema, json!({"faces": [], "thickness": 2})),
+        ("solid.shell", &shell_schema, with_key(&with_key(&shell(), "direction", json!("outside")), "tangent_chain", json!(true))),
+        ("solid.shell", &shell_schema, with_key(&shell(), "direction", json!(""))),
+        ("solid.shell", &shell_schema, with_key(&shell(), "direction", json!("sideways"))),
+        ("solid.shell", &shell_schema, json!({"faces": [[10, 10]], "thickness": 2})),
+        ("solid.shell", &shell_schema, json!({"thickness": 2})),
+        ("solid.draft", &draft_schema, draft()),
+        (
+            "solid.draft",
+            &draft_schema,
+            with_key(&with_key(&draft(), "neutral", json!({"origin": [0, 0, 0], "normal": [0, 0, 1]})), "pull", json!([0, 0, 1])),
+        ),
+        ("solid.draft", &draft_schema, with_key(&draft(), "angle", json!("3 deg"))),
+        ("solid.draft", &draft_schema, with_key(&draft(), "neutral", json!(1.5))),
+        ("solid.draft", &draft_schema, json!({"faces": [[0, 10, 10]], "angle": 3})),
+    ] {
+        let takes = cube(ParamCheck::Off).execute(id, &p).is_ok();
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &p), takes, "{id} {p}");
+    }
+}
+
+/// #12752: Shell and Draft reply as feature commands do, in Warn without warnings: the cube
+/// opened at the top, closed hollow, and drafted. A misspelt key is ignored today: Warn says so,
+/// and strict refuses it.
+#[test]
+fn shell_and_draft_reply_with_their_schemas() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    for (id, p) in [("solid.shell", shell()), ("solid.shell", json!({"faces": [], "thickness": 2})), ("solid.draft", draft())] {
+        let r = cube(ParamCheck::Warn).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        assert_eq!(r["changed_bodies"], json!(["Box"]), "{id}: {r}");
+    }
+    let p = with_key(&shell(), "tangent_chian", json!(true));
+    let r = cube(ParamCheck::Warn).execute("solid.shell", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert!(r["param_warnings"].to_string().contains("tangent_chian"), "{r}");
+    let error = cube(ParamCheck::Strict).execute("solid.shell", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`tangent_chian`"), "{error}");
 }
