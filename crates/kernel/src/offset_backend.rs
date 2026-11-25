@@ -117,8 +117,7 @@ pub(crate) fn run_ordered(
     let step = crate::validation::step();
     let (body, or) = body_from_smlib_ordered(&r)?;
     if step == Step::Check
-        && let crate::validation::DecodedCheck::Refused(detail) =
-            crate::validation::check_decoded(body.record()).map_err(|e| KernelError::Failed(format!("SMLib {name}: {e}")))?
+        && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {name}"), body.record())?
     {
         let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
         let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };

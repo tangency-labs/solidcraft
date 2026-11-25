@@ -369,8 +369,7 @@ mod imp {
         let body = crate::native::body_from_smlib(&brep)?;
         drop(brep);
         if step == Step::Check
-            && let crate::validation::DecodedCheck::Refused(detail) =
-                crate::validation::check_decoded(body.record()).map_err(|e| KernelError::Failed(format!("SMLib {what}: {e}")))?
+            && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), body.record())?
         {
             return Err(failed(what, format!("SMLib's check refuses the result: {detail}")));
         }

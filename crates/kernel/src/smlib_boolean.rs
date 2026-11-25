@@ -148,9 +148,7 @@ mod smlib {
     /// An error when SMLib's check refuses `record` as [`Body::smlib`] imports it (for a
     /// non-manifold result, already the separate solids export split it into; #22138).
     fn checked_decoded(record: &solidcore_record::brep::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<()> {
-        let crate::validation::DecodedCheck::Refused(detail) =
-            crate::validation::check_decoded(record).map_err(|e| KernelError::Failed(format!("SMLib boolean: {e}")))?
-        else {
+        let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded("SMLib boolean", record)? else {
             return Ok(());
         };
         // Each operand is checked as a copy: a check edits the body it is given, and an operand may

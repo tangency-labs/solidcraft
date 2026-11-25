@@ -515,8 +515,7 @@ mod imp {
             // Checked here when the evaluation's validation mode checks each step
             // (`crate::validation`), on the decoded record every later operation imports (#22138).
             if step == crate::validation::Step::Check
-                && let crate::validation::DecodedCheck::Refused(detail) =
-                    crate::validation::check_decoded(out.record()).map_err(|e| KernelError::Failed(format!("SMLib {what}: {e}")))?
+                && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {what}"), out.record())?
             {
                 return Err(failed(what, &crate::validation::refuses([sb.check(CheckLevel::All)].into_iter()), detail));
             }

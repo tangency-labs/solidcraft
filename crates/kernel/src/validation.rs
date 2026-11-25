@@ -179,14 +179,15 @@ impl DecodedCheck {
 
 /// SMLib's full check of a decoded record as [`Body::smlib`] imports it for every later operation
 /// (`Brep::from_record(record, true)`): the token over this thread's work stops it
-/// ([`solidcraft_smlib::Brep::check_owned`]).
-pub(crate) fn check_decoded(record: &Record) -> std::result::Result<DecodedCheck, String> {
+/// ([`solidcraft_smlib::Brep::check_owned`]). Preserves [`KernelError::Internal`] when the
+/// solidcore wrapper catches a panic.
+pub(crate) fn check_decoded(what: &str, record: &Record) -> Result<DecodedCheck> {
     let brep = match solidcraft_smlib::Brep::from_record(record, true) {
         Ok(b) => b,
         Err(solidcraft_smlib::Error::Record(u)) => return Ok(DecodedCheck::Refused(u.to_string())),
-        Err(e) => return Err(format!("re-import: {e}")),
+        Err(e) => return Err(KernelError::smlib(format!("{what}: re-import"), e)),
     };
-    brep.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}"))
+    brep.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| KernelError::smlib(format!("{what}: check"), e))
 }
 
 /// What a step says of a result SMLib's check refuses, naming the operands (the input of a
@@ -216,20 +217,19 @@ pub fn check_kept(body: &Body) -> Result<()> {
         return Ok(());
     }
     match body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|o| (u, o))) {
-        Some((u, operands)) => verdict(&u.what, check_decoded(body.record()), &operands),
-        None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}")), &[]),
+        Some((u, operands)) => verdict(&u.what, check_decoded(&u.what, body.record()), &operands),
+        None => verdict("SMLib", body.smlib()?.check(CheckLevel::All).map(DecodedCheck::of).map_err(|e| KernelError::smlib("SMLib: check", e)), &[]),
     }
 }
 
 /// What [`check_kept`] makes of SMLib's check of what step `what` made of `operands`.
-fn verdict(what: &str, check: std::result::Result<DecodedCheck, String>, operands: &[Arc<Record>]) -> Result<()> {
-    match check {
-        Ok(DecodedCheck::Valid) => Ok(()),
-        Ok(DecodedCheck::Refused(detail)) => {
+fn verdict(what: &str, check: Result<DecodedCheck>, operands: &[Arc<Record>]) -> Result<()> {
+    match check? {
+        DecodedCheck::Valid => Ok(()),
+        DecodedCheck::Refused(detail) => {
             let checks = operands.iter().map(|o| solidcraft_smlib::Brep::from_record(o, true).and_then(|s| s.check_owned(CheckLevel::All)));
             Err(KernelError::Failed(format!("{what}: {}: {detail}", refuses(checks))))
         }
-        Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
     }
 }
 
@@ -363,8 +363,10 @@ impl Kept {
         match self {
             Kept::Nothing => Ok(()),
             // Both branches own the SMLib form they check: the work's token stops them.
-            Kept::Step { what, record, operands } => verdict(&what, check_decoded(&record), &operands),
-            Kept::Copy(copy) => verdict("SMLib", (*copy)?.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| format!("check: {e}")), &[]),
+            Kept::Step { what, record, operands } => verdict(&what, check_decoded(&what, &record), &operands),
+            Kept::Copy(copy) => {
+                verdict("SMLib", (*copy)?.check_owned(CheckLevel::All).map(DecodedCheck::of).map_err(|e| KernelError::smlib("SMLib: check", e)), &[])
+            }
         }
     }
 }
