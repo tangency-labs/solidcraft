@@ -224,6 +224,7 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    split_face_classifications: Cell<u64>,
     face_intersections: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
@@ -462,6 +463,18 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Points a boolean's imprint classifies on the two faces a face was just split into,
+    /// to tell which of them a definition still to be imprinted lies on
+    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
+    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
+    /// of every proto face on the split face, at every split of it, which grew with the
+    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
+    /// fork's.
+    #[must_use]
+    pub fn split_face_classifications(&self) -> u64 {
+        self.split_face_classifications.get()
+    }
+
     /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
     /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
     /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
@@ -516,6 +529,7 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.split_face_classifications.set(0);
         self.face_intersections.set(0);
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
@@ -543,6 +557,12 @@ impl WorkCounters {
     pub(crate) fn add_trim_deviation_bound(&self) {
         self.trim_deviation_bounds
             .set(self.trim_deviation_bounds.get().saturating_add(1));
+    }
+
+    /// Counts one point classified on the two faces a face was split into.
+    pub(crate) fn add_split_face_classification(&self) {
+        self.split_face_classifications
+            .set(self.split_face_classifications.get().saturating_add(1));
     }
 
     /// Counts one pair of faces intersected.
