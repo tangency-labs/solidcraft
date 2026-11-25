@@ -1624,7 +1624,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());
@@ -2973,6 +2973,8 @@ impl Session {
 
     fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
+        // Before an open edit is finished for it: a refused sheet sketch leaves the model's open.
+        cmd::refuse_outside_drawing(self, spec)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
         let prepared = self.take_prepared_edit_source(spec, params);
