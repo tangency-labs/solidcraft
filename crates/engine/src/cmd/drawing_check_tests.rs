@@ -252,6 +252,124 @@ fn a_held_sheet_is_checked_as_it_shows_the_model() {
     assert_eq!(coverage_of(&now, bar)["state"], json!("not_covered"), "{now}");
 }
 
+/// A 100 x 60 x 10 mm plate, with length L, and front and left views separated by the default
+/// 20 mm gap. Both views fit on A3 even after their scale doubles.
+fn plate_views() -> (Session, Value, Value) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "100 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 60, "height": 10, "body_name": "Plate"}));
+    let sheet = run(&mut s, "drawing.create", json!({"projection": "first", "omit_first_sheet_title_block": true}))["sheets"][0]["id"].clone();
+    let front = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "position_mm": [250, 180], "scale": "1:1"}))["view"].clone();
+    let left = run(&mut s, "drawing.view.projected", json!({"parent": front, "side": "left"}))["view"].clone();
+    (s, front, left)
+}
+
+/// Change the plate's length in the model, then reopen its drawing.
+fn change_plate_length(s: &mut Session, expression: &str) {
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(s, "drawing.close", json!({}));
+    run(s, "parameters.change", json!({"name": "L", "expression": expression}));
+    run(s, "drawing.open", json!({"drawing": drawing}));
+}
+
+/// A scale change can use up the default gap without leaving the sheet (#19881). Check lists
+/// both views, without changing the drawing or its manually placed centres.
+#[test]
+fn overlapping_views_after_a_scale_change_are_listed_without_moving_them() {
+    let (mut s, front, left) = plate_views();
+    assert!(of_kind(&checked(&mut s, json!({})), "overlapping_views").is_empty());
+    let edit = run(&mut s, "drawing.view.edit", json!({"view": front, "set": {"scale": "2:1"}}));
+    assert!(edit["outside"].as_array().is_none_or(Vec::is_empty), "{edit}");
+    let boundary = |s: &mut Session, view: &Value| run(s, "drawing.view.inspect", json!({"view": view}))["boundary_mm"].clone();
+    assert_eq!(boundary(&mut s, &front), json!({"min": [150.0, 170.0], "max": [350.0, 190.0]}));
+    assert_eq!(boundary(&mut s, &left), json!({"min": [90.0, 170.0], "max": [210.0, 190.0]}));
+    let drawing = s.drawing("test").unwrap().clone();
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("view", &front), named("view", &left)];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "overlapping_views"), expected, "{reply}");
+    assert_eq!(reply["counts"], json!([{"kind": "overlapping_views", "count": 2}]), "{reply}");
+    assert_eq!(checked(&mut s, json!({})), reply);
+    assert_eq!(s.drawing("test").unwrap().as_ref(), drawing.as_ref());
+}
+
+/// Moving the views apart restores a 10 mm gap at 2:1. Growing L by 20 mm then grows the front
+/// view by 40 paper mm, closing that gap and overlapping the left view by 10 mm (#19881).
+#[test]
+fn overlapping_views_after_a_model_edit_are_listed() {
+    let (mut s, front, left) = plate_views();
+    run(&mut s, "drawing.view.edit", json!({"view": front, "set": {"scale": "2:1"}}));
+    run(&mut s, "drawing.view.move", json!({"view": left, "to_mm": [80, 180]}));
+    assert!(of_kind(&checked(&mut s, json!({})), "overlapping_views").is_empty());
+    change_plate_length(&mut s, "120 mm");
+    let boundary = |s: &mut Session, view: &Value| run(s, "drawing.view.inspect", json!({"view": view}))["boundary_mm"].clone();
+    assert_eq!(boundary(&mut s, &front), json!({"min": [130.0, 170.0], "max": [370.0, 190.0]}));
+    assert_eq!(boundary(&mut s, &left), json!({"min": [20.0, 170.0], "max": [140.0, 190.0]}));
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("view", &front), named("view", &left)];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "overlapping_views"), expected, "{reply}");
+    assert!(of_kind(&reply, "outside_sheet").is_empty(), "{reply}");
+}
+
+/// The front boundary is [200, 300] x [175, 185]; the left view is 60 x 10 mm. A gap, an
+/// edge contact, and a corner contact are clear. An area shared with two peers lists each view
+/// once, with its peers in numeric id order, regardless of the scene objects' order.
+#[test]
+fn overlapping_views_exclude_contact_and_report_each_view_once_in_order() {
+    let (mut s, front, left) = plate_views();
+    for at in [[150, 180], [170, 180], [170, 190], [250, 190], [250, 200]] {
+        run(&mut s, "drawing.view.move", json!({"view": left, "to_mm": at, "break_alignment": true}));
+        let reply = checked(&mut s, json!({}));
+        assert!(of_kind(&reply, "overlapping_views").is_empty(), "{at:?}: {reply}");
+    }
+    run(&mut s, "drawing.view.move", json!({"view": left, "to_mm": [230, 180]}));
+    let third = run(&mut s, "drawing.view.projected", json!({"parent": front, "side": "right", "place": {"at": [250, 180]}}))["view"].clone();
+    let drawing = s.drawing("test").unwrap().clone();
+    let sheet_id = drawing.sheets[0].id;
+    let sheet = ids::encode(sheet_id);
+    let mut views = [front, left, third];
+    views.sort_by_key(id);
+    let reply = checked(&mut s, json!({}));
+    let expected: Vec<_> = views
+        .iter()
+        .map(|view| {
+            let peers: Vec<_> = views.iter().filter(|peer| *peer != view).map(|peer| peer.as_str().unwrap()).collect();
+            json!({"kind": "overlapping_views", "sheet": sheet, "object": {"kind": "view", "id": view},
+               "why": format!("its boundary overlaps views: {}", peers.join(", "))})
+        })
+        .collect();
+    assert_eq!(reply["findings"], json!(expected), "{reply}");
+    assert_eq!(reply["counts"], json!([{"kind": "overlapping_views", "count": 3}]), "{reply}");
+    assert_eq!(checked(&mut s, json!({"sheet": sheet}))["findings"], reply["findings"]);
+    assert_eq!(s.drawing("test").unwrap().as_ref(), drawing.as_ref());
+    let mut shown = crate::drawing_scene::as_shown(&mut s, &drawing, sheet_id).unwrap();
+    shown.objects.reverse();
+    assert_eq!(serde_json::to_value(on_sheet(&drawing, sheet_id, shown).unwrap()).unwrap(), reply["findings"]);
+    assert_eq!(checked(&mut s, json!({})), reply);
+    run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
+    run(&mut s, "drawing.view.base", json!({"sheet": "Other", "position_mm": [250, 180], "scale": "1:1"}));
+    assert!(of_kind(&checked(&mut s, json!({"sheet": "Other"})), "overlapping_views").is_empty());
+    assert_eq!(of_kind(&checked(&mut s, json!({})), "overlapping_views").len(), 3);
+}
+
+/// A held drawing still shows the separated views until Update draws the larger plate.
+#[test]
+fn overlapping_views_are_checked_as_the_deferred_sheet_shows_them() {
+    let (mut s, front, left) = plate_views();
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    change_plate_length(&mut s, "160 mm");
+    let held = checked(&mut s, json!({}));
+    assert!(of_kind(&held, "overlapping_views").is_empty(), "{held}");
+    assert_eq!(of_kind(&held, "out_of_date").len(), 2, "{held}");
+    run(&mut s, "drawing.update", json!({}));
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("view", &front), named("view", &left)];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "overlapping_views"), expected, "{reply}");
+}
+
 /// A view of a design with nothing to draw shows nothing: its one box, drawn, then suppressed (a
 /// drawing of an empty design isn't made at all).
 #[test]
