@@ -280,9 +280,6 @@ pub(crate) fn solid_count(body: &Body) -> Result<usize> {
     with_body("solid_count", body, |_, b| brep_material_census(b).map(|(solids, _voids)| solids))
 }
 
-/// SMLib's `SM_SUCCESS`, the status `SmBrep::ValidatePointers` returns when it finds nothing.
-const SM_SUCCESS: i32 = 1000;
-
 /// The capi's `text()`: an empty string reads as `?`.
 fn text(s: &str) -> &str {
     if s.is_empty() { "?" } else { s }
@@ -385,14 +382,14 @@ pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scop
     let mut text = String::new();
     let mut failures = 0usize;
     collect(&c.pointer_reports, &mut text, &mut failures);
-    if c.pointers_status != SM_SUCCESS && failures == 0 {
+    if !c.pointers.is_passed() && failures == 0 {
         failures += 1;
-        text.push_str(&format!("SmBrep::ValidatePointers failed with status {}\n", c.pointers_status));
+        text.push_str("SmBrep::ValidatePointers failed without a report\n");
     }
     if failures > 0 {
-        // The capi does not run AssertValid after a failed pointer check. check_brep runs it when
-        // the status failed without a report; that result is dropped here, as the capi never
-        // computes it.
+        // The capi does not run AssertValid after a failed pointer check. check_brep runs it
+        // when the pointer check failed without a report; that result is dropped here, as the
+        // capi never computes it.
         text.push_str("AssertValid skipped: ValidatePointers failed\n");
     } else {
         let Some(ok) = c.assert_valid else {

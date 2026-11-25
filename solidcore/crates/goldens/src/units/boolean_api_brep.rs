@@ -778,7 +778,7 @@ fn check(k: &mut Kernel, b: &mut Brep, level: u8) -> Result<Vec<i64>, Stop> {
         _ => return Err(Stop::Harness(harness(format!("check level {level}")))),
     };
     let c = check_brep(k, b, level).map_err(|e| stop("check_brep", &e))?;
-    let mut o = vec![i64::from(c.pointers_status)];
+    let mut o = vec![i64::from(crate::output::pointer_check_status(c.pointers))];
     failed_tests(&mut o, &c.pointer_reports)?;
     o.push(c.assert_valid.map_or(-1, i64::from));
     failed_tests(&mut o, &c.reports)?;

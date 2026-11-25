@@ -247,6 +247,25 @@ pub fn blend_status(e: &SolidError) -> Option<i32> {
     }
 }
 
+/// The upstream status number the goldens record for a pointer check: `SM_SUCCESS` (1000)
+/// for [`PointerCheck::Passed`], `SM_ERR` (1001) for [`PointerCheck::Failed`] and the early
+/// boolean return (0) for [`PointerCheck::StoppedEarly`], as `ValidatePointers` returned them,
+/// so the recorded rows stay as they are. The golden re-bless (#21874) replaces this
+/// conversion with the typed value.
+///
+/// [`PointerCheck::Passed`]: solidcore::topology::brep::validation::PointerCheck::Passed
+/// [`PointerCheck::Failed`]: solidcore::topology::brep::validation::PointerCheck::Failed
+/// [`PointerCheck::StoppedEarly`]: solidcore::topology::brep::validation::PointerCheck::StoppedEarly
+#[must_use]
+pub fn pointer_check_status(c: solidcore::topology::brep::validation::PointerCheck) -> i32 {
+    use solidcore::topology::brep::validation::PointerCheck;
+    match c {
+        PointerCheck::Passed => solidcore::error::SM_SUCCESS,
+        PointerCheck::Failed => solidcore::error::SM_ERR,
+        PointerCheck::StoppedEarly => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{blend_status, float_bits};

@@ -68,9 +68,6 @@ impl std::fmt::Display for CheckReport {
     }
 }
 
-/// SMLib's `SM_SUCCESS`, the status `SmBrep::ValidatePointers` returns when it finds nothing.
-const SM_SUCCESS: i32 = 1000;
-
 /// Why [`Body::check`] could not run.
 enum Refusal {
     /// A test the kernel has not ported (its [`SolidError::Unported`]).
@@ -137,18 +134,14 @@ impl Body {
         let mut text = String::new();
         let mut failures = 0usize;
         collect(&c.pointer_reports, &mut text, &mut failures);
-        if c.pointers_status != SM_SUCCESS && failures == 0 {
+        if !c.pointers.is_passed() && failures == 0 {
             failures += 1;
-            let _ = writeln!(
-                text,
-                "SmBrep::ValidatePointers failed with status {}",
-                c.pointers_status
-            );
+            let _ = writeln!(text, "SmBrep::ValidatePointers failed without a report");
         }
         if failures > 0 {
-            // The capi does not run AssertValid after a failed pointer check. check_brep runs it when
-            // the status failed without a report; that result is dropped here, as the capi never
-            // computes it.
+            // The capi does not run AssertValid after a failed pointer check. check_brep runs it
+            // when the pointer check failed without a report; that result is dropped here, as the
+            // capi never computes it.
             text.push_str("AssertValid skipped: ValidatePointers failed\n");
         } else {
             let Some(ok) = c.assert_valid else {
