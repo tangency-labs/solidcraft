@@ -245,8 +245,8 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
         kinds.extend(found.iter().copied());
         let before = body.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
         for m in matrices {
-            let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&m).unwrap();
-            assert!(solidcraft_geom::brep::placement::moved(body.record(), &motion).is_some(), "{what} {found:?}: moved exactly");
+            let motion = crate::placement::Rigid::of_matrix(&m).unwrap();
+            assert!(crate::placement::moved(body.record(), &motion).is_some(), "{what} {found:?}: moved exactly");
             let placed = transform_matrix(&body, m).unwrap();
             assert_topology(&body, &placed, m);
             assert_eq!(blend_kinds(&placed), found, "{what}: the rounds stay rounds by their definitions");
@@ -289,8 +289,8 @@ fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
             // more than rounding: that is left to the kernel, as before.
             let mut near = matrices[1];
             near[0][0] *= 1.0 + 1e-12;
-            let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&near).unwrap();
-            assert!(solidcraft_geom::brep::placement::moved(body.record(), &motion).is_none(), "{what}");
+            let motion = crate::placement::Rigid::of_matrix(&near).unwrap();
+            assert!(crate::placement::moved(body.record(), &motion).is_none(), "{what}");
         }
     }
     assert!(kinds.contains(&"exact") && kinds.contains(&"procedural"), "{kinds:?}");
@@ -308,9 +308,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let (c, s) = (0.6f64.cos(), 0.6f64.sin());
     let turn = [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -3.0, 2.0, 1.0]];
     let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
-    let eager = |m: &[[f64; 4]; 4]| {
-        solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
-    };
+    let eager = |m: &[[f64; 4]; 4]| crate::placement::moved(source.record(), &crate::placement::Rigid::of_matrix(m).unwrap()).unwrap();
     let placed = transform_matrix(&source, turn).unwrap();
     assert!(placed.record.pending(), "placed without moving its record");
     assert_eq!((placed.face_count(), placed.edge_count(), placed.vertex_count()), (source.face_count(), source.edge_count(), source.vertex_count()));
@@ -336,9 +334,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let twice = transform_matrix(&placed, shift).unwrap();
     assert!(twice.record.pending() && placed.record.pending());
     // Read: exactly the eager move's record.
-    let eager = |m: &[[f64; 4]; 4]| {
-        solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
-    };
+    let eager = |m: &[[f64; 4]; 4]| crate::placement::moved(source.record(), &crate::placement::Rigid::of_matrix(m).unwrap()).unwrap();
     assert_eq!(*placed.record(), eager(&turn));
     assert_topology(&source, &placed, turn);
     let both: [[f64; 4]; 4] = std::array::from_fn(|i| std::array::from_fn(|j| (0..4).map(|k| turn[i][k] * shift[k][j]).sum()));

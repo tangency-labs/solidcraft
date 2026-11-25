@@ -764,6 +764,25 @@ fn make_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSur
     })
 }
 
+/// (not upstream) Whether `s` fails `SmBSplineSurface` test #2 as [`Surface::assert_valid`]
+/// runs it: degree + 1 control points of a span of its net coincident within the test's
+/// tolerance, `ZONE_TOL_3D / 10` ([`has_internal_pole`]). A surface whose net is one point or
+/// one curve (where the test is not run) never fails it.
+///
+/// # Errors
+///
+/// Those of the NURB's making, the degeneracy tests and [`has_internal_pole`].
+pub(crate) fn fails_internal_pole_test(k: &Kernel, s: &Surface) -> Result<bool> {
+    let Some(part) = make_nurb(k, s)? else {
+        return Ok(false);
+    };
+    let tol = ZONE_TOL_3D / 10.0;
+    if s.is_degenerate_point(k, tol, None)? || s.is_degenerate_curve(k, EFF_ZERO_DEG, None, tol)? {
+        return Ok(false);
+    }
+    has_internal_pole(k, s, &part, tol)
+}
+
 /// `SmBSplineSurface::AssertValid`.
 fn b_spline_surface_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>) -> Result<bool> {
     let mut rtn = true;

@@ -24,10 +24,10 @@ use solidcore_record::brep::Brep;
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_doc::ModelState;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::hlr::{self, HlrError, Source, Visibility};
 
 use super::ShownSet;
 use super::lines::{LineRequest, Piece, ViewLine, continues, joined_sweep, on_arc, within};

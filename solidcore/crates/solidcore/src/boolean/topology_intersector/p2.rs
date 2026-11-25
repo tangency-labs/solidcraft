@@ -2530,6 +2530,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }),
                     ) => return Err(e),
@@ -2830,6 +2831,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             Err(
                                 err @ (SolidError::Unported { .. }
                                 | SolidError::Cancelled { .. }
+                                | SolidError::OutOfFuel { .. }
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),

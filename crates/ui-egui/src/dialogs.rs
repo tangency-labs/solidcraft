@@ -156,8 +156,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
             angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
         } => json!({"angle": angle});
-        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's.
-        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
+        // Uniform, or per axis (#10782): then `factor` is X's, beside Y's and Z's. The bodies
+        // scale about the picked base point (a hole's or shaft's face: its round end's centre), else
+        // the kept one, else their centre.
+        Scale("solid.scale", "SCALE", [("Bodies", BODIES, true), ("Base point", selection::VERTICES | selection::FACES | selection::POINTS | selection::EXTERNAL_POINTS | selection::ORIGIN, false)],
             FeatureKind::Scale { factor, factors, .. }) {
             factor: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[0].to_string()),
             per_axis: bool = false => factors.is_some(),
@@ -897,6 +899,8 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
+        // A point on another copy of a part: a joint's origin there.
+        Sel::PlacedSketchPoint { .. } => a & selection::SNAP_POINTS != 0,
         Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
 }
@@ -3605,7 +3609,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::ExternalSketchCurve { sketch, id } => {
             solidcraft_ui_text::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
         }
-        Sel::ExternalSketchPoint { sketch, id } => external_point(*sketch, id),
+        Sel::ExternalSketchPoint { sketch, id } | Sel::PlacedSketchPoint { sketch, id, .. } => external_point(*sketch, id),
         Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
         Sel::Profile { sketch, index } => solidcraft_ui_text::format(
             "dialog.selection_profile",
@@ -5424,12 +5428,12 @@ fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
 }
 
-fn to_object_on(inputs: &[SelInput]) -> bool {
+pub(crate) fn to_object_on(inputs: &[SelInput]) -> bool {
     inputs.iter().any(|i| i.label == TO_OBJECT)
 }
 
 /// Add or remove the To Object input; the active input moves to it when it is added.
-fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+pub(crate) fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
     set_object(inputs, active, TO_OBJECT, on);
 }
 
@@ -5544,7 +5548,7 @@ fn object_target(s: &Session, reference: &solidcore_record::Plane, sel: &Sel) ->
 }
 
 /// The picked To Object place.
-fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
+pub(crate) fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
     object_point(inputs, TO_OBJECT)
 }
 
@@ -6397,6 +6401,24 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
     .ok_or_else(|| "the Emboss author frame is degenerate".into())
 }
 
+/// A Scale's base point pick as the reference `solid.scale` saves: a vertex (the origin), a face,
+/// an edge, a sketch point or a construction point.
+fn scale_pick(s: &Session, x: &Sel) -> Option<Value> {
+    Some(match x {
+        Sel::Vertex { body, .. } if body.is_empty() => json!({"type": "origin"}),
+        Sel::Vertex { point, .. } => json!({"vertex": pt(*point)}),
+        Sel::Face { point, .. } => json!({"face": pt(*point)}),
+        Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::ExternalSketchPoint { sketch, id } => json!({"sketch": sketch, "point": id}),
+        Sel::SketchPoint { id } => match id.split_once(':') {
+            Some((sketch, point)) => json!({"sketch": sketch.parse::<u64>().ok()?, "point": point}),
+            None => json!({"sketch": s.active_sketch?, "point": id}),
+        },
+        Sel::ConstructionPoint { name } => json!({"construct_point": name}),
+        _ => return None,
+    })
+}
+
 /// The commands (id, parameters) a dialog's OK runs.
 fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
@@ -7168,7 +7190,29 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Scale { .. } => {
             need(0, "bodies")?;
-            ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
+            let bodies = sels(d, 0).body_names();
+            let mut p = json!({"bodies": bodies});
+            // What it scales about is saved as a reference, found again each time the design
+            // updates, so it follows the features before it: the picked base point; else what an
+            // edited Scale keeps (from `extra`); else the bodies' centre, so a new Scale grows
+            // them in place, not away from the origin. A face stands for its centre: a hole's or
+            // shaft's round end, a flat face's middle. A pick that gives no point (a sphere's or
+            // torus's face) is refused, not swapped for another point the user didn't pick.
+            match sels(d, 1).first() {
+                Some(x) => {
+                    if matches!(x, Sel::Face { .. }) && crate::dialogs_assembly::snap_of(s, x).is_none() {
+                        return Err("This face has no centre to scale about: pick a flat or round face, a vertex or a point".into());
+                    }
+                    p["about"] = scale_pick(s, x).ok_or("Pick a vertex, a face or a point to scale about")?;
+                    // An edited Scale from before kept a fixed point: the pick replaces it.
+                    if d.extra.contains_key("origin") {
+                        p["origin"] = Value::Null;
+                    }
+                }
+                None if d.extra.contains_key("origin") || d.extra.contains_key("about") => {}
+                None => p["about"] = json!("centre"),
+            }
+            ("solid.scale", p)
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
@@ -7488,6 +7532,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p.insert("references".into(), json!(references));
                 }
             }
+            // Flip winds the coil the other way along its axis, downward from a sketch profile
+            // (#17870): the reversed axis keeps the coil's hand, where a negative pitch mirrors it.
+            if *cmd == "solid.coil" && coil_flipped(&d.extra) {
+                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(solidcraft_engine::params::vec3).unwrap_or(Vec3::Z);
+                p.insert("axis".into(), pt3(-axis));
+            }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
         }
@@ -7564,6 +7614,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let coil_from_sketch = coil && m.contains_key("sketch");
         // The dialog has no end cut control to clear one an edited coil kept.
         let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
@@ -7575,6 +7627,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            // Flip is the dialog's own (it reverses the axis); a sketch profile brings its own
+            // section, so the primitive section's options are never sent with it (#17870).
+            if coil && (k == "flip" || (coil_from_sketch && COIL_SECTION_OPTIONS.contains(&k.as_str()))) {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -8445,6 +8502,15 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// The Coil dialog's options that shape the primitive section, which `solid.coil` refuses with a
+/// sketch profile (#17870).
+const COIL_SECTION_OPTIONS: [&str; 3] = ["section", "section_position", "start_angle"];
+
+/// Whether the Coil dialog's Flip is on: the coil winds the other way along its axis (#17870).
+fn coil_flipped(extra: &serde_json::Map<String, Value>) -> bool {
+    extra.get("flip").and_then(Value::as_bool).unwrap_or(false)
+}
+
 /// The reference edges of cylinder `id`, as OK sends them when the window didn't place it on its
 /// face: each edge found by its name where it is now, as `hole_refs::restore` finds them (else
 /// at its saved point), with its saved distance. `None` when it has none.
@@ -8632,10 +8698,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             {
                 d.extra.insert("corner".into(), json!("g2"));
             }
-            if let FeatureKind::Fillet { turn, .. } = &f.kind
-                && !turn.is_mitre()
-            {
-                d.extra.insert("turn".into(), json!("swept"));
+            // the fillet's own turn, so editing it keeps it: Auto, the dialog's default, is not sent
+            if let FeatureKind::Fillet { turn, .. } = &f.kind {
+                use solidcraft_engine::doc::FilletTurn;
+                match turn {
+                    // Auto is the default, so it is not sent.
+                    FilletTurn::Auto => {
+                        d.extra.remove("turn");
+                    }
+                    FilletTurn::Mitre => {
+                        d.extra.insert("turn".into(), json!("mitre"));
+                    }
+                    FilletTurn::Swept => {
+                        d.extra.insert("turn".into(), json!("swept"));
+                    }
+                }
             }
             // A fillet that reduces or tapers a radius too large for its edges.
             if let FeatureKind::Fillet { fit, .. } = &f.kind {
@@ -9534,13 +9611,26 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Scale { bodies, origin, .. } => {
+        FeatureKind::Scale { bodies, origin, about, .. } => {
             let mut d = start("solid.scale")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             }
-            d.extra.insert("origin".into(), pt3(origin.0));
+            // It keeps what it scales about: the bodies' centre, its reference, or a fixed point.
+            match about {
+                Some(solidcraft_engine::doc::ScaleAbout::Centre) => {
+                    d.extra.insert("about".into(), json!("centre"));
+                }
+                Some(solidcraft_engine::doc::ScaleAbout::Pick { at }) => {
+                    if let Ok(v) = serde_json::to_value(at) {
+                        d.extra.insert("about".into(), v);
+                    }
+                }
+                None => {
+                    d.extra.insert("origin".into(), pt3(origin.0));
+                }
+            }
             d
         }
         FeatureKind::OffsetFace { faces, body, .. } => {
@@ -9784,6 +9874,7 @@ mod refused_ok_tests {
                 ghost: false,
                 tint_new: true,
                 cut_tint: true,
+                replaced_ghost: true,
                 glass_new: false,
             },
         )
