@@ -2505,7 +2505,7 @@ impl Session {
     /// only where occurrences are and the joints' values; walking every feature's result for it
     /// took 40 ms a frame in a 5,484-feature assembly. The model is compared by allocation: the
     /// weak reference keeps the allocation, so a later model can't be mistaken for it.
-    fn pin_body_names(&mut self) {
+    pub(crate) fn pin_body_names(&mut self) {
         if self.model.is_stale() {
             return;
         }
@@ -2577,15 +2577,43 @@ impl Session {
                 }
                 continue;
             }
-            // Nothing to pin when every slot the bodies take already holds a name.
-            if made.len() <= f.body_names.len() && f.body_names.iter().take(made.len()).all(|slot| !slot.trim().is_empty()) {
+            // Pin each built body's actual evaluated name in its slot (respecting skipped Import
+            // indices), so disambiguated names like `VIS (3)` stay stable when an earlier
+            // same-named body or component is deleted or suppressed.
+            let has_skip = matches!(&f.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty());
+            if !has_skip {
+                if made.len() <= f.body_names.len() && f.body_names.iter().zip(&made).all(|(slot, &name)| slot == name) {
+                    continue;
+                }
+                let mut names = f.body_names.clone();
+                if names.len() < made.len() {
+                    names.resize(made.len(), String::new());
+                }
+                for (slot, &name) in names.iter_mut().zip(&made) {
+                    if *slot != name {
+                        *slot = name.to_string();
+                    }
+                }
+                if names != f.body_names {
+                    pins.push((f.id, names));
+                }
+                continue;
+            }
+            let slots = f.body_name_slots(made.len());
+            if slots.iter().zip(&made).all(|(&slot, &name)| f.body_names.get(slot).is_some_and(|s| s == name)) {
                 continue;
             }
             let mut names = f.body_names.clone();
-            names.resize(names.len().max(made.len()), String::new());
-            for (slot, name) in names.iter_mut().zip(&made) {
-                if slot.trim().is_empty() {
-                    *slot = name.to_string();
+            if let Some(end) = slots.last().map(|s| s + 1)
+                && names.len() < end
+            {
+                names.resize(end, String::new());
+            }
+            for (&slot, &name) in slots.iter().zip(&made) {
+                if let Some(stored) = names.get_mut(slot)
+                    && *stored != name
+                {
+                    *stored = name.to_string();
                 }
             }
             if names != f.body_names {

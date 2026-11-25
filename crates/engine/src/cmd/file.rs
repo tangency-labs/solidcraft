@@ -2606,12 +2606,44 @@ impl Session {
         // found on, before a change can move it (#17229).
         session.pin_dropped_link_names();
         let dropped = session.has_dropped_link_names();
-        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+        if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) || session.has_duplicate_rolled_back_body_names() {
             session.pin_rolled_back_body_names();
         }
         session.follow_design_token();
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Whether a rolled-back design has stored body names past the marker that collide with
+    /// earlier stored names (e.g. linked or imported bodies saved before disambiguated names were
+    /// pinned), so [`Self::pin_rolled_back_body_names`] should pin their evaluated names on open.
+    fn has_duplicate_rolled_back_body_names(&self) -> bool {
+        let Some(marker) = self.doc.marker.filter(|&m| m < self.doc.features.len()) else {
+            return false;
+        };
+        let mut seen = std::collections::HashSet::new();
+        for (i, f) in self.doc.features.iter().enumerate() {
+            if f.suppressed {
+                continue;
+            }
+            let skip: Option<&[u64]> = match &f.kind {
+                solidcraft_doc::FeatureKind::Import { skip, .. } if !skip.is_empty() => Some(skip.as_slice()),
+                _ => None,
+            };
+            for (slot, name) in f.body_names.iter().enumerate() {
+                if skip.is_some_and(|s| s.contains(&(slot as u64))) {
+                    continue;
+                }
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if !seen.insert(trimmed) && i >= marker {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Pin the names of the bodies the features after the timeline marker make, in a design
