@@ -1077,6 +1077,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         if one_flat {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
+        v.push(cmd(app, "select.boundary", "Select Boundary"));
         v.push(cmd(app, "inspect.measure", "Measure"));
         // What cannot act on these faces is left out.
         v.retain(|i| i.enabled || i.is_sep());

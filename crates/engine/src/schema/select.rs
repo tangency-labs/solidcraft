@@ -307,6 +307,48 @@ pub struct SelectFilterResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Select the edges round a set of faces (#18098), read from the body's exact topology, not from
+/// its mesh: the edges that bound exactly one face of the set. `body` and `faces` name the set;
+/// `body` alone means the whole body, whose boundary is its free edges (an open surface's rim; a
+/// closed solid has none). Without either, the selected faces, or else the last selected body.
+/// The boundary comes in closed loops, walked round the faces (two loops that only meet at a
+/// vertex are two). On a face set only the outer loops are selected unless `holes` is true: a
+/// loop is a hole when all its edges come from the faces' inner loops (a hole in a plate, the
+/// edge of an island the set leaves out), from the topology, not from geometry. Both rims of a
+/// tube are kept. A body's free edges are all selected. With `add`, an edge already selected
+/// stays as it was picked. A mesh body has no edge topology and is refused. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct BoundaryParams {
+    /// The name of a body in the design. Default: the body of the selected faces, or the last selected body.
+    pub body: Option<String>,
+    /// Face indices of that body; needs `body`. Default with `body`: every face, so its free edges.
+    pub faces: Option<Vec<usize>>,
+    /// Also select the loops round holes and islands of a face set. Default: false.
+    pub holes: Option<bool>,
+    /// Add the edges to the current selection instead of replacing it. Default: false.
+    pub add: Option<bool>,
+}
+
+/// What `select.boundary` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BoundaryResult {
+    /// How many items are selected now.
+    pub selected: usize,
+    /// The body whose edges were selected.
+    pub body: String,
+    /// The selected edges, loop by loop.
+    pub edges: Vec<usize>,
+    /// How many closed loops were selected.
+    pub loops: usize,
+    /// How many loops were left out as holes (0 with `holes: true`).
+    pub holes_left: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "select_tests.rs"]
 mod tests;
