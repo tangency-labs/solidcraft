@@ -55,6 +55,10 @@ pub(crate) struct FaceInfo {
     /// Whether the name follows exact history (`false`: worked out from geometry, or a piece
     /// numbered because the faces around it did not tell it apart).
     pub verified: bool,
+    /// The name a Split Face piece had before Split Face named its pieces (told apart by the
+    /// faces around it, see [`split_pieces`]): a reference a design saved then holds finds this very
+    /// face by it.
+    pub former: Option<String>,
 }
 
 impl Names {
@@ -94,6 +98,8 @@ struct Named {
     /// Its place among the faces made for one part of the definition that made it, where the
     /// feature says (see `lineage::GrownFace`): faces with one name are numbered in this order first.
     ordinal: Option<usize>,
+    /// See [`FaceInfo::former`].
+    former: Option<String>,
 }
 
 /// Names of a body (`b`, made by `o`'s feature) from its lineage; `None` when the lineage does
@@ -125,8 +131,79 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
-    let centres = || crate::naming::face_centres(b);
-    Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
+    let centres = || crate::naming::face_centres(b).unwrap_or_default();
+    let parents: Vec<(String, bool)> = named.iter().map(|n| (n.name.clone(), n.verified)).collect();
+    let names = qualify_at(named, &adjacency(h), by_place(&o.feature, &centres));
+    Some(match lineage.pieces.as_deref() {
+        Some(pieces) => split_pieces(names, &parents, pieces, fid, &centres),
+        None => names,
+    })
+}
+
+/// What starts the role of a piece of a Split Face (`F7:split:in`): no face has it.
+const SPLIT_ROLE: &str = "split:";
+
+/// Whether a piece qualifier is a Split Face's piece role (`F7:split:in`), not a face around it.
+pub(crate) fn is_split_role(q: &str) -> bool {
+    q.strip_prefix('F')
+        .and_then(|rest| rest.split_once(':'))
+        .is_some_and(|(id, role)| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && role.starts_with(SPLIT_ROLE))
+}
+
+/// Whether `name` names a piece of a face a Split Face cut, by the feature's own name for it: then
+/// it stands for that piece alone, not every piece of the face.
+pub fn names_split_piece(name: &str) -> bool {
+    crate::piece_names::piece_parts(name).is_some_and(|(_, around)| around.iter().any(|q| is_split_role(q)))
+}
+
+/// The pieces a Split Face (feature `fid`) cut faces into, named by it: each piece is the face it
+/// came from (`parents`, its name before the split), qualified by the feature and the piece's
+/// role there (`pieces`): `F1:+z#[F7:split:in]` is the piece of `F1:+z` inside Split Face F7's loop, as
+/// an Extrude names its faces `F3:top`, `F3:side:c1`. A reference to the face it came from still
+/// finds every piece; one to a piece finds that piece alone, wherever upstream edits move it.
+/// What the faces around a piece called it before (`F1:+z#[F1:+x,F1:+y]`, or the face's bare name
+/// for the piece nothing around it told apart) stays its [`FaceInfo::former`] name, so a design
+/// saved before still finds it. Pieces with one role (an open curve crossing a face twice) are
+/// numbered by place, and not exact.
+fn split_pieces(mut names: Names, parents: &[(String, bool)], pieces: &[Option<String>], fid: u64, centres: &dyn Fn() -> Vec<Vec3>) -> Names {
+    if pieces.len() != names.faces.len() || parents.len() != names.faces.len() {
+        return names;
+    }
+    let mut faces: Vec<String> = names.faces.as_ref().clone();
+    let mut renamed: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, role) in pieces.iter().enumerate() {
+        let (Some(role), Some((parent, exact)), Some(info), Some(slot)) = (role, parents.get(i), names.info.get_mut(i), faces.get_mut(i)) else {
+            continue;
+        };
+        // Its side of the tool is exact: the name is as exact as the face it came from.
+        info.verified = *exact;
+        let marker = format!("F{fid}:{SPLIT_ROLE}{role}");
+        let (stem, inherited, tie) = split_piece(parent);
+        let mut key: BTreeSet<&str> = inherited.iter().map(String::as_str).collect();
+        key.insert(marker.as_str());
+        let key: Vec<&str> = key.into_iter().collect();
+        let name = piece_name(&stem, &key, tie.as_deref());
+        info.former = Some(std::mem::replace(slot, name.clone()));
+        info.bounds.insert(marker);
+        renamed.entry(name).or_default().push(i);
+    }
+    // Pieces on one side of every field: numbered along their spread.
+    let worked_out = std::cell::OnceCell::new();
+    for (name, same) in renamed.into_iter().filter(|(_, same)| same.len() > 1) {
+        let at: &Vec<Vec3> = worked_out.get_or_init(centres);
+        let order =
+            if at.len() == faces.len() { crate::naming::along_spread(same.iter().filter_map(|i| Some((*i, *at.get(*i)?))).collect()) } else { same };
+        for (k, i) in order.into_iter().enumerate() {
+            if let Some(slot) = faces.get_mut(i) {
+                *slot = format!("{name}#{}", k + 1);
+            }
+            if let Some(info) = names.info.get_mut(i) {
+                info.verified = false;
+            }
+        }
+    }
+    names.faces = Arc::new(faces);
+    names
 }
 
 /// Whether `face` came only from faces of tools the feature built whose roles are not known.
@@ -185,7 +262,7 @@ impl<'a> OperandNames<'a> {
                     .get_or_init(|| {
                         Arc::new(derive(body, o, &stage.lineage).unwrap_or_else(|| {
                             let names = crate::naming::geometric_names(body, o, body.body.face_count());
-                            let centres = || crate::naming::face_centres(body);
+                            let centres = || crate::naming::face_centres(body).unwrap_or_default();
                             Names::unverified(names, &crate::naming::mesh_adjacency(body), by_place(&o.feature, &centres))
                         }))
                     })
@@ -213,6 +290,7 @@ impl<'a> OperandNames<'a> {
                 verified: info.verified,
                 origins: None,
                 ordinal: None,
+                former: info.former.clone(),
             })
         };
         match self.operand {
@@ -226,6 +304,7 @@ impl<'a> OperandNames<'a> {
                     verified: n.verified,
                     origins: None,
                     ordinal: None,
+                    former: n.former.as_ref().map(|f| format!("{f}@F{fid}.{instance}")),
                 }
             }),
             Operand::Inner(_) => {
@@ -361,6 +440,11 @@ fn merged(names: Vec<Named>) -> Option<Named> {
     }
     let name = common_piece(&names).or_else(|| common.map(str::to_string)).unwrap_or(first);
     let (mut aliases, mut synonyms): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    // The former name of the face whose name it takes, when only one face has it (see `FaceInfo::former`).
+    let former = match names.as_slice() {
+        [one] => one.former.clone(),
+        _ => None,
+    };
     for n in names {
         let (kept, merged) = if n.name == name { (n.synonyms, n.aliases) } else { (Vec::new(), [vec![n.name], n.synonyms, n.aliases].concat()) };
         for synonym in kept {
@@ -374,7 +458,7 @@ fn merged(names: Vec<Named>) -> Option<Named> {
             }
         }
     }
-    Some(Named { name, aliases, synonyms, verified, origins: None, ordinal })
+    Some(Named { name, aliases, synonyms, verified, origins: None, ordinal, former })
 }
 
 /// The name the faces have in common: their stem, the faces their qualifiers share and the
@@ -575,7 +659,7 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
         .into_iter()
         .zip(bounds)
         .zip(verified)
-        .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified })
+        .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified, former: x.former })
         .collect();
     Names { faces: Arc::new(names), info }
 }
@@ -679,6 +763,11 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     let name = canonical.as_deref().unwrap_or(name);
     let today = crate::persistent_name::written_now(face);
     let current: &str = &today;
+    // The very piece of a Split Face, by the name the faces around it gave it before the feature
+    // named its pieces (a design saved then).
+    if info.and_then(|i| i.former.as_deref()) == Some(name) {
+        return Some(Match::Exact);
+    }
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });
@@ -702,9 +791,15 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     // piece of, whole again since, which they still bound: the piece is all of it (#11731). Only a
     // piece told apart by faces: a numbered one (`#2`, nothing told it apart) says nothing about
     // which part of the whole face it was.
+    // A Split Face's piece role its own name carries tells it apart too, when the piece was split
+    // again since (the role is no face around it).
+    let own: Vec<&str> =
+        crate::piece_names::piece_parts(current).map(|(_, around)| around.into_iter().filter(|q| is_split_role(q)).collect()).unwrap_or_default();
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
         && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
-        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f))))
+        && info.is_some_and(|i| {
+            around.iter().all(|f| i.bounds.contains(*f) || own.contains(f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f)))
+        })
     {
         return Some(Match::Piece);
     }

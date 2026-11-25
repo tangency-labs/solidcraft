@@ -90,7 +90,7 @@ pub const MAX_PALETTE: usize = 1 << 20;
 pub struct Palette {
     entries: Vec<[u8; 4]>,
     /// The interned entries by colour and motion slot.
-    lookup: std::collections::HashMap<([u8; 4], u32), u32>,
+    lookup: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>>,
     stable_len: usize,
     /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
     hatches: Vec<u8>,
@@ -135,14 +135,7 @@ impl Material {
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette {
-            stable_len: entries.len(),
-            entries,
-            lookup: std::collections::HashMap::new(),
-            hatches: Vec::new(),
-            motions: Vec::new(),
-            materials: Vec::new(),
-        }
+        Palette { stable_len: entries.len(), entries, lookup: Default::default(), hatches: Vec::new(), motions: Vec::new(), materials: Vec::new() }
     }
 
     /// This palette with each entry's motion slot by index (entries past `motions` have none).
@@ -451,6 +444,46 @@ impl std::hash::Hasher for WeldHasher {
 
     fn write_u32(&mut self, x: u32) {
         self.0 = (self.0.rotate_left(5) ^ u64::from(x)).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+/// A multiply-and-rotate hasher for [`Palette`]'s lookup, whose keys are four colour bytes and a
+/// slot: the standard SipHash cost about 2% of a frame on a busy design, since every face and
+/// edge is interned each build. The table is never iterated for output (only rekeyed), so the
+/// hash order cannot reach the picture.
+#[derive(Default)]
+pub(crate) struct PaletteHasher(u64);
+
+impl PaletteHasher {
+    const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+
+    fn add(&mut self, x: u64) {
+        self.0 = (self.0.rotate_left(5) ^ x).wrapping_mul(Self::K);
+    }
+}
+
+impl std::hash::Hasher for PaletteHasher {
+    fn finish(&self) -> u64 {
+        // The multiply leaves its entropy in the high bits; the table reads the low ones too.
+        self.0.rotate_left(26)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let (chunks, rest) = bytes.as_chunks::<8>();
+        for c in chunks {
+            self.add(u64::from_le_bytes(*c));
+        }
+        for b in rest {
+            self.add(u64::from(*b));
+        }
+    }
+
+    fn write_u32(&mut self, x: u32) {
+        self.add(u64::from(x));
+    }
+
+    fn write_usize(&mut self, x: usize) {
+        self.add(x as u64);
     }
 }
 
@@ -917,6 +950,20 @@ impl GpuScene {
         GpuScene { palette: Arc::new(palette), ..Default::default() }
     }
 
+    /// The sizes of the lists a sketch scene fills (`lines`, `overlay`, `under`, `trans`), for
+    /// [`GpuScene::reserve_lists`] on the next one.
+    pub fn capacity_hint(&self) -> [usize; 4] {
+        [self.lines.len(), self.overlay.len(), self.under.len(), self.trans.len()]
+    }
+
+    /// Room for the sizes [`GpuScene::capacity_hint`] gave. Only capacity: no byte changes.
+    pub fn reserve_lists(&mut self, sizes: [usize; 4]) {
+        self.lines.reserve(sizes[0]);
+        self.overlay.reserve(sizes[1]);
+        self.under.reserve(sizes[2]);
+        self.trans.reserve(sizes[3]);
+    }
+
     /// Intern an ephemeral colour (grid, highlight, sketch, preview) into this scene's palette.
     pub fn color(&mut self, rgba: [u8; 4]) -> PaletteIndex {
         Arc::make_mut(&mut self.palette).intern(rgba)
@@ -1351,11 +1398,8 @@ impl GpuScene {
         self.shadow.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn trans_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
-        for v in p.iter().chain(&n) {
-            self.trans.extend_from_slice(&v.to_le_bytes());
-        }
-        self.trans.extend_from_slice(&c.0.to_le_bytes());
-        self.trans.extend_from_slice(&NO_VALUE.to_le_bytes());
+        // The same bytes as a line record: position, normal, palette index, no value.
+        self.trans.extend_from_slice(&line_record(p, n, c, NO_VALUE));
     }
     /// A line shown only where the model hides it.
     pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -1391,11 +1435,7 @@ impl GpuScene {
     }
     /// A line under everything (see [`GpuScene::under`]).
     pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
-        for v in a.iter().chain(&b) {
-            self.under.extend_from_slice(&v.to_le_bytes());
-        }
-        self.under.extend_from_slice(&c.0.to_le_bytes());
-        self.under.extend_from_slice(&width.to_le_bytes());
+        self.under.extend_from_slice(&line_record(a, b, c, width.to_bits()));
     }
     /// A translucent triangle of a plane a section does not cut (see [`GpuScene::guide_trans`]).
     pub fn guide_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
@@ -1512,6 +1552,17 @@ pub struct Frame {
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
     /// Each clip plane's hatch, an index into `solidcraft_viewport::SECTION_HATCH_ANGLES`.
     pub clip_hatch: [usize; MAX_SECTION_PLANES],
+    /// Every shown body is selected (a whole-body `select.all`): `fs_solid` colours each body
+    /// with [`Frame::selection_tint`] instead of its own, so one uniform covers the whole model
+    /// without a highlight entry per body.
+    ///
+    /// It matches one body's selection tint to a mean of 5.6 of 255 (`6ed8b279a4`), with the
+    /// residual on the silhouette: about half of the differing pixels lie within 2 px of it,
+    /// where the highlight pass biases toward the eye (`highlight_depth`) while the model pass
+    /// biases away by `FACE_BIAS`, so the two win slightly different samples. Making them
+    /// identical would mean drawing the selection as a second biased pass, which is the per-body
+    /// geometry this flag exists to avoid.
+    pub selection_all: bool,
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
     /// Canvases and decals.
@@ -4889,6 +4940,9 @@ pub fn frame_key(cb: &Frame) -> u64 {
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
+    // Selecting every body tints them through the uniform alone: the picture must be drawn again
+    // when that toggles, or a cached untinted frame would be shown.
+    cb.selection_all.hash(&mut h);
     cb.hatch.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.sky.map(f32::to_bits).hash(&mut h);
     cb.outline.hash(&mut h);
@@ -6222,7 +6276,9 @@ fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: boo
     v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, first_moved]);
     v.extend(model.iter().flatten());
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
-    v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
+    // The fourth: 1 when every shown body is selected, so the solid shaders take the selection
+    // colour as the body's own (`u.sel.w`), with no per-body geometry.
+    v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], if cb.selection_all { 1.0 } else { 0.0 }]);
     for [r, g, b] in cb.hatch {
         v.extend([r, g, b, 1.0]);
     }
@@ -6296,6 +6352,71 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 
 #[cfg(test)]
 mod tests {
+    /// The (colour, slot) -> index lookups of a fixed pseudo-random stream: the new hasher must
+    /// intern exactly what the standard one does. Also the timing the PR quotes
+    /// (`cargo test -p solidcraft-viewport-gpu --release palette_hasher -- --nocapture --ignored`).
+    fn stream() -> Vec<([u8; 4], u32)> {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        (0..400_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let c = (x % 600) as u32;
+                ([(c * 7) as u8, ((c * 13) >> 2) as u8, (c % 251) as u8, 255], (x >> 40) as u32 % 3)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn palette_lookup_interns_the_same_entries_as_the_standard_hasher() {
+        use super::*;
+        let mut reference: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut entries: Vec<[u8; 4]> = Vec::new();
+        let mut palette = Palette::default();
+        for (rgba, slot) in stream() {
+            let want = *reference.entry((rgba, slot)).or_insert_with(|| {
+                entries.push(rgba);
+                entries.len() as u32 - 1
+            });
+            assert_eq!(palette.intern_moved(rgba, slot).0, want);
+        }
+        assert_eq!(palette.entries(), entries.as_slice());
+    }
+
+    #[test]
+    #[ignore = "timing"]
+    fn palette_hasher_timing() {
+        use super::*;
+        let keys = stream();
+        let mut std_map: std::collections::HashMap<([u8; 4], u32), u32> = Default::default();
+        let mut fast: std::collections::HashMap<([u8; 4], u32), u32, std::hash::BuildHasherDefault<PaletteHasher>> = Default::default();
+        for (i, k) in keys.iter().enumerate() {
+            std_map.insert(*k, i as u32);
+            fast.insert(*k, i as u32);
+        }
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let mut sum = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum += u64::from(*std_map.get(k).unwrap_or(&0));
+                }
+            }
+            let a = t.elapsed();
+            let t = std::time::Instant::now();
+            let mut sum2 = 0u64;
+            for _ in 0..20 {
+                for k in &keys {
+                    sum2 += u64::from(*fast.get(k).unwrap_or(&0));
+                }
+            }
+            let b = t.elapsed();
+            assert_eq!(sum, sum2);
+            println!("lookups: {} ; siphash {:?} ; palette hasher {:?}", keys.len() * 20, a, b);
+        }
+    }
+
     #[test]
     fn retaining_live_picture_slots_releases_closed_active_and_parked_uploads() {
         use super::*;
@@ -6843,6 +6964,7 @@ mod tests {
             analysis_colors: [0.0; 36],
             access: None,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
@@ -7585,6 +7707,7 @@ mod glass_tests {
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
@@ -7782,6 +7905,7 @@ mod glass_tests {
             analysis_colors: [0.0; 36],
             access: None,
             hover_tint: [0.0; 3],
+            selection_all: false,
             selection_tint: [0.0; 3],
             hatch: Default::default(),
             moving: None,
@@ -8669,6 +8793,105 @@ mod glass_tests {
                 assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed);
             }
         }
+    }
+
+    /// An OpenGL adapter under the tests' policy, with the window's device as egui-wgpu asks for it
+    /// (WebGL2 limits, textures up to 8192). `None` where no OpenGL adapter qualifies; on Linux with
+    /// `VIEWPORT_TEST_REQUIRE_GPU=1`, as in CI (Mesa's llvmpipe), a missing one fails.
+    fn opengl_window_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+        let mut descriptor = crate::instance_descriptor_from_env();
+        descriptor.backends = wgpu::Backends::GL;
+        // As in `opengl_draws_grid_lines_in_every_direction_and_at_a_point` (#15410).
+        descriptor.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
+        let instance = crate::select::start_instance(descriptor);
+        // Never dropped, as in that test (#10232).
+        std::mem::forget(instance.clone());
+        let policy = crate::test_env::policy();
+        let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
+            let why = format!("no OpenGL adapter qualifies under {}", policy.name());
+            assert!(!(cfg!(target_os = "linux") && crate::test_env::required()), "{why}");
+            eprintln!("skipped: {why}");
+            return None;
+        };
+        assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits:
+                wgpu::Limits { max_texture_dimension_2d: 8192, ..wgpu::Limits::downlevel_webgl2_defaults() }.using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .expect("the OpenGL adapter opens a device");
+        Some((adapter, device, queue))
+    }
+
+    /// The window formats `adapter` multisamples 4x together with `depth`, as viewport targets.
+    fn opengl_4x_windows(adapter: &wgpu::Adapter, depth: wgpu::TextureFormat) -> Vec<GpuTarget> {
+        [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb]
+            .into_iter()
+            .filter(|format| [*format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)))
+            .map(|format| GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false })
+            .collect()
+    }
+
+    /// Desktop OpenGL draws the scene at the saved anti-aliasing count where the startup check
+    /// shows it draws, and 1x where it doesn't; either way, what the check keeps keeps drawing.
+    /// Each format is drawn again five times at the count the check kept: a driver whose 4x passed
+    /// the check once and came out black afterwards would fail here. Mesa's llvmpipe OpenGL (CI's
+    /// software adapter) has given both answers at 4x: 4x on Mesa 26.0, and a black 4x resolve
+    /// that the check turned into 1x on Mesa 25.2 in CI.
+    #[test]
+    fn opengl_startup_msaa_check_decides_from_what_it_draws() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
+        let depth = crate::depth_format(&device, true);
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            let decided = renderer.check_msaa(&device, &queue).unwrap();
+            let kept = renderer.target().samples;
+            match decided {
+                super::MsaaCheck::Passed => assert_eq!(kept, 4, "{:?}: 4x kept where it draws", window.format),
+                super::MsaaCheck::Fallback => assert_eq!(kept, 1, "{:?}: 1x where 4x came out blank", window.format),
+                super::MsaaCheck::FailedAtOne => panic!("{:?}: OpenGL drew nothing at 1x either", window.format),
+            }
+            for again in 0..5 {
+                assert_eq!(
+                    renderer.check_msaa(&device, &queue).unwrap(),
+                    super::MsaaCheck::Passed,
+                    "{:?}: the kept {kept}x stops drawing (draw {again})",
+                    window.format
+                );
+            }
+            eprintln!("OpenGL anti-aliasing check: {} {:?} at 4x: {decided:?}, keeps {kept}x", adapter.get_info().name, window.format);
+        }
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
+    }
+
+    /// The black frames OpenGL multisampling once gave (#5605): a driver whose 4x resolve comes out
+    /// black. The check's test seam (`check_msaa_with`'s blank count) clears the multisampled
+    /// resolve to black after the scene is drawn, as such a driver leaves it, on a real OpenGL
+    /// device. The check must see the blank picture and replace the renderer with a 1x one that
+    /// draws; the app then runs at 1x for the session (`build_wgpu`'s `MsaaCheck::Fallback`).
+    #[test]
+    fn opengl_a_black_multisampled_resolve_falls_back_to_1x() {
+        let Some((adapter, device, queue)) = opengl_window_device() else { return };
+        let depth = crate::depth_format(&device, true);
+        let windows = opengl_4x_windows(&adapter, depth);
+        for window in &windows {
+            let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(
+                renderer.check_msaa_with(&device, &queue, 4).unwrap(),
+                super::MsaaCheck::Fallback,
+                "{:?}: a black 4x resolve is caught",
+                window.format
+            );
+            assert_eq!(renderer.target().samples, 1, "{:?}: the session draws 1x", window.format);
+            // The 1x replacement really draws.
+            assert_eq!(renderer.check_msaa(&device, &queue).unwrap(), super::MsaaCheck::Passed, "{:?}: 1x draws", window.format);
+            assert_eq!(renderer.target().samples, 1);
+            // Black at 1x too: nothing proves another count, so the check changes nothing.
+            let mut both = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
+            assert_eq!(both.check_msaa_with(&device, &queue, 1).unwrap(), super::MsaaCheck::FailedAtOne);
+        }
+        assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
     }
 
     /// Two see-through squares, one at z = 5 (near) and one at z = -5, in `near` and `far`

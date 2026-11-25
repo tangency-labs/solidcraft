@@ -6,7 +6,7 @@
 //! A part used twice is two bodies, at its two placements: the second a copy of the first
 //! ([`RecordBody::copy_of`]), so the design knows them as one part and the record is kept once. A body no occurrence reaches stays where
 //! it is, under a root named after the file. An occurrence that mirrors or scales is left out with
-//! the reason, as a body whose own placement does is ([`solidcore_cadir`]), and so are the bodies
+//! the reason, as a body whose own placement does is ([`solidcraft_kernel::read_cadir`]), and so are the bodies
 //! of its part and of everything under it: they do not come in where the file defines them.
 
 use std::collections::{HashMap, HashSet};

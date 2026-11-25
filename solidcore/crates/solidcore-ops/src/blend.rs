@@ -47,10 +47,10 @@ use solidcore::blend::blend_corner::rollover::{
 use solidcore::blend::blend_corner::separate_ends::{
     plan as separate_end_plan, SectionKind, SeparateEndPlan,
 };
-use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_corner::{BlendCornerEvent, TurnChoice};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
-use solidcore::blend::definition_check::BlendFaceLog;
+use solidcore::blend::definition_check::{BlendFaceKind, BlendFaceLog, MadeBlendFace};
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
 };
@@ -83,6 +83,7 @@ use crate::session::{answer, measure_body, with_body};
 use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
+mod exact_round;
 mod room;
 pub use room::{band_room, BandRoom, EndRoom, Room};
 
@@ -215,6 +216,12 @@ pub enum Turn {
     /// section revolved about the side edge, tangent to both rounds: between planes at a
     /// straight side edge, a torus. For [`Blend::Round`] only.
     Swept,
+    /// Each turn is [`Turn::Swept`] where the kernel builds it (the rolling ball can pass the
+    /// side edge: it and the rounds differ in convexity, and the rounds are constant, of one
+    /// radius, at a straight side edge square to them) and [`Turn::Mitre`] where it does not.
+    /// Decided per corner before anything is built, so it is never refused where the mitre
+    /// would have been made. Chamfers, which have no swept turn, are mitred.
+    Auto,
 }
 
 /// How chamfers close a corner where every edge at a vertex is chamfered between planes (the
@@ -803,7 +810,12 @@ fn chamfer_sized(
 
 /// `e` ([`Error::TooLarge`]) with the point at the middle of `edge`, the edge its size was
 /// found for. An edge or point that cannot be read leaves the size without a point.
-fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::Result<Error> {
+pub(crate) fn sized_on(
+    k: &Kernel,
+    b: &Brep,
+    edge: Option<EdgeId>,
+    e: Error,
+) -> solidcore::Result<Error> {
     let Error::TooLarge {
         size,
         kind,
@@ -1003,7 +1015,12 @@ fn pass(
     let done = {
         let mut s = FilletSession::new(k, b)?;
         // read as the corners are made
-        s.set_swept_turns(p.turn == Turn::Swept);
+        s.set_turns(match p.turn {
+            Turn::Mitre => TurnChoice::Mitre,
+            Turn::Swept => TurnChoice::Swept,
+            Turn::Auto if p.section.chamfer() => TurnChoice::Mitre,
+            Turn::Auto => TurnChoice::Auto,
+        });
         // the corner type the caller chose, always asked: a type refused where it does not
         // exist, with its fit (the kernel picks a type itself only where none is asked)
         s.set_chamfer_corner(match p.chamfer_corner {
@@ -1921,6 +1938,31 @@ fn blend_on_body(
             }));
         }
     }
+    // constant rounds between planes, built in closed form ([`exact_round`]); anything it does
+    // not cover, or a result that does not finish, goes to the fillet sessions as before
+    if kind == Blend::Round && turn == Turn::Mitre && back.is_empty() && corners == Corners::Filled
+    {
+        if let Some((rounded, made)) = exact_round::round_on(k, b, &picked, each)? {
+            if let Ok((r, _)) = finish_under(k, rounded, expect, contract)? {
+                *b = r;
+                if let Some(log) = k.blend_face_log.as_mut() {
+                    log.sessions.push(
+                        made.into_iter()
+                            .map(|face| MadeBlendFace {
+                                face,
+                                kind: BlendFaceKind::ExactRound,
+                            })
+                            .collect(),
+                    );
+                }
+                return Ok(Ok(Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }));
+            }
+        }
+    }
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
         Blend::Curvature => |s| Section::Curvature(s),
@@ -1986,7 +2028,7 @@ fn blend_on_body(
     // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
     // too (#19476: the foot of a cylinder that stands through a face)
     let asked_alone = kind == Blend::Round
-        && turn == Turn::Mitre
+        && turn != Turn::Swept
         && back.is_empty()
         && corners == Corners::Filled;
     let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
@@ -2000,7 +2042,7 @@ fn blend_on_body(
     // refuses them; a round asked of the event's concave chain on its own (B1 rounded by an
     // earlier feature: [`is_concave_chain`], the ledge's edges once B1 is rounded, never a
     // pocket floor's) is the event's second pass where the first call refuses it
-    let step = if may_go_first && kind == Blend::Round && turn == Turn::Mitre {
+    let step = if may_go_first && kind == Blend::Round && turn != Turn::Swept {
         RollOverStep::Classify
     } else {
         RollOverStep::No
@@ -3338,7 +3380,7 @@ fn chamfer_sides_impl(
                         why,
                     },
                 ) => Error::TooLarge {
-                    size: crate::import_geometry::scale_value(distance, size),
+                    size: solidcore::prism::transform::scale_value(distance, size),
                     kind: FitKind::Distance,
                     at,
                     face,

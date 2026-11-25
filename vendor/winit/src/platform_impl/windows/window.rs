@@ -1340,7 +1340,11 @@ unsafe fn init(
     window_flags.set(WindowFlags::CLOSABLE, true);
     window_flags.set(WindowFlags::CLIP_CHILDREN, attributes.platform_specific.clip_children);
 
-    let mut fallback_parent = || match attributes.platform_specific.owner {
+    let owner = attributes
+        .platform_specific
+        .owner
+        .or_else(|| attributes.owned_by.as_ref().map(|owner| owner.window.hwnd()));
+    let mut fallback_parent = || match owner {
         Some(parent) => {
             window_flags.set(WindowFlags::POPUP, true);
             Some(parent)

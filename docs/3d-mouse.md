@@ -10,11 +10,18 @@ versions. Two preferences opt into holding the model:
   makes the cap and navigation bridge zoom toward the surface in the middle of the view and stop
   there. Drag-zoom holds the model point where the drag began. The wheel and pinch keep their
   separate **Zoom to the cursor** preference; neither setting changes the other.
-- Preferences › Navigation › 3D mouse › **Orbit** defaults to **Classic**. Choose **Traced**
+- Preferences › Input › 3D mouse › **Orbit** defaults to **Classic**. Choose **Traced**
   (`space_mouse_model_pivot: true`) to turn around the model point in the middle of the view when
   the turn begins. A faint ball marks that point until the cap is back at rest. Over empty space,
   the pivot is the middle of the bodies in view. The navigation bridge uses the same preference,
   but picks the point each frame because device apps do not report rest.
+
+Preferences › Input › 3D mouse › **Motion model** says what the cap moves. **Object** (the
+default, as in earlier versions) moves the model the way you push, tilt or twist the cap. **Target
+camera** (`space_mouse_motion: "target_camera"`) moves the camera that way instead, around the
+point the view turns about, so the model moves the other way along every axis. Each axis's
+**Invert** still reverses that axis in either model. The navigation bridge is not affected: a
+device app sends view motion, not cap motion.
 
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the view navigator, the cap can rotate it too. Turn on **Turn sketches with
@@ -73,7 +80,7 @@ Some homemade input devices come with a program of their own that reads the devi
 knobs, rings and buttons into navigation (profiles, sensitivity, button actions). Such a program can
 move SolidCraft's view directly instead of emulating mouse drags, so the mouse pointer stays the
 user's and both can be used at once. Turn on **Navigate with a device app on this computer** in
-Preferences › Navigation › 3D mouse (off by default) and set the port the program listens on
+Preferences › Input › 3D mouse (off by default) and set the port the program listens on
 (8765 unless the program says otherwise). The desktop app then connects to `127.0.0.1:<port>`,
 retries every second while nothing answers, and shows **Connected** with the program's name once it
 is. Only the window with focus moves, and not on the start page or while a file dialog is open.

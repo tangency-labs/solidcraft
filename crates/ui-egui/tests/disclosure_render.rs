@@ -71,6 +71,74 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
 }
 
 #[test]
+fn trim_cutting_sheet_and_missing_inputs_render_at_full_and_small_sizes() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::Sel;
+    use solidcraft_ui_egui::dialogs;
+
+    let dir = std::env::var_os("SOLIDCRAFT_SCENARIO_SHOTS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/trim-review"));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (width, height) in [(1280, 720), (640, 480)] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY","name":"FloorProfile"})),
+            ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})),
+            ("sketch.finish", json!({})),
+            ("surface.patch", json!({"sketch":"FloorProfile","body_name":"Floor"})),
+            ("sketch.create", json!({"plane":"XY","name":"CutterProfile"})),
+            ("sketch.line", json!({"points":[[-5,3],[5,3],[15,7]],"ids":["c1","c2"]})),
+            ("sketch.finish", json!({})),
+            ("surface.extrude", json!({"sketch":"CutterProfile","curves":["c1","c2"],"start_offset":-5,"distance":10,"body_name":"Cutter"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.app.session.selection.clear();
+        h.app.run("view.fit", json!({})).unwrap();
+        h.app.start("surface.trim");
+        h.ctx = egui::Context::default();
+        solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
+        let mut textures = HashMap::new();
+        let size = egui::vec2(width as f32, height as f32);
+        for state in ["missing", "ready"] {
+            if state == "ready" {
+                let dialog = h.app.dialog.as_mut().unwrap();
+                dialog.inputs[0].items = vec![Sel::Body { name: "Floor".into() }];
+                dialog.active = 1;
+                dialog.pick(&h.app.session, Sel::Body { name: "Cutter".into() });
+                dialog.inputs[2].items = vec![Sel::Face { body: "Floor".into(), index: 0, point: Vec3::new(2.0, 1.0, 0.0) }];
+                let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+                assert_eq!(commands[0].1["tool"], json!({"body":"Cutter"}));
+            }
+            for _ in 0..8 {
+                raster::paint_at(&mut h, &mut textures, vec![], size);
+            }
+            if state == "ready" {
+                // Wait for completion rather than assuming a fixed number of frames finishes the worker.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+                while std::time::Instant::now() < deadline {
+                    raster::paint_at(&mut h, &mut textures, vec![], size);
+                    if !h.app.preview.busy && (h.app.preview.active || h.app.preview.error.is_some()) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                assert!(h.app.preview.active && !h.app.preview.busy, "preview did not complete: {:?}", h.app.preview.error);
+                assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
+            }
+            let output = raster::paint_at(&mut h, &mut textures, vec![], size);
+            assert_eq!(scenario::rect_of("dialog:trim_missing_input").is_some(), state == "missing");
+            assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(f64::from(state == "ready")));
+            raster::raster(&mut h, &textures, output).save(dir.join(format!("trim-{width}-{height}-{state}.png"))).unwrap();
+        }
+    }
+}
+
+#[test]
 fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/render-browser-review");
     std::fs::create_dir_all(&dir).unwrap();

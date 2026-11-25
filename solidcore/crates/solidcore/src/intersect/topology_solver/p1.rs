@@ -2487,6 +2487,7 @@ pub(super) fn face_point_classify<O: Copy>(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::PreparationRequired { .. }),
@@ -2541,7 +2542,11 @@ fn face_classifies_on_face<O: Copy>(
             Point3dClassifyOptions::default(),
         ) {
             Ok(()) => Ok(true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => Err(e),
             Err(_) => Ok(false),
         }
     };
