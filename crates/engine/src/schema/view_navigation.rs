@@ -672,14 +672,23 @@ pub enum IsolateShow {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct IsolateOthersParams {
-    pub show: IsolateShow,
+    /// How the parts show: hidden, transparent or wireframe.
+    #[serde(default)]
+    pub show: Option<IsolateShow>,
+    /// Whether a click on a part shown transparent or wireframe selects it (true) or goes
+    /// through it (false).
+    #[serde(default)]
+    pub pick: Option<bool>,
 }
 
 /// What `view.isolate_others` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct IsolateOthersResult {
-    /// The setting now.
-    pub show: IsolateShow,
+    /// What was set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<IsolateShow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

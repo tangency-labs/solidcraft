@@ -3132,6 +3132,7 @@ fn what_an_isolate_hid_shows_see_through_or_as_edges_and_can_be_picked() {
     let effect = h.app.session.status_items().into_iter().find(|e| e.id == solidcraft_engine::status_items::StatusId::Isolate).unwrap();
     let details = crate::viewport_details::description(&h.app, &effect);
     let choice = details.settings.iter().find(|s| s.id == "show").expect("a choice of how the rest shows");
+    assert!(!details.settings.iter().any(|s| s.id == "pick"), "no click choice while the parts are hidden");
     assert!(matches!(&choice.value, crate::ui_kit::DetailValue::Choice { selected: 0, options } if options.len() == 3));
     let owner = crate::viewport_status::identity(&effect);
     for (selected, show) in [(1, IsolateShow::Transparent), (2, IsolateShow::Wireframe)] {
@@ -3144,6 +3145,16 @@ fn what_an_isolate_hid_shows_see_through_or_as_edges_and_can_be_picked() {
         assert!(crate::viewport::isolate_ghost(&h.app, "A").is_none(), "shown: drawn as it is");
         assert!(!h.app.session.body_visible("B"), "still hidden in the design");
         assert!(crate::viewport::body_shown(&h.app, "B"), "drawn, so it can be picked");
+        assert_eq!(
+            crate::viewport::wire_ghost(&h.app, h.app.session.model.state().body("B").unwrap()),
+            show == IsolateShow::Wireframe,
+            "only edges: its faces don't pick"
+        );
+        let card = crate::viewport_details::description(&h.app, &effect);
+        assert!(card.settings.iter().any(|s| s.id == "pick"), "the click choice shows while the parts are drawn");
+        h.app.run("view.isolate_others", json!({"pick": false})).unwrap();
+        assert!(!crate::viewport::body_shown(&h.app, "B"), "clicks go through");
+        h.app.run("view.isolate_others", json!({"pick": true})).unwrap();
         assert!(!crate::viewport::body_shown(&h.app, "C"), "hidden before the Isolate: never picked");
     }
     h.app.run("view.isolate_others", json!({"show": "hidden"})).unwrap();

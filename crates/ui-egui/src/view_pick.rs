@@ -253,8 +253,9 @@ fn face_candidates(
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
-        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does.
-        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) {
+        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does, and so
+        // does an Isolate's wireframe: only its edges are drawn.
+        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) || crate::viewport::wire_ghost(app, b) {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -429,8 +430,9 @@ pub(crate) fn body_cut_at(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
-        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does.
-        if crate::viewport::frame_ghosted(app, b) {
+        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does;
+        // an Isolate's wireframe has no faces to cut.
+        if crate::viewport::frame_ghosted(app, b) || crate::viewport::wire_ghost(app, b) {
             continue;
         }
         // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
@@ -530,7 +532,7 @@ fn near_edges(
                     if let Some(sp) = proj.to_screen(v) {
                         let dd = sp.distance(pos);
                         if dd <= edge_px + 1.0 && visible(v, body_slack) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
-                            best_v = Some(VertexHit { dist_px: dd, point: v });
+                            best_v = Some(VertexHit { body: b.name.clone(), dist_px: dd, point: v });
                         }
                     }
                 }
@@ -546,7 +548,7 @@ fn near_edges(
                 && best_e.as_ref().is_none_or(|x| dd < x.dist_px)
             {
                 let k = seg_param(pos, a, c);
-                best_e = Some(EdgeHit { index: ei, dist_px: dd, point: p0 + (p1 - p0) * f64::from(k) });
+                best_e = Some(EdgeHit { body: b.name.clone(), index: ei, dist_px: dd, point: p0 + (p1 - p0) * f64::from(k) });
             }
         }
     }
@@ -554,12 +556,15 @@ fn near_edges(
 }
 
 struct EdgeHit {
+    /// The body the edge belongs to: a hit reports it only on that body.
+    body: String,
     index: usize,
     dist_px: f32,
     point: Vec3,
 }
 
 struct VertexHit {
+    body: String,
     dist_px: f32,
     point: Vec3,
 }
@@ -612,6 +617,9 @@ fn hit_json(
     edge: Option<&EdgeHit>,
     vertex: Option<&VertexHit>,
 ) -> Value {
+    // An edge or vertex is reported only on the body it belongs to.
+    let edge = edge.filter(|e| e.body == c.body);
+    let vertex = vertex.filter(|v| v.body == c.body);
     let mut j = json!({
         "pixel": input.raw,
         "body": c.body,

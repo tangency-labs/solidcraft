@@ -40,6 +40,9 @@ macro_rules! graphics_preferences {
             /// How the view shows what an Isolate hid: not at all (the default), see-through, or as
             /// edges (#8120). Chosen on the Isolation pill or the bar's Isolate slot.
             isolate_others: solidcraft_engine::schema::view_navigation::IsolateShow = Default::default(), PAGE_GRAPHICS;
+            /// A click on a part shown transparent or wireframe while isolating selects it (the
+            /// default) or, off, goes through it to what is behind.
+            isolate_others_pick: bool = true, PAGE_GRAPHICS;
             /// How joints look in the viewport: 0 the ring and axis drawn before badges, or a badge with
             /// the joint type's pictogram: 1 white on dark, 2 solid accent, 3 solid amber, 4 outline,
             /// 5 a colour and outline for each family of types, 6 dots (`joint_symbols::STYLES`).

@@ -184,10 +184,17 @@ fn set_projection(app: &mut SolveApp, perspective: bool) {
 /// The Isolate slot's right-click rows: how the view shows what an Isolate hid, the current one
 /// marked (`view.isolate_others`).
 fn isolate_show_rows(app: &SolveApp) -> Vec<(String, String, bool)> {
-    crate::viewport::ISOLATE_SHOWS
+    let mut rows: Vec<(String, String, bool)> = crate::viewport::ISOLATE_SHOWS
         .iter()
         .map(|(show, id, label)| ((*id).to_owned(), app.tr(label).to_owned(), app.preferences.isolate_others == *show))
-        .collect()
+        .collect();
+    // Whether clicks select the parts drawn, only while they are drawn.
+    if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
+        let pick = app.preferences.isolate_others_pick;
+        rows.push(("pick:select".into(), app.tr("ui.isolate_pick_select_row").to_owned(), pick));
+        rows.push(("pick:through".into(), app.tr("ui.isolate_pick_through_row").to_owned(), !pick));
+    }
+    rows
 }
 
 fn activate(app: &mut SolveApp, slot: &Slot) {
@@ -378,7 +385,11 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
         },
         // The Isolate slot's right-click rows: how the view shows what an Isolate hid.
         NavAction::Item { menu, item } if menu == ISOLATE => {
-            if let Err(error) = app.run("view.isolate_others", json!({ "show": item })) {
+            let params = match item.strip_prefix("pick:") {
+                Some(pick) => json!({ "pick": pick == "select" }),
+                None => json!({ "show": item }),
+            };
+            if let Err(error) = app.run("view.isolate_others", params) {
                 app.set_status(error, true);
             }
         }
@@ -859,10 +870,14 @@ mod tests {
         assert!(navigation_bar::strong(ISOLATE) && !navigation_bar::strong("grid"), "only Isolate takes the strong fill");
         // Its right-click rows choose how the view shows what an Isolate hid, the current marked.
         let rows: Vec<(&str, bool)> = on.context.iter().map(|(id, _, selected)| (id.as_str(), *selected)).collect();
-        assert_eq!(rows, [("hidden", true), ("transparent", false), ("wireframe", false)]);
+        assert_eq!(rows, [("hidden", true), ("transparent", false), ("wireframe", false)], "no click choice while hidden");
         run(&mut h.app, &h.ctx, NavAction::Item { menu: ISOLATE.into(), item: "wireframe".into() });
         assert_eq!(h.app.preferences.isolate_others, solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe);
-        assert!(view(&h).context.iter().any(|(id, _, selected)| id == "wireframe" && *selected));
+        let rows: Vec<(String, bool)> = view(&h).context.into_iter().map(|(id, _, selected)| (id, selected)).collect();
+        let rows: Vec<(&str, bool)> = rows.iter().map(|(id, selected)| (id.as_str(), *selected)).collect();
+        assert_eq!(rows, [("hidden", false), ("transparent", false), ("wireframe", true), ("pick:select", true), ("pick:through", false)]);
+        run(&mut h.app, &h.ctx, NavAction::Item { menu: ISOLATE.into(), item: "pick:through".into() });
+        assert!(!h.app.preferences.isolate_others_pick, "clicks go through");
         activate(&mut h.app, slot);
         h.settle();
         assert!(h.app.session.visibility.hidden_bodies.is_empty(), "every body is back");

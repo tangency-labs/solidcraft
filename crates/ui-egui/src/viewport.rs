@@ -1075,7 +1075,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.cam.up.hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     // What an Isolate hid may be drawn see-through or as edges.
-    (app.preferences.isolate_others, app.session.visibility.before_isolate.is_some()).hash(&mut h);
+    (app.preferences.isolate_others, app.session.visibility.before_isolate.as_ref().map(|b| &b.shown_bodies)).hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     app.session.visibility.hidden_sketches.hash(&mut h);
@@ -1255,10 +1255,17 @@ pub(crate) fn isolate_ghost(app: &SolveApp, name: &str) -> Option<solidcraft_eng
     (before.shown_bodies.contains(name) && !app.session.body_visible(name)).then_some(show)
 }
 
-/// Body `name` is on screen: shown, or drawn see-through or as edges because an Isolate hid it
-/// ([`isolate_ghost`]). What is drawn can be picked; only what is hidden cannot.
+/// Body `b` is drawn as its edges alone because an Isolate hid it and the view shows that as
+/// wireframe. A body with no edges to draw (a mesh imported without them) is drawn see-through
+/// instead, so it never vanishes. Its faces are not drawn, so they are not picked either.
+pub(crate) fn wire_ghost(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    isolate_ghost(app, &b.name) == Some(solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe) && !b.mesh_in_place().0.edges.is_empty()
+}
+
+/// Body `name` can be picked: shown, or drawn see-through or as edges because an Isolate hid it
+/// ([`isolate_ghost`]) while clicks select such parts (`isolate_others_pick`, on by default).
 pub(crate) fn body_shown(app: &SolveApp, name: &str) -> bool {
-    app.body_visible(name) || isolate_ghost(app, name).is_some()
+    app.body_visible(name) || (app.preferences.isolate_others_pick && isolate_ghost(app, name).is_some())
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -3087,7 +3094,7 @@ fn body_scene(
     for (b, (faded, identity, slots, copy)) in shown.into_iter().zip(keyed) {
         // What an Isolate hid, shown as its edges: faint edges, no faces, never from a plan or an
         // instance (whose faces those draw).
-        let wire = isolate_ghost(app, &b.name) == Some(solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe);
+        let wire = wire_ghost(app, b);
         let resolved = match appearance.bodies.get(&b.name) {
             Some((key, resolved)) if *key == identity => resolved.clone(),
             _ => {
@@ -5146,7 +5153,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
-        if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) {
+        // Nor do the faces of what an Isolate hid shown as wireframe: only its edges are drawn.
+        if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) || wire_ghost(app, b) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.

@@ -212,7 +212,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect
         return;
     }
     let effects = app.session.status_items();
-    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status {
+    // With the analysis and section statuses off only the Isolation pill shows: its card may stay open.
+    if !app.preferences.viewport_analysis_status && !app.preferences.viewport_section_status && !isolate_pill(app) {
         app.viewport_status.open_key = None;
     }
     let items: Vec<_> = effects.iter().filter_map(|effect| presentation(app, effect)).collect();

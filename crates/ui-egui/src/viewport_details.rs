@@ -97,6 +97,12 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
             let options = shows.iter().map(|(_, _, label)| tr(label)).collect();
             // "Other parts display as" is longer than the label column: above its choice.
             details.settings.push(DetailSetting { stacked: true, ..field("show", "ui.isolate_show", DetailValue::Choice { selected, options }) });
+            // Whether clicks select the parts drawn, only while they are drawn.
+            if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
+                let selected = usize::from(!app.preferences.isolate_others_pick);
+                let options = vec![tr("ui.isolate_pick_select"), tr("ui.isolate_pick_through")];
+                details.settings.push(DetailSetting { stacked: true, ..field("pick", "ui.isolate_pick", DetailValue::Choice { selected, options }) });
+            }
         }
         StatusSetting::Environment => {}
     }
@@ -240,6 +246,14 @@ pub(crate) fn dispatch(app: &mut SolveApp, ctx: &egui::Context, owner: &str, eve
     match event {
         DetailEvent::Change(id, DetailValue::Choice { selected, .. }) if id == "record" && effect.command == "inspect.continuity" => {
             app.viewport_status.selected_record = app.session.continuity_details().get(selected).map(record_id);
+        }
+        // Whether clicks select the parts drawn: a display setting too.
+        DetailEvent::Change(id, DetailValue::Choice { selected, .. })
+            if id == "pick" && effect.id == solidcraft_engine::status_items::StatusId::Isolate =>
+        {
+            if let Err(error) = app.run("view.isolate_others", json!({ "pick": selected == 0 })) {
+                app.set_status(error, true);
+            }
         }
         // How the view shows what the Isolate hid: a display setting, not the Isolate's own command.
         DetailEvent::Change(id, DetailValue::Choice { selected, .. })
