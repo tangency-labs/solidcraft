@@ -151,6 +151,39 @@ fn preflight_omits_absent_optional_selections_but_keeps_explicit_empty_values() 
 }
 
 #[test]
+fn optional_stored_selections_can_be_explicitly_unset() {
+    for empty in [false, true] {
+        let mut h = box_and_pick_plugin();
+        let name = h.app.session.model.state().bodies.first().unwrap().name.clone();
+        let saved = if empty { json!([]) } else { json!([{"type":"body","name":name}]) };
+        let schema = &mut h.app.plugin_menu.listed[0].entries[0].input_schema;
+        schema["required"] = json!([]);
+        schema["properties"]["body"]["minItems"] = json!(1);
+        open_form(&mut h.app, "inserts", "seats", &json!({"depth":2,"body":saved})).unwrap();
+        checked_prefill(&h.app);
+        if !empty {
+            // A saved pick stays in the field, and is sent, until it is explicitly unset.
+            assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["body"], saved);
+        } else {
+            assert!(
+                h.app.plugin_menu.dialog().unwrap().field_errors(&h.app).contains_key("body"),
+                "a stored empty pick list stays present until explicitly unset"
+            );
+        }
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"plugin_dialog:unset:body"}})).unwrap();
+        checked_prefill(&h.app);
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert!(dialog.ready(&h.app).unwrap().get("body").is_none(), "Unset omits the optional field despite minItems");
+        assert!(!dialog.fields.as_ref().unwrap().iter().find(|(field, _)| field.key == "body").unwrap().0.prefilled);
+        assert!(
+            h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.is_empty()),
+            "the viewport picker cannot restore an unset value"
+        );
+    }
+}
+
+#[test]
 fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
     let mut h = box_and_pick_plugin();
     open_form(&mut h.app, "inserts", "seats", &json!({"depth":2})).unwrap();
@@ -176,7 +209,10 @@ fn validation_worker_disconnect_retries_and_field_errors_stay_cached() {
 fn deliver_form_reply(app: &mut SolveApp, value: Value) {
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({}));
     request.reply.send(value).unwrap();
-    app.plugin_menu.dialogs.last_mut().unwrap().running = Some(Running { reply, ticket: request.ticket, received: None });
+    let source_guard =
+        solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+    app.plugin_menu.dialogs.last_mut().unwrap().running =
+        Some(Running { reply, ticket: request.ticket, received: None, source_guard: Some(source_guard) });
 }
 
 #[test]
@@ -221,6 +257,57 @@ fn completed_form_replies_wait_for_the_originating_session() {
         assert_eq!(dialog.session, session);
         if kind != "validation" {
             assert_eq!(dialog.fields.as_ref().unwrap().iter().find(|(field, _)| field.key == "depth").unwrap().1, Input::Number(7.0));
+        }
+    }
+}
+
+#[test]
+fn requested_forms_keep_the_dispatch_revision_across_edits_and_deferred_replies() {
+    for read in [false, true] {
+        for deferred in [false, true] {
+            let mut h = box_and_pick_plugin();
+            h.app.plugin_menu.listed[0].entries[0].input_schema["properties"]["edges"]["minItems"] = json!(0);
+            open_entry(&mut h.app, 0, 0);
+            h.app.plugin_menu.dialogs.last_mut().unwrap().read = read;
+            let queued_revision = h.app.session.design_revision();
+            run(&mut h.app).unwrap();
+            let request = h.app.control_held.pop_front().unwrap();
+            h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+            check_dispatch(&mut h.app, &request).unwrap();
+            let first_dispatch = h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().source_guard.as_ref().unwrap().revision;
+            assert_ne!(first_dispatch, queued_revision, "the queue-time design is not the run's design");
+            // Held requests can pass dispatch checking again before their worker copies the session.
+            h.app.run("solid.box", json!({"length":2,"width":1,"height":1})).unwrap();
+            check_dispatch(&mut h.app, &request).unwrap();
+            let source_revision = h.app.session.design_revision();
+            assert_ne!(source_revision, first_dispatch);
+            assert_eq!(h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap().source_guard.as_ref().unwrap().revision, source_revision);
+            assert!(take_interactive_run(&mut h.app, request.serial));
+            h.app.run("solid.box", json!({"length":3,"width":1,"height":1})).unwrap();
+            assert_ne!(source_revision, h.app.session.design_revision());
+            let reply = json!({"ok":true,"result":{"result":{},"forms":[{"plugin":"inserts","entry":"seats","params":{"depth":7}}]}});
+            request.reply.send(reply).unwrap();
+            if deferred {
+                crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+                poll(&mut h.app);
+                let running = h.app.plugin_menu.dialog().unwrap().running.as_ref().unwrap();
+                assert!(running.received.is_some(), "the completed reply waits for its original session");
+                assert_eq!(running.source_guard.as_ref().unwrap().revision, source_revision);
+                crate::documents::switch(&mut h.app, 0);
+            }
+            poll(&mut h.app);
+            checked_prefill(&h.app);
+            let dialog = h.app.plugin_menu.dialog().unwrap();
+            let guard = dialog.form_guard.as_ref().unwrap();
+            assert_eq!(guard.document_id, h.app.session.document_id);
+            assert_eq!(guard.revision, source_revision, "the requested values belong to the worker's design");
+            assert!(dialog.changed, "a requested form from an earlier revision immediately requires review");
+            assert!(!dialog.revalidated);
+            assert_eq!(dialog.ready(&h.app).unwrap()["depth"], 7.0, "values still valid on the current design remain usable");
+            // Apply forwards the old guard, so the engine revalidates before executing the entry.
+            run(&mut h.app).unwrap();
+            let apply = h.app.control_held.pop_front().unwrap();
+            assert_eq!(apply.params.pointer("/params/form_guard/revision"), Some(&json!(source_revision)));
         }
     }
 }
@@ -1634,6 +1721,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         entries,
         images: Default::default(),
         swatches: Default::default(),
+        shaders: Vec::new(),
     }
 }
 
