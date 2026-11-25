@@ -78,12 +78,29 @@ fn enter_legacy(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String
 pub(crate) type ViewRibbon = (String, Option<String>, Option<String>);
 
 pub(crate) fn focused_sketch(app: &crate::SolveApp) -> Option<u64> {
-    app.session.active_sketch.filter(|_| !app.preferences.workspace_follows_view || app.session.sketching_view == Some(app.docs.views.active().id))
+    app.session
+        .active_sketch
+        .or_else(|| app.session.active_sheet_sketch.as_ref().map(|entry| entry.sketch))
+        .filter(|_| !app.preferences.workspace_follows_view || app.session.editing_view() == Some(app.docs.views.active().id))
+}
+
+pub(crate) fn sheet_scope(app: &crate::SolveApp) -> bool {
+    app.docs.views.active().kind == solidcraft_views::ViewKind::Sheet
+}
+
+pub(crate) fn sync_history(app: &mut crate::SolveApp) {
+    if sheet_scope(app) {
+        app.session.model_focus = false;
+    } else {
+        crate::drawing_workspace::sync_history(app);
+    }
 }
 
 /// Canonical tool state stays alive while its sketch owner is unfocused.
 pub(crate) fn tool_receives_input(app: &crate::SolveApp) -> bool {
-    !app.preferences.workspace_follows_view || app.session.active_sketch.is_none() || focused_sketch(app).is_some()
+    !app.preferences.workspace_follows_view
+        || (app.session.active_sketch.is_none() && app.session.active_sheet_sketch.is_none())
+        || focused_sketch(app).is_some()
 }
 
 pub(crate) fn remember_view(app: &mut crate::SolveApp, view: u64) {
@@ -101,6 +118,8 @@ pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_vi
     }
     if view.kind == ViewKind::Sheet {
         crate::sheet_views::focus(app, view)?;
+    } else if view.kind == ViewKind::Render {
+        crate::render_workspace::focus_view_framing(app, view.id);
     }
     let home = crate::documents::view_workspace(view.kind);
     let current_workspace = if drawing_tab(&app.ui.tab) {
@@ -125,7 +144,7 @@ pub(crate) fn apply_focused_view(app: &mut crate::SolveApp, view: &solidcraft_vi
         app.ui.sketch_return_tab = None;
     }
     crate::drawing_workspace::swap_selection(app);
-    crate::drawing_workspace::sync_history(app);
+    sync_history(app);
     sync_context(app);
     Ok(())
 }
@@ -410,6 +429,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.point.center",
                     "construct.point.edge_plane",
                     "construct.point.along_path",
+                    "construct.point.average",
                 ],
             },
         ],
@@ -463,8 +483,9 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses; drawn 3D
-/// points are moved with the triad that appears when one is clicked, not a Move button.
-pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
+/// points are moved with the triad that appears when one is clicked, not a Move button. People
+/// reset every toolbar tab from Customize Toolbar, which asks first; the command never asks.
+pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d", "view.toolbar_reset_all"];
 
 pub const SECTIONS: &[Section] = &[
     Section {
@@ -538,7 +559,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "SKETCH",
         promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
+        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.spline3d.control_point", "sketch.point3d"],
     },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
     Section {
@@ -565,9 +586,14 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
+    Section {
+        tab: "SURFACE",
+        panel: "CREATE",
+        promoted: 4,
+        ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
+    },
     Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert"] },
+    Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -682,6 +708,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.browser",
             "view.ribbon_tabs_only",
         ],
     },
@@ -751,7 +778,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SHEET METAL",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.perforate", "sheet.convert", "sheet.recognize"],
+        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.tab", "sheet.perforate", "sheet.convert", "sheet.recognize"],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
@@ -759,10 +786,15 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "SHEET METAL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // A frame starts from a sketch of its lines; its profile sizes are often parameters.
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
-    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 2, ids: &["frame.member", "frame.end_cap"] },
-    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member"] },
+    Section { tab: "WELDMENTS", panel: "CREATE", promoted: 4, ids: &["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"] },
+    Section { tab: "WELDMENTS", panel: "MODIFY", promoted: 1, ids: &["frame.rotate_member", "frame.trim"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
 ];
+
+const LEGACY_SURFACE_CREATE: Section =
+    Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] };
+const LEGACY_SURFACE_CONVERT: Section =
+    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce"] };
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
 const LEGACY_RENDER_SECTIONS: &[Section] = &[
@@ -875,6 +907,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.view.section.planned", "Section View"),
     ("document.units", "Units"),
     ("frame.rotate_member", "Rotate"),
+    ("frame.trim", "Trim"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
     ("inspect.curvature_comb", "Curv. Comb"),
@@ -901,6 +934,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sheet.flat_pattern", "Flat Pattern"),
     ("sheet.manage_rules", "Sheet Rules"),
     ("sheet.path_flange", "Path"),
+    ("frame.plate", "Plate"),
     ("sketch.cancel", "Cancel"),
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
@@ -955,6 +989,7 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SHEET METAL", "CREATE", "SHEET METAL", "CREATE"),
     ("SHEET METAL", "MODIFY", "SHEET METAL", "FLAT"),
     ("WELDMENTS", "CREATE", "WELDMENTS", "CREATE"),
+    ("WELDMENTS", "MODIFY", "WELDMENTS", "MODIFY"),
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
@@ -981,6 +1016,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
+        "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
         _ => None,
     };
@@ -992,9 +1028,25 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
 /// Ordered menu commands, with the promoted commands first. Empty sections are omitted by
 /// panel_lists, except the selection filter, which has its own existing controls.
 pub fn layout<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec]) -> Option<(Vec<&'a CommandSpec>, usize)> {
-    let section = SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?;
+    layout_for(tab, panel, specs, false)
+}
+
+pub(crate) fn layout_for<'a>(tab: &str, panel: &str, specs: &[&'a CommandSpec], legacy_surface: bool) -> Option<(Vec<&'a CommandSpec>, usize)> {
+    let section = if legacy_surface && tab == "SURFACE" {
+        match panel {
+            "CREATE" => &LEGACY_SURFACE_CREATE,
+            "CONVERT" => &LEGACY_SURFACE_CONVERT,
+            "MESH" => return None,
+            _ => SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?,
+        }
+    } else {
+        SECTIONS.iter().find(|s| s.tab == tab && s.panel == panel)?
+    };
     let mut out: Vec<_> = section.ids.iter().filter_map(|id| specs.iter().find(|c| c.id == *id).copied()).collect();
-    for c in specs.iter().filter(|c| destination(c) == Some((section.tab, section.panel))) {
+    for c in specs.iter().filter(|c| {
+        destination(c) == Some((section.tab, section.panel))
+            && !(legacy_surface && tab == "SURFACE" && panel == "CREATE" && c.id == "surface.thicken")
+    }) {
         if !out.iter().any(|o| o.id == c.id) {
             out.push(*c);
         }
@@ -1019,7 +1071,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "CONSTRUCT") => Some(("MODEL", "CONSTRUCT")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSPECT") => Some(("INSPECT", "CHECK")),
         ("PLASTIC" | "SHEET METAL" | "SURFACE" | "MESH", "INSERT") => Some(("INSERT", "FILES")),
-        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "CONVERT")),
+        ("MESH", "CREATE" | "PREPARE") => Some(("SURFACE", "MESH")),
         ("UTILITIES", "MAKE" | "ADD-INS" | "UTILITY") => Some(("MANAGE", "DESIGN")),
         ("UTILITIES", "INSPECT") => Some(("INSPECT", "CHECK")),
         _ => None,
@@ -1033,6 +1085,8 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetHem { .. } => "hem",
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",
+        FeatureKind::SheetTab { .. } => "sheet_tab",
+        FeatureKind::SheetBead { .. } => "rib",
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } | FeatureKind::SheetRecognize { .. } => "convert_sheet",
@@ -1076,7 +1130,11 @@ pub fn frame_body(app: &crate::SolveApp) -> Option<String> {
     let name = active_body(app, &state)?;
     let body = state.bodies.iter().find(|b| b.name == name)?;
     let made_by = app.session.doc.feature(body.feature)?;
-    matches!(made_by.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. }).then(|| body.name.clone())
+    matches!(
+        made_by.kind,
+        FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. } | FeatureKind::FramePlate { .. } | FeatureKind::FrameGusset { .. }
+    )
+    .then(|| body.name.clone())
 }
 
 /// The design tabs following the general-purpose tabs in the ribbon.
@@ -1127,8 +1185,12 @@ pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
 
 /// Every design tab stays hidden until the person chooses to show it again.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
-    if crate::drawing_workspace::active(app) {
-        return DRAWING_TABS.to_vec();
+    if crate::drawing_workspace::active(app) || sheet_scope(app) {
+        let mut tabs = DRAWING_TABS.to_vec();
+        if app.session.active_sheet_sketch.as_ref().is_some_and(|entry| entry.view == Some(app.docs.views.active().id)) {
+            tabs.push("SKETCH");
+        }
+        return tabs;
     }
     if crate::render_workspace::active(app) {
         return Vec::new();
@@ -1167,6 +1229,26 @@ pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
 /// other tabs to remain usable for the rest of that context. Sketch takes precedence over sheet
 /// metal, and sheet metal over weldments.
 pub fn sync_context(app: &mut crate::SolveApp) {
+    if sheet_scope(app) {
+        let context = app
+            .session
+            .active_sheet_sketch
+            .as_ref()
+            .filter(|entry| entry.view == Some(app.docs.views.active().id))
+            .map(|entry| format!("sheet_sketch:{}:{}", entry.drawing, entry.sketch));
+        if let Some(context) = context {
+            if app.ui.ribbon_context.as_deref() != Some(context.as_str()) {
+                app.ui.sketch_return_tab = Some(if drawing_tab(&app.ui.tab) { app.ui.tab.clone() } else { "DRAWING LAYOUT".into() });
+                app.ui.tab = "SKETCH".into();
+                app.ui.ribbon_context = Some(context);
+            }
+        } else if app.ui.ribbon_context.as_deref().is_some_and(|context| context.starts_with("sheet_sketch:")) {
+            app.ui.tab = app.ui.sketch_return_tab.take().filter(|tab| drawing_tab(tab)).unwrap_or_else(|| "DRAWING LAYOUT".into());
+            app.ui.ribbon_context = None;
+        }
+        sync_history(app);
+        return;
+    }
     if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
@@ -1219,7 +1301,7 @@ pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
 pub fn command_tab(app: &crate::SolveApp, id: &str) -> Option<&'static str> {
     let c = solidcraft_engine::find_command(id)?;
     // Keep the tab a toolbar click came from when it already lists this shared command.
-    if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
+    if crate::toolbar_custom::panel_lists_for(app, &app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
         return None;
     }
     let (tab, _) = destination(c)?;
@@ -1718,14 +1800,14 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         assert_eq!(panels("WELDMENTS"), ["SKETCH", "CREATE", "MODIFY", "CONFIGURE"]);
         let (create, n) = layout("WELDMENTS", "CREATE", &specs).unwrap();
-        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap"]);
+        assert_eq!(create.iter().take(n).map(|c| c.id).collect::<Vec<_>>(), ["frame.member", "frame.end_cap", "frame.plate", "frame.gusset"]);
         assert!(!panel_ids("MODEL", &specs).contains(&"frame.member"), "Frame Member's home is Weldments");
 
         let mut h = crate::scenario::Harness::new();
         h.step(&json!({"click":{"handle":"tab:WELDMENTS"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "WELDMENTS");
-        for id in ["sketch.create", "frame.member", "frame.end_cap", "parameters.change"] {
+        for id in ["sketch.create", "frame.member", "frame.end_cap", "frame.plate", "frame.gusset", "parameters.change"] {
             assert!(crate::scenario::handle_at(&format!("button:{id}")).is_some(), "{id} is a button on the Weldments tab");
         }
         h.step(&json!({"click":{"handle":"button:frame.member"}})).unwrap();
@@ -1992,9 +2074,9 @@ mod tests {
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());
         assert!(h.widget("User Parameters").is_some());
-        assert!(h.widget("Model Parameters").is_some());
+        assert!(h.widget("Model Parameters").is_none(), "model groups are bands in the shared table");
         // Exercise the inline draft row through the public add prompt and Enter.
-        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
         let parameters = h.app.params.as_mut().unwrap();
         parameters.new_name = "width".into();
         parameters.new_expr = "25 mm".into();
@@ -2084,6 +2166,16 @@ mod tests {
         assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
         h.step(&json!({"choose_file": "part2.step"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
+        // A STEP file asks its import options first (`import_options`): the defaults. The window
+        // opens once the load reaches it, which can take more than a frame or two on a loaded
+        // machine.
+        for _ in 0..600 {
+            if crate::scenario::handle_at("import_options:ok").is_some() {
+                break;
+            }
+            h.frames(1);
+        }
+        h.step(&json!({"click": {"handle": "import_options:ok"}})).unwrap();
         for _ in 0..600 {
             if h.app.session.world_state().unwrap().bodies.len() == 2 {
                 break;
@@ -2503,7 +2595,6 @@ mod tests {
         let added = solidcraft_engine::doc::ids::decode(reply["result"]["note"].as_str().unwrap()).unwrap();
         assert!(h.app.session.doc.drawing(drawing).unwrap().on_sheet(sheet).notes.contains(&added));
     }
-
     #[test]
     fn suspended_sketch_tool_hints_follow_owner_focus_without_hiding_other_statuses() {
         fn painted(h: &crate::scenario::Harness, expected: &str) -> bool {

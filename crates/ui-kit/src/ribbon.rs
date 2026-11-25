@@ -1271,8 +1271,8 @@ pub fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
 /// The note under a menu (how pinning works), translated.
 pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     let t = Tokens::get();
-    ui.separator();
-    ui.add_space(4.0);
+    crate::Menu::separator(ui);
+    ui.add_space(2.0);
     ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_small).color(t.text_dim)).wrap());
     ui.add_space(4.0);
 }
@@ -1714,7 +1714,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
         // A line between groups side by side, as between the ribbon's groups.
         for x in &layout.separators {
             let x = origin.x + x;
-            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], crate::Menu::separator_stroke(&t));
         }
         for (index, (entry, (rect, _))) in plain.iter().zip(&layout.cells).enumerate() {
             let rect = rect.translate(origin.to_vec2());
@@ -1897,6 +1897,9 @@ pub struct DeferredLook {
     pub id: String,
     /// Its effect is on: drawn pressed, its label semibold.
     pub selected: bool,
+    /// With `selected`: the effect stays on after its tool closed, so it is underlined without the
+    /// pressed fill, which would read as the tool still running (#20663).
+    pub kept: bool,
     /// Its tool runs (outlined in the accent) and it keeps a focus ring while focused: the
     /// pressed presentation is on.
     pub running: bool,
@@ -1937,7 +1940,11 @@ pub fn paint_deferred(ui: &egui::Ui, items: Vec<(Deferred, DeferredLook)>, names
         let background = if look.selected {
             count += 1;
             solidcraft_ui_registry::publish_target(&format!("{namespace}:pressed:{}", look.id), paint.rect);
-            crate::persistent_button_shape(ui, &paint.response, paint.rect)
+            if look.kept {
+                egui::Shape::Vec(vec![neutral, crate::persistent_kept_shape(ui, &paint.response, paint.rect)])
+            } else {
+                crate::persistent_button_shape(ui, &paint.response, paint.rect)
+            }
         } else if paint.response.has_focus() && look.focus_ring {
             egui::Shape::Vec(vec![neutral, crate::native_button_focus(ui, &paint.response, paint.rect)])
         } else {

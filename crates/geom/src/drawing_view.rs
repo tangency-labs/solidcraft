@@ -47,8 +47,9 @@ pub(crate) fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-/// Two directions closer to parallel than this (the sine of their angle) give no view.
-pub(crate) const PARALLEL: f64 = 1e-9;
+/// Two directions closer to parallel than this (the sine of their angle) give no view. Drawing
+/// measurement (`solidcraft_doc::drawing::measure`) tests a line against the view's plane by it too.
+pub const PARALLEL: f64 = 1e-9;
 
 /// A view with a name: the six principal views and the isometric views from the four upper
 /// corners. Each looks at the model from where its name says; `iso` reads as the front-right one.
@@ -274,7 +275,7 @@ impl FromStr for Scale {
     type Err = Invalid;
 
     fn from_str(text: &str) -> Result<Scale> {
-        let parts = text.split_once(':').and_then(|(p, m)| Some((decimal(p)?, decimal(m)?)));
+        let parts = text.split_once(':').and_then(|(p, m)| Some((decimal(p.trim())?, decimal(m.trim())?)));
         let (paper, model) = parts.ok_or(Invalid("a scale is written paper:model, such as 1:2"))?;
         Scale::new(paper, model)
     }
