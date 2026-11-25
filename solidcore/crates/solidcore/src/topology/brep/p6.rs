@@ -11,6 +11,7 @@
 //! | [`test_closure_split_region`] | `SmBrep::TestClosureSplitRegion(SmFaceuse*)` |
 //! | [`test_closure_split_region_attempt`] | same, retaining native status and partial outputs |
 //! | `nest_closed_shells_as_cavities` (crate) | none: WR-442, the full-turn rotational sweep's opt-in |
+//! | `every_shell_closed` (crate) | none: its WR-529 test, shared with the stitch's region nesting |
 //!
 //! Deviations: pointers become arena ids; optional outputs become return values.
 //! Edits preserve the upstream mutations preceding an error. A closed-shell split
@@ -66,7 +67,9 @@
 //! An attempt exposes native status separately for callers that ignore it;
 //! missing dependencies and Rust representation failures remain outer errors.
 
-use crate::error::{EntityRef, Result, SolidError};
+use crate::curve::curve::Curve;
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::geom::object::{NotifyOperation, ObjectRef};
@@ -97,8 +100,44 @@ use crate::topology::{
 
 const OP: &str = "topology::brep::p6";
 
-fn required<T>(value: Option<T>, what: &'static str) -> Result<T> {
-    value.ok_or_else(|| SolidError::topology_missing(OP, what))
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]), with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR` of the `SER` it
+/// replaces.
+fn defect(why: &'static str) -> SolidError {
+    SolidError::topology(OP, TopologyFailure::Defect { why })
+}
+
+/// Why the wire edge just made has no vertex at an end.
+const NEW_EDGE_NO_VERTEX: &str = "the wire edge just made has no vertex at an end, though \
+                                  `create_wire_edge_from_curve` makes it with both";
+/// Why an edge of the source B-rep has no vertex at an end.
+const EDGE_NO_VERTEX: &str = "an edge has no vertex at an end, though the kernel makes every \
+                              edge with its two edge uses and their vertex uses";
+/// Why a transfer holds no surface where the face construction reads it.
+pub(crate) const TRANSFER_INSTALLED: &str =
+    "the surface to build the face on was already installed on a face, though a face \
+     construction installs its transfer's surface only after it has read it";
+/// Why a face has no upward face use.
+const FACE_NO_UP_FU: &str =
+    "the face has no upward face use, though the kernel makes every face with its two face uses";
+/// Why a face use has no mate.
+const FU_NO_MATE: &str = "a face use has no mate, though the kernel makes face uses in mated pairs";
+
+/// The edge's trimmed B-spline copy, or [`TopologyFailure::NoTrimmedBSpline`] with the
+/// status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn trimmed_bspline(k: &Kernel, source: &Brep, edge: EdgeId) -> Result<Curve> {
+    crate::topology::edge::create_trimmed_nurbs_curve(k, source, edge)?.ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::NoTrimmedBSpline)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })
 }
 
 // The split's bare pointer dereferences have no native error status to ignore.
@@ -128,10 +167,7 @@ pub fn copy_edges(
 ) -> Result<Vec<EdgeId>> {
     let mut result = Vec::new();
     for &edge in edges {
-        let curve = required(
-            crate::topology::edge::create_trimmed_nurbs_curve(destination_kernel, source, edge)?,
-            "the edge's trimmed B-spline curve",
-        )?;
+        let curve = trimmed_bspline(destination_kernel, source, edge)?;
         let interval = curve.natural_interval();
         let new_edge = crate::topology::brep::p5::create_wire_edge_from_curve(
             destination_kernel,
@@ -160,22 +196,14 @@ pub fn copy_edges(
         notify_copy(EntityRef::Edge(edge), EntityRef::Edge(new_edge))?;
 
         // Notify Copy Vertices - propogates attributes and reports copy
-        let new_start = required(
-            crate::topology::edge::start_vertex(destination, new_edge)?,
-            "the new edge's start vertex",
-        )?;
-        let new_end = required(
-            crate::topology::edge::other_vertex(destination, new_edge, Some(new_start))?,
-            "the new edge's end vertex",
-        )?;
-        let old_start = required(
-            crate::topology::edge::start_vertex(source, edge)?,
-            "the edge's start vertex",
-        )?;
-        let old_end = required(
-            crate::topology::edge::other_vertex(source, edge, Some(old_start))?,
-            "the edge's end vertex",
-        )?;
+        let new_start = crate::topology::edge::start_vertex(destination, new_edge)?
+            .ok_or_else(|| broken_link(NEW_EDGE_NO_VERTEX))?;
+        let new_end = crate::topology::edge::other_vertex(destination, new_edge, Some(new_start))?
+            .ok_or_else(|| broken_link(NEW_EDGE_NO_VERTEX))?;
+        let old_start = crate::topology::edge::start_vertex(source, edge)?
+            .ok_or_else(|| broken_link(EDGE_NO_VERTEX))?;
+        let old_end = crate::topology::edge::other_vertex(source, edge, Some(old_start))?
+            .ok_or_else(|| broken_link(EDGE_NO_VERTEX))?;
         notify_copy(EntityRef::Vertex(old_start), EntityRef::Vertex(new_start))?;
         if old_start != old_end && new_start != new_end {
             notify_copy(EntityRef::Vertex(old_end), EntityRef::Vertex(new_end))?;
@@ -218,10 +246,7 @@ pub fn copy_edges_with_context(
         |k, destination, env| {
             let mut result = Vec::new();
             for &edge in edges {
-                let curve = required(
-                    crate::topology::edge::create_trimmed_nurbs_curve(k, src, edge)?,
-                    "the edge's trimmed B-spline curve",
-                )?;
+                let curve = trimmed_bspline(k, src, edge)?;
                 let interval = curve.natural_interval();
                 let new_edge = brep_p5::create_wire_edge_from_curve_notified(
                     k,
@@ -248,22 +273,15 @@ pub fn copy_edges_with_context(
                 notify_copy(env, EntityRef::Edge(edge), EntityRef::Edge(new_edge))?;
 
                 // Notify Copy Vertices - propogates attributes and reports copy
-                let new_start = required(
-                    crate::topology::edge::start_vertex(destination, new_edge)?,
-                    "the new edge's start vertex",
-                )?;
-                let new_end = required(
-                    crate::topology::edge::other_vertex(destination, new_edge, Some(new_start))?,
-                    "the new edge's end vertex",
-                )?;
-                let old_start = required(
-                    crate::topology::edge::start_vertex(src, edge)?,
-                    "the edge's start vertex",
-                )?;
-                let old_end = required(
-                    crate::topology::edge::other_vertex(src, edge, Some(old_start))?,
-                    "the edge's end vertex",
-                )?;
+                let new_start = crate::topology::edge::start_vertex(destination, new_edge)?
+                    .ok_or_else(|| broken_link(NEW_EDGE_NO_VERTEX))?;
+                let new_end =
+                    crate::topology::edge::other_vertex(destination, new_edge, Some(new_start))?
+                        .ok_or_else(|| broken_link(NEW_EDGE_NO_VERTEX))?;
+                let old_start = crate::topology::edge::start_vertex(src, edge)?
+                    .ok_or_else(|| broken_link(EDGE_NO_VERTEX))?;
+                let old_end = crate::topology::edge::other_vertex(src, edge, Some(old_start))?
+                    .ok_or_else(|| broken_link(EDGE_NO_VERTEX))?;
                 notify_copy(
                     env,
                     EntityRef::Vertex(old_start),
@@ -345,22 +363,26 @@ impl FaceSurfaceTransfer {
         }
     }
 
-    pub(crate) fn owned_surface(&self) -> Result<&Surface> {
-        self.owned
-            .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the surface being moved"))
+    /// The surface the transfer still holds; `None` once it is installed on a face.
+    pub(crate) const fn owned_surface(&self) -> Option<&Surface> {
+        self.owned.as_ref()
     }
 
     pub(super) fn surface_mut<'a>(&'a mut self, brep: &'a mut Brep) -> Result<&'a mut Surface> {
         if let Some(face) = self.installed_face {
-            brep.face_mut(face)?
-                .surface
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))
+            brep.face_mut(face)?.surface.as_mut().ok_or_else(|| {
+                broken_link(
+                    "the face the transfer installed its surface on has no surface, though \
+                     only the transfer sets it",
+                )
+            })
         } else {
-            self.owned
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface being moved"))
+            self.owned.as_mut().ok_or_else(|| {
+                broken_link(
+                    "the transfer holds no surface and names no face, though it gives up its \
+                     surface only to install it on a face",
+                )
+            })
         }
     }
 
@@ -371,7 +393,7 @@ impl FaceSurfaceTransfer {
         let surface = self
             .owned
             .take()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the surface being moved"))?;
+            .ok_or_else(|| broken_link(TRANSFER_INSTALLED))?;
         destination.surface = Some(surface);
         self.installed_face = Some(face);
         Ok(())
@@ -488,9 +510,15 @@ fn delete_shell(
 // not on the region's list, `InvalidInput` in the shell port) is the native status.
 fn region_remove(brep: &mut Brep, region: RegionId, shell: ShellId) -> Result<()> {
     shell::region_remove_shell(brep, region, shell).map_err(|error| match error {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::topology_failed(OP, "the shell is not on the region's list")
-        }
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Failure::new(
+            OP,
+            TopologyFailure::Defect {
+                why: "the shell names this region but is not on its list, though a \
+                      region's list holds every shell that names it",
+            },
+        )
+        .caused_by(error)
+        .into_error(),
         other => other,
     })
 }
@@ -681,9 +709,21 @@ fn build_face(
     let region = options.region.or_else(|| brep.infinite_region());
 
     // Check input
-    let region = required(region, "the region (none given and no infinite region)")?;
+    let region = region.ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::NoInfiniteRegion)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     brep.region(region)?;
-    transfer.owned_surface()?;
+    if transfer.owned_surface().is_none() {
+        // a transfer the caller made without a surface (`make_face_topology_attempt`'s
+        // `None`) has no face either
+        return Err(if transfer.installed_face().is_some() {
+            broken_link(TRANSFER_INSTALLED)
+        } else {
+            SolidError::topology(OP, TopologyFailure::NoSurfaceGiven)
+        });
+    }
 
     // Get shell to contain new faceuses
     // If no Edgeuses given, create a new one.
@@ -760,7 +800,10 @@ fn build_face(
     // connect face to surface just temporarily to help with some radial sectoring
     // that will follow (the face is not on the face list yet).
     let face_ref = (env.key_of)(EntityRef::Face(face));
-    let domain = transfer.owned_surface()?.natural_uv_domain_with_nurb(k)?;
+    let domain = transfer
+        .owned_surface()
+        .ok_or_else(|| broken_link(TRANSFER_INSTALLED))?
+        .natural_uv_domain_with_nurb(k)?;
     transfer.install(brep, face)?;
     set_surface_owner(
         k,
@@ -1151,15 +1194,17 @@ fn connect_edge_loops(
                         face,
                         surface_key,
                     };
-                    if let Some(found) = find_sector(k, brep, env, sector)? {
-                        input_eu = found;
-                    } else {
+                    match find_sector(k, brep, env, sector)? {
+                        SectorFound::Found(found) => input_eu = found,
                         // Note the problem and carry on.
-                        *return_stat = Err(SolidError::topology_failed(
-                            OP,
-                            "no radial sector of the edge takes the new edge use",
-                        ));
-                        used_edges.push(edge);
+                        missed => {
+                            let note = Failure::new(OP, TopologyFailure::NoSectorForNewEdgeuse);
+                            *return_stat = Err(match missed {
+                                SectorFound::Failed(e) => note.caused_by(e).into_error(),
+                                _ => note.into_error(),
+                            });
+                            used_edges.push(edge);
+                        }
                     }
                 } else {
                     used_edges.push(edge);
@@ -1225,13 +1270,14 @@ struct SectorInput {
 
 /// Temporarily connect the new edge use with its loop and edge, give it a temporary
 /// UV trim curve, and find the radial sector of the edge containing the new face.
-/// Returns the sector's edge use, `None` when sectoring fails (a native status).
+/// Returns the sector's edge use, [`SectorFound::Empty`] when the sectoring found none,
+/// and [`SectorFound::Failed`] with its error when it failed with a native status.
 fn find_sector(
     k: &mut Kernel,
     brep: &mut Brep,
     env: &mut NotifyState<'_>,
     input: SectorInput,
-) -> Result<Option<EdgeuseId>> {
+) -> Result<SectorFound> {
     let SectorInput {
         edge,
         tmp,
@@ -1293,10 +1339,22 @@ fn find_sector(
     }
 
     match found {
-        Ok(sector) => Ok(sector.radial_edgeuse),
-        Err(e) if e.upstream_status().is_some() => Ok(None),
+        Ok(sector) => Ok(sector
+            .radial_edgeuse
+            .map_or(SectorFound::Empty, SectorFound::Found)),
+        Err(e) if e.upstream_status().is_some() => Ok(SectorFound::Failed(e)),
         Err(error) => Err(error),
     }
+}
+
+/// What [`find_sector`] found.
+enum SectorFound {
+    /// The sector's edge use.
+    Found(EdgeuseId),
+    /// No sector takes the new edge use.
+    Empty,
+    /// The sectoring failed with a native status (upstream goes on as if none was found).
+    Failed(SolidError),
 }
 
 /// Assign the caller's UV curves to the new face's edge uses in loop-use order:
@@ -1341,7 +1399,7 @@ fn assign_uv_curves(
                     k,
                     brep,
                     e,
-                    crate::curve::curve::Curve::from(curve),
+                    Curve::from(curve),
                     true,
                     None,
                 )
@@ -1583,6 +1641,7 @@ fn split_vertex_joined_pieces(
                 error,
                 SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }
                     | SolidError::NotFound { .. }
@@ -1862,6 +1921,27 @@ impl SplitShells {
     }
 }
 
+/// [`native`], keeping the native failure it turns into `Ok(None)` in `last`.
+fn native_keeping<T>(r: Result<T>, last: &mut Option<SolidError>) -> Result<Option<T>> {
+    match r {
+        Err(e) if native::<()>(Err(e.clone())).is_ok() => {
+            *last = Some(e);
+            Ok(None)
+        }
+        r => native(r),
+    }
+}
+
+/// [`TopologyFailure::NoClassifiablePoint`], with the last native failure of a step or a
+/// ray fire as its cause where there was one (rule 6).
+fn no_classifiable_point(last: Option<SolidError>) -> SolidError {
+    let failure = Failure::new(OP, TopologyFailure::NoClassifiablePoint);
+    match last {
+        Some(e) => failure.caused_by(e).into_error(),
+        None => failure.into_error(),
+    }
+}
+
 // A call whose native status the split ignores or handles itself: `Ok(None)` for a
 // native failure; only `Unported` and the port's representation failures propagate.
 fn native<T>(r: Result<T>) -> Result<Option<T>> {
@@ -1870,6 +1950,7 @@ fn native<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -1946,16 +2027,15 @@ fn distribute_faceuses(
         let edgeuses = eu::faceuse_edgeuses(brep, fu, false, None)?;
         // get first edgeuse and its edge
         let Some(&first_eu) = edgeuses.first() else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face use has no edge use",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::FaceWithoutEdges));
         };
         let edge = split_link(brep.edgeuse(first_eu)?.edge)?;
         let edge_zone_tol = edge_zone_tol_3d(brep, edge)?;
 
         // classification point locals
         let mut step_dist = 20.0 * edge_zone_tol;
+        // the last native failure of a step or a ray fire, the cause if no point is placed
+        let mut last_failure = None;
         let ray = Vec3::new(1.0, 0.0, 0.0);
         let mut state = ShellRayState {
             region: None,
@@ -1969,14 +2049,17 @@ fn distribute_faceuses(
             let mut last_try = false;
             // pick a point on the Face (close to the edge)
             let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
-            let stepped = native(eu2::evaluate_binormal_step_off(
-                k,
-                brep,
-                first_eu,
-                parameter,
-                step_dist,
-                &StepOffOptions::default(),
-            ))?;
+            let stepped = native_keeping(
+                eu2::evaluate_binormal_step_off(
+                    k,
+                    brep,
+                    first_eu,
+                    parameter,
+                    step_dist,
+                    &StepOffOptions::default(),
+                ),
+                &mut last_failure,
+            )?;
             let point = if let Some(eval) = stepped {
                 eval.point
             } else {
@@ -1984,10 +2067,7 @@ fn distribute_faceuses(
                 // iteration cascade the error, else give classification one try at a
                 // zero stepOffDistance point
                 if jj > 0 {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "stepping off the edge use failed",
-                    ));
+                    return Err(no_classifiable_point(last_failure));
                 }
                 last_try = true;
                 eu3::evaluate_binormal(
@@ -2012,14 +2092,11 @@ fn distribute_faceuses(
                 state,
             );
             state = attempt.state;
-            if native(attempt.status)?.is_none() {
+            if native_keeping(attempt.status, &mut last_failure)?.is_none() {
                 // binormal stepoff failed (maybe a sliver surface) and classification
                 // of the point projected from the edge failed: cascade the error
                 if last_try {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "the stepped-off point could not be classified",
-                    ));
+                    return Err(no_classifiable_point(last_failure));
                 }
                 // else increase binormal step off distance and try again
                 step_dist *= 2.0;
@@ -2192,6 +2269,28 @@ fn nest_shells(
     Ok(())
 }
 
+/// Whether every shell of every region of `brep` is a closed face-use shell
+/// ([`crate::topology::Shell::is_closed`]: a face use's mate lies in another shell), so
+/// no wire or vertex shell and no sheet on its own. A caller that also knows no lamina
+/// edge is left has a nested solid model, the region inside each closed shell the
+/// opposite of the region outside it
+/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
+///
+/// # Errors
+///
+/// Those of the region, shell and closure queries.
+pub(crate) fn every_shell_closed(brep: &Brep) -> Result<bool> {
+    for region in super::p1::regions(brep, None)? {
+        for &s in &brep.region(region)?.shells {
+            let shell = brep.shell(s)?;
+            if !shell.is_faceuse_shell() || !shell.is_closed(brep, s)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// Not upstream (WR-442, tangency-labs/solidcore#478): makes a closed solid lying
 /// inside another one that solid's cavity, for builders that make every closed shell
 /// its own solid (the full-turn rotational sweep). A candidate is a solid region with
@@ -2217,17 +2316,8 @@ pub(crate) fn nest_closed_shells_as_cavities(
     // material. Where every shell is closed the regions alternate material and void from
     // the infinite region in.
     if brep.region(infinite)?.shells.len() < 2 {
-        let regions = super::p1::regions(brep, None)?;
-        if regions.len() <= 2 {
+        if super::p1::regions(brep, None)?.len() <= 2 || !every_shell_closed(brep)? {
             return Ok(());
-        }
-        for &region in &regions {
-            for &s in &brep.region(region)?.shells {
-                let shell = brep.shell(s)?;
-                if !shell.is_faceuse_shell() || !shell.is_closed(brep, s)? {
-                    return Ok(());
-                }
-            }
         }
         return super::p1::set_region_is_void_flags_for_nested_solids(k, brep);
     }
@@ -2336,11 +2426,9 @@ pub(crate) fn nest_closed_shells_as_cavities(
         brep.region_mut(cavity)?.set_is_void(1);
         // the cavity's faces now point into the solid: swap them
         for face in super::p1::faces(brep, None)? {
-            let up = required(
-                crate::topology::face::p2::upward_faceuse(brep, face)?,
-                "the face's upward face use",
-            )?;
-            let mate = required(eu::faceuse_mate(brep, up)?, "the face use's mate")?;
+            let up = crate::topology::face::p2::upward_faceuse(brep, face)?
+                .ok_or_else(|| broken_link(FACE_NO_UP_FU))?;
+            let mate = eu::faceuse_mate(brep, up)?.ok_or_else(|| broken_link(FU_NO_MATE))?;
             if eu::faceuse_shell(brep, up)? == Some(inner)
                 || eu::faceuse_shell(brep, mate)? == Some(inner)
             {
@@ -2357,9 +2445,12 @@ pub(crate) fn nest_closed_shells_as_cavities(
 fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3> {
     let shell = brep.shell(shell_id)?;
     if shell.is_faceuse_shell() {
-        let fu = shell
-            .first_faceuse()?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's first face use"))?;
+        let fu = shell.first_faceuse()?.ok_or_else(|| {
+            broken_link(
+                "a face-use shell has no face use, though the split deletes the shells it \
+                 empties",
+            )
+        })?;
         let faceuses = shell.get_faceuses()?;
         if !eu::faceuse_edgeuses(brep, fu, false, None)?.is_empty() {
             // Not upstream (WR-797), which steps off the first edge use only and fails
@@ -2387,20 +2478,20 @@ fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3>
             }
             // no face of the shell is wide enough: the first edge use's error, as before
             return Err(first_left_face.unwrap_or_else(|| {
-                SolidError::topology_missing(OP, "the shell's first edge use")
+                broken_link(
+                    "no edge use of the shell was stepped off, though its first face use has \
+                     edge uses",
+                )
             }));
         }
         let loopuses = eu::faceuse_loopuses(brep, fu, false, None)?;
         let Some(&lu) = loopuses.first() else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face use has neither an edge use nor a loop use",
-            ));
+            return Err(SolidError::topology(OP, TopologyFailure::FaceWithoutEdges));
         };
         if !crate::topology::loopuse::is_vertex_loopuse(brep, lu)? {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face use's first loop use is not a vertex loop use",
+            return Err(defect(
+                "the face use's first loop has neither a vertex use nor an edge use, \
+                 though the kernel makes every loop with one or the other",
             ));
         }
         let vu = split_link(crate::topology::loopuse::vertexuse(brep, lu)?)?;
@@ -2408,16 +2499,16 @@ fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3>
         return crate::topology::vertex::point(brep, vertex);
     }
     if shell.is_wire_shell() {
-        let edge = shell
-            .wire_edge(brep)?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the wire shell's edge"))?;
+        let edge = shell.wire_edge(brep)?.ok_or_else(|| {
+            broken_link("a wire shell has no edge, though the kernel makes it with its edge")
+        })?;
         let primary = split_link(eu::primary_edgeuse(brep, edge)?)?;
         return Ok(eu3::normalized_evaluate(k, brep, primary, 0.4567, false, false, true)?.point);
     }
     if shell.is_vertex_shell() {
-        let vertex = shell
-            .vertex(brep)?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the vertex shell's vertex"))?;
+        let vertex = shell.vertex(brep)?.ok_or_else(|| {
+            broken_link("a vertex shell has no vertex, though the kernel makes it with its vertex")
+        })?;
         return crate::topology::vertex::point(brep, vertex);
     }
     // a shell of no known type leaves the point as constructed
@@ -2461,9 +2552,9 @@ fn remove_empty_split_objects(
 fn brep_remove_region(brep: &mut Brep, region: RegionId) -> Result<()> {
     let list = crate::topology::brep::p1::regions(brep, None)?;
     if !list.contains(&region) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the region is not on the B-rep's region list",
+        return Err(defect(
+            "a split region to delete is not on the B-rep's region list, though it is the \
+             region of a shell of the B-rep",
         ));
     }
     let head = list.first().copied();
@@ -2510,6 +2601,7 @@ fn ignore_status(r: Result<()>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -2775,12 +2867,38 @@ mod tests {
             &FaceTopologyOptions::default(),
         )
         .unwrap();
+        let e = r.status.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        // a B-rep without an infinite region, and no region given: the caller's body
         assert_eq!(
-            r.status.unwrap_err().upstream_status(),
-            Some(crate::error::SM_ERR_NULL_POINTER)
+            e.topology_failure(),
+            Some(&TopologyFailure::NoInfiniteRegion)
         );
         assert_eq!(r.face, None);
         assert_eq!(b.faces().len(), 0);
         assert_eq!(b.shells().len(), 0);
+
+        // a region, and no surface: the caller's argument
+        let mut k = Kernel::default();
+        let mut b = crate::topology::brep::p3::new_brep(&mut k, -1.0, -1.0).unwrap();
+        let shells = b.shells().len();
+        let mut state = crate::topology::brep::p2::ArenaNotifyState::new(&b);
+        let r = make_face_topology_attempt(
+            &mut k,
+            &mut b,
+            &mut Marks::default(),
+            &mut state.env(None),
+            None,
+            OrientType::Same,
+            &FaceTopologyOptions::default(),
+        )
+        .unwrap();
+        let e = r.status.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoSurfaceGiven));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(r.face, None);
+        assert_eq!(b.faces().len(), 0);
+        assert_eq!(b.shells().len(), shells);
     }
 }

@@ -356,6 +356,25 @@ fn a_new_launch_checks_even_when_the_last_check_was_today() {
     assert!(h.app.updater.rx.is_none() && h.app.updater.status == Status::Idle);
 }
 
+/// The window froze for good when the check's thread asked for a repaint while a frame read egui's
+/// context inside its own read of it (the tab strip's `ctx.viewport_id()` inside `ctx.data`): the
+/// inner read waited on the repaint, which waited on the outer read (#21091). No frame nests them.
+#[test]
+fn the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let (release, nested) = egui::Context::record_nested_locks(|| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.updater.feed = Some(feed);
+        h.frame();
+        wait_for_check(&mut h);
+        h.frames(3);
+        h.app.updater.release.as_ref().map(|r| r.version().to_string())
+    });
+    assert_eq!(release, Some(version), "the check ran");
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
 #[test]
 fn turning_off_automatic_checks_stops_the_launch_check() {
     let dir = scratch();
@@ -640,6 +659,116 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frames(2);
     assert!(!h.app.updater.open);
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
+}
+
+/// #18688: the first update offer and the community links have distinct hit
+/// regions in the measured application-bar layout, including at narrower widths.
+#[test]
+fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.preferences.show_donate_button = true;
+    h.app.preferences.show_discord_button = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.call("ui.resize", json!({"width":1920,"height":720}));
+    assert!(crate::scenario::rect_of("titlebar:update").is_none());
+
+    h.app.updater.release = Some(Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap());
+    assert!(offered(&h.app).is_some());
+    // Check the first actual update-offer frame; the registry is reset each frame.
+    h.frame();
+
+    for width in [1920.0, 1500.0, 1280.0, 1200.0, 1000.0, 850.0] {
+        if width != 1920.0 {
+            h.call("ui.resize", json!({"width":width,"height":720}));
+        }
+        let rect = crate::scenario::rect_of;
+        if width == 1920.0 {
+            assert!(rect("titlebar:update").is_some(), "wide title bar has a visible update offer");
+        }
+        let visible: Vec<_> = ["titlebar:kofi", "titlebar:discord", "titlebar:update", "titlebar:report", "titlebar:version", "titlebar:assistant"]
+            .into_iter()
+            .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
+            .collect();
+        for (i, (a, ra)) in visible.iter().enumerate() {
+            for (b, rb) in visible.iter().skip(i + 1) {
+                assert!(!ra.intersects(*rb), "{width}: {a} overlaps {b}: {ra:?}, {rb:?}");
+            }
+        }
+        if let Some(tab) = rect("tab:design:0") {
+            for (id, bounds) in &visible {
+                assert!(!tab.intersects(*bounds), "{width}: document tab overlaps {id}: {tab:?}, {bounds:?}");
+            }
+        }
+    }
+}
+
+fn windows_update_offer(notes: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the offer must not fetch anything")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("do not install in this test")));
+    h.app.updater.release = Some(Release::parse(json!({"tag_name":"v999.0.0","body":notes,"assets":[]}).to_string().as_bytes()).unwrap());
+    h.app.updater.open = true;
+    h
+}
+
+#[test]
+fn russian_update_actions_fit_when_the_window_is_narrow() {
+    let notes = "- Confirm the full footer stays visible even with a long list of release notes.\n".repeat(28);
+    for (width, action) in [(449, "cancel"), (220, "apply")] {
+        let mut h = windows_update_offer(&notes);
+        h.app.preferences.language = "ru".into();
+        h.call("ui.resize", json!({"width":width,"height":365}));
+        h.frames(3);
+        let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+        let window = crate::scenario::rect_of("update:window").unwrap();
+        let screen = h.ctx.content_rect();
+        assert!(screen.contains_rect(footer) && window.contains_rect(footer), "{width}: footer {footer:?} is visible in {window:?}");
+        for (key, label) in
+            [("dialog:ok", "Установить (закроет SolidCraft)"), ("dialog:apply", "Пропустить эту версию"), ("dialog:cancel", "Напомнить позже")]
+        {
+            let target = crate::scenario::rect_of(key).unwrap();
+            assert!(footer.contains_rect(target), "{width}: {label} target {target:?} in {footer:?}");
+            let paint = h.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => Some((shape.clip_rect, text.visual_bounding_rect())),
+                _ => None,
+            });
+            let (clip, label_rect) = paint.unwrap_or_else(|| panic!("{width}: {label} is painted"));
+            assert!(clip.contains_rect(label_rect) && footer.contains_rect(label_rect), "{width}: {label} {label_rect:?} clipped to {clip:?}");
+        }
+        let point = crate::scenario::rect_of(&format!("dialog:{action}")).unwrap().center();
+        h.call("ui.click", json!({"x":point.x,"y":point.y}));
+        assert!(!h.app.updater.open);
+        if action == "apply" {
+            assert_eq!(h.app.preferences.update.skipped, "999.0.0");
+        } else {
+            assert!(h.app.preferences.update.remind_after > 0.0);
+            assert!(h.app.preferences.update.skipped.is_empty());
+        }
+    }
+}
+
+#[test]
+fn release_note_pr_numbers_are_painted_once_and_keep_their_link() {
+    let target = "https://github.com/tangency-labs/solidcraft/pull/16906";
+    let mut h = windows_update_offer(&format!("- Faster rebuilds by somebody in {target}."));
+    h.frames(3);
+    let mut labels = h.shapes.iter().filter_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.job.text.contains("#16906") => Some(&text.galley.job),
+        _ => None,
+    });
+    let label = labels.next().expect("the release note shows its PR number");
+    assert!(labels.next().is_none(), "the PR number is painted only once");
+    assert_eq!(label.text, "#16906");
+    assert!(label.sections.iter().all(|section| section.format.color == Tokens::get().accent), "the link uses the theme accent");
+    let [x, y] = h.widget("#16906").expect("the visible PR number is a native link");
+    h.call("ui.click", json!({"x":x,"y":y}));
+    assert_eq!(h.take_opened(), [target]);
 }
 
 #[test]
