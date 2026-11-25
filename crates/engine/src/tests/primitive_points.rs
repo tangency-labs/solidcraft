@@ -587,3 +587,17 @@ fn hole_refuses_zero_and_non_finite_directions() {
         assert_eq!(s.doc.features.len(), before, "{direction} added a feature");
     }
 }
+
+/// A hole's `direction` of expressions that turns zero when a parameter changes fails its
+/// rebuild naming the `direction`, the hole's own field, not an axis (#21932).
+#[test]
+fn hole_direction_turned_zero_names_the_direction() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "90 deg"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": 4, "direction": [0, 0, "-sin(t)"], "name": "H"}));
+    let changed = s.execute("parameters.change", &json!({"name": "t", "expression": "0 deg"}));
+    let error = s.model.results.iter().find(|r| r.name == "H").and_then(|r| r.error.clone());
+    let says = format!("{changed:?} {error:?}");
+    assert!(says.contains("the direction is zero") && !says.contains("axis"), "{says}");
+}
