@@ -4169,6 +4169,7 @@ impl SurfaceSheet {
         let mut work = FlatWork::new();
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
+        self.check_countersinks(&dev, &pieces)?;
         self.laid_out(&dev, &pieces, regions)?;
         // The loose pieces lie in the flat where their panels do.
         let loose: Vec<Region2> =
@@ -4183,11 +4184,7 @@ impl SurfaceSheet {
             let frames = folded.places.clone();
             (Some(folded), frames)
         };
-        let solid_pieces = if self.countersinks.iter().any(|c| c.depth >= self.thickness - 1e-4) {
-            self.without_full_countersink_holes(&dev, &pieces)
-        } else {
-            pieces
-        };
+        let solid_pieces = if self.countersinks.is_empty() { pieces } else { self.solid_pieces_for_countersinks(&dev, &pieces)? };
         let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &solid_pieces, &self.sketch_curves, &self.recipes, &self.beads);
         // What the builder made each face for, in the order it makes them: each face's name from
         // the builder is its place in that order, read back below.
@@ -4240,21 +4237,81 @@ impl SurfaceSheet {
         Ok(body)
     }
 
-    /// `pieces` with standalone circular holes omitted where a full-thickness countersink cone
-    /// replaces the whole hole wall on a planar panel: the flat keeps the exit circle, while the
-    /// 3D solid lets the cone cut cleanly through solid metal without a zero-height cylinder wall.
-    fn without_full_countersink_holes(&self, dev: &Development, pieces: &[(Piece, Region2)]) -> Vec<(Piece, Region2)> {
-        let t = self.thickness;
-        let mut full: Vec<(usize, Vec2, f64)> = Vec::new();
+    /// Depth slack (mm) within which a countersink is treated as reaching the far face cleanly,
+    /// shared by flat-hole omission and the 3D cone cut so the exit circle and flat bore agree.
+    const FULL_COUNTERSINK_TOL: f64 = 1e-6;
+
+    /// Refuses any countersink whose outer cone circle reaches into a bend zone or panel trim
+    /// (for example after adding a flange or widening a bend radius).
+    fn check_countersinks(&self, dev: &Development, pieces: &[(Piece, Region2)]) -> Result<()> {
         for cs in &self.countersinks {
-            if cs.depth < t - 1e-4 {
-                continue;
-            }
             let Some(place) = dev.placements.get(cs.panel).copied().flatten() else { continue };
-            full.push((cs.panel, place.point(cs.center), cs.inner_radius()));
+            let circle = Loop2::circle(place.point(cs.center), cs.outer_radius);
+            for (piece, region) in pieces {
+                if matches!(piece, Piece::Zone(_) | Piece::Tab(..)) && !crate::sheet_surface::loop_clear_of(&circle, region) {
+                    return Err(DocError::Invalid("a countersink reaches into a bend zone: not supported yet".into()));
+                }
+            }
+            for tr in dev.trims.iter().filter(|tr| tr.panel == cs.panel) {
+                if !crate::sheet_surface::loop_clear_of(&circle, &tr.region) {
+                    return Err(DocError::Invalid("a countersink reaches into a bend zone: not supported yet".into()));
+                }
+            }
         }
-        if full.is_empty() {
-            return pieces.to_vec();
+        Ok(())
+    }
+
+    /// `pieces` adjusted for building the 3D solid before [`Self::countersunk_named`] cuts the
+    /// cones: omits standalone exit circles of full-thickness countersinks, and fills back any
+    /// opposing-cone breakthrough opening (less non-full circular bores) so the two cones cut
+    /// through solid metal cleanly without a zero-height vertical wall along their intersection.
+    /// The flat pattern keeps the exact through-opening from `pieces`.
+    fn solid_pieces_for_countersinks(&self, dev: &Development, pieces: &[(Piece, Region2)]) -> Result<Vec<(Piece, Region2)>> {
+        let t = self.thickness;
+        let tol = 1e-7;
+        let mut by_panel: BTreeMap<usize, Vec<&crate::Countersink>> = BTreeMap::new();
+        for cs in &self.countersinks {
+            by_panel.entry(cs.panel).or_default().push(cs);
+        }
+        let mut edits: BTreeMap<usize, (Vec<(Vec2, f64)>, Vec<Region2>)> = BTreeMap::new();
+        for (panel, list) in by_panel {
+            let Some(place) = dev.placements.get(panel).copied().flatten() else { continue };
+            let full: Vec<(Vec2, f64)> =
+                list.iter().filter(|c| c.depth >= t - Self::FULL_COUNTERSINK_TOL).map(|c| (place.point(c.center), c.inner_radius())).collect();
+            let has_near = list.iter().any(|c| !c.far);
+            let has_far = list.iter().any(|c| c.far);
+            let mut patch: Vec<Region2> = Vec::new();
+            if has_near && has_far {
+                let owned: Vec<crate::Countersink> = list.iter().map(|c| (*c).clone()).collect();
+                let breakthrough = crate::sheet_surface_cuts::opposing_breakthrough(&owned, t, tol).map_err(DocError::Invalid)?;
+                if !breakthrough.is_empty() {
+                    let non_full_bores: Vec<Region2> = list
+                        .iter()
+                        .filter(|c| c.depth < t - Self::FULL_COUNTERSINK_TOL && c.inner_radius() > 1e-6)
+                        .map(|c| Region2 { outer: Loop2::circle(c.center, c.inner_radius()), holes: Vec::new() })
+                        .collect();
+                    let mut patch_local = breakthrough;
+                    for bore in &non_full_bores {
+                        if patch_local.is_empty() {
+                            break;
+                        }
+                        patch_local =
+                            solidcraft_kernel::planar_regions_boolean(&patch_local, std::slice::from_ref(bore), solidcraft_kernel::BoolOp::Cut, tol)?;
+                    }
+                    patch.extend(patch_local.iter().map(|r| place.region(r)));
+                    // If a full-thickness countersink merged with the breakthrough opening, its
+                    // exit hole is no longer a standalone circle: include its disc in the patch.
+                    for c in list.iter().filter(|c| c.depth >= t - Self::FULL_COUNTERSINK_TOL && c.inner_radius() > 1e-6) {
+                        patch.push(Region2 { outer: Loop2::circle(place.point(c.center), c.inner_radius()), holes: Vec::new() });
+                    }
+                }
+            }
+            if !full.is_empty() || !patch.is_empty() {
+                edits.insert(panel, (full, patch));
+            }
+        }
+        if edits.is_empty() {
+            return Ok(pieces.to_vec());
         }
         let is_matching_circle = |lp: &Loop2, want_center: Vec2, want_radius: f64| -> bool {
             let Some(Seg2::Arc { sweep: first_sweep, .. }) = lp.segs.first() else { return false };
@@ -4268,18 +4325,42 @@ impl SurfaceSheet {
             }
             (total.abs() - std::f64::consts::TAU).abs() < 1e-6
         };
-        pieces
-            .iter()
-            .map(|(piece, region)| {
-                let Piece::Panel(p) = *piece else { return (*piece, region.clone()) };
-                let mine: Vec<(Vec2, f64)> = full.iter().filter(|(k, ..)| *k == p).map(|(_, c, r)| (*c, *r)).collect();
-                if mine.is_empty() {
-                    return (*piece, region.clone());
+        let mut out = Vec::with_capacity(pieces.len());
+        for (piece, region) in pieces {
+            let Piece::Panel(p) = *piece else {
+                out.push((*piece, region.clone()));
+                continue;
+            };
+            let Some((full, patch)) = edits.get(&p) else {
+                out.push((*piece, region.clone()));
+                continue;
+            };
+            let holes = if full.is_empty() {
+                region.holes.clone()
+            } else {
+                region.holes.iter().filter(|h| !full.iter().any(|(c, r)| is_matching_circle(h, *c, *r))).cloned().collect()
+            };
+            let cur = Region2 { outer: region.outer.clone(), holes };
+            if patch.is_empty() {
+                out.push((*piece, cur));
+                continue;
+            }
+            let outer_only = Region2 { outer: cur.outer.clone(), holes: Vec::new() };
+            let mut cur_vec = vec![cur];
+            for pr in patch {
+                let clipped = solidcraft_kernel::planar_regions_boolean(
+                    std::slice::from_ref(pr),
+                    std::slice::from_ref(&outer_only),
+                    solidcraft_kernel::BoolOp::Intersect,
+                    tol,
+                )?;
+                if !clipped.is_empty() {
+                    cur_vec = solidcraft_kernel::planar_regions_boolean(&cur_vec, &clipped, solidcraft_kernel::BoolOp::Union, tol)?;
                 }
-                let holes = region.holes.iter().filter(|h| !mine.iter().any(|(c, r)| is_matching_circle(h, *c, *r))).cloned().collect();
-                (*piece, Region2 { outer: region.outer.clone(), holes })
-            })
-            .collect()
+            }
+            out.extend(cur_vec.into_iter().map(|r| (*piece, r)));
+        }
+        Ok(out)
     }
 
     /// Cut each conical countersink in its panel's frame, carrying the body's face names through
@@ -4292,7 +4373,8 @@ impl SurfaceSheet {
             if !(tan_h > 0.0 && tan_h.is_finite() && cs.outer_radius > 0.0 && cs.depth > 0.0) {
                 continue;
             }
-            let depth = cs.depth.min(t);
+            let full = cs.depth >= t - Self::FULL_COUNTERSINK_TOL;
+            let depth = if full { t } else { cs.depth.min(t) };
             let r_in = (cs.outer_radius - depth * tan_h).max(0.0);
             // Past the opening face by a hair, as `recessed` does, so no face of the tool lies on
             // the sheet's; above the face the tool stays at `outer_radius` (a cylinder, #5041) so
@@ -4301,7 +4383,6 @@ impl SurfaceSheet {
             // When the cone meets a through-hole or exits the far face, run it a little past its
             // inner rim into air so the cone crosses the bore or exits the sheet cleanly rather
             // than ending on an existing edge. Stop at `depth` when a flat floor sits there.
-            let full = depth >= t - 1e-4;
             let on_floor = !full
                 && self.recesses.iter().any(|r| {
                     r.panel == cs.panel

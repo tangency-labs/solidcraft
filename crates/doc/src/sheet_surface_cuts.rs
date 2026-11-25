@@ -47,7 +47,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Query, Rigid2, Rigid3, Surface};
+use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Query, Rigid2, Rigid3, Surface, curve_through};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
 use crate::sheet::FlatWork;
@@ -76,11 +76,18 @@ pub struct Recess {
 /// the thickness (at most the thickness, where the cone meets its bore or exits the other face).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Countersink {
+    /// Index of the planar panel in `SurfaceSheet::sheet.panels`.
     pub panel: usize,
+    /// Center of the countersink in the panel's 2D chart.
     pub center: Vec2,
+    /// Opens on the panel's far face (one thickness into the material) when `true`, else on the
+    /// sheet's surface (`z = 0`).
     pub far: bool,
+    /// Opening radius on the entry face, in mm.
     pub outer_radius: f64,
+    /// Half of the included countersink angle, in radians (`0 < half_angle < π/2`).
     pub half_angle: f64,
+    /// Depth of the conical wall into the thickness from the entry face, in mm (`0 < depth <= t`).
     pub depth: f64,
 }
 
@@ -528,10 +535,125 @@ fn disjoint(list: Vec<Region2>, tol: f64) -> std::result::Result<Vec<Region2>, S
     Ok(out)
 }
 
-/// Where countersinks from both faces overlap on the same hole, material between them is seen on
-/// neither face; their common footprint (clipped to `own`) is still part of the panel's footprint
-/// before the cut.
-fn double_countersink_footprint(countersinks: &[(Countersink, Vec<usize>)], own: &[Region2], tol: f64) -> std::result::Result<Vec<Region2>, String> {
+/// The 2D region where a near-face countersink `a` (`!a.far`) and a far-face countersink `b`
+/// (`b.far`) on the same panel of thickness `t` break through each other: every point where the
+/// sum of their conical depths reaches `t`, `k_a |p - c_a| + k_b |p - c_b| <= k_a R_a + k_b R_b - t`
+/// with `k = 1 / tan(half_angle)`. Exact circle when coaxial, exact 4-conic ellipse when their
+/// half-angles match, and a smooth fitted closed oval otherwise.
+fn opposing_breakthrough_pair(a: &Countersink, b: &Countersink, t: f64, tol: f64) -> Option<Region2> {
+    let (tan_a, tan_b) = (a.half_angle.tan(), b.half_angle.tan());
+    if !(tan_a > 0.0 && tan_b > 0.0 && tan_a.is_finite() && tan_b.is_finite()) {
+        return None;
+    }
+    if a.depth + b.depth <= t + tol {
+        return None;
+    }
+    let d = a.center.dist(b.center);
+    if d >= a.outer_radius + b.outer_radius - tol {
+        return None;
+    }
+    let (ka, kb) = (1.0 / tan_a, 1.0 / tan_b);
+    let rhs = ka * a.outer_radius + kb * b.outer_radius - t;
+    if rhs <= tol {
+        return None;
+    }
+    if d <= tol {
+        let r = rhs / (ka + kb);
+        return (r > tol).then(|| Region2 { outer: Loop2::circle(a.center, r), holes: Vec::new() });
+    }
+    let u = (b.center - a.center) * (1.0 / d);
+    let v = Vec2::new(-u.y, u.x);
+    if (ka - kb).abs() <= 1e-9 * ka.max(kb) {
+        let semi_major = rhs / (2.0 * ka);
+        let semi_focal = 0.5 * d;
+        if semi_major <= semi_focal + tol {
+            return None;
+        }
+        let semi_minor = (semi_major * semi_major - semi_focal * semi_focal).max(0.0).sqrt();
+        if semi_minor <= tol {
+            return None;
+        }
+        let mid = (a.center + b.center) * 0.5;
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let (p0, p1, p2, p3) = (mid + u * semi_major, mid + v * semi_minor, mid - u * semi_major, mid - v * semi_minor);
+        let (q0, q1, q2, q3) = (
+            mid + u * semi_major + v * semi_minor,
+            mid - u * semi_major + v * semi_minor,
+            mid - u * semi_major - v * semi_minor,
+            mid + u * semi_major - v * semi_minor,
+        );
+        let outer = Loop2 {
+            segs: vec![
+                Seg2::Conic { a: p0, apex: q0, b: p1, w },
+                Seg2::Conic { a: p1, apex: q1, b: p2, w },
+                Seg2::Conic { a: p2, apex: q2, b: p3, w },
+                Seg2::Conic { a: p3, apex: q3, b: p0, w },
+            ],
+        }
+        .ccw();
+        return Some(Region2 { outer, holes: Vec::new() });
+    }
+    // General Cartesian oval `ka |p - c_a| + kb |p - c_b| <= rhs`: strictly convex. Solve its
+    // exact interval along the line joining `c_a` and `c_b`, then sample rays around the midpoint.
+    let (f0, fd) = (kb * d, ka * d);
+    if f0 >= rhs - tol && fd >= rhs - tol {
+        return None;
+    }
+    let x_min = if f0 < rhs { (kb * d - rhs) / (ka + kb) } else { (kb * d - rhs) / (kb - ka) };
+    let x_max = if fd < rhs { (rhs + kb * d) / (ka + kb) } else { (rhs - kb * d) / (ka - kb) };
+    if !(x_max - x_min > tol) {
+        return None;
+    }
+    let origin = a.center + u * (0.5 * (x_min + x_max));
+    let r_hi = (x_max - x_min) + d + a.outer_radius + b.outer_radius;
+    const N: usize = 64;
+    let mut pts = Vec::with_capacity(N + 1);
+    for k in 0..N {
+        let (sin_t, cos_t) = (TAU * k as f64 / N as f64).sin_cos();
+        let dir = u * cos_t + v * sin_t;
+        let (mut lo, mut hi) = (0.0, r_hi);
+        for _ in 0..52 {
+            let mid = 0.5 * (lo + hi);
+            let p = origin + dir * mid;
+            if ka * p.dist(a.center) + kb * p.dist(b.center) <= rhs {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        pts.push(origin + dir * (0.5 * (lo + hi)));
+    }
+    let first = pts.first().copied()?;
+    pts.push(first);
+    let (Some(head), Some(tail)) = (pts.get(..=N / 2), pts.get(N / 2..)) else { return None };
+    let mut segs = curve_through(head);
+    segs.extend(curve_through(tail));
+    (!segs.is_empty()).then(|| Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() })
+}
+
+/// Union of the 2D breakthrough regions where opposing countersinks on one panel of thickness `t`
+/// remove more than `t` together.
+pub(crate) fn opposing_breakthrough(countersinks: &[Countersink], t: f64, tol: f64) -> std::result::Result<Vec<Region2>, String> {
+    let mut regions = Vec::new();
+    for a in countersinks.iter().filter(|c| !c.far) {
+        for b in countersinks.iter().filter(|c| c.far) {
+            if let Some(r) = opposing_breakthrough_pair(a, b, t, tol) {
+                regions.push(r);
+            }
+        }
+    }
+    disjoint(regions, tol)
+}
+
+/// Where countersinks from both faces overlap on the same panel without breaking through, material
+/// between them is seen on neither face; their common footprint less any breakthrough opening
+/// (clipped to `own`) is still part of the panel's footprint before the cut.
+fn double_countersink_footprint(
+    countersinks: &[(Countersink, Vec<usize>)],
+    own: &[Region2],
+    t: f64,
+    tol: f64,
+) -> std::result::Result<Vec<Region2>, String> {
     let near: Vec<Region2> = countersinks.iter().filter(|(c, _)| !c.far).map(|(c, _)| c.footprint()).collect();
     let far: Vec<Region2> = countersinks.iter().filter(|(c, _)| c.far).map(|(c, _)| c.footprint()).collect();
     if near.is_empty() || far.is_empty() || own.is_empty() {
@@ -543,17 +665,26 @@ fn double_countersink_footprint(countersinks: &[(Countersink, Vec<usize>)], own:
     if common.is_empty() {
         return Ok(Vec::new());
     }
+    let cs_only: Vec<Countersink> = countersinks.iter().map(|(c, _)| c.clone()).collect();
+    let breakthrough = opposing_breakthrough(&cs_only, t, tol)?;
+    let common =
+        if breakthrough.is_empty() { common } else { planar_regions_boolean(&common, &breakthrough, BoolOp::Cut, tol).map_err(|e| e.to_string())? };
+    if common.is_empty() {
+        return Ok(Vec::new());
+    }
     planar_regions_boolean(&common, own, BoolOp::Intersect, tol).map_err(|e| e.to_string())
 }
 
 /// Adds the 2D material behind `countersinks` back onto each side's seen regions (`near_raw`,
-/// `far_raw`), clipped to `footprint` and to what the opposite side still holds, so that a
-/// countersunk hole reads as its through-bore (or blind floor) rather than as unequal faces.
+/// `far_raw`), clipped to `footprint` and to what the opposite side still holds (excluding any
+/// region where opposing countersinks break through the thickness `t`), so that a countersunk hole
+/// reads as its through-bore (or blind floor) rather than as unequal faces.
 fn fill_countersinks(
     near_raw: Vec<Region2>,
     far_raw: Vec<Region2>,
     countersinks: &[(Countersink, Vec<usize>)],
     footprint: &[Region2],
+    t: f64,
     tol: f64,
 ) -> std::result::Result<(Vec<Region2>, Vec<Region2>), String> {
     if countersinks.is_empty() {
@@ -562,6 +693,12 @@ fn fill_countersinks(
     let has_near = countersinks.iter().any(|(c, _)| !c.far);
     let has_far = countersinks.iter().any(|(c, _)| c.far);
     let both = has_near && has_far;
+    let breakthrough = if both {
+        let cs_only: Vec<Countersink> = countersinks.iter().map(|(c, _)| c.clone()).collect();
+        opposing_breakthrough(&cs_only, t, tol)?
+    } else {
+        Vec::new()
+    };
     let side_regions = |far_side: bool| -> std::result::Result<Vec<Region2>, String> {
         let raw: Vec<Region2> = countersinks
             .iter()
@@ -572,7 +709,11 @@ fn fill_countersinks(
             return Ok(Vec::new());
         }
         let raw = disjoint(raw, tol)?;
-        planar_regions_boolean(&raw, footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string())
+        let clipped = planar_regions_boolean(&raw, footprint, BoolOp::Intersect, tol).map_err(|e| e.to_string())?;
+        if breakthrough.is_empty() || clipped.is_empty() {
+            return Ok(clipped);
+        }
+        planar_regions_boolean(&clipped, &breakthrough, BoolOp::Cut, tol).map_err(|e| e.to_string())
     };
     let cs_near = side_regions(false)?;
     let cs_far = side_regions(true)?;
@@ -1638,7 +1779,7 @@ fn onto_panels(
             o.near.iter().chain(&o.far).cloned().chain(o.near_floors.iter().chain(&o.far_floors).map(|x| x.1.clone())).collect::<Vec<_>>()
         };
         let mut before_parts = all(&before);
-        before_parts.extend(double_countersink_footprint(&before.countersinks, std::slice::from_ref(&panel.region), tol)?);
+        before_parts.extend(double_countersink_footprint(&before.countersinks, std::slice::from_ref(&panel.region), t, tol)?);
         let footprint = union(before_parts, tol).map_err(|e| e.to_string())?;
         // What the cuts across joints took here is theirs, read with them, not here: a region
         // that lies within theirs, by the planar booleans (none of its area left outside them).
@@ -1673,7 +1814,7 @@ fn onto_panels(
         };
         let near_raw = within(seen(&after.near, &after.near_floors).map_err(|e| e.to_string())?)?;
         let far_raw = within(seen(&after.far, &after.far_floors).map_err(|e| e.to_string())?)?;
-        let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, tol)?;
+        let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, t, tol)?;
         // Square walls: each face sees material wherever the other does.
         let apart = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
         let slack = tol * 10.0 * perimeter(&footprint).max(1.0);
@@ -1932,10 +2073,10 @@ fn flat_gone(
         union(own.iter().cloned().chain(floors.iter().map(|x| x.1.clone())).collect(), tol).map_err(|e| e.to_string())
     };
     let mut before_parts = [before.near, before.far].concat();
-    before_parts.extend(double_countersink_footprint(&before.countersinks, &sk.regions, tol)?);
+    before_parts.extend(double_countersink_footprint(&before.countersinks, &sk.regions, t, tol)?);
     let footprint = seen(&before_parts, &[before.near_floors, before.far_floors].concat())?;
     let (near_raw, far_raw) = (seen(&after.near, &after.near_floors)?, seen(&after.far, &after.far_floors)?);
-    let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, tol)?;
+    let (near, far) = fill_countersinks(near_raw, far_raw, &after.countersinks, &footprint, t, tol)?;
     // Square walls: each face sees material wherever the other does.
     let apart = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
     let slack = tol * 10.0 * perimeter(&footprint).max(1.0);

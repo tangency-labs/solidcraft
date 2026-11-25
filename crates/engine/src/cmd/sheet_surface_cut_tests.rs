@@ -1298,6 +1298,12 @@ fn a_countersunk_hole_deeper_than_the_sheet_and_from_the_far_face_stay_exact() {
     run(&mut s, "sheet.unfold", json!({}));
     run(&mut s, "sheet.refold", json!({}));
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "after refold: {} vs {want}", exact_volume(&s));
+    // Verify the far-face countersink at (70, 30) opens on the far face (z = 0) and stays solid
+    // near the near face (z = T) at radius 3 mm (between bore radius 2 mm and outer radius 3.5 mm).
+    let st = s.model.state();
+    let body = &st.bodies.iter().find(|b| b.name == "Plate").expect("Plate").body;
+    assert_eq!(body.classify_point(Vec3::new(73.0, 30.0, 0.25)).expect("classify far"), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(body.classify_point(Vec3::new(73.0, 30.0, 1.75)).expect("classify near"), solidcraft_kernel::PointClass::Inside);
 }
 
 /// A countersunk hole drilled into a flange while the sheet is unfolded folds cleanly with its
@@ -1332,4 +1338,61 @@ fn a_countersunk_hole_across_a_bend_is_refused() {
         .unwrap_or_default();
     assert!(e.contains("not square to the sheet") || e.contains("don't run through"), "{e}");
     assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
+}
+
+/// Adding a flange whose bend zone reaches an existing countersink's outer cone is refused (even
+/// when the through-bore itself stays clear of the bend), leaving the sheet unchanged.
+#[test]
+fn a_flange_whose_bend_zone_reaches_an_existing_countersink_is_refused() {
+    let mut s = plate();
+    // Bend setback for R = 2, T = 2 at 90 deg is 4 mm (y <= 4). Bore radius 1.5 mm at y = 6.2 stays
+    // clear (y >= 4.7), while the 6 mm countersink cone reaches to y = 3.2, inside the bend zone.
+    run(&mut s, "solid.hole", json!({"position": [50, 6.2, T], "type": "countersink", "diameter": 3, "cs_diameter": 6, "cs_angle": "90 deg"}));
+    let v = exact_volume(&s);
+    let e = s
+        .execute("sheet.flange", &json!({"edges": [[50, 0, T]], "height": 20}))
+        .expect_err("flange whose bend zone overlaps an existing countersink must be refused")
+        .to_string();
+    assert!(e.contains("bend zone"), "{e}");
+    assert!((exact_volume(&s) - v).abs() < 1e-6 * v, "sheet unchanged: {} vs {v}", exact_volume(&s));
+    // A flange on the opposite edge stays clear of the countersink and succeeds.
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 60, T]], "height": 20}));
+    let circles = flat_circles(&mut s);
+    assert!(circles.len() == 1 && (circles[0].0 - 1.5).abs() < 1e-6, "flat circles: {circles:?}");
+}
+
+/// Two overlapping countersinks from opposite faces whose combined cone depth exceeds the sheet
+/// thickness open the flat pattern where they break through, while keeping material where the
+/// overlap does not break through and around each single cone.
+#[test]
+fn overlapping_countersinks_from_opposite_faces_open_the_flat_where_they_break_through() {
+    use solidcraft_geom::prelude::*;
+    let mut s = plate();
+    // Two 90 deg countersinks (bore r = 2.0, outer R = 3.5, depth = 1.5) 4.8 mm apart from opposite
+    // faces of a 2.0 mm sheet: at the midpoint (50, 30) each removes 1.1 mm (combined 2.2 > 2.0);
+    // at (50, 31) each removes 0.9 mm (combined 1.8 < 2.0, leaving a 0.2 mm web).
+    run(&mut s, "solid.hole", json!({"position": [47.6, 30, T], "type": "countersink", "diameter": 4, "cs_diameter": 7, "cs_angle": "90 deg"}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [52.4, 30, 0], "direction": [0, 0, 1], "type": "countersink", "diameter": 4, "cs_diameter": 7, "cs_angle": "90 deg"}),
+    );
+    let v = exact_volume(&s);
+    let st = s.model.state();
+    let body = &st.bodies.iter().find(|b| b.name == "Plate").expect("Plate").body;
+    assert_eq!(body.classify_point(Vec3::new(50.0, 30.0, 1.0)).expect("classify midpoint"), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(body.classify_point(Vec3::new(50.0, 31.0, 1.0)).expect("classify web"), solidcraft_kernel::PointClass::Inside);
+    let sk = &s.model.state().surface_sheets[0];
+    let in_flat = |x: f64, y: f64| {
+        let q = sk.flat.inverse().point(Vec3::new(x, y, T));
+        let p = Vec2::new(q.x, q.y);
+        sk.regions.iter().any(|r| r.contains(p))
+    };
+    assert!(!in_flat(50.0, 30.0), "midpoint where opposing cones break through must be open in the flat");
+    assert!(in_flat(50.0, 31.0), "overlap web where combined cone depth < T must stay solid in the flat");
+    assert!(in_flat(45.0, 30.0), "single-cone annulus away from the opposing hole must stay solid in the flat");
+    assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(1), "bores and breakthrough merge into one cutout");
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - v).abs() < 1e-6 * v, "after refold: {} vs {v}", exact_volume(&s));
 }
