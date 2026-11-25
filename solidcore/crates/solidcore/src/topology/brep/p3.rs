@@ -802,7 +802,10 @@ fn copy_trim_cover_raises(
     b: &mut Brep,
     reverse_map: &CopyBrepMap<EntityRef>,
 ) -> Result<()> {
-    let mut record = crate::topology::TrimCoverRaises::default();
+    let mut record = crate::topology::TrimCoverRaises {
+        end_checked: src.trim_cover_raises().end_checked,
+        ..Default::default()
+    };
     for (&e, &(before, after)) in &src.trim_cover_raises().edges {
         if let Some(EntityRef::Edge(c)) = reverse_map.get_at(Some(EntityRef::Edge(e)))? {
             if b.edge(c)?.tolerance.to_bits() == after.to_bits() {

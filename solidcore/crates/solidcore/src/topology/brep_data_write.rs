@@ -1315,6 +1315,40 @@ impl BrepData {
         env: &FromBrepEnv<'_>,
         all_attributes: &mut Vec<AttributeHandle>,
     ) -> Result<Self> {
+        Self::from_brep_with(b, env, all_attributes, true)
+    }
+
+    /// [`BrepData::from_brep`], writing a tolerance that a B-rep file read's kept-trim
+    /// cover raised ([`Brep::trim_cover_raises`],
+    /// [`crate::topology::TrimCoverRaises::end_checked`]) as the one it raised it from
+    /// when `unraise` (not upstream).
+    ///
+    /// The raise is the read's own: a read of the written file runs the same end check
+    /// and the same cover over the same trims at the same tolerances, raises the
+    /// tolerance again and records the raise, so the edges it covers fit at the
+    /// tolerance from before the raise, as in `b` (#16922). Written raised, the read
+    /// would take the raised tolerance as the edge's own and fit along it at that value.
+    /// Only an entry whose entity still holds the raised value is written back; a
+    /// tolerance changed since is written as it is. A part file read's raise is written
+    /// as it is: its trims were never end checked, and the written file's end check
+    /// could delete them at the tolerance before the raise.
+    /// [`crate::topology::api_files::rebuild_native`] rebuilds without the cover and
+    /// writes the tolerances as they are.
+    pub(crate) fn from_brep_with(
+        b: &Brep,
+        env: &FromBrepEnv<'_>,
+        all_attributes: &mut Vec<AttributeHandle>,
+        unraise: bool,
+    ) -> Result<Self> {
+        let raises = b.trim_cover_raises();
+        let written = |raised: Option<&(f64, f64)>, tolerance: f64| match raised {
+            Some(&(before, after))
+                if unraise && raises.end_checked && after.to_bits() == tolerance.to_bits() =>
+            {
+                before
+            }
+            _ => tolerance,
+        };
         let mut attr_map = BTreeSet::new();
         let mut table = AttributeTable {
             store: env.attributes,
@@ -1366,7 +1400,7 @@ impl BrepData {
             map.insert(EntityRef::Vertex(v), i as u64);
             let vertex = b.vertex(v)?;
             let mut vd = VertexData::zeroed();
-            vd.zone_tol_3d = vertex.tolerance;
+            vd.zone_tol_3d = written(raises.vertices.get(&v), vertex.tolerance);
             vd.point = vertex.point;
             vd.topology = topology_data(env, &mut table, EntityRef::Vertex(v));
             bd.vertices.push(vd);
@@ -1595,7 +1629,7 @@ impl BrepData {
                 object: curve.clone_for_evaluation()?,
             });
 
-            ed.zone_tol_3d = edge_rec.tolerance;
+            ed.zone_tol_3d = written(raises.edges.get(&e), edge_rec.tolerance);
             ed.interval = edge_rec.interval;
             ed.topology = topology_data(env, &mut table, EntityRef::Edge(e));
             bd.edges.push(ed);

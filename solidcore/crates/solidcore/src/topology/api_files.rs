@@ -74,7 +74,7 @@ pub fn rebuild_native(k: &mut Kernel, source: &Brep) -> Result<Brep> {
         uv_curve_key: &|_| ObjectKey(0),
         surface_key: &|_| ObjectKey(0),
     };
-    let mut data = BrepData::from_brep(source, &env, &mut handles)?;
+    let mut data = BrepData::from_brep_with(source, &env, &mut handles, false)?;
     let bytes = data.write_to_file_with_nurbs(k, FileType::Binary)?;
     let mut rebuilt_data = BrepData::read_from_file(k, bytes, FileType::Binary)?;
 
