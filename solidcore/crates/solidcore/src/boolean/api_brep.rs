@@ -669,6 +669,455 @@ pub fn boolean_union(k: &mut Kernel, brep1: Brep, brep2: Brep) -> Result<Brep> {
     merge_boolean(k, brep1, brep2, BooleanOperation::Union, None).map(|o| o.result)
 }
 
+/// Conservative enclosing bounding box of `brep` for disjointness and spatial ordering in
+/// multi-body unions. Uses non-tight face/edge/vertex hull bounds expanded by zone tolerances
+/// so every surface point lies strictly inside. Returns `None` when `brep` has no infinite
+/// region (non-solid/open arrangement) or when its box is undefined, empty, or unbounded.
+///
+/// # Errors
+///
+/// Propagates cancellation or unported errors from the bounding-box query.
+pub fn union_bounding_box(
+    k: &Kernel,
+    brep: &mut Brep,
+) -> Result<Option<crate::geom::extent3d::Extent3d>> {
+    use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    if brep.infinite_region().is_none() {
+        return Ok(None);
+    }
+    let opts = BoundingBoxOptions {
+        approx: false,
+        tight: false,
+        expand_by_zone_tol_3d: true,
+    };
+    let mut bbox = match calculate_bounding_box(k, &mut *brep, opts) {
+        Ok(b) => b,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    if !bbox.is_init() || !bbox.is_defined() || !bbox.is_bounded() {
+        return Ok(None);
+    }
+    let margin = 4.0 * brep.tolerance().max(k.tolerances.zone_tol_3d);
+    bbox.expand_absolute(margin);
+    Ok(Some(bbox))
+}
+
+/// Combines non-empty mutually disjoint B-reps (each with an infinite region, no two
+/// intersecting, touching, or enclosing one another) into one B-rep in linear time via
+/// `SmBrep::MergeBrep`, preserving every operand's attributes and provenance tags.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an empty list; otherwise those of tolerance matching or
+/// [`crate::topology::brep::p3::merge_brep`].
+pub fn combine_disjoint_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Brep> {
+    use crate::topology::brep::p2::{brep_ref, copy_source_ref, seed_brep_attributes, ArenaNotifyState};
+    use crate::topology::brep::p3::{merge_brep, reseed_records, KeyScheme};
+    use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+    use crate::topology::topology::NotifyRecords;
+
+    let mut it = breps.into_iter();
+    let Some(mut target) = it.next() else {
+        return Err(SolidError::invalid_input(
+            "boolean::api_brep::combine_disjoint_breps",
+            "combine_disjoint_breps requires at least one B-rep",
+        ));
+    };
+    let mut state = ArenaNotifyState {
+        records: NotifyRecords::new(),
+        attributes: target.take_attributes(),
+    };
+    for mut source in it {
+        crate::boolean::operand_tolerances::matched_tolerances(k, &mut target, &mut source)?;
+        let max_tol = target.tolerance().max(source.tolerance());
+        if max_tol > target.tolerance() {
+            target.set_tolerance(max_tol);
+        }
+        if !state.records.is_empty() {
+            let scheme = KeyScheme {
+                key_of: &notify_ref,
+                entity_of: &entity_of_notify_key,
+                brep_key: brep_ref(&target).key,
+                serial: k.context.issued_brep_serial(target.notify_identity()),
+            };
+            reseed_records(&mut state.records, &mut target, &scheme);
+        }
+        let src_store = source.take_attributes();
+        let src_keys: Vec<crate::geom::attribute::ObjectKey> = src_store
+            .attributed_objects()
+            .into_iter()
+            .filter_map(entity_of_notify_key)
+            .map(|e| copy_source_ref(e).key)
+            .collect();
+        if let Err(err) = seed_brep_attributes(&mut state.attributes, src_store, &copy_source_ref) {
+            let _ = state.restore_attributes(&mut target);
+            return Err(err);
+        }
+        let merged = merge_brep(
+            k,
+            &mut state.env(None),
+            &mut target,
+            &source,
+            &copy_source_ref,
+            None,
+            None,
+            false,
+        );
+        for key in src_keys {
+            let handles = state.attributes.attributes(key);
+            for h in handles {
+                let _ = state.attributes.remove_attribute(key, h, false);
+            }
+        }
+        if let Err(err) = merged {
+            let _ = state.restore_attributes(&mut target);
+            return Err(err);
+        }
+    }
+    state.restore_attributes(&mut target)?;
+    Ok(target)
+}
+
+/// Unites `breps` into a single B-rep using conservative AABB connected-component decomposition,
+/// linear-time disjoint merges ([`combine_disjoint_breps`]), hub-and-spoke spoke batching, and
+/// 3D Morton spatial ordering for overlapping pairs.
+///
+/// When `update_tolerances` is `true`, each pairwise kernel boolean result gets
+/// [`crate::topology::brep::validation::update_tolerances_after_boolean`] before participating in
+/// the next level.
+///
+/// # Errors
+///
+/// Those of bounding-box queries, tolerance matching, disjoint merges, or pairwise unions.
+pub fn union_all_breps(
+    k: &mut Kernel,
+    breps: Vec<Brep>,
+    update_tolerances: bool,
+) -> Result<Option<Brep>> {
+    if breps.len() <= 1 {
+        return Ok(breps.into_iter().next());
+    }
+    let mut items = Vec::with_capacity(breps.len());
+    for (index, mut brep) in breps.into_iter().enumerate() {
+        let bbox = union_bounding_box(k, &mut brep)?;
+        items.push(UnionItem { index, brep, bbox });
+    }
+    let Some(merged) = reduce_union_items(k, items, update_tolerances)? else {
+        return Ok(None);
+    };
+    Ok(Some(merged.brep))
+}
+
+struct UnionItem {
+    index: usize,
+    brep: Brep,
+    bbox: Option<crate::geom::extent3d::Extent3d>,
+}
+
+fn boxes_disjoint(
+    a: Option<crate::geom::extent3d::Extent3d>,
+    b: Option<crate::geom::extent3d::Extent3d>,
+) -> bool {
+    matches!((a, b), (Some(ba), Some(bb)) if ba.are_disjoint(&bb, 0.0))
+}
+
+fn union_boxes(
+    a: Option<crate::geom::extent3d::Extent3d>,
+    b: Option<crate::geom::extent3d::Extent3d>,
+) -> Option<crate::geom::extent3d::Extent3d> {
+    a.zip(b).map(|(ba, bb)| ba.union(&bb))
+}
+
+fn overlap_edges(items: &[UnionItem]) -> Vec<(usize, usize)> {
+    let mut boxed: Vec<(usize, crate::geom::extent3d::Extent3d)> = Vec::new();
+    let mut unboxed: Vec<usize> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match item.bbox {
+            Some(b) => boxed.push((i, b)),
+            None => unboxed.push(i),
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min().x.total_cmp(&b.min().x));
+    let mut edges = Vec::new();
+    for (pos, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(pos + 1) {
+            if bb.min().x > ba.max().x {
+                break;
+            }
+            if !ba.are_disjoint(&bb, 0.0) {
+                edges.push((i.min(j), i.max(j)));
+            }
+        }
+    }
+    for &u in &unboxed {
+        for other in 0..items.len() {
+            if other == u {
+                continue;
+            }
+            if other < u && items.get(other).is_some_and(|x| x.bbox.is_none()) {
+                continue;
+            }
+            edges.push((u.min(other), u.max(other)));
+        }
+    }
+    edges
+}
+
+fn connected_components(items: Vec<UnionItem>, edges: &[(usize, usize)]) -> Vec<Vec<UnionItem>> {
+    let n = items.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let find = |parent: &mut [usize], mut x: usize| -> usize {
+        while let Some(&p) = parent.get(x) {
+            if p == x {
+                break;
+            }
+            if let Some(&gp) = parent.get(p) {
+                if let Some(slot) = parent.get_mut(x) {
+                    *slot = gp;
+                }
+            }
+            x = p;
+        }
+        x
+    };
+    for &(u, v) in edges {
+        let ru = find(&mut parent, u);
+        let rv = find(&mut parent, v);
+        if ru != rv {
+            let (lo, hi) = (ru.min(rv), ru.max(rv));
+            if let Some(slot) = parent.get_mut(hi) {
+                *slot = lo;
+            }
+        }
+    }
+    let mut groups: std::collections::BTreeMap<usize, Vec<UnionItem>> =
+        std::collections::BTreeMap::new();
+    for (i, item) in items.into_iter().enumerate() {
+        let root = find(&mut parent, i);
+        groups.entry(root).or_default().push(item);
+    }
+    let mut components: Vec<Vec<UnionItem>> = groups.into_values().collect();
+    components.sort_by_key(|c| c.iter().map(|it| it.index).min().unwrap_or(usize::MAX));
+    components
+}
+
+fn morton_key(p: crate::math::Point3, overall: crate::geom::extent3d::Extent3d) -> u64 {
+    fn spread(v: u64) -> u64 {
+        let mut x = v & 0x1f_ffff;
+        x = (x | (x << 32)) & 0x001f_0000_0000_ffff;
+        x = (x | (x << 16)) & 0x001f_0000_ff00_00ff;
+        x = (x | (x << 8)) & 0x100f_00f0_0f00_f00f;
+        x = (x | (x << 4)) & 0x10c3_0c30_c30c_30c3;
+        x = (x | (x << 2)) & 0x1249_2492_4924_9249;
+        x
+    }
+    let quant = |val: f64, lo: f64, hi: f64| -> u64 {
+        let span = hi - lo;
+        if !(span > 0.0 && span.is_finite()) {
+            return 0;
+        }
+        let norm = ((val - lo) / span).clamp(0.0, 1.0);
+        (norm * ((1u64 << 21) - 1) as f64) as u64
+    };
+    let min = overall.min();
+    let max = overall.max();
+    let qx = quant(p.x, min.x, max.x);
+    let qy = quant(p.y, min.y, max.y);
+    let qz = quant(p.z, min.z, max.z);
+    spread(qx) | (spread(qy) << 1) | (spread(qz) << 2)
+}
+
+fn sort_morton(items: &mut [UnionItem]) {
+    let mut overall = crate::geom::extent3d::Extent3d::new();
+    for it in items.iter() {
+        if let Some(b) = it.bbox {
+            overall = overall.union(&b);
+        }
+    }
+    if !overall.is_init() {
+        items.sort_by_key(|it| it.index);
+        return;
+    }
+    items.sort_by_key(|it| match it.bbox {
+        Some(b) => (0u8, morton_key(b.mid(), overall), it.index),
+        None => (1u8, 0u64, it.index),
+    });
+}
+
+fn union_two_items(
+    k: &mut Kernel,
+    mut a: UnionItem,
+    mut b: UnionItem,
+    update_tolerances: bool,
+) -> Result<UnionItem> {
+    let index = a.index.min(b.index);
+    let bbox = union_boxes(a.bbox, b.bbox);
+    if boxes_disjoint(a.bbox, b.bbox)
+        && a.brep.infinite_region().is_some()
+        && b.brep.infinite_region().is_some()
+    {
+        let brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+        return Ok(UnionItem { index, brep, bbox });
+    }
+    crate::boolean::operand_tolerances::matched_tolerances(k, &mut a.brep, &mut b.brep)?;
+    let mut brep = boolean(k, a.brep, b.brep, BooleanOperation::Union)?.result;
+    if update_tolerances {
+        let _ = crate::topology::brep::validation::update_tolerances_after_boolean(k, &mut brep)?;
+    }
+    Ok(UnionItem { index, brep, bbox })
+}
+
+fn reduce_union_items(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    update_tolerances: bool,
+) -> Result<Option<UnionItem>> {
+    if items.len() <= 1 {
+        return Ok(items.into_iter().next());
+    }
+    let edges = overlap_edges(&items);
+    let components = connected_components(items, &edges);
+    if components.len() == 1 {
+        let Some(comp) = components.into_iter().next() else {
+            return Ok(None);
+        };
+        return Ok(Some(reduce_union_component(k, comp, update_tolerances)?));
+    }
+    let mut disjoint: Vec<UnionItem> = Vec::with_capacity(components.len());
+    for comp in components {
+        disjoint.push(reduce_union_component(k, comp, update_tolerances)?);
+    }
+    combine_disjoint_union_items(k, disjoint, update_tolerances).map(Some)
+}
+
+fn combine_disjoint_union_items(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    update_tolerances: bool,
+) -> Result<UnionItem> {
+    let mut can_merge = Vec::new();
+    let mut fallback = Vec::new();
+    for item in items {
+        if item.bbox.is_some() && item.brep.infinite_region().is_some() {
+            can_merge.push(item);
+        } else {
+            fallback.push(item);
+        }
+    }
+    let mut acc: Option<UnionItem> = if can_merge.len() >= 2 {
+        let index = can_merge.iter().map(|x| x.index).min().unwrap_or(0);
+        let mut bbox: Option<crate::geom::extent3d::Extent3d> = None;
+        let mut breps = Vec::with_capacity(can_merge.len());
+        for item in can_merge {
+            bbox = match (bbox, item.bbox) {
+                (Some(a), Some(b)) => Some(a.union(&b)),
+                (None, b) => b,
+                (a, None) => a,
+            };
+            breps.push(item.brep);
+        }
+        let brep = combine_disjoint_breps(k, breps)?;
+        Some(UnionItem { index, brep, bbox })
+    } else {
+        can_merge.into_iter().next()
+    };
+    for item in fallback {
+        acc = Some(match acc {
+            Some(prev) => union_two_items(k, prev, item, update_tolerances)?,
+            None => item,
+        });
+    }
+    acc.ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::combine_disjoint_union_items",
+            "empty component list",
+        )
+    })
+}
+
+fn reduce_union_component(
+    k: &mut Kernel,
+    mut comp: Vec<UnionItem>,
+    update_tolerances: bool,
+) -> Result<UnionItem> {
+    if comp.len() == 1 {
+        if let Some(only) = comp.pop() {
+            return Ok(only);
+        }
+    }
+    if comp.len() >= 5 {
+        let edges = overlap_edges(&comp);
+        let mut degree = vec![0usize; comp.len()];
+        for &(u, v) in &edges {
+            if let Some(d) = degree.get_mut(u) {
+                *d += 1;
+            }
+            if let Some(d) = degree.get_mut(v) {
+                *d += 1;
+            }
+        }
+        let hub_threshold = (comp.len() / 2).max(4);
+        let has_hub = degree.iter().any(|&d| d >= hub_threshold);
+        let has_spoke = degree.iter().any(|&d| d < hub_threshold);
+        if has_hub && has_spoke {
+            let mut hubs = Vec::new();
+            let mut spokes = Vec::new();
+            for (item, deg) in comp.into_iter().zip(degree) {
+                if deg >= hub_threshold {
+                    hubs.push(item);
+                } else {
+                    spokes.push(item);
+                }
+            }
+            let spoke_edges = overlap_edges(&spokes);
+            let spoke_components = connected_components(spokes, &spoke_edges);
+            if spoke_components.len() > 1 {
+                let mut reduced_spokes = Vec::with_capacity(spoke_components.len());
+                for sc in spoke_components {
+                    reduced_spokes.push(reduce_union_component(k, sc, update_tolerances)?);
+                }
+                let combined_spokes =
+                    combine_disjoint_union_items(k, reduced_spokes, update_tolerances)?;
+                let mut all = hubs;
+                all.push(combined_spokes);
+                return reduce_pairwise_morton(k, all, update_tolerances);
+            }
+            let mut restored = hubs;
+            for sc in spoke_components {
+                restored.extend(sc);
+            }
+            comp = restored;
+        }
+    }
+    reduce_pairwise_morton(k, comp, update_tolerances)
+}
+
+fn reduce_pairwise_morton(
+    k: &mut Kernel,
+    mut level: Vec<UnionItem>,
+    update_tolerances: bool,
+) -> Result<UnionItem> {
+    sort_morton(&mut level);
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut it = level.into_iter();
+        while let Some(a) = it.next() {
+            match it.next() {
+                Some(b) => next.push(union_two_items(k, a, b, update_tolerances)?),
+                None => next.push(a),
+            }
+        }
+        level = next;
+    }
+    level.pop().ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::reduce_pairwise_morton",
+            "empty union level",
+        )
+    })
+}
+
 /// Subtracts `brep2` from `brep1` (`SmApiBooleanDifference`); `brep2` is consumed.
 ///
 /// # Errors
@@ -1524,5 +1973,95 @@ mod tests {
         assert!(boolean_trees(&mut k, &mut breps, &[0, -1]).is_err());
         assert!(breps.first().unwrap().is_none());
         assert!(breps.get(1).unwrap().is_some());
+    }
+
+    #[test]
+    fn combine_disjoint_breps_preserves_every_entity_attribute() {
+        use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior};
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p1;
+        use crate::EntityRef;
+
+        let mut k = Kernel::default();
+        let n = 100usize;
+        let mut breps = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut b = create_box(
+                &mut k,
+                Point3::new((i as f64) * 20.0, 0.0, 0.0),
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            for (fi, f) in p1::faces(&b, None).unwrap().into_iter().enumerate() {
+                b.add_attribute(
+                    EntityRef::Face(f),
+                    Attribute::with_value(
+                        ids::USER_1,
+                        Behavior::Copy,
+                        AttributeValue::Long((i as i64) * 100 + fi as i64),
+                    ),
+                )
+                .unwrap();
+            }
+            for (ei, e) in p1::edges(&b, None).unwrap().into_iter().enumerate() {
+                b.add_attribute(
+                    EntityRef::Edge(e),
+                    Attribute::with_value(
+                        ids::USER_1,
+                        Behavior::Copy,
+                        AttributeValue::Long(100_000 + (i as i64) * 100 + ei as i64),
+                    ),
+                )
+                .unwrap();
+            }
+            breps.push(b);
+        }
+        let merged = combine_disjoint_breps(&mut k, breps).unwrap();
+        let faces = p1::faces(&merged, None).unwrap();
+        let edges = p1::edges(&merged, None).unwrap();
+        assert_eq!(faces.len(), n * 6);
+        assert_eq!(edges.len(), n * 12);
+        let mut face_tags: Vec<i64> = faces
+            .iter()
+            .map(|&f| {
+                merged
+                    .entity_attributes(EntityRef::Face(f))
+                    .into_iter()
+                    .find(|(_, a)| a.attribute_id() == ids::USER_1)
+                    .and_then(|(_, a)| match a.value() {
+                        AttributeValue::Long(v) => Some(*v),
+                        _ => None,
+                    })
+                    .expect("missing face attribute")
+            })
+            .collect();
+        face_tags.sort_unstable();
+        let expected_faces: Vec<i64> = (0..n)
+            .flat_map(|i| (0..6).map(move |fi| (i as i64) * 100 + fi as i64))
+            .collect();
+        assert_eq!(face_tags, expected_faces);
+
+        let mut edge_tags: Vec<i64> = edges
+            .iter()
+            .map(|&e| {
+                merged
+                    .entity_attributes(EntityRef::Edge(e))
+                    .into_iter()
+                    .find(|(_, a)| a.attribute_id() == ids::USER_1)
+                    .and_then(|(_, a)| match a.value() {
+                        AttributeValue::Long(v) => Some(*v),
+                        _ => None,
+                    })
+                    .expect("missing edge attribute")
+            })
+            .collect();
+        edge_tags.sort_unstable();
+        let expected_edges: Vec<i64> = (0..n)
+            .flat_map(|i| (0..12).map(move |ei| 100_000 + (i as i64) * 100 + ei as i64))
+            .collect();
+        assert_eq!(edge_tags, expected_edges);
     }
 }

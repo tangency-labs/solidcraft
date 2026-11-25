@@ -324,27 +324,8 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
     let d = run_taking("union_all", &operands(&bodies), |k| {
         let mut held: Vec<(Brep, Proof)> = bodies.iter().map(take).collect();
         let expect = expect_of(k, &mut held, contract)?;
-        let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
-        while level.len() > 1 {
-            let mut next = Vec::new();
-            let mut it = level.into_iter();
-            while let Some(a) = it.next() {
-                match it.next() {
-                    Some(mut b) => {
-                        let mut a = a;
-                        matched_tolerances(k, &mut a, &mut b)?;
-                        let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
-                        if contract == Contract::Proved {
-                            after_boolean(k, &mut r)?;
-                        }
-                        next.push(r);
-                    }
-                    None => next.push(a),
-                }
-            }
-            level = next;
-        }
-        match level.pop() {
+        let breps: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
+        match sm::union_all_breps(k, breps, contract == Contract::Proved)? {
             Some(r) => finished(k, r, expect, contract),
             None => Ok(Done::Empty),
         }
