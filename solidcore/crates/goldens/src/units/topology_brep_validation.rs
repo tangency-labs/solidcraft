@@ -462,7 +462,7 @@ impl UnitDiff for Runner {
         let run =
             validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
         let status = match run {
-            Ok(x) => x,
+            Ok(x) => crate::output::pointer_check_status(x),
             Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         };
         output(&rust_protocol(&b, status, &reports)?)

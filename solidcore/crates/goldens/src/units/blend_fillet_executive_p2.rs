@@ -1829,7 +1829,7 @@ fn exec(sub: usize, n: usize, bx: &BoxIn) -> Result<Output, HarnessError> {
             Err(e) => return Ok(error_output(&e)),
         };
         let Some([e1, e2]) = split.edges else {
-            return Ok(values_output(vec![f64::from(split.status())]));
+            return Ok(values_output(vec![f64::from(crate::output::split_edge_status(split))]));
         };
         {
             let b = access

@@ -140,7 +140,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
@@ -175,8 +175,7 @@ use super::p1::{
 };
 use super::p2::{
     add_span_with_policy, add_to_curve_with_policy, flush_curve_with_policy, seam_uv_tols,
-    BoundaryPolicy, DropOffset, SM_ERR_BAD_SURFACE_POINT, SM_ERR_INVALID_INPUT,
-    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
+    BoundaryPolicy, DropOffset, PointOutcome, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -398,7 +397,7 @@ impl SeamWrap {
 
     /// Classifies `pt` via [`Self::exit_crossing`] and re-evaluates [`DropPt::set_properties`]
     /// at the snapped `arriving_uv` before accepting it. Returns `Ok(None)` if the stored UV
-    /// fails `SM_SUCCESS`, lands on a pole, or violates the normal-line gate
+    /// does not drop ([`PointOutcome::Success`]), lands on a pole, or violates the normal-line gate
     /// `max(1, drop_to_surf) * approx_tol_3d`.
     #[allow(clippy::too_many_arguments)]
     fn snapped_exit_crossing(
@@ -435,7 +434,7 @@ impl SeamWrap {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(e) => status_of(&e),
         };
-        if ret != SM_SUCCESS || truthy(snapped.on_pole) {
+        if !ret.is_success() || truthy(snapped.on_pole) {
             return Ok(None);
         }
         snapped.crv_pd[1] = -snapped.crv_pd[1];
@@ -1034,7 +1033,7 @@ fn seam_crossing(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(e) => status_of(&e),
     };
-    if ret == SM_ERR {
+    if ret == PointOutcome::Failed {
         return Ok(None);
     }
     crossing.crv_pd[1] = -crossing.crv_pd[1];
@@ -1049,14 +1048,12 @@ fn seam_crossing(
         }
     }
 
-    let ok = ret == SM_SUCCESS
-        || (keep_all_drop_curves
-            && (ret == SM_ERR_NOT_CONVERGING || ret == SM_ERR_NOT_WITHIN_TOLERANCE)
-            && crossing.approx_dev < approx_tol_3d);
+    let ok = ret.is_success()
+        || (keep_all_drop_curves && ret.is_approximate() && crossing.approx_dev < approx_tol_3d);
     if !ok || truthy(crossing.on_pole) {
         return Ok(None);
     }
-    if ret != SM_SUCCESS {
+    if !ret.is_success() {
         crossing.good_drop = Some(true);
     }
     // Pin exact arriving seam coordinate and mark the transverse crossing as leaving so
@@ -1118,7 +1115,7 @@ fn seam_crossing(
 /// `None` when the surface is creased where the curve crosses the line (the drop point
 /// there is not put on it), when the bracket closes without a drop point on the line
 /// (the drop jumps across it), or when the point on the line does not drop
-/// ([`SM_SUCCESS`]) as a split point has to: the span is then left to the accuracy test,
+/// ([`PointOutcome::Success`]) as a split point has to: the span is then left to the accuracy test,
 /// as upstream.
 #[allow(clippy::too_many_arguments)] // `GetNextPoint`'s, the span and the line
 fn knot_line_crossing(
@@ -1172,11 +1169,11 @@ fn knot_line_crossing(
             on_v_line
         };
         if on_line {
-            return Ok((status == SM_SUCCESS).then_some(point));
+            return Ok(status.is_success().then_some(point));
         }
         // (an end that was not dropped has no UV point; one within the parameter zero
         // of the line that was not put on it is on a crease of the surface)
-        if status == SM_ERR_BAD_SURFACE_POINT
+        if status == PointOutcome::BadSurfacePoint
             || !off.is_finite()
             || offset.knot_lines().is_within_zero(line, point.uv_pd[0])
         {
@@ -1200,15 +1197,17 @@ fn knot_line_crossing(
     Ok(None)
 }
 
-/// The status upstream stores for a failed `GetNextPoint` (see the module notes).
-fn status_of(e: &SolidError) -> i32 {
+/// The outcome upstream stores for a failed `GetNextPoint` (see the module notes).
+fn status_of(e: &SolidError) -> PointOutcome {
     if let Some(code) = e.failed_routine_status() {
-        return code;
+        return PointOutcome::from_status(code);
     }
     match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        SolidError::NotConverged { .. } => SM_ERR_NOT_CONVERGING,
-        _ => SM_ERR,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
+            PointOutcome::InvalidInput
+        }
+        SolidError::NotConverged { .. } => PointOutcome::NotConverging,
+        _ => PointOutcome::Failed,
     }
 }
 
@@ -1219,11 +1218,15 @@ const fn truthy(b: Option<bool>) -> bool {
 
 /// A successful drop may still leave the surface or hit a pole in the
 /// curve's interior. Initial and restored endpoints obey the same rule.
-fn checked_endpoint_status(status: i32, end: &DropPt, interval: &Extent1d) -> i32 {
+fn checked_endpoint_status(
+    status: PointOutcome,
+    end: &DropPt,
+    interval: &Extent1d,
+) -> PointOutcome {
     if (truthy(end.on_pole) || truthy(end.leaving_domain))
         && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
     {
-        SM_ERR_OUTSIDE_OF_DOMAIN
+        PointOutcome::OutsideOfDomain
     } else {
         status
     }
@@ -1234,19 +1237,16 @@ fn checked_endpoint_status(status: i32, end: &DropPt, interval: &Extent1d) -> i3
 /// solve failure may be kept only under the caller's existing approximation
 /// policy; an interior pole or domain exit is never recovered this way.
 fn accepted_endpoint_status(
-    status: i32,
+    status: PointOutcome,
     end: &mut DropPt,
     interval: &Extent1d,
     keep_all_drop_curves: bool,
     approx_tol_3d: f64,
-) -> i32 {
+) -> PointOutcome {
     let status = checked_endpoint_status(status, end, interval);
-    if (status == SM_ERR_NOT_CONVERGING || status == SM_ERR_NOT_WITHIN_TOLERANCE)
-        && keep_all_drop_curves
-        && end.approx_dev < approx_tol_3d
-    {
+    if status.is_approximate() && keep_all_drop_curves && end.approx_dev < approx_tol_3d {
         end.good_drop = Some(true);
-        SM_SUCCESS
+        PointOutcome::Success
     } else {
         status
     }
@@ -1256,7 +1256,7 @@ fn accepted_endpoint_status(
 /// rule as the initial endpoint's, so a redrop that lands on an interior pole or leaves the
 /// domain is a failed redrop (the caller keeps the saved point), however its solve ended.
 fn accepted_redrop(
-    status: i32,
+    status: PointOutcome,
     mut redrop: DropPt,
     interval: &Extent1d,
     keep_all_drop_curves: bool,
@@ -1269,7 +1269,7 @@ fn accepted_redrop(
         keep_all_drop_curves,
         approx_tol_3d,
     );
-    (status == SM_SUCCESS).then_some(redrop)
+    status.is_success().then_some(redrop)
 }
 
 /// An `SmBoolean` argument of `SmDropCurveFail::Set`.
@@ -2541,7 +2541,7 @@ impl Surface {
                         Err(e) => status_of(&e),
                     };
                     let mut ret_status = raw_status;
-                    if ret_status == SM_SUCCESS {
+                    if ret_status == PointOutcome::Success {
                         if end.drop_to_surf.abs() > max_drop_to_surf {
                             max_drop_to_surf = end.drop_to_surf.abs();
                         }
@@ -2568,9 +2568,9 @@ impl Surface {
                     // opposite seam side.
                     let mut end_crossed_seam: Option<CrossedSeam> = None;
                     if seam_wrap.any() {
-                        if raw_status == SM_SUCCESS
-                            && (ret_status == SM_ERR_OUTSIDE_OF_DOMAIN
-                                || (ret_status == SM_SUCCESS
+                        if raw_status == PointOutcome::Success
+                            && (ret_status == PointOutcome::OutsideOfDomain
+                                || (ret_status == PointOutcome::Success
                                     && end.on_boundary == Some(true)
                                     && !s_interval.is_value_on_boundary(end.t, EFF_ZERO).0))
                         {
@@ -2594,9 +2594,9 @@ impl Surface {
                                 if end.approx_dev > max_approx_dev {
                                     max_approx_dev = end.approx_dev;
                                 }
-                                ret_status = SM_SUCCESS;
+                                ret_status = PointOutcome::Success;
                             }
-                        } else if ret_status == SM_ERR_OUTSIDE_OF_DOMAIN {
+                        } else if ret_status == PointOutcome::OutsideOfDomain {
                             if let Some(axis) = seam_wrap.jumped_axis(start.uv_pd[0], end.uv_pd[0])
                             {
                                 if let Some((crossing, axes)) = seam_crossing(
@@ -2622,13 +2622,13 @@ impl Surface {
                                     if end.approx_dev > max_approx_dev {
                                         max_approx_dev = end.approx_dev;
                                     }
-                                    ret_status = SM_SUCCESS;
+                                    ret_status = PointOutcome::Success;
                                 }
                             }
                         }
                     }
 
-                    if ret_status != SM_SUCCESS {
+                    if ret_status != PointOutcome::Success {
                         // (not upstream: a first span left out is added back before the end
                         // point's status is acted on, so the curve is the one the trace built
                         // without the left-out span: the end shortcut below extends its last
@@ -2654,7 +2654,7 @@ impl Surface {
                         }
 
                         // walked off the edge of the surface close to the curve end
-                        if ret_status == SM_ERR_OUTSIDE_OF_DOMAIN
+                        if ret_status == PointOutcome::OutsideOfDomain
                             && start.on_boundary == Some(true)
                             && start.leaving_domain == Some(true)
                             && knots.len() > 1
@@ -2706,9 +2706,7 @@ impl Surface {
                         }
 
                         // a drop point not quite on the surface normal line
-                        if ret_status == SM_ERR_NOT_CONVERGING
-                            || ret_status == SM_ERR_NOT_WITHIN_TOLERANCE
-                        {
+                        if ret_status.is_approximate() {
                             fs.set(
                                 &mut record,
                                 3,
@@ -2727,12 +2725,12 @@ impl Surface {
                         }
 
                         // still failing: give up on this start point
-                        if ret_status != SM_SUCCESS {
+                        if ret_status != PointOutcome::Success {
                             let path = path_of(record.as_ref());
                             fs.set(
                                 &mut record,
                                 3,
-                                ret_status,
+                                ret_status.status(),
                                 path,
                                 &FailOut {
                                     rd_max_drop: out.max_drop_to_surf,
@@ -2826,7 +2824,7 @@ impl Surface {
                                 end = accepted;
                                 saved_crossed_seam = None;
                                 if seam_wrap.any()
-                                    && status == SM_SUCCESS
+                                    && status == PointOutcome::Success
                                     && end.on_boundary == Some(true)
                                     && !s_interval.is_value_on_boundary(end.t, EFF_ZERO).0
                                 {
@@ -2848,7 +2846,7 @@ impl Surface {
                                         saved_crossed_seam = Some(axes);
                                     }
                                 }
-                            } else if status == SM_SUCCESS && seam_wrap.any() {
+                            } else if status == PointOutcome::Success && seam_wrap.any() {
                                 if let Some((snapped_end, axes)) = seam_wrap.snapped_exit_crossing(
                                     k,
                                     this,
@@ -3334,7 +3332,7 @@ impl Surface {
                                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                                 Err(e) => status_of(&e),
                             };
-                            if ret_status == SM_SUCCESS {
+                            if ret_status == PointOutcome::Success {
                                 if seam_wrap.any()
                                     && end.on_boundary == Some(true)
                                     && !s_interval.is_value_on_boundary(end.t, EFF_ZERO).0
@@ -3360,7 +3358,7 @@ impl Surface {
                                 found_good_one = true;
                                 break;
                             }
-                            if ret_status == SM_ERR_OUTSIDE_OF_DOMAIN && seam_wrap.any() {
+                            if ret_status == PointOutcome::OutsideOfDomain && seam_wrap.any() {
                                 if let Some(axis) =
                                     seam_wrap.jumped_axis(start.uv_pd[0], end.uv_pd[0])
                                 {
@@ -3381,7 +3379,7 @@ impl Surface {
                                     )? {
                                         end = crossing;
                                         split_crossed_seam = Some(axes);
-                                        ret_status = SM_SUCCESS;
+                                        ret_status = PointOutcome::Success;
                                         found_good_one = true;
                                         break;
                                     }
@@ -3435,7 +3433,7 @@ impl Surface {
                         fs.set(
                             &mut record,
                             3,
-                            ret_status,
+                            ret_status.status(),
                             span_failure_path,
                             &FailOut {
                                 rd_max_drop: out.max_drop_to_surf,
@@ -3592,6 +3590,7 @@ impl Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
     use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -3715,7 +3714,10 @@ mod tests {
     #[test]
     fn restored_endpoints_keep_the_initial_approximation_recovery_policy() {
         let interval = Extent1d::from_min_max(0.0, 1.0);
-        for code in [SM_ERR_NOT_CONVERGING, SM_ERR_NOT_WITHIN_TOLERANCE] {
+        for code in [
+            PointOutcome::NotConverging,
+            PointOutcome::NotWithinTolerance,
+        ] {
             for keep_all in [false, true] {
                 let mut endpoint = DropPt::new(0.5, Some(false));
                 endpoint.on_pole = Some(false);
@@ -3723,7 +3725,11 @@ mod tests {
                 endpoint.approx_dev = 0.5e-4;
                 assert_eq!(
                     accepted_endpoint_status(code, &mut endpoint, &interval, keep_all, 1e-4,),
-                    if keep_all { SM_SUCCESS } else { code }
+                    if keep_all {
+                        PointOutcome::Success
+                    } else {
+                        code
+                    }
                 );
                 assert_eq!(endpoint.good_drop == Some(true), keep_all);
                 endpoint.good_drop = Some(false);
@@ -3741,7 +3747,7 @@ mod tests {
                 endpoint.approx_dev = 0.0;
                 assert_eq!(
                     accepted_endpoint_status(code, &mut endpoint, &interval, true, 1e-4,),
-                    SM_ERR_OUTSIDE_OF_DOMAIN,
+                    PointOutcome::OutsideOfDomain,
                     "approximation recovery cannot accept an interior pole or exit"
                 );
                 assert_ne!(endpoint.good_drop, Some(true));
@@ -3753,19 +3759,19 @@ mod tests {
     fn successful_redrops_reject_interior_poles_and_domain_exits() {
         let interval = Extent1d::from_min_max(0.0, 1.0);
         for (pole, leaving, expected) in [
-            (Some(false), Some(false), SM_SUCCESS),
-            (Some(true), Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
-            (Some(false), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
-            (Some(true), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
-            (None, Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
-            (Some(false), None, SM_ERR_OUTSIDE_OF_DOMAIN),
-            (None, None, SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(false), Some(false), PointOutcome::Success),
+            (Some(true), Some(false), PointOutcome::OutsideOfDomain),
+            (Some(false), Some(true), PointOutcome::OutsideOfDomain),
+            (Some(true), Some(true), PointOutcome::OutsideOfDomain),
+            (None, Some(false), PointOutcome::OutsideOfDomain),
+            (Some(false), None, PointOutcome::OutsideOfDomain),
+            (None, None, PointOutcome::OutsideOfDomain),
         ] {
             let mut end = DropPt::new(0.5, Some(false));
             end.on_pole = pole;
             end.leaving_domain = leaving;
             assert_eq!(
-                checked_endpoint_status(SM_SUCCESS, &end, &interval),
+                checked_endpoint_status(PointOutcome::Success, &end, &interval),
                 expected
             );
             // Reaching a pole or leaving at a curve endpoint remains allowed,
@@ -3773,8 +3779,8 @@ mod tests {
             for t in [0.0, EFF_ZERO / 2.0, 1.0] {
                 end.t = t;
                 assert_eq!(
-                    checked_endpoint_status(SM_SUCCESS, &end, &interval),
-                    SM_SUCCESS
+                    checked_endpoint_status(PointOutcome::Success, &end, &interval),
+                    PointOutcome::Success
                 );
             }
         }
@@ -3783,8 +3789,8 @@ mod tests {
         end.on_pole = Some(false);
         end.leaving_domain = Some(false);
         assert_eq!(
-            checked_endpoint_status(SM_ERR_NOT_CONVERGING, &end, &interval),
-            SM_ERR_NOT_CONVERGING
+            checked_endpoint_status(PointOutcome::NotConverging, &end, &interval),
+            PointOutcome::NotConverging
         );
     }
 
@@ -3800,7 +3806,8 @@ mod tests {
             end.leaving_domain = Some(leaving);
             end
         };
-        let take = |end: DropPt| accepted_redrop(SM_SUCCESS, end, &interval, false, 1e-4);
+        let take =
+            |end: DropPt| accepted_redrop(PointOutcome::Success, end, &interval, false, 1e-4);
         let ordinary = take(redrop(0.5, false, false)).expect("an ordinary redrop is taken");
         assert_eq!(ordinary.t, 0.5);
         assert!(take(redrop(0.5, true, false)).is_none());
@@ -3808,7 +3815,7 @@ mod tests {
         assert!(take(redrop(1.0, true, true)).is_some());
         // the approximation recovery never takes an interior pole either
         assert!(accepted_redrop(
-            SM_ERR_NOT_CONVERGING,
+            PointOutcome::NotConverging,
             redrop(0.5, true, false),
             &interval,
             true,
@@ -4684,7 +4691,7 @@ mod tests {
         let status = start
             .set_properties(&k, &surface, &mut offset, SS_NONE, tol, &dom, false)
             .unwrap();
-        assert_eq!(status, SM_SUCCESS);
+        assert_eq!(status, PointOutcome::Success);
 
         let crossing = seam_crossing(
             &k,

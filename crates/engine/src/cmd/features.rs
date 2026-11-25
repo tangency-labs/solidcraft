@@ -1933,19 +1933,24 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, &p, kind)
 }
 
-/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
-/// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
+/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis (also
+/// as saved: {type: sketch_axis, axis: x|y}), a world axis (also as saved: {type: world, axis:
+/// X|Y|Z}), a construction axis by name
 /// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
 /// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
 /// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
-pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
+pub(crate) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
     if let Some((geo, ..)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok(AxisRef::Model { geo });
     }
     if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
+        if str_(o, "type") == Some("sketch_axis") {
+            let axis = str_(o, "axis").filter(|a| matches!(*a, "x" | "y")).ok_or_else(|| bad(cmd, "sketch axis requires `axis` to be x or y"))?;
+            return Ok(AxisRef::SketchAxis { axis: axis.into() });
+        }
         if str_(o, "type") == Some("world") {
             let axis =
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
@@ -5502,7 +5507,16 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     };
     check_expr(s, &factor, Kind::Unitless, cmd, "factor")?;
     let origin = p.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), factor, factors })
+    // What it scales about, found again each time the design updates: `"centre"` (the bodies'
+    // centre) or a reference (a vertex, face, edge or sketch point), which follows the model. A
+    // fixed `origin` stays where it is.
+    let about = match p.get("about") {
+        None | Some(Value::Null) => None,
+        Some(_) if p.get("origin").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `origin` or `about`, not both")),
+        Some(Value::String(c)) if c == "centre" || c == "center" => Some(solidcraft_doc::ScaleAbout::Centre),
+        Some(v) => Some(solidcraft_doc::ScaleAbout::Pick { at: super::construct::geo(s, Some(v), cmd, "about")? }),
+    };
+    add_feature(s, p, FeatureKind::Scale { bodies: bodies.into_iter().map(BodyName).collect(), origin: Position(origin), about, factor, factors })
 }
 
 fn delete_face(s: &mut Session, p: &Value) -> Result<Value> {

@@ -297,6 +297,71 @@ fn is_harness_routine_failure(e: &SolidError) -> bool {
         && matches!(e, SolidError::Failed(f) if matches!(f.reason, Reason::Geom(GeomFailure::CallFailed { .. })))
 }
 
+/// The upstream status number the goldens record for a pointer check: `SM_SUCCESS` (1000)
+/// for `PointerCheck::Passed`, `SM_ERR` (1001) for `PointerCheck::Failed` and the early
+/// boolean return (0) for `PointerCheck::StoppedEarly`, as `ValidatePointers` returned them,
+/// so the recorded rows stay as they are. The golden re-bless (#21874) replaces this
+/// conversion with the typed value.
+#[must_use]
+pub fn pointer_check_status(c: solidcore::topology::brep::validation::PointerCheck) -> i32 {
+    use solidcore::topology::brep::validation::PointerCheck;
+    match c {
+        PointerCheck::Passed => solidcore::error::SM_SUCCESS,
+        PointerCheck::Failed => solidcore::error::SM_ERR,
+        PointerCheck::StoppedEarly => 0,
+    }
+}
+
+/// The upstream status number the goldens record for a point-solve step
+/// (`FindNextStep`): 0 for a step that did not fail, `SM_ERR_NOT_CONVERGING` (1022) for a
+/// failed `TerminationReason::UnableToConverge` and `SM_ERR_OUTSIDE_OF_DOMAIN` (1020) for
+/// a failed `TerminationReason::OutOfBounds`, the only failures the step returns, so the
+/// recorded rows stay as they are. The golden re-bless (#21874) replaces this conversion with
+/// the typed value.
+#[must_use]
+pub fn next_step_status(step: solidcore::surface::surface_point_solve::p3::NextStep) -> i32 {
+    use solidcore::geom::local_solve_nd::TerminationReason;
+    match (step.failed, step.reason) {
+        (false, _) => 0,
+        (true, TerminationReason::OutOfBounds) => solidcore::error::SM_ERR_OUTSIDE_OF_DOMAIN,
+        (true, _) => solidcore::error::SM_ERR_NOT_CONVERGING,
+    }
+}
+
+/// The upstream status number the goldens record for an arc-length parameter
+/// (`FindParameterAtArcLength`): 0 when the iteration converged, `SM_ERR_NOT_CONVERGING`
+/// (1022) when it did not, so the recorded rows stay as they are. The golden re-bless
+/// (#21874) replaces this conversion with the typed value.
+#[must_use]
+pub fn arc_length_status(r: &solidcore::curve::curve::p3::ArcLengthParameter) -> i32 {
+    if r.converged {
+        0
+    } else {
+        solidcore::error::SM_ERR_NOT_CONVERGING
+    }
+}
+
+/// The upstream status number the goldens record for `MakeVertexSplitEdge`: 0 when it split
+/// the edge, `SM_ERR` (1001) when it did not, so the recorded rows stay as they are. The
+/// golden re-bless (#21874) replaces this conversion with the typed value.
+#[must_use]
+pub fn split_edge_status(split: solidcore::topology::brep::p9::SplitEdgeOutput) -> i32 {
+    if split.split {
+        0
+    } else {
+        solidcore::error::SM_ERR
+    }
+}
+
+/// The upstream status number the goldens record for `SetProperties` and `GetNextPoint`:
+/// the outcome's own status (`SM_SUCCESS` 1000, `SM_ERR` 1001, ..., or the number an
+/// `Other` keeps), so the recorded rows stay as they are. The golden re-bless (#21874)
+/// replaces this conversion with the typed value.
+#[must_use]
+pub fn point_outcome_status(o: solidcore::intersect::surface_drop_lib::p2::PointOutcome) -> i32 {
+    o.status()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{blend_status, float_bits};

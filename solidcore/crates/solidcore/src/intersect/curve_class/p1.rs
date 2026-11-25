@@ -3293,7 +3293,11 @@ fn surface_local_point_solve(
 fn surface_approximate_size(k: &Kernel, surface: &Surface) -> Result<Vec2> {
     match surface.approximate_size(k, None) {
         Ok(size) => Ok(size),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(Vec2::ZERO),
     }
 }

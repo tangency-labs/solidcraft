@@ -50,7 +50,7 @@ use solidcore::blend::blend_corner::separate_ends::{
 use solidcore::blend::blend_corner::{BlendCornerEvent, TurnChoice};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
-use solidcore::blend::definition_check::BlendFaceLog;
+use solidcore::blend::definition_check::{BlendFaceKind, BlendFaceLog, MadeBlendFace};
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
 };
@@ -83,6 +83,7 @@ use crate::session::{answer, measure_body, with_body};
 use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
+mod exact_round;
 mod room;
 pub use room::{band_room, BandRoom, EndRoom, Room};
 
@@ -1898,6 +1899,31 @@ fn blend_on_body(
             }));
         }
     }
+    // constant rounds between planes, built in closed form ([`exact_round`]); anything it does
+    // not cover, or a result that does not finish, goes to the fillet sessions as before
+    if kind == Blend::Round && turn == Turn::Mitre && back.is_empty() && corners == Corners::Filled
+    {
+        if let Some((rounded, made)) = exact_round::round_on(k, b, &picked, each)? {
+            if let Ok((r, _)) = finish_under(k, rounded, expect, contract)? {
+                *b = r;
+                if let Some(log) = k.blend_face_log.as_mut() {
+                    log.sessions.push(
+                        made.into_iter()
+                            .map(|face| MadeBlendFace {
+                                face,
+                                kind: BlendFaceKind::ExactRound,
+                            })
+                            .collect(),
+                    );
+                }
+                return Ok(Ok(Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }));
+            }
+        }
+    }
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
         Blend::Curvature => |s| Section::Curvature(s),
@@ -3039,7 +3065,7 @@ fn chamfer_sides_impl(
                         why,
                     },
                 ) => Error::TooLarge {
-                    size: crate::import_geometry::scale_value(distance, size),
+                    size: solidcore::prism::transform::scale_value(distance, size),
                     kind: FitKind::Distance,
                     at,
                     face,

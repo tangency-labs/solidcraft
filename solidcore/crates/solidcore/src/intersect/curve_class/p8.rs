@@ -152,6 +152,12 @@ impl<G: ClassGeometry<O>, O: ClassObject> ClassGeometry<O> for WithTemporaries<'
             None => self.inner.curve(o),
         }
     }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        if self.curves.iter().any(|(h, _)| *h == o) {
+            return None;
+        }
+        self.inner.intersect_curve(o)
+    }
     fn surface(&self, o: O) -> Option<&Surface> {
         match self.surfaces.iter().find(|(h, _)| *h == o) {
             Some((_, s)) => Some(*s),

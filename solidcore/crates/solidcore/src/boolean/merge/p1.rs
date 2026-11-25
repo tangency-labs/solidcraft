@@ -42,13 +42,15 @@
 //! Not upstream (WR-304, #1120): after each edge removal `boolean_post_process` also
 //! checks the merged face's edges that have it on both sides (slits), skipping any a
 //! later removal deleted.
-//! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
+//! WR-459 (#423; the default since its flag was retired, #17169): the edges in
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 //! With that keep (WR-602, the fork's tangency-labs/smlib@cac11ea, the default since its
 //! flag was retired): of those, an edge with one face on both sides (a slit) is checked
 //! all the same, and the kept-faces test needs two faces. Not the fork's (#15768): a face a
 //! merge makes of a kept face is kept, whichever of the two ids it keeps, and the fillet
-//! passes as kept edges only the input edges it left whole (`kept_edges`).
+//! passes as kept edges only the input edges it left whole (`kept_edges`), and as kept
+//! faces each face carrying its mark of a target face (#17169), whichever piece of a split
+//! face kept the id.
 //! Not upstream (#15418): `boolean_post_process` merges two faces on different surfaces only
 //! where no tolerance has to grow (`edge::is_topological_without_growth`: a plane covers
 //! within upstream's plane tolerance, anything else within a tenth of the smaller face
@@ -575,10 +577,10 @@ pub struct CleanupRelations {
     pub vertices: Vec<VertexId>,
     /// Shared live mates; deleted entities must be removed by the intersector.
     pub mates: Relations,
-    /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
-    /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
-    /// fillet's target, the input edges it left whole), and any edge between two kept
-    /// faces, or faces merged from them. Empty otherwise.
+    /// WR-459: the edges and faces the clean-up leaves alone (the fork's
+    /// `m_sPostProcessKeptEdges`/`Faces`: a fillet's target, the input edges it left whole
+    /// and the faces that are its faces or pieces of them), and any edge between two kept
+    /// faces, or faces merged from them. Empty for the boolean's own clean-up.
     pub kept_edges: BTreeSet<EdgeId>,
     /// See [`CleanupRelations::kept_edges`].
     pub kept_faces: BTreeSet<FaceId>,

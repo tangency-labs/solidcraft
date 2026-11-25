@@ -277,6 +277,13 @@ pub struct OffsetExecutive {
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// Source uses whose paired edge curves were successfully installed.
     pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the source uses whose mated offset reached no neighbour's offset at
+    /// either end (the trim took the drop of both its vertices): where both edges of a
+    /// face of two edges are such, the face's offset is empty (`eliminate_empty_lenses`).
+    pub(super) unreached_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original faces of two edges whose offset is empty, their
+    /// neighbours' offsets mated across them (`eliminate_empty_lenses`).
+    pub(super) eliminated_lenses: BTreeSet<FaceId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
@@ -341,6 +348,8 @@ impl OffsetExecutive {
             wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             mated_edgeuses: BTreeSet::new(),
+            unreached_edgeuses: BTreeSet::new(),
+            eliminated_lenses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
         }
@@ -700,6 +709,7 @@ impl OffsetExecutive {
         self.crossing_edgeuses.clear();
         self.periodic_boundary_ends.clear();
         self.mated_edgeuses.clear();
+        self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
     }
 

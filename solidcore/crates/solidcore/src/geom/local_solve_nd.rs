@@ -276,7 +276,11 @@ pub struct NdSolution {
 fn eval_outcome(r: Result<bool>) -> Result<Option<bool>> {
     match r {
         Ok(found) => Ok(Some(found)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }

@@ -390,9 +390,13 @@ struct SessionObjects<'target> {
     /// session took them, put back by `Drop` if handing the session's back fails.
     attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
-    /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
-    /// kept by the clean-up.
-    cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-459: the target's edges, each with its end vertices, before filleting, kept by
+    /// the clean-up.
+    cleanup_kept: Option<CleanupKeptEdges>,
+    /// WR-459 (#17169): the marks ([`ids::FILLET_TARGET_FACE`]) the session set on the
+    /// target's faces before filleting, which the clean-up reads to leave the target's own
+    /// faces, and which are removed when filleting ends.
+    cleanup_face_marks: Vec<AttributeHandle>,
     /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
     /// open result must keep to be kept ([`finish::OpenInput`]).
     open_input: finish::OpenInput,
@@ -1848,6 +1852,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                cleanup_face_marks: Vec::new(),
                 open_input: finish::OpenInput::default(),
                 vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),

@@ -230,7 +230,7 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 /// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
-fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),

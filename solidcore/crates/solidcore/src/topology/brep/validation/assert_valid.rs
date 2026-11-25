@@ -59,7 +59,9 @@ mod vertex;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{object_info, validate_pointers_excluding, validate_pointers_traced, Object, SUCCESS};
+use super::{
+    object_info, validate_pointers_excluding, validate_pointers_traced, Object, PointerCheck,
+};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
@@ -133,9 +135,8 @@ pub enum ValidityScope {
 /// [`BrepCheck::warnings`] lists them.
 #[derive(Debug, Clone)]
 pub struct BrepCheck {
-    /// `ValidatePointers`' native status (1000 success, 1001 a required pointer
-    /// failed, 0 an early boolean return).
-    pub pointers_status: i32,
+    /// What `ValidatePointers` concluded.
+    pub pointers: PointerCheck,
     /// The pointer check's reports, in native order.
     pub pointer_reports: AssertArray,
     /// `AssertValid`'s return; `None` when it was skipped because the pointer check
@@ -183,8 +184,8 @@ impl BrepCheck {
     /// One line per failure (warnings left out), as the capi formats them:
     /// `<reporting type>::Test #<n> <name>: <message> [owner <owner type>]` (without the
     /// owner tag when the report names no owner type), plus
-    /// `SmBrep::ValidatePointers failed with status N` when the pointer check failed
-    /// without a report, `AssertValid skipped: ValidatePointers failed` when it was
+    /// `SmBrep::ValidatePointers failed without a report` when the pointer check did not
+    /// pass and reported no failure, `AssertValid skipped: ValidatePointers failed` when it was
     /// skipped, and `SmBrep::AssertValid failed without a report` when `AssertValid`
     /// returned `false` without reporting a failure.
     #[must_use]
@@ -193,8 +194,8 @@ impl BrepCheck {
             .into_iter()
             .map(|(class, report)| match (class, report) {
                 (_, Some(r)) => report_line(r),
-                (FailureClass::PointersStatus(status), None) => {
-                    format!("SmBrep::ValidatePointers failed with status {status}")
+                (FailureClass::Pointers(_), None) => {
+                    "SmBrep::ValidatePointers failed without a report".to_string()
                 }
                 (FailureClass::AssertValidSkipped, None) => {
                     "AssertValid skipped: ValidatePointers failed".to_string()
@@ -242,7 +243,7 @@ impl BrepCheck {
                 .failures()
                 .find(|r| FailureClass::of(r) == class)
                 .map_or("the edited B-rep failed validation", |r| r.name),
-            FailureClass::PointersStatus(_) => "ValidatePointers failed",
+            FailureClass::Pointers(_) => "ValidatePointers failed",
             FailureClass::AssertValidSkipped => {
                 "AssertValid was skipped after ValidatePointers failed"
             }
@@ -255,8 +256,8 @@ impl BrepCheck {
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
         let pointer_failures = self.pointer_reports.reports().iter().any(is_failure);
-        if self.pointers_status != SUCCESS && !pointer_failures {
-            out.push((FailureClass::PointersStatus(self.pointers_status), None));
+        if !self.pointers.is_passed() && !pointer_failures {
+            out.push((FailureClass::Pointers(self.pointers), None));
         }
         out.extend(
             self.pointer_reports
@@ -300,8 +301,8 @@ pub enum FailureClass {
         /// [`AssertReport::owner_type`].
         owner_type: i64,
     },
-    /// `ValidatePointers` failed with this status and no report.
-    PointersStatus(i32),
+    /// `ValidatePointers` did not pass ([`PointerCheck`]) and reported no failure.
+    Pointers(PointerCheck),
     /// `AssertValid` was skipped: `ValidatePointers` reported a failure.
     AssertValidSkipped,
     /// `AssertValid` failed without a report.
@@ -459,7 +460,7 @@ fn check_with_keys_counted(
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
-    let (pointers_status, exclusion_failed) = validate_pointers_traced(
+    let (pointers, exclusion_failed) = validate_pointers_traced(
         k,
         b,
         Some(&mut pointer_reports),
@@ -470,7 +471,7 @@ fn check_with_keys_counted(
         false,
     )?;
     let pointers_repeat = !(k.memoize_curve_caches
-        && pointers_status == SUCCESS
+        && pointers.is_passed()
         && !exclusion_failed
         && faces_whole
         && !pointer_reports.reports().iter().any(is_failure)
@@ -508,7 +509,7 @@ fn check_with_keys_counted(
     let passes = usize::from(assert_valid.is_some() && pointers_repeat);
     Ok((
         BrepCheck {
-            pointers_status,
+            pointers,
             pointer_reports,
             assert_valid,
             reports,
@@ -660,8 +661,8 @@ pub fn validate_and_update_tolerances(
         level,
         stitched: false,
     };
-    let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
-    if status != SUCCESS {
+    let (ok, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
+    if !ok {
         return Err(SolidError::topology(
             "topology::brep::validation::validate_and_update_tolerances",
             crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
@@ -926,7 +927,7 @@ mod tests {
             .unwrap(),
         );
         BrepCheck {
-            pointers_status: SUCCESS,
+            pointers: PointerCheck::Passed,
             pointer_reports: AssertArray::new(),
             assert_valid: Some(assert_valid),
             reports,

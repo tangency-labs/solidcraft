@@ -924,9 +924,11 @@ impl FilletCorner {
                         Ok(found) => found,
                         // only Unported and a cancellation pass on: any other failure,
                         // `FaceTrimsUnavailable` from the classification included, declines
-                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                            return Err(e)
-                        }
+                        Err(
+                            e @ (SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }),
+                        ) => return Err(e),
                         Err(_) => None,
                     },
                     _ => None,

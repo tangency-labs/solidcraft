@@ -14,16 +14,16 @@
 //! | [`SS_NONE`] .. [`SS_UNKNOWN`]         | `SM_SS_NONE` .. `SM_SS_UNKNOWN` (`SmTypes.h`) |
 //!
 //! Deviations:
-//! - **Statuses.** The statuses these functions return by design are `Ok` codes
-//!   ([`SM_SUCCESS`], [`SM_ERR_NOT_WITHIN_TOLERANCE`], [`SM_ERR_BAD_TANGENT_DROP`],
-//!   [`SM_ERR_OUTSIDE_OF_DOMAIN`], [`SM_ERR_BAD_SURFACE_POINT`] and, for
-//!   `GetNextPoint`'s last try, `SM_ERR`); `SetProperties`' two `SM_ERR` returns for a
-//!   zero or normal-parallel curve tangent and every propagated callee failure (`SER`)
-//!   are errors. `GetNextPoint` stores the status of `SetProperties` (and goes on with
-//!   its second try): an error there becomes its code, the status a routine's
-//!   failure keeps, `SM_ERR_INVALID_INPUT` for [`SolidError::InvalidInput`]
-//!   and `SM_ERR` for any other variant (Rust errors do not carry every upstream
-//!   code); [`SolidError::Unported`] always propagates.
+//! - **Statuses.** The statuses these functions return by design are `Ok`
+//!   [`PointOutcome`]s (success, not within tolerance, bad tangent drop, outside of
+//!   domain, bad surface point and, for `GetNextPoint`'s last try, `SM_ERR`);
+//!   `SetProperties`' two `SM_ERR` returns for a zero or normal-parallel curve tangent
+//!   and every propagated callee failure (`SER`) are errors. `GetNextPoint` stores the
+//!   outcome of `SetProperties` (and goes on with its second try): an error there
+//!   becomes the outcome of its code, the status a routine's failure keeps,
+//!   `SM_ERR_INVALID_INPUT` for [`SolidError::InvalidInput`] and `SM_ERR` for any other
+//!   variant (Rust errors do not carry every upstream code); [`SolidError::Unported`]
+//!   always propagates.
 //! - **Offset surface.** `DropCurve`'s `SmOffsetSurface` always offsets the drop
 //!   surface itself, so it is a [`DropOffset`] (its offset distance and the
 //!   singularities it was built with) next to that surface. `DropVectors` and
@@ -75,7 +75,9 @@
 
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::{
+    ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NOT_CONVERGING, SM_ERR_NULL_POINTER,
+};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
     directional_derivs, is_dog_leg, line_point_distance, vec_lin_comb_two_vectors,
@@ -544,14 +546,91 @@ fn keep_seam_side(
     })
 }
 
-/// The status upstream would store for a failed callee (see the module notes).
-fn status_of(e: &SolidError) -> i32 {
+/// How dropping one curve point to the surface ended ([`DropPt::set_properties`],
+/// [`DropPt::get_next_point`] and the drop loop's endpoint checks).
+///
+/// Each named variant is one upstream status; [`PointOutcome::Other`] keeps any other
+/// status a failed callee carried (or a stale [`DropPt::drop_deriv_rtn`]), because the
+/// drop records the status it gave up with in `DropCurveFail::fail_status`.
+/// [`PointOutcome::from_status`] and [`PointOutcome::status`] are exact inverses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PointOutcome {
+    /// The point dropped (`SM_SUCCESS`).
+    Success,
+    /// A general failure (`SM_ERR`).
+    Failed,
+    /// A callee refused its input (`SM_ERR_INVALID_INPUT`).
+    InvalidInput,
+    /// The start is on the boundary and leaving, an endpoint left the domain or is on
+    /// an interior pole, or a seam correction is out of tolerance
+    /// (`SM_ERR_OUTSIDE_OF_DOMAIN`).
+    OutsideOfDomain,
+    /// The curve point is not on the surface normal line within the tolerance
+    /// (`SM_ERR_NOT_WITHIN_TOLERANCE`).
+    NotWithinTolerance,
+    /// A solve did not converge (`SM_ERR_NOT_CONVERGING`).
+    NotConverging,
+    /// The span start is outside the domain (`SM_ERR_BAD_SURFACE_POINT`).
+    BadSurfacePoint,
+    /// The curve tangent dropped to a bad surface tangent (`SM_ERR_BAD_TANGENT_DROP`).
+    BadTangentDrop,
+    /// Any other status, kept as its number (never one of the statuses above).
+    Other(i32),
+}
+
+impl PointOutcome {
+    /// The outcome an upstream status names.
+    pub fn from_status(status: i32) -> Self {
+        match status {
+            SM_SUCCESS => Self::Success,
+            SM_ERR => Self::Failed,
+            SM_ERR_INVALID_INPUT => Self::InvalidInput,
+            SM_ERR_OUTSIDE_OF_DOMAIN => Self::OutsideOfDomain,
+            SM_ERR_NOT_WITHIN_TOLERANCE => Self::NotWithinTolerance,
+            SM_ERR_NOT_CONVERGING => Self::NotConverging,
+            SM_ERR_BAD_SURFACE_POINT => Self::BadSurfacePoint,
+            SM_ERR_BAD_TANGENT_DROP => Self::BadTangentDrop,
+            other => Self::Other(other),
+        }
+    }
+
+    /// The upstream status of this outcome (the inverse of [`PointOutcome::from_status`]).
+    pub fn status(self) -> i32 {
+        match self {
+            Self::Success => SM_SUCCESS,
+            Self::Failed => SM_ERR,
+            Self::InvalidInput => SM_ERR_INVALID_INPUT,
+            Self::OutsideOfDomain => SM_ERR_OUTSIDE_OF_DOMAIN,
+            Self::NotWithinTolerance => SM_ERR_NOT_WITHIN_TOLERANCE,
+            Self::NotConverging => SM_ERR_NOT_CONVERGING,
+            Self::BadSurfacePoint => SM_ERR_BAD_SURFACE_POINT,
+            Self::BadTangentDrop => SM_ERR_BAD_TANGENT_DROP,
+            Self::Other(status) => status,
+        }
+    }
+
+    /// Whether the point dropped.
+    pub fn is_success(self) -> bool {
+        self == Self::Success
+    }
+
+    /// Whether the drop ended only off the normal line or unconverged: the outcomes an
+    /// approximation recovery may keep.
+    pub(crate) fn is_approximate(self) -> bool {
+        matches!(self, Self::NotConverging | Self::NotWithinTolerance)
+    }
+}
+
+/// The outcome upstream would store for a failed callee (see the module notes).
+fn status_of(e: &SolidError) -> PointOutcome {
     if let Some(code) = e.failed_routine_status() {
-        return code;
+        return PointOutcome::from_status(code);
     }
     match e {
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        _ => SM_ERR,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
+            PointOutcome::InvalidInput
+        }
+        _ => PointOutcome::Failed,
     }
 }
 
@@ -564,8 +643,10 @@ impl DropPt {
     /// `adjust_pole_pt`, a drop point on a pole first slides along the pole to match
     /// the curve tangent.
     ///
-    /// Returns [`SM_SUCCESS`], [`SM_ERR_NOT_WITHIN_TOLERANCE`] (the curve point is not
-    /// on the normal line within the tolerance) or [`SM_ERR_BAD_TANGENT_DROP`].
+    /// Returns [`PointOutcome::Success`], [`PointOutcome::NotWithinTolerance`] (the
+    /// curve point is not on the normal line within the tolerance) or
+    /// [`PointOutcome::BadTangentDrop`] (or the outcome of a stale
+    /// [`DropPt::drop_deriv_rtn`] when the tangent is not dropped again).
     ///
     /// # Errors
     ///
@@ -581,7 +662,7 @@ impl DropPt {
         approx_tol_3d: f64,
         uv_domain: &Extent2d,
         adjust_pole_pt: bool,
-    ) -> Result<i32> {
+    ) -> Result<PointOutcome> {
         // param is on a pole - change it's UV pos so that the Crv1stDeriv lines up with
         // the sole SrfTangent
         let mut singular_direction = SurfParamType::U;
@@ -917,9 +998,9 @@ impl DropPt {
 
         // all done
         Ok(if good_drop {
-            self.drop_deriv_rtn
+            PointOutcome::from_status(self.drop_deriv_rtn)
         } else {
-            SM_ERR_NOT_WITHIN_TOLERANCE
+            PointOutcome::NotWithinTolerance
         })
     }
 
@@ -930,11 +1011,11 @@ impl DropPt {
     /// curve tangent reversed (so the from-left flags look into the span). `end` is
     /// reset first; `pole_points` are the surface's pole points when known.
     ///
-    /// Returns [`SM_SUCCESS`], [`SM_ERR_BAD_SURFACE_POINT`] (the start is outside
-    /// `uv_domain`), [`SM_ERR_OUTSIDE_OF_DOMAIN`] (the start is on the boundary and
-    /// leaving, or a seam correction is out of tolerance),
-    /// [`SM_ERR_NOT_WITHIN_TOLERANCE`], [`SM_ERR_BAD_TANGENT_DROP`], or the status of
-    /// the last [`DropPt::set_properties`] (see the module notes).
+    /// Returns [`PointOutcome::Success`], [`PointOutcome::BadSurfacePoint`] (the start
+    /// is outside `uv_domain`), [`PointOutcome::OutsideOfDomain`] (the start is on the
+    /// boundary and leaving, or a seam correction is out of tolerance),
+    /// [`PointOutcome::NotWithinTolerance`], [`PointOutcome::BadTangentDrop`], or the
+    /// outcome of the last [`DropPt::set_properties`] (see the module notes).
     ///
     /// # Errors
     ///
@@ -954,14 +1035,14 @@ impl DropPt {
         approx_tol_3d: f64,
         end_t: f64,
         end: &mut Self,
-    ) -> Result<i32> {
+    ) -> Result<PointOutcome> {
         // Not upstream: a drop that subdivides without end is stopped by the caller's token
         // (a work limit, or a cancelled job); upstream has no such check.
         k.check_cancelled(OP_NEXT)?;
         let start = self;
 
         // init return values
-        let mut ret = SM_ERR;
+        let mut ret = PointOutcome::Failed;
         end.set_uninitialized();
         end.t = end_t;
         end.degen_curve = start.degen_curve;
@@ -974,12 +1055,12 @@ impl DropPt {
 
         // quit when rStart.m_UVPD[0] is not in UVDomain
         if !uv_domain.contains_point(start.uv_pd[0], max2(scaled_zero_u, scaled_zero_v)) {
-            return Ok(SM_ERR_BAD_SURFACE_POINT);
+            return Ok(PointOutcome::BadSurfacePoint);
         }
 
         // quit when rStart is on boundary and DropCurve is walking out of domain
         if start.on_boundary != Some(false) && start.leaving_domain != Some(false) {
-            return Ok(SM_ERR_OUTSIDE_OF_DOMAIN);
+            return Ok(PointOutcome::OutsideOfDomain);
         }
 
         // get StartPoint Surf DU, DV, DUU, DVV, DUV values (status ignored upstream)
@@ -1036,7 +1117,7 @@ impl DropPt {
         end.uv_pd[0] = solution;
 
         let mut ii = 0;
-        while ii < 2 && ret != SM_SUCCESS {
+        while ii < 2 && !ret.is_success() {
             // if iter 2: try again with GlobalPointSolve DropPoint
             if ii == 1 {
                 // temporarily set owner to null to prevent solver from seeing Face edges.
@@ -1121,13 +1202,8 @@ impl DropPt {
             // A larger correction rejects this candidate without moving the endpoint.
             match start.check_seam_jump(k, surface, srf_closure, approx_tol_3d, end) {
                 Ok(()) => {}
-                Err(e)
-                    if matches!(
-                        e.intersect_failure(),
-                        Some(IntersectFailure::SeamJumpNotSnapped)
-                    ) =>
-                {
-                    return Ok(SM_ERR_OUTSIDE_OF_DOMAIN)
+                Err(e) if e.failed_routine_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
+                    return Ok(PointOutcome::OutsideOfDomain)
                 }
                 Err(e) => return Err(e),
             }
@@ -1149,7 +1225,7 @@ impl DropPt {
             };
 
             // when Properties are set - negate the tangent direction a second time
-            if ret != SM_ERR {
+            if ret != PointOutcome::Failed {
                 end.crv_pd[1] = -end.crv_pd[1];
                 end.uv_pd[1] = -end.uv_pd[1];
                 // gwc: why not rEnd.m_3dPD[1] as well?
@@ -1799,7 +1875,7 @@ mod tests {
                 &mut end,
             )
             .unwrap();
-        assert_eq!(r, SM_ERR_BAD_SURFACE_POINT);
+        assert_eq!(r, PointOutcome::BadSurfacePoint);
         assert_eq!(end.t, 0.5);
         assert_eq!(end.degen_curve, Some(false));
         let mut leaving = pt(0.0, Point2::new(0.0, 0.5), Vec2::new(1.0, 0.0));
@@ -1820,7 +1896,7 @@ mod tests {
                 &mut end,
             )
             .unwrap();
-        assert_eq!(r, SM_ERR_OUTSIDE_OF_DOMAIN);
+        assert_eq!(r, PointOutcome::OutsideOfDomain);
     }
 
     #[test]
@@ -1839,7 +1915,7 @@ mod tests {
         let r = p
             .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
             .unwrap();
-        assert_eq!(r, p.drop_deriv_rtn);
+        assert_eq!(r, PointOutcome::from_status(p.drop_deriv_rtn));
         assert_eq!(off.offset_distance, 2.0);
         assert_eq!(p.good_drop, Some(true));
         assert_eq!(p.on_boundary, Some(false));

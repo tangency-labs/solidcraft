@@ -2414,7 +2414,13 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             // defect, never "no section"; a cancellation or a port failure is passed on)
             let mid = match self.try_solve_mid_point(solver, k, pj, pj1, frac) {
                 Ok(Some(found)) => found,
-                Err(e) if e.is_port_failure() || matches!(e, SolidError::Cancelled { .. }) => {
+                Err(e)
+                    if e.is_port_failure()
+                        || matches!(
+                            e,
+                            SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
+                        ) =>
+                {
                     return Err(e);
                 }
                 found => {

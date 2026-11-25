@@ -4128,41 +4128,15 @@ impl FilletBrep {
                     return Err(defect(OP, FOOT_NO_DROP));
                 }
                 // a closed surface names the foot once per period: take the name nearest the
-                // edge use's parameters, as the section solve continues from them across a seam.
-                // Not along a direction that collapses at the edge use's parameters (a sphere's
-                // pole): there the edge use's parameter is an arbitrary label, not a side of the
-                // seam, and the nearest name to it could lie a quarter period outside the
-                // domain. A miss of that test leaves the nearest name, as on a regular point.
-                // (a predicate that cannot evaluate reads as collapsed: the foot keeps its name)
-                let sing = match base.is_singularity(k, b.uv, EFF_ZERO, false) {
-                    Ok(sing) => sing,
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => crate::surface::surface::p5::Singularity {
-                        singular: true,
-                        direction: SurfParamType::Neither,
-                    },
-                };
-                let collapsed = |dir: SurfParamType| {
-                    sing.direction == dir
-                        || (sing.singular
-                            && matches!(
-                                sing.direction,
-                                SurfParamType::Neither | SurfParamType::Both
-                            ))
-                };
-                let mut foot = dropped.result_uv;
-                let periods = crate::blend::fillet_solver::p1::seam_periods(k, &base)?;
-                for (period, (value, near, dir)) in periods.iter().zip([
-                    (&mut foot.x, b.uv.x, SurfParamType::U),
-                    (&mut foot.y, b.uv.y, SurfParamType::V),
-                ]) {
-                    if let Some(interval) = period {
-                        if !collapsed(dir) {
-                            let length = interval.length();
-                            *value += length * ((near - *value) / length).round();
-                        }
-                    }
-                }
+                // edge use's parameters, as the section solve continues from them across a seam
+                // (`period_name_nearest`, which leaves a direction collapsing there, a sphere's
+                // pole, alone).
+                let foot = crate::blend::fillet_solver::p1::period_name_nearest(
+                    k,
+                    &base,
+                    dropped.result_uv,
+                    b.uv,
+                )?;
                 *slot = foot;
             }
 

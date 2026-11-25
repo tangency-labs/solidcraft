@@ -3749,6 +3749,15 @@ fn transform_in(
     }) {
         turn_to_nurbs(k, b, notifications.as_deref_mut())?;
     }
+    // #19910: a rigid move rounds every control point it moves, so a tolerance proved to cover
+    // a trim can fall short of it after the move by that rounding; the trims as they are
+    // before the move, to raise each edge that needs it after
+    // ([`crate::topology::edgeuse::p3::cover_moved_trims`])
+    let trims_before = if scale.is_none_or(|s| s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        crate::topology::edgeuse::p3::trims_before_move(k, b, &brep_edges(b)?)?
+    } else {
+        None
+    };
     let vertices = brep_vertices(b)?;
     for &vertex in &vertices {
         let mut point = b.vertex(vertex)?.point;
@@ -3861,6 +3870,9 @@ fn transform_in(
                 use_.edge_ccw_edge_gap = crate::heal::gap::EdgeEdgeGap::new();
             }
         }
+    }
+    if let Some(before) = trims_before {
+        crate::topology::edgeuse::p3::cover_moved_trims(k, b, &before, placement.matrix())?;
     }
     // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
     // keeps each tolerance at least its own times s; upstream sets every one to the body

@@ -2353,7 +2353,11 @@ impl Line {
                     line.convert_to_2d()?;
                 }
             }
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => {}
         }
         Ok(line)
