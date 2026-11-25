@@ -52,7 +52,7 @@
   }
  },
  {
-  "note": "An end dropped near another end snaps onto it and becomes coincident."
+  "note": "An end dropped near another end snaps onto it and merges into that point."
  },
  {
   "drag": [
@@ -93,11 +93,23 @@
    "query": {
     "command": "sketch.inspect",
     "path": [
-     "constraints",
-     0,
-     "type"
+     "curves",
+     1,
+     "start"
     ],
-    "value": "coincident"
+    "value": "l1.end"
+   }
+  }
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "constraints",
+     0
+    ],
+    "value": null
    }
   }
  },
@@ -201,7 +213,7 @@
   }
  },
  {
-  "note": "Undo takes the snap's constraint with the drag that made it."
+  "note": "Undo splits the merged snap point back into separate endpoints with the drag that made it."
  },
  {
   "key": "Z",
@@ -221,6 +233,19 @@
      0
     ],
     "value": null
+   }
+  }
+ },
+ {
+  "expect": {
+   "query": {
+    "command": "sketch.inspect",
+    "path": [
+     "curves",
+     1,
+     "start"
+    ],
+    "value": "l2.start"
    }
   }
  },

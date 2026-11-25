@@ -3649,19 +3649,26 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         let rep = solve(&mut sk.clone());
         before_dof = Some(rep.dof);
         let order = entity_order(sk, p);
-        let can_merge = matches!(k, ConstraintKind::Coincident { p: a, q: b } if can_merge_points(sk, a, b));
+        let used_by_curve = |sk: &Sketch, idx: usize| sk.curves.iter().any(|c| c.kind.uses(idx));
+        let merge_pair = match k {
+            ConstraintKind::Coincident { p: a, q: b } if used_by_curve(sk, a) && used_by_curve(sk, b) => {
+                let (survive, remove) = if a < b { (a, b) } else { (b, a) };
+                can_merge_points(sk, survive, remove).then_some((survive, remove))
+            }
+            _ => None,
+        };
         let id = add_c(sk, k.clone())?;
         residual = residual_of(sk, &id);
         let holds = residual.is_some_and(|r| r <= solidcraft_sketch::CONSISTENT);
         if let Some((first, second)) = order.filter(|_| !holds) {
             apply_in_order(sk, &rep, &[first], second, cmd, std::slice::from_ref(&id))?;
         }
-        if can_merge && let ConstraintKind::Coincident { p: a, q: b } = k {
+        if let Some((survive, remove)) = merge_pair {
             // Solve once with the temporary constraint so `survive` sits at the solved position,
             // but keep an explicit Coincident constraint when it is redundant so callers see `redundant: true`.
             let after_rep = solve(sk);
             let is_redundant = holds && before_dof == Some(after_rep.dof);
-            if !is_redundant && let Some(surviving) = merge_points(sk, a, b) {
+            if !is_redundant && let Some(surviving) = merge_points(sk, survive, remove) {
                 let point_id = sk.points.get(surviving).map(|pt| pt.id.clone()).unwrap_or_default();
                 return Ok(Outcome::Merged(point_id));
             }
@@ -5497,6 +5504,10 @@ fn seg2_to_record_curve(seg: &solidcore_record::Seg2) -> Option<(solidcore_recor
 /// Compute the model-space detach offset along the exact curve `ci` starting at endpoint `pi`,
 /// capped at half the curve's real arc length via `solidcraft_kernel::services::curve`.
 fn real_curve_detach_offset(sk: &Sketch, ci: usize, pi: usize, target_mm: f64) -> Option<Vec2> {
+    let (start, end) = sk.curves.get(ci)?.kind.ends()?;
+    if pi != start && pi != end {
+        return None;
+    }
     let pos = sk.point(pi)?;
     let pieces: Vec<(solidcore_record::brep::Curve, Option<[f64; 2]>)> = if let Some(segs) = sk.exact_segs(ci) {
         segs.iter().filter_map(seg2_to_record_curve).collect()

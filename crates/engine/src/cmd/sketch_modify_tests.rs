@@ -1141,14 +1141,9 @@ fn arc_extend_joins_an_end_that_already_carries_geometry_with_a_new_arc() {
     let before = sketch(&s);
     let end = before.resolve_point(&format!("{arc}.end")).expect("the arc's end");
     let line_start = before.resolve_point(&format!("{line}.start")).expect("the line's start");
-    // `connect` ties the line's own point to the arc's end, so the end carries geometry there.
+    // `connect` merges the line's start into the arc's end, so the end carries geometry there.
     assert!(before.point(end).zip(before.point(line_start)).is_some_and(|(a, b)| a.dist(b) < 1e-9));
-    assert!(
-        before
-            .constraints
-            .iter()
-            .any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, line_start) || (p, q) == (line_start, end)))
-    );
+    assert_eq!(end, line_start, "connect merges the line's start into the arc's end");
     run(&mut s, "sketch.extend", json!({"curve": arc, "at": [0, 10]}));
     let sk = sketch(&s);
     let ci = sk.curve_index(&arc).unwrap();

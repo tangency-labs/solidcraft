@@ -1488,20 +1488,20 @@ fn move_z_copies_a_plane_line_and_a_drawn_curve_together() {
 fn move3d_point_lift_takes_lines_joined_by_coincident() {
     let (mut s, sketch) = plane_3d_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
-    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
-    let (end_pt, start_pt) = {
-        let sk = s.doc.sketch(sketch).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]],"connect":false}));
+    {
+        let sk = s.doc_mut().sketch_mut(sketch).unwrap();
         let end = match &sk.curves[0].kind {
-            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            solidcraft_sketch::CurveKind::Line { b, .. } => *b,
             _ => panic!("first curve is not a line"),
         };
         let start = match &sk.curves[1].kind {
-            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            solidcraft_sketch::CurveKind::Line { a, .. } => *a,
             _ => panic!("second curve is not a line"),
         };
-        (end, start)
-    };
-    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+        sk.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: start }, None).unwrap();
+    }
+    s.refresh();
     let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
     let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
     let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
@@ -1521,20 +1521,20 @@ fn move3d_point_lift_takes_lines_joined_by_coincident() {
 fn move3d_joined_lift_keeps_unrelated_points() {
     let (mut s, sketch) = plane_3d_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
-    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
-    let (end_pt, start_pt) = {
-        let sk = s.doc.sketch(sketch).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]],"connect":false}));
+    {
+        let sk = s.doc_mut().sketch_mut(sketch).unwrap();
         let end = match &sk.curves[0].kind {
-            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            solidcraft_sketch::CurveKind::Line { b, .. } => *b,
             _ => panic!("first curve is not a line"),
         };
         let start = match &sk.curves[1].kind {
-            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            solidcraft_sketch::CurveKind::Line { a, .. } => *a,
             _ => panic!("second curve is not a line"),
         };
-        (end, start)
-    };
-    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+        sk.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: start }, None).unwrap();
+    }
+    s.refresh();
     run(&mut s, "sketch.line", json!({"points":[[20,0],[25,0]]}));
     run(&mut s, "sketch.point", json!({"point":[30,30]}));
     let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();

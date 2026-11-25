@@ -823,12 +823,14 @@ fn a_freeform_corner_keeps_what_its_line_side_and_its_partner_point_hold() {
     // of its own: a fixed partner keeps its point.
     let mut s = new_sketch();
     let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
-    let c = curves(&run(&mut s, "sketch.conic", json!({"start": [10, 0], "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
-    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{l}.end"), "b": format!("{c}.start")}));
+    let c =
+        curves(&run(&mut s, "sketch.conic", json!({"start": [10, 0], "apex": [20, 5], "end": [20, 10], "rho": 0.5, "connect": false})))[0].clone();
     let mut k = sk(&s);
+    let end = k.resolve_point(&format!("{l}.end")).unwrap();
     let partner = k.resolve_point(&format!("{c}.start")).unwrap();
     let id = k.points[partner].id.clone();
     k.points[partner].fixed = true;
+    k.add_constraint(solidcraft_sketch::ConstraintKind::Coincident { p: end, q: partner }, None).unwrap();
     super::weld_corner(&mut k, &json!({"a": l, "b": c}));
     let kept = k.point_index(&id).expect("the fixed partner stays");
     assert!(k.points[kept].fixed);

@@ -6299,10 +6299,24 @@ fn drawing_on_existing_points_connects_to_them() {
     let again = run(&mut s, "sketch.constraint.coincident", json!({"a": "origin", "b": "l1.start"}));
     assert_eq!(again["existing"], true, "{again}");
 
-    // A line from a corner, a circle on a corner and a point on the origin connect too.
-    assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[40, 30], [60, 30]]}))), 1);
-    assert_eq!(n(&run(&mut s, "sketch.circle.center", json!({"center": [0, 30], "radius": 3}))), 1);
+    // A line from a corner and a circle on a corner merge onto those points; a point on the
+    // protected origin connects with a Coincident constraint.
+    let line = run(&mut s, "sketch.line", json!({"points": [[40, 30], [60, 30]]}));
+    assert_eq!(n(&line), 0, "{line}");
+    let circle = run(&mut s, "sketch.circle.center", json!({"center": [0, 30], "radius": 3}));
+    assert_eq!(n(&circle), 0, "{circle}");
     assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [0, 0]}))), 1);
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert_eq!(
+        sk.resolve_point(&format!("{}.start", line["curves"][0].as_str().unwrap())),
+        sk.resolve_point(r["corners"]["top_right"].as_str().unwrap()),
+        "line start merges into top_right corner"
+    );
+    assert_eq!(
+        sk.resolve_point(&format!("{}.center", circle["curves"][0].as_str().unwrap())),
+        sk.resolve_point(r["corners"]["top_left"].as_str().unwrap()),
+        "circle center merges into top_left corner"
+    );
     // Close is not on it, and `connect: false` opts out.
     assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [40.001, 0]}))), 0);
     assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -10]], "connect": false}))), 0);

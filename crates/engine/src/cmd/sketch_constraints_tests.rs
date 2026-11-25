@@ -1585,7 +1585,7 @@ fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
     }
     let before = sketch(&s);
     let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
-    assert!((e.contains("shrink") && e.contains("to a point")) || e.contains("conflicts with"), "{e}");
+    assert!(e.contains("conflicts with k2, k5"), "{e}");
     assert_eq!(sketch(&s), before);
 }
 
@@ -2301,4 +2301,78 @@ fn saved_sketch_with_coincident_constraints_replays_unchanged() {
     assert_eq!(replayed.sketch.constraints, before.constraints, "legacy Coincident constraints stay intact");
     let total_area: f64 = replayed.profiles.iter().map(|p| p.area.abs()).sum();
     assert!((total_area - 75.0).abs() < 1e-6, "replayed triangle profile area unchanged: {total_area}");
+}
+
+#[test]
+fn detach_point_on_circle_centre_respects_distance_and_explicit_offset() {
+    let mut s = new_sketch();
+    let c1 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 5}))["curves"])[0].clone();
+    let c2 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_zero = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c1}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c2}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c2, "point": shared_zero, "distance": 0.0}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c1}.center")), sk.resolve_point(&format!("{c2}.center")));
+    assert!(sk.point(sk.resolve_point(&format!("{c2}.center")).unwrap()).unwrap().dist(Vec2::new(10.0, 0.0)) < 1e-9);
+
+    let c3 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 5}))["curves"])[0].clone();
+    let c4 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_dist = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c3}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c4}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c4, "point": shared_dist, "distance": 3.0}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c3}.center")), sk.resolve_point(&format!("{c4}.center")));
+    assert!(
+        sk.point(sk.resolve_point(&format!("{c4}.center")).unwrap()).unwrap().dist(Vec2::new(30.0, 0.0)) < 1e-9,
+        "non-zero distance on a circle centre must not jump along its circumference"
+    );
+
+    let c5 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
+    let c6 = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
+    let shared_off = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{c5}.center")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{c6}.center")));
+        sk.points[p].id.clone()
+    };
+    run(&mut s, "sketch.detach_point", json!({"curve": c6, "point": shared_off, "offset": [2.0, -1.0]}));
+    let sk = sketch(&s);
+    assert_ne!(sk.resolve_point(&format!("{c5}.center")), sk.resolve_point(&format!("{c6}.center")));
+    assert!(sk.point(sk.resolve_point(&format!("{c6}.center")).unwrap()).unwrap().dist(Vec2::new(52.0, -1.0)) < 1e-9);
+}
+
+#[test]
+fn unlink_curve_group_removes_one_curve_and_relinks_the_rest() {
+    let mut s = new_sketch();
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 5], [15, 5]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l3 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 10], [20, 10]], "connect": false, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.equal", json!({"a": l1, "b": l2}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": l2, "b": l3}));
+
+    let unlinked_eq = run(&mut s, "sketch.unlink_curve_group", json!({"curve": l2, "kind": "equal"}));
+    assert_eq!(ids(&unlinked_eq["removed"]).len(), 2, "{unlinked_eq}");
+    assert_eq!(ids(&unlinked_eq["added"]).len(), 1, "{unlinked_eq}");
+    let sk = sketch(&s);
+    let (i1, i2, i3) = (sk.curve_index(&l1).unwrap(), sk.curve_index(&l2).unwrap(), sk.curve_index(&l3).unwrap());
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { a, b } if a == i2 || b == i2)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Equal { a, b } if (a, b) == (i1, i3) || (a, b) == (i3, i1))));
+
+    run(&mut s, "sketch.constraint.parallel", json!({"a": l1, "b": l2}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": l2, "b": l3}));
+    let unlinked_par = run(&mut s, "sketch.unlink_curve_group", json!({"curve": l2, "kind": "parallel"}));
+    assert_eq!(ids(&unlinked_par["removed"]).len(), 2, "{unlinked_par}");
+    assert_eq!(ids(&unlinked_par["added"]).len(), 1, "{unlinked_par}");
+    let sk = sketch(&s);
+    let (i1, i2, i3) = (sk.curve_index(&l1).unwrap(), sk.curve_index(&l2).unwrap(), sk.curve_index(&l3).unwrap());
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { a, b } if a == i2 || b == i2)));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { a, b } if (a, b) == (i1, i3) || (a, b) == (i3, i1))));
 }
