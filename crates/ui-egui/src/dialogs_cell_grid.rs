@@ -14,7 +14,7 @@ use solidcore_record::{
 };
 use solidcraft_engine::{
     Sel,
-    doc::{Direction, FeatureKind, expr::Kind as ValueKind},
+    doc::{CellGridMode, Direction, FeatureKind, expr::Kind as ValueKind},
     geom::Vec3Geom as _,
 };
 
@@ -25,6 +25,8 @@ const CLIPS: [&str; 3] = ["whole", "snap", "free"];
 /// The keep-outs' clip: the first choice leaves `keepout_clip` out (the same as the field's clip),
 /// the others are [`CLIPS`] one place on.
 const KEEPOUT_CLIPS: [Option<&str>; 4] = [None, Some("whole"), Some("snap"), Some("free")];
+/// What the feature does with its cells; the first is the default.
+const MODES: [&str; 2] = ["cut", "raised"];
 const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 /// The inputs, in order: the profiles (their sketch and keep-outs), the bodies, the anchor.
 const PROFILES_INPUT: usize = 0;
@@ -40,6 +42,8 @@ const ANCHOR_PICKS: crate::selection::Accept = crate::selection::VERTICES
 
 #[derive(Clone, Debug)]
 pub struct CellGrid {
+    /// An index into [`MODES`].
+    pub mode: usize,
     /// An index into [`SHAPES`].
     pub shape: usize,
     /// Sides of a polygon cell.
@@ -66,6 +70,7 @@ pub struct CellGrid {
 impl Default for CellGrid {
     fn default() -> Self {
         Self {
+            mode: 0,
             shape: 0,
             sides: "8".into(),
             dot_grid: 0,
@@ -84,6 +89,11 @@ impl Default for CellGrid {
 }
 
 impl CellGrid {
+    /// Raised cells stand `depth` high: the command refuses them through all.
+    fn raised(&self) -> bool {
+        MODES.get(self.mode) == Some(&"raised")
+    }
+
     /// Circle and polygon cells sit on a dot grid; the other shapes tile the plane.
     fn on_dots(&self) -> bool {
         matches!(SHAPES.get(self.shape), Some(&"circle" | &"polygon"))
@@ -115,6 +125,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput]) -> bool {
+    choice_row(ui, app.tr("ui.cell_grid.mode"), "cell_grid_mode", &mut c.mode, &[app.tr("ui.cell_grid.cut"), app.tr("ui.cell_grid.raised")]);
     choice_row(
         ui,
         app.tr("Shape"),
@@ -137,7 +148,11 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, _: &[SelInput])
     }
     enter |= expr_row(ui, app.tr("ui.cell_grid.size"), &mut c.size);
     enter |= expr_row(ui, app.tr("ui.cell_grid.web"), &mut c.web);
-    row(ui, app.tr("ui.cell_grid.through_all"), |ui| check(ui, &mut c.through_all));
+    if c.raised() {
+        c.through_all = false;
+    } else {
+        row(ui, app.tr("ui.cell_grid.through_all"), |ui| check(ui, &mut c.through_all));
+    }
     if !c.through_all {
         enter |= expr_row(ui, app.tr("ui.depth"), &mut c.depth);
     }
@@ -197,7 +212,11 @@ pub fn commands(app: &SolveApp, c: &CellGrid, inputs: &[SelInput], extra: &Map<S
         if c.on_dots() {
             args.insert("dot_grid".into(), json!(DOT_GRIDS.get(c.dot_grid).copied().unwrap_or("hexagonal")));
         }
-        if c.through_all {
+        // Cut is the command's default: left out, as before the choice existed.
+        if c.raised() {
+            args.insert("mode".into(), json!("raised"));
+        }
+        if c.through_all && !c.raised() {
             args.insert("through_all".into(), json!(true));
         } else {
             args.insert("depth".into(), json!(c.depth));
@@ -242,6 +261,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let FeatureKind::CellGrid {
         sketch,
         profiles,
+        mode,
         shape,
         sides,
         dot_grid,
@@ -265,6 +285,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let length = |e: &solidcraft_engine::doc::Expr| shown_expr(e, ValueKind::Length);
     let defaults = CellGrid::default();
     let c = CellGrid {
+        mode: match mode {
+            CellGridMode::Cut => 0,
+            CellGridMode::Raised => 1,
+        },
         shape: match shape {
             CellShape::Hexagon => 0,
             CellShape::Square => 1,

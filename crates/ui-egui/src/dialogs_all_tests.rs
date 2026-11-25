@@ -1049,7 +1049,7 @@ form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(
     cell_grid,
     "solid.cell_grid",
-    ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Inset rows", "Angle"]
+    ["Mode", "Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Inset rows", "Angle"]
 );
 
 /// The rows that come and go with the choices: Sides for polygon cells, Dot grid for circle and
@@ -1066,7 +1066,7 @@ fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
             }
         }
     };
-    let always = ["Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Angle"];
+    let always = ["Mode", "Shape", "Cell size", "Web", "Through all", "Depth", "Direction", "Clip", "Keep-out clip", "Angle"];
     check_form_with("solid.cell_grid", &[&always[..], &["Sides", "Dot grid", "Margin"]].concat(), &["Inset rows"], cell(4, 0, 0));
     check_form_with("solid.cell_grid", &[&always[..], &["Margin"]].concat(), &["Inset rows"], cell(0, 0, 1));
     check_form_with("solid.cell_grid", &always, &["Margin", "Inset rows"], cell(0, 0, 2));
@@ -1097,6 +1097,42 @@ fn cell_grid_sends_the_keepout_clip_and_the_snap_inset() {
     }
     let p = sent(&d);
     assert!(p.get("snap_inset").is_none(), "{p}");
+}
+
+/// Mode is Cut unless Raised is chosen: Cut sends no mode, Raised sends `raised`, the body grows
+/// by the cells (a cut shrinks it), and Through all is not offered, nor sent, with raised cells.
+#[test]
+fn cell_grid_mode_cut_by_default_and_raised_adds_the_cells() {
+    let volume = |h: &mut Harness| h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 62, "width": 62, "height": 3, "body_name": "Plate"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let plate = volume(&mut h);
+    let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    assert!(matches!(&d.kind, Kind::CellGrid(c) if c.mode == 0));
+    let p = apply_commands(&h.app, &d).unwrap()[0].1.clone();
+    assert!(p.get("mode").is_none(), "{p}");
+    if let Kind::CellGrid(c) = &mut d.kind {
+        (c.mode, c.through_all, c.direction) = (1, true, 1);
+    }
+    let [(id, p)] = apply_commands(&h.app, &d).unwrap().try_into().unwrap() else { panic!() };
+    assert_eq!((p.get("mode"), p.get("through_all")), (Some(&json!("raised")), None), "{p}");
+    h.app.run(&id, p).unwrap();
+    assert!(volume(&mut h) > plate, "raised cells add material");
+    // A cut of the same field takes material away.
+    let mut cut = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
+    cut.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    let before = volume(&mut h);
+    let [(id, p)] = apply_commands(&h.app, &cut).unwrap().try_into().unwrap() else { panic!() };
+    h.app.run(&id, p).unwrap();
+    assert!(volume(&mut h) < before, "a cut removes material");
+    // Edit Feature shows a raised feature as Raised.
+    let kind = h.app.session.doc.find_feature("CellGrid1").unwrap().kind.clone();
+    let Some((Kind::CellGrid(c), ..)) = crate::dialogs_cell_grid::for_feature(&h.app, &kind) else { panic!() };
+    assert_eq!(c.mode, 1);
 }
 
 /// Cell Grid fills one sketch: a box over two sketches keeps the last sketch's profiles, as
