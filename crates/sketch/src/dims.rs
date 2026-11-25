@@ -275,7 +275,7 @@ pub fn linear_axis(a: Vec2, b: Vec2, text_at: Vec2) -> LinearAxis {
 /// The stored text position for text centred at `at`.
 pub fn encode_text(f: &DimFrame, at: Vec2) -> Vec2 {
     match *f {
-        DimFrame::Linear { p0, p1, dir } => {
+        DimFrame::Linear { p0, p1, dir } => 
             let m = (p0 + p1) * 0.5;
             Vec2::new((at - m).dot(dir), (at - m).dot(dir.perp()))
         }
