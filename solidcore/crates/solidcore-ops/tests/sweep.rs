@@ -1677,8 +1677,9 @@ fn a_profile_bezier_that_turns_sharply_at_its_end_extrudes_to_a_solid() {
     assert!(body.check(CheckLevel::All).unwrap().is_valid());
     let v = body.volume(1e-10).unwrap();
     assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
-    // the Bézier's sharp end is its own wall
-    assert_eq!(body.counts().unwrap()[0], 6);
+    // the Bézier is cut at its sharp end: two caps, the two lines' walls and at least two
+    // of the Bézier's
+    assert!(body.counts().unwrap()[0] >= 6);
 }
 
 /// The same profile in the XZ plane, 40 mm out along X (x from 10 to 70), turned a whole

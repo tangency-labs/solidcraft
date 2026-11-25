@@ -2338,8 +2338,7 @@ impl BSplineCurve {
                     rtn &= bool_report(&mut list, key, 13, radius_sized)?;
                     if let Some(mapped_box) = mapped_box {
                         let mapped_size = mapped_box.size().length();
-                        radius_tol = (mapped_size / size_t) / 10000.0;
-                        radius_sep = mapped_size / max2(20., size_t);
+                        (radius_tol, radius_sep) = bounded_scale(mapped_size, size_t);
                     }
                 }
             }
