@@ -536,6 +536,7 @@ pub use surface_untrim::untrim;
 pub use surfaces::copy_faces;
 pub use surfaces::extend;
 pub use surfaces::extrude_sheet;
+pub use surfaces::extrude_sheet_tapered;
 pub use surfaces::loft_sheet;
 pub use surfaces::loft_sheet_with_rails;
 pub use surfaces::loft_sheet_with_rails_legacy_sides;
