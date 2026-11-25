@@ -583,7 +583,6 @@ pub(crate) fn cover_kept_uv_trim_curves(k: &Kernel, b: &mut Brep, end_checked: b
     }
     let mut record = crate::topology::TrimCoverRaises {
         end_checked,
-        body_tolerance: b.tolerance(),
         ..Default::default()
     };
     // (every vertex tolerance as the read made it, to record those a raise cascades to)

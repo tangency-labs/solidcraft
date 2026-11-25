@@ -322,11 +322,11 @@ fn a_trim_that_needs_the_raise_keeps_it_written() {
     assert_eq!(trims(&r), kept);
 }
 
-/// A raise goes back to its tolerance from before only while that is no tighter than the
-/// B-rep's tolerance, or the B-rep still holds the tolerance the raise was made at: after
-/// the B-rep's tolerance is raised (only where larger) between a raised edge's two values,
-/// the edge still holds its raise but is written raised, not below the B-rep's tolerance
-/// (review of #21705).
+/// A raise goes back to its tolerance from before no lower than the B-rep's tolerance:
+/// after the B-rep's tolerance is raised (only where larger) between a raised edge's two
+/// values, the edge still holds its raise and is written at the B-rep's tolerance, not
+/// below it, and the read of the written file (which takes no entity below the B-rep's
+/// tolerance) records the raise from there again (review of #21705).
 #[test]
 fn a_raise_is_not_written_below_a_later_body_tolerance() {
     use solidcore::topology::brep::p2;
@@ -345,7 +345,6 @@ fn a_raise_is_not_written_below_a_later_body_tolerance() {
     let mut k = Kernel::default();
     let mut b = read(&mut k, bytes);
     let raises = b.trim_cover_raises().clone();
-    assert_eq!(raises.body_tolerance.to_bits(), b.tolerance().to_bits());
     // the held raised edge with the largest raise
     let (e, eb, ea) = bl::edges(&b, None)
         .unwrap()
@@ -381,7 +380,7 @@ fn a_raise_is_not_written_below_a_later_body_tolerance() {
         .iter()
         .position(|&x| x == e)
         .unwrap();
-    assert_eq!(bd.edges[ie].zone_tol_3d.to_bits(), ea.to_bits());
+    assert_eq!(bd.edges[ie].zone_tol_3d.to_bits(), t.to_bits());
     for ed in &bd.edges {
         assert!(
             ed.zone_tol_3d >= t,
@@ -394,4 +393,16 @@ fn a_raise_is_not_written_below_a_later_body_tolerance() {
             "a vertex written below the B-rep's tolerance"
         );
     }
+    // the read of the written file (which takes no tolerance below the B-rep's) raises the
+    // edge again from the B-rep's tolerance, so it keeps a raise record for it
+    let bytes = write(&k, &b);
+    let r = read(&mut k, bytes);
+    let re = bl::edges(&r, None).unwrap()[ie];
+    let &(rb, ra) = r
+        .trim_cover_raises()
+        .edges
+        .get(&re)
+        .expect("the read of the written file raises the edge again");
+    assert_eq!(rb.to_bits(), t.to_bits());
+    assert_eq!(r.edge(re).unwrap().tolerance.to_bits(), ra.to_bits());
 }

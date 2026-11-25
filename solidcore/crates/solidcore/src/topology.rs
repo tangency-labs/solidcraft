@@ -875,11 +875,6 @@ pub struct TrimCoverRaises {
     /// kept every covered trim at the tolerance before its raise; false for a part
     /// file's read, which runs none.
     pub end_checked: bool,
-    /// The B-rep's tolerance when the raises were made. A writer restores a tolerance from
-    /// before a raise below the B-rep's tolerance only while the B-rep still holds this
-    /// one: a later raise of the B-rep's tolerance keeps the edge or vertex written at
-    /// least at it.
-    pub body_tolerance: f64,
 }
 
 impl TrimCoverRaises {

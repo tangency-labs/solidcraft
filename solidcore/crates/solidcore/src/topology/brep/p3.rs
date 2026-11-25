@@ -805,7 +805,6 @@ fn copy_trim_cover_raises(
 ) -> Result<()> {
     let mut record = crate::topology::TrimCoverRaises {
         end_checked: src.trim_cover_raises().end_checked,
-        body_tolerance: src.trim_cover_raises().body_tolerance,
         ..Default::default()
     };
     for (&e, &(before, after)) in &src.trim_cover_raises().edges {
