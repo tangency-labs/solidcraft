@@ -3399,6 +3399,12 @@ mod tests {
             (R::NotOneTangentChain, ErrorKind::NotARemovableFillet),
             (R::OppositeEdgeNotTangent, ErrorKind::NotARemovableFillet),
             (R::NoTangentEdge, ErrorKind::NotARemovableFillet),
+            (R::ChamferSidesAmbiguous, ErrorKind::NotARemovableFillet),
+            (R::ChamferSidesUndecided, ErrorKind::NotARemovableFillet),
+            (
+                R::ChamferNeighboursNotCoaxial,
+                ErrorKind::NotARemovableFillet,
+            ),
             (R::EdgeWithoutTwoVertices, ErrorKind::NotARemovableFillet),
             (R::EdgeNotBetweenTwoFaces, ErrorKind::NotARemovableFillet),
             (R::TangentFaceNotBSpline, ErrorKind::NotARemovableFillet),

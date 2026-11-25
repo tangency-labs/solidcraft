@@ -7802,3 +7802,79 @@ fn delete_fillet_chain_takes_a_single_round_off_a_cube_edge() {
         .unwrap()
         .is_none());
 }
+
+/// The record faces of `b` that `keep` takes, with the record and its order.
+fn record_faces_where(
+    b: &Body,
+    keep: impl Fn(&solidcore_record::brep::Surface) -> bool,
+) -> (Vec<usize>, Order) {
+    let (record, order) = b.to_record().unwrap();
+    let faces = (0..record.faces.len())
+        .filter(|&i| keep(&record.faces[i].surface))
+        .collect();
+    (faces, order)
+}
+
+/// A chamfer on a 20 mm cube's edge has no tangent edge: its sides are the pair along the
+/// faces they meet, and taking it off gives the sharp cube back.
+#[test]
+fn delete_fillet_chain_takes_a_box_edge_chamfer_off() {
+    use solidcore_record::brep::Surface as S;
+    all_fixes();
+    let cube = make_box([0.0; 3], [20.0; 3]).unwrap();
+    let edge = nearest_edge(&cube, [10.0, 20.0, 20.0]);
+    blend(&cube, Blend::Chamfer, &[edge], &[2.0], &[], Corners::Filled).unwrap();
+    let (slanted, order) = record_faces_where(&cube, |s| match s {
+        S::Plane { u_axis, v_axis, .. } => {
+            let n = Vec3::new(u_axis[0], u_axis[1], u_axis[2])
+                .cross(Vec3::new(v_axis[0], v_axis[1], v_axis[2]));
+            [n.x, n.y, n.z].iter().filter(|c| c.abs() > 1e-9).count() > 1
+        }
+        _ => false,
+    });
+    assert_eq!(slanted.len(), 1, "{slanted:?}");
+    let removed = blend::delete_fillet_chain(&cube, &order, &slanted)
+        .unwrap()
+        .expect("a removable chamfer");
+    assert_eq!(
+        [removed.record.faces.len(), removed.record.edges.len()],
+        [6, 12]
+    );
+    let (back, _) = Body::from_record(&removed.record, true).unwrap();
+    let v = back.volume(1e-9).unwrap();
+    assert!((v - 8000.0).abs() < 1e-6 * 8000.0, "{v}");
+}
+
+/// A hole's chamfer is a ring chamfer between the plate's top and the hole's wall: its sharp
+/// edge is the circle where the two meet, and taking it off gives the plain hole back.
+#[test]
+fn delete_fillet_chain_takes_a_hole_chamfer_off() {
+    use solidcore_record::brep::Surface as S;
+    all_fixes();
+    let plate = make_box([0.0; 3], [40.0, 30.0, 5.0]).unwrap();
+    let pin = make_cylinder([20.0, 15.0, -1.0], 3.0, 7.0).unwrap();
+    let holed = solidcore_ops::boolean::boolean(plate, pin, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let plain_faces = holed.to_record().unwrap().0.faces.len();
+    let edge = nearest_edge(&holed, [20.0, 18.0, 5.0]);
+    blend(
+        &holed,
+        Blend::Chamfer,
+        &[edge],
+        &[1.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let (cone, order) = record_faces_where(&holed, |s| matches!(s, S::Cone { .. }));
+    assert_eq!(cone.len(), 1, "{cone:?}");
+    let removed = blend::delete_fillet_chain(&holed, &order, &cone)
+        .unwrap()
+        .expect("a removable ring chamfer");
+    assert_eq!(removed.record.faces.len(), plain_faces);
+    let (back, _) = Body::from_record(&removed.record, true).unwrap();
+    let v = back.volume(1e-9).unwrap();
+    let want = 6000.0 - 45.0 * PI;
+    assert!((v - want).abs() < 1e-6 * want, "{v} {want}");
+}
