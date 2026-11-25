@@ -32,15 +32,19 @@ fn fail(m: impl Into<String>) -> KernelError {
     KernelError::Invalid(format!("Delete Face: {}", m.into()))
 }
 
-/// Heal a feature between a sphere and a plane only when the kernel trims their
-/// extensions together. Carry the original face and edge names into the repaired body.
-fn heal_sphere_to_plane(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>) -> Result<Option<Body>> {
+/// Extend the supports of a recognized feature. Carry the original face and edge names into the repaired body.
+fn heal_from_extensions(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>, round_junction: bool) -> Result<Option<Body>> {
     let Some(form) = body.ops_body() else { return Ok(None) };
     let (operand, order) = &*form;
     let picks: Vec<_> = selected.iter().copied().collect();
     drop(solidcore_ops::session::take_failure_detail());
     let heal = || -> solidcore_ops::Result<_> {
-        let Some((healed, history)) = solidcore_ops::trim::remove_feature_with_crossing_patches(operand, order, &picks)? else {
+        let removed = if round_junction {
+            solidcore_ops::trim::remove_round_junction(operand, order, &picks)?
+        } else {
+            solidcore_ops::trim::remove_feature_with_crossing_patches(operand, order, &picks)?
+        };
+        let Some((healed, history)) = removed else {
             return Ok(None);
         };
         Ok(Some((healed.to_record()?.0, history)))
@@ -59,6 +63,59 @@ fn heal_sphere_to_plane(body: &Body, selected: &BTreeSet<usize>, neighbours: &BT
     let Some((record, history)) = result else { return Ok(None) };
     let history = crate::record::from_ops_edit(&record, history, neighbours);
     Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
+}
+
+/// A ball between three round strips is tangent along each whole boundary when
+/// its centre is on each cylinder axis and its radius and outward side agree.
+fn ball_end(rec: &solidcore_record::brep::Brep, face: usize, adjacent: &impl Fn(usize) -> BTreeSet<usize>) -> bool {
+    let Some(Surf::Sphere { c, r, convex }) = surf_of(rec, face) else { return false };
+    let around = adjacent(face);
+    around.len() == 3
+        && around.into_iter().all(|side| {
+            matches!(surf_of(rec, side), Some(Surf::Cylinder { o, a, r: sr, convex: outward })
+            if outward == convex && (sr - r).abs() <= rec.tolerance && (c - o).cross(a).len() <= rec.tolerance)
+        })
+}
+
+/// Removing a straight round growing into rolling-ball corners also removes its end
+/// patches. The other strips at each corner remain supports and extend to meet.
+fn round_junction_faces(
+    rec: &solidcore_record::brep::Brep,
+    selected: &BTreeSet<usize>,
+    adjacent: &impl Fn(usize) -> BTreeSet<usize>,
+) -> Option<BTreeSet<usize>> {
+    let mut removed = selected.clone();
+    let mut has_corner = false;
+    for &face in selected {
+        if ball_end(rec, face, adjacent) {
+            has_corner = true;
+            continue;
+        }
+        let Some(Surf::Cylinder { o, a, r, .. }) = surf_of(rec, face) else { return None };
+        let around = adjacent(face);
+        if around.len() != 4 {
+            return None;
+        }
+        let supports = around
+            .iter()
+            .filter(|&&f| {
+                matches!(surf_of(rec, f), Some(Surf::Plane { n, d })
+            if n.dot(a).abs() * r <= rec.tolerance && ((n.dot(o) - d).abs() - r).abs() <= rec.tolerance)
+            })
+            .count();
+        if supports != 2 {
+            return None;
+        }
+        for end in around {
+            if ball_end(rec, end, adjacent) {
+                removed.insert(end);
+                has_corner = true;
+            } else if !matches!(surf_of(rec, end), Some(Surf::Plane { .. })) {
+                return None;
+            }
+        }
+    }
+    has_corner.then_some(removed)
 }
 
 type Key = (i64, i64, i64);
@@ -388,6 +445,21 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             // Carry the groove result, including any refusal, past the planar fallback.
             return Ok(groove);
         }
+        let adjacent = |face| {
+            crate::offset::face_edges(&rec, face)
+                .into_iter()
+                .filter_map(|edge| efaces.get(&edge))
+                .flatten()
+                .copied()
+                .filter(|&f| f != face)
+                .collect::<BTreeSet<_>>()
+        };
+        if let Some(removed) = round_junction_faces(&rec, &del, &adjacent) {
+            let supports = removed.iter().flat_map(|&face| adjacent(face)).filter(|f| !removed.contains(f)).collect();
+            if let Some(healed) = heal_from_extensions(body, &removed, &supports, true).transpose() {
+                return Ok(healed);
+            }
+        }
         let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
         for &f in &neighbours {
             match surf_of(&rec, f) {
@@ -398,7 +470,7 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
                     if matches!(other, Some(Surf::Sphere { .. }))
                         && neighbours.len() == 2
                         && neighbours.iter().any(|&g| matches!(surf_of(&rec, g), Some(Surf::Plane { .. })))
-                        && let Some(healed) = heal_sphere_to_plane(body, &del, &neighbours).transpose()
+                        && let Some(healed) = heal_from_extensions(body, &del, &neighbours, false).transpose()
                     {
                         return Ok(healed);
                     }
@@ -752,6 +824,36 @@ mod tests {
                 other => panic!("expected a point on the face, got {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn delete_one_round_or_its_ball_corner_on_a_rounded_housing() {
+        let origin = Vec3::new(11.0, -7.0, 4.0);
+        let size = Vec3::new(36.0, 29.0, 24.0);
+        let radius = 3.0;
+        let block = box_solid(origin, origin + size).unwrap();
+        let edges: Vec<_> = block.edges(0.001).unwrap().into_iter().map(|edge| edge.mid).collect();
+        let rounded = fillet(&block, &edges, radius).unwrap();
+        let input = crate::Body::from_record(rounded.record().clone()).unwrap();
+        let strip_at = origin + Vec3::new(0.0, size.y / 2.0, 0.0);
+        let remaining: Vec<_> = edges.into_iter().filter(|p| p.dist(strip_at) > 0.001).collect();
+        assert_eq!(remaining.len(), 11);
+        let control = fillet(&block, &remaining, radius).unwrap();
+
+        let d = radius * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
+        let strip = picked_faces(&input, &[strip_at + Vec3::new(d, 0.0, d)]);
+        let healed = delete_faces(&input, &strip).unwrap();
+        assert_eq!(healed.face_count(), control.face_count());
+        assert!((healed.volume_at(1e-8).unwrap() - control.volume_at(1e-8).unwrap()).abs() < 1e-4);
+        assert!(healed.edges(0.001).unwrap().iter().any(|edge| edge.mid.dist(strip_at) < 0.001));
+
+        let d = radius * (1.0 - 1.0 / 3.0_f64.sqrt());
+        let ball = picked_faces(&input, &[origin + Vec3::new(d, d, d)]);
+        let healed = delete_faces(&input, &ball).unwrap();
+        assert_eq!(healed.face_count() + 1, input.face_count());
+        // The corner gains an octant of three intersecting cylinders less the ball octant.
+        let gained = radius.powi(3) * (2.0 - 2.0_f64.sqrt() - std::f64::consts::PI / 6.0);
+        assert!((healed.volume_at(1e-8).unwrap() - input.volume_at(1e-8).unwrap() - gained).abs() < 1e-4);
     }
 
     #[test]
