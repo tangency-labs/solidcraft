@@ -3260,7 +3260,7 @@ mod tests {
         .unwrap());
         assert!(matches!(
             rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
-            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            Err(SolidError::Cancelled { .. })
         ));
     }
 
@@ -3276,7 +3276,7 @@ mod tests {
         assert!(!rolls_over(&pseudo, None, &FailingSolvers(cancelled)).unwrap());
         assert!(matches!(
             rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
-            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            Err(SolidError::Cancelled { .. })
         ));
     }
 

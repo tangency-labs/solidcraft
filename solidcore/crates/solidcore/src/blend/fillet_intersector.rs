@@ -4692,13 +4692,7 @@ mod tests {
         let e = fi
             .skin_splits(&mut mock, k, &skin_stations(&[0.0, 1.0]), &[&skin])
             .unwrap_err();
-        assert!(
-            matches!(
-                e,
-                SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
-            ),
-            "{e:?}"
-        );
+        assert!(matches!(e, SolidError::Cancelled { .. }), "{e:?}");
     }
 
     /// A skin of a kind the generator does not build is a port invariant, not a pass.

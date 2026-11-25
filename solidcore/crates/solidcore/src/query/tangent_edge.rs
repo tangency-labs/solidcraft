@@ -2723,13 +2723,7 @@ mod tests {
         token.cancel();
         k.set_cancel_token(token);
         let r = tangent_all_along(&k, &mut b, e, 0.01);
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-            ),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
     }
 
     /// The procedural round's root edges, at kernel level, with the token already cancelled:
@@ -2746,10 +2740,7 @@ mod tests {
         for e in edges {
             let r = tangent_all_along(&k, &mut b, e, 0.5_f64.to_radians());
             assert!(
-                matches!(
-                    r,
-                    Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-                ),
+                matches!(r, Err(SolidError::Cancelled { .. })),
                 "{e:?}: {r:?}"
             );
         }

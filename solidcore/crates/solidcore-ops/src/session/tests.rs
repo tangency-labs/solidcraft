@@ -814,7 +814,7 @@ fn fuel_takes_nothing_from_a_call_within_it_and_every_result_past_it() {
     assert_eq!(r, Err(Error::Cancelled));
 }
 
-/// A real boolean: within its default fuel it builds, and given one unit it stops at the
+/// A real boolean: with no limit (the default) it builds, and given one unit it stops at the
 /// kernel's first check past it with `OutOfFuel`, naming the call.
 #[test]
 fn a_boolean_out_of_fuel_is_refused_and_one_within_it_builds() {
@@ -826,8 +826,14 @@ fn a_boolean_out_of_fuel_is_refused_and_one_within_it_builds() {
         )
     };
     let (a, b) = pair();
-    let built = crate::boolean::boolean(a, b, crate::BooleanOp::Union);
-    assert!(matches!(built, Ok(Some(_))), "{built:?}");
+    let built = crate::boolean::boolean(a, b, crate::BooleanOp::Union)
+        .unwrap()
+        .expect("the union of two overlapping cubes");
+    // two cubes of side 2 overlapping in a unit cube: 8 + 8 - 1
+    let volume = built.volume(1e-10).unwrap();
+    assert!((volume - 15.0).abs() < 1e-8, "{volume}");
+    // the L-shaped steps of the union: 12 faces, 30 edges, 20 vertices (V - E + F = 2)
+    assert_eq!(built.counts().unwrap(), [12, 30, 20]);
     let (a, b) = pair();
     let r = crate::fuel::within(crate::fuel::Fuel::Limit(1), || {
         crate::boolean::boolean(a, b, crate::BooleanOp::Union)

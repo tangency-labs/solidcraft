@@ -5191,13 +5191,7 @@ mod tests {
             let err =
                 edge_interval_maximum(&b, e, &piece, b.tolerance(), &mut held, of, Some(&surfaces))
                     .unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. }
-                ),
-                "{err:?}"
-            );
+            assert!(matches!(err, SolidError::Cancelled { .. }), "{err:?}");
         }
         assert_eq!(token.polls(), Some(2)); // Newton entered, then cancelled mid-solve.
         assert_eq!(calls.get(), 1);

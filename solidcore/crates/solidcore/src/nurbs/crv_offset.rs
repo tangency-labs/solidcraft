@@ -543,13 +543,7 @@ mod tests {
         assert_eq!(plain, unfired);
         token.cancel();
         let r = cubic().offset_pt_sampling_cancellable(b, 0.1, 3, false, par, 1e-4, Some(&token));
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-            ),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
         // the knot removal on its own
         let r = plain.remove_knots_deriv_constraints_cancellable(
             1e-4,
@@ -557,13 +551,7 @@ mod tests {
             0,
             Some(&token),
         );
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-            ),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
     }
 
     /// HANG-44 addendum 2026-10-29: the bound scales with the segment count and the

@@ -287,7 +287,7 @@ pub enum Error {
     Cancelled,
     /// The call spent the fuel it was given ([`crate::fuel`]): a deterministic budget of
     /// work units, never of time. It gave no result; run again with more fuel
-    /// ([`crate::fuel::Fuel::Times`]) to try harder.
+    /// ([`crate::fuel::Fuel::Limit`], or [`crate::fuel::Fuel::Unlimited`]) to try harder.
     OutOfFuel {
         /// The ops call that ran out (its session call name).
         op: &'static str,

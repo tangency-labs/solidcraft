@@ -3814,13 +3814,7 @@ mod tests {
             limits,
             &mut cancelling,
         );
-        assert!(
-            matches!(
-                got,
-                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-            ),
-            "{got:?}"
-        );
+        assert!(matches!(got, Err(SolidError::Cancelled { .. })), "{got:?}");
     }
 
     /// The rounding of a subpatch's hull is a small finite bound for the crown, and none

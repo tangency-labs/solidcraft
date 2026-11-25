@@ -1799,11 +1799,11 @@ mod circle_tests {
         let c = quarter(0.0);
         assert!(matches!(
             on_circle(&k, &c, C, Z, 2.0, 1e-7),
-            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            Err(SolidError::Cancelled { .. })
         ));
         assert!(matches!(
             meridian_collapse(&k, &c, P, X, C, 4.0, 1e-7),
-            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            Err(SolidError::Cancelled { .. })
         ));
     }
 

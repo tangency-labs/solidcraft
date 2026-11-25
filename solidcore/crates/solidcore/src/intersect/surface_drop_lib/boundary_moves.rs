@@ -782,13 +782,7 @@ mod tests {
         let b = plane(100.0, 100.0, 1e-3);
         let mut p = poly(0, (0.45, 2e-6), (0.5, 1e-7), (0.55, 2e-6));
         let r = fix_boundary_curves_bounded(&k, &mut p, &[0.0, 1.0, 2.0], &DOM, TOL, TOL, &b);
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
-            ),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::Cancelled { .. })), "{r:?}");
     }
 
     /// A net carrying a procedural definition is evaluated exactly, not through its net:

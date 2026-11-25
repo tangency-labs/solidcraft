@@ -13,12 +13,14 @@
 //!   [`crate::Error::OutOfFuel`], never a partial body passed off as a result: like a
 //!   cancelled call, a call whose fuel ran out returns no result even if the kernel finished,
 //!   and puts back the body it was editing ([`crate::session`]).
-//! - **Defaults** are per call ([`default_limit`]), set from measurement: about ten times the
-//!   most fuel any successful case of the kernel rig, the naming corpus and the benchmark
-//!   spends in that call, so no valid input meets its limit. A call with no measured default
-//!   runs without a limit.
+//! - **Defaults:** none yet. Every call runs without a limit unless its caller sets one with
+//!   [`within`]; [`DEFAULTS`] is empty. A valid STEP part read back as sheet metal spent more
+//!   than ten times the most any corpus case had spent in one call, so a fixed per-call
+//!   limit would refuse valid work. Limits relative to the size of the input come later, from
+//!   measurement (tangency-labs/solidcore#3390).
 //! - **Callers** change it for the calls made inside [`within`]: [`Fuel::Times`] for a
-//!   "try harder" retry, [`Fuel::Limit`] for an exact budget, [`Fuel::Unlimited`] for none.
+//!   "try harder" retry (no effect until calls have defaults), [`Fuel::Limit`] for an exact
+//!   budget, [`Fuel::Unlimited`] for none.
 //!   Work that starts threads hands them [`current`] and runs each [`within`] it.
 
 use std::cell::Cell;
@@ -52,17 +54,12 @@ impl Fuel {
 }
 
 /// Each call's default fuel, by its session call name (the name [`crate::FailureCode::call`]
-/// and [`crate::session::current_call`] give): about ten times the most fuel a successful
-/// case spent in it across the kernel rig, the naming corpus, brep-bench and the designs of
-/// slow failure reports (the measurements are in the pull request that set each line). Kept
-/// sorted by name. A call left out runs without a limit: `union_all`, whose work grows with
-/// how many bodies it is given, has too few measured cases to bound it.
-const DEFAULTS: &[(&str, u64)] = &[
-    // booleans: the most a successful case spent was 4,058,015 (4,350 calls measured)
-    ("SmApiBoolean", 41_000_000),
-    // planar region booleans: the most was 171,864 (2,420 calls measured)
-    ("planar_regions_boolean", 1_720_000),
-];
+/// and [`crate::session::current_call`] give), kept sorted by name. A call left out runs
+/// without a limit. Empty: no call has a default yet. A fixed limit per call is not enough;
+/// a valid STEP part spent 1,746,027 units in one `planar_regions_boolean`, more than ten
+/// times the corpus's most (171,864). Defaults relative to the input's size come with their
+/// measurements (tangency-labs/solidcore#3390).
+const DEFAULTS: &[(&str, u64)] = &[];
 
 /// The default fuel of `call` ([`DEFAULTS`]); `None` for a call with none measured, which runs
 /// without a limit.
@@ -136,6 +133,9 @@ mod tests {
     fn times_scales_only_a_default() {
         assert_eq!(Fuel::Times(10).limit("no such call"), None);
         assert_eq!(Fuel::Default.limit("no such call"), None);
+        // no call has a default yet: the boolean and the planar region boolean run unlimited
+        assert_eq!(Fuel::Default.limit("SmApiBoolean"), None);
+        assert_eq!(Fuel::Default.limit("planar_regions_boolean"), None);
         if let Some(&(call, n)) = DEFAULTS.first() {
             assert_eq!(Fuel::Times(3).limit(call), Some(n * 3));
         }

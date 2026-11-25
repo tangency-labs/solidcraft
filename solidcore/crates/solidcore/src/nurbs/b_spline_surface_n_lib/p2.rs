@@ -4635,7 +4635,7 @@ mod tests {
         let cancelled = Err(SolidError::Cancelled { operation: "test" });
         assert!(matches!(
             keep_bar_on_error(cancelled),
-            Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+            Err(SolidError::Cancelled { .. })
         ));
         let taken = keep_bar_on_error(Ok(Some(bar.clone()))).unwrap();
         assert_eq!(

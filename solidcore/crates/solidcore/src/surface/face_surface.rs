@@ -239,8 +239,12 @@ fn extruded(s: &BSplineSurface) -> bool {
 /// that is; otherwise the NURBS itself.
 fn recognised(k: &Kernel, net: BSplineSurface, kinds: &[SupportKind]) -> Result<Surface> {
     for &kind in kinds {
-        let Ok(support) = AnalyticSupport::derive(k, kind, &net) else {
-            continue;
+        // a derivation stopped by its caller (cancelled, or out of fuel) is no non-match: it
+        // goes up, so the NURBS is never returned in place of an answer nobody waited for
+        let support = match AnalyticSupport::derive(k, kind, &net) {
+            Ok(support) => support,
+            Err(e) if e.is_cancelled() => return Err(e),
+            Err(_) => continue,
         };
         match support.build(k, net.copy()) {
             Ok(s) => return Ok(s),
