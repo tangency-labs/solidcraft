@@ -403,7 +403,7 @@ The sites move to the rule one at a time (§10, "The coincidence rule in migrati
   outside it at the insert's corner, was one wall with the facet in the sector, while the
   intersector's plane check, at the tolerance, had found the two apart and made no curve
   where the side leaves the chamfer below it: the intersect kept the insert whole and lost
-  both chamfer wedges (#21687, kernel case
+  both chamfer wedges (kernel case
   `booleans/21687-insert-intersect-chamfered-block-corner`);
 - two points one proto vertex (`find_proto_vertex_within` and `DeclaredContact::overlaps`,
   `proto_topology/p1/proto.rs`; "One point or two" below): two points, or their uncertainty
