@@ -400,7 +400,15 @@ fn measure_pair(
                 return out;
             }
             Ok(Some(o)) => match measure_near_origin(&o, shared_region(a, b).center()) {
-                Ok(m) => out.overlap = Some((m.volume, m.area, m.bbox, m.centroid)),
+                Ok(m) => {
+                    if m.volume > 0.0
+                        && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
+                    {
+                        out.unchecked = Some(why);
+                        return out;
+                    }
+                    out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+                }
                 Err(e) => {
                     out.unchecked = Some(e.to_string());
                     return out;
