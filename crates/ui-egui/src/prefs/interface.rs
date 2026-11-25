@@ -1,6 +1,45 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// The accent presets, as `#rrggbb`: blue, green, teal, purple, pink, red, orange and amber.
+const ACCENTS: [&str; 8] = ["#3b82f6", "#22c55e", "#14b8a6", "#8b5cf6", "#ec4899", "#ef4444", "#f97316", "#eab308"];
+
+/// Accent: the theme's own, a preset, or any colour; a theme that keeps its own shows the row disabled.
+fn accent_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let accepted = accent_accepted(active_theme_file(app));
+    ui.add_enabled_ui(accepted, |ui| {
+        ui_kit::row(ui, app.tr("prefs.accent"), |ui| {
+            let own = app.preferences.accent.is_empty();
+            let chip = ui_kit::choice_chip(ui, "accent_theme", app.tr("prefs.accent_theme"), own);
+            crate::scenario::publish_target("prefs:accent:theme", chip.rect);
+            if chip.clicked() {
+                app.preferences.accent.clear();
+            }
+            // Any other colour: the shared picker, starting from the accent on now.
+            let on = crate::theme::parse_accent(&app.preferences.accent).unwrap_or(Tokens::get().accent);
+            let mut rgb = [on.r(), on.g(), on.b()];
+            if ui_kit::color_field(ui, &mut rgb).changed() {
+                app.preferences.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+            }
+        });
+        // The presets wrap on their own lines: a row clips its controls to one line.
+        ui_kit::swatch_grid(ui, &ACCENTS, |ui, hex| {
+            let Some(color) = crate::theme::parse_accent(hex) else { return };
+            let chosen = app.preferences.accent.eq_ignore_ascii_case(hex);
+            // Search draws the page unseen first (#15902): that copy takes an id of its own place.
+            let id = if ui.is_visible() { egui::Id::unique(("sc_accent", hex)) } else { ui.scope_id().with(("sc_accent", hex)) };
+            let swatch = ui_kit::color_swatch(ui, id, color, chosen, hex, ());
+            crate::scenario::publish_target(&format!("prefs:accent:{hex}"), swatch.rect);
+            if swatch.clicked() {
+                app.preferences.accent = (*hex).to_string();
+            }
+        });
+    });
+    if !accepted {
+        ui.label(egui::RichText::new(app.tr("prefs.accent_locked")).weak());
+    }
+}
+
 /// Renders the Appearance preferences page, configuring theme, viewport background, and visual styling.
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
@@ -112,6 +151,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.logo_accent = selected == 1;
                     }
                 });
+                accent_row(app, ui);
                 // A theme file another tool writes, reloaded when it changes (#7573).
                 follow_row(app, ui);
             });

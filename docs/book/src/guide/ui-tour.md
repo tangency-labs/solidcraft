@@ -540,6 +540,18 @@ malformed values are refused with the overlay's one-based position. An overlay m
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
 
+The optional boolean `accepts_accent` (default `false`) lets the Accent preference apply over the
+theme. Under the themes, **Accent** then puts another accent colour over it: the theme's own (the
+default), one of eight presets, or any colour from the colour picker. It recolours the accent, the
+selected row, the primary buttons, the selection in the view and the File view's primary action;
+the Sketch, Surface and other tabs keep their own colours. A theme without the field shows the
+row disabled, with the reason "This theme keeps its own accent", and ignores a saved accent, which
+is kept for a theme that accepts one. The built-in Light and Dark accept an accent, as do the
+built-in themes Akari, Blueprint, Catppuccin Mocha, Clay, Clay Dark, Cupertino, Graphite, Gruvbox
+Dark and Light, Nord, Nosferatu, Okibi, One Dark, Onyx and Tokyo Night. The others keep their own
+accent: the 1-bit themes, CGA, High Contrast, the green and amber phosphor themes, Platinum 9,
+SolidCraft 95 and the Solarized themes, whose colours are the theme's identity or a fixed standard.
+
 The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a
 `needs_newer` flag through the theme API for future UI. The theme-definition API can export
