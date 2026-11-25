@@ -69,6 +69,7 @@ impl Walk for crate::document::FilletTurn {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
+impl Walk for crate::document::DomeShape {}
 impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::CoilEndCut {}
 impl Walk for crate::document::ThinSide {}
