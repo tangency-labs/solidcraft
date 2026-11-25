@@ -954,6 +954,14 @@ impl SolveApp {
                         self.sketch_closed(sketch.as_u64());
                     }
                 }
+                if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
+                    for m in messages {
+                        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+                        let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+                        let error = level == "error";
+                        self.messages.push(text, error, crate::now_ms());
+                    }
+                }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;
                 // After the new geometry is in the live session, including a run that did not
                 // change the document. `accept_computed` does not copy the camera.
