@@ -939,6 +939,131 @@ impl FootBlend {
         Ok((bound * BELOW_OPEN_BOUND).max(0.0))
     }
 
+    /// A lower end of the bound on `|sagitta|` ([`FootBlend::station_bound`], on `sagitta`'s
+    /// side) over every parameter of `within` (the weld's spans as leader parameters; none:
+    /// the whole interval), with the legs `legs`: enclosed, not sampled, and within
+    /// [`BOUND_SHARE`] of the least bound over them. Each span between two of
+    /// [`FootBlend::check_stations`] is cut into pieces as [`FootBlend::prove_feet`] cuts it
+    /// and each foot proved over a piece ([`FootBlend::prove_piece`]: a piece not proved is
+    /// halved, [`PROOF_HALVINGS`] times at most). Over a piece, and over its parts where the
+    /// least bound is near ([`least_bound`]), the leader, each foot and its support's normal
+    /// are Taylor models in the leader's parameter ([`foot_on_cell`]; the fillet's feet take
+    /// the same models, [`crate::blend::fillet_section::feet_tm`]), and each foot's bound, `(c
+    /// / 2) tan(beta / 2)` concave or `(c / 2) tan((pi - beta) / 2)` convex, is composed from
+    /// them ([`toe_bound_over`]). The normals are those of the supports' forms, the surfaces
+    /// the feet are proved on.
+    ///
+    /// `Err` with the reason where no bound is proved: a station is not made, a support has
+    /// no form, a piece stays unproved or a part unenclosed after the halvings.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FootBlend::station_bound`] (a concave arc on a support where the bound at
+    /// its feet is not proved enough) and of the enclosures.
+    pub fn bound_over(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        within: &[[f64; 2]],
+    ) -> Result<std::result::Result<f64, &'static str>> {
+        use crate::blend::fillet_section::certificate::NurbsCurve;
+        check_legs(legs)?;
+        let leader = NurbsCurve::of(&self.leader)?;
+        let [one, two] = &self.sides;
+        let (Some(first), Some(second)) = (
+            ProofSupport::of(k, &one.surface)?,
+            ProofSupport::of(k, &two.surface)?,
+        ) else {
+            return Ok(Err("a support has no form to prove its foot on"));
+        };
+        let [leg1, leg2] = legs;
+        let reach = leg1.min(leg2) * PIECE_OF_LEG;
+        let whole = [[self.interval.min(), self.interval.max()]];
+        let spans: &[[f64; 2]] = if within.is_empty() { &whole } else { within };
+        let mut pieces = Vec::new();
+        for span in spans {
+            let mut near: Option<FootStation> = None;
+            for t in self.check_stations(core::slice::from_ref(span))? {
+                let Ok(s) = self.try_station(k, t, legs, near.as_ref())? else {
+                    return Ok(Err(
+                        "a check station of the joint is not made at these legs",
+                    ));
+                };
+                // the refusal of a concave arc on a support where the bound is not proved
+                self.station_bound(k, &s, sagitta)?;
+                let Some(before) = near.replace(s) else {
+                    continue;
+                };
+                // the span's pieces, each and its halves from a work list
+                let count = (before.root.distance(s.root) / reach)
+                    .ceil()
+                    .clamp(1.0, MAX_PIECES) as usize;
+                let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
+                let mut from = before;
+                for j in 1..=count {
+                    let to = if j == count {
+                        s
+                    } else {
+                        let at = before.t + (s.t - before.t) * j as f64 / count as f64;
+                        let Ok(made) = self.try_station(k, at, legs, Some(&from))? else {
+                            return Ok(Err(
+                                "a station between two check stations is not made at these legs",
+                            ));
+                        };
+                        made
+                    };
+                    work.push((from, to, 0));
+                    from = to;
+                }
+                while let Some((a, b, depth)) = work.pop() {
+                    let ([fa1, fa2], [fb1, fb2]) = (a.feet, b.feet);
+                    let mut paths = Vec::new();
+                    for (form, leg, fa, fb) in [(&first, leg1, fa1, fb1), (&second, leg2, fa2, fb2)]
+                    {
+                        let Some((.., path)) =
+                            Self::prove_piece(k, form, &leader, a.t, b.t, leg, fa, fb, &mut None)?
+                        else {
+                            break;
+                        };
+                        paths.push(path);
+                    }
+                    if let [path1, path2] = paths.as_slice() {
+                        pieces.push(BoundPiece {
+                            from: a.t.min(b.t),
+                            to: a.t.max(b.t),
+                            paths: [*path1, *path2],
+                        });
+                        continue;
+                    }
+                    if depth >= PROOF_HALVINGS {
+                        return Ok(Err("a foot is not proved over a piece of the joint"));
+                    }
+                    let Ok(mid) = self.try_station(k, 0.5 * (a.t + b.t), legs, Some(&a))? else {
+                        return Ok(Err(
+                            "the middle station of a halved piece is not made at these legs",
+                        ));
+                    };
+                    work.push((mid, b, depth + 1));
+                    work.push((a, mid, depth + 1));
+                }
+            }
+        }
+        let sides = [
+            BoundSide {
+                cn: &first.cn,
+                period: first.period,
+                leg: leg1,
+            },
+            BoundSide {
+                cn: &second.cn,
+                period: second.period,
+                leg: leg2,
+            },
+        ];
+        least_bound(&pieces, &sides, &leader, sagitta)
+    }
+
     /// Checks that each toe lies on its face of `target` at the legs `legs`: at
     /// [`FootBlend::check_stations`] of `within` (sampled), each foot's parameters
     /// classified on its face (trims included). Stations not made are skipped (the build
@@ -2625,6 +2750,430 @@ fn icross(
     }
 }
 
+/// A Taylor model in the leader's parameter over a part of a piece
+/// ([`crate::blend::fillet_section::taylor_model`]), as the fillet's feet take them.
+type Ft = crate::blend::fillet_section::feet_tm::Ft;
+
+/// A vector of [`Ft`]s.
+type Ft3 = crate::blend::fillet_section::series::V3<Ft>;
+
+/// `a - b` of vectors of models.
+fn ft_sub(a: &Ft3, b: &Ft3) -> Ft3 {
+    crate::blend::fillet_section::series::V3 {
+        x: a.x - b.x,
+        y: a.y - b.y,
+        z: a.z - b.z,
+    }
+}
+
+/// `a . b` of vectors of models.
+fn ft_dot(a: &Ft3, b: &Ft3) -> Ft {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+/// `a × b` of vectors of models.
+fn ft_cross(a: &Ft3, b: &Ft3) -> Ft3 {
+    crate::blend::fillet_section::series::V3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// The polynomial pieces of a form's direction that the interval `x` of its parameter
+/// reaches, each with the whole periods that move `x` onto it: the spans of `knots` (degree
+/// `p`, `n` control points) that meet `x`, widened by a thousand-millionth of the knots'
+/// range for the rounding of the comparisons. In a periodic direction `x` is moved into the
+/// range and cut at the seam; in another the end spans go on past the range (the form is
+/// its end piece continued there). `None` where `x` is not finite or spans a period.
+fn cells(
+    x: Ivl,
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    period: Option<f64>,
+) -> Option<Vec<(f64, usize)>> {
+    let (&first, &last) = (knots.get(p)?, knots.get(n)?);
+    let pad = 1e-9 * (last - first);
+    let (lo, hi) = (x.lo - pad, x.hi + pad);
+    let usable = lo.is_finite() && hi.is_finite() && lo <= hi && first < last;
+    if !usable {
+        return None;
+    }
+    let ranges = match period.filter(|per| *per > 0.0) {
+        Some(per) => {
+            if hi - lo >= per {
+                return None;
+            }
+            let shift = -per * ((lo - first) / per).floor();
+            let (a, b) = (lo + shift, hi + shift);
+            if b <= last {
+                vec![(a, b, shift)]
+            } else {
+                vec![(a, last, shift), (first, b - per, shift - per)]
+            }
+        }
+        None => vec![(lo, hi, 0.0)],
+    };
+    let mut out = Vec::new();
+    for (a, b, shift) in ranges {
+        for k in p..n {
+            let (&from, &to) = (knots.get(k)?, knots.get(k + 1)?);
+            if from < to && (k == p || from <= b) && (k + 1 == n || to >= a) {
+                out.push((shift, k));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// One support's side of [`least_bound`]: its form's data, its periods in u and v, and its
+/// leg.
+struct BoundSide<'a> {
+    cn: &'a crate::blend::fillet_section::station::Nurbs,
+    period: [Option<f64>; 2],
+    leg: f64,
+}
+
+/// A piece of the joint for [`least_bound`]: the leader's parameters `from..to` and each
+/// foot's path, proved over it ([`FootBlend::prove_piece`]).
+struct BoundPiece {
+    from: f64,
+    to: f64,
+    paths: [PiecePath; 2],
+}
+
+/// The steps of Newton's method [`foot_on_cell`] takes for the path's polynomial.
+const TUBE_POLISH: usize = 3;
+
+/// The steps of Krawczyk's operator [`foot_on_cell`] narrows the path's tube by.
+const TUBE_STEPS: usize = 3;
+
+/// One support's foot over a part of a proved piece, on one polynomial piece `cell` of its
+/// form (in u and in v: the whole periods to it and its span, [`cells`]): the foot and the
+/// form's normal `S_u × S_v` at it as Taylor models in the leader's parameter over the
+/// part, valid for every parameter of the part at which the foot lies on that piece
+/// (continued, the piece is not the form elsewhere). Empty where the foot lies on it at no
+/// parameter of the part; `None` where nothing is enclosed.
+///
+/// The piece's proof holds the foot within `held` of the straight path `line` at every
+/// parameter. On the cell the foot is a root of the cell's own equations, `w·e' = 0` and
+/// `|w|² = z²` with `w = S - e`, smooth there. A polynomial `P` near that root's path is
+/// taken by Newton's steps from the line (on the models' middles: any polynomial would do).
+/// Then, with `Y` the Jacobian's inverse at the part's middle and `R` a box with the foot in
+/// `P + R`: by the mean value `x - P = -Y G(P) + (I - Y J)(x - P)` for a root `x`, `J` the
+/// Jacobian somewhere in `P + R`, so the foot is in `P + (D + C R)`, `D` and `C` the ranges
+/// of `-Y G(P)` and `I - Y J` over the part, both from models along `P` (the form's partials
+/// by [`crate::blend::fillet_section::feet_tm::nurbs_partials_tm`], which keeps what moves
+/// together along the joint together). `R` starts as the proved box about the line and is
+/// narrowed so [`TUBE_STEPS`] times; a step that leaves nothing shows the cell has no root
+/// there. No existence is claimed here: the piece's proof gives it.
+fn foot_on_cell(
+    side: &BoundSide<'_>,
+    cell: [(f64, usize); 2],
+    line: [Ft; 2],
+    held: [Ivl; 2],
+    e: &Ft3,
+    e1: &Ft3,
+) -> Result<Option<Vec<(Ft3, Ft3)>>> {
+    use crate::blend::fillet_section::feet_tm::nurbs_partials_tm;
+    let [(shift_u, ku), (shift_v, kv)] = cell;
+    // onto the cell: the periods are floats, so each to a few of its last places
+    let moved = |m: Ft, s: f64| {
+        let slack = 1e-15 * s.abs();
+        m.add_ivl(Ivl::new(s - slack, s + slack))
+    };
+    let [line_u, line_v] = line;
+    let (line_u, line_v) = (moved(line_u, shift_u), moved(line_v, shift_v));
+    let zz = Ivl::from(side.leg) * Ivl::from(side.leg);
+    let (two, minus) = (Ivl::from(2.0), Ivl::from(-1.0));
+    // the form's point and first partials on the cell at the models `u` and `v`
+    let form = |u: Ft, v: Ft, order: usize| match nurbs_partials_tm(side.cn, ku, kv, u, v, order) {
+        Ok(p) => Ok(Some((p.at(0, 0), p.at(1, 0), p.at(0, 1)))),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(_) => Ok(None),
+    };
+    // the equations, and their Jacobian by rows
+    let equations = |s: &Ft3| {
+        let w = ft_sub(s, e);
+        [ft_dot(&w, e1), ft_dot(&w, &w).add_ivl(minus * zz)]
+    };
+    let jacobian = |s: &Ft3, su: &Ft3, sv: &Ft3| {
+        let w = ft_sub(s, e);
+        [
+            [ft_dot(su, e1), ft_dot(sv, e1)],
+            [ft_dot(&w, su).scale(two), ft_dot(&w, sv).scale(two)],
+        ]
+    };
+    let Some((s, su, sv)) = form(line_u.mid_poly(), line_v.mid_poly(), 1)? else {
+        return Ok(None);
+    };
+    let middle = |m: Ft| m.c.first().map_or(f64::NAN, |c| c.mid());
+    let [[a, b], [c, d]] = jacobian(&s, &su, &sv).map(|row| row.map(middle));
+    let det = a * d - b * c;
+    let regular = det.is_finite() && det != 0.0;
+    if !regular {
+        return Ok(None);
+    }
+    let [[y11, y12], [y21, y22]] =
+        [[d / det, -b / det], [-c / det, a / det]].map(|row| row.map(Ivl::from));
+    // -Y g
+    let step = |g: [Ft; 2]| {
+        let [g1, g2] = g;
+        [
+            (g1.scale(y11) + g2.scale(y12)).scale(minus),
+            (g1.scale(y21) + g2.scale(y22)).scale(minus),
+        ]
+    };
+    let mut poly = [line_u.mid_poly(), line_v.mid_poly()];
+    for _ in 0..TUBE_POLISH {
+        let [pu, pv] = poly;
+        let Some((s, ..)) = form(pu, pv, 0)? else {
+            return Ok(None);
+        };
+        let [du, dv] = step(equations(&s));
+        poly = [(pu + du).mid_poly(), (pv + dv).mid_poly()];
+    }
+    let [pu, pv] = poly;
+    let Some((s, ..)) = form(pu, pv, 0)? else {
+        return Ok(None);
+    };
+    let [du, dv] = step(equations(&s)).map(|m| m.range());
+    let [held_u, held_v] = held;
+    let mut tube = [
+        (line_u - pu).range() + held_u,
+        (line_v - pv).range() + held_v,
+    ];
+    let meet = |k: Ivl, x: Ivl| {
+        let (lo, hi) = (k.lo.max(x.lo), k.hi.min(x.hi));
+        (lo <= hi).then_some(Ivl::new(lo, hi))
+    };
+    let one = Ft::constant(Ivl::from(1.0));
+    for _ in 0..TUBE_STEPS {
+        let [ru, rv] = tube;
+        let Some((s, su, sv)) = form(pu.with_rem(ru), pv.with_rem(rv), 1)? else {
+            return Ok(None);
+        };
+        let [[j11, j12], [j21, j22]] = jacobian(&s, &su, &sv);
+        // I - Y J over the tube
+        let c11 = (one - (j11.scale(y11) + j21.scale(y12))).range();
+        let c12 = (j12.scale(y11) + j22.scale(y12)).scale(minus).range();
+        let c21 = (j11.scale(y21) + j21.scale(y22)).scale(minus).range();
+        let c22 = (one - (j12.scale(y21) + j22.scale(y22))).range();
+        let (Some(nu), Some(nv)) = (
+            meet(du + c11 * ru + c12 * rv, ru),
+            meet(dv + c21 * ru + c22 * rv, rv),
+        ) else {
+            return Ok(Some(Vec::new()));
+        };
+        tube = [nu, nv];
+    }
+    let [ru, rv] = tube;
+    let Some((s, su, sv)) = form(pu.with_rem(ru), pv.with_rem(rv), 1)? else {
+        return Ok(None);
+    };
+    Ok(Some(vec![(s, ft_cross(&su, &sv))]))
+}
+
+/// A lower end, over a part, of the bound on `|sagitta|` at the foot `foot`, and an upper
+/// end of it at the part's middle (`other` the other foot, `normal` its support's normal at
+/// the foot, `root` and `tangent` the leader's point and derivative, all models over the
+/// part): `(c / 2) tan(beta / 2)` concave and `(c / 2) tan((pi - beta) / 2)` convex, with
+/// `cos(beta)` the chord's cosine to the face's direction towards the root in the
+/// station's plane, and `tan²(beta / 2) = (1 - cos) / (1 + cos)`. `None` where that
+/// direction's side or the result is not enclosed.
+fn toe_bound_over(
+    foot: &Ft3,
+    other: &Ft3,
+    normal: &Ft3,
+    root: &Ft3,
+    tangent: &Ft3,
+    sagitta: f64,
+) -> Option<(f64, f64)> {
+    let chord = ft_sub(other, foot);
+    let along = ft_cross(normal, tangent);
+    let side = ft_dot(&along, &ft_sub(root, foot)).range();
+    // the face's direction towards the root is `along` or its opposite
+    let towards = if side.lo > 0.0 {
+        Ivl::from(1.0)
+    } else if side.hi < 0.0 {
+        Ivl::from(-1.0)
+    } else {
+        return None;
+    };
+    let cc = ft_dot(&chord, &chord);
+    let lengths = (cc * ft_dot(&along, &along)).sqrt_tm();
+    let cos = ft_dot(&chord, &along).scale(towards) / lengths;
+    let one = Ft::constant(Ivl::from(1.0));
+    let ratio = if sagitta < 0.0 {
+        (one - cos) / (one + cos)
+    } else {
+        (one + cos) / (one - cos)
+    };
+    let bound = cc.sqrt_tm().scale(Ivl::from(0.5)) * ratio.sqrt_tm();
+    let (lower, upper) = (bound.range().lo, bound.at(0.0).hi);
+    (lower.is_finite() && upper.is_finite()).then_some((lower, upper))
+}
+
+/// [`least_bound`] over the part `from..to` of `piece`: a lower end of the bound over the
+/// part, and an upper end of the bound at some parameter of it (infinite where none is
+/// known). `None` where it is not enclosed.
+///
+/// The leader and each foot are Taylor models over the part. Where a foot's box reaches
+/// more than one polynomial piece of its form (a knot line), it is enclosed on each
+/// ([`foot_on_cell`]), each enclosure valid where the foot lies on that piece, and the
+/// lower end is the least over them: nothing is assumed of the form across the line.
+fn part_bound(
+    piece: &BoundPiece,
+    sides: &[BoundSide<'_>; 2],
+    leader: &crate::blend::fillet_section::certificate::NurbsCurve,
+    from: f64,
+    to: f64,
+    sagitta: f64,
+) -> Result<Option<(f64, f64)>> {
+    use crate::blend::fillet_section::feet_tm::curve_derivs_tm;
+    use crate::blend::fillet_section::interval::round_up;
+    use crate::blend::fillet_section::station::span;
+    let at = 0.5 * (from + to);
+    let delta = round_up((to - at).max(at - from));
+    let usable = at.is_finite() && delta.is_finite() && delta > 0.0;
+    if !usable {
+        return Ok(None);
+    }
+    // (the stations hold the leader's knots, so a piece lies on one of its spans)
+    let on = span(&leader.u, leader.p, leader.n, at);
+    let derivatives = match curve_derivs_tm(leader, at, delta, 1, on) {
+        Ok(d) => d,
+        Err(error) if error.is_cancelled() => return Err(error),
+        Err(_) => return Ok(None),
+    };
+    let (Some(e), Some(e1)) = (derivatives.first(), derivatives.get(1)) else {
+        return Ok(None);
+    };
+    // the paths are about the piece's middle
+    let offset = Ivl::from(at) - Ivl::from(0.5 * (piece.from + piece.to));
+    let half = Ivl::from(delta);
+    let mut feet: [Vec<(Ft3, Ft3)>; 2] = [Vec::new(), Vec::new()];
+    for ((side, path), found) in sides.iter().zip(&piece.paths).zip(feet.iter_mut()) {
+        let line = [0, 1].map(|i: usize| {
+            let (mid, slope) = (
+                path.mid.get(i).copied().unwrap_or(f64::NAN),
+                path.slope.get(i).copied().unwrap_or(f64::NAN),
+            );
+            let slope = Ivl::from(slope);
+            Ft::from_poly(
+                &[Ivl::from(mid) + slope * offset, slope * half],
+                Ivl::from(0.0),
+            )
+        });
+        let ([line_u, line_v], [held_u, held_v], [period_u, period_v]) =
+            (line, path.held, side.period);
+        let cn = side.cn;
+        let (Some(us), Some(vs)) = (
+            cells(line_u.range() + held_u, &cn.u, cn.p, cn.nu, period_u),
+            cells(line_v.range() + held_v, &cn.v, cn.q, cn.nv, period_v),
+        ) else {
+            return Ok(None);
+        };
+        if us.len() * vs.len() > 4 {
+            return Ok(None);
+        }
+        for &cu in &us {
+            for &cv in &vs {
+                let Some(on_cell) = foot_on_cell(side, [cu, cv], line, path.held, e, e1)? else {
+                    return Ok(None);
+                };
+                found.extend(on_cell);
+            }
+        }
+    }
+    let [feet1, feet2] = &feet;
+    let (mut lower, mut upper) = (f64::INFINITY, f64::INFINITY);
+    for (foot1, normal1) in feet1 {
+        for (foot2, normal2) in feet2 {
+            let (Some((lower1, upper1)), Some((lower2, upper2))) = (
+                toe_bound_over(foot1, foot2, normal1, e, e1, sagitta),
+                toe_bound_over(foot2, foot1, normal2, e, e1, sagitta),
+            ) else {
+                return Ok(None);
+            };
+            lower = lower.min(lower1).min(lower2);
+            upper = upper.min(upper1).min(upper2);
+        }
+    }
+    // an upper end is the bound at the middle only where each foot lies on one piece there
+    if feet1.len() != 1 || feet2.len() != 1 {
+        upper = f64::INFINITY;
+    }
+    Ok(lower.is_finite().then_some((lower, upper)))
+}
+
+/// A lower end of the bound on `|sagitta|` over the pieces `pieces` of a joint, within
+/// [`BOUND_SHARE`] of the least bound on them: each piece's bound is enclosed over it
+/// ([`part_bound`]), and a part whose lower end is further than that share below the least
+/// upper end found (the bound at some parameter, so no less than the least bound) is halved
+/// and enclosed again: only the parts near the least bound are cut fine. A part is halved
+/// [`BOUND_HALVINGS`] times at most, and no more once [`BOUND_PARTS`] parts a piece are
+/// enclosed; the lower end is then further below, and still one. A part that is not
+/// enclosed is halved too; `Err` with the reason where one still is not after the halvings,
+/// or there is no piece.
+fn least_bound(
+    pieces: &[BoundPiece],
+    sides: &[BoundSide<'_>; 2],
+    leader: &crate::blend::fillet_section::certificate::NurbsCurve,
+    sagitta: f64,
+) -> Result<std::result::Result<f64, &'static str>> {
+    // (piece, from, to, halvings)
+    let mut work: Vec<(&BoundPiece, f64, f64, usize)> =
+        pieces.iter().map(|p| (p, p.from, p.to, 0)).collect();
+    let mut open: Vec<(&BoundPiece, f64, f64, usize, f64)> = Vec::new();
+    let (mut least, mut upper) = (f64::INFINITY, f64::INFINITY);
+    let mut parts = 0_usize;
+    while !work.is_empty() {
+        while let Some((piece, from, to, depth)) = work.pop() {
+            parts += 1;
+            if let Some((lower, above)) = part_bound(piece, sides, leader, from, to, sagitta)? {
+                upper = upper.min(above);
+                open.push((piece, from, to, depth, lower));
+            } else if depth >= BOUND_HALVINGS {
+                return Ok(Err(
+                    "the bound is not enclosed over a part of the joint after the halvings",
+                ));
+            } else {
+                let mid = 0.5 * (from + to);
+                work.push((piece, from, mid, depth + 1));
+                work.push((piece, mid, to, depth + 1));
+            }
+        }
+        let spent = parts >= BOUND_PARTS * pieces.len();
+        for (piece, from, to, depth, lower) in open.drain(..) {
+            let near = upper.is_infinite() || lower >= upper - BOUND_SHARE * upper.abs();
+            if spent || depth >= BOUND_HALVINGS || near {
+                least = least.min(lower);
+            } else {
+                let mid = 0.5 * (from + to);
+                work.push((piece, from, mid, depth + 1));
+                work.push((piece, mid, to, depth + 1));
+            }
+        }
+    }
+    Ok(if least.is_finite() {
+        Ok(least)
+    } else {
+        Err("the joint has no piece to enclose the bound over")
+    })
+}
+
+/// How close below the least bound over a joint [`least_bound`] comes, as a share of it.
+const BOUND_SHARE: f64 = 1e-4;
+
+/// The most times [`least_bound`] halves a part of a piece.
+const BOUND_HALVINGS: usize = 12;
+
+/// The most parts [`least_bound`] encloses before it stops halving those that are enclosed,
+/// for each piece of the joint (a joint takes a few a piece).
+const BOUND_PARTS: usize = 16;
+
 /// The path a foot's piece is proved about ([`FootBlend::prove_piece`]): `x(t) = mid + slope
 /// (t − t̃) + δ` on the support's form, `t̃` the piece's middle, and the box of `δ` Krawczyk's
 /// test ran on, in which the foot is the only point for every `t` of the piece.
@@ -2633,6 +3182,9 @@ struct PiecePath {
     mid: [f64; 2],
     slope: [f64; 2],
     region: [Ivl; 2],
+    /// The box of `δ` the test proved the foot in for every `t` of the piece (inside
+    /// `region`, and far narrower).
+    held: [Ivl; 2],
 }
 
 /// Krawczyk's test about `mid` (`geom::krawczyk`'s operator), its preconditioner the
@@ -3013,7 +3565,12 @@ impl FootBlend {
         Ok(Some((
             [m0 + d0 + s0 * dt, m1 + d1 + s1 * dt],
             w,
-            PiecePath { mid, slope, region },
+            PiecePath {
+                mid,
+                slope,
+                region,
+                held: delta,
+            },
         )))
     }
 

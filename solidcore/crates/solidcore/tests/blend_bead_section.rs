@@ -2021,6 +2021,75 @@ fn a_concave_bead_is_refused_where_its_bound_is_not_proved() {
     assert!(smb(&k, &cup) == before, "the cup changed");
 }
 
+/// The bound on a sagitta enclosed over a whole joint (`FootBlend::bound_over`) is no more
+/// than the bound read at any parameter of it: round the T-joint, a branch off the main
+/// tube's axis and a rod on a plate, concave and convex, against the least of 2001
+/// parameters. Prints how far below that least it is, the fit read at the stations, and how
+/// long the enclosure takes.
+#[test]
+fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
+    use solidcore::blend::foot_blend::FootBlend;
+    use solidcore::primitive::api_primitives::create_box;
+    let offset = [
+        Tube {
+            o: Point3::new(0.0, 0.0, -60.0),
+            d: Vec3::new(0.0, 0.0, 1.0),
+            r: 20.0,
+            len: 120.0,
+        },
+        Tube {
+            o: Point3::new(0.0, 6.0, 0.0),
+            d: Vec3::new(1.0, 0.0, 0.3).unitize().unwrap(),
+            r: 10.0,
+            len: 60.0,
+        },
+    ];
+    let mut parts: Vec<(&str, Kernel, Brep, EdgeId)> = Vec::new();
+    for (what, pair) in [
+        ("tee", branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0))),
+        ("offset branch", offset),
+    ] {
+        let mut k = kernel();
+        let (part, joints) = tubes(&mut k, &pair);
+        parts.push((what, k, part, joints[0]));
+    }
+    {
+        let mut k = kernel();
+        let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+        let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 40.0).unwrap();
+        let part = boolean_union(&mut k, plate, rod).unwrap();
+        let joint = pick(&k, &part, [65.0, 50.0, 10.0]);
+        parts.push(("rod", k, part, joint));
+    }
+    let legs = [4.0; 2];
+    for (what, k, mut part, joint) in parts {
+        let blend = FootBlend::of_edge(&k, &mut part, joint, None).unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for h in [-1.0, 1.0] {
+            let started = std::time::Instant::now();
+            let enclosed = blend.bound_over(&k, legs, h, &[]).unwrap();
+            let took = started.elapsed();
+            // a sagitta that fits is its bound less a thousand-millionth
+            let bound = |within: &[[f64; 2]]| {
+                blend.sagitta_that_fits(&k, legs, h, within).unwrap() / (1.0 - 1e-9)
+            };
+            let stations = bound(&[]);
+            let least = (0..=2000)
+                .map(|i| bound(&[[lo + (hi - lo) * f64::from(i) / 2000.0; 2]]))
+                .fold(f64::INFINITY, f64::min);
+            println!(
+                "{what}, sagitta {h}: enclosed {enclosed:?}, least of 2001 parameters {least}, at the stations {stations}, {took:?}"
+            );
+            if let Ok(lower) = enclosed {
+                assert!(
+                    lower <= least * (1.0 + 1e-12),
+                    "{what} {h}: {lower} above {least}"
+                );
+            }
+        }
+    }
+}
+
 /// A sagitta too large for several joints of one call is refused with the smallest sagitta
 /// that fits over all of them, whichever joint comes first: two branches of different size on
 /// one main tube, each joint alone naming its own depth, both together the least of the two,
