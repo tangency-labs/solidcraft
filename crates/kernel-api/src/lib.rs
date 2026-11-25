@@ -22,8 +22,10 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
+pub mod cell_grid;
 pub mod modelling;
 
+pub use cell_grid::{CellGrid, CellGridLimits};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
@@ -67,6 +69,8 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// A cell grid planned over a profile ([`CellGrid`]).
+    CellGrid,
 }
 
 impl OpKind {
@@ -84,6 +88,7 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::CellGrid,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -101,6 +106,7 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::CellGrid => "cell_grid",
         }
     }
 

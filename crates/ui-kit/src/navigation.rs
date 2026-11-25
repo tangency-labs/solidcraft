@@ -116,6 +116,9 @@ pub enum NavigationFill {
     Hover,
     Press,
     Active,
+    /// An active slot whose state must stand out ([`crate::navigation_bar::Catalogue::strong`]):
+    /// the primary action's fill.
+    Strong,
 }
 
 /// Actions never latch, and keyboard focus has its own outline rather than a fill.
@@ -138,6 +141,7 @@ pub fn navigation_fill(t: &Tokens, fill: NavigationFill) -> Option<egui::Color32
         NavigationFill::Hover => Some(t.nav_hover),
         NavigationFill::Press => Some(t.nav_press),
         NavigationFill::Active => Some(t.selected_bg),
+        NavigationFill::Strong => Some(t.form_primary_fill),
     }
 }
 
@@ -145,6 +149,9 @@ pub fn navigation_fill(t: &Tokens, fill: NavigationFill) -> Option<egui::Color32
 /// where that reads; a theme whose selected fill is as dark as its accent (SolidCraft 95's navy)
 /// gets the theme's selected-text ink instead, so an active toggle never turns into a blank block.
 pub fn navigation_ink(t: &Tokens, fill: NavigationFill) -> egui::Color32 {
+    if fill == NavigationFill::Strong {
+        return t.on_accent;
+    }
     if fill != NavigationFill::Active {
         return t.form_ink;
     }
@@ -179,7 +186,10 @@ pub fn navigation_button_editable(ui: &mut Ui, rect: Rect, button: NavigationBut
     if pressed || response.clicked_by(egui::PointerButton::Primary) {
         response.surrender_focus();
     }
-    let (fill, focus) = navigation_visual(button.kind, button.selected, response.hovered(), pressed, response.has_focus());
+    let (mut fill, focus) = navigation_visual(button.kind, button.selected, response.hovered(), pressed, response.has_focus());
+    if fill == NavigationFill::Active && !editing && crate::navigation_bar::strong(button.id) {
+        fill = NavigationFill::Strong;
+    }
     if let Some(fill) = navigation_fill(&t, fill) {
         ui.painter().rect_filled(rect, metrics.button_radius, fill);
     }

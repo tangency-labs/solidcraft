@@ -872,12 +872,13 @@ impl<'a> Mapper<'a> {
         Ok(i)
     }
 
-    /// `ORIENTED_EDGE` (possibly of another oriented edge) -> (edge, forward).
+    /// `ORIENTED_EDGE` or `SEAM_EDGE` (possibly of another oriented edge) -> (edge, forward);
+    /// a seam edge's pcurve is not used.
     fn oriented_edge(&self, id: u64, c: &mut Ctx, depth: usize) -> R<OrientedEdge> {
         self.check_depth(depth)?;
         let r = self.simple(id)?;
         match r.name.as_str() {
-            "ORIENTED_EDGE" => {
+            "ORIENTED_EDGE" | "SEAM_EDGE" => {
                 let inner = ref_of(param(r, 3)?)?;
                 let fwd = boolean(param(r, 4)?)?;
                 let e = self.oriented_edge(inner, c, depth + 1)?;
