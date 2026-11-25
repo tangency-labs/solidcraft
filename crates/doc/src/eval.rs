@@ -127,7 +127,9 @@ pub struct ModelBody {
     volume: Arc<OnceLock<(Body, Option<f64>)>>,
     /// [`kernel::measure`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones: inspecting a design again measures only the bodies that changed.
-    measured: Arc<OnceLock<(Body, kernel::Result<kernel::BodyMeasure>)>>,
+    /// Only successful measurements are cached so cancellation or transient errors never poison
+    /// the cell.
+    measured: Arc<OnceLock<(Body, kernel::BodyMeasure)>>,
     /// Whether `body` is open (with the body it was measured on): a B-rep one a surface body
     /// ([`Body::is_surface`]), a mesh one with a side only one triangle has
     /// ([`Body::is_closed_mesh`]); worked out once and shared by clones.
@@ -270,7 +272,7 @@ impl ModelBody {
     /// body's measure depends on nothing else, so the bill of materials and the physical
     /// properties weigh it once however often they are asked. `None` when it can't be measured.
     pub fn volume(&self) -> Option<f64> {
-        if let Some((measured, Ok(m))) = self.measured.get()
+        if let Some((measured, m)) = self.measured.get()
             && measured.same(&self.body)
         {
             return Some(m.volume);
@@ -285,7 +287,7 @@ impl ModelBody {
 
     /// Whether [`ModelBody::volume`] is already cached for the current body.
     pub(crate) fn has_cached_volume(&self) -> bool {
-        self.volume.get().is_some_and(|(b, _)| b.same(&self.body)) || self.measured.get().is_some_and(|(b, r)| b.same(&self.body) && r.is_ok())
+        self.volume.get().is_some_and(|(b, _)| b.same(&self.body)) || self.measured.get().is_some_and(|(b, _)| b.same(&self.body))
     }
 
     /// Whether [`ModelBody::measure`] is already cached for the current body.
@@ -391,14 +393,16 @@ impl ModelBody {
     /// [`kernel::measure`] of the body (volume, area, centre of mass, box and topology), worked
     /// out once: snapshots and passed-through copies of this geometry share it.
     pub fn measure(&self) -> kernel::Result<kernel::BodyMeasure> {
-        let measure = || {
-            #[cfg(test)]
-            cost_tests::count(|c| c.measures += 1);
-            kernel::measure(&self.body)
-        };
-        let (body, m) = self.measured.get_or_init(|| (self.body.clone(), measure()));
-        // The body was replaced in this cell's holder since: measure it again.
-        if body.same(&self.body) { m.clone() } else { measure() }
+        if let Some((body, m)) = self.measured.get()
+            && body.same(&self.body)
+        {
+            return Ok(m.clone());
+        }
+        #[cfg(test)]
+        cost_tests::count(|c| c.measures += 1);
+        let m = kernel::measure(&self.body)?;
+        let _ = self.measured.set((self.body.clone(), m.clone()));
+        Ok(m)
     }
 
     /// Identity of this body's geometry where it stands: the same for a body evaluated or

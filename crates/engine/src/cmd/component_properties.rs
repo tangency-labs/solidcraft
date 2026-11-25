@@ -353,6 +353,9 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
         }
     }
     let total_bodies = tasks.len();
+    if let Some(w) = &watch {
+        w.progress("measuring", 0, total_bodies);
+    }
     // Phase 1: warm exact measurements of distinct uncached bodies used by rigid placements in
     // parallel, so every placement reuses one parallelized measurement.
     let mut seen_measure = HashSet::new();
@@ -361,11 +364,17 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
         .filter(|t| proper_rotation(&t.transform) && !t.body.has_cached_measure() && seen_measure.insert(t.body_index))
         .map(|t| t.body)
         .collect();
+    let parallel_done = std::sync::atomic::AtomicUsize::new(0);
     if cold_bodies.len() > 1 {
+        let cold_total = cold_bodies.len();
         solidcraft_kernel::for_each_on_threads(&cold_bodies, 16, |body| {
             if !watch.as_ref().is_some_and(|w| w.cancelled()) {
                 let _ = body.measure();
                 let _ = body.is_closed();
+                if let Some(w) = &watch {
+                    let n = parallel_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    w.progress("measuring", n, cold_total);
+                }
             }
         });
     }
@@ -378,6 +387,8 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
         tasks.iter().enumerate().filter(|(_, t)| !proper_rotation(&t.transform) || !square_to_axes(&t.transform)).map(|(i, _)| i).collect();
     let mut precomputed: Vec<Option<solidcraft_kernel::Result<Placed>>> = std::iter::repeat_with(|| None).take(tasks.len()).collect();
     if expensive.len() > 1 {
+        let exp_total = expensive.len();
+        parallel_done.store(0, std::sync::atomic::Ordering::Relaxed);
         let computed = solidcraft_kernel::map_on_threads(&expensive, 16, |&ti| {
             if watch.as_ref().is_some_and(|w| w.cancelled()) {
                 return Err(solidcraft_kernel::KernelError::Failed("cancelled".into()));
@@ -385,7 +396,12 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
             let Some(task) = tasks.get(ti) else {
                 return Err(solidcraft_kernel::KernelError::Internal("missing body task".into()));
             };
-            measure_placed_body(task.body, task.transform)
+            let res = measure_placed_body(task.body, task.transform);
+            if let Some(w) = &watch {
+                let n = parallel_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                w.progress("measuring", n, exp_total);
+            }
+            res
         });
         for (ti, res) in expensive.into_iter().zip(computed) {
             if let Some(slot) = precomputed.get_mut(ti) {
