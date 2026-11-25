@@ -484,6 +484,11 @@ fn a_short_cylinder_keeps_both_rims_when_its_vertices_have_a_larger_tolerance() 
     for vertex in &mut body.vertices {
         vertex.tolerance = 0.0018;
     }
+    let wall = body.faces.iter().position(|f| matches!(f.surface, brep::Surface::Cylinder { .. })).expect("cylinder wall");
+    let middle = body.faces[wall].domain.map(|[lo, hi]| lo.midpoint(hi));
+    let prepared = super::prepare(&body, 0.01, None, Purpose::Display).expect("cylinder boundaries");
+    // The cylinder's NURBS runs from one rim to the other along v, even within the boundary's pole tolerance.
+    assert!(!prepared.evals[wall].pole(middle, 1, prepared.boundaries[wall].reach), "the axial generator has two distinct ends");
     let (plan, _) = meshed(&body, &MeshSpec::chord(0.01), 2.0, None);
     let (mesh, refused) = plan.welded().expect("welded cylinder");
     assert!(refused.is_empty(), "{refused:?}");
