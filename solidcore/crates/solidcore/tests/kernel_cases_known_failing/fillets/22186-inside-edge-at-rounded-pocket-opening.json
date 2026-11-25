@@ -1,0 +1,5 @@
+{
+  "fails": "call 0 (blend_dropping) refused: the result is not a closed solid",
+  "issue": "tangency-labs/solidcraft#22186",
+  "reason": "The inside round ends at the pocket mouth. The kernel leaves an open solid at this end."
+}
