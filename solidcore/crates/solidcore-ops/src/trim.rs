@@ -721,12 +721,27 @@ fn remove_extended_feature(
             }) {
                 return Ok(false);
             }
-            Ok(executive.do_defeature(k)?.is_empty()
-                && (!crossing_pair
-                    || executive
-                        .features()
-                        .get(i)
-                        .is_some_and(|feature| feature.trimmed_crossing_base_patches)))
+            if !executive.do_defeature(k)?.is_empty() {
+                return Ok(false);
+            }
+            if crossing_pair {
+                return Ok(executive
+                    .features()
+                    .get(i)
+                    .is_some_and(|feature| feature.trimmed_crossing_base_patches));
+            }
+            drop(executive);
+            // The extensions can leave their attachment edges as seams on the
+            // original supports. Remove only joins between a patch and an old face.
+            let original: HashSet<_> = mapped.faces.iter().copied().collect();
+            let patches: Vec<_> = b
+                .face_list()
+                .iter()
+                .copied()
+                .filter(|face| !original.contains(face))
+                .collect();
+            solidcore::blend::feature_executive::remove_patch_rims(k, b, &mapped.faces, &patches)?;
+            Ok(true)
         })?;
         Ok(())
     })?;
