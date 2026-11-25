@@ -2037,8 +2037,9 @@ pub(crate) fn trims_before_move(
 /// ([`within_edge_tolerance_limit`]: a body the check refuses), and the edge curve's distance to
 /// a face whose uses hold no trim (a follow-up).
 ///
-/// The bounds are cut at [`TRIM_BOUND_FLOOR`] of `T`, not of the fit tolerance
-/// ([`fit_tolerance`] measures gaps): a bound only matters here where it is close to `T`.
+/// The bounds are cut at [`TRIM_BOUND_FLOOR`] of `T` (of `room` where that is larger), not of
+/// the fit tolerance ([`fit_tolerance`] measures gaps): a bound only matters here where it is
+/// close to `T`, or to the raise.
 ///
 /// [`trim_image_gap_bound_within`]: crate::query::curve_surface_gap::trim_image_gap_bound_within
 /// [`moved_pair_room`]: crate::query::curve_surface_gap::moved_pair_room
@@ -2088,7 +2089,7 @@ pub(crate) fn cover_moved_trims(
                 continue;
             };
             // (the distance before the move, proved within `T` or not covered)
-            let bound_before = |enough: f64| {
+            let bound_before = |floor: f64, enough: f64| {
                 trim_image_gap_bound_within(
                     k,
                     &t.surface,
@@ -2112,10 +2113,15 @@ pub(crate) fn cover_moved_trims(
                 None
             };
             if let Some(room) = room {
-                // (a distance before the move within `enough` stays within `T` after it)
-                let enough = ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo;
-                let b0 = match bound_before(enough)? {
-                    Some(b0) if b0.is_finite() && b0 > enough => b0,
+                // (a distance before the move within `covered` stays within `T` after it)
+                let covered = ((Ivl::from(tol) - Ivl::from(room)) / Ivl::from(norm)).lo;
+                // (the raise `‖A‖ B0 + room` is wanted to [`TRIM_BOUND_FLOOR`] of itself, not
+                // of `T`: where `room` passes `T`, a `B0` cut finer than a thousandth of
+                // `room` changes the raise by less, and a floor of `T` cuts each piece of a
+                // tightly lowered edge down to its own rounding)
+                let floor = TRIM_BOUND_FLOOR * tol.max(room);
+                let b0 = match bound_before(floor, covered.max(floor))? {
+                    Some(b0) if b0.is_finite() && b0 > covered => b0,
                     _ => continue,
                 };
                 need = need.max(up((Ivl::from(norm) * Ivl::from(b0) + Ivl::from(room)).hi));
@@ -2123,7 +2129,7 @@ pub(crate) fn cover_moved_trims(
             }
             // (the structure changed: the distance after the move is proved directly, for a
             // trim covered before it)
-            if !matches!(bound_before(tol)?, Some(b0) if b0.is_finite()) {
+            if !matches!(bound_before(floor, tol)?, Some(b0) if b0.is_finite()) {
                 continue;
             }
             let b1 = trim_image_gap_bound_within(
@@ -4114,13 +4120,14 @@ mod tests {
     }
 
     /// #19910: a rigid move after a tolerance was proved keeps it covering the trim. One
-    /// edge of a sphere at the origin is given its trims' proved distance `B0` as its
-    /// tolerance exactly (no headroom, lowered below its build tolerance), then the body is
-    /// turned by 0.3 rad about z and moved 8e8 away (gen1157's centre). The move rounds the
-    /// control points of the edge curve and the sphere's net by up to about `eps * 8e8`, so
-    /// `B0` no longer covers the distance proved after it: [`cover_moved_trims`] raises the
-    /// edge to `‖A‖ B0` plus that rounding (enclosed from the data before and after,
-    /// [`moved_pair_room`]); without it the tolerance stays at `B0`, below that.
+    /// edge of a sphere at the origin is lowered to `2 B0`, `B0` its trims' proved distance
+    /// (what [`trim_raise_distance`]'s lowering leaves, below the build tolerance), then the
+    /// body is turned by 0.3 rad about z and moved 8e8 away (gen1157's centre). The move
+    /// rounds the control points of the edge curve and the sphere's net by up to about
+    /// `eps * 8e8`, enclosed from the data before and after as `room` ([`moved_pair_room`]),
+    /// which is above `2 B0`: the distance after the move is only proved within `‖A‖ B0 +
+    /// room`, and [`cover_moved_trims`] raises the edge to cover it (at least `room`);
+    /// without it the tolerance stays at `2 B0`, below `room`.
     ///
     /// [`moved_pair_room`]: crate::query::curve_surface_gap::moved_pair_room
     #[test]
@@ -4151,8 +4158,9 @@ mod tests {
             pairs.push((eu, trim.clone_for_evaluation().unwrap(), surface));
         }
         assert!(!pairs.is_empty() && b0 > 0.0);
-        crate::topology::edge::set_tolerance(&mut b, e, b0, false, true).unwrap();
-        assert_eq!(b.edge(e).unwrap().tolerance, b0);
+        let lowered = 2.0 * b0;
+        crate::topology::edge::set_tolerance(&mut b, e, lowered, false, true).unwrap();
+        assert_eq!(b.edge(e).unwrap().tolerance, lowered);
         let curve0 = b
             .edge(e)
             .unwrap()
@@ -4170,11 +4178,11 @@ mod tests {
         let range = [rec.interval.min(), rec.interval.max()];
         let curve1 = rec.curve.as_ref().unwrap().clone_for_evaluation().unwrap();
         let tol = rec.tolerance;
-        let mut need = 0.0_f64;
+        let mut room = 0.0_f64;
         for (eu, trim0, surface0) in &pairs {
             let trim1 = b.edgeuse(*eu).unwrap().uv_trim_curve.as_ref().unwrap();
             let (_, surface1) = trim_pair_surface(&b, *eu).unwrap().unwrap();
-            let room = moved_pair_room(
+            let r = moved_pair_room(
                 &k,
                 (surface0, &curve0, trim0),
                 (&surface1, &curve1, trim1),
@@ -4183,10 +4191,17 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-            need = need.max(norm * b0 + room);
+            room = room.max(r);
         }
-        assert!(need > b0, "the move's rounding is not above B0: {need:e}");
-        assert!(tol >= need, "edge {e:?}: {tol:e} below {need:e}");
+        assert!(
+            norm >= 1.0 && room > lowered,
+            "the rounding {room:e} is within {lowered:e}"
+        );
+        assert!(tol >= room, "edge {e:?}: {tol:e} below {room:e}");
+        assert!(
+            tol <= norm * lowered + room + 1e-12,
+            "edge {e:?} raised past the bound: {tol:e}"
+        );
     }
 
     #[test]
