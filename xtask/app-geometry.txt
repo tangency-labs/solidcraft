@@ -1304,10 +1304,6 @@ crates/ui-egui/src/drawing_workspace/dimension.rs:shape_of cross,dot,normalized
 crates/ui-egui/src/drawing_workspace/dimension.rs:smaller_angle atan2,dot,normalized
 crates/ui-egui/src/drawing_workspace/placement.rs:Placement::target cross
 crates/ui-egui/src/edit_clipboard.rs:paste_placement dot
-crates/ui-egui/src/edit_in_place.rs:draw_context triangles
-crates/ui-egui/src/edit_in_place.rs:scene_key triangles
-crates/ui-egui/src/edit_in_place.rs:snapshot triangles
-crates/ui-egui/src/edit_in_place.rs:take_refresh triangles
 crates/ui-egui/src/extrude_face_snap.rs:flat_faces_of cross,dot,normalized,triangles
 crates/ui-egui/src/extrude_face_snap.rs:nearest distance
 crates/ui-egui/src/extrude_face_snap.rs:stops dot

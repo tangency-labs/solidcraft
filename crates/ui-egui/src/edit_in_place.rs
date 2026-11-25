@@ -181,34 +181,6 @@ fn mat_rows(m: &Mat) -> [[f32; 4]; 3] {
     [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32])
 }
 
-/// Extent of `mesh` in its own frame, matching the triangles [`crate::viewport::build_shared_tris`] packs.
-fn local_bounds(mesh: &solidcraft_engine::geom::Mesh, body: &solidcraft_engine::doc::ModelBody) -> Aabb3 {
-    let mut bounds = Aabb3::EMPTY;
-    if let Some((positions, triangles)) = body.flat_mesh_in_place().filter(|(_, triangles)| triangles.len() == mesh.triangles.len()) {
-        for t in triangles {
-            let [Some(a), Some(b), Some(c)] = t.map(|k| positions.get(k as usize).copied()) else { continue };
-            bounds.add(a);
-            bounds.add(b);
-            bounds.add(c);
-        }
-        return bounds;
-    }
-    for t in &mesh.triangles {
-        // A triangle with an index out of range is left out whole, matching SharedTris::new.
-        let [Some(a), Some(b), Some(c)] = t.map(|k| {
-            let i = k as usize;
-            mesh.normals.get(i)?;
-            mesh.positions.get(i).copied()
-        }) else {
-            continue;
-        };
-        bounds.add(a);
-        bounds.add(b);
-        bounds.add(c);
-    }
-    bounds
-}
-
 /// Expand `bounds` by the 8 corners of `local` transformed by `m`.
 fn add_transformed_bounds(bounds: &mut Aabb3, local: &Aabb3, m: &Mat) {
     if local.is_empty() {
@@ -241,7 +213,7 @@ fn snapshot(session: &Session, component: u64, placement: &[u64]) -> Option<(usi
             Some((held, local, slot)) if Arc::ptr_eq(held, &mesh) => (*local, *slot),
             _ => {
                 let tris = crate::viewport::build_shared_tris(&mesh, Some(b));
-                let local = local_bounds(&mesh, b);
+                let local = if tris.indices.is_empty() { Aabb3::EMPTY } else { mesh.bounds() };
                 let slot = (!tris.indices.is_empty()).then(|| {
                     let key = Arc::as_ptr(&tris) as usize as u64;
                     let idx = meshes.len();
