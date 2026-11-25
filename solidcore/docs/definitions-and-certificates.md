@@ -364,7 +364,7 @@ equations over each piece, `generic-blend.md` §2.5; at a tapered or rounded end
 are at least a quarter of the full ones), each on the branch of its support's section that leaves
 the root along the face where the leg holds over the piece (not in a shaped end's zone): a chain
 of Krawczyk boxes over the leg, `t` over the piece and the distance `ρ` from the root over each
-step (the first to an eighth of the leg, each further one an eighth longer than its start's
+step (the first to an eighth of the leg, each further one a quarter longer than its start's
 distance from the root), from the root (in `(S − e)/ρ` near it, from 64 times the bound on the
 root's own gap from the support) to the toe, two boxes joined by the branch's point where they
 meet (proved to rounding, strictly inside both boxes' regions, each of which holds one root
