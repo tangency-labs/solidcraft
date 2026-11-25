@@ -1719,14 +1719,21 @@ pub fn test_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Sized>(
     if let Some(&through) = v.intersector().through_points.first() {
         let p1 = need_prev()?;
 
+        // the step landed on the through point itself (not upstream, #21179): the test of
+        // the span leaves its ends out of its interior and takes one by its tangent's sign,
+        // which a through point does not have
+        let on_through = v.landed_on_through_point(next, through)?;
+
         // if through point is on hermite curve from pPrev1 point to rNextTSP point
-        if is_point_on_tsect_curve(
-            k,
-            v.intersector().point(through)?,
-            v.intersector().point(p1)?,
-            v.intersector().point(next)?,
-            tol,
-        )? {
+        if on_through
+            || is_point_on_tsect_curve(
+                k,
+                v.intersector().point(through)?,
+                v.intersector().point(p1)?,
+                v.intersector().point(next)?,
+                tol,
+            )?
+        {
             // modify the rNextTSP to correspond to the through point
             update_tsect_point_with(v, k, p1, next, through)?;
 
