@@ -224,6 +224,7 @@ pub const ELEMENTS: &[Element] = &[
             setting: "Z · 1°".into(),
             has_key: true,
             editable: false,
+            clear_key: None,
         };
         viewport_status_item(ui, &item, &mut StatusPresentation::default());
     }),
