@@ -1122,6 +1122,26 @@ impl Body {
             .collect()
     }
 
+    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`.
+    pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        let form = self.ops_body()?;
+        let (ops, order) = &*form;
+        let hit = ops.face_hit_by_ray(order, [origin.x, origin.y, origin.z], [dir.x, dir.y, dir.z]).ok()??;
+        Some((hit.distance, hit.face))
+    }
+
+    /// Whether `p` lies inside or on the boundary of `self` (for a B-rep body).
+    pub fn contains(&self, p: Vec3) -> bool {
+        let Some(form) = self.ops_body() else {
+            return false;
+        };
+        let (ops, _) = &*form;
+        let Ok(mut res) = ops.classify_points(&[[p.x, p.y, p.z]]) else {
+            return false;
+        };
+        matches!(res.pop().and_then(std::result::Result::ok), Some(solidcore_ops::PointClass::Inside | solidcore_ops::PointClass::OnBoundary))
+    }
+
     /// Every edge of `self` drawn as a polyline within a thousandth of the body's size, for
     /// finding the edge nearest a point ([`EdgeLines::nearest`]). Empty for a mesh body.
     pub fn edge_lines(&self) -> EdgeLines {
