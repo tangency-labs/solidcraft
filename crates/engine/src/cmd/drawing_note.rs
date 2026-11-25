@@ -104,7 +104,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let align = Some(request.align.unwrap_or(HAlign::Left));
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches };
     if let Some(view) = note.anchor.view() {
-        check_drawn(&record, view, note.paths(), ADD)?;
+        check_drawn(&record, view, note.references(), ADD)?;
     }
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let id = note.id;
@@ -176,7 +176,7 @@ fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
     })?;
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {
-        check_drawn(record, view, added.iter().map(Branch::path), EDIT)?;
+        check_drawn(record, view, added.iter().map(Branch::reference), EDIT)?;
     }
     Ok(kept.into_iter().chain(added).collect())
 }
@@ -199,7 +199,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
     let (text, fields) = crate::title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
-    let mut warnings = note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default();
+    let mut warnings = note.anchor.view().map(|view| drawn_warning(d, view, note.references())).unwrap_or_default();
     warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {
         note: ids::encode(id),

@@ -267,7 +267,7 @@ pub(crate) fn placed(
     cmd: &str,
     new: NewDimension,
 ) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
-    if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
+    if let Err(e) = check_drawn(record, new.view, new.kind.references(), cmd) {
         return Ok(Err(Refused::NotDrawn(e)));
     }
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
@@ -481,7 +481,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         change(&mut staged, id, set, targets.clone(), None)?;
         if targets.is_some() {
             let dimension = staged.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?;
-            check_drawn(&staged, dimension.view, dimension.kind.paths(), EDIT)?;
+            check_drawn(&staged, dimension.view, dimension.kind.references(), EDIT)?;
             let read = crate::drawing_view::ViewSessions::new(s)
                 .read_on(&staged, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
                 .map_err(|e| bad(EDIT, e.to_string()))?;
@@ -765,7 +765,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         candidates,
         layout,
         layout_why,
-        warnings: drawn_warning(&d, dimension.view, dimension.kind.paths()),
+        warnings: drawn_warning(&d, dimension.view, dimension.kind.references()),
         dry_run: false,
         param_warnings: Vec::new(),
     };

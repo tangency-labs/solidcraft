@@ -14,6 +14,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::bom::Unlisted;
 use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
+use solidcraft_doc::drawing::dimension::Reference;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
@@ -93,7 +94,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     let edge = s.doc.edge_reference(&s.model, &request.edge.pick, &request.edge.path).map_err(|why| bad(ADD, why.to_string()))?;
-    check_drawn(&record, view, [edge.path.as_slice()], ADD)?;
+    check_drawn(&record, view, [Reference::Edge(&edge)], ADD)?;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let balloon = Balloon { id, view, edge, at: request.at, parts_list: request.parts_list.map(|list| list.0) };
     s.edit_drawing(ADD, |d| {
@@ -159,7 +160,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     // Why it has no number, in the sheet's words, when no edit to the balloon gives it one.
     let lasting = matches!(row, RowRead::Unlisted { why: Unlisted::Reference, .. } | RowRead::Unread { .. });
     let mut warnings: Vec<String> = if lasting { crate::drawing_scene::row_why(&row).into_iter().collect() } else { Vec::new() };
-    warnings.extend(drawn_warning(d, balloon.view, [balloon.edge.path.as_slice()]));
+    warnings.extend(drawn_warning(d, balloon.view, [Reference::Edge(&balloon.edge)]));
     let reply = BalloonResult {
         balloon: ids::encode(id),
         view: ids::encode(balloon.view),

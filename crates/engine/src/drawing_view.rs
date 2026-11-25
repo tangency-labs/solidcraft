@@ -3,9 +3,10 @@
 //! their pictures (W17b) will too.
 //!
 //! A view shows the bodies the design places, where its occurrences place it ([`shown`]), less what
-//! it chooses to leave out ([`ShownSet::of_view`]). The browser's eye counts for nothing: hiding a
-//! part in the model never changes a drawing. A body placed through a reference occurrence is a
-//! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
+//! it chooses to leave out ([`ShownSet::of_view`]): subtrees, and single bodies of a part ([`Filter`]).
+//! The browser's eye counts for nothing: hiding a part in the model never changes a drawing.
+//! A body placed through a reference occurrence is a reference part: it doesn't set the view's extents
+//! when model parts are there too ([`measure`]).
 
 use std::borrow::Cow;
 use std::cell::OnceCell;
@@ -19,7 +20,7 @@ use solidcraft_doc::drawing::cutting_line::SectionKind;
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind};
 use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
-use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
+use solidcraft_doc::drawing_view::{Exploded, HiddenBody, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_detail::{Boundary, Shape};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
@@ -187,53 +188,116 @@ impl ShownSet {
         self.state.bodies.get(shown.index)
     }
 
-    /// The bodies under one of the `source` occurrence paths (all of them when there is none;
-    /// `[]` takes the design's own bodies) and under no `hide` path, in the same order.
-    pub fn keep(mut self, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> ShownSet {
-        let source: Option<HashSet<&[u64]>> = source.map(|paths| paths.iter().map(Vec::as_slice).collect());
-        let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
-        self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
+    /// The bodies `filter` keeps, in the same order.
+    pub fn keep(mut self, filter: &Filter) -> ShownSet {
+        self.bodies.retain(|b| filter.keeps(&b.path, &b.body));
         self
     }
 
-    /// What saved view `view` shows of the set: [`ShownSet::keep`] by what it resolves to, which a
-    /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
+    /// What saved view `view` shows of the set: [`ShownSet::keep`] by its [`Filter`], which a view
+    /// that leaves nothing out skips. Paths no occurrence makes any more, and bodies no part has any
+    /// more, match no body.
     pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
-        let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
-        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
+        let filter = Filter::of_view(view);
+        if filter.keeps_all() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(&filter)) }
     }
 }
 
-/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
-/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
-/// most 64 of them however many paths there are.
-fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
-    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
-    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
-    wanted && !heads().any(|h| hide.contains(h))
+/// Which bodies a view draws, built once per view and asked once per body (#22107): under a
+/// `source` path (every body when there is none; `[]` only for the design's own bodies), under no
+/// `hide` path, and not one of `hide_bodies`, each a body by the occurrences that place it and its
+/// definition's body name, the pair [`Shown`] carries. Each of a path's heads is one look-up, so a
+/// body costs at most 64 of them however many paths there are, and one more for its name.
+#[derive(Debug, Default)]
+pub struct Filter<'a> {
+    source: Option<HashSet<&'a [u64]>>,
+    hide: HashSet<&'a [u64]>,
+    hide_bodies: HashSet<(&'a [u64], &'a str)>,
 }
 
-/// Why a saved view doesn't draw what an occurrence path places ([`left_out`]).
+impl<'a> Filter<'a> {
+    /// The filter of `source`, `hide` and `hide_bodies`, as a view or a snapshot gives them.
+    pub fn new(source: Option<&'a [Vec<u64>]>, hide: &'a [Vec<u64>], hide_bodies: &'a [HiddenBody]) -> Filter<'a> {
+        Filter {
+            source: source.map(|paths| paths.iter().map(Vec::as_slice).collect()),
+            hide: hide.iter().map(Vec::as_slice).collect(),
+            hide_bodies: hide_bodies.iter().map(|b| (b.path.as_slice(), b.body.as_str())).collect(),
+        }
+    }
+
+    /// Saved view `view`'s filter, by what its settings resolve to.
+    pub fn of_view(view: &'a ResolvedView) -> Filter<'a> {
+        Filter::new(
+            view.occurrences.value.as_deref(),
+            view.hide.value.as_deref().unwrap_or_default(),
+            view.hide_bodies.value.as_deref().unwrap_or_default(),
+        )
+    }
+
+    /// Whether it keeps every body: nothing chosen and nothing left out.
+    pub fn keeps_all(&self) -> bool {
+        self.source.is_none() && self.hide.is_empty() && self.hide_bodies.is_empty()
+    }
+
+    /// Whether it keeps body `body` placed by `path` ([`Filter::left_out`] finds nothing).
+    pub fn keeps(&self, path: &[u64], body: &str) -> bool {
+        self.why(path, body).is_none()
+    }
+
+    /// Why it leaves body `body` placed by `path` out, if it does: a `hide` path covering it first,
+    /// then no `source` path taking it, then the body itself in `hide_bodies`.
+    fn why<'p>(&self, path: &'p [u64], body: &str) -> Option<Why<'p>> {
+        let mut heads = (1..=path.len()).filter_map(|n| path.get(..n));
+        if let Some(by) = heads.clone().find(|h| self.hide.contains(h)) {
+            return Some(Why::Hidden(by));
+        }
+        let wanted = self.source.as_ref().is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads.any(|h| set.contains(h)) });
+        if !wanted {
+            return Some(Why::NotChosen);
+        }
+        self.hide_bodies.contains(&(path, body)).then_some(Why::BodyHidden)
+    }
+}
+
+/// The entries of `hide_bodies` that name no body `all` places at their path, in their order: every
+/// entry when there are no bodies to read. A body renamed or deleted since it was hidden is one.
+pub fn unmatched<'b>(all: &std::result::Result<ShownSet, Unmeasured>, hide_bodies: &'b [HiddenBody]) -> Vec<&'b HiddenBody> {
+    if hide_bodies.is_empty() {
+        return Vec::new();
+    }
+    let placed: HashSet<(&[u64], &str)> = match all {
+        Ok(set) => set.bodies.iter().map(|b| (b.path.as_slice(), b.body.as_str())).collect(),
+        Err(_) => HashSet::new(),
+    };
+    hide_bodies.iter().filter(|b| !placed.contains(&(b.path.as_slice(), b.body.as_str()))).collect()
+}
+
+/// What [`Filter::why`] found, before the view says who set it.
+enum Why<'p> {
+    Hidden(&'p [u64]),
+    NotChosen,
+    BodyHidden,
+}
+
+/// Why a saved view doesn't draw a body ([`left_out`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LeftOut {
     /// A `hide` path covers it: that path, and the view that set it.
     Hidden { by: Vec<u64>, set_by: SetBy },
     /// No `source` path takes it: the view that set the source.
     NotChosen { set_by: SetBy },
+    /// `hide_bodies` names it (#22107): the body, the occurrences that place it, and the view that
+    /// set it.
+    BodyHidden { body: String, path: Vec<u64>, set_by: SetBy },
 }
 
-/// Why saved view `view` doesn't draw the body that occurrence path `path` places, if it doesn't:
-/// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
-pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
-    let source: Option<HashSet<&[u64]>> = view.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
-    let hide: HashSet<&[u64]> = view.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
-    if chosen(path, source.as_ref(), &hide) {
-        return None;
-    }
-    let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
-    Some(match by {
-        Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
-        None => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+/// Why saved view `view` doesn't draw body `body` (its definition's body name) placed by occurrence
+/// path `path`, if it doesn't: its [`Filter`] asked about one body. No model is read.
+pub fn left_out(view: &ResolvedView, path: &[u64], body: &str) -> Option<LeftOut> {
+    Some(match Filter::of_view(view).why(path, body)? {
+        Why::Hidden(by) => LeftOut::Hidden { by: by.to_vec(), set_by: view.hide.set_by },
+        Why::NotChosen => LeftOut::NotChosen { set_by: view.occurrences.set_by },
+        Why::BodyHidden => LeftOut::BodyHidden { body: body.to_string(), path: path.to_vec(), set_by: view.hide_bodies.set_by },
     })
 }
 
@@ -924,21 +988,38 @@ mod tests {
     /// path wins over a `source` path above it.
     #[test]
     fn a_body_is_drawn_under_a_source_path_and_no_hide_path() {
-        let set = |paths: &[&'static [u64]]| paths.iter().copied().collect::<HashSet<&[u64]>>();
+        let list = |paths: &[&[u64]]| paths.iter().map(|p| p.to_vec()).collect::<Vec<Vec<u64>>>();
         let paths: [&[u64]; 5] = [&[], &[1], &[1, 2], &[1, 2, 3], &[4]];
-        let cases: [(Option<HashSet<&[u64]>>, HashSet<&[u64]>, [bool; 5]); 4] = [
-            (None, set(&[&[1, 2]]), [true, true, false, false, true]),
-            (Some(set(&[&[1, 2]])), set(&[]), [false, false, true, true, false]),
-            (Some(set(&[&[]])), set(&[]), [true, false, false, false, false]),
-            (Some(set(&[&[1], &[4]])), set(&[&[1, 2]]), [false, true, false, false, true]),
+        let cases: [(Option<Vec<Vec<u64>>>, Vec<Vec<u64>>, [bool; 5]); 4] = [
+            (None, list(&[&[1, 2]]), [true, true, false, false, true]),
+            (Some(list(&[&[1, 2]])), list(&[]), [false, false, true, true, false]),
+            (Some(list(&[&[]])), list(&[]), [true, false, false, false, false]),
+            (Some(list(&[&[1], &[4]])), list(&[&[1, 2]]), [false, true, false, false, true]),
         ];
         for (source, hide, want) in cases {
-            let got = paths.map(|p| chosen(p, source.as_ref(), &hide));
+            let filter = Filter::new(source.as_deref(), &hide, &[]);
+            let got = paths.map(|p| filter.keeps(p, "Body"));
             assert_eq!(got, want, "{source:?} {hide:?}");
         }
     }
 
-    /// Seeded paths and choices: `chosen` always agrees with the rule worked out the long way.
+    /// `hide_bodies` leaves out one body by its path and its name, and no other: not its namesake at
+    /// another path, nor another body at its path. A hide path or an unchosen source says why first.
+    #[test]
+    fn a_hidden_body_is_left_out_by_its_path_and_name() {
+        let hidden = [HiddenBody { path: vec![], body: "Door".into() }, HiddenBody { path: vec![1, 2], body: "Door".into() }];
+        let filter = Filter::new(None, &[], &hidden);
+        assert!(!filter.keeps_all());
+        let kept = [(&[][..], "Door"), (&[][..], "Carcass"), (&[1][..], "Door"), (&[1, 2][..], "Door"), (&[1, 2][..], "Shelf")]
+            .map(|(path, body)| filter.keeps(path, body));
+        assert_eq!(kept, [false, true, true, false, true]);
+        let (hide, source) = (vec![vec![1]], vec![vec![4]]);
+        assert!(matches!(Filter::new(None, &hide, &hidden).why(&[1, 2], "Door"), Some(Why::Hidden(&[1]))));
+        assert!(matches!(Filter::new(Some(&source), &[], &hidden).why(&[], "Door"), Some(Why::NotChosen)));
+        assert!(Filter::new(None, &[], &[]).keeps_all());
+    }
+
+    /// Seeded paths and choices: the filter always agrees with the rule worked out the long way.
     #[test]
     fn seeded_choices_agree_with_the_rule() {
         let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
@@ -946,12 +1027,16 @@ mod tests {
         for seed in 1..=500u64 {
             let sources: Vec<Vec<u64>> = (0..pick(seed, 1, 3)).map(|i| path(seed, 100 + i * 20)).collect();
             let hides: Vec<Vec<u64>> = (0..pick(seed, 2, 3)).map(|i| path(seed, 200 + i * 20)).filter(|p| !p.is_empty()).collect();
-            let body = path(seed, 3);
-            let source = (pick(seed, 4, 2) == 0).then(|| sources.iter().map(Vec::as_slice).collect::<HashSet<&[u64]>>());
-            let hide: HashSet<&[u64]> = hides.iter().map(Vec::as_slice).collect();
+            let hidden: Vec<HiddenBody> =
+                (0..pick(seed, 5, 3)).map(|i| HiddenBody { path: path(seed, 300 + i * 20), body: format!("B{}", pick(seed, 400 + i, 2)) }).collect();
+            let (body, name) = (path(seed, 3), format!("B{}", pick(seed, 6, 2)));
+            let source = (pick(seed, 4, 2) == 0).then_some(sources.as_slice());
             let under = |p: &Vec<u64>| if p.is_empty() { body.is_empty() } else { body.starts_with(p) };
-            let long_way = (source.is_none() || sources.iter().any(under)) && !hides.iter().any(under);
-            assert_eq!(chosen(&body, source.as_ref(), &hide), long_way, "seed {seed}: {body:?} {sources:?} {hides:?}");
+            let long_way = (source.is_none() || sources.iter().any(under))
+                && !hides.iter().any(under)
+                && !hidden.iter().any(|h| h.path == body && h.body == name);
+            let filter = Filter::new(source, &hides, &hidden);
+            assert_eq!(filter.keeps(&body, &name), long_way, "seed {seed}: {body:?} {name} {sources:?} {hides:?} {hidden:?}");
         }
     }
 }

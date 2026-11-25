@@ -111,6 +111,14 @@ pub enum Branch {
 }
 
 impl Branch {
+    /// The model reference it points at.
+    pub fn reference(&self) -> Reference<'_> {
+        match self {
+            Branch::Edge(edge) => Reference::Edge(edge),
+            Branch::Corner(point) => Reference::Point(point),
+        }
+    }
+
     /// The occurrence path of the model reference it points at.
     pub fn path(&self) -> &[u64] {
         match self {

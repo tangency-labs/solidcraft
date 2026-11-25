@@ -12,6 +12,7 @@ fn schemas_and_the_key_check_agree() {
         "chord_mm",
         "decimals",
         "hide",
+        "hide_bodies",
         "max_error_mm",
         "measure",
         "position_mm",
@@ -32,6 +33,7 @@ fn schemas_and_the_key_check_agree() {
         "configuration",
         "exploded",
         "hide",
+        "hide_bodies",
         "pose",
         "position_mm",
         "reference_hides_model",
@@ -65,6 +67,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         tangent_edges: Some(Default::default()),
         occurrences: Some(Vec::new().into()),
         hide: Some(Vec::new().into()),
+        hide_bodies: Some(Vec::new().into()),
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
@@ -91,7 +94,10 @@ fn the_contract_lists_the_view_settings() {
     let mut theirs: Vec<String> = settings.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     // Beside a view's settings, the request's own: where it goes, its page, its lines' chord and
     // accuracy check, whether it wants the paper scene, what it draws, and what it reads.
-    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "measure", "units", "decimals"].map(String::from));
+    theirs.extend(
+        ["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "hide_bodies", "measure", "units", "decimals"]
+            .map(String::from),
+    );
     theirs.sort();
     let schema = input_schema_for::<SnapshotParams>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();

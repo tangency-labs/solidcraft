@@ -7139,3 +7139,36 @@ fn a_detail_views_region_and_what_it_refuses() {
     let status = built(&s, sheet).views.into_iter().find(|v| v.view == first).map(|v| v.status);
     assert_eq!(status, Some(Status::Failed("not supported yet: a shaded detail view".into())));
 }
+
+/// One part with two bodies (#22107), the way woodwork makes a cabinet's boards: Carcass, 100 x 50 x
+/// 20 mm along X, Y and Z from the origin, and Door, a 20 mm cube from (200, 0, 0), a body of its own.
+pub(crate) fn carcass_and_door() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Carcass"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [200, 0, 0], "body_name": "Door", "operation": "new"}));
+    s
+}
+
+/// A view's `hide_bodies` leaves out one body of a part (#22107): from the front at 1:1 both bodies'
+/// outlines are 320 mm of line across 220 mm; with the door hidden, the carcass's 240 mm across 100,
+/// its middle on the view's centre. The provider redraws the view as for any other setting.
+#[test]
+fn a_view_leaves_out_a_hidden_body_of_a_part() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:1", "position_mm": [200, 150]}));
+    let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let across = |scene: &Scene| {
+        let group = scene.groups.iter().find(|g| g.object == view && g.kind == ObjectKind::View).unwrap();
+        let (lo, hi, length) = reach(group);
+        (lo.x, hi.x, length)
+    };
+    let (lo, hi, length) = across(&settled(&mut s, sheet).scene);
+    assert!((hi - lo - 220.0).abs() < 1e-6 && (length - 320.0).abs() < 1e-6, "{lo} {hi} {length}");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"hide_bodies": [{"body": "Door"}]}}));
+    let one = settled(&mut s, sheet);
+    let (lo, hi, length) = across(&one.scene);
+    assert!((lo - 150.0).abs() < 1e-6 && (hi - 250.0).abs() < 1e-6 && (length - 240.0).abs() < 1e-6, "{lo} {hi} {length}");
+    assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+}

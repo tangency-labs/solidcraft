@@ -30,7 +30,7 @@
 //! view is placed at a point; an auxiliary view's side is a direction of about unit length; a view
 //! lined up with its parent is on the parent's sheet; a section view is placed at a point, and its
 //! cutting line keeps [`CuttingLine::new`]'s rules; a view's place is on paper
-//! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
+//! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`], and its hidden bodies [`check_hidden_bodies`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
 use std::collections::BTreeSet;
@@ -50,8 +50,8 @@ use super::cutting_line::CuttingLine;
 use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
-    ViewDirection, ViewOverrides, ViewSettings,
+    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose,
+    TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -63,6 +63,8 @@ pub const MAX_VIEW_DEPTH: usize = 32;
 pub const MAX_PATHS: usize = 1_000;
 /// Ids a view's `occurrences` and `hide` may hold in all.
 pub const MAX_PATH_IDS: usize = 4_096;
+/// Characters a body name in a view's `hide_bodies` may hold, as a body's own name does.
+pub const MAX_BODY_NAME: usize = 128;
 
 /// One view of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -490,6 +492,8 @@ pub struct ResolvedView {
     pub occurrences: Setting<Option<OccurrencePaths>>,
     /// The subtrees it leaves out: none when None.
     pub hide: Setting<Option<OccurrencePaths>>,
+    /// The bodies of its parts it leaves out, each on its own: none when None.
+    pub hide_bodies: Setting<Option<HiddenBodies>>,
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
@@ -559,6 +563,21 @@ pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Re
         format!("an occurrence path is 1..{MAX_PLACEMENT_DEPTH} ids")
     })?;
     require(hide.iter().all(|path| !path.is_empty()), || "hide [] would leave out the design's own bodies: give source instead".into())
+}
+
+/// What bodies a view's `hide_bodies` may leave out, saved or asked for: at most [`MAX_PATHS`]
+/// entries and [`MAX_PATH_IDS`] ids in all, no path deeper than an assembly goes, each body named in
+/// 1 to [`MAX_BODY_NAME`] characters. The bodies aren't checked against the design here: one deleted
+/// or renamed later matches nothing, and the view draws what is left.
+pub fn check_hidden_bodies(bodies: &[HiddenBody]) -> Result<()> {
+    let ids = bodies.iter().map(|b| b.path.len()).fold(0usize, usize::saturating_add);
+    require(bodies.len() <= MAX_PATHS && ids <= MAX_PATH_IDS, || {
+        format!("at most {MAX_PATHS} bodies in hide_bodies, and {MAX_PATH_IDS} ids in all")
+    })?;
+    require(bodies.iter().all(|b| b.path.len() <= MAX_PLACEMENT_DEPTH), || format!("a hide_bodies path is 0..{MAX_PLACEMENT_DEPTH} ids"))?;
+    require(bodies.iter().all(|b| !b.body.is_empty() && b.body.chars().count() <= MAX_BODY_NAME), || {
+        format!("a hide_bodies body is named in 1 to {MAX_BODY_NAME} characters")
+    })
 }
 
 /// What a view's position may hold, saved or asked for: 1 to [`MAX_POSE_JOINTS`] joints, each once,
@@ -692,6 +711,7 @@ impl Drawing {
         };
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
+        check_hidden_bodies(view.settings.hide_bodies.as_deref().unwrap_or_default())?;
         view.settings.pose.as_ref().map_or(Ok(()), check_pose)?;
         if let Some(label) = &view.label {
             let letter = (1..=MAX_LETTERS).contains(&label.letter.len()) && label.letter.bytes().all(|b| b.is_ascii_uppercase());
@@ -829,6 +849,7 @@ impl Drawing {
             tangent_edges: or_default(&chain, |s| s.tangent_edges, defaults.tangent_edges),
             occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
+            hide_bodies: or_default(&chain, |s| s.hide_bodies.clone().map(Some), None),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),

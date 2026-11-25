@@ -1331,3 +1331,50 @@ fn a_quarter_turn_is_saved_as_its_degrees() {
         assert!(serde_json::from_value::<QuarterTurn>(bad.clone()).is_err(), "{bad}");
     }
 }
+
+/// A view's hidden bodies (#22107) save in its settings as `{path, body}`, a left-out `path` reading
+/// as `[]`, follow down its chain until a view sets its own (`[]` hides none), and read back as the
+/// same bytes. A drawing saved before them reads unchanged and saves no `hide_bodies`. Their limits
+/// are kept on reading, at each side of each.
+#[test]
+fn hidden_bodies_follow_their_chain_and_keep_their_limits() {
+    let (mut d, _, [front, right, top]) = three();
+    let older = d.to_json().unwrap();
+    assert!(!older.contains("hide_bodies"));
+    assert_eq!(Drawing::from_json(&older).unwrap().to_json().unwrap(), older);
+    let none = d.resolve_view(top).unwrap();
+    assert_eq!((none.hide_bodies.value, none.hide_bodies.set_by), (None, SetBy::Default));
+    let bodies: HiddenBodies = vec![HiddenBody { path: vec![], body: "Door".into() }, HiddenBody { path: vec![7, 8], body: "Shelf".into() }].into();
+    view_mut(&mut d, front).settings.hide_bodies = Some(bodies.clone());
+    d.validate().unwrap();
+    let followed = d.resolve_view(top).unwrap();
+    assert_eq!((followed.hide_bodies.value, followed.hide_bodies.set_by), (Some(bodies.clone()), SetBy::Parent(front)));
+    view_mut(&mut d, right).settings.hide_bodies = Some(Vec::new().into());
+    let own = d.resolve_view(top).unwrap();
+    assert_eq!((own.hide_bodies.value.as_deref().map(<[HiddenBody]>::len), own.hide_bodies.set_by), (Some(0), SetBy::Parent(right)));
+    let v = file(&d);
+    let at = v["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(front))).unwrap();
+    assert_eq!(v["views"][at]["settings"]["hide_bodies"], json!([{"path": [], "body": "Door"}, {"path": [7, 8], "body": "Shelf"}]));
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+
+    let with = |bodies: Value| refused(&d, |v| v["views"][at]["settings"]["hide_bodies"] = bodies);
+    let many = |n: usize, ids: usize| json!(vec![json!({"path": vec![1u64; ids], "body": "B"}); n]);
+    let cases = [
+        (json!([{"body": "Door"}]), "read"),
+        (many(1000, 4), "read"),
+        (many(1001, 0), "at most 1000 bodies in hide_bodies"),
+        (many(64, 64), "read"),
+        (json!([vec![json!({"path": vec![1u64; 64], "body": "B"}); 64], vec![json!({"path": [1], "body": "B"})]].concat()), "and 4096 ids in all"),
+        (json!([{"path": vec![1u64; MAX_PLACEMENT_DEPTH + 1], "body": "B"}]), "a hide_bodies path is 0..64 ids"),
+        (json!([{"body": ""}]), "named in 1 to 128 characters"),
+        (json!([{"body": "B".repeat(MAX_BODY_NAME)}]), "read"),
+        (json!([{"body": "B".repeat(MAX_BODY_NAME + 1)}]), "named in 1 to 128 characters"),
+        (json!([{"body": "B", "side": 1}]), "unknown field `side`"),
+    ];
+    for (bodies, why) in cases {
+        let got = with(bodies.clone());
+        assert!(got.contains(why), "{bodies}: {got}");
+    }
+}

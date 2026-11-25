@@ -3060,3 +3060,30 @@ fn a_set_targets_edit_reads_where_its_view_draws_its_parts() {
     let values: Vec<f64> = read["members"].as_array().unwrap().iter().map(|m| m["value"].as_f64().unwrap()).collect();
     assert!(values.len() == 3 && values.iter().zip([10.0, 60.0, 50.0]).all(|(v, want)| (v - want).abs() < 1e-6), "{read}");
 }
+
+/// A view's `hide_bodies` leaves out one body of the design's own (#22107): a dimension with a corner
+/// on it is refused in words that name the body, and the drawing is left as it was; one added before
+/// warns until the edit is undone. A dimension on the body it still draws is added.
+#[test]
+fn a_dimension_is_refused_on_a_body_its_view_leaves_out() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "operation": "new", "body_name": "Door"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let v = ids::encode(view);
+    let across = json!({"view": v, "kind": {"linear": {"a": [80, 0, 0], "b": [100, 0, 0], "direction": "horizontal"}}});
+    let added = run(&mut s, ADD, across.clone());
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"path": [], "body": "Door"}]}}));
+    let words = "its hide leaves out body `Door`";
+    let warned = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let e = refused(&mut s, across);
+    assert!(e.ends_with(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    let on_box = run(&mut s, ADD, json!({"view": v, "kind": {"linear": {"a": [0, 0, 0], "b": [80, 0, 0], "direction": "horizontal"}}}));
+    reads(&on_box, 80.0, "80.00");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"dimension": added["dimension"]}))["warnings"].is_null());
+}
