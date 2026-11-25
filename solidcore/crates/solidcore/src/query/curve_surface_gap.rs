@@ -3875,7 +3875,8 @@ pub(crate) fn moved_pair_room(
     ) else {
         return Ok(None);
     };
-    let Some(residual) = bisection_residual(s1, &p1.net) else {
+    // (#20643: the cone residual windowed to the trim's UV box, as the trim-image bound takes it)
+    let Some(residual) = bisection_residual(k, s1, &p1.net, nurbs_uv_box(&p1.wn))? else {
         return Ok(None);
     };
     let room = Ivl::from(dc) + Ivl::from(ds) + Ivl::from(p1.c_slack) + Ivl::from(residual);

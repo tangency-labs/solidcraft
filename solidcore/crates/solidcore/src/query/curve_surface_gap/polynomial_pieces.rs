@@ -1130,7 +1130,14 @@ pub(crate) fn trim_distance_lower_bound(
         let (Some(d0), Some(d1)) = (piece(a, m)?, piece(m, b)?) else {
             return Ok(None);
         };
-        pieces.swap_remove(at);
+        // `swap_remove(at)` with checked accesses only: the last piece takes slot `at`
+        // (`at` came from `pieces.iter()`, so the pop always has a piece to give).
+        let Some(last) = pieces.pop() else {
+            return Ok(None);
+        };
+        if let Some(slot) = pieces.get_mut(at) {
+            *slot = last;
+        }
         pieces.push((d0, a, m));
         pieces.push((d1, m, b));
         made += 2;
