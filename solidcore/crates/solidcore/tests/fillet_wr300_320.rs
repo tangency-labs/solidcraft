@@ -539,8 +539,23 @@ fn closed_chamfer_touching_a_pocket_edge_at_one_point_builds() {
 
         // the shaft's cylinder, top, bottom, the pocket's wall and floor and the chamfer
         assert_eq!(b.faces().ids().count(), 6, "vertex {vertex_at_contact}");
-        // the chamfer is one face, carrying its definition
-        assert_eq!(blend_definitions(&b), 1, "vertex {vertex_at_contact}");
+        // three cones (the shaft, the pocket's wall and the chamfer) and three planes; a
+        // cylinder rim's chamfer is a cone that carries no definition yet, as on the shaft
+        // without the pocket
+        let mut kinds: Vec<&str> = b
+            .faces()
+            .ids()
+            .map(|f| {
+                let s = b.face(f).unwrap().surface.as_ref().unwrap();
+                solidcore::blend::definition_check::surface_kind_name(s)
+            })
+            .collect();
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            ["cone", "cone", "cone", "plane", "plane", "plane"],
+            "vertex {vertex_at_contact}"
+        );
 
         let pocket = hole_through_wall(4.0, |x| (156.25 - x * x).sqrt() - 8.5);
         let expected = pi * 156.25 * 60.0 - pocket - 2.0 * pi * 0.5 * (12.5 - 1.0 / 3.0);
