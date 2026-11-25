@@ -239,7 +239,7 @@
     "ai.prefs.control_listening": "Naslouchá na 127.0.0.1:{port}",
     "ai.prefs.control_not_listening": "Nenaslouchá",
     "ai.prefs.control_port": "Port",
-    "ai.prefs.control_port_note": "Port, ke kterému se na tomto počítači (127.0.0.1) připojují AI agenti. Výchozí je 27878: když je obsazený, použije se další volný port. Jiný port se použije přesně. Nastavte stejný port i v klientovi MCP, například solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_port_note": "Port, ke kterému se na tomto počítači (127.0.0.1) připojují AI agenti. Výchozí je 27878: když je obsazený, použije se další volný port. Jiný port se použije přesně. Nastavte stejný port i v klientovi MCP, například solidcraft-cli mcp --connect 127.0.0.1:27878.",
     "ai.prefs.control_port_taken": "Port {port} používá jiný program (nebo jiné okno SolidCraftu). Zvolte jiný port.",
     "app_bar.check_hint": "Položky na liště mají zaškrtnutí",
     "app_bar.commands": "Příkazy",
