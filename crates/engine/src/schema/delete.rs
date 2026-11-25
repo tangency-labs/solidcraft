@@ -36,6 +36,10 @@ pub struct SelectionDeleteParams {
     /// being edited) are named in `skipped`.
     #[serde(default)]
     pub items: Option<SelectionItems>,
+    /// Delete every shown body as well, by scope rather than by name: what Select All selected
+    /// (`selection.get` reports it as `all_bodies`). Locked bodies stay. Default: false.
+    #[serde(default)]
+    pub all_bodies: Option<bool>,
     /// `delete`: a view in `items` also takes the views projected or cut from it, which are
     /// otherwise refused, naming them. Read only for a drawing's objects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,6 +233,12 @@ pub struct SelectionDeleteResult {
     /// A drawing's delete: the ids of the notes that went, with their views or on their own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the manual centre marks that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_marks: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the manual centre lines that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_lines: Option<Vec<String>>,
     /// A drawing's delete: the ids of the sketches that went with their views.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketches: Option<Vec<String>>,

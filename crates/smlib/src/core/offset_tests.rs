@@ -24,21 +24,51 @@ use crate::{BooleanOp, Error};
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Stress corpus S0790 (#18802): a frustum with two blind holes, one separated from its
-/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause. The
-/// rim hole's edge comes within the two edges' tolerances of the rim on the seam at (10, 0, 50),
-/// so the top's outline touches itself there and the shell is refused as such (#18568), with
-/// the kernel's failure kept whole after it.
+/// Stress corpus S0790 (#18802): the rim hole leaves a 0.00002 mm web at the
+/// frustum's top. Inward shelling preserves that web. Moving the drill to x = 8.8
+/// makes its rim touch the top boundary at (10, 0, 50), which keeps the diagnosed
+/// outline-touch refusal and its nested kernel cause (#18568).
 #[test]
 fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
-    let error = timed("S0790", || {
-        let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
-        let rim_hole = make_cylinder([8.79998, 0.0, 40.0], 1.2, 10.0).unwrap();
-        let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
-        let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
-        let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
-        shell(&drilled, &[], TOL, -1.2).expect_err("the shell is currently refused")
-    });
+    let shelled = |x| {
+        timed("S0790", move || {
+            let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+            let rim_hole = make_cylinder([x, 0.0, 40.0], 1.2, 10.0).unwrap();
+            let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
+            let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
+            let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
+            shell(&drilled, &[], TOL, -1.2)
+        })
+    };
+
+    let body = shelled(8.79998).expect("the positive-width web survives shelling");
+    let check = super::check(&body, crate::check::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    assert_eq!(super::solid_count(&body).unwrap(), 1);
+    let (record, _) = native(&to_arrays(&body).unwrap()).unwrap();
+    solidcore_ops::record_check::validate(&record).unwrap();
+    let top: Vec<_> = record
+        .faces
+        .iter()
+        .filter(|face| match &face.surface {
+            solidcore_record::brep::Surface::Plane { origin, .. } | solidcore_record::brep::Surface::PlaneThrough { origin, .. } => {
+                (origin[2] - 50.0).abs() < 1e-8
+            }
+            _ => false,
+        })
+        .collect();
+    assert_eq!(top.len(), 1);
+    assert_eq!(top[0].loops.len(), 3, "one outer boundary and two separate blind holes");
+    // The outer drilled volume is 16227.6*pi. The inward cavity has radius
+    // R(z) = 25 - 0.3*z - 1.2*sqrt(1.09), for z in [1.2, 48.8]. Its excluded
+    // central hole has radius 2.2 above z=40.8. Its eccentric hole has radius
+    // 2.4 above z=38.8, clipped to that circular section. Integrating these
+    // independent sections gives this material volume.
+    let want = 9243.7803299802;
+    let got = volume(&body, 1e-8).unwrap();
+    assert!(rel(got, want) < 1e-9, "volume {got}, independently derived {want}");
+
+    let error = shelled(8.8).expect_err("the hole actually touches the top outline");
     let words = error.to_string();
     let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
     assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
@@ -848,4 +878,15 @@ fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     let largest: f64 = largest.parse().unwrap();
     assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
+}
+
+/// A draft direction of no length is refused as an argument before any face is picked, even with
+/// a point that would pick no face: the direction is the first thing wrong.
+#[test]
+fn a_draft_with_no_neutral_normal_is_refused_before_its_pick() {
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let z = [0.0, 0.0, 1.0];
+    for (normal, pull) in [([0.0; 3], z), (z, [0.0; 3])] {
+        assert_eq!(draft(&b, &[[50.0, 50.0, 50.0]], TOL, [0.0; 3], normal, pull, 0.1).err(), Some(Error::Argument));
+    }
 }

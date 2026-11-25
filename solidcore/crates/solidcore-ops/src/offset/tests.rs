@@ -188,6 +188,187 @@ fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
     );
 }
 
+/// `f` integrated over `[a, b]` by 5-point Gauss-Legendre on 400 pieces, after
+/// `x = a + (b - a) (3 u^2 - 2 u^3)`, which makes an integrand vanishing as a power 3/2 at
+/// either end (a lens opening from, or closing to, a point) smooth in `u`.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn integral(a: f64, b: f64, f: impl Fn(f64) -> f64) -> f64 {
+    let inner = (5.0 - 2.0 * (10.0_f64 / 7.0).sqrt()).sqrt() / 3.0;
+    let outer = (5.0 + 2.0 * (10.0_f64 / 7.0).sqrt()).sqrt() / 3.0;
+    let w_inner = (322.0 + 13.0 * 70.0_f64.sqrt()) / 900.0;
+    let w_outer = (322.0 - 13.0 * 70.0_f64.sqrt()) / 900.0;
+    let nodes = [
+        (0.0, 128.0 / 225.0),
+        (inner, w_inner),
+        (-inner, w_inner),
+        (outer, w_outer),
+        (-outer, w_outer),
+    ];
+    let pieces = 400;
+    let h = 1.0 / f64::from(pieces);
+    let mut sum = 0.0;
+    for i in 0..pieces {
+        let mid = (f64::from(i) + 0.5) * h;
+        for (x, w) in nodes {
+            let u = mid + 0.5 * h * x;
+            let at = a + (b - a) * u * u * (3.0 - 2.0 * u);
+            sum += 0.5 * h * w * f(at) * (b - a) * 6.0 * u * (1.0 - u);
+        }
+    }
+    sum
+}
+
+/// The area of the disc of radius `r` beyond a chord `d` from its centre (none when `d >= r`).
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn disc_segment(r: f64, d: f64) -> f64 {
+    if d >= r {
+        return 0.0;
+    }
+    r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+}
+
+/// The area of the rectangle `|x| <= a`, `|y| <= b` inside the disc of radius `r` about its
+/// centre: the disc less its segments beyond the four sides, each corner's part beyond two
+/// sides taken twice and given back, `F(x) = (x sqrt(r^2 - x^2) + r^2 asin(x / r)) / 2` the
+/// area under the circle from 0 to x.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn rectangle_in_disc(r: f64, a: f64, b: f64) -> f64 {
+    let under = |x: f64| 0.5 * (x * (r * r - x * x).sqrt() + r * r * (x / r).asin());
+    let corner = if r * r > a * a + b * b {
+        let reach = (r * r - b * b).sqrt();
+        under(reach) - under(a) - b * (reach - a)
+    } else {
+        0.0
+    };
+    PI * r * r - 2.0 * disc_segment(r, a) - 2.0 * disc_segment(r, b) + 4.0 * corner
+}
+
+/// A 40 x 38 x 100 block (|x| <= 20, |y| <= 19, 0 <= z <= 100) cut by the ball of r 55 about
+/// (0, 0, 50), which takes its eight vertical corners at the bottom and the top, with the
+/// sixteen edges where the sphere meets the sides rounded r 1, shelled 1 in and open at the
+/// top. Each round collapses onto its spine (an inset by its radius), and the faces beside it
+/// meet across it. At each corner the two rounds meet each other along a mitre, and the block
+/// not being square, a round there also touches the side beyond its own on a sliver: a round of
+/// five edges, whose rails are its two edges tangent to the sphere and its side (not opposite
+/// in a loop of four, as a lone round's are).
+///
+/// Every rounded edge is convex and the wall is the rounds' radius, so the cavity is the inset
+/// of the sharp body: the points with |x| < 19, |y| < 18 and z > 1 inside the ball of r 54,
+/// up to the open top. The shell takes that much away: the integral over z in (1, 100) of the
+/// area of the 38 x 36 rectangle inside the circle of radius sqrt(54^2 - (z - 50)^2)
+/// (`rectangle_in_disc`), split where the circle passes the rectangle's corners.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and edge picks, not ops geometry
+fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
+    crate::test_corpus::rig_fixes();
+    let block = make_box([-20.0, -19.0, 0.0], [40.0, 38.0, 100.0]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 50.0], 55.0).unwrap();
+    let body = crate::boolean::boolean(block, ball, crate::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    // a point of each sphere-to-side edge, on x = +-20 or y = +-19, at the bottom and the top
+    let mut edges = Vec::new();
+    for (sx, sy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        for [x, y] in [[20.0 * sx, 17.0 * sy], [18.0 * sx, 19.0 * sy]] {
+            let h = (55.0_f64 * 55.0 - x * x - y * y).sqrt();
+            edges.push(edge_at(&body, [x, y, 50.0 - h]));
+            edges.push(edge_at(&body, [x, y, 50.0 + h]));
+        }
+    }
+    blend(
+        &body,
+        Blend::Round,
+        &edges,
+        &[1.0; 16],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let open = face(&body, &o, |bx| {
+        (bx.min().z - 100.0).abs() < 1e-9 && (bx.max().z - 100.0).abs() < 1e-9
+    });
+    shell(&body, &o, &[open], -1.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let section = |z: f64| {
+        rectangle_in_disc(
+            (54.0_f64 * 54.0 - (z - 50.0) * (z - 50.0)).sqrt(),
+            19.0,
+            18.0,
+        )
+    };
+    // the circle passes the rectangle's corners, sqrt(19^2 + 18^2) out, at z = 50 -+ sqrt(54^2 - 685)
+    let corners = (54.0_f64 * 54.0 - 685.0).sqrt();
+    let cavity = integral(1.0, 50.0 - corners, section)
+        + integral(50.0 - corners, 50.0 + corners, section)
+        + integral(50.0 + corners, 100.0, section);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
+/// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
+/// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
+/// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
+/// between the wall's line and the side's circle (r 7 there): 0.2 across at x = 0, its two
+/// vertices the only places the side, the wall and the ceiling meet. The side meets the wall
+/// along a hyperbola.
+fn slotted_frustum() -> Body {
+    let frustum = crate::make_cone([0.0; 3], 10.0, 4.0, 20.0).unwrap();
+    let slot = make_box([-20.0, 6.8, -1.0], [40.0, 20.0, 11.0]).unwrap();
+    crate::boolean::boolean(frustum, slot, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-1's notch ceiling where it breaks out through the torus, on a frustum: the slotted
+/// frustum shelled closed. The void is the core: the frustum with its side moved in t along
+/// its normal (its radius at z is 10 - 0.3 z - t sqrt(1.09)) between z = t and 20 - t, less the
+/// slot grown by t (its wall at y = 6.8 - t, its ceiling at 10 + t). At t = 1 the side and the
+/// wall no longer meet on the ceiling's plane, z = 11 (the side is there at 10 - 3.3 - 1.044 =
+/// 5.656, the wall at 5.8): the lens's offset is empty (the offset eliminates it), and the
+/// wall meets the side directly up to z* = (10 - 1.044 - 5.8) / 0.3 = 10.52, where they part.
+/// At t = 0.1 the lens's offset is still there (the wall at 6.7 against the side at 6.866 on
+/// z = 10.1). The shell is the body less the core, each a frustum less its slot: at each
+/// height z the slot takes the disc's segment beyond the wall (`disc_segment`), up to the
+/// ceiling or to where the side and the wall part, whichever comes first.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_lens_whose_offset_is_empty_leaves_the_shell() {
+    crate::test_corpus::rig_fixes();
+    // the frustum moved in by `t` less its slot moved out by `t`
+    let core = |t: f64| {
+        let radius = |z: f64| 10.0 - 0.3 * z - t * 1.09_f64.sqrt();
+        let (bottom, top) = (radius(t), radius(20.0 - t));
+        let wall = 6.8 - t;
+        let parts = (10.0 - t * 1.09_f64.sqrt() - wall) / 0.3;
+        PI / 3.0 * (20.0 - 2.0 * t) * (bottom * bottom + bottom * top + top * top)
+            - integral(t, (10.0 + t).min(parts), |z| disc_segment(radius(z), wall))
+    };
+    let body_volume = core(0.0);
+    for t in [1.0, 0.1] {
+        let body = slotted_frustum();
+        assert!(
+            rel(volume(&body), body_volume) < 1e-9,
+            "body {}",
+            volume(&body)
+        );
+        shell(&body, &order(&body), &[], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let want = body_volume - core(t);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, want) < 1e-9,
+            "t {t}: shell volume {actual:.17}, want {want:.17}"
+        );
+    }
+}
+
 /// The same incidence graph before the seam disappears: the outer rim is
 /// 37.99 and the grown drill reaches 37.96, so their meridian still survives.
 #[test]

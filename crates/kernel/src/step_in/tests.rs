@@ -581,6 +581,52 @@ fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
     assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
 }
 
+/// The midpoint rule over n even steps of [a, b].
+fn midpoint(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
+    let h = (b - a) / n as f64;
+    (0..n).map(|i| f(a + (i as f64 + 0.5) * h)).sum::<f64>() * h
+}
+
+/// Two solids that 0.45.0 read as one closed body with the wrong volume, its only sign a "needs
+/// repair ... Edge endpoints within face domain" warning (#20551). Each has an edge on a closed
+/// C1 cubic B-spline through the exact intersection of two of its surfaces.
+/// The rod: r 15, z −50 to 50, a through hole r 10 along x. The hole's exit rim is one closed
+/// edge whose vertex is half a turn round the rim while its curve starts 1 rad round: it read
+/// 875.18 mm³. The rod less the hole, πR²·2L − 4∫ a² cos²t √(R² − a² sin²t) dt over t from
+/// −π/2 to π/2 (y = a sin t).
+/// The disc: r 10, height 3, its top edge rounded r 3 (a torus R 7, r 3 about z = 3), cut off
+/// at x = 8.5; the cut meets the round in a closed oval whose edge has its two vertices 1e-7 mm
+/// off it: it read 1164.29 mm³. The disc to z = 3 and the round above it, each height's circle
+/// of radius q less its segment beyond x = 8.5, with q = 7 + 3 cos φ at z = 3 + 3 sin φ.
+/// Each reads as one closed body of its volume, without that check's failure.
+#[test]
+fn a_closed_edge_off_its_curves_start_keeps_the_solids_volume() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (r, a, l) = (15.0_f64, 10.0_f64, 50.0_f64);
+    let hole = 4.0 * midpoint(|t| a * a * t.cos().powi(2) * (r * r - a * a * t.sin().powi(2)).sqrt(), -FRAC_PI_2, FRAC_PI_2, 2000);
+    let rod = PI * r * r * 2.0 * l - hole;
+    let (d, rt, rr, h) = (8.5_f64, 7.0_f64, 3.0_f64, 3.0_f64);
+    let segment = |q: f64| if q > d { q * q * (d / q).acos() - d * (q * q - d * d).sqrt() } else { 0.0 };
+    let slice = |phi: f64| {
+        let q = rt + rr * phi.cos();
+        (PI * q * q - segment(q)) * rr * phi.cos()
+    };
+    // The segment ends where q = d: the integral is split there.
+    let ends = ((d - rt) / rr).acos();
+    let disc = (PI * (rt + rr).powi(2) - segment(rt + rr)) * h + midpoint(slice, 0.0, ends, 20000) + midpoint(slice, ends, FRAC_PI_2, 20000);
+    for (what, text, volume) in [
+        ("rod", include_str!("../../../../tests/step-regressions/rod_cross_hole_rim_off_curve_start.step"), rod),
+        ("disc", include_str!("../../../../tests/step-regressions/rounded_disc_cut_vertices_off.step"), disc),
+    ] {
+        let imp = step_import(text).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(!imp.warnings.iter().any(|w| w.contains("Edge endpoints within face domain")), "{what}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert!(rel(m.volume, volume) < 1e-8, "{what}: volume {} vs {volume}", m.volume);
+    }
+}
+
 #[test]
 #[ignore = "manual STEP import timing; run without concurrent builds"]
 fn benchmark_independent_step_solids() {

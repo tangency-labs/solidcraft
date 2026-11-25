@@ -1231,4 +1231,42 @@ mod tests {
         eprintln!("classify (type, found): {classes:?}");
         assert!(stats.len() >= 13, "{}", stats.len());
     }
+
+    /// The global solves the target distance bounded out (#20438): each named case's solve
+    /// now answers no solution, where before the candidate beyond the target was returned.
+    #[rustfmt::skip]
+    const TARGET_BOUNDED: &[&str] = &[
+        "gen0337", "gen0437", "gen0594", "gen0687", "gen1022", "gen1119", "gen1125",
+        "gen1128", "gen1400", "gen1470", "gen1507", "gen1639", "gen1670", "gen1783",
+        "gen1816", "gen1919", "gen1955", "gen2023", "gen2239", "gen2342", "gen2355",
+        "gen2573", "gen2736", "gen2776", "gen2875", "gen2892",
+    ];
+
+    /// #20438: every solve the target bounded out is replayed (it answers no solution) and
+    /// certified empty, as the tree solve culls (`AddSortedSolution`): each is a minimize
+    /// whose surface is proven farther than `|target| + tol` over the whole solve domain
+    /// ([`crate::certify::domain_lower_bound`]), so no point of it is within the target.
+    #[test]
+    fn target_bounded_solves_are_certified_empty() {
+        let k = Kernel::default();
+        let mut unproven = Vec::new();
+        for &name in TARGET_BOUNDED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert_eq!(row, [0.0, 0.0], "{name}: not answered empty");
+            let OpIn::Gps { dom, sop, p, tol, target: Some(target), .. } = &i.op else {
+                panic!("{name}: not a global point solve with a target");
+            };
+            assert_eq!(sop_of(*sop).unwrap(), SolverOperation::Minimize, "{name}");
+            let s = surface_of(&i.surface).expect("surface");
+            let want = target.abs() + tol;
+            let lo = crate::certify::domain_lower_bound(&k, &s, &dom_of(*dom), v3(*p), want);
+            eprintln!("{name}: target {target:e} tol {tol:e} lower bound {lo:?}");
+            if !lo.is_some_and(|lo| lo > want) {
+                unproven.push(name);
+            }
+        }
+        assert!(unproven.is_empty(), "not certified empty: {unproven:?}");
+    }
 }

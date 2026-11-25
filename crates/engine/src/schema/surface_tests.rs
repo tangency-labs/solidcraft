@@ -462,7 +462,7 @@ fn loft_of(section: Value) -> Value {
 fn surface_loft_contract_and_reply() {
     assert_keys(
         input_schema_for::<SurfaceLoftParams>(),
-        &["body_name", "body_names", "continuity", "crown", "name", "participants", "rail_fit", "rails", "sections"],
+        &["body_name", "body_names", "continuity", "crown", "faced", "name", "participants", "rail_fit", "rails", "sections"],
     );
     let schema = input_schema_for::<SurfaceLoftParams>();
     let schema = schema.as_value();

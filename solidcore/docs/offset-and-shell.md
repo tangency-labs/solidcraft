@@ -159,6 +159,7 @@ job (§5.1).
 |---|---|---|---|---|
 | `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `proved_singular` (`least_wall`) |
 | `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
+| `OffsetFailure::TubeFolds`, `TubeNotCertified` | a rounded offset's cap is the tube of radius \|d\| about a convex edge, `c + d u` with `u` on the arc between the faces' normals turned to the offset's side; it folds where `d (u · k) ≥ 1` (`k` the edge's curvature vector); `TubeNotCertified` when that is neither proved nor ruled out (#13685) | the edge, the distance and, for `TubeFolds`, `largest`, the largest distance at which the edge's tube is proved not to fold (none if none is; only the tube is proved there, so other defects can still appear at or near it) | on the first cap built for each edge, in every offset but the local operation (not a closing wall) | `offset_executive/p1.rs`, `refuse_folding_tube`; `query/tangent_edge.rs`, `tube_regularity` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
@@ -276,6 +277,20 @@ construction. The source body remains intact for the shell difference. Curved or
 branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
 plane pair still require the general arrangement and cavity rule. This event does not complete
 S3–S5 or change the existing refusal for exactly meeting planes.
+
+The executive also takes out a face whose offset is empty because its neighbours' offsets
+overtake it (a face eliminated by the offset, one of the changes of topology a shell meets
+[6]), for one shape so far
+(`offset_executive/empty_lens.rs`): a face of one loop of two edges (a lens, such as a notch's
+ceiling where it breaks out through a curved wall), each edge shared with one other face, its
+two vertices of those three faces only. Its offset is bounded by the two curves its neighbours'
+offsets cut on it, which meet at the offsets of its two vertices; where neither curve's trim
+found a neighbour's offset at either end (both ends are drops of their vertices,
+`TrimmedEdge::unreached`, `offset_geometry_creation.rs`), the two curves do not meet within the
+faces' extensions and the region between them is empty. The lens's offset faces are deleted
+and its two edges' offsets on the neighbours mated across it, as a collapsed round's are: the
+neighbours' offsets meet directly where the lens was, the edges between them at its two
+vertices running on into each other along one curve.
 
 ### 5.2 Mitres and the reach, as they run today
 

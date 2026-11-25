@@ -16,9 +16,11 @@ pub(crate) mod open_steps;
 #[path = "file_send.rs"]
 mod send;
 
+use std::io::Cursor;
+
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
-use solidcraft_io::Format;
+use solidcraft_io::{DesignContainerReader, Format};
 
 use super::CommandSpec;
 use super::print_face;
@@ -76,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
-            "linked_bodies?: all|folder (a design saved without the bodies of its linked designs, file.save's `linked_bodies: false`: which linked design files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
+            "linked_bodies?: all|folder (a design saved without the bodies of its linked designs and STEP files, file.save's `linked_bodies: false`: which linked files are read for them as it opens; default all; folder: only files in the design's own folder or below it, and the other links have no bodies until component.update_links reads them; warnings name each link not read); ",
             "verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); ",
             "newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving",
         )),
@@ -134,7 +136,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
-            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
+            "linked_bodies?: bool (the bodies of linked designs and linked STEP files, with a linked design's mesh bodies; false: the file keeps each link without its bodies, opening the design reads them from the linked files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); ",
             "sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); ",
@@ -151,7 +153,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "format?: container|json (default: json for .json, otherwise container); ",
             "compression?: fast|compact (default: fast); ",
             "cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); ",
-            "linked_bodies?: bool (the bodies of linked designs; false: the file keeps each link without its bodies, opening the design reads them from the linked design files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
+            "linked_bodies?: bool (the bodies of linked designs and linked STEP files, with a linked design's mesh bodies; false: the file keeps each link without its bodies, opening the design reads them from the linked files again, and a container has no saved model; a link whose file cannot be read now keeps its bodies and is named in warnings; default: as the design was last saved or opened, true for a new design); ",
             "preview?: bool (saved display meshes, default: false); ",
             "overwrite?: bool (as file.save, when `path` is the design's own file); ",
             "sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)",
@@ -2147,12 +2149,8 @@ fn write_file(
 /// import's check of its parts was still running when the save began, so the save left the
 /// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
 /// have ended since.
-fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, bytes: &[u8]) -> Option<String> {
-    if !cache || format != "container" || s.doc.features.is_empty() {
-        return None;
-    }
-    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
-    if present {
+fn missing_save_cache(s: &Session, cache: bool, checking: bool, reader: Option<&DesignContainerReader<Cursor<&[u8]>>>) -> Option<String> {
+    if !cache || s.doc.features.is_empty() || reader?.has_model_cache() {
         return None;
     }
     let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
@@ -2166,10 +2164,25 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, by
         "there are no evaluated bodies to cache".into()
     } else if checking {
         "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
+    } else if let Some(refusal) = solidcraft_io::take_last_cache_refusal() {
+        refusal
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
     Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
+/// A successful save can exceed the opening limit on disk or when its contents are unpacked.
+fn save_limit_warning(bytes: usize, over_expanded_limit: bool) -> Option<String> {
+    let limit = solidcraft_io::limits::max_design_bytes();
+    let reason = if bytes > limit {
+        format!("Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit:", bytes >> 20, limit >> 20)
+    } else if over_expanded_limit {
+        "Design saved. Reopening it requires a higher file-size limit for its unpacked contents.".to_owned()
+    } else {
+        return None;
+    };
+    Some(format!("{reason} {}", solidcraft_io::limits::how_to_raise()))
 }
 
 fn write_bytes(
@@ -2233,9 +2246,8 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    // Left out with the linked bodies ([`Session::container_bytes`]): not a cache that went missing.
+    // The linked bodies were deliberately left out with their cache.
     let cache = cache && (s.linked_bodies || s.doc.links.is_empty());
-    let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     if !s.linked_bodies {
         notes.extend(super::component_link::kept_linked_bodies(s));
     }
@@ -2249,15 +2261,16 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
-    // The bytes just written, read back without the open-size limit: a save over it keeps its
-    // history for the next save (#18686).
-    s.provenance_chain = solidcraft_io::written_design_provenance_chain(&bytes);
+    // Inspect the directory once. A save over the opening limit keeps its history for the next save.
+    let reader = if format == "container" { DesignContainerReader::from_written_bytes(&bytes).ok() } else { None };
+    let limit_warning = save_limit_warning(bytes.len(), reader.as_ref().is_some_and(DesignContainerReader::exceeds_expanded_open_limit));
+    let cache_not_saved = missing_save_cache(s, cache, checking, reader.as_ref());
+    s.provenance_chain = reader.and_then(|mut r| r.provenance_chain());
     s.provenance = None;
     s.mark_saved();
-    let bytes_len = bytes.len();
     let mut out = SaveResult {
         path: path.to_string(),
-        bytes: bytes_len,
+        bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
         warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
@@ -2266,14 +2279,6 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
     };
-    if bytes_len > solidcraft_io::limits::max_design_bytes() {
-        notes.push(format!(
-            "Saved, but the design is {} MB, over the {} MB \"Largest file to open\" limit: {}",
-            bytes_len >> 20,
-            solidcraft_io::limits::max_design_bytes() >> 20,
-            solidcraft_io::limits::how_to_raise()
-        ));
-    }
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -2289,6 +2294,10 @@ fn write_bytes(
     }
     if !notes.is_empty() {
         out.warnings.get_or_insert_with(Vec::new).extend(notes);
+    }
+    // The desktop shows the first warning in its status line.
+    if let Some(warning) = limit_warning {
+        out.warnings.get_or_insert_with(Vec::new).insert(0, warning);
     }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
@@ -2667,10 +2676,47 @@ impl Session {
                 thumbnail.as_deref(),
                 save,
             ),
-            None => {
-                solidcraft_io::write_design_container_with_thumbnail(&design, compression, preview.as_ref(), geometry.as_ref(), thumbnail.as_deref())
-            }
+            // The container the design was opened from: its blobs whose content has not changed
+            // are copied as they are, instead of being encoded and compressed again. A part is
+            // copied only when its name (the SHA-256 of its content), length and CRC-32 match what
+            // this save writes, so the file reads back the same either way.
+            None => match self.reuse_container().as_deref() {
+                Some(bytes) => solidcraft_io::write_design_container_reusing(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                    bytes,
+                ),
+                None => solidcraft_io::write_design_container_with_thumbnail(
+                    &design,
+                    compression,
+                    preview.as_ref(),
+                    geometry.as_ref(),
+                    thumbnail.as_deref(),
+                ),
+            },
         }
+    }
+
+    /// The container the design was opened from, read for a save to copy its unchanged blobs:
+    /// `None` when the design has never been saved, the file is not a container (a design script),
+    /// something else wrote the file since it was opened or saved here, or nothing is imported (an
+    /// import's source text is the part a save cannot encode cheaply). Each copied part is checked
+    /// against the content being saved as well, so a file replaced after this check is not copied
+    /// from either. Read here and dropped when the save returns, so nothing is kept between saves.
+    fn reuse_container(&self) -> Option<Vec<u8>> {
+        let path = self.path.as_deref()?;
+        let imported = self.doc.features.iter().any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Import { .. }));
+        if !imported {
+            return None;
+        }
+        let known = self.disk.as_ref()?;
+        if solidcraft_io::design_lock::changed_since(path, known) {
+            return None;
+        }
+        solidcraft_io::read_container_bytes(path)
     }
 }
 
@@ -3338,12 +3384,12 @@ struct CadmpegChoices<'a> {
 fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::DecalPlan> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let world = d.corners.map(|p| [p.x, p.y, p.z]);
-        let local = world.map(|p| solidcore_ops::affine::apply_point(&to_component, p));
+        let local = world.map(|p| solidcraft_kernel::services::affine::apply_point(&to_component, p));
         let sha256 = solidcraft_doc::render_resources::HdrId::of(&d.image).to_string();
         let image = solidcraft_io::SurfaceMap { sha256, bytes: std::sync::Arc::from(d.image) };
         decals.push(solidcraft_io::DecalPlan { name: d.name, component: d.component, local, world, image });
@@ -3355,12 +3401,12 @@ fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, w
 fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let corners = d.corners.map(|p| {
-            let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+            let [x, y, z] = solidcraft_kernel::services::affine::apply_point(&to_component, [p.x, p.y, p.z]);
             solidcore_record::Vec3::new(x, y, z)
         });
         decals.push(solidcraft_io::urdf::UrdfDecal { name: d.name, component: d.component, corners, image: d.image });
@@ -5091,15 +5137,75 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
-        let notice = missing_save_cache(&s, "container", true, false, &omitted).unwrap();
+        let omitted = DesignContainerReader::new(Cursor::new(omitted.as_slice())).unwrap();
+        let notice = missing_save_cache(&s, true, false, Some(&omitted)).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
         // Left out while an import's parts were being checked (#20133): that is the reason given.
-        let checking = missing_save_cache(&s, "container", true, true, &omitted).unwrap();
+        let checking = missing_save_cache(&s, true, true, Some(&omitted)).unwrap();
         assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
-        assert!(missing_save_cache(&s, "container", false, false, &omitted).is_none());
-        assert!(missing_save_cache(&s, "json", true, false, &omitted).is_none());
+        assert!(missing_save_cache(&s, false, false, Some(&omitted)).is_none());
+        assert!(missing_save_cache(&s, true, false, None).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
-        assert!(missing_save_cache(&s, "container", true, false, &included).is_none());
+        let included = DesignContainerReader::new(Cursor::new(included.as_slice())).unwrap();
+        assert!(missing_save_cache(&s, true, false, Some(&included)).is_none());
+    }
+
+    #[test]
+    fn save_limit_warning_covers_disk_and_expanded_limits() {
+        let limit = solidcraft_io::limits::max_design_bytes();
+        assert!(save_limit_warning(limit, false).is_none());
+        let expanded = save_limit_warning(1024, true).unwrap();
+        assert!(
+            expanded.contains("Reopening") && expanded.contains("unpacked") && expanded.contains(solidcraft_io::limits::how_to_raise()),
+            "{expanded}"
+        );
+        let on_disk = save_limit_warning(limit + 1, false).unwrap();
+        assert!(on_disk.contains("Largest file to open") && on_disk.contains(solidcraft_io::limits::how_to_raise()), "{on_disk}");
+    }
+
+    /// When the model cache could not be saved due to an exact body round-trip failure or size refusal,
+    /// missing_save_cache surfaces the specific refusal reason instead of falsely claiming file size budget (#21610).
+    #[test]
+    fn missing_save_cache_reports_specific_refusal_when_available() -> Result<()> {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5}))?;
+        let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false)?;
+        let omitted_reader = DesignContainerReader::new(Cursor::new(omitted.as_slice()))?;
+
+        // Without an explicit refusal, it falls back to the default design file budget message.
+        assert!(solidcraft_io::take_last_cache_refusal().is_none());
+        let default_notice =
+            missing_save_cache(&s, true, false, Some(&omitted_reader)).ok_or_else(|| EngineError::Other("expected default notice".into()))?;
+        assert!(default_notice.contains("the cache could not fit or be encoded within the design file budget"), "{default_notice}");
+
+        // Now test that when an unencodable body refusal is recorded, missing_save_cache reports it:
+        let broken = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10., 10., 10.))?.with_paint(Some(
+            solidcraft_kernel::Paint {
+                opacity: 1.0,
+                faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
+                name: None,
+            },
+        ));
+        let model = solidcraft_doc::SavedModel {
+            records: json!({
+                "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
+                "states": [json!({"bodies": [[0, 1]], "sketches": [], "body_counter": 1, "sheets": [], "construct": [], "threads": [], "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": []})],
+                "model_bodies": [json!({"name": "GraphicsCore", "feature": 1, "component": 0, "key": "0000000000000001", "names": 0, "body": 0})],
+                "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [], "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}], "named_faces": [],
+            }),
+            bodies: vec![broken],
+        };
+        let mut doc = (*s.doc).clone();
+        doc.features[0].id = 1;
+        doc.features[0].name = "PCIe Board Import".into();
+        let bytes = solidcraft_io::write_design_container_with_cache(&doc, solidcraft_io::DesignCompression::Fast, None, Some(&model))?;
+        let reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes.as_slice()))?;
+        assert!(!reader.has_model_cache());
+
+        let notice = missing_save_cache(&s, true, false, Some(&reader)).ok_or_else(|| EngineError::Other("expected notice".into()))?;
+        assert!(notice.contains("body 'GraphicsCore' in feature 'PCIe Board Import' could not be stored exactly"), "{notice}");
+        assert!(!notice.contains("design file budget"), "must not mention budget: {notice}");
+        Ok(())
     }
 
     #[test]
