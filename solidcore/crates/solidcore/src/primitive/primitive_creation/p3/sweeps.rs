@@ -638,6 +638,14 @@ impl PrimitiveCreation {
                     a.delete_primitive_faces(brep, &[face])?;
                     return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
                 }
+                // Not upstream (#21671): the check above sees only an axis lying in the
+                // face. An axis crossing the face's plane at a point inside the face leaves
+                // that point fixed, so both caps contain it, and two caps through a common
+                // inside point cross (or overlap, when the axis is the plane's normal)
+                if cap && axis_crosses_face_inside(a, (brep, face), axis_base, axis)? {
+                    a.delete_primitive_faces(brep, &[face])?;
+                    return Err(SolidError::primitive(OP, PrimitiveFailure::AxisInsideFace));
+                }
             } else {
                 cap = false;
             }
@@ -669,6 +677,64 @@ impl PrimitiveCreation {
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
     }
+}
+
+/// Not upstream (#21671): whether the axis through `axis_base` along `axis` crosses the
+/// plane of the planar profile `face` at a point strictly inside the face, off its
+/// boundary by more than the face's tolerance.
+///
+/// The rotation fixes every point of its axis, so that point lies on the start cap and on
+/// the end cap of a capped partial revolution. The two caps' planes both pass through it:
+/// they cross along a line through it (or coincide, when the axis is the plane's normal),
+/// and since the point is inside both caps they cross there along a segment that is no
+/// edge of the body, or overlap. The point is where the axis line meets the face's plane,
+/// classified against the face's own loops (`point_3d_classify_at`); an axis parallel to
+/// the plane meets it nowhere, or lies in it, which `axis_inside_face` decides. A face
+/// that is not planar within its tolerance is not decided here (`false`).
+///
+/// # Errors
+///
+/// Those of the face's surface and of the point classification.
+fn axis_crosses_face_inside(
+    a: &mut impl PrimitiveAccess,
+    face: crate::sweep::topology_sweep::access::FaceRef,
+    axis_base: Point3,
+    axis: Vec3,
+) -> Result<bool> {
+    use crate::intersect::point_class::{PointClassType, PointClassification};
+    use crate::query::face::p1::{point_3d_classify_at, Point3dClassifyOptions};
+
+    a.with_brep_mut(face.0, |k, b, _, _| {
+        let tolerance = b.face(face.1)?.tolerance;
+        let Some(surface) = crate::topology::face::p2::surface(b, face.1)? else {
+            return Ok(false);
+        };
+        let plane = surface.is_planar(k, tolerance)?;
+        if !plane.is_planar {
+            return Ok(false);
+        }
+        let along = plane.normal.dot(axis);
+        if along == 0.0 || !along.is_finite() {
+            return Ok(false);
+        }
+        let t = plane.normal.dot(plane.point - axis_base) / along;
+        let point = axis_base + t * axis;
+        if ![point.x, point.y, point.z].iter().all(|c| c.is_finite()) {
+            return Ok(false);
+        }
+        let mut pc = PointClassification::new(crate::geom::tol::zone_tol3d(k, tolerance));
+        point_3d_classify_at(
+            k,
+            b,
+            face.1,
+            point,
+            tolerance,
+            true,
+            &mut pc,
+            Point3dClassifyOptions::default(),
+        )?;
+        Ok(pc.point_class() == PointClassType::Face)
+    })
 }
 
 /// Not upstream (#17204): `curve`, a B-spline, with each end that lies within `tolerance`
@@ -741,6 +807,77 @@ mod tests {
             api_curves::create_line_segment(Point3::new(ax, ay, az), Point3::new(bx, by, bz))
                 .expect("segment"),
         )
+    }
+
+    /// #21671 (goldens `primitive.primitive_creation_p3`
+    /// `capped_rot_square_axis_tilted_through_face_{90,270}`): a capped partial revolve
+    /// whose axis crosses the profile's plane inside the profile is refused with
+    /// `AxisInsideFace`. The square [2,4] x [0,2] at z 0 about the axis (1, 0, 1)
+    /// through its centre (3, 1, 0): the rotation fixes the centre, so both caps contain
+    /// it; after 90 degrees the end cap's normal is (1/2, -1/sqrt 2, 1/2), at 60 degrees
+    /// to the start cap's, and the caps cross along a segment of length sqrt 6 through
+    /// the centre that is no edge. Before, the 90 degree turn returned that body. The
+    /// axis (0, 0, 1) through the centre turns the square in its own plane: the caps
+    /// overlap, refused the same way.
+    /// Controls that still build, by Pappus (an axis in the profile's plane, a quarter
+    /// turn: volume = area 4 * centroid distance * pi / 2): the y axis outside the square
+    /// (centroid 3 from it, 6 pi), and the y axis along the edge x 0 of [0,2]^2
+    /// (centroid 1 from it, 2 pi).
+    #[test]
+    fn issue_21671_an_axis_through_the_capped_profile_is_refused() {
+        use crate::error::primitive::PrimitiveFailure;
+        use crate::mass::integrator::properties::brep_volume_default;
+
+        let square = |x0: f64| {
+            [
+                segment([x0, 0.0, 0.0], [x0 + 2.0, 0.0, 0.0]),
+                segment([x0 + 2.0, 0.0, 0.0], [x0 + 2.0, 2.0, 0.0]),
+                segment([x0 + 2.0, 2.0, 0.0], [x0, 2.0, 0.0]),
+                segment([x0, 2.0, 0.0], [x0, 0.0, 0.0]),
+            ]
+        };
+        let off = square(2.0);
+        let curves: Vec<Option<&Curve>> = off.iter().map(Some).collect();
+        let centre = Point3::new(3.0, 1.0, 0.0);
+        let mut k = Kernel::default();
+        for (axis, angle) in [
+            (Vec3::new(1.0, 0.0, 1.0), 90.0),
+            (Vec3::new(1.0, 0.0, 1.0), 270.0),
+            (Vec3::new(-1.0, 0.0, 1.0), 45.0),
+            (Vec3::new(0.0, 0.0, 1.0), 90.0),
+        ] {
+            let got = create_rotational_sweep(&mut k, &curves, centre, axis, angle, true);
+            assert_eq!(
+                got.as_ref()
+                    .err()
+                    .and_then(|e| e.primitive_failure())
+                    .copied(),
+                Some(PrimitiveFailure::AxisInsideFace),
+                "axis {axis:?} through the centre, {angle} degrees: {:?}",
+                got.map(|_| ())
+            );
+        }
+
+        let pi = std::f64::consts::PI;
+        let on_edge = square(0.0);
+        let on_edge: Vec<Option<&Curve>> = on_edge.iter().map(Some).collect();
+        let (o, y) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        for (curves, want, what) in [
+            (&curves, 6.0 * pi, "outside"),
+            (&on_edge, 2.0 * pi, "on edge"),
+        ] {
+            let mut body = create_rotational_sweep(&mut k, curves, o, y, 90.0, true)
+                .unwrap_or_else(|e| panic!("y axis {what}: {e}"));
+            assert!(
+                crate::topology::brep::p2::is_manifold_solid(&body).unwrap(),
+                "{what}"
+            );
+            let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap().abs();
+            assert!(
+                (volume - want).abs() < 1e-6 * want,
+                "y axis {what}: volume {volume}, want {want}"
+            );
+        }
     }
 
     /// WR-776: a line skew to the axis sweeps a hyperboloid of one sheet. Every point of

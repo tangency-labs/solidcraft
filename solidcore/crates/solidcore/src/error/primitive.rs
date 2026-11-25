@@ -42,8 +42,9 @@ pub enum PrimitiveFailure {
     /// The caller's curve cannot be revolved about the axis into one analytic face.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
     AnalyticSweepRefused(AnalyticSweepRefusal),
-    /// A revolution's axis runs inside the face it would turn, so the revolved solid
-    /// would cross itself.
+    /// A revolution's axis runs inside the face it would turn, or, for a capped partial
+    /// revolution, crosses the face's plane inside the face (not upstream, #21671), so
+    /// the revolved solid would cross itself.
     AxisInsideFace,
     /// The caller asked for a capped partial revolution repeated other than once.
     /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
