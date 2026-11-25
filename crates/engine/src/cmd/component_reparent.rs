@@ -3,8 +3,9 @@
 //! once is one definition: what goes in it goes in every instance, placed by the one instance
 //! named (`parent_path`, else the active placement) and in the same place in the others. Paths
 //! through the placement change: the session's paths (selection, active and hidden placements,
-//! hidden folders) and the design's face attachments found through it follow it, and a move that
-//! would still leave a feature failing that worked before is refused.
+//! hidden folders), the design's face attachments found through it and the origin planes and axes
+//! its joints name follow it, and a move that would still leave a feature failing that worked
+//! before is refused.
 
 use super::placing::{parent_path, placement_of};
 use super::*;
@@ -56,13 +57,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let uncaptured = s.uncaptured_moves().into_owned();
     for ancestor in from_path.iter().chain(&to_path) {
         let Some(pending) = uncaptured.get(ancestor).copied() else { continue };
-        scratch.pending_moves.remove(ancestor);
+        scratch.clear_pending_move(*ancestor);
         if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor) {
+            let prev = x.transform;
             x.transform = pending;
+            x.adjust_base_for_direct_move(&prev, &pending);
         }
     }
-    scratch.pending_moves.remove(&id);
+    scratch.clear_pending_move(id);
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+        let prev = x.transform;
+        if let Some(pending) = uncaptured.get(&id) {
+            x.adjust_base_for_direct_move(&prev, pending);
+        }
+        if let Some(base) = x.base_transform {
+            let reframed = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(&from_frame, &base));
+            x.base_transform = solidcraft_doc::is_placement(&reframed).then_some(reframed);
+        }
         x.parent = to;
         x.transform = transform;
         // A move typed in world axes takes them into the new parent's frame.
@@ -138,8 +149,28 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             _ => {}
         }
     }
+    // A joint side on a placement's origin plane or axis names it by its path from the design
+    // (`o:4/origin/XY`), which follows the move the same way (#22216).
+    for joint in &mut scratch.doc_mut().assembly.joints {
+        for side in [&mut joint.a, &mut joint.b] {
+            use solidcraft_doc::joints::{AxisRef, AxisTarget, Snap};
+            match &mut side.snap {
+                Snap::Plane { plane, .. } => {
+                    if let solidcraft_doc::PlaneRef::Datum { datum } = plane.as_mut() {
+                        rebase(&mut datum.path);
+                    }
+                }
+                Snap::Axis { axis, .. } => {
+                    if let AxisRef::Target(AxisTarget::Datum { datum }) = axis.as_mut() {
+                        rebase(&mut datum.path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     if too_deep {
-        return Err(bad(cmd, format!("moving {} would nest a face attachment more than 64 placements deep", o.name)));
+        return Err(bad(cmd, format!("moving {} would nest a face attachment or a joint's origin plane more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected
     // or active placement whose path no longer leads anywhere.

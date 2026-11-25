@@ -379,6 +379,15 @@ impl Brep {
         r
     }
 
+    /// This closed solid grown by `distance` along its faces' outward normals (negative: shrunk):
+    /// the convex edges extended until the moved faces meet, or (`round`) rounded with `distance`
+    /// as the radius. A body that is not a closed solid is [`Error::Argument`].
+    pub fn offset_solid(&self, distance: f64, round: bool) -> Result<Brep> {
+        let r = core::offset::offset_solid(self.core(), distance, round).map(Brep::made_core);
+        trace::made("offset_solid", &[self], &r, || json!({"distance": distance, "round": round}));
+        r
+    }
+
     /// This body with its topological edges and vertices removed (SMLib's
     /// `SmBrep::RemoveTopologicalEdgesAndVertices`): faces on one surface meeting along an edge
     /// become one, and two edges on one curve meeting at a vertex nothing else uses become one.
@@ -390,6 +399,15 @@ impl Brep {
         }
         let r = core::merge::merge_faces(self.core(), keep, tolerance).map(Brep::made_core);
         trace::made("merge_faces", &[self], &r, || json!({"keep": trace::picks(self, PickKind::Edge, keep, tolerance)}));
+        r
+    }
+
+    /// Like [`Brep::merge_faces`], keeping the edges at indices `keep` (in SMLib's edge order)
+    /// directly instead of picking them by 3D proximity. Has no [`MAX_POINTS`] cap and avoids the
+    /// quadratic closest-point pick loop when keeping thousands of split-line edges.
+    pub fn merge_faces_keeping_edges(&self, keep: &[usize]) -> Result<Brep> {
+        let r = core::merge::merge_faces_keeping_edges(self.core(), keep).map(Brep::made_core);
+        trace::made("merge_faces_keeping_edges", &[self], &r, || json!({"keep_edges": keep.len()}));
         r
     }
 

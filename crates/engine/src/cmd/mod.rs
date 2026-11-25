@@ -204,6 +204,9 @@ pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+mod pulleys;
+#[cfg(test)]
+mod pulleys_tests;
 mod script;
 mod section;
 mod selection;
@@ -292,6 +295,7 @@ mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
 mod sketch_links;
+mod sketch_merge_lines;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
@@ -626,6 +630,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
     v.extend(sketch_divide::COMMANDS.iter());
+    v.extend(sketch_merge_lines::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
@@ -668,6 +673,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(pulleys::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
