@@ -1014,8 +1014,16 @@ mod view_compass {
                 ..Default::default()
             };
             let output = crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
-                let compass =
-                    Compass { clip: ui.max_rect(), centre, axes: front, hover: Some(at), orbiting: false, snap_hint, home_label: "Home".into() };
+                let compass = Compass {
+                    clip: ui.max_rect(),
+                    centre,
+                    axes: front,
+                    hover: Some(at),
+                    orbiting: false,
+                    snap_hint,
+                    home_label: "Home".into(),
+                    turn_around_label: None,
+                };
                 show(ui, &compass);
             });
             texts = Vec::new();

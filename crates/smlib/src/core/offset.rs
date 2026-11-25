@@ -4,6 +4,11 @@
 //! `FaceSet`, `outer_faceuse`, `move_faces`, `draft_faces`), `capi/src/smlib_sheets.cpp`
 //! (`smlib_offset_sheet`) and `capi/src/smlib_pick.h` (`pick_faces`).
 //!
+//! Shells, face offsets and sheet offsets are solidcore-ops' own ([`solidcore_ops::offset`]),
+//! their faces picked by point through [`solidcore_ops::pick::faces`]. Thickening and drafts are
+//! still composed here: solidcore-ops' versions differ from these in their results (a draft's
+//! refusals, a thickened sheet), so they move once those match.
+//!
 //! As there, every operation works on a copy of its body (`SmApiBrepCopy`) and picks faces by
 //! point; the shell and the offsets are `SmApiShellBrepFull` and `SmApiOffsetBrepFull`, with
 //! convex edges extended and the results merged. A sheet offset takes faces that close into a
@@ -22,16 +27,13 @@ use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::Shape;
 use solidcore::geom::vector3d::{Point3, Vec3};
-use solidcore::intersect::point_class::PointClassType;
 use solidcore::kernel::Kernel;
-use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
-use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
-use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
+use solidcore::query::api_queries::{face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -40,6 +42,7 @@ use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId};
 
 use super::blend::{Miss, on_copy, p3, pick, points_ok, status as blend_status, tolerance_ok};
+use super::call::ops_as;
 use super::{Body, answer};
 use crate::{Error, Result};
 
@@ -67,6 +70,10 @@ fn status(e: SolidError) -> Error {
 /// their fields; other typed refusals keep the kernel diagnostic alongside them.
 pub(super) fn refused(error: solidcore_ops::Error, diagnostic: String) -> Error {
     use solidcore_ops::Error as Ops;
+    // this crate words a named solid test as the bare NotSolid it always was
+    if error.not_solid_test().is_some() {
+        return Error::RefusedWithDiagnostic { refusal: Ops::NotSolid, diagnostic };
+    }
     match error {
         Ops::WallsTouch => Error::WallsTouch,
         Ops::WallFolds { largest } => Error::WallFolds { largest },
@@ -83,55 +90,6 @@ fn distance_ok(x: f64) -> bool {
 
 /// The B-rep id every shape and face key in this module names the one body by.
 const ONE: BrepId = BrepId::from_index(0);
-
-/// Faces with their loose bounding boxes, for nearest-face queries (`FaceSet`).
-struct FaceSet {
-    faces: Vec<FaceId>,
-    boxes: Vec<(Point3, Point3)>,
-    /// Each face's shape (`SmApiFaceClosestPoint` makes one per query; it depends only on the
-    /// face, so it is made once).
-    shapes: Vec<Shape>,
-}
-
-impl FaceSet {
-    fn new() -> FaceSet {
-        FaceSet { faces: Vec::new(), boxes: Vec::new(), shapes: Vec::new() }
-    }
-
-    /// `add`: false when the face's box cannot be measured.
-    fn add(&mut self, k: &mut Kernel, b: &Brep, f: FaceId) -> solidcore::Result<bool> {
-        let Some(bx) = answer(face_bounding_box(k, b, f, false))? else { return Ok(false) };
-        let Some(shape) = answer(Shape::new(k, &(ONE, b), &[], &[(ONE, f)], &[], &[]))? else { return Ok(false) };
-        self.faces.push(f);
-        self.boxes.push((bx.min(), bx.max()));
-        self.shapes.push(shape);
-        Ok(true)
-    }
-
-    /// `nearest`: the distance from `p` to the nearest face, with the nearest point; infinite
-    /// when none answers. A face whose box is farther than the nearest face so far is skipped.
-    fn nearest(&self, k: &Kernel, live: &LiveBrepObjects<'_, '_>, p: Point3) -> solidcore::Result<(f64, Option<Point3>)> {
-        let (mut best, mut at) = (f64::INFINITY, None);
-        for ((&f, (lo, hi)), shape) in self.faces.iter().zip(&self.boxes).zip(&self.shapes) {
-            let mut bx = 0.0;
-            for (l, (h, x)) in [lo.x, lo.y, lo.z].into_iter().zip([hi.x, hi.y, hi.z].into_iter().zip([p.x, p.y, p.z])) {
-                let out = (l - x).max((x - h).max(0.0));
-                bx += out * out;
-            }
-            if f64::sqrt(bx) >= best {
-                continue;
-            }
-            if let Some(c) = answer(face_closest_point_in_shape(k, shape, live, (ONE, f), p))?
-                && c.distance.is_finite()
-                && c.distance < best
-            {
-                best = c.distance;
-                at = Some(c.point);
-            }
-        }
-        Ok((best, at))
-    }
-}
 
 /// The live view of `b` the closest-point solves read, under `identity`: `query`'s effective
 /// identity ([`BrepQuery::effective_identity`]).
@@ -180,104 +138,6 @@ fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Option<FaceuseId>> {
     Ok(if outside { Some(fu) } else { use_.mate })
 }
 
-/// `leaves_cavity`: whether an inward offset of `wall` (> 0) from every face of the solid `b`
-/// but `open` leaves a cavity: a point inside `b` farther than `wall`, and a margin, from every
-/// face that is offset. A point counts only as the centre of a ball inside `b`, reached from a
-/// face sample by stepping inward along the normal, then from ball to ball. The capi refuses a
-/// wall this finds no room for before SMLib sees it (C++ SMLib corrupts memory there,
-/// solidcore#380); the same refusal here keeps the C++ path's answer.
-fn leaves_cavity(k: &mut Kernel, b: &mut Brep, open: &[FaceId], wall: f64) -> solidcore::Result<bool> {
-    let list = brep_p1::faces(b, None)?;
-    let (mut all, mut walls) = (FaceSet::new(), FaceSet::new());
-    for &f in &list {
-        if !all.add(k, b, f)? {
-            return Ok(false);
-        }
-        if !open.contains(&f) && !walls.add(k, b, f)? {
-            return Ok(false);
-        }
-    }
-    if walls.faces.is_empty() {
-        return Ok(true);
-    }
-    let tol = b.tolerance();
-    let margin = (10.0 * tol).max(1e-3 * wall);
-    let need = wall + margin;
-    // Face samples: a grid over each offset face's domain, the points inside its trims, each
-    // with the inward unit normal there.
-    const GRID: usize = 5;
-    const MAX_SAMPLES: usize = 2048;
-    let mut samples: Vec<(Point3, Vec3)> = Vec::new();
-    for &f in &walls.faces {
-        let Some(fu) = outer_faceuse(b, f)? else { continue };
-        let inward = if b.faceuse(fu)?.orientation == OrientType::Same { -1.0 } else { 1.0 };
-        let dom = b.face(f)?.uv_domain;
-        for i in 0..GRID {
-            for j in 0..GRID {
-                if samples.len() >= MAX_SAMPLES {
-                    break;
-                }
-                let uv: Point2 = dom.evaluate((i as f64 + 0.5) / GRID as f64, (j as f64 + 0.5) / GRID as f64);
-                if answer(face_classify_uv(k, b, f, uv))? != Some(PointClassType::Face) {
-                    continue;
-                }
-                let Some(surf) = b.face(f)?.surface.as_ref() else { break };
-                let (Some(at), Some(n)) = (answer(surf.evaluate_point(k, uv))?, answer(surf.evaluate_normal(k, uv, Side::Left, Side::Left))?) else {
-                    continue;
-                };
-                let len = n.length();
-                if !(len > 0.0) || !len.is_finite() {
-                    continue;
-                }
-                samples.push((at, n * (inward / len)));
-            }
-        }
-    }
-    let query = BrepQuery::of_brep(b);
-    let identity = query.effective_identity();
-    let objects = live(b, &identity)?;
-    let k: &Kernel = k;
-    // A step of `h` inward from a sample ends at a ball's centre when no face is nearer to it
-    // than `h` (the step crossed none, and the ball touches only the sample's face).
-    let ball = |s: Point3, n: Vec3, h: f64| -> solidcore::Result<(bool, Point3, f64)> {
-        let c = s + n * h;
-        let (r, _) = all.nearest(k, &objects, c)?;
-        Ok((r.is_finite() && r >= h * (1.0 - 1e-9), c, r))
-    };
-    // First the direct step of `need` from each sample.
-    for &(s, n) in &samples {
-        let (inside, c, _) = ball(s, n, need)?;
-        if inside && walls.nearest(k, &objects, c)?.0 >= need {
-            return Ok(true);
-        }
-    }
-    // Then climbing, from a small ball at each sample: step away from the nearest offset face by
-    // most of the ball's radius (staying inside the ball, so inside the body) while the distance
-    // from the offset faces grows.
-    const STEPS: usize = 48;
-    for &(s, n) in &samples {
-        let (inside, mut c, mut r) = ball(s, n, margin.max(1e3 * tol))?;
-        if !inside {
-            continue;
-        }
-        for _ in 0..STEPS {
-            let (d, q) = walls.nearest(k, &objects, c)?;
-            if d >= need {
-                return Ok(true);
-            }
-            let Some(q) = q.filter(|_| d > 0.0 && d.is_finite()) else { break };
-            let next = c + (c - q) * (0.9 * r / d);
-            let (rn, _) = all.nearest(k, &objects, next)?;
-            if !(rn > 0.0) || !rn.is_finite() || walls.nearest(k, &objects, next)?.0 <= d * (1.0 + 1e-9) {
-                break;
-            }
-            c = next;
-            r = rn;
-        }
-    }
-    Ok(false)
-}
-
 /// `SmApiShellBrepFull(b, distance, TRUE, TRUE, TRUE, open, r)`: convex edges extended, results
 /// merged, side walls made at a sheet's edges, and (as the fork does, 5448b9a) a thickened
 /// sheet's coplanar side walls one face.
@@ -315,6 +175,62 @@ fn called<T>(r: solidcore::Result<T>) -> solidcore::Result<Out<T>> {
     }
 }
 
+/// solidcore-ops' refusal of an offset as this crate's error: the moves and walls that have
+/// kinds of their own as those kinds, a kernel status as the kernel's words for it, a result
+/// that is not a solid as [`Error::NotSolid`] (with the kernel's words where the kernel said
+/// why), and the rest as [`refused`] words them.
+fn offset_error(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    use solidcore_ops::Error as Ops;
+    if e.not_solid_test().is_some() && detail.is_none() {
+        return Error::NotSolid;
+    }
+    match e {
+        Ops::Argument => Error::Argument,
+        Ops::Empty => Error::Empty,
+        Ops::NoRoom => Error::NoRoom,
+        Ops::NoEffect => Error::NoEffect,
+        Ops::NotExact => Error::NotExact,
+        Ops::NotSolid => Error::NotSolid,
+        Ops::Cancelled => Error::Cancelled(call),
+        Ops::Internal(what) => Error::Internal(what),
+        Ops::BlendsNotFollowed { exact, why } => Error::BlendsNotFollowed { exact, why },
+        Ops::DraftCutsThrough { at, depth } => Error::DraftCutsThrough { at, depth },
+        Ops::Status(code) => Error::Solidcore(detail.unwrap_or_else(|| format!("{call}: status {code}"))),
+        e => refused(e, detail.unwrap_or_default()),
+    }
+}
+
+/// The faces of `body` nearest `points` (each within `tolerance`), each once, in the order its
+/// first point picked it, as indices of the body's own list; a point that picks none, or is as
+/// near two faces, refused ([`face_miss`]).
+fn picked_faces(call: &'static str, body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Vec<usize>> {
+    let each = ops_as(call, &[("brep", body)], offset_error, || solidcore_ops::pick::faces(body, points, tolerance))?;
+    let each = each.map_err(|m| {
+        let e = face_miss(match m {
+            solidcore_ops::pick::Miss::None(point) => Miss::None(point),
+            solidcore_ops::pick::Miss::Ambiguous(point) => Miss::Ambiguous(point),
+        });
+        super::dump::failed_ops(call, &e.to_string(), &[("brep", body)]);
+        e
+    })?;
+    let mut once: Vec<usize> = Vec::with_capacity(each.len());
+    for f in each {
+        if !once.contains(&f) {
+            once.push(f);
+        }
+    }
+    Ok(once)
+}
+
+/// A copy of `body` for an operation to work on (`SmApiBrepCopy`): solidcore-ops' offsets
+/// change the body they are given.
+fn working_copy(call: &'static str, body: &Body) -> Result<Body> {
+    if body.kernel_left_unfinished() {
+        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
+    }
+    ops_as(call, &[("brep", body)], offset_error, || body.copy())
+}
+
 /// `smlib_shell`: the faces nearest `points` (each within `tolerance`) opened, the rest offset
 /// by `thickness` (negative: inward) into a wall; none gives a closed hollow body. An inward
 /// wall of a solid that leaves no cavity is [`Error::NoRoom`], refused before the shell.
@@ -322,27 +238,20 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
     if !points_ok(points, true) || !tolerance_ok(tolerance) || !distance_ok(thickness) {
         return Err(Error::Argument);
     }
-    on_copy("smlib_shell", body, |k, mut w| {
-        let picked = match pick_faces(k, &mut w, points, tolerance)? {
-            Ok(p) => p,
-            Err(m) => return Ok(Err(face_miss(m))),
-        };
-        let solid_in = brep_p2::is_manifold_solid(&w)?;
-        if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
-            return Ok(Err(Error::NoRoom));
-        }
-        let shelled = match called(shell_brep_full(k, &w, thickness, &picked))? {
-            Ok(r) => finish(r, solid_in)?,
-            Err(e) => Err(e),
-        };
-        match shelled {
-            Err(e) if is_bare_failure(&e) => match solidcore_ops::offset::outline_touch(k, &w)? {
-                Some(at) => Ok(Err(Error::OutlineTouches { at, detail: e.to_string() })),
-                None => Ok(Err(e)),
-            },
-            r => Ok(r),
-        }
-    })
+    const CALL: &str = "smlib_shell";
+    let open = picked_faces(CALL, body, points, tolerance)?;
+    let w = working_copy(CALL, body)?;
+    let order = w.own_order();
+    match ops_as(CALL, &[("brep", body)], offset_error, || solidcore_ops::offset::shell(&w, &order, &open, thickness)) {
+        Ok(()) => Ok(w),
+        // (#18568) said why where a face's outline touches itself: the copy was put back as it
+        // came in, so its faces are the body's
+        Err(e) if is_bare_failure(&e) => match ops_as(CALL, &[], offset_error, || w.outline_touch())? {
+            Some(at) => Err(Error::OutlineTouches { at, detail: e.to_string() }),
+            None => Err(e),
+        },
+        Err(e) => Err(e),
+    }
 }
 
 /// (#18568) A failure that does not say why: a bare status, solidcore's text, a result that is
@@ -354,61 +263,19 @@ fn is_bare_failure(e: &Error) -> bool {
     )
 }
 
-/// `smlib_offset_faces`: its checks, the pick, the solid check, (moving faces in) the cavity
-/// check, then `move_faces`.
+/// `smlib_offset_faces`: the faces nearest `points` (each within `tolerance`) of a solid moved
+/// `distance` along their outward normals; faces moved in so far that the body leaves no
+/// material behind them are [`Error::NoRoom`].
 pub(crate) fn offset_faces(body: &Body, points: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Body> {
     if !points_ok(points, false) || !tolerance_ok(tolerance) || !distance_ok(distance) {
         return Err(Error::Argument);
     }
-    on_copy("smlib_offset_faces", body, |k, mut w| {
-        let picked = match pick_faces(k, &mut w, points, tolerance)? {
-            Ok(p) => p,
-            Err(m) => return Ok(Err(face_miss(m))),
-        };
-        if !brep_p2::is_manifold_solid(&w)? {
-            return Ok(Err(Error::Argument));
-        }
-        // Faces moved in so far that no material is left behind them: the body must reach
-        // deeper than the move behind the moved faces.
-        if distance < 0.0 {
-            let others: Vec<FaceId> = brep_p1::faces(&w, None)?.into_iter().filter(|f| !picked.contains(f)).collect();
-            if !leaves_cavity(k, &mut w, &others, -distance)? {
-                return Ok(Err(Error::NoRoom));
-            }
-        }
-        match move_faces(k, &mut w, &picked, distance) {
-            Ok(()) => finish(w, true),
-            Err(e) => Ok(Err(e)),
-        }
-    })
-}
-
-/// `move_faces`: moves the picked faces of `b` (in place) `distance` along their outward normals:
-/// each gets its surface's offset, and the local operation extends or trims the faces around them
-/// to meet it; the tangent blends on them follow (`SmOffsetFacesExecutive`: taken off, the faces
-/// moved, put back at their own sizes). A blend that no longer fits is [`Error::NoRoom`], one that
-/// cannot be put back as it was [`Error::Unsupported`], one that would need a continuation that
-/// cannot be made exactly [`Error::NotExact`], a move that moved nothing [`Error::NoEffect`]. Where
-/// solidcore says why a blend cannot follow, the last three are [`Error::BlendsNotFollowed`] with
-/// its reason (#18575).
-fn move_faces(k: &mut Kernel, b: &mut Brep, picked: &[FaceId], distance: f64) -> Out<()> {
-    let mut exec = OffsetFacesExecutive::new();
-    exec.offset_faces(k, b, picked, distance).map_err(|e| {
-        let why = exec.reason().trim();
-        let not_followed = |exact: bool, bare: Error| {
-            if why.is_empty() { bare } else { Error::BlendsNotFollowed { exact, why: why.to_string() } }
-        };
-        match exec.refusal() {
-            OffsetFacesRefusal::NoRoom => Error::NoRoom,
-            OffsetFacesRefusal::Unsupported => not_followed(false, Error::Unsupported),
-            OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
-            OffsetFacesRefusal::NoEffect => Error::NoEffect,
-            // Not in the fork (solidcore#2020, #2027): the blends cannot be put back, the fillet's
-            // status kept. SolidCraft has no such error: a move solidcore does not make.
-            OffsetFacesRefusal::NotPutBack => not_followed(false, Error::Unsupported),
-            OffsetFacesRefusal::None => status(e),
-        }
-    })
+    const CALL: &str = "smlib_offset_faces";
+    let picked = picked_faces(CALL, body, points, tolerance)?;
+    let w = working_copy(CALL, body)?;
+    let order = w.own_order();
+    ops_as(CALL, &[("brep", body)], offset_error, || solidcore_ops::offset::offset_faces(&w, &order, &picked, distance))?;
+    Ok(w)
 }
 
 /// `smlib_thicken`: a sheet thickened by `thickness` along its normals, or (symmetric) moved back
@@ -441,13 +308,10 @@ pub(crate) fn offset_sheet(body: &Body, distance: f64) -> Result<Body> {
     if !distance_ok(distance) {
         return Err(Error::Argument);
     }
-    on_copy("smlib_offset_sheet", body, |k, mut w| {
-        // `take`: a result without faces (a sphere moved in to its centre) is SMLIB_ERR_EMPTY.
-        match called(offset_brep_full(k, &mut w, distance))? {
-            Ok(r) => finish(r, false),
-            Err(e) => Ok(Err(e)),
-        }
-    })
+    const CALL: &str = "smlib_offset_sheet";
+    let w = working_copy(CALL, body)?;
+    ops_as(CALL, &[("brep", body)], offset_error, || solidcore_ops::offset::offset_sheet(&w, distance))?;
+    Ok(w)
 }
 
 /// A unit vector from `v`, as `smlib_draft`'s `unit`; `None` for a vector too short or not
@@ -477,6 +341,15 @@ fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) ->
     Ok(Some(n))
 }
 
+/// A face the draft cannot tilt, refused for what about it the draft cannot handle (#18541), in
+/// the words `solidcore_ops::offset::draft` gives the same refusal where they fit this check.
+fn cannot_draft(why: &'static str) -> Error {
+    Error::Refused(solidcore_ops::Error::Unsupported(why))
+}
+
+/// A drafted cone's radius would reach zero within the face's span.
+const CONE_CLOSES: &str = "a drafted cone would close within the face";
+
 /// `drafted_cone` (tangency-labs/smlib#27, #53): the cone a face on the cone or cylinder `cyl` about
 /// the pull (its outward normal `n` at `inside`) becomes drafted by `angle` about its circle on the
 /// neutral plane (through `origin`, normal `normal`), so that it leans in going along `pull`: its
@@ -487,8 +360,10 @@ fn outward_normal(k: &Kernel, b: &Brep, f: FaceId, fu: FaceuseId, at: Point3) ->
 /// the surface's own NURB with each control point moved radially by the new radius over the old at
 /// its height, so it keeps the surface's parameters and the face's UV trims stay valid: for a
 /// cylinder solidcore's `Cone::lean_cylinder` (solidcore#1545), for a cone the same edit on
-/// [`Cone::base_mut`]. [`Error::Unsupported`] when the pull does not run along the axis, the axis
-/// lies in the neutral plane, or the cone would close within the face's span.
+/// [`Cone::base_mut`]. Refused ([`cannot_draft`]) when the pull does not run along the axis, the
+/// axis is parallel to the neutral plane, the neutral plane is at or past the cone's apex, or the
+/// cone would close within the face's span;
+/// [`Error::Unsupported`] when the cone's frame or net cannot be read or edited.
 #[allow(clippy::too_many_arguments)] // the capi's drafted_cone
 fn drafted_cone(
     k: &Kernel,
@@ -509,12 +384,12 @@ fn drafted_cone(
     let z = z * (1.0 / len);
     let sense = z.dot(pull);
     if (sense.abs() - 1.0).abs() > 1e-9 {
-        return Ok(Err(Error::Unsupported));
+        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is not along the pull")));
     }
     let axis = frame.origin();
     let toward = z.dot(normal);
     if toward.abs() < 1e-12 {
-        return Ok(Err(Error::Unsupported));
+        return Ok(Err(cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane")));
     }
     // The hinge circle's centre: the axis on the neutral plane, at the cone's height v0.
     let v0 = (origin - axis).dot(normal) / toward;
@@ -526,8 +401,11 @@ fn drafted_cone(
     let r0 = cyl.radius(v0);
     let slope = (cyl.radius(1.0) - cyl.radius(0.0)) * sense;
     let turned = (slope.atan() - s * angle).tan();
-    if !(r0 > 0.0) || !turned.is_finite() {
-        return Ok(Err(Error::Unsupported));
+    if !(r0 > 0.0) {
+        return Ok(Err(cannot_draft("the neutral plane is at or past a drafted cone's apex")));
+    }
+    if !turned.is_finite() {
+        return Ok(Err(cannot_draft(CONE_CLOSES)));
     }
     if cyl.is_cylinder() {
         return Ok(answer(cyl.lean_cylinder(k, turned * sense, v0))?.ok_or(Error::Unsupported));
@@ -543,7 +421,7 @@ fn drafted_cone(
             let h = (p - centre).dot(pull);
             let (was, now) = (cyl.radius(v0 + h * sense), r0 + h * turned);
             if !(was > 0.0 && now > 0.0) {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft(CONE_CLOSES)));
             }
             let foot = centre + pull * h;
             if answer(net.set_control_point(ControlPointForm::EuclideanRational, i, j, foot + (p - foot) * (now / was), w))?.is_none() {
@@ -645,7 +523,7 @@ pub(crate) fn draft(
                 continue;
             }
             let SurfaceKind::Plane(plane) = surf.kind_with_nurb(k)? else {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft("a drafted face is neither a plane nor a cone or cylinder")));
             };
             // The face's outward normal: the plane's, turned with the outer faceuse.
             let mut n = plane.position().z_axis();
@@ -653,7 +531,7 @@ pub(crate) fn draft(
                 n = -n;
             }
             if n.dot(along).abs() > 1e-6 {
-                return Ok(Err(Error::Unsupported));
+                return Ok(Err(cannot_draft("a drafted plane is not parallel to the pull")));
             }
             let Some(inside) = answer(face_internal_point(k, &mut w, f))? else {
                 return Ok(Err(Error::Status(INVALID_INPUT)));
@@ -683,11 +561,25 @@ pub(crate) fn draft(
             }
             surfaces.push(tilted);
         }
+        // A drafted cone that would reach a cavity's wall closes the wall: refused with the largest
+        // angle that keeps it (#20767), before anything changes.
+        let (n, p) = ([normal.x, normal.y, normal.z], [along.x, along.y, along.z]);
+        if let Err(e) = called(solidcore_ops::offset::refuse_draft_closing_wall(k, &w, &picked, neutral_origin, n, p, angle))? {
+            return Ok(Err(e));
+        }
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
+        // A face the drafted faces would cut through (a hole's wall within the draft of the side,
+        // #19686): read before the kernel edits the copy, named if the kernel then refuses. Best
+        // effort: a check that fails itself only leaves the kernel's own refusal, and never
+        // refuses a draft the kernel builds.
+        let through = solidcore_ops::offset::drafted_through(k, &mut w, &picked, &surfaces).ok().flatten();
         mark_moved(&mut w, &picked)?;
         if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
-            return Ok(Err(e));
+            return Ok(Err(match through {
+                Some(t) => Error::DraftCutsThrough { at: [t.at.x, t.at.y, t.at.z], depth: t.depth },
+                None => e,
+            }));
         }
         if !moved_faces(&mut w)? {
             return Ok(Err(Error::NoEffect));

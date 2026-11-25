@@ -197,22 +197,12 @@ fn app_bar_old_canonical_quick_layout_loses_only_its_automatic_third_divider() {
     assert_eq!(Layout::from_value(&value, &defaults), old, "custom layout objects are preserved");
 }
 
+/// The kit's own Dark and Light. The look's crate checks its Onyx theme the same way
+/// (`app_bar_edit_palette_reads_on_onyx`), since the theme files are the look's.
 #[test]
 fn app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground() {
     use solidcraft_theme::contrast_ratio;
-    let mut onyx = Tokens::dark();
-    let source: serde_json::Value = serde_json::from_str(include_str!("../../look/themes/onyx.json")).unwrap();
-    let color = |name: &str| {
-        let text = source["colors"][name].as_str().unwrap().trim_start_matches('#');
-        egui::Color32::from_rgb(
-            u8::from_str_radix(&text[..2], 16).unwrap(),
-            u8::from_str_radix(&text[2..4], 16).unwrap(),
-            u8::from_str_radix(&text[4..6], 16).unwrap(),
-        )
-    };
-    onyx.app_bar = color("app_bar");
-    onyx.app_bar_text = color("app_bar_text");
-    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light()), ("Onyx", onyx)] {
+    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light())] {
         let p = edit_palette(t);
         let a = contrast_ratio(p.card, p.item);
         let b = contrast_ratio(p.item, p.hover);
@@ -516,6 +506,13 @@ fn app_bar_edit_mode_changes_only_separator_widths() {
 
 #[test]
 fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
+    // The bar's helpers and these checks never lock the context inside its own lock: a worker's
+    // repaint between the two reads froze the window (#21091).
+    let ((), nested) = egui::Context::record_nested_locks(separator_mode_changes_glide_and_resize_still_snaps);
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
+fn separator_mode_changes_glide_and_resize_still_snaps() {
     let mut rig = BarRig::new(1920.0);
     let mut style = rig.ctx.global_style().as_ref().clone();
     style.animation_time = 0.15;
@@ -527,7 +524,8 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
             Rect::from_min_size(pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0), vec2(item.right - item.left, ITEM_HEIGHT));
         // Outside a frame cumulative_frame_nr already points to the next frame, so
         // inspect the completed paint state rather than calling the in-frame helper.
-        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap().items.get("save").unwrap().drawn);
+        let key = motion_key(&rig.ctx);
+        let painted = rig.ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().drawn);
         (final_rect, Rect::from_min_size(painted, final_rect.size()))
     };
     let separator_gap = |rig: &BarRig| {
@@ -539,8 +537,9 @@ fn app_bar_separator_mode_changes_glide_and_resize_still_snaps() {
                 pos2(item.left, (height(editing_active(&rig.ctx)) - ITEM_HEIGHT) / 2.0),
                 vec2(item.right - item.left, ITEM_HEIGHT),
             );
+            let key = motion_key(&rig.ctx);
             rig.ctx.data(|data| {
-                let state = data.get_temp::<BarMotion>(motion_key(&rig.ctx)).unwrap();
+                let state = data.get_temp::<BarMotion>(key).unwrap();
                 let item = state.items.get(id).unwrap();
                 Rect::from_min_size(item.drawn, vec2(if id.starts_with("separator:") { item.drawn_width } else { rect.width() }, rect.height()))
             })
@@ -1086,7 +1085,7 @@ const VIEW_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const PLUS_MENU: [TabMenuRow<'static>; 4] = [
     TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_sketch", "Sketch", "").with_icon("sketch", Some(egui::Color32::GREEN)),
+    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
     TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
     TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
 ];
@@ -1106,6 +1105,7 @@ const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
         compass: None,
+        sketch_mode: false,
         name: "Model",
         icon: "model",
         accent: egui::Color32::BLUE,
@@ -1120,8 +1120,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
     },
     ViewTab {
         compass: None,
-        name: "Sketch 2",
-        icon: "sketch",
+        sketch_mode: false,
+        name: "Render 2",
+        icon: "render",
         accent: egui::Color32::GREEN,
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
@@ -1130,10 +1131,11 @@ const VIEWS: [ViewTab<'static>; 3] = [
         window_name: None,
         window_number: None,
         to_window: None,
-        tip: "Sketch 2",
+        tip: "Render 2",
     },
     ViewTab {
         compass: None,
+        sketch_mode: false,
         name: "Sheet 1",
         icon: "sheet",
         accent: egui::Color32::RED,
@@ -1167,6 +1169,7 @@ struct TabsRig {
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
+    plus_rows: &'static [TabMenuRow<'static>],
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
@@ -1198,6 +1201,7 @@ impl TabsRig {
             layout: None,
             pop_out: false,
             plus,
+            plus_rows: &PLUS_MENU,
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
@@ -1266,7 +1270,7 @@ impl TabsRig {
             view_right_row: "vright",
             view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
-            plus_menu: if self.plus { &PLUS_MENU } else { &[] },
+            plus_menu: if self.plus { self.plus_rows } else { &[] },
             layout_menu: if layout.is_some() { &LAYOUT_MENU } else { &[] },
             view_layout: layout.as_ref(),
             layout_current: "layout.single",
@@ -1644,6 +1648,28 @@ fn the_view_switcher_lists_every_view() {
     assert_eq!(rig.press(rig.at("t:menu:as_tabs"), egui::PointerButton::Primary), vec![TabAction::SwitcherMenu { id: "as_tabs".into() }]);
 }
 
+/// The first extra view is reachable from a one-view design, including the default switcher preference.
+#[test]
+fn a_single_view_tab_opens_the_add_view_menu_with_either_tab_preference() {
+    for as_tabs in [false, true] {
+        for clear in [false, true] {
+            let mut rig = TabsRig::build(Some(as_tabs), true, None);
+            rig.single_view = true;
+            rig.clear = clear;
+            rig.frame(Vec::new());
+            let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("a single-view design has an add-view button");
+            if !as_tabs || !clear {
+                let close = solidcraft_ui_registry::rect_of("t:close:0").expect("the plain tab retains its close button");
+                assert!(!plus.intersects(close), "add-view and close keep separate hit targets");
+            }
+            assert!(rig.press(plus.center(), egui::PointerButton::Primary).is_empty());
+            rig.frame(Vec::new());
+            rig.frame(Vec::new());
+            assert_eq!(rig.press(rig.at("t:menu:plus_render"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
+        }
+    }
+}
+
 /// A click on the + opens its menu and leaves it open: two frames later its rows are drawn under the
 /// +'s left edge, and a row returns its id. A press in the frame that opened the menu is not a press
 /// outside it.
@@ -1654,15 +1680,15 @@ fn the_plus_menu_stays_open_after_its_click() {
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
-    let row = solidcraft_ui_registry::handle_at("t:menu:plus_sketch").expect("the menu's row is drawn");
+    let row = solidcraft_ui_registry::handle_at("t:menu:plus_render").expect("the menu's row is drawn");
     assert!(row.y > HEIGHT && row.x >= plus.left(), "the menu opens under the + at {row:?}");
-    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_sketch".into() }]);
+    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
     // A press and release in one frame (a click driven by a script) leaves the menu open too.
     let at = rig.at("t:vnew");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     rig.frame(vec![button(true), button(false)]);
     rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_sketch").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_render").is_some());
 }
 
 /// The + menu's header is drawn but never chosen, every row (with a glyph or without) returns its
@@ -1674,13 +1700,73 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:Open as a view").is_none(), "the header is not a row");
-    let (sketch, dup) = (rig.at("t:menu:plus_sketch"), rig.at("t:menu:plus_dup"));
-    assert!(dup.y - sketch.y > 32.0, "a separator sits above Duplicate: {sketch:?} {dup:?}");
+    let (render, dup) = (rig.at("t:menu:plus_render"), rig.at("t:menu:plus_dup"));
+    assert!(dup.y - render.y > 32.0, "a separator sits above Duplicate: {render:?} {dup:?}");
     assert_eq!(rig.press(dup, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_dup".into() }]);
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:plus_reopen"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_reopen".into() }]);
+}
+
+const SHEET_PLUS_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("sheet", "Sheet", "")
+    .with_children(&[TabMenuRow::new("sheet.new", "New sheet", ""), TabMenuRow::new("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")])];
+
+#[test]
+fn plus_sheet_submenu_hover_survives_the_gap_and_returns_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent = rig.at("t:menu:sheet");
+    assert!(rig.frame(vec![egui::Event::PointerMoved(parent)]).is_empty(), "hovering Sheet opens its children without choosing the parent");
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent stays drawn");
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").expect("the existing Sheet child is drawn");
+    let gap_x = if child_rect.left() > parent_rect.right() {
+        (parent_rect.right() + child_rect.left()) * 0.5
+    } else {
+        assert!(child_rect.right() < parent_rect.left(), "the flyout opens beside the parent");
+        (child_rect.right() + parent_rect.left()) * 0.5
+    };
+    let gap = pos2(gap_x, parent_rect.center().y);
+    assert!(rig.frame(vec![egui::Event::PointerMoved(gap)]).is_empty());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_some(), "crossing the gap keeps the same flyout open");
+    let child = rig.at("t:menu:sheet.open:drawing/sheet");
+    assert_eq!(rig.press(child, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "sheet.open:drawing/sheet".into() }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:sheet.open:drawing/sheet").is_none(), "choosing a child closes the menu");
+}
+
+#[test]
+fn plus_sheet_submenu_arrow_right_and_enter_choose_the_child_action() {
+    let mut rig = TabsRig::build(Some(true), true, None);
+    rig.plus_rows = &SHEET_PLUS_MENU;
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    rig.frame(vec![egui::Event::PointerGone]);
+    let key = |key, pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+    let parent_rect = solidcraft_ui_registry::rect_of("t:menu:sheet").expect("Sheet parent is drawn");
+    let focused_rect = || rig.ctx.memory(|m| m.focused()).and_then(|id| rig.ctx.read_response(id)).map(|response| response.rect);
+    for _ in 0..32 {
+        if focused_rect() == Some(parent_rect) {
+            break;
+        }
+        assert!(rig.frame(vec![key(egui::Key::Tab, true)]).is_empty());
+        rig.frame(vec![key(egui::Key::Tab, false)]);
+    }
+    assert_eq!(focused_rect(), Some(parent_rect), "Tab reaches the Sheet row before entering its submenu");
+    assert!(rig.frame(vec![key(egui::Key::ArrowRight, true)]).is_empty());
+    rig.frame(vec![key(egui::Key::ArrowRight, false)]);
+    // read_response reports the previous paint; let the flyout's invisible sizing pass
+    // settle before comparing its focused response with the published visible row.
+    rig.frame(Vec::new());
+    let child_rect = solidcraft_ui_registry::rect_of("t:menu:sheet.new").expect("the first Sheet child is drawn");
+    assert_eq!(focused_rect(), Some(child_rect), "ArrowRight transfers keyboard focus to the first child");
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter, true)]), vec![TabAction::PlusMenu { id: "sheet.new".into() }]);
 }
 
 /// The row builders set only what they say, and the glyphs the menus use exist.
@@ -1692,7 +1778,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
+    for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
@@ -2909,4 +2995,38 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}
+
+#[test]
+fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
+    let ctx = crate::test_support::context();
+    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
+        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        if width == 240.0 {
+            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
+        }
+        if width >= 70.0 {
+            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
+        }
+        let chip = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(chip.height(), 18.0);
+        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
+    }
+    for t in [Tokens::light(), Tokens::dark()] {
+        assert!(
+            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
+            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
+        );
+    }
 }

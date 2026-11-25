@@ -95,12 +95,11 @@ pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a
 
 /// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
 /// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
-pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
+pub fn plus_menu<'a>(dark: bool) -> Vec<TabMenuRow<'a>> {
     let kind = |id, label: &'static str, icon| TabMenuRow::new(id, label, "").with_icon(icon, Some(crate::workspace::view_icon_colour(label, dark)));
     vec![
         TabMenuRow::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
-        kind("plus.sketch", "Sketch", "sketch"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
@@ -322,6 +321,9 @@ fn layout_action(app: &mut SolveApp, id: &str) -> bool {
 }
 
 fn plus_row(app: &mut SolveApp, id: &str) -> bool {
+    if crate::sheet_views::menu_action(app, id) {
+        return true;
+    }
     if let Some(kind) = id.strip_prefix("plus.").and_then(ViewKind::from_key) {
         // A Model view is another angle on the design, so "+ Model" always opens a new one; the
         // Render workspace is one place, so it is reused.

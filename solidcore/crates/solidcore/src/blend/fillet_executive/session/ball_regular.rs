@@ -42,7 +42,8 @@ use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType, SeamDomain,
 };
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
@@ -58,6 +59,33 @@ use crate::topology::edgeuse::p1 as eu;
 use crate::topology::{edge, Brep};
 
 const OP: &str = "blend::fillet_executive::session::ball_regular";
+
+/// The caller's solver without an offset surface it reads
+/// ([`SolverFailure::OffsetSurfaceMissing`]): the solver is the caller's, passed in through
+/// the public entry points, so its state is the caller's input. Status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`, as the phrase cause it replaces had.
+fn offset_surface_missing() -> SolidError {
+    Failure::new(
+        OP,
+        BlendFailure::Solver(SolverFailure::OffsetSurfaceMissing),
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
+/// A reviewed defect: [`judge_ball_at`] reads an offset surface of the solver after checking
+/// both are there, and nothing between removes one (status `SM_ERR_NULL_POINTER`, the fork's
+/// `NER`, as the phrase cause it replaces had).
+fn surfaces_checked() -> SolidError {
+    Failure::new(
+        OP,
+        BlendFailure::Defect {
+            why: "both offset surfaces of the solver are checked present before the station reads one, and setting its offsets removes none",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
 
 /// `lSteps`: the sections along the edge.
 const STEPS: usize = 32;
@@ -228,7 +256,8 @@ pub fn ball_law(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result
 ///
 /// # Errors
 ///
-/// A missing offset surface (`BlendFailure::Missing`; the fork dereferences it).
+/// A missing offset surface ([`SolverFailure::OffsetSurfaceMissing`], status
+/// `SM_ERR_NULL_POINTER`; the fork dereferences it).
 pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     let (radii, base): (&mut [f64; 2], &mut FilletSolver) = match solver {
         SolverObject::ConstantRadius(s) => (&mut s.fillet_radii, &mut s.solver),
@@ -238,9 +267,7 @@ pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     *radii = [radius, radius];
     let orientations = base.orientations;
     for (rail, orientation) in orientations.into_iter().enumerate() {
-        let slot = base
-            .surface_mut(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        let slot = base.surface_mut(rail)?.ok_or_else(offset_surface_missing)?;
         slot.surface.set_offset_distance(radius * orientation);
     }
     Ok(true)
@@ -430,7 +457,7 @@ fn solve4(a: &[[f64; 4]; 4], b: &[f64; 4]) -> Option<[f64; 4]> {
 /// # Errors
 ///
 /// Those of the law's, the offsets' and the surfaces' evaluations; a missing offset
-/// surface (a `BlendFailure::Missing`).
+/// surface ([`SolverFailure::OffsetSurfaceMissing`], status `SM_ERR_NULL_POINTER`).
 pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result<BallStation> {
     let mut station = BallStation::default();
     let law = ball_law(k, solver, pnt)?;
@@ -442,7 +469,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
     let approx_tol = solver.base().this_approx_tol_3d();
     let ops = ops_of(solver);
     if ops.solver().surface(0)?.is_none() || ops.solver().surface(1)?.is_none() {
-        return Err(SolidError::blend_missing(OP, "the solver's offset surface"));
+        return Err(offset_surface_missing());
     }
     station.law = on_edge;
     station.ball = ball;
@@ -460,7 +487,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
             let slot = ops
                 .solver_mut()
                 .surface_mut(rail)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+                .ok_or_else(surfaces_checked)?;
             *dst = slot.surface.surface.evaluate_point_extending(k, uv)?;
         }
         Ok(on)
@@ -476,10 +503,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
     let mut jets: [Option<FaceJet>; 2] = [None, None];
     let mut offsets = [0.0_f64; 2];
     for rail in 0..2 {
-        let slot = ops
-            .solver()
-            .surface(rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+        let slot = ops.solver().surface(rail)?.ok_or_else(surfaces_checked)?;
         let offset: &OffsetSurface = &slot.surface.surface;
         let uv = uvs.get(rail).copied().unwrap_or(Point2::UNDEF);
         let base = offset.base_surface();
@@ -703,11 +727,11 @@ pub(crate) fn ball_section_at(
         let s0 = ops
             .solver()
             .surface(0)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            .ok_or_else(offset_surface_missing)?;
         let s1 = ops
             .solver()
             .surface(1)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
+            .ok_or_else(offset_surface_missing)?;
         [
             s0.surface.base_surface().clone(),
             s1.surface.base_surface().clone(),
@@ -916,10 +940,17 @@ pub fn ball_is_regular(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(first);
     };
-    let edge_id = eu::edge(target, edgeuse)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| {
+        SolidError::blend_at(
+            OP,
+            BlendFailure::EdgeUseWithoutEdge,
+            EntityRef::Edgeuse(edgeuse),
+        )
+    })?;
     let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
+        .ok_or_else(|| {
+            SolidError::blend_at(OP, BlendFailure::EdgeWithoutCurve, EntityRef::Edge(edge_id))
+        })?
         .clone();
     let ivl = edge::interval(target, edge_id)?;
     let closed = edge::is_closed(target, edge_id)?;
@@ -1177,6 +1208,29 @@ pub fn ball_is_regular(
                     fits: radius,
                     ..BallStation::default()
                 });
+            }
+            // The same proof for a ball wider than a face: an analytic cylinder, sphere or
+            // torus of a radius less than the ball's with the ball on its inner side curves
+            // toward the ball more than the ball does at every point, so no ball of that
+            // radius touches it without cutting into it, and none rolls along the edge (the
+            // stations found none). A radius below the face's fits it.
+            if radius > EFF_ZERO {
+                if let Some(width) =
+                    crate::blend::fillet_exact::ball_wider_than_a_face_along_the_edge(
+                        ops_of(solver),
+                        k,
+                        target,
+                        radius,
+                    )?
+                {
+                    return Ok(BallStation {
+                        check: BallCheck::NotEnclosed,
+                        radius,
+                        works: width,
+                        fits: width,
+                        ..BallStation::default()
+                    });
+                }
             }
         }
     }

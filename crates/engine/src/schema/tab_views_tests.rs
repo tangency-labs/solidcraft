@@ -34,7 +34,7 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
     let (before, undo) = (s.doc.to_json(), s.undo.len());
     for (id, params, echo) in [
         ("tab.view.open", json!({}), json!({"reuse": false})),
-        ("tab.view.open", json!({"kind": "sketch", "subject": "7"}), json!({"kind": "sketch", "subject": "7", "reuse": true})),
+        ("tab.view.open", json!({"kind": "sheet", "subject": "7"}), json!({"kind": "sheet", "subject": "7", "reuse": true})),
         ("tab.view.open", json!({"kind": "render", "reuse": true}), json!({"kind": "render", "reuse": true})),
         ("tab.view.open", json!({"window": 0}), json!({"reuse": false, "window": 0})),
         ("tab.view.open", json!({"window": null}), json!({"reuse": false})),
@@ -73,6 +73,16 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         assert_eq!(s.execute(id, &Value::Null).is_ok(), !matches!(id, "tab.view.activate" | "tab.view.move" | "tab.view.layout"), "{id}: null");
     }
     assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "nothing in the design changes");
+}
+
+#[test]
+fn sketch_is_not_a_view_kind_at_any_parameter_check_level() {
+    for param_check in ParamCheck::ALL {
+        let mut s = Session { param_check, ..Session::default() };
+        let before = (s.doc.to_json(), s.undo.len());
+        assert!(s.execute("tab.view.open", &json!({"kind": "sketch", "subject": "7"})).is_err(), "{param_check:?}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), before, "a rejected view request never edits the design");
+    }
 }
 
 #[test]

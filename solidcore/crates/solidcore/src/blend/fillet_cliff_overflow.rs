@@ -40,7 +40,9 @@
 //!
 //! Deviations:
 //! - **Errors.** `GetFilletErrorInfo()->NoteError(code, comment)` followed by `SM_ERR`
-//!   becomes a [`Refusal`] written to the caller's note, then `SM_ERR`.
+//!   becomes a [`Refusal`] written to the caller's note, then a
+//!   [`crate::error::blend::BlendFailure::NoRoom`] refusal for the same reason (status
+//!   `SM_ERR`).
 //! - **Sets.** The fork's pointer-keyed `std::set` is a `BTreeSet` keyed by ids, used for
 //!   membership only; every loop follows a vector.
 //! - **Curve ownership.** A face's curves are owned values handed to
@@ -52,9 +54,11 @@ use std::collections::BTreeSet;
 
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::FilletErrorType;
+use crate::blend::fillet_overflow::{PLANAR_NORMAL, PLANE_AXIS};
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, OverflowDrop, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -109,13 +113,36 @@ impl Refusal {
     }
 }
 
-/// Write `refusal` to `note` and fail (`NoteError`, then `return SM_ERR`).
-fn refuse<T>(note: &mut Option<Refusal>, refusal: Refusal) -> Result<T> {
-    *note = Some(refusal);
-    Err(SolidError::blend_failed(
-        OP,
-        "the overflow is refused, as the note says",
-    ))
+/// Write the refusal for `reason` to `note` and fail with it (`NoteError`, then `return
+/// SM_ERR`): a [`BlendFailure::NoRoom`] refusal for the same reason, status `SM_ERR`.
+fn refuse<T>(note: &mut Option<Refusal>, reason: NoRoomReason, comment: &'static str) -> Result<T> {
+    *note = Some(Refusal::no_room(reason, comment));
+    Err(SolidError::blend(OP, BlendFailure::NoRoom(reason)))
+}
+
+/// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
+/// The helpers read the caller's body and the executive's sheet alike, so the failure names
+/// no entity: the executive's refusal carries the error's entity as the target's.
+#[track_caller]
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
+}
+
+/// A missing thing this module built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A [`BlendFailure::Defect`] chaining the failed step's error `cause`.
+#[track_caller]
+fn defect_caused_by(why: &'static str, cause: SolidError) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .caused_by(cause)
+        .into_error()
 }
 
 // ---- helpers ------------------------------------------------------------------------------
@@ -158,8 +185,7 @@ fn add_curve(
 
 /// `sm_EdgeCurve`: a copy of the edge's curve over the edge's interval.
 pub(crate) fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
-    let curve =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let mut copy = curve.copy(k)?;
     let mut ivl = edge::interval(b, e)?;
     if ivl != copy.natural_interval() {
@@ -188,7 +214,7 @@ pub struct PlaneFrame {
 /// it leans on least. `None` when the surface is not planar.
 ///
 /// # Errors
-/// `SM_ERR` for a zero normal or axis; those of `IsPlanar`.
+/// A [`BlendFailure::Defect`] (`SM_ERR`) for a zero normal or axis; those of `IsPlanar`.
 pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     if let SurfaceKind::Plane(plane) = surface.kind() {
         let frame = plane.position();
@@ -206,7 +232,7 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     let normal = planar
         .normal
         .unitize()
-        .map_err(|_| SolidError::blend_failed(OP, "the plane's normal is zero"))?;
+        .map_err(|e| defect_caused_by(PLANAR_NORMAL, e))?;
     // an axis in the plane: the normal crossed with the coordinate axis it leans on least
     let mut axis = Vec3::new(1.0, 0.0, 0.0);
     if normal.y.abs() < normal.x.abs() && normal.y.abs() <= normal.z.abs() {
@@ -217,7 +243,7 @@ pub fn plane_of(k: &Kernel, surface: &Surface) -> Result<Option<PlaneFrame>> {
     let x = normal
         .cross(axis)
         .unitize()
-        .map_err(|_| SolidError::blend_failed(OP, "the plane's axis is parallel to its normal"))?;
+        .map_err(|e| defect_caused_by(PLANE_AXIS, e))?;
     let y = normal.cross(x);
     Ok(Some(PlaneFrame {
         origin: planar.point,
@@ -272,8 +298,8 @@ fn rotation_of(rev: &SurfOfRevolution) -> (usize, bool) {
 /// A plane is [`plane_of`]'s, not continued here.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the copies, the
-/// continuations and the drops.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
+/// surface; those of the copies, the continuations and the drops.
 pub fn continued_surface(
     k: &Kernel,
     b: &Brep,
@@ -281,8 +307,7 @@ pub fn continued_surface(
     points: &[Point3],
     tol: f64,
 ) -> Result<ContinuedSurface> {
-    let base = face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let base = face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     let domain = base.natural_uv_domain_with_nurb(k)?;
     let size = domain.size();
     let as_itself = OffsetSurface::continues_as_itself(base);
@@ -384,10 +409,11 @@ pub fn continued_surface(
 /// of any kind ([`plane_of`]; WR-635, `eddf0ed`) continues as its plane.
 ///
 /// # Errors
-/// `SM_ERR_NULL_POINTER` for a face without surface; those of the drop.
+/// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
+/// surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let surface =
+        face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     if let Some(frame) = plane_of(k, surface)? {
         return Ok((point - frame.origin).dot(frame.z).abs());
     }
@@ -427,8 +453,9 @@ fn same(a: Point3, b: Point3, tol: f64) -> bool {
 /// the crease trim fits it tighter, #17673).
 ///
 /// # Errors
-/// The refusals as `SM_ERR`; `SM_ERR` for a failed drop of the edge's middle; those of the
-/// section, the split, the classifications and the deletion.
+/// The refusals as [`BlendFailure::NoRoom`] (`SM_ERR`);
+/// [`BlendFailure::OverflowPointDoesNotDrop`] (`SM_ERR`) for a failed drop of the edge's
+/// middle; those of the section, the split, the classifications and the deletion.
 #[allow(clippy::too_many_arguments)]
 pub fn cut_fillet_at_open_end(
     k: &mut Kernel,
@@ -445,10 +472,8 @@ pub fn cut_fillet_at_open_end(
     if !planar.is_planar {
         return refuse(
             note,
-            Refusal::no_room(
-                NoRoomReason::CliffEndFaceNotPlanar,
-                "Fillet Error: a cliff overflow runs past a fillet end whose end face is not planar",
-            ),
+            NoRoomReason::CliffEndFaceNotPlanar,
+            "Fillet Error: a cliff overflow runs past a fillet end whose end face is not planar",
         );
     }
     let (at, normal) = (planar.point, planar.normal);
@@ -459,7 +484,7 @@ pub fn cut_fillet_at_open_end(
             continue;
         };
         let surface = face::p2::surface(region, f)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+            .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
             .clone_for_evaluation()?;
         let uv_domain = face::p2::uv_domain(region, f)?;
         let dropped = surface.drop_point::<NoObject>(
@@ -469,9 +494,9 @@ pub fn cut_fillet_at_open_end(
             &DropPointOptions::default(),
         )?;
         if !dropped.success {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the edge's middle does not drop onto the face",
+                BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::EdgeMiddleOntoFilletFace),
             ));
         }
         let keep = surface.evaluate_point(k, dropped.result_uv)?;
@@ -541,10 +566,8 @@ pub fn cut_fillet_at_open_end(
             }
             return refuse(
                 note,
-                Refusal::no_room(
-                    NoRoomReason::CliffEndNotCut,
-                    "Fillet Error: the end face's plane does not cut a fillet that overflows its end in two",
-                ),
+                NoRoomReason::CliffEndNotCut,
+                "Fillet Error: the end face's plane does not cut a fillet that overflows its end in two",
             );
         };
         // keep the piece holding the fillet's middle, delete the one beyond the end
@@ -569,10 +592,8 @@ pub fn cut_fillet_at_open_end(
         if held_first == held_new {
             return refuse(
                 note,
-                Refusal::no_room(
-                    NoRoomReason::CliffEndNotCut,
-                    "Fillet Error: the end face's plane does not part a fillet that overflows its end from its middle",
-                ),
+                NoRoomReason::CliffEndNotCut,
+                "Fillet Error: the end face's plane does not part a fillet that overflows its end from its middle",
             );
         }
         let beyond = if held_first { new_face } else { f };
@@ -622,7 +643,8 @@ fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
 /// region.
 ///
 /// # Errors
-/// `SM_ERR` for a failed drop; those of the samples and the face construction.
+/// [`BlendFailure::OverflowPointDoesNotDrop`] (`SM_ERR`) for a failed drop; those of the
+/// samples and the face construction.
 fn face_of_loop(
     k: &mut Kernel,
     region: &mut Brep,
@@ -644,19 +666,17 @@ fn face_of_loop(
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
             if !dropped.success {
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend(
                     OP,
-                    "the sample does not drop onto the surface",
+                    BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::LoopSampleOntoSurface),
                 ));
             }
             uvs.push(dropped.result_uv);
         }
     }
     let mut area = 0.0;
-    for (i, a) in uvs.iter().enumerate() {
-        let Some(b) = uvs.get((i + 1) % uvs.len()) else {
-            return Err(SolidError::blend_missing(OP, "the loop's next point"));
-        };
+    // each point and its successor, the last point's the first
+    for (a, b) in uvs.iter().zip(uvs.iter().cycle().skip(1)) {
         area += a.x * b.y - b.x * a.y;
     }
     if area < 0.0 {
@@ -694,8 +714,13 @@ fn face_of_loop(
             env,
         )
     })?;
-    made.face
-        .ok_or_else(|| SolidError::blend_missing(OP, "the overflow face"))
+    made.face.ok_or_else(|| {
+        null_defect(
+            "making a section end's face from its loop succeeded without a face: \
+             `MakeFaceWithCurves` hands back the face its face construction made, which \
+             fails where it makes none",
+        )
+    })
 }
 
 /// The section's flat face of a round cut off at `end` (WR-674;
@@ -717,39 +742,36 @@ pub fn section_end_face(
     let (a, b) = edge::start_end_vertices(region, section)?;
     let a = vertex::point(
         region,
-        a.ok_or_else(|| SolidError::blend_missing(OP, "the section's start vertex"))?,
+        a.ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
     )?;
     let b = vertex::point(
         region,
-        b.ok_or_else(|| SolidError::blend_missing(OP, "the section's end vertex"))?,
+        b.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
     )?;
     let mut lp: Vec<LoopCurve> = Vec::new();
-    add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
+    let section_curve = edge_curve(k, region, section)?;
+    // the box starts at the section curve's first sample (`samples`' point at 0), so it is
+    // never empty: adding that sample again below leaves it as it is
+    let first = section_curve.evaluate_point(k, section_curve.natural_interval().evaluate(0.0))?;
+    add_curve(k, &mut lp, section_curve, a, b)?;
     for (from, to) in [(b, end.at), (end.at, a)] {
         if !same(from, to, on_tol) {
             add_curve(k, &mut lp, line(from, to), from, to)?;
         }
     }
     let [_, x, y] = end.normal.make_unit_ortho_vectors(None)?;
-    let mut bbox: Option<Extent2d> = None;
+    let in_plane = |p: Point3| {
+        let d = p - end.at;
+        Point2::new(d.dot(x), d.dot(y))
+    };
+    let mut bbox = Extent2d::from_points(in_plane(first), in_plane(first));
     for c in &lp {
         let mut points = Vec::new();
         samples(k, &c.curve, 8, &mut points)?;
         for p in points {
-            let d = p - end.at;
-            let uv = Point2::new(d.dot(x), d.dot(y));
-            match bbox.as_mut() {
-                None => bbox = Some(Extent2d::from_points(uv, uv)),
-                Some(bx) => bx.add_point(uv),
-            }
+            bbox.add_point(in_plane(p));
         }
     }
-    let Some(bbox) = bbox else {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the section end's loop has no points",
-        ));
-    };
     let margin = 0.01 * bbox.size().length() + on_tol;
     let domain = Extent2d::from_bounds(
         bbox.min().x - margin,
@@ -782,12 +804,14 @@ pub fn section_end(
         interval.max()
     };
     let derivs = edge::curve(target, fil_edge)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?
+        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?
         .evaluate(k, t, 1, true, true)?;
-    let tangent = derivs
-        .get(1)
-        .copied()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's tangent"))?;
+    let tangent = derivs.get(1).copied().ok_or_else(|| {
+        null_defect(
+            "the filleted edge's curve evaluated with one derivative gives no tangent: a \
+                 curve's evaluation returns its point and each derivative asked for",
+        )
+    })?;
     let length = tangent.length();
     if length <= EFF_ZERO {
         return Ok(None);
@@ -852,12 +876,21 @@ mod tests {
     #[test]
     fn a_refusal_is_noted_and_a_typed_failure() {
         let mut note = None;
-        let error = refuse::<()>(&mut note, BRANCHES).unwrap_err();
+        let error = refuse::<()>(
+            &mut note,
+            NoRoomReason::CliffBoundaryBranches,
+            BRANCHES.comment,
+        )
+        .unwrap_err();
         assert_eq!(note, Some(BRANCHES));
         assert_eq!(
             error,
-            SolidError::blend_failed(OP, "the overflow is refused, as the note says")
+            SolidError::blend(
+                OP,
+                BlendFailure::NoRoom(NoRoomReason::CliffBoundaryBranches)
+            )
         );
+        assert!(error.is_refusal(), "{error:?}");
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
 }
