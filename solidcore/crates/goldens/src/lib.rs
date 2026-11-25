@@ -38,6 +38,8 @@ pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
 pub mod plan;
+#[cfg(test)]
+pub(crate) mod replay_seam;
 pub mod rng;
 pub mod runner;
 pub mod script;
@@ -51,8 +53,6 @@ pub(crate) mod trims_on_edges;
 pub mod util;
 #[cfg(test)]
 pub(crate) mod wr450_rows;
-#[cfg(test)]
-mod wr57_replay;
 #[cfg(test)]
 mod wr587_replay;
 
@@ -72,13 +72,13 @@ pub use runner::RunOptions;
 pub use runner::UnitDiff;
 
 /// A runner's kernel: [`solidcore::Kernel::default`]. In this crate's tests it also
-/// carries the WR-57 substitution replay's seam while a `wr57_replay` test has one
-/// installed on this thread (the seam state is the kernel's; the runners make their own
-/// kernels, so they take it from here).
+/// carries the replay seam a test has installed on this thread ([`replay_seam`]: the
+/// WR-450 and WR-587 replays' and the target bound's; the seam state is the kernel's, and the
+/// runners make their own kernels, so they take it from here).
 pub(crate) fn runner_kernel() -> solidcore::Kernel {
     let k = solidcore::Kernel::default();
     #[cfg(test)]
-    let k = wr57_replay::with_seam(k);
+    let k = replay_seam::with_seam(k);
     k
 }
 
@@ -88,7 +88,7 @@ pub(crate) fn runner_kernel() -> solidcore::Kernel {
 pub(crate) fn replay_active() -> bool {
     #[cfg(test)]
     {
-        wr57_replay::active()
+        replay_seam::active()
     }
     #[cfg(not(test))]
     {
