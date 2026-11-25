@@ -165,10 +165,7 @@ fn test_boat_horizon_lock_matches_navigation_and_off_still_rolls() {
             let m = motion([0.0; 3], [0.0, 0.0, 0.5]);
             for _ in 0..20 {
                 step(&mut cam, m, 0.05, 150.0, radius, 1.4, free_orbit, horizon_lock);
-                crate::navigation::device_camera(
-                    &mut expected, m, 0.05, 150.0, true,
-                    free_orbit, horizon_lock, None, None,
-                );
+                crate::navigation::device_camera(&mut expected, m, 0.05, 150.0, true, free_orbit, horizon_lock, None, None);
                 assert_eq!(cam, expected);
             }
             if horizon_lock {

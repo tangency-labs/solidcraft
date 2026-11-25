@@ -110,7 +110,16 @@ impl Boat {
 
 /// `motion` for `seconds` on the boat's camera in a box `aspect` wide for its height of `height`
 /// points, with pan and zoom held so a sphere of `radius` stays inside it.
-pub(crate) fn step(cam: &mut Camera, motion: crate::space_mouse::Motion, seconds: f64, height: f64, radius: f64, aspect: f64, free_orbit: bool, horizon_lock: bool) {
+pub(crate) fn step(
+    cam: &mut Camera,
+    motion: crate::space_mouse::Motion,
+    seconds: f64,
+    height: f64,
+    radius: f64,
+    aspect: f64,
+    free_orbit: bool,
+    horizon_lock: bool,
+) {
     crate::navigation::device_camera(cam, motion, seconds, height, true, free_orbit, horizon_lock, None, None);
     cam.fov = FOV;
     // Zoom within limits: the nearest still shows the whole boat in the shorter side of the box.
@@ -163,7 +172,14 @@ pub(crate) fn project(model: &Model, cam: &Camera, rect: Rect) -> Frame {
 }
 
 /// Draws the boat in a box of `size` and moves it by this frame's motion. `boat` is the page's state.
-pub(crate) fn show(ui: &mut egui::Ui, boat: &mut Option<Boat>, motion: Option<DeviceMotion>, free_orbit: bool, horizon_lock: bool, size: egui::Vec2) -> Option<Rect> {
+pub(crate) fn show(
+    ui: &mut egui::Ui,
+    boat: &mut Option<Boat>,
+    motion: Option<DeviceMotion>,
+    free_orbit: bool,
+    horizon_lock: bool,
+    size: egui::Vec2,
+) -> Option<Rect> {
     let model = model()?;
     let t = Tokens::get();
     let now = ui.input(|i| i.time);
