@@ -59,7 +59,7 @@ pub fn offset_contour(
     let short = || ContourRefusal::ZeroLength;
     // The joints (indices into `at`) at sharp corners, where an arc beside them is cut anew.
     let mut sharp = BTreeSet::new();
-    let mut at = Vec::with_capacity(segs.len() + 1);
+    let mut at = Vec::new();
     let first = segs.first().ok_or_else(short)?;
     at.push(first.start() + away(first.start_tangent()).unwrap_or(Vec2::ZERO) * depth);
     for pair in segs.windows(2) {
@@ -93,7 +93,7 @@ pub fn offset_contour(
     }
     let last = segs.last().ok_or_else(short)?;
     at.push(last.end() + away(last.end_tangent()).unwrap_or(Vec2::ZERO) * depth);
-    let mut out = Vec::with_capacity(segs.len());
+    let mut out = Vec::new();
     for (i, seg) in segs.iter().enumerate() {
         let (Some(&from), Some(&to)) = (at.get(i), at.get(i + 1)) else {
             return Err(short());
