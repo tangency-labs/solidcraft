@@ -2590,4 +2590,4 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
 
 #[cfg(test)]
 #[path = "plugin_menu_tests.rs"]
-mod tests;
+pub(crate) mod tests;

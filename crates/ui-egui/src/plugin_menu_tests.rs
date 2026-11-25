@@ -1807,11 +1807,11 @@ fn run_waits_for_required_fields_and_valid_values() {
     );
 }
 
-fn entry(name: &str, effect: &str, slots: Value) -> solidcraft_engine::plugin::Entry {
+pub(crate) fn entry(name: &str, effect: &str, slots: Value) -> solidcraft_engine::plugin::Entry {
     serde_json::from_value(json!({"name":name,"effect":effect,"input_schema":{"type":"object"},"slots":slots})).unwrap()
 }
 
-fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
+pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
     Listed {
         id: id.into(),
         name: format!("{id} plugin"),
