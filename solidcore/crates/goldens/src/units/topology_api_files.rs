@@ -1366,6 +1366,18 @@ mod tests {
                 assert_eq!(ed.zone_tol_3d.to_bits(), t.to_bits(), "{name}: edge {i}");
                 edges += usize::from(raised);
             }
+            // every written vertex covers every edge at it as written (the writer's floor
+            // for an unraised vertex never binds here)
+            for (&e, ed) in es.iter().zip(&w.edges) {
+                for v in solidcore::topology::vertex::edge_vertices(&b, e)
+                    .unwrap()
+                    .into_iter()
+                    .flatten()
+                {
+                    let i = vs.iter().position(|&x| x == v).unwrap();
+                    assert!(w.vertices[i].zone_tol_3d >= ed.zone_tol_3d, "{name}: vertex {i}");
+                }
+            }
             // read back: the same tolerances, the same raises
             let mut r = Brep::new_with_infinite_region().unwrap();
             {

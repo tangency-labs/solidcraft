@@ -103,3 +103,73 @@ fn a_written_body_reads_back_with_the_same_tolerances_and_cover_raises() {
     // B-spline edge curve to a line, as upstream's reader does, and the second write
     // stores the line; MEASURED, the only difference)
 }
+
+/// A raised vertex goes back to its tolerance from before the raise only while no edge
+/// at it is written above that: after an edit sets a raised edge at it to a tolerance
+/// between the vertex's two values (so the edge's raise no longer holds and the edge is
+/// written as it is), the vertex is written at its raised tolerance, still covering the
+/// edge.
+#[test]
+fn a_raised_vertex_is_written_no_tighter_than_its_edges() {
+    use solidcore::topology::brep_data::BrepData;
+    use solidcore::topology::{edge, vertex};
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../upstream/TestFiles/pt_TestFiles/Fillet/sphere_diff_3cylinders.smb");
+    let Ok(bytes) = std::fs::read(&path) else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
+        eprintln!("unavailable upstream test file: {}", path.display());
+        return;
+    };
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, bytes);
+    let raises = b.trim_cover_raises().clone();
+    // a raised vertex (held, strictly raised) with a raised edge at it
+    let (v, e, vb, va) = bl::edges(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|e| raises.edges.contains_key(e))
+        .find_map(|e| {
+            vertex::edge_vertices(&b, e)
+                .unwrap()
+                .into_iter()
+                .flatten()
+                .find_map(|v| {
+                    let &(vb, va) = raises.vertices.get(&v)?;
+                    let held = b.vertex(v).unwrap().tolerance.to_bits() == va.to_bits();
+                    (held && vb < va).then_some((v, e, vb, va))
+                })
+        })
+        .expect("the input's read raises a vertex at a raised edge");
+    let t = 0.5 * (vb + va);
+    assert!(vb < t && t < va && t.to_bits() != raises.edges[&e].1.to_bits());
+    edge::set_tolerance(&mut b, e, t, false, false).unwrap();
+
+    let store = AttributeStore::new();
+    let records = NotifyRecords::new();
+    let key_of = |x: EntityRef| b.owner_identity(x);
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &key_of,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    let bd = BrepData::from_brep(&b, &env, &mut Vec::new()).unwrap();
+    let i = bl::vertices(&b, None)
+        .unwrap()
+        .iter()
+        .position(|&x| x == v)
+        .unwrap();
+    assert!(
+        bd.edges
+            .iter()
+            .any(|ed| ed.zone_tol_3d.to_bits() == t.to_bits()),
+        "the edited edge is written as it is"
+    );
+    assert_eq!(bd.vertices[i].zone_tol_3d.to_bits(), va.to_bits());
+}

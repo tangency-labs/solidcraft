@@ -83,7 +83,7 @@ use crate::topology::database_io::{DatabaseWriter, FileType};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::geometry_write::{write_curve, write_surface};
 use crate::topology::topology::Topology;
-use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId};
+use crate::topology::{edge, face, loopuse, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1349,6 +1349,31 @@ impl BrepData {
             }
             _ => tolerance,
         };
+        // A vertex goes back to its tolerance from before the raise only while every
+        // edge at it is written no tighter than that: an edge whose raise no longer
+        // holds is written at its own tolerance, and the vertex stays above it.
+        let mut vertex_floor: BTreeMap<VertexId, f64> = BTreeMap::new();
+        if unraise && raises.end_checked && !raises.vertices.is_empty() {
+            for e in bl::edges(b, None)? {
+                let tolerance = written(raises.edges.get(&e), b.edge(e)?.tolerance);
+                for v in crate::topology::vertex::edge_vertices(b, e)?
+                    .into_iter()
+                    .flatten()
+                {
+                    let floor = vertex_floor.entry(v).or_insert(tolerance);
+                    if tolerance > *floor {
+                        *floor = tolerance;
+                    }
+                }
+            }
+        }
+        let written_vertex = |v: VertexId, tolerance: f64| {
+            let unraised = written(raises.vertices.get(&v), tolerance);
+            match vertex_floor.get(&v) {
+                Some(&floor) if unraised < floor => tolerance,
+                _ => unraised,
+            }
+        };
         let mut attr_map = BTreeSet::new();
         let mut table = AttributeTable {
             store: env.attributes,
@@ -1400,7 +1425,7 @@ impl BrepData {
             map.insert(EntityRef::Vertex(v), i as u64);
             let vertex = b.vertex(v)?;
             let mut vd = VertexData::zeroed();
-            vd.zone_tol_3d = written(raises.vertices.get(&v), vertex.tolerance);
+            vd.zone_tol_3d = written_vertex(v, vertex.tolerance);
             vd.point = vertex.point;
             vd.topology = topology_data(env, &mut table, EntityRef::Vertex(v));
             bd.vertices.push(vd);
