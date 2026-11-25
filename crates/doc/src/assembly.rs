@@ -1292,7 +1292,7 @@ impl crate::CapturedOccurrenceMove {
         let axis = match self.rotate_axis {
             Some([x, y, z]) => {
                 let v = Vec3::new(x, y, z);
-                if !v.is_finite() || (angle != 0.0 && v.normalized().is_none()) {
+                if !v.is_finite() || (angle != 0.0 && v.x * v.x + v.y * v.y + v.z * v.z == 0.0) {
                     return Err(DocError::Invalid("captured move rotation axis must be finite and nonzero".into()));
                 }
                 v
