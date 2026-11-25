@@ -57,6 +57,7 @@ pub mod curve_fit;
 pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
+pub mod cylinder_circle;
 pub mod cylinder_wall;
 pub mod develop;
 pub mod dome;

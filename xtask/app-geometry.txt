@@ -949,7 +949,6 @@ crates/kernel/src/continuity.rs:across cross
 crates/kernel/src/continuity.rs:station dot,normalized
 crates/kernel/src/curvature_comb.rs:iso_comb cross,dot,normalized
 crates/kernel/src/delete_face.rs:close cross,dot
-crates/kernel/src/delete_face.rs:delete_faces cross,dot
 crates/kernel/src/draft_corners.rs:carrier normalized
 crates/kernel/src/draft_corners.rs:continued cross,dot
 crates/kernel/src/draft_corners.rs:draft_corners atan2,cross,dot
