@@ -171,6 +171,8 @@ mod public_copy_transforms;
 mod public_scale_ownership;
 #[path = "../query_normal_definition.rs"]
 mod query_normal_definition;
+#[path = "../recognise_analytic.rs"]
+mod recognise_analytic;
 #[path = "../section_frames.rs"]
 mod section_frames;
 #[path = "../sphere_drop_spans_certified.rs"]

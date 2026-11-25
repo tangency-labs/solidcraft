@@ -76,7 +76,7 @@ fn main() {
                     None => Record::Spline {
                         u_knots,
                         v_knots,
-                        points: b.points.iter().map(|r| r.to_vec()).collect(),
+                        points: b.points.clone(),
                     },
                     Some(w) => Record::RationalSpline {
                         u_knots,
