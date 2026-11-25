@@ -159,8 +159,11 @@ fn format_pending(root: &Path) -> Result<(), String> {
     crate::run(c, "bash scripts/test-format-pending.sh")
 }
 
+/// A path gate's check, run from the repository root.
+type Runner = fn(&Path) -> Result<(), String>;
+
 /// The runner of a path gate's check; `None` when no such check exists.
-fn runner(check: &str) -> Option<fn(&Path) -> Result<(), String>> {
+fn runner(check: &str) -> Option<Runner> {
     match check {
         "i18n --check" => Some(i18n),
         "kernel-cases --coverage" => Some(kernel_coverage),
