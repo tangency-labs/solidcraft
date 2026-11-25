@@ -215,6 +215,12 @@ pub struct FeatureFailure {
     /// The kernel call's stable code.
     pub code: solidcraft_kernel::ErrorCode,
 }
+impl From<serde_json::Error> for EngineError {
+    fn from(e: serde_json::Error) -> Self {
+        EngineError::Other(e.to_string())
+    }
+}
+
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
         EngineError::Other(e.to_string())
@@ -297,7 +303,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,
@@ -313,6 +319,14 @@ pub enum Sel {
     },
     SketchPoint {
         id: String,
+    },
+    /// A point of a component sketch, picked on another copy of its part than the one the sketch
+    /// is edited at: the copy's placement (occurrence ids from the root), as a joint's origin
+    /// takes it.
+    PlacedSketchPoint {
+        sketch: u64,
+        id: String,
+        path: Vec<u64>,
     },
     /// The associative midpoint of a line in the active sketch. Selection alone creates no geometry.
     SketchMidpoint {
@@ -1610,7 +1624,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());
@@ -2101,18 +2115,19 @@ impl Session {
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
         let drag = self.drag_moves();
-        let w = if drag.is_empty() {
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &self.pending_moves, &mut reuse)
+        // A drag's frame places its occurrences over any move not captured yet.
+        let dragged;
+        let moves = if drag.is_empty() {
+            &self.pending_moves
         } else {
-            // A drag's frame places its occurrences over any move not captured yet.
-            let mut moves = self.pending_moves.clone();
-            moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &moves, &mut reuse)
+            dragged = self.pending_moves.iter().chain(drag).map(|(o, m)| (*o, *m)).collect();
+            &dragged
         };
+        let w = solidcraft_doc::world_state_moved_reusing(&self.doc, &st, moves, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
-        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(w, moves)).map(Arc::new);
         if let Ok(mut c) = self.world_cache.lock() {
             *c = Some(WorldCache {
                 doc: self.doc.clone(),
@@ -2169,6 +2184,57 @@ impl Session {
             }
         }
         Ok(w)
+    }
+
+    /// `w` with the other placements of each component sketch ([`solidcraft_doc::SketchCopy`]):
+    /// each placement of its component under `moves`, but the one it is drawn at
+    /// ([`Session::feature_path`]), as a move from there.
+    fn sketch_copies(
+        &self,
+        mut w: solidcraft_doc::ModelState,
+        moves: &std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    ) -> solidcraft_doc::ModelState {
+        let mut owners: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for sketch in &w.sketches {
+            if let Some(f) = self.doc.feature(sketch.feature)
+                && f.component != 0
+            {
+                owners.entry(f.component).or_default().push(sketch.feature);
+            }
+        }
+        if owners.is_empty() {
+            return w;
+        }
+        let mut of: std::collections::BTreeMap<u64, Vec<(Vec<u64>, solidcraft_doc::Mat)>> = std::collections::BTreeMap::new();
+        for (component, path, m) in self.doc.placements_moved(moves) {
+            if owners.contains_key(&component) {
+                of.entry(component).or_default().push((path, m));
+            }
+        }
+        for (component, sketches) in owners {
+            let placements = of.remove(&component).unwrap_or_default();
+            if placements.len() < 2 {
+                continue;
+            }
+            // Where the sketch is drawn: the placement being authored, at its frame as
+            // `authored_sketches` put it there, else the first, where the world state placed it.
+            let shown = self.feature_path(component);
+            let drawn = if self.active_occurrence_path.is_some() && self.active_component == component {
+                Some(self.active_component_frame())
+            } else {
+                placements.iter().find(|(path, _)| *path == shown).map(|(_, m)| *m)
+            };
+            let Some(inverse) = drawn.and_then(|m| solidcraft_doc::mat_inverse(&m)) else { continue };
+            let copies: Arc<[solidcraft_doc::SketchCopy]> = placements
+                .into_iter()
+                .filter(|(path, _)| *path != shown)
+                .map(|(path, m)| solidcraft_doc::SketchCopy { path, delta: solidcraft_doc::mat_mul(&m, &inverse) })
+                .collect();
+            for sketch in sketches {
+                w.sketch_copies.insert(sketch, copies.clone());
+            }
+        }
+        w
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
@@ -2907,6 +2973,8 @@ impl Session {
 
     fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
+        // Before an open edit is finished for it: a refused sheet sketch leaves the model's open.
+        cmd::refuse_outside_drawing(self, spec)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
         let prepared = self.take_prepared_edit_source(spec, params);
@@ -3631,13 +3699,17 @@ impl Session {
     }
 
     fn compute_commands_under(
-        self,
+        mut self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        computed.plugin_state.defer_user_settings();
+        // UI consent travels to the worker invocation, never to the source identity that is
+        // compared with the live session when accepting its result.
+        self.plugin_state.user.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();
@@ -3706,6 +3778,9 @@ impl Session {
                 }
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        if !self.plugin_state.user.defer_user_settings {
+            prepared.computed.plugin_state.publish_user_settings()?;
         }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
@@ -3874,6 +3949,7 @@ impl Session {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
+        self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -4052,6 +4128,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.plugin_state.defer_user_settings();
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }

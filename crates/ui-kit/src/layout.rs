@@ -306,6 +306,18 @@ pub fn hint_row_positive(ui: &mut Ui, label: &str, value: &mut String, hint: &st
     })
 }
 
+/// Expression row with an empty-value hint and step arrows; `next` steps the text as
+/// [`super::stepped_field`] describes, and `step` names the amount the arrows add. Its label
+/// scrubs a literal value as `expr_row`'s does. Tokens: `row, stepped_field`.
+pub fn step_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, step: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, false);
+        }
+        super::stepped_field(ui, value, hint, step, &next)
+    })
+}
+
 /// Expression row with an empty-value hint whose value the form checks: with `warning`, the
 /// field is outlined in the warning colour and the message sits under it in that colour, so the
 /// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,

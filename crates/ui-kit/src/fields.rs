@@ -189,17 +189,38 @@ pub fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -> bool 
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
     ui.ctx().data_mut(|d| d.insert_temp(focus_id, response.id));
     let row = label(ui).to_owned();
-    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits))) {
+    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, "1", |delta| step_count(value, delta, limits))) {
         *value = next;
     }
     enter
 }
 
+/// Expression editor with up and down step arrows at its right edge, like [`count_field`] for
+/// any value: `next` says what the field's own text steps to for an arrow (`1` up, `-1` down),
+/// and None on an arrow disables it, so an expression can be left as typed. `step` names the
+/// amount the arrows add, for their accessible name. Returns accepted Enter. Tokens: field
+/// tokens, `control_border`, `selected_bg`, `form_ink`, `form_dim`.
+pub fn stepped_field(ui: &mut Ui, value: &mut String, hint: &str, step: &str, next: impl Fn(&str, i64) -> Option<String>) -> bool {
+    let t = Tokens::get();
+    let reserve = (t.control_height * 0.75).round();
+    let (enter, _, response) = editor_reserving(ui, value, hint, true, reserve);
+    let row = label(ui).to_owned();
+    let stepped = {
+        let text = value.as_str();
+        step_arrows(ui, response.rect, reserve, &row, step, |delta| next(text, delta))
+    };
+    if let Some(stepped) = stepped {
+        *value = stepped;
+    }
+    enter
+}
+
 /// The up and down step arrows at the right edge of a field (`rect`), in a column `width` wide:
-/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it. Returns what the
-/// clicked arrow stepped to. Tokens: `control_border`, `control_radius`, `selected_bg`,
-/// `form_ink`, `form_dim`.
-fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
+/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it, and `step` names
+/// the amount for the button's accessible name ("1" for a whole number, "10 deg" for an angle).
+/// Returns what the clicked arrow stepped to. Tokens: `control_border`, `control_radius`,
+/// `selected_bg`, `form_ink`, `form_dim`.
+fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, step: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
     let t = Tokens::get();
     let column = egui::Rect::from_min_max(egui::pos2((rect.right() - width).max(rect.left()), rect.top()), rect.max);
     let painter = ui.painter_at(rect);
@@ -227,8 +248,8 @@ fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: im
             ink,
             egui::Stroke::NONE,
         ));
-        let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(row))));
+        let sign = if delta > 0 { "+" } else { "−" };
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}{step}", solidcraft_ui_text::tr_label(row))));
         solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
         if enabled && arrow.clicked() {
             stepped = next;
@@ -2315,7 +2336,7 @@ pub fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, r
         .inner;
     let row = label(ui).to_owned();
     let (now, lo, hi) = (value.to_f64(), range.start().to_f64(), range.end().to_f64());
-    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_whole(now, lo, hi, delta)) {
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, "1", |delta| step_whole(now, lo, hi, delta)) {
         *value = T::from_f64(next);
         response.mark_changed();
     }

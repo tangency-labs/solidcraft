@@ -813,6 +813,7 @@ fn status_free<T>(r: Result<T>, fallback: T) -> Result<T> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(fallback),
