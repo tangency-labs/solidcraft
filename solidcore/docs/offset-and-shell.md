@@ -403,6 +403,15 @@ stitch:
    offset minus the input, by the manifold boolean configured with the input's tolerance and 20°
    (`configure_operands`).
 
+`shell_brep_simple` (`offset_executive/p2.rs`), the entry every caller's shell goes through,
+first turns the seam of each cone or cylinder face whose loops are a band and holes about its
+axis to the middle of the widest angle the holes leave free (`offset/shell_seams.rs`): the
+offset keeps each face's loops, so a hole whose offset grows past a seam its rim did not reach
+would cross an edge nothing splits. The faces the shell keeps get their seams
+back afterwards. An inward closed shell refused for a thin feature
+(`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
+then each other feature on its own.
+
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with
 `symmetric` first offsets the sheet by −t/2 (`offset_brep_simple`), then shells it by t.

@@ -450,6 +450,36 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// Three pins r 0.5, 2 high, on the top of the 30 x 20 x 10 block, shelled closed with a wall
+/// of their radius (solidcore#3353, acid-8 stage 5's seven bosses): each pin's side collapses
+/// onto its axis, so all three come off together, what is left is shelled once (two shells in
+/// all, counted) and the pins are joined back on, solid.
+///
+/// Closed form: 6000 + 3 pi 0.5^2 2 - (30 - 1)(20 - 1)(10 - 1).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn pins_as_thin_as_the_wall_come_off_together_and_stay_solid() {
+    all_fixes();
+    let mut b = block();
+    for x in [8.0, 15.0, 22.0] {
+        let pin = make_cylinder([x, 10.0, 10.0], 0.5, 2.0).unwrap();
+        b = crate::boolean::boolean(b, pin, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let (r, shells) = session::counted(solidcore::kernel::WorkCounters::shells, || {
+        shell(&b, &order(&b), &[], -0.5)
+    });
+    r.unwrap();
+    // the first shell, refused for the pins, and one of the block with all three off (one
+    // at a time it was one more for each pin)
+    assert_eq!(shells, 2);
+    let want = ABC + 3.0 * PI * 0.25 * 2.0 - 29.0 * 19.0 * 9.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its

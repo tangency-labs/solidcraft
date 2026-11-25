@@ -2362,11 +2362,13 @@ pub(crate) fn copy_local_sweep_attributes(
 /// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
 /// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
 /// source's attributes reach the result as upstream's notifications carry them; the
-/// source is not changed.
+/// source is not changed. The working copy's cones and cylinders have their seams turned
+/// clear of the holes in them first, and the faces the shell keeps are turned back after
+/// it (`shell_seams`, solidcore#3353).
 ///
 /// # Errors
 ///
-/// Those of [`api_shell_brep_full`].
+/// Those of [`api_shell_brep_full`]; a cancellation of a seam's turn.
 pub fn shell_brep_simple(
     kernel: &mut Kernel,
     original: &Brep,
@@ -2377,7 +2379,11 @@ pub fn shell_brep_simple(
     // The working copy keeps the faces' definitions (not upstream: an exact round's
     // definition rides beside its net, #2485), so that a round offsets by its definition
     // (#2487: the round of the moved radius on the offset supports), never by its net.
+    kernel.work_counters.add_shell();
     let mut source = original.clone_standing_for_self_keeping_definitions()?;
+    // (not upstream, solidcore#3353) a cylinder's seam turned clear of the holes in it, so
+    // that no hole's offset crosses it; turned back on the faces the shell keeps
+    let turned = crate::offset::shell_seams::seams_clear_of_loops(kernel, &mut source)?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();
@@ -2393,7 +2399,7 @@ pub fn shell_brep_simple(
         merge_identities: Some(&attributes::SimpleIdentities),
     };
     let selections: Vec<Option<FaceKey>> = faces.iter().map(|&f| Some((source_id, f))).collect();
-    api_shell_brep_full(
+    let mut shell = api_shell_brep_full(
         kernel,
         Some(BrepRef {
             brep: &source,
@@ -2407,7 +2413,9 @@ pub fn shell_brep_simple(
             boolean_source_lists: &attributes::copy_source_lists,
         },
         &mut notifications,
-    )
+    )?;
+    crate::offset::shell_seams::seams_back(kernel, &mut shell, &turned)?;
+    Ok(shell)
 }
 
 /// `SmOffsetGeometryCreation(distance, approx_tol_3d).FaceuseOffset(faceuse, TRUE)`: the
@@ -2430,6 +2438,33 @@ pub fn faceuse_offset(
         approx_tol_3d,
     );
     Ok(super::face::build(kernel, &creator, original, faceuse, true)?.0)
+}
+
+/// (not upstream, solidcore#3353) Whether the inset by `wall` (> 0) of face `face` of the
+/// solid `original` leaves no offset surface (a cylinder, cone, sphere or torus shrunk onto
+/// its spine, a round offset by its radius): the face use and distance the extended inset's
+/// executive offsets it with (`select_offset_faceuse`, `|distance|`), at the input's
+/// tolerance, as `offset_face_prefix` makes it a collapsed face.
+///
+/// # Errors
+///
+/// Those of the face use's selection and of `FaceuseOffset`.
+pub(crate) fn inset_face_collapses(
+    kernel: &Kernel,
+    original: &Brep,
+    face: FaceId,
+    wall: f64,
+) -> Result<bool> {
+    let faceuse = select_offset_faceuse(original, face, true, true, OP_EXTENDED)?;
+    let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
+        wall,
+        original.tolerance(),
+    );
+    Ok(
+        super::face::build(kernel, &creator, original, faceuse, true)?
+            .0
+            .is_none(),
+    )
 }
 
 fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecutive {
