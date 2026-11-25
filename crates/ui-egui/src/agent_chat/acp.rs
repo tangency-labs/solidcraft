@@ -828,6 +828,13 @@ mod tests {
         assert!(s.get("token").is_none(), "{s}");
         assert!(s.get("path").is_none(), "{s}");
         assert!(s.get("allow-any-path").is_none(), "{s}");
+        // The env carries folders only, never a token or a token file.
+        for e in s["env"].as_array().into_iter().flatten() {
+            assert!(matches!(e["name"].as_str(), Some("XDG_DATA_HOME" | "SOLIDCRAFT_CONTROL_DIR")), "{e}");
+            assert!(!e["value"].as_str().unwrap_or_default().ends_with(".token"), "{e}");
+        }
+        let text = p.to_string();
+        assert!(!text.contains("allow-any-path") && !text.contains("TOKEN"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
     }

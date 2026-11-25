@@ -74,9 +74,10 @@ impl Mcp {
         let program = server.get("command")?.as_str()?;
         let args: Vec<String> = server.get("args")?.as_array()?.iter().filter_map(|a| a.as_str().map(str::to_string)).collect();
         let env: Vec<(String, String)> = server
-            .get("env")?
-            .as_array()?
-            .iter()
+            .get("env")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
             .filter_map(|entry| Some((entry.get("name")?.as_str()?.to_string(), entry.get("value")?.as_str()?.to_string())))
             .collect();
         let mut child =
