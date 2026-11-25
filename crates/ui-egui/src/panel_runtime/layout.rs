@@ -272,6 +272,8 @@ pub struct HostMetrics {
     pub sash_width: f32,
     /// Docked sashes draw `sash_width` but grab this wide; zero grabs only what is drawn.
     pub docked_grab_width: f32,
+    /// Zero keeps a floating card's single bottom-right handle.
+    pub floating_grab_reach: f32,
     pub control_extent: f32,
     pub tab_min_width: f32,
     /// Single-row Wide composition threshold, bounded by the shared contract.
@@ -281,6 +283,9 @@ pub struct HostMetrics {
 }
 
 pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
+/// A floating card's handles reach this far out of its border, and inward as far
+/// as the content inset on that axis, so content and scrollbars keep their presses.
+pub(super) const FLOATING_GRAB_REACH: f32 = 4.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -292,6 +297,7 @@ impl Default for HostMetrics {
             gap: t.space_4,
             sash_width: t.space_4,
             docked_grab_width: 0.0,
+            floating_grab_reach: 0.0,
             control_extent: t.control_height,
             tab_min_width: t.control_height * 2.0,
             inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
@@ -322,6 +328,9 @@ impl HostMetrics {
         }
         if !self.docked_grab_width.is_finite() || !(0.0..=DOCKED_GRAB_WIDTH).contains(&self.docked_grab_width) {
             return Err(error(Rule::Bounds, "invalid docked grab width"));
+        }
+        if !self.floating_grab_reach.is_finite() || !(0.0..=FLOATING_GRAB_REACH).contains(&self.floating_grab_reach) {
+            return Err(error(Rule::Bounds, "invalid floating grab reach"));
         }
         if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
             return Err(error(Rule::Bounds, "invalid inline row threshold"));
@@ -1494,8 +1503,17 @@ fn append_section(
     out.occlusion.extend(&painted);
     out.input.extend(&painted);
     add_control(out, HostPointerTarget::Surface { instance: instance.clone() }, outer, InputRole::Surface, "ui.panel_host.surface");
+    let floating_open = section.location.zone() == Zone::Floating && !section.collapsed && metrics.floating_grab_reach > 0.0;
     if let Some(title) = title {
         add_control(out, HostPointerTarget::Header { instance: instance.clone() }, title, InputRole::Header, "ui.panel_host.header");
+    }
+    // Handles over the header sit above the draggable title and below every other header control.
+    if floating_open {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| touches_header(*grab, header))
+        {
+            add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
+        }
     }
     add_control(out, HostPointerTarget::Menu { instance: instance.clone() }, menu, InputRole::Action, "ui.panel_host.menu");
     if let Some(collapse) = collapse {
@@ -1514,16 +1532,22 @@ fn append_section(
     if let Some(bounds) = tab_overflow {
         add_control(out, HostPointerTarget::TabOverflow { section: section.id.clone() }, bounds, InputRole::Action, "ui.panel_host.overflow");
     }
-    // Workspace paints the card's resize response last, above header/content.
-    // Reverse geometric hit-testing must choose the same owner at their edges.
-    let edge = match section.location.zone() {
-        Zone::Floating => HostResizeEdge::BottomRight,
-        Zone::Bottom => HostResizeEdge::Top,
-        Zone::Left => HostResizeEdge::Right,
-        _ => HostResizeEdge::Left,
-    };
+    // Docked sashes and the floating handles clear of the header are painted last, above content;
+    // reverse hit-testing must choose the same owner at their edges.
     let (min, max) = tab_bounds(proposed, service.registry(), section)?;
-    if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
+    if floating_open {
+        for (edge, grab) in
+            floating_resize_handles(outer, header, metrics.floating_grab_reach).into_iter().filter(|(_, grab)| !touches_header(*grab, header))
+        {
+            add_floating_handle(out, section, edge, grab, outer, metrics.sash_width);
+        }
+    } else if !section.collapsed && !(section.location.zone() == Zone::Bottom && min.height == max.height) {
+        let edge = match section.location.zone() {
+            Zone::Floating => HostResizeEdge::BottomRight,
+            Zone::Bottom => HostResizeEdge::Top,
+            Zone::Left => HostResizeEdge::Right,
+            _ => HostResizeEdge::Left,
+        };
         add_control(
             out,
             HostPointerTarget::Resize { section: section.id.clone(), edge },
@@ -1671,6 +1695,51 @@ fn centre_widen(ink: LogicalRect, grab: f32) -> LogicalRect {
     }
 }
 
+fn resize_name(edge: HostResizeEdge) -> &'static str {
+    match edge {
+        HostResizeEdge::Left => "ui.panel_host.resize_left",
+        HostResizeEdge::Right => "ui.panel_host.resize_right",
+        HostResizeEdge::Top => "ui.panel_host.resize_top",
+        HostResizeEdge::Bottom => "ui.panel_host.resize_bottom",
+        HostResizeEdge::TopLeft => "ui.panel_host.resize_top_left",
+        HostResizeEdge::TopRight => "ui.panel_host.resize_top_right",
+        HostResizeEdge::BottomLeft => "ui.panel_host.resize_bottom_left",
+        HostResizeEdge::BottomRight => "ui.panel_host.resize",
+    }
+}
+
+fn add_floating_handle(out: &mut HostLayout, section: &Section, edge: HostResizeEdge, grab: LogicalRect, outer: LogicalRect, sash_width: f32) {
+    let ink = intersect_rect(grab, resize_rect(outer, edge, sash_width)).unwrap_or(grab);
+    add_grab_control(out, HostPointerTarget::Resize { section: section.id.clone(), edge }, grab, ink, InputRole::Sash, resize_name(edge));
+}
+
+/// The inward reach on each axis is capped by the tokens `render_slot` insets by.
+/// Side bands start below the header.
+fn floating_resize_handles(outer: LogicalRect, header: LogicalRect, reach: f32) -> [(HostResizeEdge, LogicalRect); 8] {
+    let t = solidcraft_theme::Tokens::get();
+    let (in_x, in_y) = (reach.min(t.space_4), reach.min(t.space_2));
+    let (x, y) = (outer.origin.x, outer.origin.y);
+    let (r, b) = (right(outer), bottom(outer));
+    let side_top = bottom(header).max(y + reach);
+    let along_w = (outer.size.width - 2.0 * in_x).max(0.0);
+    let along_h = (b - in_y - side_top).max(0.0);
+    let (wide, high) = (reach + in_x, reach + in_y);
+    [
+        (HostResizeEdge::Left, rect(x - reach, side_top, wide, along_h)),
+        (HostResizeEdge::Right, rect(r - in_x, side_top, wide, along_h)),
+        (HostResizeEdge::Top, rect(x + in_x, y - reach, along_w, 2.0 * reach)),
+        (HostResizeEdge::Bottom, rect(x + in_x, b - in_y, along_w, high)),
+        (HostResizeEdge::TopLeft, rect(x - reach, y - reach, wide, 2.0 * reach)),
+        (HostResizeEdge::TopRight, rect(r - in_x, y - reach, wide, 2.0 * reach)),
+        (HostResizeEdge::BottomLeft, rect(x - reach, b - in_y, wide, high)),
+        (HostResizeEdge::BottomRight, rect(r - in_x, b - in_y, wide, high)),
+    ]
+}
+
+fn touches_header(grab: LogicalRect, header: LogicalRect) -> bool {
+    intersect_rect(grab, header).is_some_and(|shared| shared.size.width > 0.0 && shared.size.height > 0.0)
+}
+
 fn resize_rect(outer: LogicalRect, edge: HostResizeEdge, thickness: f32) -> LogicalRect {
     let width = thickness.min(outer.size.width);
     let height = thickness.min(outer.size.height);
@@ -1679,6 +1748,9 @@ fn resize_rect(outer: LogicalRect, edge: HostResizeEdge, thickness: f32) -> Logi
         HostResizeEdge::Right => rect(right(outer) - width, outer.origin.y, width, outer.size.height),
         HostResizeEdge::Top => rect(outer.origin.x, outer.origin.y, outer.size.width, height),
         HostResizeEdge::Bottom => rect(outer.origin.x, bottom(outer) - height, outer.size.width, height),
+        HostResizeEdge::TopLeft => rect(outer.origin.x, outer.origin.y, width, height),
+        HostResizeEdge::TopRight => rect(right(outer) - width, outer.origin.y, width, height),
+        HostResizeEdge::BottomLeft => rect(outer.origin.x, bottom(outer) - height, width, height),
         HostResizeEdge::BottomRight => rect(right(outer) - width, bottom(outer) - height, width, height),
     }
 }
@@ -1695,4 +1767,14 @@ pub(super) fn right(bounds: LogicalRect) -> f32 {
 }
 pub(super) fn bottom(bounds: LogicalRect) -> f32 {
     bounds.origin.y + bounds.size.height
+}
+
+/// Takes back the input and occlusion a control's grab claimed beyond its drawn handle.
+pub(super) fn release_grab(controls: &[HostControl], target: &HostPointerTarget, input: &mut Vec<LogicalRect>, occlusion: &mut Vec<LogicalRect>) {
+    let Some(control) = controls.iter().find(|control| control.target == *target && control.bounds != control.ink) else { return };
+    for regions in [input, occlusion] {
+        if let Some(index) = regions.iter().position(|rect| *rect == control.bounds) {
+            regions.remove(index);
+        }
+    }
 }
