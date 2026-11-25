@@ -935,7 +935,7 @@ mod tests {
         }
     }
 
-    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true };
+    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false };
 
     #[test]
     fn a_window_that_draws_the_bar_publishes_it_for_the_systems_hit_test() {
@@ -962,7 +962,7 @@ mod tests {
         assert_eq!((bar.min_x, bar.min_y, bar.max_x, bar.max_y), (0, 0, (1200.0 * ppp).ceil() as i32, (BAR * ppp).ceil() as i32));
         assert!(maximize.is_some_and(|m| m.min_x > bar.min_x && m.max_x < bar.max_x), "{maximize:?} in {bar:?}");
         // A pass that draws no bar (the system's own title bar, full screen): no caption.
-        w.bar = TitleBar { traffic_lights: false, caption_buttons: false };
+        w.bar = TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false };
         w.frame(vec![]);
         assert_eq!((hit(bare), caption::title_bar(window)), (CaptionHit::Outside, None));
         // And the bar again as soon as it is drawn again.
