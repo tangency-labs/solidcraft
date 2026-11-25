@@ -1849,7 +1849,10 @@ fn regions_from_loops_noted(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>, no
             let center = Vec2::new(drill.center[0], drill.center[1]);
             let mut best: Option<usize> = None;
             for (i, (_, region)) in regions.iter().enumerate() {
-                if region.outer.contains(center)
+                // A centre exactly on the outline counts as on the board: `contains` answers for
+                // one side of an edge only, which dropped the drills on the other two edges.
+                let on_board = region.outer.contains(center) || distance_to_loop(&region.outer, center).is_some_and(|d| d < 1e-6);
+                if on_board
                     && !region.holes.iter().any(|h| h.contains(center))
                     && best.is_none_or(|b| region.outer.signed_area().abs() < regions[b].1.outer.signed_area().abs())
                 {
@@ -1919,11 +1922,10 @@ fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop
 
 /// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
 ///
-/// A drill centred on an edge puts polygon vertices exactly on that edge (a circle's vertices at a
-/// quarter turn from its start do, on a vertical or horizontal edge, whenever the arithmetic
-/// lands them exactly there), and the boolean refuses such touching input. So when a cut fails,
-/// the drill polygon is turned a little about its centre, which moves every vertex off the edge,
-/// and tried again: the notch differs by a fraction of a degree.
+/// A drill centred on an edge can put polygon vertices exactly on that edge, which the boolean
+/// refuses as touching input. So when a cut fails, the drill polygon is turned a little about its
+/// centre, which moves every vertex off the edge, and tried again: the notch differs by a
+/// fraction of a degree.
 fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
     use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
     let mut a = loop_to_pline(outer)?;

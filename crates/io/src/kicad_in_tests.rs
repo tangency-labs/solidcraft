@@ -352,7 +352,7 @@ fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
 }
 
 /// A castellated hole is cut on every edge of the board, whichever of the outline's edges the drill
-/// is centred on: a drill whose polygon touched the edge exactly (the right edge, x = 20) used to be
+/// is centred on: a drill centred exactly on the outline (the right and bottom edges) was not found on the board and was
 /// dropped with nothing said.
 #[test]
 fn a_castellated_hole_is_cut_on_every_edge() {
