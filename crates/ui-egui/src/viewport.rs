@@ -86,6 +86,7 @@ pub(crate) struct ViewScenes {
     wireframe: crate::wireframe_silhouettes::Outlines,
     hl_slot: SceneSlot,
     hl_key: u64,
+    hover_body: Option<String>,
     scene_target: Option<u64>,
     drag: Option<drag_layer::DragLayer>,
     scene_world: Option<drag_layer::SceneWorld>,
@@ -135,6 +136,7 @@ impl ViewScenes {
         std::mem::swap(&mut self.wireframe, &mut vp.wireframe);
         std::mem::swap(&mut self.hl_slot, &mut vp.hl_slot);
         std::mem::swap(&mut self.hl_key, &mut vp.hl_key);
+        std::mem::swap(&mut self.hover_body, &mut vp.hover_body);
         std::mem::swap(&mut self.scene_target, &mut vp.scene_target);
         std::mem::swap(&mut self.drag, &mut vp.drag);
         std::mem::swap(&mut self.scene_world, &mut vp.scene_world);
@@ -7751,6 +7753,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // The feedback palette extends the scene's own: set it before sharing the geometry, and keep
     // the indices valid on the cache hit above.
     sc.palette = feedback.palette.clone();
+    // The scene the frame draws names the hovered body, however the feedback joins it.
+    sc.hover_body = feedback.hover_body.clone();
     if projected {
         sc.tris.append(&mut feedback.tris);
         sc.trans.append(&mut feedback.trans);
@@ -7795,8 +7799,6 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let lit_edges = feedback.lit_edges;
         let (lit_instanced_edges, lit_instanced_hidden) = (feedback.lit_instanced_edges, feedback.lit_instanced_hidden);
         let planned = feedback.planned;
-        // The scene the frame draws names the hovered body too, not only the cache.
-        sc.hover_body = feedback.hover_body.clone();
         if let Ok(mut cache) = app.viewport.hover_block.lock() {
             *cache = Some(HoverBlock {
                 key,

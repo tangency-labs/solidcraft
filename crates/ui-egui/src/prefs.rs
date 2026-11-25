@@ -10262,15 +10262,23 @@ mod tests {
     /// panel layout is unchanged must reuse the last build instead.
     #[test]
     fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
-        let app = SolveApp::new(Default::default(), Default::default());
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let layout = |name: &str| json!({"version":1,"selected":name});
+        app.load_prefs(&json!({"panel_layout":layout("first")}).to_string());
+        assert!(crate::panel_runtime::preferences_value(&app).is_some(), "a panel layout to convert");
+        let builds = |app: &SolveApp| app.portable_prefs.lock().unwrap().as_ref().map_or(0, |c| c.builds);
         let first = app.try_prefs().unwrap();
-        let cached = app.portable_prefs.lock().unwrap().clone();
-        let (layout, portable) = cached.expect("the first save builds and caches the portable preferences");
-        assert_eq!(layout, held_panel_layout(&app).unwrap_or_else(|| crate::panel_runtime::preferences_value(&app)));
-        assert_eq!(portable, crate::panel_runtime::portable_preferences_value(&app, layout.clone()).unwrap());
-        let second = app.try_prefs().unwrap();
-        assert_eq!(first, second);
-        app.portable_prefs.lock().unwrap().clone().expect("the second save keeps the cache");
+        let again = app.try_prefs().unwrap();
+        assert_eq!(first, again);
+        assert_eq!(builds(&app), 1, "the second save reuses the first's conversion");
+        let fresh = crate::panel_runtime::portable_preferences_value(&app, crate::panel_runtime::preferences_value(&app)).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&again).unwrap();
+        assert_eq!(Some(saved["panel_layout"].clone()), fresh, "what a fresh conversion makes");
+        // Another layout is converted again.
+        app.load_prefs(&json!({"panel_layout":layout("second")}).to_string());
+        let other: serde_json::Value = serde_json::from_str(&app.try_prefs().unwrap()).unwrap();
+        assert_eq!(builds(&app), 2, "a changed layout is converted again");
+        assert_eq!(other["panel_layout"]["selected"], "second");
     }
 
     #[test]
