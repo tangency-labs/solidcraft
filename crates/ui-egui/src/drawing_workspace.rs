@@ -1196,15 +1196,16 @@ fn show_delete(app: &mut SolveApp, ctx: &egui::Context) {
             ui.label(message);
         });
     if answer == ui_kit::Action::Ok {
-        let whole = row == MenuRow::Drawing;
-        if whole {
-            // The drawing's panels and drafts go with it.
-            close_panel(app);
-        }
         // Nothing else opens after a drawing's delete: the page that makes one shows, and Design's
         // undo brings the drawing back.
-        if let Err(error) = app.run(command, params) {
-            app.set_status(error, true);
+        match app.run(command, params) {
+            // The drawing's panels and drafts go with it once it is gone. A delete the engine
+            // refuses (a sheet sketch started meanwhile) leaves them as they were.
+            Ok(_) if row == MenuRow::Drawing => {
+                close_panel(app);
+            }
+            Ok(_) => {}
+            Err(error) => app.set_status(error, true),
         }
     } else if !closed && answer != ui_kit::Action::Cancel {
         app.drawing_workspace.delete = Some(pending);
@@ -2646,6 +2647,31 @@ mod tests {
         h.frames(3);
         assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &doc));
         assert_eq!((h.app.session.undo.len(), h.app.session.open_drawing), (steps, open));
+    }
+
+    /// A Delete Drawing the engine refuses (a sheet sketch started while the Confirm is up, as over
+    /// the control channel) keeps the drawing and its open panels, and the status line says why.
+    #[test]
+    fn a_refused_delete_drawing_keeps_the_drawing_and_its_panels() {
+        use serde_json::json;
+
+        let mut h = drawing_open(json!({"name":"Bracket"}));
+        let drawing = the_drawing(&h);
+        assert!(start(&mut h.app, "drawing.set"));
+        h.frames(2);
+        ask_to_delete_the_drawing(&mut h, drawing.id);
+        let sheet = solidcraft_engine::doc::ids::encode(drawing.sheets[0].id);
+        h.app.run("drawing.sketch.create", json!({"owner": sheet})).unwrap();
+        let open = Some((h.app.session.uid, drawing.id));
+        assert_eq!(open_drawing_settings(&h), open, "Drawing Settings is open when the delete is confirmed");
+
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc.drawings.len(), 1, "the engine refused the delete");
+        assert_eq!(h.app.session.open_drawing, Some(drawing.id));
+        assert_eq!(open_drawing_settings(&h), open, "a refused delete closes none of the drawing's panels");
+        let (text, _, error) = h.app.status.clone().unwrap();
+        assert!(error && text.contains("sheet sketch"), "{text}");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
