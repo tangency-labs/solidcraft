@@ -640,42 +640,34 @@ fn diagonal_wavy_strip(k: &mut Kernel, n: u32, w: f64) -> Brep {
     create_linear_sweep(k, &refs, across, w, true).unwrap()
 }
 
-/// Not the fork's: the face pairs the union of [`woven_grid`] with
-/// [`diagonal_wavy_strip`] visits and those it intersects
+/// Not the fork's: the union of [`woven_grid`] with [`diagonal_wavy_strip`], checked
+/// valid at Level 2: the face pairs it visits and those it intersects
 /// ([`solidcore::kernel::WorkCounters::face_pairs`],
-/// [`solidcore::kernel::WorkCounters::face_intersections`]), after checking the union's
-/// volume against the grid's and the strip's less their common part's.
-fn grid_and_strip_pairs(n: u32) -> (u64, u64) {
+/// [`solidcore::kernel::WorkCounters::face_intersections`]), its faces, edges and
+/// vertices, and its volume.
+fn grid_and_strip_union(n: u32) -> (u64, u64, [usize; 3], f64) {
     let mut k = Kernel::default();
     let w = 1.0;
-    let mut grid = woven_grid(&mut k, n, w);
-    let mut strip = diagonal_wavy_strip(&mut k, n, w);
-    let grid_volume = brep_volume_default(&k, &mut grid, 1e-9).unwrap();
-    let strip_volume = brep_volume_default(&k, &mut strip, 1e-9).unwrap();
-    let (grid_copy, strip_copy) = (woven_grid(&mut k, n, w), diagonal_wavy_strip(&mut k, n, w));
-    let mut common = boolean_3d(
-        &mut k,
-        grid_copy,
-        strip_copy,
-        BooleanOperation::Intersection,
-    )
-    .unwrap()
-    .result;
-    let common_volume = brep_volume_default(&k, &mut common, 1e-9).unwrap();
+    let grid = woven_grid(&mut k, n, w);
+    let strip = diagonal_wavy_strip(&mut k, n, w);
     k.work_counters.reset();
     let mut u = boolean_union(&mut k, grid, strip).unwrap();
     let (pairs, intersected) = (
         k.work_counters.face_pairs(),
         k.work_counters.face_intersections(),
     );
+    let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{n} x {n}: {lines:?}");
+    let topology = [
+        p1::faces(&u, None).unwrap().len(),
+        p1::edges(&u, None).unwrap().len(),
+        p1::vertices(&u, None).unwrap().len(),
+    ];
     let volume = brep_volume_default(&k, &mut u, 1e-9).unwrap();
-    let expected = grid_volume + strip_volume - common_volume;
-    println!("{n} x {n} grid and a diagonal strip: {pairs} face pairs, {intersected} intersected, volume {volume}");
-    assert!(
-        (volume - expected).abs() <= 1e-9 * expected,
-        "volume {volume}, expected {expected}"
-    );
-    (pairs, intersected)
+    println!("{n} x {n} grid and a diagonal strip: {pairs} face pairs, {intersected} intersected, faces, edges, vertices {topology:?}, volume {volume:?}");
+    (pairs, intersected, topology, volume)
 }
 
 /// Not the fork's: a strip across a woven grid on its diagonal, as the strips of a woven
@@ -686,8 +678,21 @@ fn grid_and_strip_pairs(n: u32) -> (u64, u64) {
 /// face's box wholly on one side of the other's plane, two planar faces whose edges near
 /// each other's plane lie apart, a curved face whose control net's spans all lie away from
 /// the other face. 82 and 166 are intersected, about twice for twice the strip's length.
+///
+/// The union is the one the boolean makes without those tests, every pair intersected:
+/// valid, 91 faces, 289 edges and 191 vertices and 90.2478725649763 of volume for 4 x 4,
+/// 271, 945 and 627 and 339.5719887040468 for 8 x 8. A pair the tests showed apart wrongly
+/// would leave an intersection out and change them.
 #[test]
 fn a_strip_across_a_woven_grid_intersects_only_the_faces_it_comes_near() {
-    let counts = [4, 8].map(grid_and_strip_pairs);
-    assert_eq!(counts, [(189, 82), (625, 166)]);
+    let unions = [4, 8].map(grid_and_strip_union);
+    assert_eq!(unions.map(|u| (u.0, u.1)), [(189, 82), (625, 166)]);
+    assert_eq!(unions.map(|u| u.2), [[91, 289, 191], [271, 945, 627]]);
+    for (u, reference) in unions.iter().zip([90.2478725649763, 339.5719887040468]) {
+        assert!(
+            (u.3 - reference).abs() <= 1e-12 * reference,
+            "volume {}, without the tests {reference}",
+            u.3
+        );
+    }
 }
