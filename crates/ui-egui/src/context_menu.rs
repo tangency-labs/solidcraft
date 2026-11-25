@@ -155,6 +155,11 @@ pub enum Target {
     },
     /// The quick menu at the cursor: the commands that take the selection (#5501).
     Quick,
+    /// A projection (link) listed under its sketch.
+    SketchLink {
+        sketch: u64,
+        link: String,
+    },
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
@@ -419,6 +424,84 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
+/// An Isolate is in effect: one ran since the last Unisolate or Show All. Not kept in a saved
+/// design, so a reopened one offers Isolate again (the empty-space Unisolate still shows all).
+fn isolating(app: &SolveApp) -> bool {
+    app.session.visibility.before_isolate.is_some()
+}
+
+/// The one Exit Isolation entry every menu shares: it puts back what the Isolates hid (#8120), and
+/// shows `browser.unisolate`'s key (#3504).
+fn unisolate_item(app: &SolveApp) -> Item {
+    act("ui.unisolate", "Exit Isolation", "body").key(&crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default())
+}
+
+/// `browser.isolate`'s key, for the menus' Isolate entries (#3504).
+fn isolate_key(app: &SolveApp) -> String {
+    crate::keymap::display_for(app, "browser.isolate").unwrap_or_default()
+}
+
+/// Isolate, as before: while isolating it narrows what stays on screen. [`items`] adds Exit Isolation
+/// beside it (#8120).
+pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
+    act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).key(&isolate_key(app)).on(!bodies.is_empty())
+}
+
+/// Isolate this placement. [`items`] adds Exit Isolation beside it (#8120).
+pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
+    act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path })).key(&isolate_key(app))
+}
+
+/// While an Isolate is in effect, Exit Isolation follows the menu's Isolate entry (#8120), unless
+/// the menu offers it already, as the empty-space menu does. On what is already all that is on
+/// screen Isolate would change nothing, so Exit Isolation takes its place there.
+fn add_unisolate(app: &SolveApp, v: &mut Vec<Item>) {
+    if !isolating(app) || v.iter().any(|item| item.id == "ui.unisolate") {
+        return;
+    }
+    if let Some(at) = v.iter().position(|item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence") {
+        if isolates_nothing(app, &v[at]) {
+            v[at] = unisolate_item(app);
+        } else {
+            v.insert(at + 1, unisolate_item(app));
+        }
+    }
+}
+
+/// Whether Isolate entry `item` would change nothing: its bodies are exactly the ones shown.
+fn isolates_nothing(app: &SolveApp, item: &Item) -> bool {
+    let params = item.params.as_ref();
+    let bodies: Vec<String> = match item.id.as_str() {
+        "ui.isolate" => params
+            .and_then(|p| p.get("bodies"))
+            .and_then(Value::as_array)
+            .map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default(),
+        "ui.isolateOccurrence" => {
+            let path: Vec<u64> = params
+                .and_then(|p| p.get("path"))
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            app.session.occurrence_bodies(&path, true).unwrap_or_default()
+        }
+        _ => return false,
+    };
+    let Ok(world) = app.session.world_state() else { return false };
+    let shown: std::collections::BTreeSet<&str> =
+        world.bodies.iter().map(|body| body.name.as_str()).filter(|name| app.session.body_visible(name)).collect();
+    !bodies.is_empty() && shown == bodies.iter().map(String::as_str).collect()
+}
+
+/// Returns an isolation menu item for a component. While an Isolate is in effect, the menu adds
+/// Exit Isolation after it.
+pub fn isolate_component_item(app: &SolveApp, id: u64, bodies: &[String]) -> Option<Item> {
+    if bodies.is_empty() || id == 0 {
+        return None;
+    }
+    Some(isolate_bodies_item(app, bodies))
+}
+
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
     let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
@@ -459,7 +542,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             cmd(app, "select.set", "Select").with(json!({"items":[Sel::Body {name:name.clone()}]})),
             cmd(app, "select.same_look", "Select Same Look").with(json!({"body":name})),
             Item::sep(),
-            act("ui.isolate", "Isolate", "body").with(json!({"bodies":[name]})),
+            isolate_bodies_item(app, std::slice::from_ref(name)),
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
@@ -497,6 +580,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
+        Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
@@ -652,6 +736,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     {
         v.push(crate::render_workspace::assign::menu(app, name));
     }
+    add_unisolate(app, &mut v);
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
         v.push(Item::sep());
@@ -936,6 +1021,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
         v.push(cmd(app, "solid.shell", "Shell"));
+        v.push(cmd(app, "solid.dome", "Dome"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
@@ -1001,7 +1087,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else {
         // Empty space, or a plane: both lead with Create Sketch (#3032). On a plane it sketches
         // there, with Look At beside it; on empty space it is the toolbar's, which asks for the
-        // plane or face.
+        // plane or face. A plane resized by hand offers its size back.
         let sketch = cmd(app, "sketch.create", "Create Sketch");
         match &app.menu.plane {
             Some(plane) => {
@@ -1009,6 +1095,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
                 v.push(act("ui.lookAt", "Look At", "lookat").with(json!({ "plane": plane })));
             }
             None => v.push(sketch),
+        }
+        if let Some(plane) = &app.menu.plane
+            && let Some(f) = app.session.doc.find_feature(plane).filter(|f| app.session.doc.plane_extents.contains_key(&f.id))
+        {
+            v.push(reset_plane_size(app, f.id, plane));
         }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -1021,7 +1112,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let anything_hidden =
             can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(can_unisolate));
+        // The same Unisolate as the toggled Isolate entry on the item menus (#8120).
+        let key = crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default();
+        v.push(act("ui.unisolate", "Exit Isolation", "eye").key(&key).on(can_unisolate || isolating(app)));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -1074,7 +1167,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
-        act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
+        isolate_bodies_item(app, bodies),
     ];
     if browser {
         let at = v.len() - 1;
@@ -1224,6 +1317,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         items.push(Item::sep());
     }
     items.push(act("ui.editFeature", "Edit Feature", crate::timeline::icon_of(&f.kind)).with(json!({ "feature": id })));
+    items.push(reset_plane_size(app, id, &f.name));
     items.push(Item::sep());
     items.extend([
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
@@ -1235,6 +1329,11 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]);
     items
+}
+
+/// Back to a size that follows the zoom, for a construction plane dragged to a size of its own.
+fn reset_plane_size(app: &SolveApp, id: u64, name: &str) -> Item {
+    cmd(app, "view.plane_size", "Reset Size").with(json!({ "plane": name, "extent": null })).on(app.session.doc.plane_extents.contains_key(&id))
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.
@@ -1348,10 +1447,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
-        "ui.isolate" => {
-            item.id = "ui.isolateOccurrence".into();
-            item.params = Some(json!({"path": path}));
-        }
+        // This placement's own Isolate, whatever the component's first placement shows.
+        "ui.isolate" => *item = isolate_occurrence_item(app, path),
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
@@ -1538,7 +1635,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
-    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    if let Some(item) = isolate_component_item(app, id, &bodies) {
+        v.push(item);
+    }
     v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
     v.push(Item::sep());
     let mut organize = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
@@ -1567,6 +1666,56 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     v.push(group("Organize", "folder", organize));
     v
+}
+
+/// A projection's menu (its row under the sketch): update it where its source is now, freeze
+/// or resume it, show or hide it, switch its curves between profile and construction lines,
+/// remove it, or break it into normal geometry.
+fn sketch_link_items(app: &SolveApp, sketch: u64, link: &str) -> Vec<Item> {
+    let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
+    let Some(l) = sk.link(link) else { return Vec::new() };
+    let editing = app.session.active_sketch == Some(sketch);
+    let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.clone()).collect();
+    let one = json!({"sketch": sketch, "link": link});
+    let mut v = vec![
+        cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sketch})),
+        if l.frozen {
+            cmd(app, "sketch.resume_link", "Resume Link").with(one.clone())
+        } else {
+            cmd(app, "sketch.freeze_link", "Freeze Link").with(one.clone())
+        },
+        cmd(app, "sketch.link_visibility", if l.hidden { "Show" } else { "Hide" }).with(json!({"sketch": sketch, "link": link, "visible": l.hidden})),
+    ];
+    // A lost projection (as the model shows it) takes a new source, picked in the model.
+    let lost = app.session.model.result(sketch).and_then(|r| r.state.sketch(sketch)).and_then(|ss| ss.sketch.link(link).map(|l| l.lost));
+    if lost.unwrap_or(l.lost) {
+        v.insert(0, act("ui.repairLink", "Repair Link…", "project").with(json!({"link": link})).on(editing));
+    }
+    // Line type and Break Link work on the sketch being edited.
+    v.push(cmd(app, "sketch.construction", "Normal/Construction").with(json!({"curves": curves})).on(editing && !curves.is_empty()));
+    v.push(Item::sep());
+    v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(one));
+    v.push(cmd(app, "sketch.break_link", "Break Link").with(json!({"link": link})).on(editing));
+    v
+}
+
+/// The links (projections, not text) owning the selected sketch entities.
+fn selected_links(sk: &solidcraft_engine::sketch::Sketch, ents: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in ents {
+        let link = sk
+            .curves
+            .iter()
+            .find(|c| c.id == *e)
+            .and_then(|c| c.link.clone())
+            .or_else(|| sk.points.iter().find(|p| p.id == *e).and_then(|p| p.link.clone()));
+        if let Some(link) = link.filter(|l| sk.link(l).is_some_and(|l| l.kind != solidcraft_engine::sketch::LinkKind::Text))
+            && !out.contains(&link)
+        {
+            out.push(link);
+        }
+    }
+    out
 }
 
 /// Explode Text (#1842): the selected text's outlines become normal sketch lines, arcs and
@@ -1713,7 +1862,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
     }
-    v.extend(break_link(app, &ss.sketch, &ents));
+    // The opt-in groups Break Link with the projection's actions; otherwise keep its old place.
+    if !app.ui.project_link_tools || selected_links(&ss.sketch, &ents).is_empty() {
+        v.extend(break_link(app, &ss.sketch, &ents));
+    }
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
@@ -1746,6 +1898,31 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // Projected geometry: the whole projection, or just the selected members (Delete).
+    let links = selected_links(&ss.sketch, &ents);
+    if !links.is_empty() {
+        let frozen = links.iter().all(|l| ss.sketch.link(l).is_some_and(|l| l.frozen));
+        let p = json!({"links": links});
+        v.push(Item::heading("Projection"));
+        v.push(cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sid})));
+        v.push(if frozen { cmd(app, "sketch.resume_link", "Resume Link") } else { cmd(app, "sketch.freeze_link", "Freeze Link") }.with(p.clone()));
+        if let [link] = links.as_slice()
+            && ss.sketch.link(link).is_some_and(|l| l.lost)
+        {
+            v.push(act("ui.repairLink", "Repair Link…", "project").with(json!({"link": link})));
+        }
+        v.push(cmd(app, "sketch.link_visibility", "Hide Projection").with(json!({"links": links, "visible": false})));
+        v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(p));
+        // Break Link frees every member of the projection, not only the ones selected.
+        if app.ui.project_link_tools {
+            let partial =
+                links.iter().any(|l| ss.sketch.link_curves(l).iter().filter_map(|c| ss.sketch.curves.get(*c)).any(|c| !ents.contains(&c.id)));
+            v.push(
+                cmd(app, "sketch.break_link", if partial { "Break Link (whole projection)" } else { "Break Link" }).with(json!({"entities": ents})),
+            );
+        }
+        v.push(Item::sep());
     }
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
@@ -1795,7 +1972,14 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.remove_point", "Remove Spline Point").with(json!({ "curve": spline.id, "point": point })));
     }
-    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
+    // Projected geometry is fixed by its source already.
+    let projected = ents.iter().all(|e| {
+        ss.sketch.curve_index(e).map_or_else(
+            || ss.sketch.point_index(e).is_some_and(|i| ss.sketch.points.get(i).is_some_and(|p| p.link.is_some())),
+            |c| ss.sketch.is_linked_curve(c),
+        )
+    });
+    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })).on(!app.ui.project_link_tools || !projected));
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
@@ -2061,6 +2245,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
             }
         }
+        "ui.unisolate" => {
+            // What the Isolates hid comes back, or everything when none is in effect (#8120); one
+            // undo step, as Isolate is.
+            let _ = app.run("browser.visibility", json!({ "visible": true, "unisolate": true }));
+        }
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
             if locked {
@@ -2255,6 +2444,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
         "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
+        "ui.repairLink" => {
+            if let Some(link) = p.get("link").and_then(Value::as_str) {
+                crate::sketch_tools::start_repair(app, link);
+            }
+        }
         "ui.editSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 app.edit_sketch(id);
@@ -2344,6 +2538,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.toolbarCustomize"
         | "ui.toolbarTab"
         | "ui.shortcutPin"
+        | "ui.shortcutKey"
         | "ui.quickAccessAdd"
         | "ui.quickAccessRemove" => crate::toolbar_custom::run(app, &item.id, &p),
         "ui.navigatorStyle" => {
@@ -3143,6 +3338,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Sketch { id } | Target::ReplaceSketchFile { sketch: id, .. } => {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
+        Target::SketchLink { sketch, link } => doc.sketch(*sketch).is_ok_and(|sk| sk.link(link).is_some()),
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),
@@ -4272,46 +4468,68 @@ mod tests {
     fn projected_geometry_context_menu_breaks_its_link_and_allows_trim() {
         use solidcore_record::Vec2;
 
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
-        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}],"projection_link":true})).unwrap();
-        let drawn = h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap()["curves"][0]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let sid = h.app.session.active_sketch.unwrap();
-        let cut = Vec2::new(15.0, 0.0);
-        let edge = {
-            let state = h.app.session.world_state().unwrap();
-            let sk = &state.sketch(sid).unwrap().sketch;
-            (0..sk.curves.len())
-                .find(|i| sk.curves[*i].link.is_some() && sk.shape(*i).is_some_and(|shape| shape.dist(cut) < 1e-6))
-                .map(|i| sk.curves[i].id.clone())
-        }
-        .expect("the box's edge along y = 0 is projected");
-        assert!(h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).is_err(), "a linked edge is not trimmed");
+        for enhanced in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.ui.project_link_tools = enhanced;
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}],"projection_link":true})).unwrap();
+            let drawn = h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap()["curves"][0]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let sid = h.app.session.active_sketch.unwrap();
+            let cut = Vec2::new(15.0, 0.0);
+            let edge = {
+                let state = h.app.session.world_state().unwrap();
+                let sk = &state.sketch(sid).unwrap().sketch;
+                (0..sk.curves.len())
+                    .find(|i| sk.curves[*i].link.is_some() && sk.shape(*i).is_some_and(|shape| shape.dist(cut) < 1e-6))
+                    .map(|i| sk.curves[i].id.clone())
+            }
+            .expect("the box's edge along y = 0 is projected");
+            assert!(h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).is_err(), "a linked edge is not trimmed");
 
-        h.call("ui.view", json!({"view":"top"}));
-        h.app.cam.distance = 80.0;
-        h.settle();
-        h.step(&json!({"click":{"world":[10,3,0]},"button":"right"})).unwrap();
-        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: drawn.clone(), sketch: None }]);
-        assert!(!items(&h.app, &Target::Viewport).iter().any(|item| item.id == "sketch.break_link"), "a drawn line has no link to break");
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.step(&json!({"click":{"world":[cut.x,cut.y,0]},"button":"right"})).unwrap();
-        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: edge.clone(), sketch: None }]);
-        let menu = items(&h.app, &Target::Viewport);
-        let item = menu.iter().find(|item| item.id == "sketch.break_link").expect("a projected edge must offer Break Link");
-        assert_eq!(item.label, "Break Link");
-        assert!(item.enabled);
-        assert_eq!(item.params, Some(json!({"entities":[edge]})));
-        h.step(&json!({"click":{"handle":"menu:sketch.break_link"}})).unwrap();
-        let unlinked =
-            h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.curves.iter().find(|c| c.id == edge).is_some_and(|c| c.link.is_none());
-        assert!(unlinked, "Break Link makes the edge normal sketch geometry");
-        h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.app.cam.distance = 80.0;
+            h.settle();
+            h.step(&json!({"click":{"world":[10,3,0]},"button":"right"})).unwrap();
+            assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: drawn.clone(), sketch: None }]);
+            assert!(!items(&h.app, &Target::Viewport).iter().any(|item| item.id == "sketch.break_link"), "a drawn line has no link to break");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.step(&json!({"click":{"world":[cut.x,cut.y,0]},"button":"right"})).unwrap();
+            assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: edge.clone(), sketch: None }]);
+            let menu = items(&h.app, &Target::Viewport);
+            let item = menu.iter().find(|item| item.id == "sketch.break_link").expect("a projected edge must offer Break Link");
+            // The body's outline is one projection: breaking it frees every edge, not only this one.
+            assert_eq!(item.label, if enhanced { "Break Link (whole projection)" } else { "Break Link" });
+            assert_eq!(menu.iter().filter(|item| item.id == "sketch.break_link").count(), 1, "one Break Link");
+            let break_at = menu.iter().position(|item| item.id == "sketch.break_link").unwrap();
+            let move_at = menu.iter().position(|item| item.id == "sketch.move").unwrap();
+            assert_eq!(break_at > move_at, enhanced, "only the opt-in moves Break Link into the Projection section");
+            assert_eq!(menu.iter().find(|item| item.id == "ui.fix").unwrap().enabled, !enhanced);
+            for command in ["sketch.update_references", "sketch.freeze_link", "sketch.link_visibility", "sketch.remove_link"] {
+                assert!(menu.iter().any(|item| item.id == command && item.enabled), "{command} remains available");
+            }
+            assert!(item.enabled);
+            assert_eq!(item.params, Some(json!({"entities":[edge]})));
+            h.step(&json!({"click":{"handle":"menu:sketch.break_link"}})).unwrap();
+            let unlinked = h
+                .app
+                .session
+                .world_state()
+                .unwrap()
+                .sketch(sid)
+                .unwrap()
+                .sketch
+                .curves
+                .iter()
+                .find(|c| c.id == edge)
+                .is_some_and(|c| c.link.is_none());
+            assert!(unlinked, "Break Link makes the edge normal sketch geometry");
+            h.app.run("sketch.trim", json!({"curve":edge,"at":[cut.x,cut.y]})).unwrap();
+        }
     }
 
     /// #6533: a right-click on a fit point spline offers Add Spline Point at the clicked spot, and

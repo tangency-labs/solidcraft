@@ -162,6 +162,9 @@ struct App {
     window_move: native_frame::WindowMove,
     /// After a lost device: the first frame stores it, since the setup's frames save nothing.
     clear_stored_background: bool,
+    /// Brackets the touchpad's swipes (winit sends pixels only for it, #15353).
+    #[cfg(target_os = "windows")]
+    wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
 }
 
 /// Flushes the stored settings with the background effect off; false when none was stored.
@@ -225,6 +228,13 @@ impl PrefsWriter {
         due
     }
 
+    /// Compare the settings [`Self::INTERVAL`] from now (or when a check already waiting is due),
+    /// for input that comes in every frame while it lasts. Returns how long that is: the caller
+    /// asks for a frame then, so an idle app still writes a change.
+    fn check_later(&mut self, now: std::time::Instant) -> std::time::Duration {
+        self.pending_until.get_or_insert(now + Self::INTERVAL).saturating_duration_since(now)
+    }
+
     /// Write `prefs` and flush them to disk if they differ from the settings written last and the
     /// last write is at least [`Self::INTERVAL`] old. Returns how long a change waits otherwise:
     /// the caller asks for a frame then, so an idle app still writes it.
@@ -253,8 +263,9 @@ fn pointer_in_points(x: f64, y: f64, pixels_per_point: f32) -> Option<egui::Pos2
     (pixels_per_point > 0.0 && pos.is_finite()).then_some(pos)
 }
 
-/// Input that can change a setting: a click, a key, typed or pasted text, a wheel or a pinch.
-/// Pointer motion, which comes every frame while the mouse moves, cannot by itself.
+/// Input that can change a setting: a click, a key or typed or pasted text. Pointer motion,
+/// which comes every frame while the mouse moves, cannot by itself; a wheel or a pinch, which
+/// also come every frame while the view zooms or a list scrolls, are [`settles_settings_later`].
 fn changes_settings(event: &egui::Event) -> bool {
     matches!(
         event,
@@ -264,11 +275,16 @@ fn changes_settings(event: &egui::Event) -> bool {
             | egui::Event::Paste(_)
             | egui::Event::Cut
             | egui::Event::Ime(_)
-            | egui::Event::MouseWheel { .. }
-            | egui::Event::Zoom(_)
-            | egui::Event::Rotate(_)
             | egui::Event::AccessKitActionRequest(_)
     )
+}
+
+/// Input that can change a setting but comes in every frame while it lasts: a wheel (a value
+/// stepped over its box) or a pinch. The settings are compared once [`PrefsWriter::INTERVAL`]
+/// after it, not in each of its frames: reading them out takes about 2 ms, as long as the rest
+/// of a zooming frame.
+fn settles_settings_later(event: &egui::Event) -> bool {
+    matches!(event, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_) | egui::Event::Rotate(_))
 }
 
 impl eframe::App for App {
@@ -390,6 +406,14 @@ impl eframe::App for App {
         solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         // A native dialog or lost focus may have kept a release (#16460).
         solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+        // Windows touchpad: winit sends its two-finger scroll as pixels, which this brackets (#15353).
+        #[cfg(target_os = "windows")]
+        {
+            let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
+            if let Some(delay) = self.wheel_gestures.update(raw, now, solidcraft_ui_egui::prefs::BrowserScrollWheel::Automatic) {
+                ctx.request_repaint_after(delay);
+            }
+        }
         // Wayland shows the last program's cursor until the window sets its own again (#16581).
         solidcraft_ui_egui::window_chrome::reapply_cursor_on_return(ctx, raw);
         #[cfg(target_os = "macos")]
@@ -514,7 +538,11 @@ impl eframe::App for App {
         self.solve.retain_view_pictures(frame.wgpu_render_state());
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
-        if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
+        let (input, later) = ui.input(|i| (i.events.iter().any(changes_settings), i.events.iter().any(settles_settings_later)));
+        if later {
+            ui.ctx().request_repaint_after(self.prefs_writer.check_later(now));
+        }
+        if self.prefs_writer.due(input, now)
             && let Some(storage) = frame.storage_mut()
             && let Ok(prefs) = self.prefs_for_storage(storage)
             && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
@@ -1207,6 +1235,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
         install_app: None,
+        persist_design: None,
         can_restore: None,
         restore_file: None,
         download_design: None,
@@ -1921,6 +1950,9 @@ fn main() -> eframe::Result {
             settings.as_ref().map(|d| d.join("app.ron"))
         },
         persist_window: !safe_mode,
+        // SolidCraft finds a missing character in the installed fonts itself
+        // (`fonts::add_system_font_fallback`), so eframe's stand-in, which only logs, stays out.
+        system_font_fallback: false,
         wgpu_options,
         // #743: hand the control channel the event loop's proxy so it can run a logic pass at once.
         event_loop_ready: Some(Box::new(move |proxy| wake_hook.set(proxy.clone()))),
@@ -1967,6 +1999,10 @@ fn main() -> eframe::Result {
     // 3D mouse driver then too.
     #[cfg(target_os = "macos")]
     let _driver_client = DriverClient;
+    // Windows touchpad two-finger scroll arrives as pixels, not wheel notches (#15353). winit reads
+    // this when the event loop is built, so it is set before eframe builds it.
+    #[cfg(target_os = "windows")]
+    winit::platform::windows::set_touchpad_wheels(true);
     mark("run_native");
     let result = eframe::run_native(
         "SolidCraft",
@@ -1977,6 +2013,7 @@ fn main() -> eframe::Result {
             mark("window and device ready");
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
+            solidcraft_ui_egui::fonts::add_system_font_fallback(&cc.egui_ctx);
             mark("fonts");
             let dialog_folder = DialogFolder::default();
             // The file chooser that opens may not be the desktop's own: the session bus is asked
@@ -2277,6 +2314,8 @@ fn main() -> eframe::Result {
                 ctx: cc.egui_ctx.clone(),
                 #[cfg(target_os = "windows")]
                 window_move,
+                #[cfg(target_os = "windows")]
+                wheel_gestures: solidcraft_ui_egui::WebWheelGestures::every_point_swipes(),
             }))
         }),
     );
@@ -3007,6 +3046,44 @@ mod prefs_writer_tests {
         assert!(super::changes_settings(&egui::Event::Text("5".into())));
         assert!(!super::changes_settings(&egui::Event::PointerMoved(egui::Pos2::ZERO)));
         assert!(!super::changes_settings(&egui::Event::MouseMoved(egui::Vec2::X)));
+    }
+
+    /// A wheel or a pinch comes in every frame while the view zooms: its frames don't read the
+    /// settings out, but one a second after it does, so a value stepped with the wheel is still
+    /// on disk within a second, and an idle app gets a frame for it.
+    #[test]
+    fn wheel_frames_are_checked_once_a_second_after_not_each_frame() {
+        let mut app = new_app();
+        let mut disk = Disk::default();
+        let mut writer = PrefsWriter::read(app.prefs());
+        let start = Instant::now();
+        let frame = Duration::from_millis(16);
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        assert!(!super::changes_settings(&wheel) && super::settles_settings_later(&wheel));
+        assert!(super::settles_settings_later(&egui::Event::Zoom(1.1)));
+        // Half a second of zooming: no frame reads the settings.
+        let mut checked = 0;
+        for n in 0..30u32 {
+            let now = start + frame * n;
+            assert!(writer.check_later(now) <= PrefsWriter::INTERVAL);
+            if writer.due(false, now) {
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 0, "no frame of the zoom reads the settings");
+        // A value stepped with the wheel in that time is written when the second is up.
+        app.preferences.ui_scale = 1.5;
+        let then = start + PrefsWriter::INTERVAL;
+        assert!(writer.due(false, then), "the frame asked for a second after the wheel");
+        assert_eq!(writer.store(&mut disk, app.prefs(), then), None);
+        assert_eq!(disk.flushes, 1);
+        assert!(!writer.due(false, then + frame), "nothing waits after it");
     }
 
     /// A window position in physical pixels is egui's points at the window's scale; a scale or
