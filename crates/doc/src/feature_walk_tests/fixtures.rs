@@ -144,6 +144,12 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
                 "anchor": "bottom_left", "mirror": true}),
         ),
         (
+            "frame_trim",
+            json!({"type": "frame_trim", "members": [{"feature": "F", "line": "l1"}],
+                "to": [{"type": "member", "member": {"feature": "F", "line": "l2"}, "side": "left"}, {"type": "plane", "plane": plane("frame_trim")}],
+                "end": "start", "gap": "frame_trim.gap"}),
+        ),
+        (
             "frame_plate",
             json!({"type":"frame_plate","member":{"feature":7,"line":"line1"},"plane":plane("plate"),"shape":{"shape":"rectangle","width":"plate.width","height":"plate.height"},"holes":{"pattern":"circle","diameter":"plate.hole","pitch_diameter":"plate.pitch","count":6,"angle":"plate.hole_angle"},"thickness":"plate.thickness","offset":"plate.offset","x_offset":"plate.x","y_offset":"plate.y","angle":"plate.angle"}),
         ),
@@ -183,6 +189,13 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("sheet_path", json!({"type": "sheet_path", "edge": o, "sketch": 1, "curves": ["l1"], "radius": "path.radius"})),
         ("sheet_tab", json!({"type": "sheet_tab", "sketch": 1, "profiles": {"type": "all"}})),
+        (
+            "sheet_bead",
+            json!({
+                "type": "sheet_bead", "sketch": 1, "curves": ["l1"], "depth": "bead.depth", "width": "bead.width", "angle": "bead.angle",
+                "crown_width": "bead.crown", "base_radius": "bead.rb", "crown_radius": "bead.rc", "end_length": "bead.end", "margin": "bead.margin"
+            }),
+        ),
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
         ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o, "engrave": [o]})),
         ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o], "engrave": [o]})),
@@ -284,6 +297,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         | "sheet_unfold" | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
         }
+        "sheet_bead" => json!({"body": "B"}),
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),

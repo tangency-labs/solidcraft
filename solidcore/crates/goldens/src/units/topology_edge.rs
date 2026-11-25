@@ -999,7 +999,7 @@ fn edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
 /// side.
 fn own_brep(i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use crate::own_builder::{build_as, counts, failed_output, finish, in_new_brep, read_as, Built};
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (vo, ig) = (i.validate_only, i.init_gaps);
     let built = match &i.brep {
         BrepIn::File { rebuild, .. } => {
@@ -1118,7 +1118,7 @@ fn ellipse_wire(k: &mut Kernel, b: &mut Brep, src: &BrepIn) -> Result<(), SolidE
 }
 
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let eid = |x: i64| EdgeId::from_index(x as u32);
     let mut out: Vec<f64> = Vec::new();
     match op {

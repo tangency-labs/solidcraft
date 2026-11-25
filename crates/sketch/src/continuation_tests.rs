@@ -366,6 +366,21 @@ fn an_edit_continuation_cannot_reach_is_solved_in_steps() {
     }
 }
 
+/// The edit above, solved with each repeated LM run taken from the first (the step tries
+/// start from the same layout, so their first sub-steps repeat runs made before): the same
+/// geometry bit for bit and the same report as solved with every run made again.
+#[test]
+fn an_edit_solved_in_steps_is_the_same_with_repeated_runs_taken_again() {
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let mut rng = Lcg(1);
+    let (mut sk, old) = linkage(&mut rng, 1.0, 1.0, false);
+    set_distances(&mut sk, &new);
+    let ((plain, plain_report), (remembered, report), hits) = switch::without_differential(|| crate::solver::solve_after_value_edit_both(&sk, &old));
+    assert!(hits > 0, "the step tries repeat runs");
+    assert_eq!(remembered.points, plain.points);
+    assert_eq!(format!("{report:?}"), format!("{plain_report:?}"));
+}
+
 /// #15766: a horizontal and a vertical distance from a fixed point to a free one drawn on their
 /// negative sides, each edited to zero and back. At zero the two points are level; the next
 /// value puts the free point back on the side it was drawn on, not on the mirrored one.

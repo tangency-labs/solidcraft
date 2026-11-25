@@ -88,5 +88,9 @@ fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
 pub(crate) fn name_unnamed_products(step: String, file: &str) -> String {
     const PLACEHOLDER: &str = "'cadmpeg_model'";
     let stem = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    if stem.trim().is_empty() || !step.contains(PLACEHOLDER) { step } else { step.replace(PLACEHOLDER, &solidcore_step::write::string(&stem)) }
+    if stem.trim().is_empty() || !step.contains(PLACEHOLDER) {
+        step
+    } else {
+        step.replace(PLACEHOLDER, &solidcraft_kernel::services::step::string(&stem))
+    }
 }

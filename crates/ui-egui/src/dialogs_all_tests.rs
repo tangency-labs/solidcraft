@@ -421,6 +421,20 @@ fn command_dialog_value_memory_is_off_by_default_and_resets_each_time() {
     assert!(matches!(&recalled.kind, Kind::PatternRect { count, .. } if count == "3"));
 }
 
+#[test]
+fn new_fillet_opens_at_the_last_applied_radius_without_remember_dialog_values() {
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.remember_dialog_values);
+    let first = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    let Kind::Fillet { radius, chamfer: false, .. } = &first.kind else { panic!("a fillet dialog") };
+    let shipped = radius.clone();
+    h.app.last_fillet_radius = "5 mm".into();
+
+    let next = Dialog::for_command(&h.app, "solid.fillet").unwrap();
+    assert!(matches!(&next.kind, Kind::Fillet { radius, chamfer: false, .. } if radius == "5 mm"));
+    assert_ne!(shipped, "5 mm");
+}
+
 fn fixture() -> Harness {
     let mut h = Harness::new();
     for (name, x) in [("A", 0), ("B", 30), ("C", 60), ("D", 90)] {
@@ -1072,6 +1086,12 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":950}));
+            // The system's fallback faces are read on a thread (slow where large CJK faces are
+            // installed) and the fonts are set up again once they are in, which can change the
+            // card's text: on CI that landed between the two reads below (#21495). Read them now
+            // (this waits for that thread's search) and let the app set its fonts up with them.
+            crate::fonts::setup_fonts_for(&h.ctx, "en", &h.app.preferences.ui_font);
+            h.frames(2);
             h.app.dialog = Some(representative(&h, command));
             // The card settles on its own; its preview (joint.create's is an error row here)
             // comes from a worker, which a loaded machine can finish a frame later.
@@ -1738,6 +1758,67 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("section_size").is_none(), "{p}");
     assert!(p.get("revolutions").is_some() && p.get("pitch").is_some(), "{p}");
     assert!(p.get("operation").is_some(), "{p}");
+}
+
+/// A coil from a sketch profile takes its section from the sketch, so the dialog shows neither the
+/// Section rows nor Start angle and never sends them, even remembered from an earlier coil
+/// (#17870): `solid.coil` refuses them with `sketch`.
+#[test]
+fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("section".into(), json!("square"));
+    d.extra.insert("section_position".into(), json!("outside"));
+    d.extra.insert("start_angle".into(), json!("30 deg"));
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"shown": label}})).unwrap_or_else(|e| panic!("without a profile: {e}"));
+    }
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"not_shown": label}})).unwrap_or_else(|e| panic!("with a profile: {e}"));
+    }
+    h.step(&json!({"expect":{"shown": "Clockwise"}})).unwrap();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.coil");
+    for key in ["section", "section_position", "start_angle"] {
+        assert!(p.get(key).is_none(), "{key} sent with a sketch profile: {p}");
+    }
+    h.app.run(id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+}
+
+/// Flip winds the coil the other way along its axis (#17870): down from a sketch profile, and
+/// reversed on any axis the coil already has. The option itself is never sent.
+#[test]
+fn coil_flip_winds_the_coil_down_its_axis() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("flip".into(), json!(true));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([0.0, 0.0, -1.0]), "{p}");
+    assert!(p.get("flip").is_none(), "{p}");
+    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([-1.0, 0.0, 0.0]), "{p}");
+    d.extra.remove("axis");
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    h.step(&json!({"expect":{"shown": "Flip"}})).unwrap();
+    let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { axis, .. } => Some(axis.0),
+        _ => None,
+    });
+    assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
 }
 
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the

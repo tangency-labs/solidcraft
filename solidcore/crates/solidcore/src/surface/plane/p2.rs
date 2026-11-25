@@ -81,10 +81,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, passed_on, Failure, Result, SolidError,
-    SM_ERR_NULL_POINTER,
-};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::{self, next_up};
 use crate::geom::extent1d::Extent1d;
@@ -127,6 +124,15 @@ const OP_TRIM: &str = "surface::plane::p2::Plane::trim_with_domain";
 pub(super) enum ClipPurpose {
     Trim,
     Section,
+}
+
+impl ClipPurpose {
+    fn handle_status<T>(self, result: Result<T>) -> Result<Option<T>> {
+        match self {
+            Self::Trim => ignored(result),
+            Self::Section => result.map(Some),
+        }
+    }
 }
 
 pub(super) struct PlaneClip {
@@ -385,6 +391,7 @@ impl Plane {
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(e),
                 Err(e) => return Err(unmeasurable.caused_by(e).into_error()),
@@ -1105,7 +1112,7 @@ impl Plane {
                     ],
                 },
             );
-            let Some(t_solutions) = ignored(passed_on(boundary_hits, section)?)? else {
+            let Some(t_solutions) = purpose.handle_status(boundary_hits)? else {
                 continue;
             };
 
@@ -1132,10 +1139,11 @@ impl Plane {
                     continue;
                 }
 
-                ignore_or_pass_on(
-                    gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true),
-                    section,
-                )?;
+                let _ = purpose.handle_status(gs.add_sorted_solution(
+                    solution,
+                    SortKey::ByFirstParameter,
+                    true,
+                ))?;
             }
             solutions = gs.set_solutions(SolutionArray::new());
         }
@@ -1256,7 +1264,7 @@ impl Plane {
             let mut trim_ivl = Extent1d::from_min_max(s_param, e_param);
             let mut new_curve = curve.copy(k)?;
             // Trimming may snap the interval to existing knots.
-            ignore_or_pass_on(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify), section)?;
+            let _ = purpose.handle_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
             // A full circle has coincident endpoints. Bound the whole analytic
             // interval using its diameter and arc length, with signed sizes by magnitude.
             // Round each computed upper bound outward, including norm underflow.
@@ -2016,8 +2024,8 @@ mod tests {
 
     #[test]
     fn spline_sections_distinguish_a_thin_plane_patch_from_a_failed_boundary_solve() {
-        use crate::error::{curve::CurveFailure, Reason};
         use crate::nurbs::math::CPoint;
+        use crate::surface::surface::p2::base_global_surface_intersect;
 
         let k = Kernel::default();
         let rows = [-1.0, 1.0].map(|z| {
@@ -2040,30 +2048,55 @@ mod tests {
         let domain = spline.natural_uv_domain();
         let loft = Surface::from(spline);
         let plane = Surface::from(rect());
-        let intersect = |top| {
-            loft.global_surface_intersect(
+        // Both horizontal sides meet the parabola at its ends within tolerance.
+        let thin = loft
+            .global_surface_intersect(
                 &k,
                 &domain,
                 &plane,
-                &Extent2d::from_bounds(-1., 0., 1., top),
+                &Extent2d::from_bounds(-1., 0., 1., 1e-14),
                 [false; 2],
                 Some(1e-6),
                 None,
             )
-        };
-        // Both horizontal sides meet the parabola at its ends within tolerance.
-        let thin = intersect(1e-14).unwrap();
+            .unwrap();
         assert!(!thin.curve_types.is_empty());
         assert!(thin
             .curve_types
             .iter()
             .all(|kind| *kind == TsectCurveType::Touching));
-        // A non-finite upper boundary prevents the curve solver from building its cache.
-        let error = intersect(f64::NAN).unwrap_err();
-        assert!(matches!(
-            error.failure().unwrap().reason,
-            Reason::Curve(CurveFailure::CacheNotBuilt)
-        ));
+        // A non-finite upper boundary prevents the section's curve solver from building
+        // its cache. Both surface orders must defer to the general intersector.
+        let plane_domain = Extent2d::from_bounds(-1., 0., 1., f64::NAN);
+        for (first, first_domain, second, second_domain) in [
+            (&loft, &domain, &plane, &plane_domain),
+            (&plane, &plane_domain, &loft, &domain),
+        ] {
+            let section = first
+                .global_surface_intersect(
+                    &k,
+                    first_domain,
+                    second,
+                    second_domain,
+                    [false; 2],
+                    Some(1e-6),
+                    None,
+                )
+                .unwrap();
+            let general = base_global_surface_intersect(
+                &k,
+                first,
+                first_domain,
+                second,
+                second_domain,
+                [false; 2],
+                Some(1e-6),
+                None,
+            )
+            .unwrap();
+            assert!(general.curve_types.contains(&TsectCurveType::Crossing));
+            assert_eq!(section.curve_types, general.curve_types);
+        }
     }
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {

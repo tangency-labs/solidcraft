@@ -2,12 +2,15 @@
 //! pairs of points. Lines and points are picked in the view into the path, where consecutive points
 //! pair up in pick order; the section is a built-in profile with its dimensions, or the profiles
 //! picked in another sketch. Anchor, angle and mirror place the section on each member.
+//!
+//! Trim/Extend (`frame.trim`): members picked in the view trimmed or extended to other members
+//! (butt joints), planar faces or planes, with the end that moves and a weld gap.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile};
+use solidcraft_engine::doc::frame::{self, CornerType, MemberProfile, SectionView, TrimEnd, TrimMemberRef, TrimTarget};
 use solidcraft_engine::doc::frame_corners::CORNER_TOL;
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::{FeatureKind, PlaneRef, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::{Sel, Session};
@@ -15,13 +18,15 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, check, curves_sketch, form_row, input_rows_range, profile_indices, put, shown_expr};
 use crate::selection::{
-    CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, is_point,
+    BODIES, CONSTRUCTION_POINTS, EXTERNAL_POINTS, ORIGIN, PLANAR_FACES, PLANES, POINTS, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput,
+    SelectionExt as _, VERTICES, is_point,
 };
 use crate::ui_kit::{Button, button, choice_row, expr_row, hint_row, row_height, sized_row, text_row};
 use crate::viewport::Hit;
 
-/// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: &[(&str, &str)] = &[
+/// The anchors as `frame.member` names them, and their labels, in `frame::Anchor::ALL` order
+/// (the hot points in the view, `place_gizmo::frame_anchor`, go by it).
+pub(crate) const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),
@@ -109,6 +114,20 @@ pub struct Member {
     pub whole: Option<u64>,
     pub anchor: usize,
     pub locate: Option<[f64; 2]>,
+    /// Offset A and B: how far the section is moved from its anchor, along its own axes as drawn
+    /// (A its width, B its height; not the world's X and Y; both empty: none). Kept as the dialog's `locate` (`sync_offset`), which the engine reads.
+    pub offset: [String; 2],
+    /// The offset text last applied, so an edit is told from a `locate` changed in the view.
+    seen: [String; 2],
+    /// What the section was worked out from when the offset was last applied (`base_key`).
+    applied_key: Option<String>,
+    /// The `locate` the dialog held after the offset was last applied: one that differs was set
+    /// elsewhere (the hot points in the view).
+    written: Option<[f64; 2]>,
+    /// Why the typed offset cannot be applied to the section now; OK refuses with it.
+    refused: Option<String>,
+    /// The section the anchors are read from: what it was worked out from (`base_key`) and the section.
+    base: Option<(String, SectionView)>,
     pub angle: String,
     pub mirror: bool,
     pub name: String,
@@ -445,6 +464,12 @@ impl Member {
             whole: None,
             anchor: 0,
             locate: None,
+            offset: Default::default(),
+            seen: Default::default(),
+            applied_key: None,
+            written: None,
+            refused: None,
+            base: None,
             angle: String::new(),
             mirror: false,
             name: String::new(),
@@ -542,6 +567,13 @@ impl Member {
         self.angle = g.angle;
         self.mirror = g.mirror;
         self.name = g.name;
+        // Offset A and B are worked out again from this group's `locate` (`sync_offset`), so the
+        // last group's typed offset is not applied to this one.
+        self.offset = Default::default();
+        self.seen = Default::default();
+        self.applied_key = None;
+        self.written = None;
+        self.refused = None;
         if let Some(i) = inputs.first_mut() {
             i.items = g.lines;
             self.sync(&i.items);
@@ -576,8 +608,14 @@ const PATH: crate::selection::Accept = SKETCH_LINES | VERTICES | POINTS | CONSTR
 const NEEDS_PARTNER: &str = "A point needs another point after it";
 const PICK_SECOND: &str = "Pick the second point";
 
-/// The dialog for Frame Member.
+/// The dialog for Frame Member or Trim/Extend.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
+    if id == "frame.trim" {
+        return Some((
+            Kind::FrameTrim(Trim::default()),
+            vec![SelInput::new("Members", BODIES, true), SelInput::new("ui.frame_trim.to", BODIES | PLANAR_FACES | PLANES, true)],
+        ));
+    }
     (id == "frame.member").then(|| {
         let inputs = vec![
             SelInput::new("Path", PATH, true).ordered_points(),
@@ -916,7 +954,7 @@ fn tr(text: &str) -> &str {
 /// pressed in a value.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, d: &mut Dialog) -> bool {
     let Kind::Frame(m) = &mut d.kind else { return false };
-    let mut enter = member_rows(app, ui, m, &mut d.inputs);
+    let mut enter = member_rows(app, ui, m, &mut d.inputs, &d.extra);
     ui.separator();
     let labels = CORNER_TYPES.map(|c| c.1);
     choice_row(ui, "Corner Type", "frame_corner", &mut m.corner, &labels);
@@ -1214,7 +1252,7 @@ fn group_rows(ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) {
 }
 
 /// The Frame Member rows proper: the section, its placement and the name.
-fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput]) -> bool {
+fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [SelInput], extra: &Map<String, Value>) -> bool {
     let mut enter = false;
     m.sync(crate::selection::items(inputs, 0));
     if m.groups.len() == 1 {
@@ -1244,17 +1282,158 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
     }
     let anchors: Vec<&str> = ANCHORS.iter().map(|a| a.1).collect();
     choice_row(ui, "Anchor", "frame_anchor", &mut m.anchor, &anchors);
+    let [x, y] = &mut m.offset;
+    enter |= hint_row(ui, "ui.frame_offset_a", x, "0 mm");
+    enter |= hint_row(ui, "ui.frame_offset_b", y, "0 mm");
     enter |= hint_row(ui, "Angle", &mut m.angle, "0 deg");
     form_row(ui, "Mirror", |ui| check(ui, &mut m.mirror));
     enter |= text_row(ui, "Name", &mut m.name, tr("from the profile")).0;
     form_row(ui, "Ghost Frame Members", |ui| check(ui, &mut m.ghost));
+    sync_offset(app, m, inputs, extra);
     enter
+}
+
+/// Keep Offset A and B and the shown group's `locate` in step: an edited offset sets `locate` (the
+/// anchor's point minus the offset, both empty: none), and so does a change of the other values
+/// (a dimension, the anchor), from the offset as typed; a `locate` set elsewhere (the hot points in
+/// the view, another group shown) rewrites the offset from it.
+fn sync_offset(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &Map<String, Value>) {
+    let held = m.locate;
+    let edited = m.offset != m.seen;
+    let elsewhere = match (held, m.written) {
+        (Some(h), Some(w)) => !same_locate(h, w),
+        (h, w) => h.is_some() != w.is_some(),
+    };
+    if !edited && elsewhere {
+        let offset = match held {
+            None => Some(Default::default()),
+            Some(at) => base_view(app, m, inputs, extra).and_then(|v| offset_of(&v, m.anchor, at)).map(|o| {
+                let doc = &app.session.doc;
+                o.map(|v| crate::length_input::model(doc, (v * 1e6).round() / 1e6 + 0.0))
+            }),
+        };
+        // No section to read it on yet: tried again as values change.
+        if let Some(offset) = offset {
+            m.seen = offset.clone();
+            m.offset = offset;
+            m.written = held;
+            m.refused = None;
+            m.applied_key = base_key(app, m, inputs, extra);
+        }
+        return;
+    }
+    let key = base_key(app, m, inputs, extra);
+    if !edited && (key.is_none() || m.applied_key == key) {
+        return;
+    }
+    m.refused = None;
+    match offset_mm(app, m) {
+        Ok(None) => m.locate = None,
+        Ok(Some(off)) => match base_view(app, m, inputs, extra) {
+            Some(v) => match locate_for(&v, m.anchor, off) {
+                Some(at) => m.locate = Some(at),
+                // The section is there but the offset puts its point on the line too far: OK
+                // refuses rather than running a `locate` left from other values.
+                None => {
+                    m.refused = Some(format!("Offset A and Offset B move the section's point on the line past {} mm", frame::MAX_PROFILE_SIZE));
+                    m.locate = None;
+                }
+            },
+            // No section yet (no line, an unfinished value): the offset waits for one, tried
+            // again each frame, rather than being taken as applied and later wiped.
+            None => return,
+        },
+        // Refused when the dialog runs; `locate` stays as it was meanwhile.
+        Err(_) => {}
+    }
+    m.seen = m.offset.clone();
+    m.written = m.locate;
+    m.applied_key = key;
+}
+
+/// Two `locate`s within float noise of each other.
+fn same_locate(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).abs() <= 1e-9 && (a[1] - b[1]).abs() <= 1e-9
+}
+
+/// Offset A and B in mm; none when both are empty (an empty one is 0).
+fn offset_mm(app: &SolveApp, m: &Member) -> Result<Option<[f64; 2]>, String> {
+    let [x, y] = [m.offset[0].trim(), m.offset[1].trim()];
+    if x.is_empty() && y.is_empty() {
+        return Ok(None);
+    }
+    let mm = |t: &str| -> Result<f64, String> {
+        if t.is_empty() {
+            return Ok(0.0);
+        }
+        crate::length_input::eval(&app.session.doc, t, ValueKind::Length)
+            .ok()
+            .filter(|v| v.is_finite() && v.abs() <= frame::MAX_PROFILE_SIZE)
+            .ok_or_else(|| format!("Offset A and Offset B must be lengths within {} mm", frame::MAX_PROFILE_SIZE))
+    };
+    Ok(Some([mm(x)?, mm(y)?]))
+}
+
+/// The dialog's parameters without a located point: what the anchors are read from (they do not
+/// move with one).
+fn base_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<Value> {
+    let mut p = shown_params(app, m, inputs, extra).ok()?;
+    if let Value::Object(o) = &mut p {
+        o.remove("locate");
+    }
+    Some(p)
+}
+
+/// What the anchors are worked out from: the dialog's values and the design's parameters and units
+/// (a profile dimension may name a parameter that changes while the dialog is open).
+fn base_key(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<String> {
+    let doc = &app.session.doc;
+    base_params(app, m, inputs, extra).map(|p| format!("{p} {} {:?}", doc.units, doc.param_values().0))
+}
+
+/// The section the dialog's values make, without a located point (its anchors do not move with
+/// one), worked out again only when those values or the design's parameters change.
+fn base_view(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Option<SectionView> {
+    let p = base_params(app, m, inputs, extra)?;
+    let key = base_key(app, m, inputs, extra)?;
+    if let Some((k, v)) = &m.base
+        && *k == key
+    {
+        return Some(v.clone());
+    }
+    let v = solidcraft_engine::cmd::frame::member_section_view(&app.session, &p).ok()?;
+    m.base = Some((key, v.clone()));
+    Some(v)
+}
+
+/// The `locate` that moves the section by `off` from anchor `anchor`.
+fn locate_for(v: &SectionView, anchor: usize, off: [f64; 2]) -> Option<[f64; 2]> {
+    let (_, a) = v.anchors().get(anchor).copied()?;
+    let mut p = a;
+    p.x -= off[0];
+    p.y -= off[1];
+    let at = v.locate_of(p);
+    at.iter().all(|c| c.is_finite() && c.abs() <= frame::MAX_PROFILE_SIZE).then_some(at)
+}
+
+/// How far `locate` moves the section from anchor `anchor` (as `locate_for` takes it).
+fn offset_of(v: &SectionView, anchor: usize, at: [f64; 2]) -> Option<[f64; 2]> {
+    let (_, a) = v.anchors().get(anchor).copied()?;
+    let x = v.origin.x + at[0];
+    let p = [if v.mirror { -x } else { x }, v.origin.y + at[1]];
+    let off = [a.x - p[0], a.y - p[1]];
+    off.iter().all(|c| c.is_finite()).then_some(off)
 }
 
 /// The command the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 /// Group placement uses the same path/profile reader as an ordinary frame. Unsupported joined
 /// groups are refused, preserving the selected corner and finishing controls for the user.
 pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    if offset_mm(app, m)?.is_some()
+        && let Some(e) = &m.refused
+    {
+        return Err(e.clone());
+    }
     if m.groups.len() <= 1 {
         return flat_commands(app, m, inputs, extra);
     }
@@ -1314,6 +1493,16 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     let mut p = common.ok_or("select lines for the path first")?;
     p["groups"] = json!(grouped);
     Ok(vec![("frame.member".into(), p)])
+}
+
+/// The `frame.member` parameters of the group shown alone (its lines, anchor, `locate`, angle and
+/// mirror, as one flat member): what the hot points in the view and Offset A and B lay out.
+pub(crate) fn shown_params(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Value, String> {
+    let mut kept = extra.clone();
+    kept.remove("groups");
+    kept.remove("locate");
+    let (_, p) = flat_commands(app, m, inputs, &kept)?.into_iter().next().ok_or("select lines for the path first")?;
+    Ok(p)
 }
 
 fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
@@ -1500,7 +1689,7 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
             o.entry(key.clone()).or_insert_with(|| v.clone());
         }
     }
-    Ok(vec![("frame.member".to_string(), p)])
+    Ok(vec![("frame.member".into(), p)])
 }
 
 /// Whether a weld gap typed as `g` is none: empty, or a plain 0 (`0`, `0 mm`; a parameter that is 0 now is kept).
@@ -1618,12 +1807,9 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     m.mirror = *mirror;
     m.locate = *locate;
     m.name = body_name.clone().unwrap_or_default();
-    // The dialog has no field for a located point: an edit keeps it, so the member stays where it
-    // is attached.
+    // A located point stays as the feature has it (`m.locate`: the member stays where it is
+    // attached); Offset A and B show it from the anchor once the dialog is drawn (`sync_offset`).
     let mut extra = Map::new();
-    if let Some(at) = locate {
-        extra.insert("locate".into(), json!(at));
-    }
     m.corner = corner_index(corner);
     m.flip = *flip;
     m.fit_ends = *fit_ends;
@@ -1694,9 +1880,144 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         m.current = usize::MAX;
         m.all = matches!(groups.as_slice(), [one] if one.lines.is_empty());
         m.show(0, &mut inputs);
-        extra.remove("locate");
     }
     Some((Kind::Frame(m), inputs, extra))
+}
+
+/// Which end of each member moves, as `frame.trim` names it, and its label.
+const ENDS: [(&str, &str); 3] = [("auto", "ui.frame_trim.nearer_end"), ("start", "ui.frame_trim.start"), ("end", "ui.frame_trim.end")];
+
+/// The Trim/Extend dialog's values (the members and targets are its selection inputs).
+#[derive(Clone, Debug, Default)]
+pub struct Trim {
+    /// An index into [`ENDS`].
+    pub end: usize,
+    pub gap: String,
+    /// Targets of the feature being edited that a pick can't show (a member's chosen side, a
+    /// face or plane kept as the design saved it), passed back as they are while kept.
+    pub kept: Vec<Value>,
+    pub keep: bool,
+}
+
+/// The Trim/Extend rows (after the selection inputs); true when Enter was pressed in a value.
+pub fn trim_rows(ui: &mut egui::Ui, t: &mut Trim) -> bool {
+    let ends: Vec<&str> = ENDS.iter().map(|e| e.1).collect();
+    choice_row(ui, "ui.frame_trim.end", "frame_trim_end", &mut t.end, &ends);
+    let enter = hint_row(ui, "Gap", &mut t.gap, "0 mm");
+    if !t.kept.is_empty() {
+        let label = solidcraft_ui_text::format("ui.frame_trim.more_targets", &[("count", &t.kept.len().to_string())]);
+        form_row(ui, "ui.frame_trim.keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
+    }
+    enter
+}
+
+/// The body a pick names, when it is a member's.
+fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
+    let body = match pick {
+        Sel::Body { name } => name,
+        Sel::Face { body, .. } => body,
+        _ => return None,
+    };
+    app.session.model.state().frame_member(body).is_some().then(|| body.clone())
+}
+
+/// The command Trim/Extend's OK runs (`extra`: parameters kept from the feature being edited).
+pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+    let mut members: Vec<String> = Vec::new();
+    for pick in crate::selection::items(inputs, 0) {
+        let body = member_body(app, pick).ok_or_else(|| solidcraft_ui_text::tr("ui.frame_trim.pick_members").to_string())?;
+        if !members.contains(&body) {
+            members.push(body);
+        }
+    }
+    if members.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_members_first").to_string());
+    }
+    let mut to: Vec<Value> = Vec::new();
+    for pick in crate::selection::items(inputs, 1) {
+        let member = member_body(app, pick).filter(|name| {
+            // A face picked on a changed member follows that actual face, rather than using
+            // a stale sketch/profile side. Picking the whole body still gives the refusal.
+            if !matches!(pick, Sel::Face { .. }) {
+                return true;
+            }
+            let st = app.session.model.state();
+            st.frame_member(name).zip(st.body(name)).is_some_and(|(r, b)| !b.transferred && r.is_unchanged(&b.body))
+        });
+        let target = match (member, pick) {
+            // A member, or a face of one: a butt joint against it.
+            (Some(body), _) => json!(body),
+            // The exact face (its body, index and path), as Start Sketch picks one.
+            (None, face @ Sel::Face { point, .. }) => json!({
+                "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
+            }),
+            (None, Sel::Plane { name }) => json!({"plane": name}),
+            _ => return Err(solidcraft_ui_text::tr("ui.frame_trim.target_kinds").to_string()),
+        };
+        if !to.contains(&target) {
+            to.push(target);
+        }
+    }
+    if t.keep {
+        to.extend(t.kept.iter().cloned());
+    }
+    if to.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.frame_trim.pick_targets").to_string());
+    }
+    let mut p = json!({"members": members, "to": to});
+    if let Some((end, _)) = ENDS.get(t.end).filter(|_| t.end != 0) {
+        p["end"] = json!(end);
+    }
+    put(&mut p, &[("gap", &t.gap)]);
+    if let Value::Object(o) = &mut p {
+        for (key, v) in extra {
+            o.entry(key.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    Ok(vec![("frame.trim".to_string(), p)])
+}
+
+/// The body of a member in the current model, by its feature and line.
+fn body_of(app: &SolveApp, r: &TrimMemberRef) -> Option<String> {
+    let id = app.session.doc.find_feature(&r.feature)?.id;
+    let st = app.session.model.state();
+    let record = st.frame_members.iter().find(|m| m.feature == id && m.line == r.line)?;
+    st.body(&record.body).filter(|b| b.feature == id).map(|b| b.name.clone())
+}
+
+/// The Trim/Extend dialog editing a trim feature, filled from it.
+pub fn trim_for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+    let FeatureKind::FrameTrim { members, to, end, gap } = kind else { return None };
+    let (_, mut inputs) = start(app, "frame.trim")?;
+    let mut t = Trim::default();
+    if let Some(i) = inputs.get_mut(0) {
+        i.items = members.iter().filter_map(|m| body_of(app, m)).map(|name| Sel::Body { name }).collect();
+    }
+    let mut picks = Vec::new();
+    for target in to {
+        match target {
+            TrimTarget::Member { member, side: None } if let Some(name) = body_of(app, member) => picks.push(Sel::Body { name }),
+            TrimTarget::Plane { plane: PlaneRef::Origin { name } } => picks.push(Sel::Plane { name: name.clone() }),
+            TrimTarget::Plane { plane: PlaneRef::Construction { feature, placement: None } } if let Some(f) = app.session.doc.feature(feature.0) => {
+                picks.push(Sel::Plane { name: f.name.clone() })
+            }
+            TrimTarget::Member { member, side } => {
+                t.kept.push(json!({"member": {"feature": member.feature.to_string(), "line": member.line}, "side": side}))
+            }
+            TrimTarget::Plane { plane } => t.kept.push(json!({"plane_ref": plane})),
+        }
+    }
+    if let Some(i) = inputs.get_mut(1) {
+        i.items = picks;
+    }
+    t.keep = !t.kept.is_empty();
+    t.end = match end {
+        TrimEnd::Auto => 0,
+        TrimEnd::Start => 1,
+        TrimEnd::End => 2,
+    };
+    t.gap = gap.as_deref().map(|g| shown_expr(g, ValueKind::Length)).unwrap_or_default();
+    Some((Kind::FrameTrim(t), inputs, Map::new()))
 }
 
 #[cfg(test)]

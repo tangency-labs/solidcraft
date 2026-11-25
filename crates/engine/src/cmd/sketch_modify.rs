@@ -159,6 +159,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MoveResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
+        .key("M")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane, and drawn picks move that far along it); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move with the rest, along the plane and by `z` along its normal; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
@@ -305,11 +306,30 @@ pub(super) fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
     if let Some(e) = ends.into_iter().find(|e| sk.point(*e).is_some_and(|q| q.dist(at) < TOL * 10.0)) {
         if e != p {
             add_c(sk, ConstraintKind::Coincident { p, q: e })?;
+            drop_implied_point_on_curve(sk, p, e);
         }
         return Ok(());
     }
     add_c(sk, ConstraintKind::PointOnCurve { p, c: cutter })?;
     Ok(())
+}
+
+/// Points `p` and `q` were just made coincident: a Point On Curve holding either one on a curve
+/// the other ends is implied by that and goes. Two crossing lines trimmed back to a corner kept
+/// the first trim's end-on-line beside the second trim's end-to-end, a constraint that held
+/// nothing (#15619).
+fn drop_implied_point_on_curve(sk: &mut Sketch, p: usize, q: usize) {
+    let ends_at = |c: usize, x: usize| sk.curves.get(c).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == x || b == x);
+    let implied: Vec<bool> = sk
+        .constraints
+        .iter()
+        .map(|k| match k.kind {
+            ConstraintKind::PointOnCurve { p: x, c } => (x == p && ends_at(c, q)) || (x == q && ends_at(c, p)),
+            _ => false,
+        })
+        .collect();
+    let mut drop = implied.into_iter();
+    sk.constraints.retain(|_| !drop.next().unwrap_or(false));
 }
 
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
@@ -460,15 +480,16 @@ fn rebind_attached_points(sk: &mut Sketch, ci: usize, keep: &[usize]) {
 
 /// Tangencies tied to one of the curve's ends, through a shared point or Coincident
 /// constraints. Record them before splitting: keeping the curve ID alone would leave an
-/// end tangent on the wrong piece and lose the solver's endpoint tangency equation.
-fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
+/// end tangent on the wrong piece and lose the solver's endpoint tangency equation. Each is
+/// recorded by constraint id: the cuts in between can remove constraints (a Point On Curve made
+/// redundant at a corner) and shift the indices of those after it.
+fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(String, usize)> {
     let Some((start, end)) = sk.curves.get(ci).and_then(|c| c.kind.ends()) else { return Vec::new() };
     let groups = coincident_points(sk);
     let root = |p: usize| groups.get(p).copied().unwrap_or(p);
     sk.constraints
         .iter()
-        .enumerate()
-        .filter_map(|(i, k)| {
+        .filter_map(|k| {
             let ConstraintKind::Tangent { a, b } = k.kind else { return None };
             let other = if a == ci {
                 b
@@ -480,8 +501,8 @@ fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
             let (a, b) = sk.curves.get(other)?.kind.ends()?;
             let joined = |p| root(p) == root(a) || root(p) == root(b);
             match (joined(start), joined(end)) {
-                (true, false) => Some((i, start)),
-                (false, true) => Some((i, end)),
+                (true, false) => Some((k.id.clone(), start)),
+                (false, true) => Some((k.id.clone(), end)),
                 _ => None,
             }
         })
@@ -490,11 +511,12 @@ fn endpoint_tangencies(sk: &Sketch, ci: usize) -> Vec<(usize, usize)> {
 
 /// Follow the original endpoints after the pieces have exchanged geometry to preserve the
 /// original curve ID. A tangent on the removed piece goes with it in `remove_curves`.
-fn rebind_endpoint_tangencies(sk: &mut Sketch, ci: usize, pieces: &[usize], tangencies: &[(usize, usize)]) {
-    for &(constraint, point) in tangencies {
+fn rebind_endpoint_tangencies(sk: &mut Sketch, ci: usize, pieces: &[usize], tangencies: &[(String, usize)]) {
+    for (constraint, point) in tangencies {
+        let point = *point;
         let owner = pieces.iter().copied().find(|i| sk.curves.get(*i).and_then(|c| c.kind.ends()).is_some_and(|(a, b)| a == point || b == point));
         if let Some(owner) = owner
-            && let Some(k) = sk.constraints.get_mut(constraint)
+            && let Some(k) = sk.constraints.iter_mut().find(|k| k.id == *constraint)
             && let ConstraintKind::Tangent { a, b } = &mut k.kind
         {
             if *a == ci {
@@ -2449,8 +2471,9 @@ struct CornerKept {
 /// of either line, a fixed or expression-driven position, or it is the origin or still ends another
 /// curve. It stays as a virtual sharp corner, held on both curves' extensions (their
 /// intersection), and the line lengths become distances from the far end to it, so the part
-/// keeps its size. Otherwise None: the caller removes the point.
-fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2]) -> Result<Option<CornerKept>> {
+/// keeps its size. `retain` also keeps an unmeasured corner for new chamfer dimensions.
+/// Otherwise None: the caller removes the point.
+fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2], retain: bool) -> Result<Option<CornerKept>> {
     let used = sk.curves.iter().any(|x| uses(x, c));
     let mut moved: Vec<String> = sk.constraints.iter().filter(|k| k.kind.refers_to_point(c)).map(|k| k.id.clone()).collect();
     for k in sk.constraints.iter_mut() {
@@ -2468,7 +2491,7 @@ fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize);
         moved.push(k.id.clone());
     }
     let positioned = sk.points.get(c).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
-    if moved.is_empty() && !used && c != 0 && !positioned {
+    if !retain && moved.is_empty() && !used && c != 0 && !positioned {
         return Ok(None);
     }
     for cu in [ca, cb] {
@@ -2500,6 +2523,7 @@ fn cut_corner(
     fb: usize,
     da: f64,
     db: f64,
+    retain: bool,
     cmd: &str,
 ) -> Result<(usize, usize, Vec2, CornerKept)> {
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2514,7 +2538,7 @@ fn cut_corner(
     moved.extend(keep_side_relations(sk, lb)?);
     reattach(sk, la, c, ta);
     reattach(sk, lb, c, tb);
-    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)])?;
+    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)], retain)?;
     if let Some(k) = &mut kept {
         k.moved.extend(moved);
     }
@@ -2761,7 +2785,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
     let center = pc + bis * (r / half.sin());
     let (da, db) = (if spent_a { short(len_a) } else { d }, if spent_b { short(len_b) } else { d });
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, false, cmd)?;
     let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
     let ccw = (qa - center).cross(qb - center) > 0.0;
     let arc = if ccw {
@@ -2890,7 +2914,7 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     let arc =
         if ccw { sk.add_arc(cen, ta, tb, [None, Some(na), Some(nb)], None)? } else { sk.add_arc(cen, tb, ta, [None, Some(nb), Some(na)], None)? };
     let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: arc })?];
-    match keep_corner(sk, q, [(ca, na), (cb, nb)])? {
+    match keep_corner(sk, q, [(ca, na), (cb, nb)], false)? {
         Some(kept) => Ok(Some((arc, cons, kept))),
         None => {
             let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
@@ -2901,8 +2925,35 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     }
 }
 
-fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
+#[derive(Clone, Copy)]
+enum ChamferSecond {
+    Equal,
+    Distance(f64),
+    Angle(f64), // Degrees, as entered.
+}
+
+fn chamfer_dimension_binding(doc: &mut solidcraft_doc::Document, on_sheet: bool, base: &str, value: f64, unit: &str, cmd: &str) -> Result<String> {
+    let expression = format!("{value} {unit}");
+    if on_sheet {
+        return Ok(expression);
+    }
+    let taken: std::collections::BTreeSet<_> = doc
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .chain(doc.text_params.iter().map(|p| p.name.as_str()))
+        .chain(doc.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
+        .collect();
+    let name = (1..=taken.len() + 1)
+        .map(|index| if index == 1 { base.to_string() } else { format!("{base}_{index}") })
+        .find(|name| !taken.contains(name.as_str()))
+        .ok_or_else(|| bad(cmd, "no free chamfer parameter name"))?;
+    Ok(doc.new_named_model_param(&name, &expression, unit)?)
+}
+
+fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: ChamferSecond) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         // A corner symmetric to another is cut with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
@@ -2920,9 +2971,17 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
                 return Err(bad(cmd, "a corner is listed twice"));
             }
         }
+        // A drawing stores the expressions on the sheet. A model shares named parameters across the selected corners.
+        let first = chamfer_dimension_binding(doc, on_sheet, "chamfer_distance", distance, "mm", cmd)?;
+        let other = match second {
+            ChamferSecond::Equal => first.clone(),
+            ChamferSecond::Distance(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_second_distance", value, "mm", cmd)?,
+            ChamferSecond::Angle(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_angle", value, "deg", cmd)?,
+        };
+        let params = [first, other];
         let (mut lines, mut kept) = (Vec::new(), Vec::new());
         for q in &corners {
-            let (l, k) = chamfer_corner(sk, q, cmd, &dists)?;
+            let (l, k) = chamfer_corner(sk, q, cmd, distance, second, &params)?;
             lines.push(l);
             kept.push(k);
         }
@@ -2935,9 +2994,9 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
     )
 }
 
-/// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
-/// far back along each line from the corner's angle: the new line and what became of the corner.
-fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) -> Result<(f64, f64)>) -> Result<(usize, CornerKept)> {
+/// Cut one corner (`point` or `a`, `b`) of two lines and dimension its inputs from the sharp
+/// corner: the new line and what became of the corner.
+fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, distance: f64, second: ChamferSecond, params: &[String; 2]) -> Result<(usize, CornerKept)> {
     prepare_corner(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2949,9 +3008,35 @@ fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) ->
     if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
         return Err(bad(cmd, "the lines are parallel"));
     }
-    let (da, db) = dists(corner_angle)?;
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
-    Ok((sk.add_line_pts(ta, tb, None)?, kept))
+    let db = match second {
+        ChamferSecond::Equal => distance,
+        ChamferSecond::Distance(value) => value,
+        ChamferSecond::Angle(value) => {
+            // Triangle corner–Ta–Tb: the entered angle is at Ta.
+            let angle = value.to_radians();
+            let opposite = PI - angle - corner_angle;
+            if !(angle > 1e-6 && opposite > 1e-6) {
+                return Err(bad(cmd, "that angle does not meet the other line"));
+            }
+            distance * angle.sin() / opposite.sin()
+        }
+    };
+    // Keep the sharp corner even when no existing dimension measures to it. Its index stays
+    // stable, and PointOnCurve constraints hold it at the intersection of the two sides.
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, distance, db, true, cmd)?;
+    let line = sk.add_line_pts(ta, tb, None)?;
+    sk.add_constraint(ConstraintKind::Distance { p: c, q: ta, value: distance }, Some(params[0].clone()))?;
+    let other = match second {
+        ChamferSecond::Angle(value) => {
+            let (a, b) = if u.cross(v) > 0.0 { (line, la) } else { (la, line) };
+            // The entered angle looks toward the corner, opposite a side stored from Ta out.
+            let flip = matches!(sk.curves.get(la).map(|c| &c.kind), Some(CurveKind::Line { a, .. }) if *a == ta);
+            ConstraintKind::Angle { a, b, value: value.to_radians(), flip }
+        }
+        _ => ConstraintKind::Distance { p: c, q: tb, value: db },
+    };
+    sk.add_constraint(other, Some(params[1].clone()))?;
+    Ok((line, kept))
 }
 
 /// The checks and joins before a chamfer cuts a corner. Running them again on a corner already
@@ -2967,28 +3052,21 @@ fn prepare_corner(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
 fn chamfer_equal(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.equal_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d)))
+    chamfer(s, p, cmd, d, ChamferSecond::Equal)
 }
 
 fn chamfer_two(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.two_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let d2 = num(p, "distance2").ok_or_else(|| bad(cmd, "`distance2` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d2)))
+    chamfer(s, p, cmd, d, ChamferSecond::Distance(d2))
 }
 
 fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.distance_angle";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
-    let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians();
-    chamfer(s, p, cmd, |phi| {
-        // Triangle corner–Ta–Tb: angle phi at the corner, `a` at Ta.
-        let opp = std::f64::consts::PI - a - phi;
-        if !(a > 1e-6 && opp > 1e-6) {
-            return Err(bad(cmd, "that angle does not meet the other line"));
-        }
-        Ok((d, d * a.sin() / opp.sin()))
-    })
+    let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?;
+    chamfer(s, p, cmd, d, ChamferSecond::Angle(a))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4701,7 +4779,11 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             let mut drawn_ids = Vec::new();
             for (wire, plane) in &drawn {
                 let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * (plane.height(q) + z)).collect();
-                drawn_ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                drawn_ids.push(match (wire.arc, wire.control) {
+                    (Some(_), _) => sk.add_drawn_arc_in(&fit, wire.space)?,
+                    (None, Some(control)) => sk.add_drawn_control_in(&fit, control.degree, wire.space)?,
+                    (None, None) => sk.add_drawn_wire_in(&fit, wire.space)?,
+                });
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
             if let Some(target) = target.filter(|_| !drawn_ids.is_empty()) {

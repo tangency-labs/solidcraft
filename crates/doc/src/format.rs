@@ -2551,6 +2551,200 @@ mod tests {
         assert_eq!(names.iter().collect::<std::collections::BTreeSet<_>>().len(), names.len());
     }
 
+    /// Deterministic draws for the input-name repair tests (xorshift64), so a failure names its case.
+    struct Draws(u64);
+
+    impl Draws {
+        /// A number in `0..n`, for `n` above 0.
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    fn input_repair_box() -> crate::FeatureKind {
+        crate::FeatureKind::Box {
+            corner: ["0".into(), "0".into(), "0".into()],
+            length: "10".into(),
+            width: "10".into(),
+            height: "10".into(),
+            operation: crate::Operation::NewBody,
+            centred: false,
+        }
+    }
+
+    /// `Document::name_all_feature_inputs` as it was while a freed `dN` lowered `next`, the
+    /// reference for its names. Only the lines marked as counters are new. They return how often
+    /// a freed name lowered `next`, and how often a name freed at or above `next` was given later.
+    fn input_repair_that_restarts(d: &mut Document) -> (usize, usize) {
+        let mut taken: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for name in d.params.iter().map(|p| &p.name).chain(d.features.iter().flat_map(|f| &f.param_names)) {
+            *taken.entry(name.clone()).or_default() += 1;
+        }
+        let mut next = 1usize;
+        let (mut lowered, mut given_later, mut freed_above) = (0, 0, std::collections::BTreeSet::new()); // counters
+        for f in &mut d.features {
+            let n = f.kind.inputs().len();
+            for k in 0..n {
+                if f.param_names.get(k).is_some_and(|name| !name.is_empty()) {
+                    continue;
+                }
+                let name = loop {
+                    let name = format!("d{next}");
+                    next += 1;
+                    if !taken.contains_key(&name) {
+                        break name;
+                    }
+                };
+                given_later += usize::from(freed_above.remove(&name)); // counter
+                if f.param_names.len() <= k {
+                    f.param_names.resize(k + 1, String::new());
+                }
+                if let Some(slot) = f.param_names.get_mut(k) {
+                    *slot = name.clone();
+                }
+                taken.insert(name, 1);
+            }
+            for name in f.param_names.drain(n..) {
+                if let Some(count) = taken.get_mut(&name) {
+                    *count -= 1;
+                    if *count == 0 {
+                        taken.remove(&name);
+                        if let Some(i) = name.strip_prefix('d').and_then(|s| s.parse::<usize>().ok())
+                            && name == format!("d{i}")
+                            && i > 0
+                        {
+                            if i < next {
+                                lowered += 1; // counter
+                            } else {
+                                freed_above.insert(name.clone()); // counter
+                            }
+                            next = next.min(i);
+                        }
+                    }
+                }
+            }
+        }
+        (lowered, given_later)
+    }
+
+    /// A name as a damaged or hand-edited file may hold one. Often empty or a `dN` the repair
+    /// also gives (up to d24), sometimes a `dN` the repair rarely reaches, sometimes a name that
+    /// is not `dN` as the repair writes it (`d05` and `d+3` parse as 5 and 3).
+    fn drawn_input_name(draws: &mut Draws) -> String {
+        match draws.below(20) {
+            0..=7 => String::new(),
+            8..=14 => format!("d{}", 1 + draws.below(24)),
+            15 | 16 => format!("d{}", 25 + draws.below(40)),
+            _ => ["d0", "d05", "d007", "d-1", "dx", "d+3", "D2", "x1", "d", "d1.0"][draws.below(10)].to_string(),
+        }
+    }
+
+    /// Up to four parameters and twelve features of zero to three inputs, each feature with up
+    /// to three more names than inputs (fewer is missing names, more is surplus names).
+    fn drawn_input_design(draws: &mut Draws, kinds: &[crate::Feature]) -> Document {
+        let mut d = Document::new("drawn input names");
+        for _ in 0..draws.below(5) {
+            let name = drawn_input_name(draws);
+            d.params.push(crate::Param { name, expr: "1".into(), unit: String::new(), comment: String::new(), model: false });
+        }
+        for id in 1..=draws.below(13) as u64 {
+            let mut f = kinds[draws.below(kinds.len())].clone();
+            f.id = id;
+            f.param_names.clear();
+            for _ in 0..draws.below(f.kind.inputs().len() + 4) {
+                f.param_names.push(drawn_input_name(draws));
+            }
+            d.features.push(f);
+            d.next_id = id + 1;
+        }
+        d
+    }
+
+    /// Thousands of drawn timelines get the names of the repair that lowered `next` to a freed
+    /// name, and of `name_feature_inputs` feature by feature. The draws mix empty and missing
+    /// names, repeats, names shared with parameters, surplus names written as `dN` or not, and
+    /// freed names below and at or above `next`.
+    #[test]
+    fn bulk_input_repair_gives_the_names_of_the_repair_that_restarted_its_search() {
+        let mut kinds_doc = Document::new("kinds");
+        let at = || ["0".into(), "0".into(), "0".into()];
+        let sketch = crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: solidcraft_sketch::Sketch::new() };
+        let sphere = crate::FeatureKind::Sphere { center: at(), radius: "5".into(), operation: crate::Operation::NewBody };
+        let torus = crate::FeatureKind::Torus { center: at(), major: "10".into(), minor: "2".into(), operation: crate::Operation::NewBody };
+        for kind in [sketch, sphere, torus, input_repair_box()] {
+            kinds_doc.add_feature(kind, None).unwrap();
+        }
+        let kinds = kinds_doc.features;
+        assert_eq!(kinds.iter().map(|f| f.kind.inputs().len()).collect::<Vec<_>>(), [0, 1, 2, 3]);
+        let names = |d: &Document| d.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>();
+        let mut draws = Draws(0x9e37_79b9_7f4a_7c15);
+        let (mut lowered, mut given_later) = (0, 0);
+        for case in 0..5000 {
+            let drawn = drawn_input_design(&mut draws, &kinds);
+            let mut old = drawn.clone();
+            let (l, g) = input_repair_that_restarts(&mut old);
+            (lowered, given_later) = (lowered + l, given_later + g);
+            let mut new = drawn.clone();
+            new.name_all_feature_inputs();
+            assert_eq!(names(&new), names(&old), "case {case}, drawn {:?}", names(&drawn));
+            assert_eq!(new.params, drawn.params);
+            let mut one_by_one = drawn.clone();
+            for id in drawn.features.iter().map(|f| f.id) {
+                one_by_one.name_feature_inputs(id);
+            }
+            assert_eq!(names(&new), names(&one_by_one), "case {case}, drawn {:?}", names(&drawn));
+        }
+        assert!(lowered > 0 && given_later > 0, "the draws reach both kinds of freed name ({lowered}, {given_later})");
+    }
+
+    /// The shape of a slow file found by reading how designs are opened. Boxes 1 to m each have
+    /// three unnamed inputs and one surplus name, dj for box j, and a last box names its inputs
+    /// x1 to x3 and has the b surplus names d(m+2) to d(m+b+1). Before the repair the taken `dN`
+    /// are d1 to dm and that block, so the lowest free name is d(m+1) and the lowest above the
+    /// block d(m+b+2). Box 1 takes d(m+1), d(m+b+2) and d(m+b+3), then frees d1. When box j
+    /// (from 2) is repaired, boxes 2 to j-1 hold d1 to d(j-2), box j-1 has just freed d(j-1),
+    /// dj to dm are still surplus names, and boxes 1 to j-1 hold d(m+1) and d(m+b+2) to
+    /// d(m+b+2j-1). So box j takes d(j-1), d(m+b+2j) and d(m+b+2j+1). The last box keeps its
+    /// own three names and drops the block. Each name the search tries is either held before the
+    /// repair (d1 to dm and the block), and tried once at most since the search never goes back
+    /// down, or the name it then gives to one of the 3m unnamed inputs. So it tries at most
+    /// 4m + b names (this repair tries 3m + b + 1). Lowering the search to each freed name made
+    /// it pass the whole block again for every box, about m times (m+b) tries.
+    #[test]
+    fn freed_surplus_names_are_reused_without_passing_a_large_block_again() {
+        let mut template = Document::new("freed input names");
+        let id = template.add_feature(input_repair_box(), None).unwrap();
+        let f = template.feature(id).unwrap().clone();
+        assert_eq!(f.kind.inputs().len(), 3);
+        let d = |i: usize| format!("d{i}");
+        for (m, b) in [(2_000, 0), (2_000, 50_000)] {
+            let mut design = Document::new("freed input names");
+            for j in 1..=m {
+                let mut f = f.clone();
+                f.id = j as u64;
+                f.param_names = vec![String::new(), String::new(), String::new(), d(j)];
+                design.features.push(f);
+            }
+            let mut last = f.clone();
+            last.id = m as u64 + 1;
+            last.param_names = ["x1", "x2", "x3"].map(String::from).into_iter().chain((m + 2..=m + b + 1).map(d)).collect();
+            design.features.push(last);
+            design.next_id = m as u64 + 2;
+            let json = design.to_json();
+            crate::params::INPUT_NAME_TRIES.set(0);
+            let back = read(&json).unwrap();
+            let tries = crate::params::INPUT_NAME_TRIES.get();
+            assert!(tries <= 4 * m + b, "{m} boxes, {b} block names, {tries} names tried");
+            let mut expected = vec![vec![d(m + 1), d(m + b + 2), d(m + b + 3)]];
+            expected.extend((2..=m).map(|j| vec![d(j - 1), d(m + b + 2 * j), d(m + b + 2 * j + 1)]));
+            expected.push(["x1", "x2", "x3"].map(String::from).to_vec());
+            assert_eq!(back.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>(), expected, "{m} boxes, {b} block names");
+        }
+    }
+
     #[test]
     fn versions() {
         assert_eq!(version_of("solidcraft/1"), Some(1));
