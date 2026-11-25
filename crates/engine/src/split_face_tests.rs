@@ -230,7 +230,7 @@ fn a_design_saved_before_finds_split_pieces_by_their_former_names() {
     let top = solidcraft_doc::naming::strip_piece(&name).to_string();
     let k = s.doc.features.iter().position(|f| f.name == "Raise").unwrap();
     // As an older build saved the Offset Face's pick: the disc by the top's bare name.
-    let mut old = s.doc.clone();
+    let mut old: solidcraft_doc::Document = (*s.doc).clone();
     old.features[k].face_names = vec![top.clone()];
     let mut t = Session::new(solidcraft_doc::Document::from_json(&old.to_json()).unwrap());
     t.refresh();
@@ -239,8 +239,7 @@ fn a_design_saved_before_finds_split_pieces_by_their_former_names() {
     // And the ring by the box's sides around it.
     let st = s.model.state();
     let (ring, _) = face_at(&s, "B", [2., 2., 20.]);
-    let sides: Vec<String> = [[0., 15., 10.], [40., 15., 10.], [20., 0., 10.], [20., 30., 10.]].iter().map(|p| face_at(&s, "B", *p).1).collect();
-    let mut sides = sides;
+    let mut sides: Vec<String> = [[0., 15., 10.], [40., 15., 10.], [20., 0., 10.], [20., 30., 10.]].iter().map(|p| face_at(&s, "B", *p).1).collect();
     sides.sort();
     let ring_old = format!("{top}#[{}]", sides.join(","));
     let at = |n: &str, p: [f64; 3]| solidcraft_doc::naming::locate_face(&st, n, solidcore_record::Vec3::new(p[0], p[1], p[2])).map(|h| h.face);
