@@ -276,6 +276,10 @@ pub struct Documents {
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
+    /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
+    /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
+    /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
+    parked_agent_chat: Option<Box<crate::agent_chat::AgentChat>>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -509,6 +513,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     if !presenting {
         crate::select_other::close(app);
     }
+    let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
         crate::select_other::close(app);
@@ -525,7 +530,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.viewport.hover = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
-        crate::agent_chat::leave_document(app);
+        if shared_chat && app.agent_chat.following_document {
+            crate::agent_chat::merge_active_turn_for_switch(app);
+        } else {
+            crate::agent_chat::leave_document(app);
+        }
         app.edit_anchor_hint = None;
     }
     if !presenting {
@@ -549,7 +558,13 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.agent_chat.swap_document(&mut slot.agent_chat);
+    let outgoing_chat = if shared_chat {
+        app.docs.parked_agent_chat.replace(Box::new(slot.agent_chat)).map_or_else(Default::default, |chat| *chat)
+    } else {
+        app.docs.parked_agent_chat = None;
+        app.agent_chat.swap_document(&mut slot.agent_chat);
+        slot.agent_chat
+    };
     let out_rev = app.session.revision;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
@@ -562,7 +577,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         reveals,
-        agent_chat: slot.agent_chat,
+        agent_chat: outgoing_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
@@ -600,6 +615,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
             pending.view_changed(before, app.session.revision);
         }
         app.jobs_view_changed(before, app.session.revision);
+    }
+    if !presenting && shared_chat {
+        crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
@@ -1870,7 +1888,7 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
         app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
     };
     let Some(index) = index else { return Ok(false) };
-    if app.agent_chat.following_document && index != app.docs.active {
+    if app.agent_chat.following_document && index != app.docs.active && !app.preferences.agent_shared_session {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
     }
     if app.file_picker_busy() {
@@ -2339,6 +2357,12 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
         crate::agent_chat::continue_in_document(app);
         return;
     }
+    if app.preferences.agent_shared_session {
+        crate::agent_chat::leave_document(app);
+        app.docs.parked_agent_chat = None;
+        crate::agent_chat::continue_in_document(app);
+        return;
+    }
     // A chat not asked anything yet (an agent connected at start, say) holds nothing of the old
     // design: it starts over in place, and its agent stays connected.
     if !app.agent_chat.items.iter().any(|i| matches!(i, crate::agent_chat::Item::User { .. })) {
@@ -2352,6 +2376,9 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 
 /// Hidden conversations must also stop when AI is disabled or the application quits.
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_document(&mut app.session, wait);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
     }
@@ -2359,6 +2386,9 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
 
 /// Stop only the hidden conversations whose endpoint permission was revoked.
 pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_endpoint(&mut app.session, id);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }

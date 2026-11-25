@@ -1072,6 +1072,24 @@ impl SpaceMouseGhost {
     pub const ALL: [Self; 3] = [Self::LeftViewport, Self::RightViewport, Self::LeftWindow];
 }
 
+/// What the 3D mouse's cap moves (Preferences: "Motion model").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMouseMotion {
+    /// The cap holds the model: push it right and the model goes right, tilt it and the model
+    /// tilts the same way. How the 3D mouse has always moved the view.
+    #[default]
+    Object,
+    /// The cap holds the camera, which looks at the point the view turns around: push it right and
+    /// the camera goes right, so the model goes left; tilt it forward and the camera rises over the
+    /// model. Every axis moves the other way from `Object`.
+    TargetCamera,
+}
+
+impl SpaceMouseMotion {
+    pub const ALL: [Self; 2] = [Self::Object, Self::TargetCamera];
+}
+
 impl SpaceMouseDriver {
     pub const ALL: [Self; 3] = [Self::Automatic, Self::Spacenavd, Self::Direct];
 
@@ -1341,6 +1359,45 @@ impl MiddleDoubleClick {
     }
 }
 
+/// The key that turns a mouse orbit drag into the other orbit style (`free_orbit_key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeOrbitKey {
+    Off,
+    Alt,
+    Ctrl,
+}
+
+impl FreeOrbitKey {
+    pub const ALL: &[(FreeOrbitKey, &str)] = &[(FreeOrbitKey::Off, "none"), (FreeOrbitKey::Alt, "alt"), (FreeOrbitKey::Ctrl, "ctrl")];
+
+    /// The preference's setting (no key for an unknown one).
+    pub fn of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
+    pub fn parse(id: &str) -> Option<FreeOrbitKey> {
+        Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
+    }
+
+    /// Whether this key is down in `mods` (Ctrl is Cmd on macOS). No key is never held.
+    pub fn held(self, mods: Modifiers) -> bool {
+        match self {
+            FreeOrbitKey::Off => false,
+            FreeOrbitKey::Alt => mods.alt,
+            FreeOrbitKey::Ctrl => mods.ctrl || mods.command,
+        }
+    }
+
+    /// `mods` with this key let go.
+    pub fn released(self, mods: Modifiers) -> Modifiers {
+        match self {
+            FreeOrbitKey::Off => mods,
+            FreeOrbitKey::Alt => Modifiers { alt: false, ..mods },
+            FreeOrbitKey::Ctrl => Modifiers { ctrl: false, command: false, ..mods },
+        }
+    }
+}
+
 impl Prefs {
     /// Explicit files, samples and control clients keep their existing launch behavior.
     pub fn home_on_launch(&self, has_file: bool, sample: bool, controlled: bool) -> bool {
@@ -1576,9 +1633,11 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
+        let plugin_importer_options = std::mem::take(&mut app.preferences.plugin_importer_options);
         let view_window_setups = std::mem::take(&mut app.preferences.view_window_setups);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.preferences.plugin_importer_options = plugin_importer_options;
         app.preferences.view_window_setups = view_window_setups;
         app.plugin_themes.signature = None;
         crate::plugins::sync_policy(app);
@@ -1648,6 +1707,7 @@ impl Snapshot {
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
+            held.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
             held.view_window_setups.clone_from(&app.preferences.view_window_setups);
             held == app.preferences
         };
@@ -1685,6 +1745,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
+    prefs.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
     prefs.view_window_setups.clone_from(&app.preferences.view_window_setups);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
@@ -2838,6 +2899,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
+    p.space_mouse_motion = d.space_mouse_motion;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
 }
 
@@ -3896,6 +3958,11 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !accepted::max_sketch_points(&p) {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
+    p.plugin_importer_options.retain(|id, entries| {
+        entries.retain(|name, memory| crate::plugin_menu::valid_saved_options(name, &memory.values));
+        crate::plugins::valid_id(id) && entries.len() <= crate::plugins::MAX_DISABLED
+    });
+    p.plugin_importer_options = p.plugin_importer_options.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     p.plugin_grants.retain(|id, grants| crate::plugins::valid_id(id) && crate::plugins::valid_grants(grants));
     p.plugin_grants = p.plugin_grants.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     for grants in p.plugin_grants.values_mut() {
@@ -4144,6 +4211,15 @@ fn prepare_preferences(
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
     }
+    if new.plugin_importer_options.len() > crate::plugins::MAX_DISABLED
+        || new.plugin_importer_options.iter().any(|(id, entries)| {
+            !crate::plugins::valid_id(id)
+                || entries.len() > crate::plugins::MAX_DISABLED
+                || entries.iter().any(|(name, memory)| !crate::plugin_menu::valid_saved_options(name, &memory.values))
+        })
+    {
+        return Err("`plugin_importer_options` needs bounded plugin ids, entry names and option objects".into());
+    }
     if new.plugin_grants.len() > crate::plugins::MAX_DISABLED
         || new.plugin_grants.iter().any(|(id, grants)| !crate::plugins::valid_id(id) || !crate::plugins::valid_grants(grants))
     {
@@ -4243,6 +4319,9 @@ fn prepare_preferences(
     }
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
+    }
+    if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
+        return Err("`free_orbit_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
@@ -5721,6 +5800,7 @@ mod tests {
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
         p.space_mouse_model_pivot = true;
+        p.space_mouse_motion = SpaceMouseMotion::TargetCamera;
         p.space_mouse_sketch_orbit = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
@@ -5734,6 +5814,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_motion, d.space_mouse_motion);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
@@ -5743,6 +5824,20 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
+    }
+
+    /// The 3D mouse's motion model is a choice of two: Object (the default, as before) moves the
+    /// model the way the cap goes, Target camera moves the camera that way.
+    #[test]
+    fn the_3d_mouse_motion_model_is_object_or_target_camera() {
+        let mut h = changed_3d_mouse_settings(None);
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object is the default");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_target_camera");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::TargetCamera, "target camera is opt-in");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_object");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object again");
+        let saved = serde_json::to_value(Prefs { space_mouse_motion: SpaceMouseMotion::TargetCamera, ..Default::default() }).unwrap_or_default();
+        assert_eq!(saved["space_mouse_motion"], "target_camera", "saved by a stable name");
     }
 
     /// The 3D mouse's orbit is a choice of two: Classic turns around the view's centre, Traced
