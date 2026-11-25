@@ -50,6 +50,7 @@ pub use scene::SEE_THROUGH;
 pub use scene::Scene;
 pub use scene::SceneLine;
 pub use scene::SceneMesh;
+pub use scene::glass_alpha;
 pub use scene::png;
 pub use scene::section_hatch;
 pub use scene::section_hatch_line;

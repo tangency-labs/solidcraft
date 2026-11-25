@@ -1464,7 +1464,9 @@ fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
 fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
     let (origin, dir) = proj.ray(pos);
     let state = crate::open_meshing::shown_world(app);
-    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| {
+        app.session.body_visible(name) && app.display_opacity(name) > 0.0
+    })?;
     let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
     (!refs.is_empty()).then_some(refs)
 }

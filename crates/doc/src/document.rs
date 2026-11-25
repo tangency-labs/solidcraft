@@ -4453,6 +4453,11 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// How opaque bodies and placements are drawn in the modelling view (`browser.opacity`),
+    /// apart from their appearances. Shared, so an undo step and a check for a change cost
+    /// nothing.
+    #[serde(skip_serializing_if = "crate::display_opacity::unset")]
+    pub opacity: std::sync::Arc<crate::display_opacity::DisplayOpacity>,
 }
 
 impl Visibility {
@@ -4470,6 +4475,7 @@ impl Visibility {
             && self.shown_dimensions.is_empty()
             && self.locked_bodies.is_empty()
             && self.hidden_folders.is_empty()
+            && self.opacity.is_empty()
     }
 }
 

@@ -246,6 +246,8 @@ pub struct MenuState {
     pending: Option<(Pos2, Target)>,
     /// An inline rename in progress.
     pub rename: Option<Rename>,
+    /// The Custom Opacity card, asking for a percentage.
+    pub(crate) opacity: Option<crate::opacity_menu::Prompt>,
     /// A delete waiting for its confirmation (it takes or breaks other features).
     pub confirm: Option<crate::delete::Pending>,
     /// A selected part has no free joint value for the explicit assembly Move command.
@@ -371,7 +373,7 @@ fn sel_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// Bodies the selection touches (bodies, and the bodies of selected faces and edges).
-fn touched_bodies(app: &SolveApp) -> Vec<String> {
+pub(crate) fn touched_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
         let b = match s {
@@ -703,6 +705,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
+    // Renders draw bodies as their appearances say.
+    if crate::render_workspace::active(app) {
+        v.retain(|item| item.id != "ui.opacity");
+    }
     // Render's Fit frames the whole scene whatever is selected, so its component and
     // occurrence menus do not offer Zoom to Selection.
     if crate::render_workspace::active(app) {
@@ -966,6 +972,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         }
         v.extend(remove_tube_item(app, &bodies));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
+        crate::opacity_menu::add(app, &mut v, &crate::opacity_menu::Targets::bodies(bodies));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
@@ -984,6 +991,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
+        crate::opacity_menu::add(app, &mut v, &crate::opacity_menu::Targets::bodies(touched_bodies(app)));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
@@ -1073,6 +1081,10 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    // A row of several selected bodies sets them all, as its Appearance does.
+    let selected = sel_bodies(app);
+    let faded = if browser && bodies.iter().all(|b| selected.contains(b)) { selected } else { bodies.to_vec() };
+    crate::opacity_menu::add(app, &mut v, &crate::opacity_menu::Targets::bodies(faded));
     if browser {
         let at = v.len() - 1;
         v.insert(at + 1, zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), true));
@@ -1357,6 +1369,9 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         _ => {}
     });
+    if let Some(entry) = entries.iter_mut().find(|item| item.id == "ui.opacity") {
+        *entry = crate::opacity_menu::menu(app, &crate::opacity_menu::Targets::paths(crate::browser::selected_occurrence_paths(app, path)));
+    }
     // One placement of several can show another design on its own, above the row for all of them.
     if app.session.doc.links.contains_key(&placement.component)
         && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
@@ -1532,6 +1547,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .with(json!({ "bodies": visibility_bodies }))
             .on(!visibility_bodies.is_empty()),
     );
+    crate::opacity_menu::add(app, &mut v, &crate::opacity_menu::Targets::bodies(visibility_bodies));
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
@@ -2533,6 +2549,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
             }
         }
+        "ui.customOpacity" => crate::opacity_menu::ask(app, &p),
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
         // A plane's Create Sketch is the toolbar's with that plane picked first: it replaces a
         // dialog in progress, and the dialog starts the sketch at once, facing the plane.

@@ -30,6 +30,9 @@ pub struct SceneMesh {
     /// drawn see-through, so what lies inside it shows, as the viewport draws glass. A body
     /// without an appearance of its own is solid.
     pub opacity: f32,
+    /// How much of that opacity the view draws the body with (the body's display opacity): 1 all
+    /// of it, 0 none.
+    pub shown: f32,
     /// The body encloses a volume (a solid, a closed mesh); an open one (a surface body, a solid
     /// with faces left out) has no inside, so a section gives it no cap.
     pub closed: bool,
@@ -43,7 +46,7 @@ pub struct SceneMesh {
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), values: None }
+        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, shown: 1.0, closed: true, hatch: Hatch(0), values: None }
     }
 
     /// An open sheet in `color` (not [`SceneMesh::closed`]).
@@ -51,16 +54,23 @@ impl SceneMesh {
         SceneMesh { closed: false, ..SceneMesh::solid(mesh, color) }
     }
 
-    /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
+    /// Is the body drawn see-through? (What it shows of its opacity is below [`SEE_THROUGH`].)
     pub fn glass(&self) -> bool {
-        self.opacity < SEE_THROUGH
+        self.opacity * self.shown < SEE_THROUGH
     }
 
     /// The alpha the body is blended with: its opacity, never so low that it vanishes
-    /// altogether, and 1 when it is solid.
+    /// altogether ([`glass_alpha`]), and 1 when it is solid.
     pub fn alpha(&self) -> f64 {
-        if self.glass() { f64::from(self.opacity).clamp(MIN_ALPHA, 1.0) } else { 1.0 }
+        if self.glass() { glass_alpha(f64::from(self.opacity), f64::from(self.shown)) } else { 1.0 }
     }
+}
+
+/// A see-through body's or face's alpha: an appearance's `opacity`, of which a trace is always
+/// left ([`MIN_ALPHA`]), as far as the view shows it (`shown`, the display opacity, which may
+/// take it to nothing).
+pub fn glass_alpha(opacity: f64, shown: f64) -> f64 {
+    opacity.clamp(MIN_ALPHA, 1.0) * shown.clamp(0.0, 1.0)
 }
 
 /// At or above this opacity a body is drawn solid: an appearance a hair under 1 is not worth a

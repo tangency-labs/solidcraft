@@ -1101,6 +1101,45 @@ pub struct VisibilityState {
     /// Browser folders and groups hidden themselves, by tree key. Present when there are any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// The bodies and placements drawn below 100% opacity (`browser.opacity`). Present when there
+    /// are any.
+    #[serde(default, skip_serializing_if = "OpacityState::is_empty")]
+    pub opacity: OpacityState,
+}
+
+/// How opaque bodies and placements are drawn in the modelling view, where below 100%.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct OpacityState {
+    /// Bodies by name: percent, 0 to 99. Present when there are any.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub bodies: std::collections::BTreeMap<String, u8>,
+    /// Placements, each with everything in it. Present when there are any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placements: Vec<PlacementOpacityState>,
+}
+
+/// One placement drawn below 100% opacity.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacementOpacityState {
+    /// Its occurrence path.
+    pub path: Vec<u64>,
+    /// Percent, 0 to 99.
+    pub percent: u8,
+}
+
+impl OpacityState {
+    fn is_empty(&self) -> bool {
+        self.bodies.is_empty() && self.placements.is_empty()
+    }
+}
+
+impl From<&solidcraft_doc::display_opacity::DisplayOpacity> for OpacityState {
+    fn from(o: &solidcraft_doc::display_opacity::DisplayOpacity) -> Self {
+        OpacityState {
+            bodies: o.bodies().clone(),
+            placements: o.placements().map(|p| PlacementOpacityState { path: p.path, percent: p.percent }).collect(),
+        }
+    }
 }
 
 impl From<&solidcraft_doc::Visibility> for VisibilityState {
@@ -1118,8 +1157,105 @@ impl From<&solidcraft_doc::Visibility> for VisibilityState {
             shown_dimensions: v.shown_dimensions.clone(),
             locked_bodies: v.locked_bodies.clone(),
             hidden_folders: v.hidden_folders.clone(),
+            opacity: OpacityState::from(&*v.opacity),
         }
     }
+}
+
+/// `browser.opacity`'s `percent`: a whole number, 0 to 100.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpacityPercent(pub u8);
+
+impl<'de> Deserialize<'de> for OpacityPercent {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        opacity_percent(&Value::deserialize(d)?)
+            .map(OpacityPercent)
+            .ok_or_else(|| D::Error::custom(whole("`percent` must be a whole number from 0 to 100")))
+    }
+}
+
+/// A percentage as `browser.opacity` reads one.
+pub(crate) fn opacity_percent(value: &Value) -> Option<u8> {
+    value.as_u64().and_then(|p| u8::try_from(p).ok()).filter(|p| *p <= solidcraft_doc::display_opacity::OPAQUE)
+}
+
+impl JsonSchema for OpacityPercent {
+    fn schema_name() -> Cow<'static, str> {
+        "OpacityPercent".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "0 (not drawn) to 100 (as the appearance says), a whole number.", "type": "integer", "minimum": 0, "maximum": 100})
+    }
+}
+
+/// `browser.opacity`'s `bodies`: 1 to 10000 body names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OpacityBodies(pub Vec<String>);
+
+impl<'de> Deserialize<'de> for OpacityBodies {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        opacity_bodies(&Value::deserialize(d)?).map(OpacityBodies).ok_or_else(|| D::Error::custom(whole("`bodies` must list 1..10000 body names")))
+    }
+}
+
+/// The body names `browser.opacity` takes. No limit on a name's length: each must be a body's.
+pub(crate) fn opacity_bodies(value: &Value) -> Option<Vec<String>> {
+    let list = value.as_array().filter(|a| !a.is_empty() && a.len() <= MAX_LIST)?;
+    list.iter().map(|b| b.as_str().filter(|b| !b.is_empty()).map(str::to_string)).collect()
+}
+
+impl JsonSchema for OpacityBodies {
+    fn schema_name() -> Cow<'static, str> {
+        "OpacityBodies".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Bodies, by name; a placed copy's name (`KB (K:2)`) is that copy alone.",
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "minItems": 1,
+            "maxItems": MAX_LIST
+        })
+    }
+}
+
+fn percent_required(schema: &mut Schema) {
+    require(schema, &["percent"]);
+}
+
+/// Set how opaque bodies and placements are drawn in the modelling view, apart from their
+/// appearances, which stay as they are: give `bodies`, `paths` or both. A body's percentage,
+/// those of the placements above it and its appearance's opacity multiply; 100 clears the
+/// target's own. Renders and exports don't use it. Saved with the design and undone like any
+/// other change.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = percent_required)]
+pub struct BrowserOpacityParams {
+    // Required in the schema (`percent_required`), optional in the type, as `visible` above.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OpacityPercent")]
+    pub percent: Option<OpacityPercent>,
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OpacityBodies")]
+    pub bodies: Option<OpacityBodies>,
+    /// Exact placements, each by its occurrence ids: each with everything in it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlacementPaths")]
+    pub paths: Option<PlacementPaths>,
+}
+
+/// What `browser.opacity` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrowserOpacityResult {
+    /// What was asked for.
+    pub percent: u8,
+    /// How many bodies and placements it was asked for.
+    pub changed: usize,
+    /// The bodies and placements below 100% now.
+    pub opacity: OpacityState,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What an isolate kept.

@@ -133,6 +133,19 @@ impl VisibilityIndex {
     }
 }
 
+/// How much of their own opacity the bodies drawn below 100% keep ([`Session::display_opacity`]),
+/// by name in the placed design.
+pub(crate) struct OpacityCache {
+    /// The design the bodies were placed by and the model they are of. Weak: their addresses are
+    /// not used again while the answers are kept, and neither is kept alive or copied on an edit
+    /// for them.
+    doc: std::sync::Weak<solidcraft_doc::Document>,
+    model: std::sync::Weak<solidcraft_doc::ModelState>,
+    /// The percentages set, kept so that a change of them is another allocation.
+    set: std::sync::Arc<solidcraft_doc::display_opacity::DisplayOpacity>,
+    factors: std::collections::HashMap<String, f64>,
+}
+
 /// How many entries of the hidden lists a visibility answer had to walk, and how many the
 /// index was built from. The browser asks about every joint of the design on every frame, so
 /// the answer must not cost more as the design grows (#3892); the counters make that cost
@@ -386,7 +399,7 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() {
+        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() && self.visibility.opacity.bodies().is_empty() {
             return;
         }
         if rename.is_none() {
@@ -416,7 +429,7 @@ impl Session {
                 if old != new {
                     destinations.insert(new.clone());
                 }
-                if hidden.contains(old.as_str()) || selected.contains(old.as_str()) {
+                if hidden.contains(old.as_str()) || selected.contains(old.as_str()) || self.visibility.opacity.bodies().contains_key(&old) {
                     names.insert(old, new);
                 }
             }
@@ -431,6 +444,13 @@ impl Session {
                 !destinations.contains(hidden)
             }
         });
+        if !self.visibility.opacity.bodies().is_empty() {
+            let mut opacity = (*self.visibility.opacity).clone();
+            opacity.rename_bodies(&names, &destinations);
+            if opacity != *self.visibility.opacity {
+                self.visibility.opacity = opacity.into();
+            }
+        }
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,
@@ -1058,6 +1078,63 @@ impl Session {
         !self.bodies_hidden_by_parents().contains(name)
     }
 
+    /// How much of its appearance's opacity a body is drawn with in the modelling view, 0 to 1
+    /// (`browser.opacity`): its own percentage times those of the placements above it. 0 is not
+    /// drawn. The one answer for every view that draws with it; renders, exports and modelling
+    /// commands read appearances and [`Session::body_visible`], never this.
+    ///
+    /// Inlined, so that with nothing set the answer costs the caller no call (as for
+    /// [`Session::body_visible`]).
+    #[inline]
+    pub fn display_opacity(&self, name: &str) -> f64 {
+        if self.visibility.opacity.is_empty() { 1.0 } else { self.display_opacity_set(name) }
+    }
+
+    fn display_opacity_set(&self, name: &str) -> f64 {
+        use std::sync::Arc;
+        let model = self.model.state();
+        let Ok(mut cache) = self.opacity_cache.lock() else {
+            return self.display_opacities(&model).get(name).copied().unwrap_or(1.0);
+        };
+        let set = &self.visibility.opacity;
+        let current = |c: &OpacityCache| {
+            Arc::ptr_eq(&c.set, set) && std::ptr::eq(c.doc.as_ptr(), Arc::as_ptr(&self.doc)) && std::ptr::eq(c.model.as_ptr(), Arc::as_ptr(&model))
+        };
+        if !cache.as_ref().is_some_and(current) {
+            let factors = self.display_opacities(&model);
+            *cache = Some(OpacityCache { doc: Arc::downgrade(&self.doc), model: Arc::downgrade(&model), set: set.clone(), factors });
+        }
+        cache.as_ref().and_then(|c| c.factors.get(name).copied()).unwrap_or(1.0)
+    }
+
+    /// [`Session::display_opacity`] of every body below 1. The bodies are grouped by component
+    /// once, as for [`Session::bodies_hidden_by_parents`].
+    fn display_opacities(&self, st: &solidcraft_doc::ModelState) -> std::collections::HashMap<String, f64> {
+        let set = &self.visibility.opacity;
+        let mut out = std::collections::HashMap::new();
+        let mut by_component: std::collections::HashMap<u64, Vec<&str>> = std::collections::HashMap::new();
+        for (b, component) in st.bodies.iter().zip(self.doc.model_body_components(st)) {
+            by_component.entry(component).or_default().push(&b.name);
+        }
+        let names = solidcraft_doc::WorldNames::new(&self.doc, st);
+        for (component, path, _) in self.doc.placements() {
+            let Some(bodies) = by_component.get(&component) else { continue };
+            let placed = set.placement_factor(&path);
+            // With no body of its own below 100% a placement at 100% has nothing to name.
+            if placed >= 1.0 && set.bodies().is_empty() {
+                continue;
+            }
+            for &body in bodies {
+                let name = names.name(body, component, &path);
+                let factor = placed * f64::from(set.body(&name)) / 100.0;
+                if factor < 1.0 {
+                    out.insert(name, factor);
+                }
+            }
+        }
+        out
+    }
+
     /// Is the body hidden itself (its own eye; a placement, folder or group may still hide it)?
     fn body_hidden_itself(&self, name: &str) -> bool {
         if let Some(cache) = self.visibility_index() {
@@ -1187,7 +1264,8 @@ impl Session {
         // Keep the view flags for a live occurrence that a pattern has temporarily taken out
         // of the model, while still pruning paths that were actually deleted.
         let shown = std::mem::take(&mut self.visibility.shown_component_origins);
-        if hidden.is_empty() && shown.is_empty() {
+        let opacity = self.visibility.opacity.clone();
+        if hidden.is_empty() && shown.is_empty() && opacity.placements().next().is_none() {
             return;
         }
         let inactive = self.doc.inactive_pattern_occurrences();
@@ -1198,9 +1276,14 @@ impl Session {
                 self.occurrence_placement(path).is_ok()
             }
         };
-        let hidden = hidden.into_iter().filter(kept).collect();
-        let shown = shown.into_iter().filter(kept).collect();
+        let hidden = hidden.into_iter().filter(&kept).collect();
+        let shown = shown.into_iter().filter(&kept).collect();
+        let mut pruned = (*opacity).clone();
+        pruned.retain_placements(kept);
         self.visibility.hidden_occurrences = hidden;
         self.visibility.shown_component_origins = shown;
+        if pruned != *opacity {
+            self.visibility.opacity = pruned.into();
+        }
     }
 }

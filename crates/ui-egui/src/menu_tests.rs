@@ -2806,6 +2806,9 @@ mod browser_rows {
     #[test]
     fn a_click_elsewhere_moves_or_closes_an_open_menu() {
         let mut h = harness();
+        // Tall enough that the body's menu opens below its row, leaving the rows above it uncovered.
+        h.call("ui.resize", serde_json::json!({"width": 1600, "height": 1200}));
+        h.frames(3);
         let half = vec2(0.5, 0.5);
         let plate = crate::scenario::handle_at("row:Plate").expect("Plate row");
         let origin = crate::scenario::handle_at("row:Origin").expect("Origin row");
@@ -3198,4 +3201,124 @@ fn a_whole_body_selection_holds_every_shown_body_and_ctrl_click_takes_one_out() 
         .collect();
     assert_eq!(app.session.selection, others);
     assert!(!app.session.selection_all_bodies);
+}
+
+/// Opacity's rows: Custom Opacity, a line, then 0% to 100% by tens.
+fn opacity_rows() -> Vec<String> {
+    let mut rows = vec!["Custom Opacity".to_string(), String::new()];
+    rows.extend((0..=10).map(|n| format!("{}%", n * 10)));
+    rows
+}
+
+fn opacity_of(app: &SolveApp, t: &Target) -> Item {
+    let rows = context_menu::items(app, t);
+    let at = rows.iter().position(|i| i.label == "Show/Hide").unwrap_or_else(|| panic!("no Show/Hide for {t:?}"));
+    let item = rows[at + 1].clone();
+    assert_eq!((item.id.as_str(), item.label.as_str(), item.enabled), ("ui.opacity", "Opacity", true), "directly under Show/Hide: {t:?}");
+    let labels: Vec<String> = item.children.iter().map(|i| if i.is_sep() { String::new() } else { i.label.clone() }).collect();
+    assert_eq!(labels, opacity_rows());
+    item
+}
+
+fn current(item: &Item) -> Vec<String> {
+    item.children.iter().filter(|i| i.shortcut == "current").map(|i| i.label.clone()).collect()
+}
+
+#[test]
+fn opacity_is_under_show_hide_of_bodies_faces_edges_components_and_placements() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    app.run("component.create", json!({"name": "K"})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "KB"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let k = app.session.doc.components.iter().find(|c| c.name == "K").unwrap().id;
+    let first = app.session.doc.occurrence_of(k).unwrap().id;
+    let second = app.run("occurrence.copy", json!({"occurrence": first, "translate": [0, 30, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    for t in [
+        Target::Body { name: "Block".into() },
+        Target::Component { id: 0 },
+        Target::Component { id: k },
+        Target::Occurrence { path: vec![first] },
+        Target::Occurrence { path: vec![second] },
+    ] {
+        assert_eq!(current(&opacity_of(&app, &t)), ["100%"], "{t:?}");
+    }
+    for item in [
+        json!({"type": "body", "name": "Block"}),
+        json!({"type": "face", "body": "Block", "point": [5, 5, 10]}),
+        json!({"type": "edge", "body": "Block", "point": [5, 0, 10]}),
+    ] {
+        app.run("select.set", json!({"items": [item]})).unwrap();
+        opacity_of(&app, &Target::Viewport);
+        act(&mut app, &Target::Viewport, "40%");
+        assert_eq!(app.session.visibility.opacity.body("Block"), 40, "{item}");
+        assert_eq!(current(&opacity_of(&app, &Target::Viewport)), ["40%"]);
+        act(&mut app, &Target::Viewport, "100%");
+        assert!(app.session.visibility.opacity.is_empty());
+    }
+    // One placement, not its copy; a percentage between the tens checks Custom Opacity.
+    act(&mut app, &Target::Occurrence { path: vec![second] }, "30%");
+    assert_eq!((app.session.visibility.opacity.placement(&[first]), app.session.visibility.opacity.placement(&[second])), (100, 30));
+    app.run("browser.opacity", json!({"percent": 35, "paths": [[second]]})).unwrap();
+    assert_eq!(current(&opacity_of(&app, &Target::Occurrence { path: vec![second] })), ["Custom Opacity"]);
+    assert_eq!(current(&opacity_of(&app, &Target::Occurrence { path: vec![first] })), ["100%"]);
+    // Nowhere else.
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.features.iter().find(|f| f.name == "S").unwrap().id;
+    for t in [Target::Sketch { id: sketch }, Target::OriginPlane { name: "XY".into() }, Target::OriginAxis { name: "X".into() }] {
+        assert!(context_menu::entries(&app, &t).iter().all(|i| i.id != "ui.opacity"), "{t:?}");
+    }
+}
+
+#[test]
+fn opacity_of_a_selected_row_sets_the_selection_and_of_another_row_only_itself() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (i, name) in ["A", "B", "C"].iter().enumerate() {
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20 * i, 0, 0], "body_name": name})).unwrap();
+    }
+    app.run("select.set", json!({"items": [{"type": "body", "name": "A"}, {"type": "body", "name": "B"}]})).unwrap();
+    act(&mut app, &Target::Body { name: "A".into() }, "20%");
+    let set = |app: &SolveApp| ["A", "B", "C"].map(|b| app.session.visibility.opacity.body(b));
+    assert_eq!(set(&app), [20, 20, 100]);
+    act(&mut app, &Target::Body { name: "C".into() }, "0%");
+    assert_eq!(set(&app), [20, 20, 0]);
+    // Different percentages mark none.
+    app.run("select.set", json!({"items": [{"type": "body", "name": "A"}, {"type": "body", "name": "C"}]})).unwrap();
+    assert_eq!(current(&opacity_of(&app, &Target::Body { name: "A".into() })), Vec::<String>::new());
+    let undo = app.session.undo.len();
+    act(&mut app, &Target::Body { name: "A".into() }, "100%");
+    assert_eq!((set(&app), app.session.undo.len()), ([100, 20, 100], undo + 1), "one undo step");
+}
+
+/// The check is on the percentage's own row, or on Custom Opacity when it has none; choosing
+/// another moves it, and undo moves it back.
+#[test]
+fn opacity_checks_the_row_of_the_percentage_set() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("A", 0), ("B", 20)] {
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [x, 0, 0], "body_name": name})).unwrap();
+    }
+    let a = Target::Body { name: "A".into() };
+    let set = |app: &mut SolveApp, percent: u8| drop(app.run("browser.opacity", json!({"percent": percent, "bodies": ["A"]})).unwrap());
+    let checked = |app: &SolveApp| current(&opacity_of(app, &Target::Body { name: "A".into() }));
+    for percent in 0..=100u8 {
+        set(&mut app, percent);
+        let row = if percent % 10 == 0 { format!("{percent}%") } else { "Custom Opacity".to_string() };
+        assert_eq!(checked(&app), [row], "{percent}%");
+    }
+    set(&mut app, 35);
+    act(&mut app, &a, "70%");
+    assert_eq!(checked(&app), ["70%"], "choosing another takes the check off Custom Opacity");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(checked(&app), ["Custom Opacity"]);
+    set(&mut app, 40);
+    assert_eq!(checked(&app), ["40%"], "a custom percentage with a row of its own checks that row");
+    // Both selected: the same custom percentage checks it, different ones check nothing.
+    app.run("select.set", json!({"items": [{"type": "body", "name": "A"}, {"type": "body", "name": "B"}]})).unwrap();
+    app.run("browser.opacity", json!({"percent": 35, "bodies": ["A", "B"]})).unwrap();
+    assert_eq!(checked(&app), ["Custom Opacity"]);
+    set(&mut app, 36);
+    assert_eq!(checked(&app), Vec::<String>::new());
 }

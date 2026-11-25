@@ -608,6 +608,9 @@ fn clear_history(s: &mut Session, sc: &Scope) {
     s.visibility.hidden_sketches.retain(|f| !sc.inside.contains(f));
     s.visibility.shown_sketches.retain(|f| !sc.inside.contains(f));
     s.visibility.hidden_occurrences.retain(|p| !p.iter().any(|o| inner.contains(o)));
+    if !s.visibility.opacity.is_empty() {
+        std::sync::Arc::make_mut(&mut s.visibility.opacity).retain_placements(|p| !p.iter().any(|o| inner.contains(o)));
+    }
     if children.contains(&s.active_component) {
         s.active_component = 0;
         s.active_occurrence_path = None;
@@ -988,6 +991,21 @@ mod tests {
         run(&mut s, "component.activate", json!({"component": 0}));
         run(&mut s, "occurrence.move", json!({"occurrence": plate_occ, "translate": [100, 0, 0]}));
         (s, plate, other)
+    }
+
+    /// The extracted component's own placement keeps its display opacity; those of the placements
+    /// that went into the new design go with them.
+    #[test]
+    fn extract_keeps_the_placements_display_opacity_and_drops_its_contents() {
+        let dir = folder("display-opacity");
+        let (mut s, plate, _) = assembly();
+        let outer = s.doc.occurrence_of(plate).unwrap().id;
+        let inner = s.doc.occurrences.iter().find(|o| o.parent == plate).unwrap().id;
+        run(&mut s, "file.save", json!({"path": dir.join("asm.solidcraft")}));
+        run(&mut s, "browser.opacity", json!({"percent": 40, "paths": [[outer], [outer, inner]]}));
+        run(&mut s, "component.extract", json!({"component": "Plate", "path": dir.join("plate.solidcraft")}));
+        let opacity = &s.visibility.opacity;
+        assert_eq!((opacity.placement(&[outer]), opacity.placement(&[outer, inner]), opacity.len()), (40, 100, 1), "{opacity:?}");
     }
 
     #[test]

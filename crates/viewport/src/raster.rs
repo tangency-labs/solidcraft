@@ -616,6 +616,7 @@ mod tests {
             color: Rgb(255, 0, 0),
             face_colors: Vec::new(),
             opacity: front_opacity,
+            shown: 1.0,
             closed: true,
             hatch: Default::default(),
             values: None,

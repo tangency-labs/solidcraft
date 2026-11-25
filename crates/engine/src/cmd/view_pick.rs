@@ -72,7 +72,7 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
     let occ = occurrence_map(s);
     let comps = component_names(s);
     let names: BTreeMap<u64, &str> = s.doc.components.iter().map(|c| (c.id, c.name.as_str())).collect();
-    let shown: Vec<_> = st.bodies.iter().filter(|b| s.body_visible(&b.name)).collect();
+    let shown: Vec<_> = st.bodies.iter().filter(|b| s.body_visible(&b.name) && s.display_opacity(&b.name) > 0.0).collect();
     let clouds: Vec<_> = if clouds_on && cloud_radius > 0.0 { crate::view::shown_point_clouds(s).collect() } else { Vec::new() };
     let cloud_indexes: Vec<Option<solidcraft_geom::PointCloudIndex>> =
         clouds.iter().map(|c| (inputs.len() > 1 && c.len() > 512).then(|| solidcraft_geom::PointCloudIndex::new(c.points.values()))).collect();

@@ -1005,7 +1005,7 @@ pub(crate) fn in_view_centre(app: &SolveApp, proj: &Proj) -> Option<Vec3> {
     let st = crate::open_meshing::shown_world(app);
     let b = body_bounds(app, &st)
         .iter()
-        .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && in_view(proj, b))
+        .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && app.display_opacity(name) > 0.0 && in_view(proj, b))
         .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b));
     (!b.is_empty()).then(|| b.center())
 }
@@ -1080,6 +1080,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.session.visibility.shown_sketches.hash(&mut h);
     app.session.visibility.hidden_folders.hash(&mut h);
     app.session.visibility.hidden_profiles.hash(&mut h);
+    display_opacity_key(app).hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
@@ -1209,12 +1210,35 @@ const FRAME_GHOST_OPACITY: f64 = 0.3;
 
 /// [`FRAME_GHOST_OPACITY`] as a colour's alpha, as see-through faces are drawn.
 pub(crate) fn frame_ghost_alpha() -> u8 {
-    glass_alpha(FRAME_GHOST_OPACITY)
+    glass_alpha(FRAME_GHOST_OPACITY, 1.0)
 }
 
-/// A see-through face's alpha for an opacity.
-fn glass_alpha(opacity: f64) -> u8 {
-    (opacity.clamp(0.05, 1.0) * 255.0).round() as u8
+/// A see-through face's alpha for an appearance's opacity, of which the view shows `display`
+/// ([`SolveApp::display_opacity`]).
+fn glass_alpha(opacity: f64, display: f64) -> u8 {
+    (solidcraft_viewport::glass_alpha(opacity, display) * 255.0).round() as u8
+}
+
+/// A colour at `display` ([`SolveApp::display_opacity`]) of its own alpha.
+fn at_display([r, g, b, a]: [u8; 4], display: f64) -> [u8; 4] {
+    [r, g, b, (f64::from(a) * display.clamp(0.0, 1.0)).round() as u8]
+}
+
+/// A look's key for a body drawn at `display` of its opacity: copies of a part that look the
+/// same share palette slots only at the same one.
+fn at_display_key(key: u64, display: f64) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    if display >= 1.0 {
+        return key;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (key, display.to_bits()).hash(&mut h);
+    h.finish()
+}
+
+/// What a body's display opacity changes in the scenes and picks ([`SolveApp::display_opacity`]).
+fn display_opacity_key(app: &SolveApp) -> Option<&solidcraft_engine::doc::display_opacity::DisplayOpacity> {
+    Some(&*app.session.visibility.opacity).filter(|set| !set.is_empty() && !crate::render_workspace::active(app))
 }
 
 /// Is the Frame Member dialog open with Ghost Frame Members ticked (#15705)?
@@ -1522,7 +1546,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
         if !refined {
             continue;
         }
-        let shown = app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name);
+        let shown = app.body_drawn(&b.name) && !app.preview.effective_replaced().contains(&b.name);
         let on_screen = match screen_box(proj, bx, 0.0).filter(|_| shown) {
             Some(r) => r.intersects(proj.rect).then(|| f64::from(r.width().max(r.height())) * ppp),
             // A corner behind the eye: the view is inside or right by the box.
@@ -1601,6 +1625,8 @@ struct ResolvedAppearance {
     component: Option<Color32>,
     body: Option<Color32>,
     opacity: f64,
+    /// How much of its looks' opacity the view shows ([`SolveApp::display_opacity`]).
+    display: f64,
     face_looks: std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
     /// The body look's PBR finish (metallic, roughness), if it has one.
     pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>,
@@ -1716,6 +1742,7 @@ fn resolve_appearance(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> 
         component: solidcraft_engine::view::component_color(s, b.component).map(|[r, g, b]| Color32::from_rgb(r, g, b)),
         body: body_color(&s.doc, b),
         opacity: s.doc.model_body_opacity(b),
+        display: app.display_opacity(&b.name),
         face_looks: if s.colored_components.is_none() { s.doc.face_colors(b).into_iter().collect() } else { Default::default() },
         pbr: s.doc.model_body_look(b).and_then(|l| l.pbr),
     }
@@ -1746,7 +1773,7 @@ fn face_classes(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, active_bo
     (0..b.body.face_count())
         .map(|f| {
             let opacity = resolved.face_looks.get(&f).map_or(resolved.opacity, |l| l.opacity);
-            if opacity < 0.999 { crate::gpu::TriClass::Glass } else { crate::gpu::TriClass::Opaque }
+            if opacity * resolved.display < 0.999 { crate::gpu::TriClass::Glass } else { crate::gpu::TriClass::Opaque }
         })
         .collect()
 }
@@ -2851,7 +2878,9 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
     // The closed solid bodies the section cuts and where it cuts them: their hatches by part.
     let by_part = app.preferences.section_hatch == crate::prefs::SectionHatch::ByPart;
     let mut cuts: Vec<(&str, Vec<(Vec3, Vec3)>)> = Vec::new();
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+    for b in st.bodies.iter().filter(|b| app.body_drawn(&b.name)) {
+        let display = app.display_opacity(&b.name);
+        let col = if display < 1.0 { sc.color(at_display(c4(Tokens::view().text.gamma_multiply(0.9)), display)) } else { col };
         let mesh = b.mesh();
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let index = match kept.remove(&key).filter(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)) {
@@ -2868,7 +2897,7 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
             }
         }
         made.insert(key, (mesh, index));
-        let solid = b.is_closed() && !body_faded(app, b, &active_bodies) && s.doc.model_body_opacity(b) >= 0.999;
+        let solid = b.is_closed() && !body_faded(app, b, &active_bodies) && s.doc.model_body_opacity(b) * display >= 0.999;
         if by_part && solid && !segments.is_empty() {
             cuts.push((b.name.as_str(), segments));
         }
@@ -2977,7 +3006,7 @@ fn body_scene(
     // Every shown body, and the ones this scene takes. The arena and the appearance cache
     // keep every shown body, so a scene of some of them (a drag drawn as a layer) leaves the
     // others' slots and looks as they were.
-    let visible = |b: &&solidcraft_engine::doc::ModelBody| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name);
+    let visible = |b: &&solidcraft_engine::doc::ModelBody| app.body_drawn(&b.name) && !app.preview.effective_replaced().contains(&b.name);
     let shown_names: Vec<&str> = st.bodies.iter().filter(visible).map(|b| b.name.as_str()).collect();
     let shown: Vec<&solidcraft_engine::doc::ModelBody> =
         st.bodies.iter().enumerate().filter(|(i, b)| takes(*i) && visible(b)).map(|(_, b)| b).collect();
@@ -3006,6 +3035,7 @@ fn body_scene(
         .iter()
         .map(|b| {
             let faded = body_faded(app, b, &active_bodies);
+            let display = app.display_opacity(&b.name);
             let identity = match appearance.keys.get(&b.name).copied() {
                 Some(key) => key,
                 None => {
@@ -3014,12 +3044,13 @@ fn body_scene(
                     key
                 }
             };
+            let identity = at_display_key(identity, display);
             let copy = b
                 .placed_definition()
                 // A copy drawn finer than the others (zoomed in on) is drawn from its own plan, in
                 // its face slots: shared, they would name no motion, and a joint drag would leave it.
                 .filter(|_| repeated_copy(app, b) && refined(app, b).is_none())
-                .map(|definition| (definition, look_key(&s.doc, b, &appearance.faces, colored)));
+                .map(|definition| (definition, at_display_key(look_key(&s.doc, b, &appearance.faces, colored), display)));
             let slots = match copy {
                 Some((definition, look)) => {
                     let key = copy_keys.entry((definition, look, faded)).or_insert_with(|| format!("\u{0}placed {definition:x} {look:x} {faded}"));
@@ -3061,14 +3092,15 @@ fn body_scene(
                 resolved
             }
         };
-        set_palette_color(&mut arena, &mut sc.palette, slots.edge, edge_col);
-        set_palette_color(&mut arena, &mut sc.palette, slots.hidden_edge, hidden_col);
+        let display = resolved.display;
+        set_palette_color(&mut arena, &mut sc.palette, slots.edge, at_display(edge_col, display));
+        set_palette_color(&mut arena, &mut sc.palette, slots.hidden_edge, at_display(hidden_col, display));
         if app.preferences.cosmetic_threads
             && thread_budget.available()
             && shaded
             && !faded
             && thread_budget.has_thread(&b.name, &st.threads)
-            && resolved.opacity >= 0.999
+            && resolved.opacity * display >= 0.999
             && resolved.face_looks.values().all(|l| l.opacity >= 0.999)
         {
             let mesh = shown_mesh(app, b, &active_bodies);
@@ -3079,14 +3111,14 @@ fn body_scene(
         // Ghost Frame Members: see-through in the plain body colour, whatever its appearance.
         let ghosted = !faded && frame_ghosted(app, b);
         let base = if ghosted { tk.body } else { resolved.component.or(resolved.body).unwrap_or(tk.body) };
-        let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
+        let col = if faded { at_display(c4(base.gamma_multiply(0.35)), display) } else { c4(base) };
         set_palette_color(&mut arena, &mut sc.palette, slots.body, col);
         // Appearances: the body's opacity, and faces with looks of their own.
         let opacity = if ghosted { FRAME_GHOST_OPACITY } else { resolved.opacity };
         // PBR finishes (metallic, roughness) for opaque bodies and faces in their own colours
         // (shown when Preferences › Graphics says so, `sky_uniform`).
         let finishes = !faded;
-        let body_pbr = resolved.pbr.filter(|_| finishes && resolved.component.is_none() && opacity >= 0.999);
+        let body_pbr = resolved.pbr.filter(|_| finishes && resolved.component.is_none() && opacity * display >= 0.999);
         arena.set_material(slots.body, finish(base, body_pbr));
         arena.set_material(slots.instance, finish(base, body_pbr));
         let no_looks = std::collections::HashMap::new();
@@ -3111,17 +3143,17 @@ fn body_scene(
                     let color = look.map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]));
                     let opacity = look.map_or(opacity, |l| l.opacity);
                     let (rgba, class) = if faded {
-                        (c4(color.gamma_multiply(0.35)), crate::gpu::TriClass::Faded)
-                    } else if opacity < 0.999 {
+                        (at_display(c4(color.gamma_multiply(0.35)), display), crate::gpu::TriClass::Faded)
+                    } else if opacity * display < 0.999 {
                         let mut rgba = c4(color);
-                        rgba[3] = glass_alpha(opacity);
+                        rgba[3] = glass_alpha(opacity, display);
                         (rgba, crate::gpu::TriClass::Glass)
                     } else {
                         (c4(color), crate::gpu::TriClass::Opaque)
                     };
                     let slot = slots.face(f);
                     set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
-                    let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
+                    let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity * display >= 0.999));
                     let material = finish(color, pbr);
                     arena.set_material(slot, material);
                     face_colors.push(slot);
@@ -3164,14 +3196,14 @@ fn body_scene(
         // are built as before).
         let look = if faded {
             crate::gpu::InstanceLook::Faded
-        } else if opacity < 0.999 {
+        } else if opacity * display < 0.999 {
             crate::gpu::InstanceLook::Glass
         } else {
             crate::gpu::InstanceLook::Opaque
         };
         let alpha = match look {
             crate::gpu::InstanceLook::Faded => col[3],
-            crate::gpu::InstanceLook::Glass => glass_alpha(opacity),
+            crate::gpu::InstanceLook::Glass => glass_alpha(opacity, display),
             crate::gpu::InstanceLook::Opaque | crate::gpu::InstanceLook::Pbr => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
@@ -3350,13 +3382,13 @@ fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
         }
         outlines.advance(&proj.cam, crate::wireframe_silhouettes::WORK_PER_FRAME, |index| {
             let body = st.bodies.get(index)?;
-            if !app.body_visible(&body.name) || app.preview.effective_replaced().contains(&body.name) {
+            if !app.body_drawn(&body.name) || app.preview.effective_replaced().contains(&body.name) {
                 return None;
             }
             // The model scene already requested these display meshes. Reuse placements'
             // shared triangles instead of materializing a moved copy during each drag.
             let (mesh, placement) = shared_mesh(app, body).unwrap_or_else(|| (drawn_mesh(app, body), solidcraft_engine::doc::IDENTITY));
-            crate::wireframe_silhouettes::Source::new(mesh, placement)
+            Some(crate::wireframe_silhouettes::Source::new(mesh, placement)?.shown(app.display_opacity(&body.name)))
         });
     }
     app.viewport.wireframe = outlines;
@@ -3379,8 +3411,13 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     }
     if app.ui.visual_style == 2 {
         let color = sc.color(c4(tk.text));
-        for [a, b] in app.viewport.wireframe.segments() {
-            sc.line(a.to_f32(), b.to_f32(), color, 1.3, false);
+        let mut faint = (1.0, color);
+        for ([a, b], shown) in app.viewport.wireframe.lines() {
+            // One body's lines follow each other.
+            if shown != faint.0 {
+                faint = (shown, if shown < 1.0 { sc.color(at_display(c4(tk.text), shown)) } else { color });
+            }
+            sc.line(a.to_f32(), b.to_f32(), faint.1, 1.3, false);
         }
     }
     let mut fill_budget = 131_072;
@@ -3704,7 +3741,7 @@ fn ground_shadow_shown(app: &SolveApp) -> bool {
 /// Each shown body's box in the camera's Z-up frame (the ground is its XY plane).
 fn ground_boxes(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> Vec<solidcraft_engine::geom::Aabb3> {
     let boxes = body_bounds(app, st);
-    let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_visible(&x.name));
+    let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_drawn(&x.name));
     shown.map(|(_, (_, bb))| frame_bounds(app, box_corners(bb).into_iter())).collect()
 }
 
@@ -4623,6 +4660,7 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
+    display_opacity_key(app).hash(&mut h);
     for c in solidcraft_engine::view::shown_point_clouds(&app.session) {
         c.id.hash(&mut h);
         (std::sync::Arc::as_ptr(c.points.values()).cast::<f32>() as usize).hash(&mut h);
@@ -5101,7 +5139,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
-        if (!through && !app.body_visible(&b.name)) || frame_ghosted(app, b) {
+        if (!through && !app.body_drawn(&b.name)) || frame_ghosted(app, b) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -5175,7 +5213,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
-        if !through && !app.body_visible(&b.name) {
+        if !through && !app.body_drawn(&b.name) {
             continue;
         }
         // A ghosted frame member's vertices are picked, its edges are not.
@@ -6512,6 +6550,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     app.session.visibility.hidden_folders.hash(&mut h);
+    display_opacity_key(app).hash(&mut h);
     // How strongly print faces are tinted (Preferences › General › Slicer).
     app.preferences.print_face_highlight.to_bits().hash(&mut h);
     // And whether they are tinted at all: only while Send to Slicer is open, unless kept (#11512).
@@ -6638,7 +6677,7 @@ fn highlight_opaque(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, activ
     }
     let doc = &app.session.doc;
     let faces_opaque = app.ui.visual_style == 2 || doc.face_colors(b).iter().all(|(_, l)| l.opacity >= 0.999);
-    !body_faded(app, b, active_bodies) && doc.model_body_opacity(b) >= 0.999 && faces_opaque
+    !body_faded(app, b, active_bodies) && doc.model_body_opacity(b) * app.display_opacity(&b.name) >= 0.999 && faces_opaque
 }
 
 /// Whole highlighted bodies the model draws as placements of shared triangles, collected as one
@@ -7135,7 +7174,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // in the error colour, over the shading (and dimmed where the model hides it), like the
     // selection's outline.
     for (body, face) in &app.viewport.refused_ring {
-        let Some(b) = st.body(body).filter(|_| app.session.body_visible(body)) else { continue };
+        let Some(b) = st.body(body).filter(|_| app.body_drawn(body)) else { continue };
         // The face itself tinted (a face whose edges are two small circles still reads as one).
         face_tris(&mut sc, &shown(b), *face, c4(t.error.gamma_multiply(0.35)), false);
         let m = drawn_mesh(app, b);
@@ -7203,7 +7242,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let k = (strength * 2.25).min(1.0);
         let rim = Color32::from_rgb(blend(edge.r(), cap.r(), k), blend(edge.g(), cap.g(), k), blend(edge.b(), cap.b(), k));
         let outline = EdgeColours::new(&mut feedback, rim, rim);
-        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+        for b in st.bodies.iter().filter(|b| app.body_drawn(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
             let Some(Ok(face)) = s.doc.print_face(&st, b) else { continue };
             let (r, g, bl) = body_rgb(app, &b.name);
             face_tris(&mut feedback, &shown(b), face.index, [mix(r, cap.r()), mix(g, cap.g()), mix(bl, cap.b()), 255], true);
@@ -7234,7 +7273,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // A live preview stands in for the body: its old faces would fight with it.
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
-                if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
+                if let Some(b) = by_name.get(body).filter(|_| app.body_drawn(body) && !replaced(body)) {
                     // The only face of an imported mesh covers all its triangles and has no
                     // pickable outline. Preserve authored normals in the copied fill: the
                     // instanced flat shader uses the geometric normal even on a triangle with
@@ -7267,7 +7306,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // As a face: lit over a live preview, the old body fought with it in slivers. A body
                 // Move/Copy moves is outlined by its preview while one draws it.
                 if let Some(b) = by_name.get(name)
-                    && app.body_visible(name)
+                    && app.body_drawn(name)
                     && !replaced(name)
                     && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
                 {
@@ -7307,7 +7346,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
             Sel::Edge { body, index, point } => {
                 if let Some(b) = by_name.get(body)
-                    && app.body_visible(body)
+                    && app.body_drawn(body)
                     && !moving(body)
                 {
                     let m = drawn(b);
@@ -7436,7 +7475,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+    for b in st.bodies.iter().filter(|b| app.body_drawn(&b.name)) {
         // A body the preview stands in for is not lit, its old faces fighting with the preview,
         // but outlined by what the preview draws for it where it says (a combine's result, or a
         // tool it ghosts).
@@ -9836,7 +9875,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         let active_bodies = if scoped_bodies { active_body_names(app) } else { None };
         let measuring = measuring_mesh_edges(app);
         for b in &st.bodies {
-            if !app.body_visible(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
+            if !app.body_drawn(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
                 continue;
             }
             let m = b.mesh();
@@ -10078,7 +10117,7 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj, feedback: Option<&egui::Co
     near.dedup();
     for i in near.into_iter().chain(bounds.len()..st.bodies.len()) {
         let Some(b) = st.bodies.get(i) else { continue };
-        if !app.body_visible(&b.name) {
+        if !app.body_drawn(&b.name) {
             continue;
         }
         // A body a joint drag moves on the GPU hides it where the frame draws it.
@@ -14664,6 +14703,127 @@ mod tests {
         assert!(drawn > 300, "the sphere is drawn: {drawn} pixels");
         let differ = lod.chunks(4).zip(full.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
         assert!(differ * 20 < drawn, "{differ} of {drawn} pixels differ");
+    }
+
+    /// Display opacity (`browser.opacity`) fades a body's faces and its edges, times its
+    /// appearance's opacity, and leaves its colour; 100% draws it as before. 0% draws nothing.
+    #[test]
+    fn display_opacity_fades_faces_and_edges_and_100_is_as_before() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "body_name": "Other"})).unwrap();
+        app.run("appearance.assign", json!({"bodies": ["Block"], "color": "#3366cc"})).unwrap();
+        let top = [10.0, 10.0, 20.0];
+        app.run("appearance.assign", json!({"faces": [{"point": top, "body": "Block"}], "color": "#ff0000", "opacity": 0.5})).unwrap();
+        let drawn = |app: &SolveApp| {
+            let scene = build_scene(app);
+            let body = app.session.world_state().unwrap().body("Block").unwrap().clone();
+            let arena = app.viewport.palette.lock().unwrap();
+            let colours = arena.slots("Block").map(|slots| {
+                let faces: std::collections::BTreeSet<_> = (0..body.body.face_count()).map(|f| arena.get(slots.face(f)).unwrap()).collect();
+                (faces.into_iter().collect::<Vec<_>>(), arena.get(slots.edge).unwrap()[3], arena.get(slots.hidden_edge).unwrap()[3])
+            });
+            let merged = scene.merged();
+            (colours, merged.tris.len(), merged.glass.len(), merged.lines.len())
+        };
+        let before = drawn(&app);
+        let key = scene_key(&app);
+        let (faces, edge, hidden) = before.0.clone().unwrap();
+        assert_eq!(faces, [[0x33, 0x66, 0xcc, 255], [255, 0, 0, 128]]);
+        assert_eq!(edge, 255);
+        app.run("browser.opacity", json!({"percent": 40, "bodies": ["Block"]})).unwrap();
+        assert_ne!(scene_key(&app), key, "the scene is drawn again");
+        let faded = drawn(&app);
+        let (faces, e, h) = faded.0.clone().unwrap();
+        assert_eq!(faces, [[0x33, 0x66, 0xcc, 102], [255, 0, 0, 51]], "40% of 1 and of 0.5");
+        assert_eq!((e, h), (102, (f64::from(hidden) * 0.4).round() as u8), "the edges fade alike");
+        assert_eq!((faded.1 + faded.2, faded.3), (before.1 + before.2, before.3), "the same triangles and lines, see-through");
+        // As faint as asked, below the trace a clear appearance leaves.
+        app.run("browser.opacity", json!({"percent": 1, "bodies": ["Block"]})).unwrap();
+        assert_eq!(drawn(&app).0.unwrap().0, [[0x33, 0x66, 0xcc, 3], [255, 0, 0, 1]]);
+        app.run("browser.opacity", json!({"percent": 0, "bodies": ["Block"]})).unwrap();
+        let gone = drawn(&app);
+        assert!(gone.1 + gone.2 < before.1 + before.2 && gone.3 < before.3, "only the other body is drawn: {gone:?} of {before:?}");
+        app.run("browser.opacity", json!({"percent": 100, "bodies": ["Block"]})).unwrap();
+        assert_eq!(drawn(&app), before);
+        assert_eq!(app.session.doc.appearances.bodies["Block"].opacity, 1.0);
+    }
+
+    /// One placement of a part at its own opacity is drawn see-through, its copies as they were:
+    /// they share no colours then.
+    #[test]
+    fn display_opacity_of_one_placement_leaves_its_copies() {
+        use crate::gpu::InstanceLook;
+        let mut app = three_placed_parts(PARTS[0]);
+        let looks = |app: &SolveApp| {
+            let mut looks: Vec<_> = build_scene(app).instanced.iter().map(|m| (format!("{:?}", m.look), m.count())).collect();
+            looks.sort();
+            looks
+        };
+        let name = |look: InstanceLook| format!("{look:?}");
+        let before = looks(&app);
+        assert_eq!(before.iter().map(|(_, n)| n).sum::<usize>(), 3, "{before:?}");
+        let path = vec![app.session.doc.occurrences.last().unwrap().id];
+        app.run("browser.opacity", json!({"percent": 30, "paths": [path]})).unwrap();
+        assert_eq!(looks(&app), [(name(InstanceLook::Glass), 1), (name(InstanceLook::Opaque), 2)]);
+        let alphas: std::collections::BTreeSet<u8> = {
+            let arena = app.viewport.palette.lock().unwrap();
+            let world = app.session.world_state().unwrap();
+            world.bodies.iter().map(|b| arena.get(arena.slots(&b.name).unwrap().instance).unwrap()[3]).collect()
+        };
+        assert_eq!(alphas.into_iter().collect::<Vec<_>>(), [77, 255]);
+        app.run("browser.opacity", json!({"percent": 0, "paths": [path]})).unwrap();
+        assert_eq!(looks(&app).iter().map(|(_, n)| n).sum::<usize>(), 2, "the placement at 0% is not drawn");
+        app.run("browser.opacity", json!({"percent": 100, "paths": [path]})).unwrap();
+        assert_eq!(looks(&app), before);
+    }
+
+    /// A body at 0% is neither clicked nor taken by a selection box, though it is not hidden; at
+    /// 30% it is, as at 100%. The Render workspace draws it as its appearance says.
+    #[test]
+    fn display_opacity_0_lets_clicks_through_and_anything_more_does_not() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Front", "corner": [0, 0, 10]})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 5, "body_name": "Behind", "operation": "new"})).unwrap();
+        h.settle();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        h.call("ui.view", json!({"view": "fit"}));
+        h.settle();
+        let hit = |h: &mut crate::scenario::Harness| {
+            let proj = display_proj(&h.app);
+            let at = proj.to_screen(Vec3::new(8.0, 11.0, 5.0)).unwrap();
+            pick(&h.app, &proj, at).into_iter().find_map(|hit| match hit {
+                Hit::Face { body, .. } => Some(body),
+                _ => None,
+            })
+        };
+        assert_eq!(hit(&mut h).as_deref(), Some("Front"));
+        for percent in [30, 1] {
+            h.app.run("browser.opacity", json!({"percent": percent, "bodies": ["Front"]})).unwrap();
+            assert_eq!(hit(&mut h).as_deref(), Some("Front"), "{percent}%");
+        }
+        h.app.run("browser.opacity", json!({"percent": 0, "bodies": ["Front"]})).unwrap();
+        h.settle();
+        assert_eq!(hit(&mut h).as_deref(), Some("Behind"));
+        assert!(h.app.body_visible("Front") && !h.app.body_drawn("Front"), "the Browser shows it as shown");
+        let boxed = |h: &mut crate::scenario::Harness| {
+            h.app.run("select.clear", json!({})).unwrap();
+            // Round both bodies, a little outside them.
+            let corners = [[0.0, 0.0], [20.0, 20.0]].map(|[x, y]| h.at(&json!({"world": [x, y, 5.0]})).unwrap());
+            let span = |i: usize| (corners[0][i].min(corners[1][i]) - 5.0, corners[0][i].max(corners[1][i]) + 5.0);
+            let (x, y) = (span(0), span(1));
+            h.step(&json!({"drag": [[x.0, y.0], [x.1, y.1]]})).unwrap();
+            let mut names = crate::context_menu::sel_bodies(&h.app);
+            names.sort();
+            names
+        };
+        assert_eq!(boxed(&mut h), ["Behind"], "the box takes what is drawn");
+        h.app.run("browser.opacity", json!({"percent": 100, "bodies": ["Front"]})).unwrap();
+        assert_eq!(hit(&mut h).as_deref(), Some("Front"));
+        assert_eq!(boxed(&mut h), ["Behind", "Front"]);
     }
 
     /// See-through and faded placements of a part are drawn as instances too, with their alpha:

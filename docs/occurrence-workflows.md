@@ -42,6 +42,14 @@ Visibility is an independent view setting for exact placements. Hide a path and 
 
 `visible:true` removes that path's own hide setting. A hidden ancestor still hides its descendants. Add `isolate:true` to a visible path list to hide other branches. Show the bodies folder to clear occurrence hides. Selection and activation paths are session state. Visibility is saved with the design (hidden bodies, placements, sketches and origin items) and is an undo step of its own, so undo brings a hidden body or placement back; the saved document also retains occurrence IDs and transforms. Undo follows the existing behavior of clearing selection.
 
+Display opacity is a view setting too, for exact placements and for bodies. `browser.opacity` sets it in whole percent:
+
+```json
+{"percent":40,"paths":[[2,4]],"bodies":["Cover"]}
+```
+
+A body's percentage, the percentage of each placement above it and the opacity of its appearance multiply. 100 removes the setting, and the body is drawn as its appearance says. The appearance, colour and material never change. At 0 the body is not drawn and clicks pass through it, but it is not hidden: the Browser shows it as shown and modelling commands use it. Edges fade as well, and more strongly than the faces, because the see-through faces are drawn over them. Renders and exports read appearances only. Display opacity is saved with the design, is an undo step of its own and adds no feature. In the app, use **Opacity** under **Show/Hide** in the menu of a body or component.
+
 Paths are checked for missing links, repeated IDs, component mismatches and a maximum depth of 64. Descendant expansion rejects more than 100,000 placements or bodies instead of returning incomplete results. Computed body names normally retain their readable occurrence labels; collisions use full occurrence IDs so visibility and body commands still address the correct source.
 
 Placed bodies retain their definition identity separately from display names. Body materials and appearances remain shared, with body overrides taking precedence over component overrides and material colors. Face overrides follow the placed geometry, including pending positions, and painted exports retain these colors.

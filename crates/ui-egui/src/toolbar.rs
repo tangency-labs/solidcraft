@@ -3063,6 +3063,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     // starting with L or D), even on the frame before its field holds the focus.
     let popup_owner = egui::Popup::is_any_open(ctx)
         || crate::dialogs_save_mesh::popup_open(ctx)
+        || crate::opacity_menu::asking(app)
         || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
         || crate::personal_sheet_rules::name_prompt_open(ctx, app.dialog.as_ref());
     let inline_editor = crate::dim_view::editing();

@@ -1,0 +1,58 @@
+{
+  "en": {
+    "cmd.browser_opacity": "Opacity",
+    "Custom Opacity": "Custom Opacity",
+    "Custom opacity %": "Custom opacity %",
+    "opacity.out_of_range": "Enter a whole number from 0 to 100.",
+    "opacity.select_first": "Select bodies or components first, then set their opacity."
+  },
+  "ar": {
+    "cmd.browser_opacity": "العتامة",
+    "Custom Opacity": "عتامة مخصصة",
+    "Custom opacity %": "عتامة مخصصة %",
+    "opacity.out_of_range": "أدخل عددًا صحيحًا من 0 إلى 100.",
+    "opacity.select_first": "حدد الأجسام أو المكونات أولاً، ثم عيّن عتامتها."
+  },
+  "he": {
+    "cmd.browser_opacity": "אטימות",
+    "Custom Opacity": "אטימות מותאמת אישית",
+    "Custom opacity %": "אטימות מותאמת אישית %",
+    "opacity.out_of_range": "יש להזין מספר שלם מ-0 עד 100.",
+    "opacity.select_first": "יש לבחור תחילה גופים או רכיבים, ואז להגדיר את האטימות שלהם."
+  },
+  "ja": {
+    "cmd.browser_opacity": "不透明度",
+    "Custom Opacity": "カスタム不透明度",
+    "Custom opacity %": "カスタム不透明度 %",
+    "opacity.out_of_range": "0 から 100 までの整数を入力してください。",
+    "opacity.select_first": "先にボディまたはコンポーネントを選択してから、不透明度を設定してください。"
+  },
+  "vi": {
+    "cmd.browser_opacity": "Độ mờ đục",
+    "Custom Opacity": "Độ mờ đục tùy chỉnh",
+    "Custom opacity %": "Độ mờ đục tùy chỉnh %",
+    "opacity.out_of_range": "Nhập một số nguyên từ 0 đến 100.",
+    "opacity.select_first": "Hãy chọn vật thể hoặc thành phần trước, rồi đặt độ mờ đục của chúng."
+  },
+  "zh": {
+    "cmd.browser_opacity": "不透明度",
+    "Custom Opacity": "自定义不透明度",
+    "Custom opacity %": "自定义不透明度 %",
+    "opacity.out_of_range": "请输入 0 到 100 之间的整数。",
+    "opacity.select_first": "请先选择实体或零部件，然后设置其不透明度。"
+  },
+  "de": {
+    "cmd.browser_opacity": "Deckkraft",
+    "Custom Opacity": "Benutzerdefinierte Deckkraft",
+    "Custom opacity %": "Benutzerdefinierte Deckkraft %",
+    "opacity.out_of_range": "Geben Sie eine ganze Zahl von 0 bis 100 ein.",
+    "opacity.select_first": "Wählen Sie zuerst Körper oder Komponenten aus und legen Sie dann ihre Deckkraft fest."
+  },
+  "ko": {
+    "cmd.browser_opacity": "불투명도",
+    "Custom Opacity": "사용자 지정 불투명도",
+    "Custom opacity %": "사용자 지정 불투명도 %",
+    "opacity.out_of_range": "0에서 100 사이의 정수를 입력하세요.",
+    "opacity.select_first": "먼저 바디나 컴포넌트를 선택한 다음 불투명도를 설정하세요."
+  }
+}

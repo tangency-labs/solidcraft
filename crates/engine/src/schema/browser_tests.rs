@@ -315,6 +315,12 @@ fn the_visibility_reply_type_matches_the_design_s() {
         shown_dimensions: vec![8],
         locked_bodies: vec!["B".into()],
         hidden_folders: vec!["c0/bodies".into()],
+        opacity: {
+            let mut opacity = solidcraft_doc::display_opacity::DisplayOpacity::default();
+            opacity.set_body("A", 40);
+            opacity.set_placement(&[1, 2], 0);
+            opacity.into()
+        },
     };
     assert_eq!(serde_json::to_value(VisibilityState::from(&v)).unwrap(), serde_json::to_value(&v).unwrap());
     let empty = solidcraft_doc::Visibility::default();
@@ -380,6 +386,14 @@ fn browser_commands_reply_with_their_schemas() {
         assert!(r["visibility"].is_object(), "{p}: {r}");
         assert_eq!(r.get("isolated").is_some(), p.get("isolate").is_some(), "{p}: {r}");
         assert_eq!(r.get("changed").is_some(), p.get("isolate").is_none(), "{p}: {r}");
+    }
+    let opaque = output_schema_for::<crate::schema::browser::BrowserOpacityResult>;
+    for (p, set) in
+        [(json!({"percent": 40, "bodies": ["A"], "paths": [[occ]]}), true), (json!({"percent": 100, "bodies": ["A"], "paths": [[occ]]}), false)]
+    {
+        let r = run("browser.opacity", p.clone(), opaque());
+        assert_eq!(r["opacity"].get("bodies").is_some(), set, "{p}: {r}");
+        assert_eq!(r["opacity"].get("placements").is_some(), set, "{p}: {r}");
     }
     let fold = output_schema_for::<BrowserFoldResult>;
     for (id, p, open) in [

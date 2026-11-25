@@ -174,6 +174,11 @@ pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u
             *hidden = moved;
         }
     }
+    let mut opacity = (*s.visibility.opacity).clone();
+    opacity.move_placements(|path| rebased(path, old_path, new_path));
+    if opacity != *s.visibility.opacity {
+        s.visibility.opacity = opacity.into();
+    }
     let (old_scope, new_scope) = (Session::folder_scope(old_path), Session::folder_scope(new_path));
     for key in &mut s.visibility.hidden_folders {
         if let Some(rest) = key.strip_prefix(&old_scope).filter(|rest| rest.starts_with('/')) {

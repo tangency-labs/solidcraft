@@ -73,7 +73,7 @@ first and last point are apart, and a line then closes the profile.
 How a body, face or component looks on screen and in renders.
 
 An appearance sets colour and surface finish only. It has no effect on mass or strength. Compare
-*material*.
+*material* and *display opacity*.
 
 - **In SolidCraft:** `appearance.assign`, `appearance.library`, `appearance.list`; the
   `appearances` design-file key.
@@ -315,6 +315,17 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Don't use:** measurement (for a dimension), size.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
+
+### display opacity
+
+How opaque a body or component is drawn in the modelling view, in percent of what its appearance
+says. It changes no appearance, and renders and exports do not use it. Compare *appearance*, whose
+own opacity is part of how the body looks everywhere.
+
+- **In SolidCraft:** **Opacity** in the menus of bodies and components; `browser.opacity`.
+- **Don't use:** transparency (the opposite scale), visibility (that is Show/Hide).
+- **Elsewhere:** opacity.
+- **For translators:** in the menus the word is only *Opacity*.
 
 ### end cap
 

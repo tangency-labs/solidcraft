@@ -260,6 +260,7 @@ pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
+pub mod opacity_menu;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
 pub mod operations;
@@ -2445,6 +2446,10 @@ impl SolveApp {
             }
             return;
         }
+        if id == "browser.opacity" {
+            opacity_menu::ask_for_selection(self);
+            return;
+        }
         // Dialog OK runs OK in the open dialog and starts nothing (#17416).
         if id == "ui.dialog_ok" {
             dialogs::confirm(self);
@@ -3594,6 +3599,20 @@ impl SolveApp {
     /// without changing the session's visibility or either history stack.
     pub(crate) fn body_visible(&self, name: &str) -> bool {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
+    }
+
+    /// How much of its appearance's opacity the modelling view draws a body with, 0 to 1
+    /// (`browser.opacity`). The Render workspace draws bodies as their appearances say.
+    #[inline]
+    pub(crate) fn display_opacity(&self, name: &str) -> f64 {
+        if self.session.visibility.opacity.is_empty() || render_workspace::active(self) { 1.0 } else { self.session.display_opacity(name) }
+    }
+
+    /// Is a body drawn in the view, and picked there? A shown body at 0% ([`Self::display_opacity`])
+    /// is neither, though the Browser shows it as shown; one a dialog asks for is both.
+    pub(crate) fn body_drawn(&self, name: &str) -> bool {
+        self.body_visible(name)
+            && (self.display_opacity(name) > 0.0 || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name)))
     }
 
     /// Everything shown as selected: the selection plus the open dialog's inputs.
@@ -4834,6 +4853,7 @@ impl SolveApp {
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
+        opacity_menu::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
         import_report::show(self, ui.ctx());

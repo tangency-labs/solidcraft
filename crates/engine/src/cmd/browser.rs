@@ -19,11 +19,11 @@ use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern};
 use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
-    BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
-    PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams,
-    RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
-    ViewSaveParams, ViewSaved, VisibilityState,
+    BrowserMoveParams, BrowserMoved, BrowserOpacityParams, BrowserOpacityResult, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams,
+    BrowserUngroupParams, BrowserUngrouped, BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams,
+    FindResult, FlipAxis, Isolated, OpacityState, PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody,
+    RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams,
+    ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -39,6 +39,7 @@ const RENAME_GROUP_CONTRACT: TypedContract<BrowserRenameGroupParams> = TypedCont
 const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
+const OPACITY_CONTRACT: TypedContract<BrowserOpacityParams> = TypedContract::new();
 const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
@@ -144,6 +145,15 @@ pub static COMMANDS: &[CommandSpec] = &[
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+    ),
+    CommandSpec::new("browser.opacity", "Opacity", crate::checked!("browser.opacity", opacity))
+        .icon("style_translucent")
+        .contract(&OPACITY_CONTRACT)
+        .output(output_schema_for::<BrowserOpacityResult>)
+        .params(
+        "percent: 0..100 (a whole number; 0 is not drawn, 100 is as the appearance says); bodies?: [body names] and/or paths?: [[occurrence ids]] (exact placements, \
+         each with everything in it). How opaque they are drawn in the modelling view: their appearances stay as they are, and renders and exports don't use it. \
+         A body's percentage, those of the placements above it and its appearance's opacity multiply. Saved with the design and undone like browser.visibility",
     ),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
@@ -730,20 +740,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         if p.get("items").is_some() || p.get("folder").is_some() {
             return Err(bad(cmd, "give paths, items or folder, not several"));
         }
-        let paths =
-            value.as_array().filter(|a| !a.is_empty() && a.len() <= 10_000).ok_or_else(|| bad(cmd, "paths must list 1..10000 occurrence paths"))?;
-        let paths: Vec<Vec<u64>> = paths
-            .iter()
-            .map(|value| {
-                let path = value
-                    .as_array()
-                    .filter(|a| !a.is_empty() && a.len() <= 64)
-                    .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
-                    .ok_or_else(|| bad(cmd, "each path must list 1..64 occurrence ids"))?;
-                s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
-                Ok(path)
-            })
-            .collect::<Result<_>>()?;
+        let paths = placement_paths(s, value, cmd)?;
         if bool_(p, "isolate").unwrap_or(false) {
             if !visible {
                 return Err(bad(cmd, "isolate requires visible:true"));
@@ -917,6 +914,69 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     s.refresh_display();
     let visibility = VisibilityState::from(&s.visibility);
     reply(cmd, BrowserVisibilityResult { visible, changed: Some(items.len()), isolated: None, visibility, param_warnings: Vec::new() })
+}
+
+/// `browser.opacity`: how opaque bodies and placements are drawn, apart from their appearances.
+fn opacity(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "browser.opacity";
+    let percent = p
+        .get("percent")
+        .and_then(crate::schema::browser::opacity_percent)
+        .ok_or_else(|| bad(cmd, "`percent` must be a whole number from 0 to 100"))?;
+    // Every target is found before anything changes.
+    let bodies = match p.get("bodies") {
+        None => Vec::new(),
+        Some(list) => crate::schema::browser::opacity_bodies(list).ok_or_else(|| bad(cmd, "`bodies` must list 1..10000 body names"))?,
+    };
+    let paths = match p.get("paths") {
+        None => Vec::new(),
+        Some(list) => placement_paths(s, list, cmd)?,
+    };
+    if bodies.is_empty() && paths.is_empty() {
+        return Err(bad(cmd, "give `bodies`, `paths` or both"));
+    }
+    if !bodies.is_empty() {
+        let world = s.world_state()?;
+        let known: HashSet<&str> = world.bodies.iter().map(|b| b.name.as_str()).collect();
+        if let Some(unknown) = bodies.iter().find(|b| !known.contains(b.as_str())) {
+            return Err(bad(cmd, format!("no body `{unknown}`")));
+        }
+    }
+    let mut next = (*s.visibility.opacity).clone();
+    for body in &bodies {
+        next.set_body(body, percent);
+    }
+    for path in &paths {
+        next.set_placement(path, percent);
+    }
+    if next.len() > solidcraft_doc::MAX_PLACEMENTS {
+        return Err(bad(cmd, format!("at most {} bodies and placements can be below 100%", solidcraft_doc::MAX_PLACEMENTS)));
+    }
+    // The state it already has is no change: no undo step, no unsaved changes.
+    if next != *s.visibility.opacity {
+        s.visibility.opacity = next.into();
+        s.refresh_display();
+    }
+    let opacity = OpacityState::from(&*s.visibility.opacity);
+    reply(cmd, BrowserOpacityResult { percent, changed: bodies.len().saturating_add(paths.len()), opacity, param_warnings: Vec::new() })
+}
+
+/// The placements a `paths` parameter lists, each of which must exist.
+fn placement_paths(s: &Session, value: &Value, cmd: &str) -> Result<Vec<Vec<u64>>> {
+    let paths =
+        value.as_array().filter(|a| !a.is_empty() && a.len() <= 10_000).ok_or_else(|| bad(cmd, "paths must list 1..10000 occurrence paths"))?;
+    paths
+        .iter()
+        .map(|value| {
+            let path = value
+                .as_array()
+                .filter(|a| !a.is_empty() && a.len() <= 64)
+                .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| bad(cmd, "each path must list 1..64 occurrence ids"))?;
+            s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(path)
+        })
+        .collect()
 }
 
 /// `browser.toggle_planes`: the origin planes and the construction planes, hidden when any shows.
@@ -4152,5 +4212,233 @@ mod tests {
         let too_long = "中".repeat(257);
         let error = s.execute("browser.order", &json!({"folder": "bodies", "order": [too_long]})).unwrap_err().to_string();
         assert!(error.contains("bad keys"), "{error}");
+    }
+
+    /// The body of K's second placement.
+    const COPY: &str = "KB (Outer:1/K:2)";
+
+    /// A component K placed twice in a component Outer (its body is `KB` and [`COPY`]), and a root
+    /// body `Root`: the session and the two placements' paths.
+    fn placed_twice() -> (Session, Vec<u64>, Vec<u64>) {
+        let mut s = Session::default();
+        let outer = run(&mut s, "component.create", json!({"name": "Outer"}));
+        let made = run(&mut s, "component.create", json!({"name": "K", "parent": outer["component"]}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        let first = made["occurrence"].as_u64().unwrap();
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "solid.box", json!({"body_name": "Root", "length": 5, "width": 5, "height": 5, "corner": [0, 40, 0]}));
+        let outer = outer["occurrence"].as_u64().unwrap();
+        assert!(
+            s.world_state().unwrap().body(COPY).is_some(),
+            "{:?}",
+            s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>()
+        );
+        (s, vec![outer, first], vec![outer, second])
+    }
+
+    fn opacities(s: &Session) -> Vec<(String, f64)> {
+        s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), (s.display_opacity(&b.name) * 1e6).round() / 1e6)).collect()
+    }
+
+    fn opacity_of(s: &Session, name: &str) -> f64 {
+        opacities(s).into_iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no body {name}")).1
+    }
+
+    fn reopen(s: &Session) -> Session {
+        let saved = crate::as_saved(&s.doc, &s.visibility, &s.dimension_values).into_owned();
+        let doc = solidcraft_doc::Document::from_json(&saved.to_json()).unwrap();
+        Session::opened(doc, None)
+    }
+
+    /// A body's percentage, its placement's and the one above multiply; a copy has its own; 100
+    /// takes each away again and leaves the design as it was saved before.
+    #[test]
+    fn display_opacity_multiplies_down_the_placements_and_100_leaves_no_trace() {
+        let (mut s, first, second) = placed_twice();
+        let saved = crate::as_saved(&s.doc, &s.visibility, &s.dimension_values).to_json();
+        assert!(opacities(&s).iter().all(|(_, o)| *o == 1.0));
+        run(&mut s, "browser.opacity", json!({"percent": 50, "paths": [[first[0]]]}));
+        run(&mut s, "browser.opacity", json!({"percent": 50, "paths": [first]}));
+        run(&mut s, "browser.opacity", json!({"percent": 50, "bodies": ["KB"]}));
+        assert_eq!([opacity_of(&s, "KB"), opacity_of(&s, COPY), opacity_of(&s, "Root")], [0.125, 0.5, 1.0]);
+        let reply = run(&mut s, "browser.opacity", json!({"percent": 20, "bodies": [COPY, "Root"], "paths": [second]}));
+        assert_eq!((reply["percent"].clone(), reply["changed"].clone()), (json!(20), json!(3)), "{reply}");
+        assert_eq!([opacity_of(&s, "KB"), opacity_of(&s, COPY), opacity_of(&s, "Root")], [0.125, 0.02, 0.2]);
+        // Nothing is hidden, and no appearance is made.
+        assert!(s.body_visible("KB") && s.doc.appearances.is_empty());
+        run(&mut s, "browser.opacity", json!({"percent": 100, "bodies": ["KB", COPY, "Root"], "paths": [[first[0]], first, second]}));
+        assert!(opacities(&s).iter().all(|(_, o)| *o == 1.0) && s.visibility.is_empty());
+        assert_eq!(crate::as_saved(&s.doc, &s.visibility, &s.dimension_values).to_json(), saved);
+    }
+
+    /// Saved with the design, one undo step each, an unsaved change, and no step when nothing changes.
+    #[test]
+    fn display_opacity_is_saved_and_undone_like_show_hide() {
+        let (mut s, first, _) = placed_twice();
+        let (steps, features, revision) = (s.undo.len(), s.doc.features.len(), s.doc.clone());
+        run(&mut s, "browser.opacity", json!({"percent": 30, "paths": [first]}));
+        run(&mut s, "browser.opacity", json!({"percent": 0, "bodies": ["Root"]}));
+        assert!(s.is_dirty() && std::sync::Arc::ptr_eq(&s.doc, &revision), "the design itself is untouched");
+        assert_eq!((s.undo.len(), s.doc.features.len()), (steps + 2, features));
+        run(&mut s, "browser.opacity", json!({"percent": 0, "bodies": ["Root"]}));
+        assert_eq!(s.undo.len(), steps + 2, "the state it has is no step");
+        let opened = reopen(&s);
+        assert_eq!(opened.visibility, s.visibility);
+        assert_eq!([opacity_of(&opened, "KB"), opacity_of(&opened, COPY), opacity_of(&opened, "Root")], [0.3, 1.0, 0.0]);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!([opacity_of(&s, "KB"), opacity_of(&s, "Root")], [0.3, 1.0]);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.visibility.opacity.is_empty());
+        run(&mut s, "edit.redo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!([opacity_of(&s, "KB"), opacity_of(&s, "Root")], [0.3, 0.0]);
+        // Show All is about what is hidden.
+        run(&mut s, "browser.visibility", json!({"folder": "all", "visible": true}));
+        assert_eq!(opacity_of(&s, "Root"), 0.0);
+    }
+
+    #[test]
+    fn display_opacity_refuses_what_is_not_a_percentage_of_something() {
+        let (mut s, first, _) = placed_twice();
+        let many: Vec<String> = (0..10_001).map(|i| i.to_string()).collect();
+        let deep: Vec<u64> = (0..65).collect();
+        for p in [
+            json!({}),
+            json!({"percent": 50}),
+            json!({"bodies": ["Root"]}),
+            json!({"percent": 101, "bodies": ["Root"]}),
+            json!({"percent": -1, "bodies": ["Root"]}),
+            json!({"percent": 1.5, "bodies": ["Root"]}),
+            json!({"percent": "50", "bodies": ["Root"]}),
+            json!({"percent": null, "bodies": ["Root"]}),
+            json!({"percent": 50, "bodies": "Root"}),
+            json!({"percent": 50, "bodies": []}),
+            json!({"percent": 50, "bodies": ["Root", "Nope"]}),
+            json!({"percent": 50, "bodies": ["Root", 3]}),
+            json!({"percent": 50, "bodies": many}),
+            json!({"percent": 50, "bodies": ["Root"], "paths": [[]]}),
+            json!({"percent": 50, "bodies": ["Root"], "paths": [[999_999]]}),
+            json!({"percent": 50, "paths": [deep]}),
+            json!({"percent": 50, "paths": [first, ["x"]]}),
+        ] {
+            let steps = s.undo.len();
+            assert!(s.execute("browser.opacity", &p).is_err(), "{}", p.to_string().chars().take(80).collect::<String>());
+            assert!(s.visibility.opacity.is_empty() && s.undo.len() == steps);
+        }
+    }
+
+    /// The percentage stays on the body or placement through renames, a move to another parent
+    /// and undo, and goes with a deleted placement.
+    #[test]
+    fn display_opacity_follows_renames_moves_and_deletes() {
+        let (mut s, first, second) = placed_twice();
+        run(&mut s, "browser.opacity", json!({"percent": 30, "bodies": [COPY]}));
+        run(&mut s, "browser.opacity", json!({"percent": 60, "bodies": ["Root"], "paths": [first]}));
+        run(&mut s, "body.rename", json!({"body": "Root", "name": "Base"}));
+        run(&mut s, "body.rename", json!({"body": "KB", "name": "Lid"}));
+        assert_eq!(
+            [opacity_of(&s, "Lid"), opacity_of(&s, "Lid (Outer:1/K:2)"), opacity_of(&s, "Base")],
+            [0.6, 0.3, 0.6],
+            "{:?}",
+            s.visibility.opacity
+        );
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!([opacity_of(&s, "KB"), opacity_of(&s, COPY), opacity_of(&s, "Root")], [0.6, 0.3, 0.6]);
+        // Out of Outer: the placement's path is new, its percentage is not.
+        run(&mut s, "occurrence.reparent", json!({"occurrence": first[1], "parent": 0}));
+        assert_eq!(s.visibility.opacity.placement(&first[1..]), 60, "{:?}", s.visibility.opacity);
+        assert_eq!(s.visibility.opacity.placement(&first), 100);
+        run(&mut s, "browser.opacity", json!({"percent": 10, "paths": [second]}));
+        run(&mut s, "selection.delete", json!({"occurrences": [second[1]]}));
+        assert_eq!(s.visibility.opacity.placement(&second), 100, "a deleted placement leaves nothing: {:?}", s.visibility.opacity);
+    }
+
+    /// Set while a feature is computed on a copy, the percentage is the one the view has, and the
+    /// computed step's undo keeps it.
+    #[test]
+    fn display_opacity_set_during_a_computation_is_kept() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        let mut scratch = s.scratch();
+        run(&mut scratch, "solid.box", json!({"body_name": "Other", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+        run(&mut s, "browser.opacity", json!({"percent": 40, "bodies": ["Block"]}));
+        s.accept_computed(scratch).unwrap();
+        assert_eq!([opacity_of(&s, "Block"), opacity_of(&s, "Other")], [0.4, 1.0]);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(opacity_of(&s, "Block"), 0.4);
+    }
+
+    /// Renders, exports and modelling do not see it: their scenes and files are the same, and a
+    /// cut still cuts a body at 0%.
+    #[test]
+    fn display_opacity_stays_out_of_renders_exports_and_modelling() {
+        let (mut s, first, _) = placed_twice();
+        run(&mut s, "appearance.assign", json!({"bodies": ["Root"], "color": "#3366cc", "opacity": 0.4}));
+        let dir = std::env::temp_dir().join(format!("sc-display-opacity-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let outputs = |s: &mut Session| {
+            let scene = crate::product_scene::extract(s).unwrap();
+            let render: Vec<_> = scene.meshes.iter().map(|m| (m.name.clone(), m.color, m.opacity.to_bits(), m.mesh.positions.len())).collect();
+            let painted: Vec<_> = {
+                let world = s.world_state().unwrap();
+                s.doc.painted(&world).bodies.iter().map(|b| format!("{:?}", b.body.paint())).collect()
+            };
+            let files: Vec<Vec<u8>> = ["glb", "stl", "obj", "3mf", "step"]
+                .iter()
+                .map(|ext| {
+                    let path = dir.join(format!("part.{ext}"));
+                    run(s, "file.export", json!({"path": path.to_string_lossy()}));
+                    std::fs::read(&path).unwrap()
+                })
+                .collect();
+            (render, painted, files)
+        };
+        let before = outputs(&mut s);
+        assert!(before.2 == outputs(&mut s).2, "an unchanged design exports the same bytes");
+        for percent in [50, 0] {
+            run(&mut s, "browser.opacity", json!({"percent": percent, "bodies": ["Root"], "paths": [first]}));
+            let after = outputs(&mut s);
+            assert!(before.0 == after.0 && before.1 == after.1, "{percent}%: {:?} {:?}", before.0, after.0);
+            for (i, (a, b)) in before.2.iter().zip(&after.2).enumerate() {
+                assert!(a == b, "{percent}%: export {i} differs");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let volume = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["Root"]}))["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume(&mut s) - 125.0).abs() < 1e-6);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 1, "corner": [0, 40, 0], "operation": "cut"}));
+        assert!((volume(&mut s) - 100.0).abs() < 1e-6, "a body at 0% is cut as any shown body");
+    }
+
+    /// The picture of the view fades the body and its edges, times its appearance's opacity, and
+    /// leaves out a body at 0%; a pick goes through that one.
+    #[test]
+    fn display_opacity_is_in_the_picture_of_the_view() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        let cam = solidcraft_viewport::Camera::default();
+        let drawn = |s: &Session| {
+            let scene = crate::view::scene(s, &cam).unwrap();
+            let body: Vec<_> = scene.meshes.iter().map(|m| (m.glass(), (m.alpha() * 1000.0).round() / 1000.0)).collect();
+            let edge = scene.lines.iter().filter(|l| l.width == 1.2).map(|l| l.alpha).fold(0.0f32, f32::max);
+            (body, (edge * 1000.0).round() / 1000.0)
+        };
+        assert_eq!(drawn(&s), (vec![(false, 1.0)], 1.0));
+        run(&mut s, "browser.opacity", json!({"percent": 30, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s), (vec![(true, 0.3)], 0.3));
+        run(&mut s, "browser.opacity", json!({"percent": 1, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s), (vec![(true, 0.01)], 0.01), "as faint as asked, below what is left of a clear appearance");
+        run(&mut s, "appearance.assign", json!({"bodies": ["Block"], "color": "#3366cc", "opacity": 0.5}));
+        run(&mut s, "browser.opacity", json!({"percent": 50, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s), (vec![(true, 0.25)], 0.5));
+        let hit = |s: &mut Session| run(s, "view.pick", json!({"rays": [{"origin": [5, 5, 100], "dir": [0, 0, -1]}]}))["hits"][0]["body"].clone();
+        assert_eq!(hit(&mut s), json!("Block"));
+        run(&mut s, "browser.opacity", json!({"percent": 0, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s).0, vec![]);
+        assert_eq!(hit(&mut s), Value::Null);
+        run(&mut s, "browser.opacity", json!({"percent": 100, "bodies": ["Block"]}));
+        assert_eq!(drawn(&s), (vec![(true, 0.5)], 1.0), "the appearance is as it was");
     }
 }

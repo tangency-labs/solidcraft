@@ -1217,7 +1217,8 @@ fn same_visibility(a: &solidcraft_engine::Visibility, b: &solidcraft_engine::Vis
             && same_items(&a.hidden_profiles, &b.hidden_profiles)
             && same_items(&a.shown_dimensions, &b.shown_dimensions)
             && same_items(&a.locked_bodies, &b.locked_bodies)
-            && same_items(&a.hidden_folders, &b.hidden_folders))
+            && same_items(&a.hidden_folders, &b.hidden_folders)
+            && a.opacity == b.opacity)
 }
 
 /// `ui.set {...UiState fields}`: UI state and what is hidden.

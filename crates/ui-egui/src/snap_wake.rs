@@ -332,7 +332,7 @@ pub fn shown(app: &SolveApp) -> Vec<(Vec3, &SnapPoint)> {
     {
         return Vec::new();
     }
-    app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_visible(&p.body)).map(|p| (at(p), p)).collect()
+    app.viewport.woken.points.iter().filter(|p| p.body.is_empty() || app.body_drawn(&p.body)).map(|p| (at(p), p)).collect()
 }
 
 /// The woken holes' rims (centre, point on the rim) where they show, as [`shown`] places the

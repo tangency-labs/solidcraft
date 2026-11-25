@@ -53,6 +53,11 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
         None => s.body_visible(name),
     };
     for body in world.bodies.iter().filter(|b| pictured(&b.name)) {
+        // A picture of the design shows it as the view does; one of an export, as it is exported.
+        let shown = if exported.is_some() { 1.0 } else { s.display_opacity(&body.name) as f32 };
+        if shown <= 0.0 {
+            continue;
+        }
         let mesh = if exported.is_some() { body.mesh() } else { body.cached_mesh()? };
         triangles = triangles.saturating_add(mesh.triangles.len());
         points = points.saturating_add(mesh.positions.len());
@@ -65,7 +70,7 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
         let face_colors =
             s.doc.face_colors(body).into_iter().map(|(face, look)| (face as u32, Rgb(look.color[0], look.color[1], look.color[2]))).collect();
         let opacity = s.doc.model_body_opacity(body) as f32;
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), values: None });
+        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, shown, closed: body.is_closed(), hatch: Default::default(), values: None });
     }
     if bounds.is_empty() {
         return None;
