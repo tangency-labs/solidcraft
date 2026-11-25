@@ -404,7 +404,8 @@ fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Sh
     let ctx = context();
     solidcraft_theme::set_dark(dark);
     solidcraft_theme::apply(&ctx);
-    let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(110.0, 44.0));
+    // The pinned symbol row is wide: the symbol keeps one scale and is centred in it.
+    let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), vec2(320.0, 2.0 * Tokens::get().control_height + 8.0));
     let mut defined = false;
     let mut expected_labels = Vec::new();
     let mut output = ctx.run_ui(RawInput::default(), |ui| {
@@ -464,19 +465,19 @@ fn weld_panel_700_point_card_pins_chrome_while_only_body_scrolls() {
         assert_eq!(before.footer, after.footer);
         assert!(section(&after, "type").top() < section(&before, "type").top(), "body scroll moved its content");
         close(footer.bottom(), card.bottom() - 1.0, 0.5);
-        assert!(footer.contains_rect(preview), "the symbol button is part of the footer bar");
-        close(body.bottom(), footer.top(), 0.5);
+        // Two pinned rows: the symbol row sits directly above the shared Cancel / OK bar.
+        assert!(preview.bottom() <= footer.top() + 0.5 && preview.top() >= body.bottom() - 0.5);
+        assert!(preview.width() > footer.width() * 0.8, "the symbol row is wide");
+        assert!(body.bottom() <= preview.top());
         assert!(header.bottom() <= body.top());
-        let buttons = [after.define.expect("Define symbol"), after.cancel.expect("Cancel"), after.ok.expect("OK")];
+        assert_eq!(after.define, after.preview);
+        let buttons = [after.cancel.expect("Cancel"), after.ok.expect("OK")];
         for button in buttons {
             assert!(footer.contains_rect(button));
-        }
-        for button in &buttons[1..] {
             close(button.height(), Tokens::get().form_button_height, 0.5);
         }
-        for pair in buttons.windows(2) {
-            assert!(!pair[0].intersects(pair[1]));
-        }
+        assert!(!buttons[0].intersects(buttons[1]));
+        let buttons = [after.define.expect("Define symbol"), buttons[0], buttons[1]];
         // Compare the actual shared footer, rather than duplicating its width formula.
         let mut reference = None;
         let mut output = ctx.run_ui(RawInput::default(), |ui| {

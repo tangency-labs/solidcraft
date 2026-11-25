@@ -88,9 +88,10 @@ fn weld_dialog_host_fills_available_tool_height_with_pinned_actions() {
     assert!((footer.bottom() - card.bottom()).abs() <= 1.0);
     assert!(header.bottom() <= body.top());
     assert!(body.bottom() <= footer.top() + 0.5);
-    for button in [define, cancel, ok] {
+    for button in [cancel, ok] {
         assert!(footer.contains_rect(button));
     }
+    assert!(define.bottom() <= footer.top() + 0.5, "the symbol row is above the Cancel / OK bar");
     for button in [cancel, ok] {
         assert!((button.height() - t.form_button_height).abs() <= 0.5);
     }

@@ -49,18 +49,19 @@ pub(super) fn more_button(ui: &mut Ui, m: &mut Measurements, rect: Rect, t: &Tok
     response
 }
 
-/// The live symbol as a button in the footer's free left slot; true when clicked.
-pub(super) fn footer_symbol(ui: &mut Ui, band: Rect, right: f32, state: &WeldPanelState, t: &Tokens, m: &mut Measurements) -> bool {
-    let slot = Rect::from_min_max(pos2(band.left() + t.space_12, band.top() + t.space_6), pos2(right, band.bottom() - t.space_6));
-    if slot.width() <= 0.0 || slot.height() <= 0.0 {
+/// Height of the pinned symbol row above the shared Cancel / OK bar.
+pub(super) fn symbol_band_height(t: &Tokens) -> f32 {
+    t.control_height * 2.0 + t.space_16
+}
+
+/// The live symbol as a full-width button in its own pinned row; true when clicked.
+pub(super) fn symbol_band(ui: &mut Ui, height: f32, state: &WeldPanelState, t: &Tokens, m: &mut Measurements) -> bool {
+    let (band, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    rule(ui, t, band.top());
+    let rect = band.shrink2(vec2(t.space_12, t.space_8));
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return false;
     }
-    // Only as wide as the symbol needs (the icon placeholder is square), left-aligned.
-    let pad = t.space_4;
-    let inner_height = slot.height() - t.space_2 * 2.0;
-    let ink = symbol::natural_width(ui, inner_height, state, t).unwrap_or(inner_height);
-    let wanted = ink.max(symbol::min_width(inner_height, t)) + pad * 2.0;
-    let rect = Rect::from_min_size(slot.min, vec2(wanted.min(slot.width()), slot.height()));
     let response = at_button(ui, m, rect, "symbol", "", Button::Normal).backing_on_hover_text(tr("ui.weld.symbol_tip"));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr("ui.weld.symbol_tip")));
     symbol::paint(ui, rect, state, t);

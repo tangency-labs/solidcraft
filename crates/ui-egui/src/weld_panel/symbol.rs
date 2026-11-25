@@ -118,18 +118,6 @@ pub(super) fn scale(height: f32, t: &Tokens) -> f32 {
     height / (4.0 * t.font_caption)
 }
 
-/// Width of the ink at the constant scale, or None when only the placeholder icon shows.
-pub(super) fn natural_width(ui: &Ui, height: f32, state: &WeldPanelState, t: &Tokens) -> Option<f32> {
-    let (drawing, _) = prepared(ui, state, t);
-    let probe = Rect::from_min_size(egui::Pos2::ZERO, vec2(10_000.0, height));
-    crate::weld_symbol_paint::centre_in_rect(&drawing?, probe, scale(height, t), ui.painter()).map(|fit| fit.size.x)
-}
-
-/// A floor on the box width so it does not jump between short and long symbols.
-pub(super) fn min_width(height: f32, t: &Tokens) -> f32 {
-    10.0 * t.font_caption * scale(height, t)
-}
-
 /// Returns whether a complete symbol is defined; the caller uses that for the strip hint.
 pub(super) fn paint(ui: &Ui, rect: Rect, state: &WeldPanelState, t: &Tokens) -> bool {
     let (drawing, defined) = prepared(ui, state, t);

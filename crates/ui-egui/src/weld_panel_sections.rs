@@ -653,7 +653,8 @@ pub(super) fn show_contents_measured(
     let mut close = false;
     kit::panel::header(ui, "weld", tr("ui.weld.title"), || close = true);
     let header = solidcraft_ui_registry::rect_of("dialog:header");
-    let body_height = (card.bottom() - ui.cursor().top() - t.form_footer_height).max(0.0);
+    let symbol_height = chrome::symbol_band_height(t);
+    let body_height = (card.bottom() - ui.cursor().top() - symbol_height - t.form_footer_height).max(0.0);
     let scroll = egui::ScrollArea::vertical().id_salt("weld_body").max_height(body_height).min_scrolled_height(0.0).auto_shrink([false, false]).show(
         ui,
         |ui| {
@@ -671,18 +672,14 @@ pub(super) fn show_contents_measured(
     measured.body = Some(scroll.inner_rect);
     solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);
     solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
+    // Two pinned rows: the live symbol (click to define it), then the shared Cancel / OK bar.
+    if chrome::symbol_band(ui, symbol_height, state, t, &mut measured) {
+        event = WeldPanelEvent::DefineSymbol;
+    }
     let footer = kit::footer(ui, tr("OK"), tr("ui.weld.cancel"), true, kit::Footer::default());
     measured.footer = solidcraft_ui_registry::rect_of("dialog:footer");
     measured.cancel = solidcraft_ui_registry::rect_of("dialog:cancel");
     measured.ok = solidcraft_ui_registry::rect_of("dialog:ok");
-    // The public footer API has no left callback. The clickable symbol fills the footer's free
-    // left slot; the shared action painter alone owns the buttons' sizing, order and style.
-    if let (Some(band), Some(cancel), Some(ok)) = (measured.footer, measured.cancel, measured.ok) {
-        let right = cancel.left().min(ok.left()) - t.space_8;
-        if chrome::footer_symbol(ui, band, right, state, t, &mut measured) {
-            event = WeldPanelEvent::DefineSymbol;
-        }
-    }
     if close || footer == kit::Action::Cancel {
         event = WeldPanelEvent::Cancel;
     } else if footer == kit::Action::Ok {
