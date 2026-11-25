@@ -358,6 +358,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::levels_along;
 pub use measure::measure;
 pub use measure::measure_mass;
 pub use mesh_convert::convert_prismatic_mesh;
