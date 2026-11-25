@@ -340,6 +340,37 @@ impl JsonSchema for Point2 {
     }
 }
 
+/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
+/// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
+/// isn't zero, is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisDirExpr(pub [Expr; 3]);
+
+impl<'de> Deserialize<'de> for AxisDirExpr {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::axis_expr_form(&Value::deserialize(d)?).map(AxisDirExpr).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for AxisDirExpr {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisDirExpr".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        // A number of any size gives a direction; an expression is a `NumberExpr`.
+        let c = json_schema!({"anyOf": [{"type": "number"}, generator.subschema_for::<NumberExpr>()]});
+        json_schema!({
+            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\" (a parameter added as a plain number is a length: \"n / 1 mm\").",
+            "anyOf": [
+                {"type": "string", "pattern": format!("^[{ws}]*[XYZxyz][{ws}]*$", ws = whitespace_class())},
+                {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+            ]
+        })
+    }
+}
+
 /// A placement point: `[x, y, z]` or `{x, y, z}`, each a number (mm) or a length expression,
 /// as `features::point_param` reads it. Whether the expressions evaluate is checked by the
 /// handler, which has the design.
@@ -579,6 +610,14 @@ keyword_param!(
     "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `end_cut`.
+    CoilEndCutParam,
+    "end cut",
+    &["axial", "square"],
+    "axial or square",
+    "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
@@ -638,9 +677,9 @@ keyword_param!(
     /// `solid.fillet`'s `turn`.
     FilletTurnParam,
     "turn",
-    &["mitre", "swept"],
-    "mitre or swept",
-    "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+    &["auto", "mitre", "swept"],
+    "auto, mitre or swept",
+    "How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along a boss's base, at its upright edges): auto (the default, mitre with edge_radii) sweeps each turn where the swept turn builds and mitres the rest, never refused where the mitre builds; mitre runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal, the side edge is curved or tangent, or the ball cannot pass it (a side edge of the rounds' own convexity: a pocket's or a box's corner edge). Matching ignores case."
 );
 keyword_param!(
     /// `plastic.lip`'s `type`.

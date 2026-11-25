@@ -161,10 +161,7 @@ fn a_contour_flanges_first_leg_names_its_rims_as_the_others_do() {
         let made = run(&mut s, "sketch.create", json!({"plane": {"face": [p.x, p.y, p.z], "body": body, "index": hit.face, "path": []}}));
         let id = made["sketch"].as_u64().unwrap();
         let status = s.placed_document().sketch_face_attachment(id, &s.model);
-        assert!(
-            matches!(status, solidcraft_doc::FaceAttachmentStatus::Healthy { .. } | solidcraft_doc::FaceAttachmentStatus::Sheet { .. }),
-            "{name}: {status:?}"
-        );
+        assert!(matches!(status, solidcraft_doc::FaceAttachmentStatus::Healthy { .. }), "{name}: {status:?}");
         run(&mut s, "sketch.finish", json!({}));
     }
 }
@@ -383,6 +380,64 @@ fn a_holes_halves_keep_their_numbers_when_the_sheet_is_mirrored() {
         assert_eq!(hole_halves(&mut s), want, "flip {flip}, unfolded");
         run(&mut s, "sheet.refold", json!({}));
         assert_eq!(hole_halves(&mut s), want, "flip {flip}, refolded");
+    }
+}
+
+/// #21372: drills through a panel or into its rim keep each surviving hole's face names when
+/// an earlier sketch point disappears, including when the sheet is built flat and folded again.
+#[test]
+fn sheet_drilled_holes_keep_their_names_after_a_point_is_deleted() {
+    for (sketch_plane, axis, centers, z, diameter, depth, walls) in [
+        (json!({"plane": "XY", "offset": 2.5}), 0, [20.0, 50.0, 80.0], 30.0, 8.0, None, 2),
+        (json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}}), 1, [20.0, 35.0, 50.0], 1.25, 1.0, Some(20.0), 1),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plate"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Plate"}));
+        let mut sketch = sketch_plane;
+        sketch["name"] = json!("DrillPoints");
+        run(&mut s, "sketch.create", sketch);
+        for center in centers {
+            run(&mut s, "sketch.point", json!({"point": [center, z]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        let mut hole = json!({"sketch": "DrillPoints", "points": ["p1", "p2", "p3"], "diameter": diameter});
+        if let Some(depth) = depth {
+            hole["extent"] = json!("blind");
+            hole["depth"] = json!(depth);
+        }
+        run(&mut s, "solid.hole", hole);
+        let body = s.model.state().surface_sheets[0].body.clone();
+        let names = |s: &mut Session| {
+            let r = run(s, "model.faces", json!({"body": body}));
+            centers.map(|center| {
+                let mut names: Vec<_> = r["faces"]
+                    .as_array()
+                    .expect("sheet faces")
+                    .iter()
+                    .filter(|f| f["cylinder"]["origin"][axis].as_f64().is_some_and(|at| (at - center).abs() < 1e-6))
+                    .map(|f| f["name"].as_str().expect("named hole wall").to_string())
+                    .collect();
+                names.sort();
+                names
+            })
+        };
+        let [left, middle, right] = names(&mut s);
+        assert_eq!([left.len(), middle.len(), right.len()], [walls; 3]);
+        run(&mut s, "sketch.edit", json!({"sketch": "DrillPoints"}));
+        run(&mut s, "sketch.delete", json!({"entities": ["p1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let expected = [Vec::new(), middle, right];
+        assert_eq!(names(&mut s), expected, "after deleting a point");
+        for name in left {
+            assert!(solidcraft_doc::naming::named_face_point(&s.model.state(), Some(&body), &name).is_err(), "removed wall {name} still resolves");
+        }
+        run(&mut s, "sheet.unfold", json!({}));
+        assert_eq!(names(&mut s), expected, "unfolded");
+        run(&mut s, "sheet.refold", json!({}));
+        assert_eq!(names(&mut s), expected, "refolded");
     }
 }
 

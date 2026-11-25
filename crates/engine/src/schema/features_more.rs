@@ -19,7 +19,7 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
+    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
     IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
     TouchingParam, feature_common, present,
 };
@@ -313,6 +313,10 @@ pub struct CoilParams {
     /// A left-handed coil, turning the other way while still climbing along `axis`. Default: false.
     #[serde(default)]
     pub clockwise: Option<bool>,
+    /// Where the wire ends: in a plane through the axis (axial, the default) or square to the
+    /// wire. Refused with `sketch`.
+    #[serde(default)]
+    pub end_cut: Option<CoilEndCutParam>,
     /// A sketch whose profile is the section. Its plane is the section plane, so its placement
     /// sets the radius and the start phase.
     #[serde(default)]
@@ -352,7 +356,7 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point selecting a planar face or a complete cylindrical wall, outside or a bore. Default:
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
     /// inferred when exactly one supported tangent cylinder matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]

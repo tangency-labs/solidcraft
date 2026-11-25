@@ -25,7 +25,8 @@ const MAX_LIST: usize = 10_000;
 /// Remove feature from here on in the timeline), occurrences and components, canvases, point
 /// clouds and joints. `dry_run` reports what would go and what would fail without changing
 /// anything. Give something to delete in `items` or one of the lists; otherwise the call is
-/// refused.
+/// refused. With a drawing open, `items` may instead name its views, dimensions, balloons and
+/// notes (`{"type": "drawing", "drawing": id, "object": id}`), deleted apart from the model.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SelectionDeleteParams {
@@ -35,6 +36,15 @@ pub struct SelectionDeleteParams {
     /// being edited) are named in `skipped`.
     #[serde(default)]
     pub items: Option<SelectionItems>,
+    /// Delete every shown body as well, by scope rather than by name: what Select All selected
+    /// (`selection.get` reports it as `all_bodies`). Locked bodies stay. Default: false.
+    #[serde(default)]
+    pub all_bodies: Option<bool>,
+    /// `delete`: a view in `items` also takes the views projected or cut from it, which are
+    /// otherwise refused, naming them. Read only for a drawing's objects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "contents_schema")]
+    pub contents: Option<Value>,
     /// Components to delete, by id or name (not the design itself). Only the first 10000 are
     /// read.
     #[serde(default)]
@@ -56,6 +66,10 @@ pub struct SelectionDeleteParams {
     /// false.
     #[serde(default)]
     pub dry_run: Option<bool>,
+}
+
+fn contents_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["delete"]})
 }
 
 /// `items`, as the handler reads it: a list of at most 10000 selection items, each as [`Sel`]
@@ -99,6 +113,7 @@ impl JsonSchema for SelectionItems {
             json!({"type": "object", "properties": properties, "required": required})
         };
         let path = json!({"type": "array", "items": {"type": "integer", "minimum": 0}});
+        let id = json!({"type": "string", "pattern": "^[0-9a-hjkmnp-tv-z]{13}$"});
         json_schema!({
             "description": "Selection items: objects with a `type` and the keys that type needs.",
             "type": "array",
@@ -109,6 +124,7 @@ impl JsonSchema for SelectionItems {
                 item("edge", &[("body", &text), ("index", &count), ("point", &point)], &[]),
                 item("face", &[("body", &text), ("index", &count), ("point", &point)], &[]),
                 item("feature", &[("id", &count)], &[]),
+                item("drawing", &[("drawing", &id), ("object", &id)], &[]),
                 item("sketch_curve", &[("id", &text)], &[("sketch", &count)]),
                 item("sketch_point", &[("id", &text)], &[]),
                 item("sketch_midpoint", &[("id", &text)], &[]),
@@ -205,6 +221,24 @@ pub struct SelectionDeleteResult {
     pub would_fail: Vec<String>,
     /// Why some items were not deleted (an origin plane, an edge or vertex, …), each reason once.
     pub skipped: Vec<String>,
+    /// A drawing's delete: the ids of the views that went, asked for or with them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub views: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the dimensions that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the balloons that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balloons: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the notes that went, with their views or on their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the sketches that went with their views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketches: Option<Vec<String>>,
+    /// A drawing's delete: the ids of the fills that went with their views.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fills: Option<Vec<String>>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

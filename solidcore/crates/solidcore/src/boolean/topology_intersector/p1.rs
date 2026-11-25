@@ -181,7 +181,9 @@ pub const MAX_FACE_LIST: usize = 1 << 16;
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::boolean::{BooleanFailure, BooleanStage, PlacedEntity, RelateSide};
+use crate::error::boolean::{
+    BooleanFailure, BooleanStage, ClassificationStep, PlacedEntity, RelateSide,
+};
 use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -211,7 +213,7 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::{
     prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
 };
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::topology::proto_topology::p2::exactly_placed;
 use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
@@ -268,15 +270,23 @@ pub(super) const fn dangling(reason: &'static str) -> SolidError {
 /// A status upstream ignores, except the errors that cannot be ignored here: unported
 /// callees and undefined behaviour upstream.
 pub(super) fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
+    Ok(split_soft(r)?.ok())
+}
+
+/// [`ignore_soft`] that keeps the status it would ignore: the errors that cannot be
+/// ignored propagate, any other comes back as the inner `Err`, for a caller that names a
+/// cause of its own and chains it.
+pub(super) fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, SolidError>> {
     match r {
-        Ok(v) => Ok(Some(v)),
+        Ok(v) => Ok(Ok(v)),
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
-        Err(_) => Ok(None),
+        Err(e) => Ok(Err(e)),
     }
 }
 
@@ -663,7 +673,14 @@ pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
         &mut out,
     )?;
     out.map(|(edge, new_loop, new_face)| (Some(edge), new_loop, new_face))
-        .ok_or_else(|| SolidError::entity_missing(OP, "a new edge"))
+        .ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Split,
+                "making the edge succeeded but recorded no edge, though a successful make \
+                 always records the edge it made",
+            )
+        })
 }
 
 /// `MakeEdgeInFace`'s face, vertex and curve handles: its `SmFace::FindVertexSector`
@@ -730,8 +747,14 @@ impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
         all: bool,
     ) -> Result<Option<O>> {
         // NER(cpVertex) before anything is resolved
-        let vertex =
-            vertex.ok_or_else(|| SolidError::entity_missing(OP, "a vertex to split an edge at"))?;
+        let vertex = vertex.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Split,
+                "the edge is to be split at no vertex, though the intersector splits an edge \
+                 only at the vertex it found or made at the interval's end",
+            )
+        })?;
         let EntityRef::Vertex(vertex) = self.entity(vertex)? else {
             return Err(SolidError::invalid_input(OP, "not a vertex handle"));
         };
@@ -1244,11 +1267,12 @@ pub struct TopologyIntersector<O> {
 /// gap; and `v`, with twice its largest gap, when that passes its tolerance (`AssertValid`
 /// checks a vertex's gaps against half of it). A curve end is the end of the edge's
 /// interval nearer `v` (the farther for a closed edge): for an edge longer than twice the
-/// gap that is the end at its vertex. The vertex's cover comes with its reach (the far
-/// vertex of each of the edges, a lower bound of its distance and its tolerance) and its
-/// stored tolerance, and each edge's growth with the raise it gives its two vertices
-/// (`set_topology_tolerance` cascades an edge's tolerance to them), which the caller
-/// checks once every growth is known ([`first_reaching`], [`covers_staying_clear`]).
+/// gap that is the end at its vertex. The vertex's cover comes with its reach
+/// ([`merged_reach`]) and its stored tolerance, and each edge's growth with the raise it
+/// gives its two vertices (`set_topology_tolerance` cascades an edge's tolerance to them),
+/// which the caller judges as a growth of each vertex the raised one becomes one with
+/// ([`raise_growths`]), once every growth is known ([`first_reaching`],
+/// [`covers_staying_clear`]).
 ///
 /// # Errors
 ///
@@ -1267,12 +1291,10 @@ fn certified_vertex_gaps<O: ClassObject>(
         });
     };
     let point = b.vertex(vid)?.point;
-    let own_tolerance = b.vertex(vid)?.tolerance;
     let rounded = |p: Point3, q: Point3| p.distance(q) + gamma(8) * (p.length() + q.length());
     let mut out = Vec::new();
     let mut raised = Vec::new();
     let mut gap: f64 = 0.0;
-    let mut reach = Vec::new();
     for o in std::iter::once(v).chain(mates.iter().copied()) {
         let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
             continue;
@@ -1297,25 +1319,12 @@ fn certified_vertex_gaps<O: ClassObject>(
                     out.push((h, edge_gap));
                     for x in [start, end].into_iter().flatten() {
                         if let Some(vertex) = brep.topology_handle_in(ob, EntityRef::Vertex(x)) {
-                            raised.push(Growth {
-                                vertex,
-                                tolerance: edge_gap,
-                                reach: Vec::new(),
-                            });
+                            raised.push((vertex, edge_gap));
                         }
                     }
                 }
             }
             gap = max2(gap, edge_gap);
-            let far = if start == Some(ovid) { end } else { start };
-            if let Some(far) = far.filter(|&f| f != ovid) {
-                let f = ob.vertex(far)?;
-                // the distance less its rounding: a lower bound
-                let apart =
-                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
-                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
-                reach.push((handle, apart, f.tolerance));
-            }
         }
         for f in vertex::faces(ob, ovid)? {
             let Some(SurfaceKind::Plane(plane)) = ob.face(f)?.surface.as_ref().map(Surface::kind)
@@ -1335,25 +1344,67 @@ fn certified_vertex_gaps<O: ClassObject>(
             gap = max2(gap, face_gap);
         }
     }
-    let cover = Growth {
-        vertex: v,
-        tolerance: zone_tol3d(k, 2.0 * gap),
-        reach,
-    };
+    let cover = merged_reach(brep, v, mates)?.map(|(reach, own_tolerance)| {
+        let cover = Growth {
+            vertex: v,
+            tolerance: zone_tol3d(k, 2.0 * gap),
+            reach,
+        };
+        (cover, own_tolerance)
+    });
     Ok(CertifiedGaps {
         edges: out,
         raised,
-        cover: Some((cover, own_tolerance)),
+        cover,
     })
+}
+
+/// Not upstream: the reach of vertex `v`, which the merge makes one with `mates` at either
+/// point: the far vertex of each edge of `v` or of `mates`, with a lower bound of its
+/// distance from `v`'s point (less its rounding) and its stored tolerance; with `v`'s
+/// stored tolerance. `None` for an object that is no vertex.
+///
+/// # Errors
+///
+/// Those of the topology walks.
+fn merged_reach<O: ClassObject>(
+    brep: &impl IntersectorBrep<O>,
+    v: O,
+    mates: &[O],
+) -> Result<Option<(Reach<O>, f64)>> {
+    let Some((b, EntityRef::Vertex(vid))) = ClassGeometry::topology_entity(brep, v) else {
+        return Ok(None);
+    };
+    let point = b.vertex(vid)?.point;
+    let own_tolerance = b.vertex(vid)?.tolerance;
+    let mut reach = Vec::new();
+    for o in std::iter::once(v).chain(mates.iter().copied()) {
+        let Some((ob, EntityRef::Vertex(ovid))) = ClassGeometry::topology_entity(brep, o) else {
+            continue;
+        };
+        for e in vertex::edges(ob, ovid, None)? {
+            let (start, end) = (edge::start_vertex(ob, e)?, edge::end_vertex(ob, e)?);
+            let far = if start == Some(ovid) { end } else { start };
+            if let Some(far) = far.filter(|&f| f != ovid) {
+                let f = ob.vertex(far)?;
+                // the distance less its rounding: a lower bound
+                let apart =
+                    point.distance(f.point) - gamma(8) * (point.length() + f.point.length());
+                let handle = brep.topology_handle_in(ob, EntityRef::Vertex(far));
+                reach.push((handle, apart, f.tolerance));
+            }
+        }
+    }
+    Ok(Some((reach, own_tolerance)))
 }
 
 /// What [`certified_vertex_gaps`] returns.
 struct CertifiedGaps<O> {
     /// The edges to grow, each with its tolerance.
     edges: Vec<(O, f64)>,
-    /// The raise each of those growths gives the edge's two vertices (no reach of their
-    /// own: they are judged as far vertices only).
-    raised: Vec<Growth<O>>,
+    /// The raise each of those growths gives the edge's two vertices: each vertex with
+    /// the edge's tolerance.
+    raised: Vec<(O, f64)>,
     /// The vertex's cover (twice its largest gap) with its reach, and its stored tolerance;
     /// `None` for an object that is no vertex.
     cover: Option<(Growth<O>, f64)>,
@@ -1368,8 +1419,11 @@ pub(crate) struct Growth<K> {
     /// Its grown tolerance.
     pub(crate) tolerance: f64,
     /// `(far vertex, distance lower bound, stored tolerance)` per far vertex.
-    pub(crate) reach: Vec<(Option<K>, f64, f64)>,
+    pub(crate) reach: Reach<K>,
 }
+
+/// A growth's far vertices: `(far vertex, distance lower bound, stored tolerance)` each.
+pub(crate) type Reach<K> = Vec<(Option<K>, f64, f64)>;
 
 /// Not upstream (#15718): the first of `growths` whose grown ball would reach one of its far
 /// vertices, judged against every growth at once, with the tolerance below which it would
@@ -1455,20 +1509,62 @@ pub(crate) fn covers_staying_clear<K: Copy + PartialEq>(
 
 /// Not upstream: the vertices of one definition as one vertex (`relate` gives each the
 /// larger tolerance): every cover of `members` (each with its stored tolerance) at the
-/// largest of them, for the members that tolerance raises. A NaN cover raises nothing.
-fn shared_cover<K>(members: Vec<(Growth<K>, f64)>) -> Vec<Growth<K>> {
-    let shared = members
-        .iter()
-        .map(|(g, _)| g.tolerance)
-        .fold(f64::NEG_INFINITY, f64::max);
-    members
-        .into_iter()
-        .filter(|&(_, own)| shared > own)
-        .map(|(mut g, _)| {
-            g.tolerance = shared;
-            g
-        })
-        .collect()
+/// largest of them, for the members that tolerance raises. `None` when a cover is NaN:
+/// that vertex's gaps are not known, so no tolerance is known to cover them, and the
+/// group is refused whole rather than raised to a mate's cover.
+fn shared_cover<K>(members: Vec<(Growth<K>, f64)>) -> Option<Vec<Growth<K>>> {
+    let mut shared = f64::NEG_INFINITY;
+    for (g, _) in &members {
+        if g.tolerance.is_nan() {
+            return None;
+        }
+        shared = shared.max(g.tolerance);
+    }
+    Some(
+        members
+            .into_iter()
+            .filter(|&(_, own)| shared > own)
+            .map(|(mut g, _)| {
+                g.tolerance = shared;
+                g
+            })
+            .collect(),
+    )
+}
+
+/// Not upstream: the growths the `raises` give (an exact edge growth cascades its
+/// tolerance to its two vertices): the raised vertex and each vertex it becomes one with
+/// (`merged_with`, itself among them; `relate` gives them the larger tolerance) take the
+/// raise wherever it passes their stored tolerance, each judged against its own reach from
+/// its own point (`reach_of(vertex, its mates)`, [`merged_reach`]), as a cover is.
+///
+/// # Errors
+///
+/// Those of `reach_of`.
+fn raise_growths<O: Copy + Ord>(
+    raises: &[(O, f64)],
+    merged_with: &BTreeMap<O, Vec<O>>,
+    mut reach_of: impl FnMut(O, &[O]) -> Result<Option<(Reach<O>, f64)>>,
+) -> Result<Vec<Growth<O>>> {
+    let mut out = Vec::new();
+    for &(x, tolerance) in raises {
+        let group = merged_with.get(&x).map_or_else(|| vec![x], Clone::clone);
+        for &m in &group {
+            let mates: Vec<O> = group.iter().copied().filter(|&o| o != m).collect();
+            let Some((reach, own)) = reach_of(m, &mates)? else {
+                continue;
+            };
+            // a NaN raise is kept, and `first_reaching` refuses it
+            if tolerance > own || tolerance.is_nan() {
+                out.push(Growth {
+                    vertex: m,
+                    tolerance,
+                    reach,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Not upstream (WR-306): the growths of the raise that makes each vertex of an absorbing
@@ -1783,9 +1879,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let copy =
                         Self::b_spline_copy(geometry, out.curves_3d.get(jj).copied().flatten())?;
                     let Some(h) = copy else {
-                        out.status = Some(SolidError::stage_failed(
+                        out.status = Some(SolidError::boolean(
                             OP_CHECK_SSI,
-                            "a curve could not be copied for the existing intersection",
+                            BooleanFailure::IntersectionCurveNotCopyable,
                         ));
                         return Ok(out);
                     };
@@ -1993,10 +2089,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let v2 = other_topo
                 .filter(|o| o.class_kind() == ClassObjectKind::Vertex)
                 .ok_or_else(|| {
-                    SolidError::boolean_entity_missing(
+                    SolidError::boolean_null_defect(
                         OP_RELATE,
                         BooleanStage::Relate,
-                        "a vertex of the other B-rep to relate the vertex to",
+                        "a vertex is to be related to no vertex of the other B-rep, though \
+                         every caller relates two entities of one kind",
                     )
                 })?;
             Self::max_tolerances(k, brep, brep_topo, v2)?;
@@ -2007,10 +2104,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let e2 = other_topo
                 .filter(|o| o.class_kind() == ClassObjectKind::Edge)
                 .ok_or_else(|| {
-                    SolidError::boolean_entity_missing(
+                    SolidError::boolean_null_defect(
                         OP_RELATE,
                         BooleanStage::Relate,
-                        "an edge of the other B-rep to relate the edge to",
+                        "an edge is to be related to no edge of the other B-rep, though every \
+                         caller relates two entities of one kind",
                     )
                 })?;
             Self::max_tolerances(k, brep, brep_topo, e2)?;
@@ -2293,8 +2391,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Err(refusal);
         }
 
-        // Resolve OverlappingPEs (SE_MSG: the status only warns)
-        if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {
+        // Resolve OverlappingPEs (SE_MSG: the status only warns). Not upstream (#18927): a
+        // group that failed part way through its replacement refuses the Boolean.
+        let resolved = mgr.resolve_overlapping_proto_edges(k, brep, approx_tol);
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
+        if let Some(d) = ignore_soft(resolved)? {
             deleted.extend(d);
         }
 
@@ -2574,6 +2677,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let mut grow: Vec<(O, f64)> = Vec::new();
         let mut growths: Vec<Growth<O>> = Vec::new();
         let mut covers: Vec<Vec<Growth<O>>> = Vec::new();
+        let mut definitions: Vec<(bool, Vec<O>)> = Vec::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             let Some(proto_vertex) = mgr.proto_vertex(pv) else {
@@ -2594,27 +2698,60 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         finals.push(v);
                     }
                 }
-                let mut members = Vec::new();
-                for &v in &finals {
-                    let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
-                    let gaps = certified_vertex_gaps(k, &*brep, v, &mates)?;
-                    if exact {
-                        grow.extend(gaps.edges);
-                        growths.extend(gaps.raised);
+                definitions.push((exact, finals));
+            }
+        }
+        // the vertices each vertex becomes one with, itself among them
+        let mut merged_with: BTreeMap<O, Vec<O>> = BTreeMap::new();
+        for (_, finals) in &definitions {
+            for &v in finals {
+                let group = merged_with.entry(v).or_insert_with(|| vec![v]);
+                for &m in finals {
+                    if !group.contains(&m) {
+                        group.push(m);
                     }
-                    members.extend(gaps.cover);
-                }
-                // `relate` gives the definition's vertices one tolerance, the larger: each
-                // ball is judged at that one, about its own point
-                let group = shared_cover(members);
-                if exact {
-                    grow.extend(group.iter().map(|g| (g.vertex, g.tolerance)));
-                    growths.extend(group);
-                } else if !group.is_empty() {
-                    covers.push(group);
                 }
             }
         }
+        let mut raises: Vec<(O, f64)> = Vec::new();
+        for (exact, finals) in definitions {
+            let mut members = Vec::new();
+            for &v in &finals {
+                let mates: Vec<O> = finals.iter().copied().filter(|&m| m != v).collect();
+                let gaps = certified_vertex_gaps(k, &*brep, v, &mates)?;
+                if exact {
+                    grow.extend(gaps.edges);
+                    raises.extend(gaps.raised);
+                }
+                members.extend(gaps.cover);
+            }
+            // `relate` gives the definition's vertices one tolerance, the larger: each
+            // ball is judged at that one, about its own point
+            let Some(group) = shared_cover(members) else {
+                if exact {
+                    // NaN refuses: an exact definition's gap is all its vertex must cover
+                    return Err(Failure::new(
+                        OP_CERTIFIED_GAPS,
+                        BooleanFailure::MergedVertexReaches {
+                            needed: f64::NAN,
+                            fits_below: None,
+                        },
+                    )
+                    .into_error());
+                }
+                continue;
+            };
+            if exact {
+                grow.extend(group.iter().map(|g| (g.vertex, g.tolerance)));
+                growths.extend(group);
+            } else if !group.is_empty() {
+                covers.push(group);
+            }
+        }
+        // a raise is judged like a growth of every vertex the raised one becomes one with
+        growths.extend(raise_growths(&raises, &merged_with, |m, mates| {
+            merged_reach(&*brep, m, mates)
+        })?);
         if let Some((_, needed, fits_below)) = first_reaching(&growths) {
             return Err(Failure::new(
                 OP_CERTIFIED_GAPS,
@@ -3460,9 +3597,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 // Record new face for output and to include in future intersections
                                 faces1.push(new_face); // some redundancy, will intersect all sFaces2, but only needs from jj+1
                                 if faces1.len() + faces2.len() > MAX_FACE_LIST {
-                                    return Err(SolidError::stage_failed(
+                                    return Err(SolidError::boolean(
                                         OP_FACE_FACE,
-                                        "the new faces exceed the face list limit",
+                                        BooleanFailure::FaceListLimit {
+                                            limit: MAX_FACE_LIST,
+                                        },
                                     ));
                                 }
                                 out.new_faces.push(new_face);
@@ -3493,9 +3632,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 // Record new face for output and to intersect both the old and the new face
                                 out.new_faces.push(new_face);
                                 if faces1.len() + faces2.len() + 1 > MAX_FACE_LIST {
-                                    return Err(SolidError::stage_failed(
+                                    return Err(SolidError::boolean(
                                         OP_FACE_FACE,
-                                        "the new faces exceed the face list limit",
+                                        BooleanFailure::FaceListLimit {
+                                            limit: MAX_FACE_LIST,
+                                        },
                                     ));
                                 }
 
@@ -3893,10 +4034,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                                 kk += 1;
                                 continue;
                             }
-                            return Err(SolidError::boolean_stage_failed(
+                            return Err(SolidError::boolean_defect(
                                 OP_FFC,
                                 BooleanStage::Coincidence,
-                                "the face to delete has no B-rep",
+                                "the coincident face to delete belongs to no B-rep, though it \
+                                 came from the face lists of the B-reps being intersected",
                             ));
                         };
                         let old_tol = brep
@@ -4115,48 +4257,44 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         if surface.face()?.is_none() {
             return surface_cache(k, surface, Some(handle));
         }
-        let face =
-            self.0.inner().surface_face(handle)?.ok_or_else(|| {
-                SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
-            })?;
-        match self.0.caches.built.get(&face) {
-            Some(Ok(cache)) => {
-                self.0.caches.tree_requested.borrow_mut().insert(face);
-                cache.map_handles(Ok)
-            }
-            Some(Err(e)) => Err(e.clone()),
-            None => {
-                self.0.caches.pending.set(Some((face, true)));
-                Err(SolidError::PreparationRequired {
-                    operation: OP_FACE_CACHES,
-                })
-            }
-        }
+        let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP_FACE_CACHES,
+                BooleanStage::Intersect,
+                "the handle of a surface that has a face names no face, though the \
+                     handle was made for that surface's face",
+            )
+        })?;
+        self.built_cache(face)?.map_handles(Ok)
     }
 
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
+    ) -> Result<SurfaceCacheState<O>> {
         let Some(handle) = handle else {
-            return self.build_surface_cache(k, surface, None);
+            return self.build_surface_cache(k, surface, None)?.state();
         };
         if surface.face()?.is_none() {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.build_surface_cache(k, surface, Some(handle))?.state();
         }
-        let face =
-            self.0.inner().surface_face(handle)?.ok_or_else(|| {
-                SolidError::entity_missing(OP_FACE_CACHES, "a face for the surface")
-            })?;
+        let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP_FACE_CACHES,
+                BooleanStage::Intersect,
+                "the handle of a surface that has a face names no face, though the \
+                     handle was made for that surface's face",
+            )
+        })?;
         // after the attempt's first GetTree of the face's cache, upstream's cache has
         // its tree
         if self.0.caches.tree_requested.borrow().contains(&face) {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.built_cache(face)?.mapped_state(|o| o);
         }
         match self.0.caches.states.get(&face) {
-            Some(Ok(cache)) => cache.map_handles(Ok),
+            Some(Ok(cache)) => cache.mapped_state(|o| o),
             Some(Err(e)) => Err(e.clone()),
             None => {
                 self.0.caches.pending.set(Some((face, false)));
@@ -4175,6 +4313,24 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
 impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized>
     FaceCacheContext<'_, '_, O, G>
 {
+    /// The built cache of `face` a solve's `GetTree` gets (recording that the
+    /// attempt's tree of it was requested), or the request to build it.
+    fn built_cache(&self, face: O) -> Result<&SurfaceCache<O>> {
+        match self.0.caches.built.get(&face) {
+            Some(Ok(cache)) => {
+                self.0.caches.tree_requested.borrow_mut().insert(face);
+                Ok(cache)
+            }
+            Some(Err(e)) => Err(e.clone()),
+            None => {
+                self.0.caches.pending.set(Some((face, true)));
+                Err(SolidError::PreparationRequired {
+                    operation: OP_FACE_CACHES,
+                })
+            }
+        }
+    }
+
     /// `f` on the read-only queries of `face` (its B-rep holds the UV trim curves its
     /// cache build created).
     fn with_queries<R>(
@@ -4247,6 +4403,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
         self.with_queries(face, |q| q.face_zone_tol_3d(face))
     }
 
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.with_queries(face, |q| q.face_has_loopuses(face))
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -4275,7 +4435,12 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
                 .curve_edge(curve)
                 .and_then(|edge| {
                     edge.ok_or_else(|| {
-                        SolidError::entity_missing(OP_FACE_CACHES, "an edge for the curve")
+                        SolidError::boolean_null_defect(
+                            OP_FACE_CACHES,
+                            BooleanStage::Intersect,
+                            "a curve whose edge tolerance the classification asks for has no \
+                             edge, though it asks only for the curves of the edges it met",
+                        )
                     })
                 })
                 .and_then(|edge| inner.edge_tolerance(edge)),
@@ -4516,8 +4681,14 @@ where
             Some((face, b, f))
         })
         .collect();
-    trim_owner_face(&candidates, |b| caches.trims.trim_requested_on(b), eu)
-        .ok_or_else(|| SolidError::entity_missing(OP_FACE_CACHES, "a face that owns the trim"))
+    trim_owner_face(&candidates, |b| caches.trims.trim_requested_on(b), eu).ok_or_else(|| {
+        SolidError::boolean_null_defect(
+            OP_FACE_CACHES,
+            BooleanStage::Intersect,
+            "no classified face holds the edge use whose UV trim the classification asked \
+                 for, though it asks only for the trims of the faces it classified against",
+        )
+    })
 }
 
 /// The candidate face whose B-rep `requested_on` accepts and whose loop uses hold `eu`
@@ -4830,11 +5001,17 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
         }
 
         // Syncronize the two curve classifications.
-        if ignore_soft(cc_homogenize(k, geometry, &mut crv_class1, &mut crv_class2))?.is_none() {
-            return Err(SolidError::stage_failed(
+        if let Err(cause) =
+            split_soft(cc_homogenize(k, geometry, &mut crv_class1, &mut crv_class2))?
+        {
+            return Err(Failure::new(
                 OP,
-                "the two curve classifications could not be made consistent",
-            ));
+                BooleanFailure::ClassificationStepFailed {
+                    step: ClassificationStep::Homogenize,
+                },
+            )
+            .caused_by(cause)
+            .into_error());
         }
 
         // Create ProtoEdges from each segment.
@@ -5122,23 +5299,11 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
     let curve1 = geometry
         .edge_curve(edge1)
         .ok_or(dangling("edge handle is unknown"))?
-        .ok_or_else(|| {
-            SolidError::boolean_entity_missing(
-                OP_SPLIT_TWO,
-                BooleanStage::Split,
-                "a curve on the first edge",
-            )
-        })?;
+        .ok_or_else(|| SolidError::boolean(OP_SPLIT_TWO, BooleanFailure::EdgeWithoutCurve))?;
     let curve2 = geometry
         .edge_curve(edge2)
         .ok_or(dangling("edge handle is unknown"))?
-        .ok_or_else(|| {
-            SolidError::boolean_entity_missing(
-                OP_SPLIT_TWO,
-                BooleanStage::Split,
-                "a curve on the second edge",
-            )
-        })?;
+        .ok_or_else(|| SolidError::boolean(OP_SPLIT_TWO, BooleanFailure::EdgeWithoutCurve))?;
 
     let skip_global_coincidence_check = true; //cbi ?
 
@@ -5205,16 +5370,17 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
         // The intersection is interior to both Edges.
         // Split them both, and then glue the vertices.
         let brep = geometry.edge_brep_handle(edge1)?.ok_or_else(|| {
-            SolidError::boolean_entity_missing(
+            SolidError::boolean_null_defect(
                 OP_SPLIT_TWO,
                 BooleanStage::Split,
-                "a B-rep for the first edge",
+                "the edge to split belongs to no B-rep, though it came from the edge lists of \
+                 the B-reps being intersected",
             )
         })?;
 
         let (e1, e2, new_v1) = match geometry
             .make_vertex_split_edge(k, brep, edge1, t1)
-            .map(|(e1, e2, v)| (Some(e1), Some(e2), Some(v)))
+            .map(|(e1, e2, v)| (Some(e1), Some(e2), v))
         {
             Ok(r) => r,
             Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
@@ -5230,13 +5396,6 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
                 continue;
             }
         };
-        let new_v1 = new_v1.ok_or_else(|| {
-            SolidError::boolean_entity_missing(
-                OP_SPLIT_TWO,
-                BooleanStage::Split,
-                "a vertex made by splitting the first edge",
-            )
-        })?;
         let new_edge = if e2 == Some(edge1) { e1 } else { e2 };
         out.new_edges1.push(new_edge);
 
@@ -5245,7 +5404,7 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
             .ok_or(dangling("edge without B-rep"))?; // Presumably the same... (dereferenced upstream)
         let (e1, e2, new_v2) = match geometry
             .make_vertex_split_edge(k, brep, edge2, t2)
-            .map(|(e1, e2, v)| (Some(e1), Some(e2), Some(v)))
+            .map(|(e1, e2, v)| (Some(e1), Some(e2), v))
         {
             Ok(r) => r,
             Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
@@ -5254,13 +5413,6 @@ pub fn test_and_split_two_edges<O: ClassObject + SolutionObject + Ord>(
             Err(_) => continue, // SM_ASSERT(FALSE)
         };
         // pNewV2 will be deleted, so don't add to output list.
-        let new_v2 = new_v2.ok_or_else(|| {
-            SolidError::boolean_entity_missing(
-                OP_SPLIT_TWO,
-                BooleanStage::Split,
-                "a vertex made by splitting the second edge",
-            )
-        })?;
         let new_edge = if e2 == Some(edge2) { e1 } else { e2 };
         out.new_edges2.push(new_edge);
 
@@ -5313,13 +5465,7 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
     let surface = geometry
         .face_surface(face)
         .ok_or(dangling("face handle is unknown"))?
-        .ok_or_else(|| {
-            SolidError::boolean_entity_missing(
-                OP_IMPRINT_FACE,
-                BooleanStage::Imprint,
-                "a surface on the face",
-            )
-        })?;
+        .ok_or_else(|| SolidError::boolean(OP_IMPRINT_FACE, BooleanFailure::FaceWithoutSurface))?;
     let uv_domain = geometry
         .face_uv_domain(face)
         .ok_or(dangling("face handle is unknown"))?;
@@ -5367,18 +5513,8 @@ pub fn test_and_imprint_face<O: ClassObject + SolutionObject + Ord>(
     let f_brep = geometry
         .face_brep(face)?
         .ok_or(dangling("face without B-rep"))?;
-    match geometry
-        .make_vertex_loop(f_brep, face, point)
-        .map(|(l, v)| (l, Some(v)))
-    {
+    match geometry.make_vertex_loop(f_brep, face, point) {
         Ok((_new_loop, new_v)) => {
-            let new_v = new_v.ok_or_else(|| {
-                SolidError::boolean_entity_missing(
-                    OP_IMPRINT_FACE,
-                    BooleanStage::Imprint,
-                    "a vertex made by the imprint",
-                )
-            })?;
             out.new_vertex = Some(new_v);
         }
         Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => return Err(e),
@@ -5514,18 +5650,43 @@ impl<I: Ord + Copy> MateMap<I> {
     ///
     /// `SM_ERR` when either id already has a different mate.
     pub fn record(&mut self, primary: I, other: I) -> Result<()> {
-        if self.other(primary).is_some_and(|v| v != other)
-            || self.primary(other).is_some_and(|v| v != primary)
-        {
-            return Err(SolidError::boolean_stage_failed(
+        // (a typed id carries no B-rep to place it by)
+        let side = if self.other(primary).is_some_and(|v| v != other) {
+            Some(RelateSide::Brep)
+        } else if self.primary(other).is_some_and(|v| v != primary) {
+            Some(RelateSide::Other)
+        } else {
+            None
+        };
+        if let Some(side) = side {
+            return Err(SolidError::boolean_relate_conflict(
                 "boolean::topology_intersector::p1::record",
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                side,
+                PlacedEntity::Unplaced,
+                PlacedEntity::Unplaced,
+                PlacedEntity::Unplaced,
             ));
         }
         self.to_other.insert(primary, other);
         self.to_primary.insert(other, primary);
         Ok(())
+    }
+}
+
+/// A vertex of an arena B-rep placed by its point, for a relate refusal.
+fn place_vertex(b: &Brep, v: VertexId) -> PlacedEntity {
+    b.vertex(v)
+        .map_or(PlacedEntity::Unplaced, |v| PlacedEntity::Vertex(v.point))
+}
+
+/// An edge of an arena B-rep placed by its vertices' points, for a relate refusal.
+fn place_edge(b: &Brep, e: EdgeId) -> PlacedEntity {
+    let start = edge::vertex(b, e).ok().flatten();
+    let end = start.and_then(|s| edge::other_vertex(b, e, Some(s)).ok().flatten());
+    let point = |v: Option<VertexId>| v.and_then(|v| b.vertex(v).ok()).map(|v| v.point);
+    match (point(start), point(end)) {
+        (Some(a), Some(z)) => PlacedEntity::Edge(a, z),
+        _ => PlacedEntity::Unplaced,
     }
 }
 
@@ -5564,17 +5725,24 @@ impl Relations {
         other: &mut Brep,
         other_edge: EdgeId,
     ) -> Result<()> {
-        // check for conflicting existing mate relationships
-        if self.edges.other(brep_edge).is_some_and(|e| e != other_edge)
-            || self
-                .edges
-                .primary(other_edge)
-                .is_some_and(|e| e != brep_edge)
-        {
-            return Err(SolidError::boolean_stage_failed(
+        // check for conflicting existing mate relationships (#16098: the refusal places
+        // the entity, its mate and the one asked for by their points)
+        if let Some(mate) = self.edges.other(brep_edge).filter(|&e| e != other_edge) {
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Brep,
+                place_edge(brep, brep_edge),
+                place_edge(other, mate),
+                place_edge(other, other_edge),
+            ));
+        }
+        if let Some(mate) = self.edges.primary(other_edge).filter(|&e| e != brep_edge) {
+            return Err(SolidError::boolean_relate_conflict(
+                OP_RELATE,
+                RelateSide::Other,
+                place_edge(other, other_edge),
+                place_edge(brep, mate),
+                place_edge(brep, brep_edge),
             ));
         }
 
@@ -5721,18 +5889,23 @@ impl Relations {
         // check for conflicting existing mate relationships
         let oth = self.vertices.other(brep_vertex);
         let brp = self.vertices.primary(other_vertex);
-        if oth.is_some_and(|v| v != other_vertex) {
-            return Err(SolidError::boolean_stage_failed(
+        // (#16098: the refusal places the entity, its mate and the one asked for)
+        if let Some(mate) = oth.filter(|&v| v != other_vertex) {
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Brep,
+                place_vertex(brep, brep_vertex),
+                place_vertex(other, mate),
+                place_vertex(other, other_vertex),
             ));
         }
-        if brp.is_some_and(|v| v != brep_vertex) {
-            return Err(SolidError::boolean_stage_failed(
+        if let Some(mate) = brp.filter(|&v| v != brep_vertex) {
+            return Err(SolidError::boolean_relate_conflict(
                 OP_RELATE,
-                BooleanStage::Relate,
-                "another entity is already related to the other one",
+                RelateSide::Other,
+                place_vertex(other, other_vertex),
+                place_vertex(brep, mate),
+                place_vertex(brep, brep_vertex),
             ));
         }
 
@@ -5864,13 +6037,13 @@ mod tests {
         assert_eq!(covers_staying_clear(&[], &nan), vec![]);
     }
 
-    /// #19045 review: a far vertex is taken at the raise an edge growth cascades to it (no
-    /// reach of its own): the 1.6 beside a far vertex 3 away with a stored 0.2 fits, but
+    /// #19045 review: a far vertex is taken at the raise an edge growth cascades to it: the 1.6 beside a far vertex 3 away with a stored 0.2 fits, but
     /// not once an edge of that vertex grows to 1.5 (1.6 + 1.5 > 3). And the two vertices
     /// of one definition are judged at the tolerance `relate` gives both, the larger: of
     /// covers of 1.6 and 0.8, the 0.8 one with its far vertex 2 away (stored 0.05), both
     /// are taken at 1.6 (1.65 < 2); with that far vertex 1.2 away the 0.8 alone would fit
-    /// (0.85 < 1.2) but the shared 1.6 does not (1.65 > 1.2), and neither is taken.
+    /// (0.85 < 1.2) but the shared 1.6 does not (1.65 > 1.2), and neither is taken. A NaN
+    /// cover refuses its group: its finite mate's cover is not given to it.
     #[test]
     fn a_cover_is_judged_at_its_cascaded_far_vertices_and_its_shared_tolerance() {
         let g = |vertex: u8, far: u8, apart: f64, stored: f64, tolerance: f64| Growth {
@@ -5897,7 +6070,7 @@ mod tests {
                 (g(2, 4, apart, 0.05, 0.8), 0.01),
             ]
         };
-        let fits = shared_cover(members(2.0));
+        let fits = shared_cover(members(2.0)).unwrap();
         assert_eq!(
             fits.iter()
                 .map(|g| (g.vertex, g.tolerance))
@@ -5906,16 +6079,71 @@ mod tests {
         );
         assert_eq!(covers_staying_clear(&[], &[fits]), vec![(1, 1.6), (2, 1.6)]);
         assert_eq!(
-            covers_staying_clear(&[], &[shared_cover(members(1.2))]),
+            covers_staying_clear(&[], &[shared_cover(members(1.2)).unwrap()]),
             vec![]
         );
-        // a member whose stored tolerance is past the shared one is not raised; NaN raises
-        // nothing
-        assert_eq!(shared_cover(vec![(g(1, 2, 3.0, 0.0, 0.5), 0.7)]).len(), 0);
+        // a member whose stored tolerance is past the shared one is not raised
         assert_eq!(
-            shared_cover(vec![(g(1, 2, 3.0, 0.0, f64::NAN), 0.0)]).len(),
-            0
+            shared_cover(vec![(g(1, 2, 3.0, 0.0, 0.5), 0.7)]).map(|v| v.len()),
+            Some(0)
         );
+        // a NaN cover refuses its group, alone or beside a finite mate
+        assert!(shared_cover(vec![(g(1, 2, 3.0, 0.0, f64::NAN), 0.0)]).is_none());
+        assert!(shared_cover(vec![
+            (g(1, 3, 5.0, 0.05, 1.6), 0.01),
+            (g(2, 4, 5.0, 0.05, f64::NAN), 0.01),
+        ])
+        .is_none());
+    }
+
+    /// #19114 review: the raise an exact edge growth cascades to its far end B is judged
+    /// like a growth of B and of every vertex B becomes one with, each against its own far
+    /// vertices from its own point. B raised to 0.6 beside C 0.7 away (stored 0.2) is
+    /// refused (0.8 > 0.7), and fits with C 1.0 away; B's mate B2, raised with it, is
+    /// refused beside its own far vertex D 0.62 away (stored 0.05: 0.65 > 0.62) although B
+    /// fits. A raise at or below a vertex's stored tolerance gives it no growth.
+    #[test]
+    fn a_cascaded_raise_is_judged_at_every_vertex_it_becomes_one_with() {
+        const B: u8 = 2;
+        const B2: u8 = 3;
+        const C: u8 = 4;
+        const D: u8 = 5;
+        let reaches = |bc: f64, b2d: f64| {
+            move |m: u8, _: &[u8]| -> Result<Option<(Reach<u8>, f64)>> {
+                Ok(match m {
+                    B => Some((vec![(Some(C), bc, 0.2)], 0.1)),
+                    B2 => Some((vec![(Some(D), b2d, 0.05)], 0.1)),
+                    _ => None,
+                })
+            }
+        };
+        let alone = BTreeMap::new();
+        let raised = |bc: f64| raise_growths(&[(B, 0.6)], &alone, reaches(bc, 5.0)).unwrap();
+        let refused = raised(0.7);
+        assert_eq!(refused.len(), 1);
+        assert_eq!(
+            first_reaching(&refused).map(|(at, needed, _)| (at, needed)),
+            Some((B, 0.6))
+        );
+        assert!(first_reaching(&raised(1.0)).is_none());
+
+        let merged = BTreeMap::from([(B, vec![B, B2]), (B2, vec![B2, B])]);
+        let both = raise_growths(&[(B, 0.6)], &merged, reaches(1.0, 0.62)).unwrap();
+        assert_eq!(
+            both.iter()
+                .map(|g| (g.vertex, g.tolerance))
+                .collect::<Vec<_>>(),
+            vec![(B, 0.6), (B2, 0.6)]
+        );
+        assert_eq!(
+            first_reaching(&both).map(|(at, needed, _)| (at, needed)),
+            Some((B2, 0.6))
+        );
+        let clear = raise_growths(&[(B, 0.6)], &merged, reaches(1.0, 1.0)).unwrap();
+        assert!(first_reaching(&clear).is_none());
+        assert!(raise_growths(&[(B, 0.1)], &merged, reaches(0.7, 0.62))
+            .unwrap()
+            .is_empty());
     }
 
     /// WR-306 (#17888 review): the raise that makes each vertex of an absorbing pair cover

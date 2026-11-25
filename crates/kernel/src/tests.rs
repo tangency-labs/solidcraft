@@ -1299,6 +1299,40 @@ fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
 }
 
 #[test]
+fn a_flat_scan_keeps_its_welded_source_and_rebuilds_the_same_winding() {
+    // Two triangles of an open square, sharing a side that runs in the same direction.
+    let positions = std::sync::Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0., 1., 1., 0., 1., 0., 0., 0., 1., 0.]);
+    let facets = std::sync::Arc::from([0, 1, 2, 4, 5, 3]);
+    let (ready, packed, indexed) = crate::Body::from_packed_flat_mesh_indexed(positions, facets).unwrap();
+    assert_eq!(packed.as_chunks::<3>().0, &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]);
+    assert_eq!(indexed, [0, 1, 2, 1, 2, 3], "source order is kept for shading");
+    let reopened = crate::Body::from_packed_mesh(packed.as_chunks::<3>().0, indexed.as_chunks::<3>().0, &[]).unwrap();
+    assert_eq!(ready.triangle_mesh(), reopened.triangle_mesh());
+    assert_eq!(reopened.triangle_mesh().unwrap().1, &[[0, 1, 2], [1, 3, 2]]);
+}
+
+#[test]
+fn mesh_winding_cannot_close_a_nonorientable_surface() {
+    // Six-vertex projective plane. Each side belongs to two triangles, but their
+    // directions cannot all be made opposite in one consistent winding.
+    let triangles = [[0, 1, 2], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 5], [1, 2, 5], [1, 3, 4], [1, 4, 5], [2, 3, 4], [2, 3, 5]];
+    let positions = [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z];
+    let body = crate::mesh_body(&positions, &triangles).unwrap();
+    let (_, triangles) = body.triangle_mesh().unwrap();
+    let mut edges = std::collections::BTreeMap::new();
+    for &[a, b, c] in triangles {
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            let (uses, balance) = edges.entry((from.min(to), from.max(to))).or_insert((0, 0));
+            *uses += 1;
+            *balance += if from < to { 1 } else { -1 };
+        }
+    }
+    assert!(edges.values().all(|(uses, _)| *uses == 2));
+    assert!(edges.values().any(|(_, balance)| *balance != 0));
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
@@ -1318,8 +1352,10 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!((m.volume - 1000.0).abs() < 1e-9 && (m.area - 600.0).abs() < 1e-9, "{m:?}");
     assert_eq!((m.faces, m.edges, m.vertices), (12, 18, 8));
     let moved = crate::transform(&b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+    assert!(moved.is_closed_mesh());
     assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
     let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    assert!(mirrored.is_closed_mesh());
     assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
     let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
     assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));
@@ -1339,6 +1375,35 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(!sheet.is_closed_mesh());
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, 4.0), Vec3::new(0.0, 0.0, -1.0)), Some((4.0, Vec3::Z)));
     assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
+}
+
+/// `Body::face_line_hit` on the Ø40 × 40 cylinder about +Z, exactly, in closed form.
+/// - A line through the axis meets the side at the same distance both ways, (±20, 0, 20): the tie
+///   goes to the meeting ahead along the direction, whichever way the line points.
+/// - A line lying on the side (a ruling, here at 33° and on the side's seam) is no single place
+///   on it: `None`, not a failure. Each end meets it once, on its rim, at z = 0 and z = 40.
+#[test]
+fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let ends: Vec<usize> = (0..b.face_count()).filter(|&f| f != side).collect();
+    assert_eq!(ends.len(), 2);
+    let centre = Vec3::new(0.0, 0.0, 20.0);
+    for (dir, ahead) in [(Vec3::X, Vec3::new(20.0, 0.0, 20.0)), (-Vec3::X, Vec3::new(-20.0, 0.0, 20.0))] {
+        let got = b.face_line_hit(side, centre, dir).unwrap().unwrap();
+        assert!(got.dist(ahead) < 1e-9, "along {dir:?}: {got:?}, not {ahead:?}");
+    }
+    for a in [33f64.to_radians(), crate::build::SEAM_ANGLE] {
+        let rim = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        for (z, dir) in [(30.0, -Vec3::Z), (10.0, Vec3::Z)] {
+            let on = rim + Vec3::new(0.0, 0.0, z);
+            assert_eq!(b.face_line_hit(side, on, dir).unwrap(), None, "at {a} rad, z = {z}");
+            let mut met: Vec<Vec3> = ends.iter().filter_map(|&f| b.face_line_hit(f, on, dir).unwrap()).collect();
+            met.sort_by(|p, q| p.z.total_cmp(&q.z));
+            assert_eq!(met.len(), 2, "at {a} rad, z = {z}: {met:?}");
+            assert!(met[0].dist(rim) < 1e-9 && met[1].dist(rim + Vec3::new(0.0, 0.0, 40.0)) < 1e-9, "at {a} rad, z = {z}: {met:?}");
+        }
+    }
 }
 
 #[test]
@@ -2351,6 +2416,42 @@ fn partial_revolve_on_the_axis() {
     assert!(vc < v - 1.0 && vc > v - PI * 3.75 * 3.75 * 2.5, "{vc}");
 }
 
+/// #17528: a profile corner 0.0000119 mm from the axis, as a sketch leaves it when nothing holds
+/// the corner on the axis line. It goes onto the axis, so the turn has no hair-thin cone face along
+/// the axis. That face went to STEP with its apex kilometres away: slicers hung on the file and
+/// SolidCraft read the body back open.
+#[test]
+fn revolve_puts_a_corner_next_to_the_axis_on_it() {
+    let off = 1.19e-5;
+    let profile = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, -9.0), Vec2::new(2.1, -9.0), Vec2::new(4.25, -6.85), Vec2::new(4.25, 6.5), Vec2::new(off, 6.5)]),
+        holes: vec![],
+    };
+    let body = revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The top and bottom discs, the cylinder and the cone: no face from the edge beside the axis.
+    assert_eq!(measure(&body).unwrap().merged.faces, 4);
+    let text = step_export(&[&body], "peg").unwrap();
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    assert!(back.validity().is_empty(), "{:?}", back.validity());
+    assert_eq!(measure(&back).unwrap().merged.faces, 4);
+    // A corner as near on the far side of the axis doesn't count as crossing it: the rectangle
+    // turns into a cylinder, two discs and its side.
+    let across =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(-off, 5.0)]), holes: vec![] };
+    let cylinder = revolve(&Plane::XZ, &[across], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(rel(measure(&cylinder).unwrap().volume, PI * 25.0 * 5.0) < 5e-4);
+    assert_eq!(measure(&cylinder).unwrap().merged.faces, 3);
+    // A partial turn goes toward the sketch normal's side from where the profile is once its
+    // corners are on the axis, not from the centroid it had before (here on the other side).
+    let sliver = Region2 { outer: Loop2::polygon(&[Vec2::new(-9e-5, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(-9e-5, 2.0)]), holes: vec![] };
+    let on_axis = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(0.0, 2.0)]), holes: vec![] };
+    // Too thin for mass properties: the boxes come from the vertices and edges.
+    let quarter = |r: Region2| revolve(&Plane::XY, &[r], Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap().outline_bounds();
+    let (a, b) = (quarter(sliver), quarter(on_axis));
+    assert!(a.min.dist(b.min) < 1e-9 && a.max.dist(b.max) < 1e-9, "{a:?} vs {b:?}");
+}
+
 /// Boolean identities on primitives the robustness runs found failing: cylinders tangent to box
 /// faces from inside and out, crossing cylinders touching along a line (their seams used to lie
 /// exactly where the other body cut them).
@@ -2509,6 +2610,20 @@ fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part(
     assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
 }
 
+/// #11436: a tilted cut leaves a rim of ellipses, which a band cannot follow; the flat rim still takes it.
+#[test]
+fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
+    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 30.0), holes: vec![Loop2::circle(Vec2::ZERO, 22.0)] };
+    let ring = extrude(&Plane::XY, &[ring], 0.0, 20.0).unwrap().pop().unwrap();
+    let tilt = 20f64.to_radians();
+    let cut = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::new(tilt.cos(), 0.0, -tilt.sin()), y: Vec3::Y };
+    let sloped = half_space(&ring, &cut, false).unwrap().0.unwrap();
+    let at = Vec3::new(-26.0, 0.0, 10.0 + 26.0 * tilt.tan());
+    let text = raise_band(&sloped, at, 1.5, 3.0, false).unwrap_err().to_string();
+    assert!(text.contains("not supported yet") && text.contains("ellipse"), "{text}");
+    assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
@@ -2589,6 +2704,60 @@ fn retained_bytes_matches_the_iterator_counts() {
         let walked = r.faces.len() * 2048 + uses * (512 + 96);
         assert_eq!(body.retained_bytes(), walked);
     }
+}
+
+/// #19629: a body lets go of its kernel forms, which are several times its record once it was
+/// measured, and the record gives each again on its next use with the same answers. Clones
+/// share the forms, so letting go through one lets go for all. A 40 x 30 x 10 block less a
+/// Ø 10 hole through it: 12 000 − 250 π mm³, and the point 3 above the middle of its top's
+/// front half is 3 from the top, its nearest face.
+#[test]
+fn released_kernel_forms_are_made_again_from_the_record() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+    let hole = cylinder(Vec3::new(20.0, 15.0, -5.0), Vec3::Z, 5.0, 30.0).unwrap();
+    let drilled = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
+    assert!(!drilled.holds_kernel_form(), "the record alone until a use asks for a form");
+    // The SMLib form.
+    let before = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form(), "clones share the form");
+    let after = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!(before.to_bits(), after.to_bits(), "the record gives the same body");
+    let exact = 12_000.0 - 250.0 * std::f64::consts::PI;
+    assert!((after - exact).abs() < 1e-6 * exact, "{after} against {exact}");
+    // The solidcore-ops form.
+    drilled.release_kernel_form();
+    let above = Vec3::new(20.0, 5.0, 13.0);
+    let near = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form());
+    let again = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!((near.0.to_bits(), near.1), (again.0.to_bits(), again.1), "the record gives the same body");
+    assert!((again.0 - 3.0).abs() < 1e-9, "{again:?}");
+    // A measurement on forms made again is the measurement on forms in use, to the bit.
+    let warm = format!("{:?}", crate::measure(&drilled).unwrap());
+    drilled.release_kernel_form();
+    assert_eq!(format!("{:?}", crate::measure(&drilled).unwrap()), warm);
+    // So is an operation: a slot cut into the block with its forms in use, and let go.
+    let slot = box_solid(Vec3::new(5.0, 10.0, 5.0), Vec3::new(10.0, 20.0, 15.0)).unwrap();
+    let on_warm = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    drilled.release_kernel_form();
+    slot.release_kernel_form();
+    let on_cold = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(format!("{:?}", on_cold.record()), format!("{:?}", on_warm.record()));
+    // The forms are let go without the body in hand too, until the body itself is gone.
+    let forms = drilled.kernel_forms();
+    drilled.smlib().unwrap();
+    assert!(forms.held() && !forms.gone());
+    forms.release();
+    assert!(!drilled.holds_kernel_form() && !forms.held());
+    drop(drilled);
+    assert!(forms.gone());
+    forms.release();
 }
 
 /// #881: a pleated band lofted to a nearly flat one, both 18 vertices from (-26, 3), counter-
@@ -3387,4 +3556,214 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
     for &e in &ring {
         assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
     }
+}
+
+/// A round larger than a narrow concave round on its tangent chain is refused at once, naming
+/// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
+/// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
+/// kinks those rounds are concave faces 0.1 to 0.3 mm wide. A ball of 8 or of 5 does not roll
+/// inside a round of 2, so the round of the stem's foot does not fit them. The kernel found no
+/// ball on those three edges and let them pass; it went on for 18 s to refuse two of the chain's
+/// bands as overlapping, with 0.158 mm as the radius that fits.
+#[test]
+fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming_it() {
+    let bar_plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let bar_loop = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
+            Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
+            // from (30, 17.5) through (0, 22.5) to (-30, 17.5)
+            Seg2::Arc { center: Vec2::new(0.0, -70.0), radius: 92.5, start: 1.240498971965643, sweep: 0.6605947096585074 },
+            Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
+        ],
+    };
+    let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    // The stem's outline: five arcs and a line, corner to corner, each arc given by the three
+    // points the sketch drew it through (its start, a point on it, its end).
+    let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
+    let segs = vec![
+        // through (18.8, 4)
+        Seg2::Arc {
+            center: Vec2::new(-23.764857456221563, -12.77514513750452),
+            radius: 45.75120309514059,
+            start: 0.13979868890741112,
+            sweep: 0.4711554890184193,
+        },
+        // through (0.94, 17.9)
+        Seg2::Arc {
+            center: Vec2::new(-0.020515226704094107, -5.489318159144774),
+            radius: 23.409032304869626,
+            start: 0.9440065846664395,
+            sweep: 1.1724802229343485,
+        },
+        // through (-17.68, 5.16)
+        Seg2::Arc {
+            center: Vec2::new(39.13116330153082, -21.98152348199092),
+            radius: 62.96165954449315,
+            start: 2.5231805421562297,
+            sweep: 0.3454829737892329,
+        },
+        // through (-20.99, -11.41)
+        Seg2::Arc {
+            center: Vec2::new(-14.535971623535861, -7.675374301250519),
+            radius: 7.456668920769142,
+            start: 2.7760583061845803,
+            sweep: 1.7972107229845715,
+        },
+        Seg2::Line { a: Vec2::new(-15.57, -15.06), b: Vec2::new(13.88, -15.91) },
+        // through (20.24, -13.18)
+        Seg2::Arc {
+            center: Vec2::new(14.49239208224037, -8.563320015768795),
+            radius: 7.372159171714493,
+            start: -1.6539603698181953,
+            sweep: 1.9517884128893068,
+        },
+    ];
+    let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
+    let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
+    let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
+    let picks: Vec<Vec3> = corners.iter().map(|c| Vec3::new(c[0], c[1], 45.0)).collect();
+    let body = fillet(&body, &picks, 2.0).unwrap();
+    let chain = tangent_chain(&body, &[Vec3::new(-0.85, -15.48, 19.32)]).unwrap();
+    assert_eq!(chain.len(), 14, "the foot: six sides, six corner rounds and the bar's seam twice");
+    for r in [8.0, 5.0] {
+        let Err(KernelError::TooLarge(why)) = fillet(&body, &chain, r) else { panic!("{r}: refused as too large") };
+        assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
+        assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
+    }
+}
+
+#[test]
+fn iso_line_crosses_a_quadratic_trim_twice_within_one_sample_step() {
+    use solidcore_record::brep as b;
+    let tol = 1e-7;
+    let c: f64 = 33.0 / 128.0;
+    let r: f64 = 1.0 / 256.0;
+    // The bottom trim is y = 1000 ((t - c)^2 - r^2), x = 1000 t.
+    // Its two roots are strictly between adjacent samples 16/64 and 17/64.
+    let y0 = 1000.0 * (c * c - r * r);
+    let y1 = 1000.0 * ((1.0 - c) * (1.0 - c) - r * r);
+    let uv = [[0.0, y0], [1000.0, y1], [1000.0, 900.0], [0.0, 900.0]];
+    let xyz = |p: [f64; 2]| [p[0], p[1], 0.0];
+    let mut edges = vec![];
+    let mut oriented = vec![];
+    for i in 0..4 {
+        let next = (i + 1) % 4;
+        let points = if i == 0 { vec![uv[i], [500.0, y0 - 1000.0 * c], uv[next]] } else { vec![uv[i], uv[next]] };
+        let knots: Vec<f64> = [vec![0.0; points.len()], vec![1.0; points.len()]].concat();
+        edges.push(b::Edge {
+            curve: b::Curve::Spline { knots: knots.clone(), points: points.iter().copied().map(xyz).collect() },
+            nurbs: None,
+            interval: [0.0, 1.0],
+            vertices: [i as u32, next as u32],
+            tolerance: tol,
+            uses: vec![b::EdgeUseRef { face: 0, r#loop: 0, position: i as u32, upper: false }],
+        });
+        oriented.push(b::OrientedEdge { edge: i as u32, forward: true, pcurve: b::Curve2::Spline { points, knots } });
+    }
+    let record = b::Brep {
+        version: b::VERSION,
+        tolerance: tol,
+        regions: vec![b::Region { shells: vec![0], void: false }],
+        shells: vec![b::Shell::Faces { faces: vec![b::OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![b::Face {
+            surface: b::Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] },
+            nurbs: None,
+            domain: [[0.0, 1000.0], [-1.0, 900.0]],
+            loops: vec![b::Loop::Edges { edges: oriented }],
+        }],
+        edges,
+        vertices: uv.map(|p| b::Vertex { point: xyz(p), tolerance: tol }).to_vec(),
+    };
+    let mut rational = record.clone();
+    // Weights 1, 2, 4 reparameterize the same parabola by t = 2s/(1+s).
+    let b::Loop::Edges { edges: boundary } = &mut rational.faces[0].loops[0] else { panic!("edge loop") };
+    let b::Curve2::Spline { knots, points } = &boundary[0].pcurve else { panic!("quadratic trim") };
+    let h: Vec<_> = points.iter().zip([1.0, 2.0, 4.0]).map(|(p, w)| [p[0] * w, p[1] * w, w]).collect();
+    rational.edges[0].curve = b::Curve::RationalSpline { knots: knots.clone(), homogeneous: h.iter().map(|&[x, y, w]| [x, y, 0.0, w]).collect() };
+    boundary[0].pcurve = b::Curve2::RationalSpline { knots: knots.clone(), homogeneous: h };
+    for data in [record, rational] {
+        let body = Body::from_record(data).unwrap();
+        for y in [1.0, 0.0] {
+            let pieces = iso_curves(&body, 0, Vec3::new(1000.0 * c, y, 0.0), true).unwrap();
+            let half = 1000.0 * (r * r + y / 1000.0).sqrt();
+            assert_eq!(pieces.len(), 1);
+            let b::Curve::Line { start, end } = pieces[0].0 else { panic!("expected a line") };
+            assert!((start[0] - (1000.0 * c - half)).abs() < 1e-7 && (end[0] - (1000.0 * c + half)).abs() < 1e-7);
+        }
+        assert!(iso_curves(&body, 0, Vec3::new(1000.0 * c, -0.02, 0.0), true).is_err());
+        let boundary = iso_curves(&body, 0, Vec3::new(500.0, 900.0, 0.0), true).unwrap();
+        assert_eq!(boundary.len(), 1);
+        let b::Curve::Line { start, end } = boundary[0].0 else { panic!("expected the upper boundary") };
+        assert_eq!((start, end), ([0.0, 900.0, 0.0], [1000.0, 900.0, 0.0]));
+    }
+}
+
+#[test]
+fn iso_line_across_a_round_hole_stops_at_both_sides() {
+    use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+    let region = Region2 { outer: rect(40.0, 30.0).outer, holes: vec![Loop2::circle(Vec2::new(20.0, 15.0), 5.0).reversed()] };
+    let body = extrude(&Plane::XY, &[region], 0.0, 5.0).unwrap().pop().unwrap();
+    let (fi, face) = body.record().faces.iter().enumerate().find(|(_, f)| f.loops.len() == 2).unwrap();
+    let surface = SurfaceEval::new(face.parameters()).unwrap();
+    let center = Vec3::new(20.0, 15.0, surface.point([0.0, 0.0]).unwrap().z);
+    let uv = surface.project(center, None, 1e-7).unwrap();
+    let dir = surface.partials(uv[0], uv[1]).unwrap()[1][0].normalized().unwrap();
+    let sections = iso_curves(&body, fi, center + dir * 8.0, true).unwrap();
+    assert_eq!(sections.len(), 2);
+    for ((curve, range), end) in sections.iter().zip([1, 0]) {
+        let point = CurveEval::new(curve).unwrap().point(range[end]).unwrap();
+        assert!((point.dist(center) - 5.0).abs() < 1e-7);
+    }
+}
+
+/// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with
+/// corners 1e-9 apart stop the triangulation library on an assertion; the mesher's own guard
+/// catches it and returns an internal error, but the crash reports read [`guarded`], which did
+/// not count the mesher's guard, so a caught panic was reported as a crash.
+#[test]
+fn a_panic_the_mesher_catches_counts_as_guarded() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let loops = vec![
+        vec![
+            [1.999999999609, 4.000000000408],
+            [2.999999999249, 5.77e-10],
+            [1.000000000478, 2.000000000614],
+            [1.000000000991, 1.000000000228],
+            [2.000000000482, 3.99999999949],
+            [1.999999999672, -9.53e-10],
+            [3.000000000364, 0.99999999994],
+            [-1.05e-10, 3.999999999914],
+            [1.999999999286, 1.000000000788],
+        ],
+        vec![
+            [4.000000000261, 1.999999999246],
+            [1.999999999553, -4.57e-10],
+            [1.999999999469, 1.000000000877],
+            [3.999999999666, 2.000000000137],
+            [3.76e-10, 2.99999999915],
+            [4.000000000737, 3.000000000668],
+            [1.000000000447, 1.000000000422],
+            [0.999999999585, 0.999999999164],
+            [0.999999999585, 3.000000000598],
+        ],
+    ];
+    let me = std::thread::current().id();
+    let (panics, unguarded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (p, u) = (panics.clone(), unguarded.clone());
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            p.fetch_add(1, Ordering::SeqCst);
+            if !guarded() {
+                u.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }));
+    let result = solidcore_tess::triangulate_planar(&loops);
+    std::panic::set_hook(prev);
+    assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
+    assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
+    assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
 }

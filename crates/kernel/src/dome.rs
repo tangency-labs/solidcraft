@@ -15,7 +15,8 @@ use crate::{KernelError, Result};
 /// the kernel cannot take the body or the result does not close.
 pub fn dome(b: &Body, face: usize, height: f64, shape: DomeShape, reverse: bool) -> Result<Body> {
     b.require_brep("dome")?;
-    let (ops, order) = b.ops_body().ok_or_else(|| KernelError::Failed("dome: the kernel could not take the body".into()))?;
+    let form = b.ops_body().ok_or_else(|| KernelError::Failed("dome: the kernel could not take the body".into()))?;
+    let (ops, order) = &*form;
     let raised = solidcore_ops::dome::dome(ops, order, face, height, shape, reverse).map_err(|e| match e {
         solidcore_ops::Error::Dome(refusal) => KernelError::Dome(refusal),
         e => KernelError::Failed(format!("dome: {e}")),

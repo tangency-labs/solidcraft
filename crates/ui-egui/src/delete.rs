@@ -43,7 +43,14 @@ pub fn selection_params(app: &SolveApp) -> Value {
     let occurrences: Vec<u64> = app.tree.picked_components.iter().filter_map(|c| app.session.doc.occurrence_of(*c).map(|o| o.id)).collect();
     // Undo can remove a canvas while its Browser selection survives.
     let canvases: Vec<u64> = app.tree.picked_canvases.iter().copied().filter(|id| app.session.doc.canvases.iter().any(|c| c.id == *id)).collect();
-    let mut params = json!({ "items": items, "occurrences": occurrences, "canvases": canvases, "joints": app.tree.picked_joints });
+    // A whole-body selection is a scope: name it, not the 56,100 bodies it covers.
+    let mut params = json!({
+        "items": items,
+        "all_bodies": app.session.all_bodies_selected(),
+        "occurrences": occurrences,
+        "canvases": canvases,
+        "joints": app.tree.picked_joints,
+    });
     // A drawing's view goes with the views projected or cut from it, as a view takes its
     // dimensions with it: one delete, one undo step, and Ctrl+Z brings them all back.
     if items.iter().any(|item| matches!(item, Sel::Drawing { .. })) {
@@ -53,7 +60,11 @@ pub fn selection_params(app: &SolveApp) -> Value {
 }
 
 fn is_empty(p: &Value) -> bool {
-    ["items", "occurrences", "components", "canvases", "joints"].iter().all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
+    let scoped = p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false);
+    !scoped
+        && ["items", "occurrences", "components", "canvases", "joints"]
+            .iter()
+            .all(|k| p.get(*k).and_then(Value::as_array).is_none_or(|a| a.is_empty()))
 }
 
 fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
@@ -71,6 +82,10 @@ fn shared_occurrences(app: &SolveApp, params: &Value) -> bool {
 /// Delete what is selected (the Delete key). A selected sketch dimension or constraint glyph
 /// goes first, as before.
 pub fn delete_selection(app: &mut SolveApp) {
+    // In Frame Member, the tubes picked in the view are taken out of its path (#15705).
+    if crate::dialogs_frame::remove_picked(app) {
+        return;
+    }
     if crate::sketch3d::delete_selected(app) || crate::sketch_tools::delete_glyph(app) {
         return;
     }
