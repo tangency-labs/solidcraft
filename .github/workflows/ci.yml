@@ -15,8 +15,9 @@
 # nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
 # on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
 # Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
-# that changes what they exercise. The wasm check and browser smoke run on approved pull requests
-# and merge groups that touch app dependencies, the web app, assets or the browser tests. Dependency advisories run nightly
+# that changes what they exercise. The wasm check and browser smoke (up to 45 minutes) run nightly and in
+# the merge queue for a group that touches app dependencies, the web app, assets or the browser
+# tests, not on pull requests, so pull request CI stays fast. Dependency advisories run nightly
 # and on any pull request or merge group that changes Cargo.lock or a Cargo.toml. Only main saves the build caches; pull requests restore them.
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
@@ -162,7 +163,7 @@ jobs:
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
       deps: ${{ steps.paths.outputs.deps }}
-      # Relevant approved PRs and merge groups, or the nightly: wasm build and browser smoke.
+      # Relevant merge groups (and batch/** pushes), or the nightly: wasm build and browser smoke.
       wasm: ${{ steps.paths.outputs.wasm }}
       # solidcore/** changed (approved pull requests, merge groups, pushes to main): SolidCore checks.
       solidcore: ${{ steps.paths.outputs.solidcore }}
@@ -394,8 +395,10 @@ jobs:
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
-            # the wasm build and browser smoke also run once the pull request is approved for CI.
+            # the wasm build and browser smoke wait for the merge queue (and the nightly), so pull
+            # request CI stays fast.
             deps_wasm_paths "$RUNNER_TEMP/ci-paths"
+            wasm=false
             solidcore_paths "$RUNNER_TEMP/ci-paths"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
@@ -422,7 +425,6 @@ jobs:
             native=false
             oracle=false
             solidcore=false
-            wasm=false
           fi
           # A push that only merges main into the change (Merge branch 'main', Update branch) when
           # the change itself already passed: nothing new to test here, and main tests the merged
@@ -436,7 +438,6 @@ jobs:
               echo "Only a merge of main into a change that passed in $carried: repository checks only."
               native=false
               solidcore=false
-              wasm=false
             fi
           fi
           # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
@@ -1489,9 +1490,10 @@ jobs:
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
   # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
-  # (`cargo xtask plugin-examples`), then run the built web client in headless Chrome. Relevant
-  # approved pull requests and merge groups (Select checks' `wasm`), where `ci` requires it;
-  # by hand with cross_compile. Pages keeps the full API and offline browser tests.
+  # (`cargo xtask plugin-examples`), then run the built web client in headless Chrome. In the
+  # merge queue for a group that reaches the wasm build (Select checks' `wasm`), where `ci`
+  # requires it, and nightly; never on pull requests; by hand with cross_compile. Pages keeps the
+  # full API and offline browser tests.
   wasm:
     name: Compile WebAssembly and test browser startup
     needs: changes

@@ -82,5 +82,5 @@ It creates a synthetic 30 × 20 × 10 mm box, saves it, opens the saved design a
 6000 mm³ volume. It then changes the camera three times and requires different frames through
 `ui.screenshot`, whose request tokens identify frames painted after each camera command.
 Each run uses a free local server port; it never controls an existing browser.
-The smoke runs in the WebAssembly job for relevant pull requests after `approved-for-ci`, and
-in the merge queue. A nightly run warms the build cache. The full API and offline tests still run in Pages.
+The smoke runs in the WebAssembly job in the merge queue, for a group that touches the web app or
+what it builds from, and nightly; pull requests skip it so their CI stays fast. The full API and offline tests still run in Pages.
