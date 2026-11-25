@@ -3633,6 +3633,42 @@ fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming
     }
 }
 
+/// Issue #19602: Boolean cut of a block with a 3.6° tilted jamb less a cylinder.
+/// When the cylinder cut creates partition faces in void space outside the material
+/// solid, SMLib export must omit void-void boundary faces without error.
+#[test]
+fn test_issue_19602_tilted_jamb_block_cylinder_cut() {
+    let planes = [
+        [-0.99812, -0.0561, -0.02475, 1.3166],
+        [1., 0., 0., 4.7812],
+        [0., 0., -1., -8.5],
+        [0., 0., 1., 27.52],
+        [0., -1., 0., -2.],
+        [0., 1., 0., 9.5],
+        [1., 0., 0., 60.],
+        [-1., 0., 0., 60.],
+        [0., 1., 0., 60.],
+        [0., -1., 0., 60.],
+        [0., 0., 1., 60.],
+        [0., 0., -1., 60.],
+    ];
+    let hs: Vec<HalfSpace> = planes
+        .iter()
+        .map(|&[a, b, c, d]: &[f64; 4]| {
+            let k = (a * a + b * b + c * c).sqrt();
+            HalfSpace { n: Vec3::new(a / k, b / k, c / k), d: d / k }
+        })
+        .collect();
+    let block = convex_polyhedron(&hs).expect("block polyhedron must build");
+    let a = [-0.05545f64, 1., -0.02618];
+    let k = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let arch = cylinder(Vec3::new(2.392, 2.0057, 27.5982), Vec3::new(a[0] / k, a[1] / k, a[2] / k), 4.5, 8.).expect("cylinder must build");
+    let r = boolean(&block, &arch, BoolOp::Cut);
+    assert!(r.is_ok(), "{r:?}");
+    let solid = r.unwrap().expect("cut should produce a non-empty solid");
+    assert!(solid.validity().is_empty(), "{:?}", solid.validity());
+}
+
 #[test]
 fn iso_line_crosses_a_quadratic_trim_twice_within_one_sample_step() {
     use solidcore_record::brep as b;
@@ -3715,6 +3751,19 @@ fn iso_line_across_a_round_hole_stops_at_both_sides() {
         let point = CurveEval::new(curve).unwrap().point(range[end]).unwrap();
         assert!((point.dist(center) - 5.0).abs() < 1e-7);
     }
+}
+
+#[test]
+fn ray_meets_exact_bounds_culls_misses_and_keeps_hits_for_solid_and_mesh() {
+    let solid = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 5.0), Vec3::X));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::Z));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(25.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+
+    let mesh = mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(mesh.ray_meets_exact_bounds(Vec3::new(2.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(!mesh.ray_meets_exact_bounds(Vec3::new(25.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
 }
 
 /// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with

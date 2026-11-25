@@ -53,8 +53,6 @@ pub mod develop;
 pub mod eval;
 pub mod finger_joint;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;

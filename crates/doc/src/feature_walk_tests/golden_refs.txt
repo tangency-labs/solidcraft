@@ -85,6 +85,8 @@ sweep_options
   remap_bodies: targets[0]
 shell
   remap_bodies: body
+dome
+  remap_bodies: body
 draft
   remap_refs: neutral.base.base.feature
   remap_bodies: body
