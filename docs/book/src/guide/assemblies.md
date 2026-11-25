@@ -702,8 +702,7 @@ it. **Keep its components** makes a linked subassembly. It starts off: all bodie
 one linked component, as in earlier versions. **Flexible** makes the new occurrence flexible.
 It starts off too, and it needs the first one: the panel greys it until that one is ticked. A
 paste of a copied linked component keeps its components as the last Insert Design did, and
-comes in rigid. With Preferences › General › **Ask for a file's import options** off, a picked
-design goes straight in as one linked component, without the panel. In scripts, use `structure` and
+comes in rigid. In scripts, use `structure` and
 `flexible` on `component.insert_design` (both
 default to `false`, and `flexible` keeps the components as `structure` does),
 `component.relink` and `component.link_mode`. `component.link_mode` takes

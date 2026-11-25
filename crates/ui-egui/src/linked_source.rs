@@ -523,8 +523,7 @@ mod tests {
 
     /// Insert Design's options panel (#5526): a picked design waits in it, both options off;
     /// Flexible is greyed until Keep its components is ticked; Cancel inserts nothing; OK inserts
-    /// with what was ticked, as `structure` and `flexible`; with import options not asked for, no
-    /// panel.
+    /// with what was ticked, as `structure` and `flexible`.
     #[test]
     fn insert_designs_panel_asks_how_a_picked_design_comes_in() {
         let mut h = crate::scenario::Harness::new();
@@ -585,12 +584,6 @@ mod tests {
         h.settle();
         assert_eq!(h.app.session.doc.links.values().filter(|link| link.tree.is_none()).count(), 1, "one component");
         assert!(!h.app.insert_design_keeps_components);
-        // Import options not asked for: no panel, straight in as one component, as before.
-        h.app.preferences.ask_import_options = false;
-        pick(&mut h);
-        assert!(panel(&h).is_none(), "no panel");
-        h.settle();
-        assert_eq!(h.app.session.doc.links.values().filter(|link| link.tree.is_none()).count(), 2, "one component");
     }
 
     /// A linked design that has components (#5526): its menu switches it between rigid and

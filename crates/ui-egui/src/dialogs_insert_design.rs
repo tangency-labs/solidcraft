@@ -2,10 +2,8 @@
 //! other tabs), the panel on the right asks how a linked design that has components of its own
 //! comes in, and OK inserts it beside the window as before (#5526, #11593). Both options start
 //! off: off, the design comes in as one linked component, which is what `component.insert_design`
-//! does when it is not told. Preferences > General "Ask for a file's import options" off skips the
-//! panel: the design goes straight in with both off, as before the panel existed. A script, the
-//! control channel or MCP calls the command with its own `structure` and `flexible` and never
-//! meets this panel.
+//! does when it is not told. A script, the control channel or MCP calls the command with its own
+//! `structure` and `flexible` and never meets this panel.
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row};
@@ -23,13 +21,8 @@ pub struct InsertDesign {
     pub flexible: bool,
 }
 
-/// Open the panel for the design at `path`, both options off; with the import options not asked
-/// for, insert it at once, as one linked component.
+/// Open the panel for the design at `path`, both options off.
 pub fn open(app: &mut SolveApp, path: &str, note: Option<String>) {
-    if !app.preferences.ask_import_options {
-        app.insert_design_async(path, note, &[]);
-        return;
-    }
     app.dialog = Some(Dialog::new(Kind::InsertDesign(InsertDesign { path: path.into(), note, keep: false, flexible: false }), Vec::new()));
 }
 
