@@ -72,7 +72,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a step of the script that fails stops the run, with --allow-errors too: nothing is written, and --results\n       gives {results: those of the steps before it, error: {step, command, error}}, to --json-out FILE as well)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. A parameter the script sets itself (parameters.add) takes the value given instead, so a\n       script can be a template; a script given as --in is refused. An unknown name, a missing `=` or a bad expression fails\n       the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--quiet] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run; --quiet prints no report to stdout, as for run: the exit status\n       still says whether a feature failed, and a --json-out file is still written)\n";
 /// `check`'s lines in the usage.
@@ -512,10 +512,15 @@ fn read_session(
     if v.get("format").and_then(Value::as_str).is_some_and(|f| solidcraft_engine::doc::format::version_of(f).is_some()) {
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
     } else {
-        let script = if v.get("features").is_some() && v.get("commands").is_none() { recipe::to_script(&v)? } else { v };
-        run_script_warning(&mut s, path, &script)?;
+        run_script_warning(&mut s, path, &script_of(v)?)?;
     }
     Ok(s)
+}
+
+/// The command script `v` is: itself, or the script an oracle recipe (`features`, no `commands`)
+/// turns into.
+fn script_of(v: Value) -> Result<Value, String> {
+    if v.get("features").is_some() && v.get("commands").is_none() { recipe::to_script(&v) } else { Ok(v) }
 }
 
 /// `run --save FILE` over a design another SolidCraft has open (a fresh lock beside it, #16199):
@@ -681,25 +686,25 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let timings = profile || args.iter().any(|a| a == "--timings");
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
-        let mut s = match base {
+        let (mut s, for_script) = match base {
             // A command script as `--in` runs as it loads, before any override could be set.
             Some(b) if !overrides.is_empty() && is_script(b) => return Err(overrides_need_design("run")),
             Some(b) => {
                 let mut s = load_with(b, check, validation)?;
-                apply_overrides("run", &mut s, &overrides)?;
-                s
+                let rest = apply_known_overrides("run", &mut s, &overrides)?;
+                (s, rest)
             }
-            None if !overrides.is_empty() => return Err(overrides_need_design("run")),
             None => {
                 let mut s = Session::default();
                 s.set_validation(validation);
-                s
+                (s, overrides.clone())
             }
         };
         s.param_check = check;
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
         let script = path.ok_or(needs)?;
-        let v = read_json(script)?;
+        let mut v = read_json(script)?;
+        override_script("run", &mut v, &for_script, base.is_some())?;
         let run =
             s.run_script_kept(&v, timings.then_some(profile), &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
         let mut out = match run.timings {
@@ -844,7 +849,8 @@ fn open_validating(
 }
 
 /// [`open_validating`] with `overrides` (`--param`, `--params-file`) set on the design before the
-/// script's own commands run. They need a design to act on: a script alone has none yet.
+/// script's own commands run. One the design doesn't have, or any when there is no design, is a
+/// parameter the script sets itself: the script runs with the value given instead (#22309).
 fn open_overriding(
     base: Option<&str>,
     path: Option<&String>,
@@ -859,8 +865,10 @@ fn open_overriding(
         (Some(b), _) if !overrides.is_empty() && is_script(b) => Err(overrides_need_design(cmd)),
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
-            apply_overrides(cmd, &mut s, overrides)?;
-            run_script_warning(&mut s, p, &read_json(p)?)?;
+            let rest = apply_known_overrides(cmd, &mut s, overrides)?;
+            let mut script = read_json(p)?;
+            override_script(cmd, &mut script, &rest, true)?;
+            run_script_warning(&mut s, p, &script)?;
             Ok(s)
         }
         (Some(b), None) => {
@@ -868,10 +876,16 @@ fn open_overriding(
             apply_overrides(cmd, &mut s, overrides)?;
             Ok(s)
         }
+        (None, Some(p)) if !overrides.is_empty() && is_script(p) => {
+            let mut script = script_of(read_json(p)?)?;
+            override_script(cmd, &mut script, overrides, false)?;
+            let mut s = Session::default();
+            s.param_check = check;
+            s.set_validation(validation);
+            run_script_warning(&mut s, p, &script)?;
+            Ok(s)
+        }
         (None, Some(p)) => {
-            if !overrides.is_empty() && is_script(p) {
-                return Err(overrides_need_design(cmd));
-            }
             let mut s = load(p)?;
             apply_overrides(cmd, &mut s, overrides)?;
             Ok(s)
@@ -882,8 +896,54 @@ fn open_overriding(
 
 fn overrides_need_design(cmd: &str) -> String {
     format!(
-        "{cmd}: --param and --params-file set parameters of a design before a script runs; give the design (or --in DESIGN with the script), since a script alone has none yet"
+        "{cmd}: --param and --params-file can't reach a command script given as --in, which runs as it loads; give the script without --in (`{cmd} SCRIPT --param NAME=EXPR`), or a design"
     )
+}
+
+/// Sets the overrides the design in `s` has, as [`apply_overrides`] does, and returns the rest, in
+/// order, for the script that runs next to set.
+fn apply_known_overrides(cmd: &str, s: &mut Session, overrides: &[(String, String)]) -> Result<Vec<(String, String)>, String> {
+    let (known, rest): (Vec<_>, Vec<_>) = overrides.iter().cloned().partition(|(name, _)| design_has(s, name));
+    apply_overrides(cmd, s, &known)?;
+    Ok(rest)
+}
+
+/// Each override a parameter the script sets itself: wherever a `parameters.add` or
+/// `parameters.change` step sets that name, the expression given replaces the script's, so a
+/// command script can be a template whose sizes come from the command line (#22309). An override
+/// no step sets is refused, naming it; `design` says whether a design came first, for the words.
+fn override_script(cmd: &str, script: &mut Value, overrides: &[(String, String)], design: bool) -> Result<(), String> {
+    let mut steps = match script {
+        Value::Array(steps) => Some(steps),
+        Value::Object(o) => o.get_mut("commands").and_then(Value::as_array_mut),
+        _ => None,
+    };
+    for (name, expr) in overrides {
+        let mut set = false;
+        for step in steps.as_deref_mut().into_iter().flatten() {
+            let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
+            if !matches!(command, Some("parameters.add" | "parameters.change")) {
+                continue;
+            }
+            let Some(params) = step.get_mut("params").and_then(Value::as_object_mut) else { continue };
+            if params.get("name").and_then(Value::as_str).map(str::trim) != Some(name.as_str()) {
+                continue;
+            }
+            params.remove("value");
+            params.insert("expression".into(), Value::String(expr.clone()));
+            set = true;
+        }
+        if !set {
+            let had = if design { "the design has no parameter" } else { "no parameter" };
+            return Err(format!("{cmd}: --param {name}: {had} `{name}`, and the script sets none (parameters.add)"));
+        }
+    }
+    Ok(())
+}
+
+/// Whether the design in `s` has a parameter `name`: a user parameter, a text one, or a feature's.
+fn design_has(s: &Session, name: &str) -> bool {
+    s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
 }
 
 /// The parameters `--params-file` (an object of names and expressions, applied first) and each
@@ -928,9 +988,7 @@ fn checked_override(cmd: &str, name: &str, expr: &str) -> Result<(String, String
 fn apply_overrides(cmd: &str, s: &mut Session, overrides: &[(String, String)]) -> Result<(), String> {
     for (name, expr) in overrides {
         // `parameters.change` would add an unknown name as a new parameter; an override only sets one the design has.
-        let known =
-            s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name));
-        if !known {
+        if !design_has(s, name) {
             return Err(format!("{cmd}: --param {name}: no parameter `{name}` in the design"));
         }
         s.execute("parameters.change", &json!({"name": name, "expression": expr})).map_err(|e| format!("{cmd}: --param {name}: {e}"))?;

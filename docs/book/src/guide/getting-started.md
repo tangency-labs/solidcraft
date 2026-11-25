@@ -417,12 +417,14 @@ solidcraft-cli run --in part.sc --out part.stl --quality fine
 only: the file on disk is not touched. Repeat it to set several; they apply in the order given,
 before the script's own commands run, so a later one can use an earlier one's value. `--params-file
 FILE.json` does the same from an object such as `{"width": "30 mm", "depth": 20}` and applies before
-any `--param`. The name must already be a parameter of the design (or of one of its features), so a
-typo fails the run and names the parameter, rather than adding a new one. Overrides need a design to
-act on: the positional design, or `--in` with a script on top; a script alone has no parameters yet
-(have it set them itself). A missing `=`, an empty name or expression, or an expression that does not
-evaluate fails the run with the command's own message, and nothing is written. `eval` takes the same
-two options.
+any `--param`. The name must already be a parameter of the design (or of one of its features), or
+one the script sets itself, so a typo fails the run and names the parameter, rather than adding a new
+one. A parameter the script sets with `parameters.add` (or `parameters.change`) takes the value given
+instead of the script's, wherever the script sets it, so a plain JSON command script can be a template
+whose sizes come from the command line: `solidcraft-cli run cabinet.json --param "W=900 mm"`. A script
+given as `--in` runs as it loads, before any override, so overrides are refused there. A missing `=`, an
+empty name or expression, or an expression that does not evaluate fails the run with the command's own
+message, and nothing is written. `eval` takes the same two options.
 
 ```sh
 solidcraft-cli run part.sc --param width=30mm --param depth=width/2 --out part.step
