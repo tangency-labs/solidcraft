@@ -6,8 +6,10 @@ fn ring(pts: &[(f64, f64)]) -> Vec<Vec2> {
 
 /// A circle of `n` points, counter-clockwise, or clockwise for a hole.
 fn circle(c: (f64, f64), r: f64, n: usize, hole: bool) -> Vec<Vec2> {
-    let mut pts: Vec<Vec2> =
-        (0..n).map(|k| std::f64::consts::TAU * k as f64 / n as f64).map(|t| Vec2::new(c.0 + r * t.cos(), c.1 + r * t.sin())).collect();
+    let mut pts: Vec<Vec2> = (0..n)
+        .map(|k| std::f64::consts::TAU * k as f64 / n as f64)
+        .map(|t| Vec2::new(c.0 + r * t.cos(), c.1 + r * t.sin()))
+        .collect();
     if hole {
         pts.reverse();
     }
@@ -29,16 +31,34 @@ fn check(loops: &[Vec<Vec2>], parts: &[Vec<(usize, usize)>]) {
         let n = pts.len();
         for k in 0..n {
             let (a, v, b) = (pts[(k + n - 1) % n], pts[k], pts[(k + 1) % n]);
-            assert!(turn(a, v, b) >= -1e-9 * a.dist(v) * v.dist(b), "part {part:?} turns right at {k}");
+            assert!(
+                turn(a, v, b) >= -1e-9 * a.dist(v) * v.dist(b),
+                "part {part:?} turns right at {k}"
+            );
         }
         let a: f64 = (0..n).map(|k| pts[k].cross(pts[(k + 1) % n])).sum::<f64>() * 0.5;
         assert!(a > 0.0);
         covered += a;
         used.extend(part.iter().copied());
     }
-    let region: f64 = loops.iter().map(|l| (0..l.len()).map(|k| l[k].cross(l[(k + 1) % l.len()])).sum::<f64>() * 0.5).sum();
-    assert!((covered - region).abs() < 1e-9 * region.abs(), "{covered} vs {region}");
-    assert_eq!(used.len(), loops.iter().map(Vec::len).sum::<usize>(), "every boundary point is a corner");
+    let region: f64 = loops
+        .iter()
+        .map(|l| {
+            (0..l.len())
+                .map(|k| l[k].cross(l[(k + 1) % l.len()]))
+                .sum::<f64>()
+                * 0.5
+        })
+        .sum();
+    assert!(
+        (covered - region).abs() < 1e-9 * region.abs(),
+        "{covered} vs {region}"
+    );
+    assert_eq!(
+        used.len(),
+        loops.iter().map(Vec::len).sum::<usize>(),
+        "every boundary point is a corner"
+    );
 }
 
 #[test]
@@ -51,7 +71,10 @@ fn a_convex_loop_is_one_part() {
 
 #[test]
 fn a_square_ring_is_four_parts() {
-    let loops = vec![ring(&[(-2.0, -2.0), (2.0, -2.0), (2.0, 2.0), (-2.0, 2.0)]), ring(&[(-1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (1.0, -1.0)])];
+    let loops = vec![
+        ring(&[(-2.0, -2.0), (2.0, -2.0), (2.0, 2.0), (-2.0, 2.0)]),
+        ring(&[(-1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (1.0, -1.0)]),
+    ];
     let parts = convex_parts(&loops).unwrap();
     check(&loops, &parts);
     assert!(parts.len() <= 5, "{parts:?}");
@@ -72,7 +95,16 @@ fn a_plate_with_round_holes_is_a_few_parts() {
 #[test]
 fn points_along_straight_sides_stay_corners() {
     // An L with three points on its long sides and a square hole.
-    let outer = ring(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0), (0.0, 5.0)]);
+    let outer = ring(&[
+        (0.0, 0.0),
+        (5.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 4.0),
+        (4.0, 4.0),
+        (4.0, 10.0),
+        (0.0, 10.0),
+        (0.0, 5.0),
+    ]);
     let hole = ring(&[(1.0, 1.0), (1.0, 3.0), (3.0, 3.0), (3.0, 1.0)]);
     let loops = vec![outer, hole];
     let parts = convex_parts(&loops).unwrap();
@@ -110,12 +142,24 @@ fn loops_that_cannot_be_cut_are_refused() {
 fn a_point_turning_in_a_little_never_makes_a_reflex_corner() {
     // The bottom side's middle point lies a hair inside: near enough to be set aside as straight,
     // but put back it turns inwards.
-    let loops = vec![ring(&[(0.0, 0.0), (1.0, 5e-8), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)])];
+    let loops = vec![ring(&[
+        (0.0, 0.0),
+        (1.0, 5e-8),
+        (2.0, 0.0),
+        (2.0, 1.0),
+        (0.0, 1.0),
+    ])];
     if let Some(parts) = convex_parts(&loops) {
         check(&loops, &parts);
     }
     // Exactly on the side, it goes back in and the part stays one.
-    let loops = vec![ring(&[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0), (0.0, 1.0)])];
+    let loops = vec![ring(&[
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (2.0, 0.0),
+        (2.0, 1.0),
+        (0.0, 1.0),
+    ])];
     let parts = convex_parts(&loops).unwrap();
     check(&loops, &parts);
     assert_eq!(parts.len(), 1);
@@ -130,20 +174,58 @@ fn hostile_loops_never_panic() {
         vec![square.clone(), bow.iter().rev().copied().collect()],
         // A hole sticking out of the outer loop, a hole touching it, holes overlapping.
         vec![square.clone(), circle((4.0, 2.0), 1.0, 8, true)],
-        vec![square.clone(), ring(&[(0.0, 0.0), (1.0, 2.0), (2.0, 1.0)]).iter().rev().copied().collect()],
-        vec![square.clone(), circle((2.0, 2.0), 1.0, 8, true), circle((2.5, 2.0), 1.0, 8, true)],
+        vec![
+            square.clone(),
+            ring(&[(0.0, 0.0), (1.0, 2.0), (2.0, 1.0)])
+                .iter()
+                .rev()
+                .copied()
+                .collect(),
+        ],
+        vec![
+            square.clone(),
+            circle((2.0, 2.0), 1.0, 8, true),
+            circle((2.5, 2.0), 1.0, 8, true),
+        ],
         // Repeated points, huge and tiny coordinates.
-        vec![ring(&[(0.0, 0.0), (0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (1.0, 1.0)])],
-        vec![ring(&[(0.0, 0.0), (1e300, 0.0), (1e300, 1e300), (0.0, 1e300)])],
-        vec![ring(&[(0.0, 0.0), (1e-300, 0.0), (1e-300, 1e-300), (0.0, 1e-300)])],
+        vec![ring(&[
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.0, 1.0),
+            (1.0, 1.0),
+        ])],
+        vec![ring(&[
+            (0.0, 0.0),
+            (1e300, 0.0),
+            (1e300, 1e300),
+            (0.0, 1e300),
+        ])],
+        vec![ring(&[
+            (0.0, 0.0),
+            (1e-300, 0.0),
+            (1e-300, 1e-300),
+            (0.0, 1e-300),
+        ])],
     ];
     for loops in cases {
         if let Some(parts) = convex_parts(&loops) {
             for part in &parts {
-                assert!(part.iter().all(|&(l, i)| l < loops.len() && i < loops[l].len()));
+                assert!(
+                    part.iter()
+                        .all(|&(l, i)| l < loops.len() && i < loops[l].len())
+                );
             }
         }
     }
     // Finite points whose area is not.
-    assert!(convex_parts(&[ring(&[(0.0, 0.0), (1e300, 0.0), (1e300, 1e300), (0.0, 1e300)])]).is_none());
+    assert!(
+        convex_parts(&[ring(&[
+            (0.0, 0.0),
+            (1e300, 0.0),
+            (1e300, 1e300),
+            (0.0, 1e300)
+        ])])
+        .is_none()
+    );
 }

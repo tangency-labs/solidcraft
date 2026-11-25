@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::prelude::*;
+use crate::vec::Vec2Ext;
 use solidcore_record::Vec2;
 
 /// Most boundary points [`convex_parts`] takes (clipping ears is quadratic in them).
@@ -43,10 +43,17 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
         ranges.push(start..pts.len());
     }
     let at = |i: usize| pts.get(i).copied().unwrap_or(Vec2::ZERO);
-    let areas: Vec<f64> = ranges.iter().map(|r| area(&r.clone().collect::<Vec<_>>(), &at)).collect();
-    let (Some(&outer_area), Some(holes)) = (areas.first(), areas.get(1..)) else { return None };
+    let areas: Vec<f64> = ranges
+        .iter()
+        .map(|r| area(&r.clone().collect::<Vec<_>>(), &at))
+        .collect();
+    let (Some(&outer_area), Some(holes)) = (areas.first(), areas.get(1..)) else {
+        return None;
+    };
     // Finite points can still make an area too large for a float (sides of 1e300).
-    if !(outer_area > 0.0 && outer_area.is_finite()) || holes.iter().any(|a| !(*a < 0.0 && a.is_finite())) {
+    if !(outer_area > 0.0 && outer_area.is_finite())
+        || holes.iter().any(|a| !(*a < 0.0 && a.is_finite()))
+    {
         return None;
     }
 
@@ -57,11 +64,20 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
         let ring: Vec<usize> = r.clone().collect();
         let n = ring.len();
         let straight = |k: usize| {
-            let (a, v, b) = (ring.get((k + n - 1) % n), ring.get(k), ring.get((k + 1) % n));
-            let (Some(&a), Some(&v), Some(&b)) = (a, v, b) else { return false };
+            let (a, v, b) = (
+                ring.get((k + n - 1) % n),
+                ring.get(k),
+                ring.get((k + 1) % n),
+            );
+            let (Some(&a), Some(&v), Some(&b)) = (a, v, b) else {
+                return false;
+            };
             on_segment(at(a), at(v), at(b))
         };
-        let keep: Vec<usize> = (0..n).filter(|&k| !straight(k)).filter_map(|k| ring.get(k).copied()).collect();
+        let keep: Vec<usize> = (0..n)
+            .filter(|&k| !straight(k))
+            .filter_map(|k| ring.get(k).copied())
+            .collect();
         if keep.len() < 3 {
             return None;
         }
@@ -86,7 +102,7 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
 
     let poly = bridge_holes(kept, &at)?;
     let tris = clip_ears(&poly, &at)?;
-    let parts = merge_convex(tris, &at)?;
+    let parts = merge_convex(&tris, &at)?;
 
     // The straight-through points back into the sides they lay on.
     let mut out: Vec<Vec<usize>> = Vec::with_capacity(parts.len());
@@ -103,7 +119,13 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
         // convex with it (straight points pass, give or take rounding).
         let m = corners.len();
         let reflex = (0..m).any(|k| {
-            let (Some(&a), Some(&v), Some(&b)) = (corners.get((k + m - 1) % m), corners.get(k), corners.get((k + 1) % m)) else { return true };
+            let (Some(&a), Some(&v), Some(&b)) = (
+                corners.get((k + m - 1) % m),
+                corners.get(k),
+                corners.get((k + 1) % m),
+            ) else {
+                return true;
+            };
             let (pa, pv, pb) = (at(a), at(v), at(b));
             turn(pa, pv, pb) < -1e-12 * pa.dist(pv) * pv.dist(pb)
         });
@@ -120,16 +142,22 @@ pub fn convex_parts(loops: &[Vec<Vec2>]) -> Option<Vec<Vec<(usize, usize)>>> {
     if !(region > 0.0 && region.is_finite() && covered.is_finite())
         || (covered - region).abs() > 1e-9 * outer_area
         || used.len() != total
-        || out.iter().any(|p| !(area(p, &at) > 0.0 && area(p, &at).is_finite()))
+        || out
+            .iter()
+            .any(|p| !(area(p, &at) > 0.0 && area(p, &at).is_finite()))
     {
         return None;
     }
-    out.into_iter().map(|p| p.into_iter().map(|i| ids.get(i).copied()).collect()).collect()
+    out.into_iter()
+        .map(|p| p.into_iter().map(|i| ids.get(i).copied()).collect())
+        .collect()
 }
 
 /// The signed area of a ring of points (positive counter-clockwise).
 fn area(ring: &[usize], at: &impl Fn(usize) -> Vec2) -> f64 {
-    let Some(&first) = ring.first() else { return 0.0 };
+    let Some(&first) = ring.first() else {
+        return 0.0;
+    };
     let o = at(first);
     let mut s = 0.0;
     for (k, &i) in ring.iter().enumerate() {
@@ -143,7 +171,7 @@ fn area(ring: &[usize], at: &impl Fn(usize) -> Vec2) -> f64 {
 fn on_segment(a: Vec2, v: Vec2, b: Vec2) -> bool {
     let ab = b - a;
     let l2 = ab.len2();
-    if !(l2 > 0.0) {
+    if l2.is_nan() || l2 <= 0.0 {
         return false;
     }
     let t = (v - a).dot(ab) / l2;
@@ -164,9 +192,15 @@ fn bridge_holes(mut loops: Vec<Vec<usize>>, at: &impl Fn(usize) -> Vec2) -> Opti
     let mut ring = loops.remove(0);
     // The rightmost point of each hole (the lowest when level), right to left.
     let rightmost = |h: &Vec<usize>| -> Option<(usize, Vec2)> {
-        h.iter().enumerate().map(|(k, &i)| (k, at(i))).max_by(|a, b| a.1.x.total_cmp(&b.1.x).then(b.1.y.total_cmp(&a.1.y)))
+        h.iter()
+            .enumerate()
+            .map(|(k, &i)| (k, at(i)))
+            .max_by(|a, b| a.1.x.total_cmp(&b.1.x).then(b.1.y.total_cmp(&a.1.y)))
     };
-    let mut holes: Vec<(usize, Vec2, Vec<usize>)> = loops.into_iter().filter_map(|h| rightmost(&h).map(|(k, p)| (k, p, h))).collect();
+    let mut holes: Vec<(usize, Vec2, Vec<usize>)> = loops
+        .into_iter()
+        .filter_map(|h| rightmost(&h).map(|(k, p)| (k, p, h)))
+        .collect();
     holes.sort_by(|a, b| b.1.x.total_cmp(&a.1.x).then(a.1.y.total_cmp(&b.1.y)));
     for (k, m, hole) in holes {
         let pos = visible(&ring, m, at)?;
@@ -250,7 +284,11 @@ fn visible(ring: &[usize], m: Vec2, at: &impl Fn(usize) -> Vec2) -> Option<usize
 /// direction to `q`.
 fn opens_towards(a: Vec2, v: Vec2, b: Vec2, q: Vec2) -> bool {
     let (to_next, to_prev, d) = (b - v, a - v, q - v);
-    if to_next.cross(to_prev) > 0.0 { to_next.cross(d) >= 0.0 && d.cross(to_prev) >= 0.0 } else { to_next.cross(d) >= 0.0 || d.cross(to_prev) >= 0.0 }
+    if to_next.cross(to_prev) > 0.0 {
+        to_next.cross(d) >= 0.0 && d.cross(to_prev) >= 0.0
+    } else {
+        to_next.cross(d) >= 0.0 || d.cross(to_prev) >= 0.0
+    }
 }
 
 /// Triangles covering a counter-clockwise ring (bridges allowed), by clipping ears.
@@ -263,7 +301,10 @@ fn clip_ears(ring: &[usize], at: &impl Fn(usize) -> Vec2) -> Option<Vec<[usize; 
     let mut prev: Vec<usize> = (0..n).map(|k| (k + n - 1) % n).collect();
     let mut next: Vec<usize> = (0..n).map(|k| (k + 1) % n).collect();
     let link = |prev: &mut Vec<usize>, next: &mut Vec<usize>, k: usize| {
-        let (a, b) = (prev.get(k).copied().unwrap_or(k), next.get(k).copied().unwrap_or(k));
+        let (a, b) = (
+            prev.get(k).copied().unwrap_or(k),
+            next.get(k).copied().unwrap_or(k),
+        );
         if let Some(s) = next.get_mut(a) {
             *s = b;
         }
@@ -287,7 +328,10 @@ fn clip_ears(ring: &[usize], at: &impl Fn(usize) -> Vec2) -> Option<Vec<[usize; 
             let rest: Vec<usize> = rest.iter().filter_map(|&j| ring.get(j).copied()).collect();
             return (area(&rest, at).abs() <= 1e-12 * area(ring, at).abs()).then_some(tris);
         }
-        let (a, b) = (prev.get(k).copied().unwrap_or(k), next.get(k).copied().unwrap_or(k));
+        let (a, b) = (
+            prev.get(k).copied().unwrap_or(k),
+            next.get(k).copied().unwrap_or(k),
+        );
         let (pa, pk, pb) = (p(a), p(k), p(b));
         // A spike back along a bridge, or a point repeated: drop it, it holds no area.
         if pa == pb || pk == pb {
@@ -321,9 +365,19 @@ fn clip_ears(ring: &[usize], at: &impl Fn(usize) -> Vec2) -> Option<Vec<[usize; 
 }
 
 /// Some reflex corner of the ring, other than the ear's own, lies in the ear `t` (inclusive).
-fn blocks_ear(next: &[usize], prev: &[usize], from: usize, to: usize, t: (Vec2, Vec2, Vec2), p: &impl Fn(usize) -> Vec2) -> bool {
+fn blocks_ear(
+    next: &[usize],
+    prev: &[usize],
+    from: usize,
+    to: usize,
+    t: (Vec2, Vec2, Vec2),
+    p: &impl Fn(usize) -> Vec2,
+) -> bool {
     let (a, k, b) = t;
-    let (lo, hi) = (Vec2::new(a.x.min(k.x).min(b.x), a.y.min(k.y).min(b.y)), Vec2::new(a.x.max(k.x).max(b.x), a.y.max(k.y).max(b.y)));
+    let (lo, hi) = (
+        Vec2::new(a.x.min(k.x).min(b.x), a.y.min(k.y).min(b.y)),
+        Vec2::new(a.x.max(k.x).max(b.x), a.y.max(k.y).max(b.y)),
+    );
     // The corners after the ear, up to the one before it.
     let mut j = next.get(from).copied().unwrap_or(to);
     let mut steps = 0usize;
@@ -347,18 +401,20 @@ fn blocks_ear(next: &[usize], prev: &[usize], from: usize, to: usize, t: (Vec2, 
 }
 
 /// Triangles joined across shared sides wherever the join stays convex, longest side first.
-fn merge_convex(tris: Vec<[usize; 3]>, at: &impl Fn(usize) -> Vec2) -> Option<Vec<Vec<usize>>> {
+fn merge_convex(tris: &[[usize; 3]], at: &impl Fn(usize) -> Vec2) -> Option<Vec<Vec<usize>>> {
     let mut owner: HashMap<(usize, usize), usize> = HashMap::new();
     for (k, t) in tris.iter().enumerate() {
-        for i in 0..3 {
-            let e = (t[i], t[(i + 1) % 3]);
+        for e in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
             if owner.insert(e, k).is_some() {
                 return None;
             }
         }
     }
-    let mut sides: Vec<(f64, usize, usize)> =
-        owner.keys().filter(|&&(a, b)| a < b && owner.contains_key(&(b, a))).map(|&(a, b)| (at(a).dist(at(b)), a, b)).collect();
+    let mut sides: Vec<(f64, usize, usize)> = owner
+        .keys()
+        .filter(|&&(a, b)| a < b && owner.contains_key(&(b, a)))
+        .map(|&(a, b)| (at(a).dist(at(b)), a, b))
+        .collect();
     sides.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)).then(x.2.cmp(&y.2)));
     let mut parts: Vec<Option<Vec<usize>>> = tris.iter().map(|t| Some(t.to_vec())).collect();
     let convex = |a: usize, v: usize, b: usize| {
@@ -366,28 +422,48 @@ fn merge_convex(tris: Vec<[usize; 3]>, at: &impl Fn(usize) -> Vec2) -> Option<Ve
         turn(pa, pv, pb) >= -1e-9 * pa.dist(pv) * pv.dist(pb)
     };
     for (_, a, b) in sides {
-        let (Some(&p), Some(&q)) = (owner.get(&(a, b)), owner.get(&(b, a))) else { continue };
+        let (Some(&p), Some(&q)) = (owner.get(&(a, b)), owner.get(&(b, a))) else {
+            continue;
+        };
         if p == q {
             continue;
         }
-        let (Some(Some(pp)), Some(Some(qq))) = (parts.get(p), parts.get(q)) else { continue };
-        // pp from b round to a, qq from a round to b.
-        let (Some(pb), Some(qa)) = (pp.iter().position(|&v| v == b), qq.iter().position(|&v| v == a)) else { continue };
-        let pr: Vec<usize> = (0..pp.len()).filter_map(|s| pp.get((pb + s) % pp.len()).copied()).collect();
-        let qr: Vec<usize> = (0..qq.len()).filter_map(|s| qq.get((qa + s) % qq.len()).copied()).collect();
-        let (Some(&before_a), Some(&after_a), Some(&before_b), Some(&after_b)) =
-            (pr.get(pr.len().wrapping_sub(2)), qr.get(1), qr.get(qr.len().wrapping_sub(2)), pr.get(1))
-        else {
+        let (Some(Some(pp)), Some(Some(qq))) = (parts.get(p), parts.get(q)) else {
             continue;
         };
-        if pr.last() != Some(&a) || qr.last() != Some(&b) || !convex(before_a, a, after_a) || !convex(before_b, b, after_b) {
+        // pp from b round to a, qq from a round to b.
+        let (Some(pb), Some(qa)) = (
+            pp.iter().position(|&v| v == b),
+            qq.iter().position(|&v| v == a),
+        ) else {
+            continue;
+        };
+        let pr: Vec<usize> = (0..pp.len())
+            .filter_map(|s| pp.get((pb + s) % pp.len()).copied())
+            .collect();
+        let qr: Vec<usize> = (0..qq.len())
+            .filter_map(|s| qq.get((qa + s) % qq.len()).copied())
+            .collect();
+        let (Some(&before_a), Some(&after_a), Some(&before_b), Some(&after_b)) = (
+            pr.get(pr.len().wrapping_sub(2)),
+            qr.get(1),
+            qr.get(qr.len().wrapping_sub(2)),
+            pr.get(1),
+        ) else {
+            continue;
+        };
+        if pr.last() != Some(&a)
+            || qr.last() != Some(&b)
+            || !convex(before_a, a, after_a)
+            || !convex(before_b, b, after_b)
+        {
             continue;
         }
         let mut merged = pr;
         merged.extend(qr.get(1..qr.len() - 1).unwrap_or(&[]));
         let mut seen = merged.clone();
         seen.sort_unstable();
-        if seen.windows(2).any(|w| w[0] == w[1]) {
+        if seen.windows(2).any(|w| matches!(w, [x, y] if x == y)) {
             continue;
         }
         owner.remove(&(a, b));

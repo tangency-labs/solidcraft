@@ -14,6 +14,8 @@
 //!   meshers, slow by design; [`TessPlan::welded`] joins its faces at their shared vertices;
 //! - [`TessPlan`], [`FacePlan`]: the plan, and [`TessPlan::transformed`] for a placed copy;
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
+//! - [`poly_mesh`]: a plan as one welded mesh of polygons (n-gons, quads, triangles) for programs
+//!   that edit what they are given, with [`convex_parts`] for planar faces with holes;
 //! - [`curve_points`]: a free curve's points at a [`MeshTolerance`], by the edge rules;
 //! - [`simplify`]: display levels of detail of a large mesh;
 //! - [`preview`]: a bounded coarse mesh of a decoded body;
@@ -25,6 +27,7 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+pub mod convex_parts;
 mod curve;
 pub mod eval;
 #[cfg(test)]
@@ -39,6 +42,7 @@ mod mesher;
 mod par;
 mod plan;
 mod pole;
+pub mod poly_mesh;
 pub mod preview;
 mod ring;
 pub mod simplify;

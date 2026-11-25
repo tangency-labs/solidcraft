@@ -15,8 +15,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Mesh;
 use crate::convex_parts::convex_parts;
-use crate::prelude::*;
-use crate::tess::{EvalSurface, TessPlan};
+use crate::vec::{Vec2Ext, VecExt};
+use crate::{EvalSurface, TessPlan};
 use solidcore_record::{Vec2, Vec3};
 
 /// Most vertices a polygon mesh may be made from (the plan's or mesh's vertices).
@@ -38,6 +38,7 @@ pub enum PolyTopology {
 /// How triangles are joined into polygons.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PolyOptions {
+    /// What polygons a face may become.
     pub topology: PolyTopology,
     /// Most a quad's corner may differ from a right angle (radians).
     pub max_corner_dev: f64,
@@ -77,8 +78,11 @@ pub mod edge_flag {
 /// Counts that describe a polygon mesh.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PolyStats {
+    /// Polygons with three corners.
     pub triangles: usize,
+    /// Polygons with four corners.
     pub quads: usize,
+    /// Polygons with more than four corners.
     pub ngons: usize,
     /// Edges used by one polygon only (zero for a closed solid).
     pub open_edges: usize,
@@ -87,6 +91,7 @@ pub struct PolyStats {
 /// A welded polygon mesh; see the module documentation.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PolyMesh {
+    /// The welded vertices.
     pub positions: Vec<Vec3>,
     /// Corners of each polygon, in order.
     pub poly_sizes: Vec<u32>,
@@ -102,11 +107,14 @@ pub struct PolyMesh {
     pub edge_flags: Vec<u8>,
     /// B-rep edge of each segment.
     pub edge_brep: Vec<u32>,
+    /// Counts that describe the mesh.
     pub stats: PolyStats,
 }
 
+/// Why a polygon mesh could not be made.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PolyMeshError {
+    /// More vertices than [`MAX_POLY_VERTICES`].
     #[error("the mesh has {0} vertices, more than a polygon mesh may have ({MAX_POLY_VERTICES})")]
     TooLarge(usize),
 }
@@ -155,13 +163,19 @@ impl Welder {
     }
 
     fn find(&self, p: Vec3) -> Option<u32> {
-        p.is_finite().then(|| self.index.get(&bits(p)).copied()).flatten()
+        p.is_finite()
+            .then(|| self.index.get(&bits(p)).copied())
+            .flatten()
     }
 }
 
 /// The bits of a position, with -0.0 read as 0.0.
 fn bits(p: Vec3) -> [u64; 3] {
-    [(p.x + 0.0).to_bits(), (p.y + 0.0).to_bits(), (p.z + 0.0).to_bits()]
+    [
+        (p.x + 0.0).to_bits(),
+        (p.y + 0.0).to_bits(),
+        (p.z + 0.0).to_bits(),
+    ]
 }
 
 impl PolyMesh {
@@ -170,7 +184,11 @@ impl PolyMesh {
     /// the plan is evaluated again here and its flags are not used: every B-rep edge segment is
     /// then marked [`edge_flag::TANGENT`] or [`edge_flag::SHARP`] from the polygons' normals
     /// on either side, and none [`edge_flag::SURFACE_SEAM`].
-    pub fn from_plan(plan: &TessPlan, evaluated: &Mesh, o: &PolyOptions) -> Result<PolyMesh, PolyMeshError> {
+    pub fn from_plan(
+        plan: &TessPlan,
+        evaluated: &Mesh,
+        o: &PolyOptions,
+    ) -> Result<PolyMesh, PolyMeshError> {
         let count = plan.vertex_count();
         if count > MAX_POLY_VERTICES {
             return Err(PolyMeshError::TooLarge(count));
@@ -188,14 +206,28 @@ impl PolyMesh {
         let mut base = 0usize;
         for f in &plan.faces {
             let n = f.uv.len();
-            let planar = matches!(f.surface.and_then(|s| plan.surfaces.get(s as usize)), Some(EvalSurface::Plane { .. }));
+            let planar = matches!(
+                f.surface.and_then(|s| plan.surfaces.get(s as usize)),
+                Some(EvalSurface::Plane { .. })
+            );
             let mut corner = |k: u32| -> Option<Corner> {
                 let i = base.checked_add(k as usize).filter(|_| (k as usize) < n)?;
                 let v = w.at(*m.positions.get(i)?)?;
-                Some(Corner { v, n: m.normals.get(i).copied().unwrap_or(Vec3::ZERO) })
+                Some(Corner {
+                    v,
+                    n: m.normals.get(i).copied().unwrap_or(Vec3::ZERO),
+                })
             };
-            let tris = f.triangles.iter().filter_map(|t| Some([corner(t[0])?, corner(t[1])?, corner(t[2])?])).collect();
-            faces.push(FaceTris { face: f.face, planar, tris });
+            let tris = f
+                .triangles
+                .iter()
+                .filter_map(|t| Some([corner(t[0])?, corner(t[1])?, corner(t[2])?]))
+                .collect();
+            faces.push(FaceTris {
+                face: f.face,
+                planar,
+                tris,
+            });
             base = base.saturating_add(n);
         }
         let flags = (evaluated.seams.len() == plan.edges.len()
@@ -203,7 +235,7 @@ impl PolyMesh {
             && evaluated.sharp_edges.len() == plan.edges.len()
             && matches)
             .then_some(evaluated);
-        Ok(build(w, faces, &plan.edges, flags, o))
+        Ok(build(&w, faces, &plan.edges, flags, o))
     }
 
     /// The polygon mesh of a triangle mesh with a B-rep face per triangle (a body that has no
@@ -220,12 +252,21 @@ impl PolyMesh {
             let face = m.tri_face.get(k).copied().unwrap_or(0);
             let mut corner = |i: u32| -> Option<Corner> {
                 let v = w.at(*m.positions.get(i as usize)?)?;
-                Some(Corner { v, n: m.normals.get(i as usize).copied().unwrap_or(Vec3::ZERO) })
+                Some(Corner {
+                    v,
+                    n: m.normals.get(i as usize).copied().unwrap_or(Vec3::ZERO),
+                })
             };
-            let [Some(a), Some(b), Some(c)] = [corner(t[0]), corner(t[1]), corner(t[2])] else { continue };
+            let [Some(a), Some(b), Some(c)] = [corner(t[0]), corner(t[1]), corner(t[2])] else {
+                continue;
+            };
             let tri = [a, b, c];
             let at = *slot.entry(face).or_insert_with(|| {
-                faces.push(FaceTris { face, planar: true, tris: Vec::new() });
+                faces.push(FaceTris {
+                    face,
+                    planar: true,
+                    tris: Vec::new(),
+                });
                 faces.len() - 1
             });
             if let Some(f) = faces.get_mut(at) {
@@ -234,11 +275,19 @@ impl PolyMesh {
         }
         for f in &mut faces {
             let first = f.tris.first().and_then(|t| t[0].n.normalized());
-            let normals_agree = first.is_some_and(|n0| f.tris.iter().flatten().all(|c| c.n.normalized().is_some_and(|n| n.dot(n0) > 1.0 - 1e-9)));
+            let normals_agree = first.is_some_and(|n0| {
+                f.tris
+                    .iter()
+                    .flatten()
+                    .all(|c| c.n.normalized().is_some_and(|n| n.dot(n0) > 1.0 - 1e-9))
+            });
             f.planar = normals_agree && coplanar(&f.tris, &w.positions);
         }
-        let flags = (m.seams.len() == m.edges.len() && m.smooth_edges.len() == m.edges.len() && m.sharp_edges.len() == m.edges.len()).then_some(m);
-        Ok(build(w, faces, &m.edges, flags, o))
+        let flags = (m.seams.len() == m.edges.len()
+            && m.smooth_edges.len() == m.edges.len()
+            && m.sharp_edges.len() == m.edges.len())
+        .then_some(m);
+        Ok(build(&w, faces, &m.edges, flags, o))
     }
 
     /// Signed volume enclosed (mm³), each polygon fanned from its first corner: exact for
@@ -248,7 +297,13 @@ impl PolyMesh {
         let mut start = 0usize;
         for &size in &self.poly_sizes {
             let corners = self.loops.get(start..start + size as usize).unwrap_or(&[]);
-            let p = |i: usize| corners.get(i).and_then(|&k| self.positions.get(k as usize)).copied().unwrap_or(Vec3::ZERO);
+            let p = |i: usize| {
+                corners
+                    .get(i)
+                    .and_then(|&k| self.positions.get(k as usize))
+                    .copied()
+                    .unwrap_or(Vec3::ZERO)
+            };
             for i in 1..corners.len().saturating_sub(1) {
                 v += p(0).dot(p(i).cross(p(i + 1))) / 6.0;
             }
@@ -278,11 +333,21 @@ fn edge_uses(sizes: &[u32], loops: &[u32]) -> HashMap<(u32, u32), u32> {
     uses
 }
 
-fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Option<&Mesh>, o: &PolyOptions) -> PolyMesh {
+fn build(
+    w: &Welder,
+    faces: Vec<FaceTris>,
+    brep_edges: &[Vec<Vec3>],
+    flags: Option<&Mesh>,
+    o: &PolyOptions,
+) -> PolyMesh {
     let mut polys = Vec::new();
     for f in faces {
         // A triangle whose corners weld together has no area and joins nothing.
-        let tris: Vec<[Corner; 3]> = f.tris.into_iter().filter(|t| t[0].v != t[1].v && t[1].v != t[2].v && t[2].v != t[0].v).collect();
+        let tris: Vec<[Corner; 3]> = f
+            .tris
+            .into_iter()
+            .filter(|t| t[0].v != t[1].v && t[1].v != t[2].v && t[2].v != t[0].v)
+            .collect();
         if tris.is_empty() {
             continue;
         }
@@ -290,7 +355,11 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
             match boundary_loops(&tris) {
                 Some(mut loops) if loops.len() == 1 => {
                     let corners = loops.pop().unwrap_or_default();
-                    polys.push(Poly { face: f.face, corners, tris });
+                    polys.push(Poly {
+                        face: f.face,
+                        corners,
+                        tris,
+                    });
                     continue;
                 }
                 Some(loops) => {
@@ -303,7 +372,11 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
             }
         }
         if o.topology == PolyTopology::Triangles {
-            polys.extend(tris.into_iter().map(|t| Poly { face: f.face, corners: t.to_vec(), tris: vec![t] }));
+            polys.extend(tris.into_iter().map(|t| Poly {
+                face: f.face,
+                corners: t.to_vec(),
+                tris: vec![t],
+            }));
         } else {
             polys.extend(quads(f.face, tris, &w.positions, o));
         }
@@ -315,25 +388,42 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
     // the polygon goes back to its triangles.
     let mut out_polys: Vec<(u32, Vec<Corner>)> = Vec::with_capacity(polys.len());
     for p in polys {
-        let mut corners: Vec<Corner> = p.corners.iter().map(|c| Corner { v: root(c.v), n: c.n }).collect();
+        let mut corners: Vec<Corner> = p
+            .corners
+            .iter()
+            .map(|c| Corner {
+                v: root(c.v),
+                n: c.n,
+            })
+            .collect();
         corners.dedup_by(|a, b| a.v == b.v);
         while corners.len() > 1 && corners.first().map(|c| c.v) == corners.last().map(|c| c.v) {
             corners.pop();
         }
         let mut seen: Vec<u32> = corners.iter().map(|c| c.v).collect();
         seen.sort_unstable();
-        let repeats = seen.windows(2).any(|s| s[0] == s[1]);
+        let repeats = seen.windows(2).any(|s| matches!(s, [x, y] if x == y));
         if corners.len() >= 3 && !repeats && keeps_turning(&p.corners, &corners, &w.positions) {
             out_polys.push((p.face, corners));
         } else {
             for t in p.tris {
-                let welded = t.map(|c| Corner { v: root(c.v), n: c.n });
-                if welded[0].v == welded[1].v || welded[1].v == welded[2].v || welded[2].v == welded[0].v {
+                let welded = t.map(|c| Corner {
+                    v: root(c.v),
+                    n: c.n,
+                });
+                if welded[0].v == welded[1].v
+                    || welded[1].v == welded[2].v
+                    || welded[2].v == welded[0].v
+                {
                     // Two of its own corners joined: a sliver with no area.
                     continue;
                 }
                 // A weld that would turn the triangle over or flatten it leaves it as it was.
-                let t = if keeps_turning(&t, &welded, &w.positions) { welded } else { t };
+                let t = if keeps_turning(&t, &welded, &w.positions) {
+                    welded
+                } else {
+                    t
+                };
                 out_polys.push((p.face, t.to_vec()));
             }
         }
@@ -341,7 +431,12 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
 
     // Points along straight edges between n-gons are not needed: a box is eight corners, not
     // its edges' sample points. B-rep vertices stay, so every B-rep edge keeps its ends.
-    let ends: HashSet<u32> = brep_edges.iter().flat_map(|e| [e.first(), e.last()]).flatten().filter_map(|p| w.find(*p).map(root)).collect();
+    let ends: HashSet<u32> = brep_edges
+        .iter()
+        .flat_map(|e| [e.first(), e.last()])
+        .flatten()
+        .filter_map(|p| w.find(*p).map(root))
+        .collect();
     dissolve_collinear(&mut out_polys, &w.positions, &ends);
 
     // Only the vertices polygons use, in the order they are first used.
@@ -349,17 +444,22 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
     let mut out = PolyMesh::default();
     for (face, corners) in &out_polys {
         for c in corners {
-            let Some(slot) = new_index.get_mut(c.v as usize) else { continue };
+            let Some(slot) = new_index.get_mut(c.v as usize) else {
+                continue;
+            };
             if *slot == u32::MAX {
                 *slot = u32::try_from(out.positions.len()).unwrap_or(u32::MAX);
-                out.positions.push(w.positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO));
+                out.positions
+                    .push(w.positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO));
             }
         }
         let fallback = polygon_normal(corners, &w.positions);
-        out.poly_sizes.push(u32::try_from(corners.len()).unwrap_or(u32::MAX));
+        out.poly_sizes
+            .push(u32::try_from(corners.len()).unwrap_or(u32::MAX));
         out.poly_face.push(*face);
         for c in corners {
-            out.loops.push(new_index.get(c.v as usize).copied().unwrap_or(0));
+            out.loops
+                .push(new_index.get(c.v as usize).copied().unwrap_or(0));
             out.loop_normals.push(c.n.normalized().unwrap_or(fallback));
         }
         match corners.len() {
@@ -368,7 +468,10 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
             _ => out.stats.ngons += 1,
         }
     }
-    out.stats.open_edges = edge_uses(&out.poly_sizes, &out.loops).values().filter(|&&n| n == 1).count();
+    out.stats.open_edges = edge_uses(&out.poly_sizes, &out.loops)
+        .values()
+        .filter(|&&n| n == 1)
+        .count();
 
     // The normals on either side of every polygon edge, for telling creases from tangent joins.
     let mut sides: HashMap<[u32; 2], Vec<(Vec3, Vec3)>> = HashMap::new();
@@ -377,14 +480,28 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
         let end = start + size as usize;
         for i in start..end {
             let j = if i + 1 == end { start } else { i + 1 };
-            let (Some(&a), Some(&b)) = (out.loops.get(i), out.loops.get(j)) else { continue };
-            let (Some(&na), Some(&nb)) = (out.loop_normals.get(i), out.loop_normals.get(j)) else { continue };
-            let (key, normals) = if a < b { ([a, b], (na, nb)) } else { ([b, a], (nb, na)) };
+            let (Some(&a), Some(&b)) = (out.loops.get(i), out.loops.get(j)) else {
+                continue;
+            };
+            let (Some(&na), Some(&nb)) = (out.loop_normals.get(i), out.loop_normals.get(j)) else {
+                continue;
+            };
+            let (key, normals) = if a < b {
+                ([a, b], (na, nb))
+            } else {
+                ([b, a], (nb, na))
+            };
             sides.entry(key).or_default().push(normals);
         }
         start = end;
     }
-    let cos_tangent = if o.tangent_angle.is_finite() { o.tangent_angle.clamp(0.0, std::f64::consts::FRAC_PI_2).cos() } else { 1.0 };
+    let cos_tangent = if o.tangent_angle.is_finite() {
+        o.tangent_angle
+            .clamp(0.0, std::f64::consts::FRAC_PI_2)
+            .cos()
+    } else {
+        1.0
+    };
     let tangent = |key: &[u32; 2]| match sides.get(key).map(Vec::as_slice) {
         Some([(a1, b1), (a2, b2)]) => a1.dot(*a2) >= cos_tangent && b1.dot(*b2) >= cos_tangent,
         _ => false,
@@ -400,11 +517,16 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
                 m.sharp_edges.get(e).copied().unwrap_or(false),
             )
         });
-        let vertex = |p: &Vec3| w.find(*p).map(root).and_then(|v| new_index.get(v as usize).copied()).filter(|&v| v != u32::MAX);
+        let vertex = |p: &Vec3| {
+            w.find(*p)
+                .map(root)
+                .and_then(|v| new_index.get(v as usize).copied())
+                .filter(|&v| v != u32::MAX)
+        };
         let mut chain: Vec<u32> = points.iter().filter_map(vertex).collect();
         chain.dedup();
         for pair in chain.windows(2) {
-            let (a, b) = (pair[0], pair[1]);
+            let &[a, b] = pair else { continue };
             let key = [a.min(b), a.max(b)];
             let flag = edge_flag::BREP
                 | match known {
@@ -450,19 +572,33 @@ fn dissolve_collinear(polys: &mut [(u32, Vec<Corner>)], positions: &[Vec3], keep
         }
     }
     let mut sizes: Vec<usize> = polys.iter().map(|(_, c)| c.len()).collect();
-    let mut candidates: Vec<u32> = neighbours.iter().filter(|(v, n)| n.len() == 2 && !keep.contains(v)).map(|(v, _)| *v).collect();
+    let mut candidates: Vec<u32> = neighbours
+        .iter()
+        .filter(|(v, n)| n.len() == 2 && !keep.contains(v))
+        .map(|(v, _)| *v)
+        .collect();
     candidates.sort_unstable();
     let mut removed: HashSet<u32> = HashSet::new();
     let at = |v: u32| positions.get(v as usize).copied();
     for v in candidates {
-        let Some(&[a, b]) = neighbours.get(&v).map(Vec::as_slice) else { continue };
-        let (Some(pv), Some(pa), Some(pb)) = (at(v), at(a), at(b)) else { continue };
+        let Some(&[a, b]) = neighbours.get(&v).map(Vec::as_slice) else {
+            continue;
+        };
+        let (Some(pv), Some(pa), Some(pb)) = (at(v), at(a), at(b)) else {
+            continue;
+        };
         let ab = pb - pa;
         let l2 = ab.len2();
-        let t = if l2 > 0.0 { (pv - pa).dot(ab) / l2 } else { -1.0 };
+        let t = if l2 > 0.0 {
+            (pv - pa).dot(ab) / l2
+        } else {
+            -1.0
+        };
         let straight = t > 0.0 && t < 1.0 && pv.dist(pa + ab * t) <= 1e-7 * l2.sqrt();
-        let polys_of = member.get(&v).map(Vec::as_slice).unwrap_or(&[]);
-        let roomy = polys_of.iter().all(|&k| sizes.get(k).is_some_and(|&n| n > 3));
+        let polys_of = member.get(&v).map_or(&[][..], Vec::as_slice);
+        let roomy = polys_of
+            .iter()
+            .all(|&k| sizes.get(k).is_some_and(|&n| n > 3));
         let joined = neighbours.get(&a).is_some_and(|n| n.contains(&b));
         if !straight || !roomy || joined {
             continue;
@@ -496,18 +632,18 @@ fn dissolve_collinear(polys: &mut [(u32, Vec<Corner>)], positions: &[Vec3], keep
 fn boundary_loops(tris: &[[Corner; 3]]) -> Option<Vec<Vec<Corner>>> {
     let mut directed: HashSet<(u32, u32)> = HashSet::new();
     for t in tris {
-        for i in 0..3 {
-            directed.insert((t[i].v, t[(i + 1) % 3].v));
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            directed.insert((a.v, b.v));
         }
     }
     let mut next: HashMap<u32, (u32, Vec3)> = HashMap::new();
     for t in tris {
-        for i in 0..3 {
-            let (a, b) = (t[i].v, t[(i + 1) % 3].v);
+        for (c, d) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (a, b) = (c.v, d.v);
             if directed.contains(&(b, a)) {
                 continue;
             }
-            if next.insert(a, (b, t[i].n)).is_some() {
+            if next.insert(a, (b, c.n)).is_some() {
                 return None;
             }
         }
@@ -543,28 +679,63 @@ fn boundary_loops(tris: &[[Corner; 3]]) -> Option<Vec<Vec<Corner>>> {
 
 /// A planar face with holes as convex polygons through its boundary points; `None` when its
 /// loops are not one outer loop around holes, or cannot be cut.
-fn holed_ngons(face: u32, tris: &[[Corner; 3]], loops: &[Vec<Corner>], positions: &[Vec3]) -> Option<Vec<Poly>> {
+fn holed_ngons(
+    face: u32,
+    tris: &[[Corner; 3]],
+    loops: &[Vec<Corner>],
+    positions: &[Vec3],
+) -> Option<Vec<Poly>> {
     let pos = |c: &Corner| positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO);
     // The face's normal as its triangles wind, and a frame in its plane.
-    let n = tris.iter().fold(Vec3::ZERO, |s, t| s + (pos(&t[1]) - pos(&t[0])).cross(pos(&t[2]) - pos(&t[0]))).normalized()?;
+    let n = tris
+        .iter()
+        .fold(Vec3::ZERO, |s, t| {
+            s + (pos(&t[1]) - pos(&t[0])).cross(pos(&t[2]) - pos(&t[0]))
+        })
+        .normalized()?;
     let (du, dv) = (n.any_perp(), n.cross(n.any_perp()));
     let origin = loops.first().and_then(|l| l.first()).map(pos)?;
-    let flat = |l: &Vec<Corner>| -> Vec<Vec2> { l.iter().map(|c| pos(c) - origin).map(|d| Vec2::new(d.dot(du), d.dot(dv))).collect() };
-    let signed = |l: &[Vec2]| (0..l.len()).filter_map(|k| Some(l.get(k)?.cross(*l.get((k + 1) % l.len())?))).sum::<f64>();
+    let flat = |l: &Vec<Corner>| -> Vec<Vec2> {
+        l.iter()
+            .map(|c| pos(c) - origin)
+            .map(|d| Vec2::new(d.dot(du), d.dot(dv)))
+            .collect()
+    };
+    let signed = |l: &[Vec2]| {
+        (0..l.len())
+            .filter_map(|k| Some(l.get(k)?.cross(*l.get((k + 1) % l.len())?)))
+            .sum::<f64>()
+    };
     // The one loop wound counter-clockwise is the outer one; the rest are holes.
     let mut flats: Vec<(Vec<Vec2>, &Vec<Corner>)> = loops.iter().map(|l| (flat(l), l)).collect();
     if flats.iter().filter(|(f, _)| signed(f) > 0.0).count() != 1 {
         return None;
     }
-    flats.sort_by_key(|(f, _)| !(signed(f) > 0.0));
+    flats.sort_by_key(|(f, _)| {
+        let s = signed(f);
+        s.is_nan() || s <= 0.0
+    });
     let flat_loops: Vec<Vec<Vec2>> = flats.iter().map(|(f, _)| f.clone()).collect();
     let parts = convex_parts(&flat_loops)?;
     let mut out = Vec::with_capacity(parts.len());
     for part in parts {
-        let corners: Vec<Corner> = part.iter().map(|&(l, i)| flats.get(l).and_then(|(_, c)| c.get(i)).copied()).collect::<Option<_>>()?;
+        let corners: Vec<Corner> = part
+            .iter()
+            .map(|&(l, i)| flats.get(l).and_then(|(_, c)| c.get(i)).copied())
+            .collect::<Option<_>>()?;
         let (first, rest) = corners.split_first()?;
-        let fan = rest.windows(2).map(|w| [*first, w[0], w[1]]).collect();
-        out.push(Poly { face, corners, tris: fan });
+        let fan = rest
+            .windows(2)
+            .filter_map(|w| match w {
+                [a, b] => Some([*first, *a, *b]),
+                _ => None,
+            })
+            .collect();
+        out.push(Poly {
+            face,
+            corners,
+            tris: fan,
+        });
     }
     Some(out)
 }
@@ -575,8 +746,11 @@ fn quads(face: u32, tris: Vec<[Corner; 3]>, positions: &[Vec3], o: &PolyOptions)
     let mut by_edge: HashMap<(u32, u32), (usize, usize)> = HashMap::new();
     let mut shared: HashMap<(u32, u32), u8> = HashMap::new();
     for (k, t) in tris.iter().enumerate() {
-        for i in 0..3 {
-            let (a, b) = (t[i].v, t[(i + 1) % 3].v);
+        for (i, (c, d)) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])]
+            .into_iter()
+            .enumerate()
+        {
+            let (a, b) = (c.v, d.v);
             by_edge.insert((a, b), (k, i));
             let uses = shared.entry((a.min(b), a.max(b))).or_insert(0);
             *uses = uses.saturating_add(1);
@@ -585,17 +759,20 @@ fn quads(face: u32, tris: Vec<[Corner; 3]>, positions: &[Vec3], o: &PolyOptions)
     // Every inner edge between two triangles that wind the same way is a candidate quad.
     let mut candidates: Vec<(f64, u32, u32, usize, usize, [Corner; 4])> = Vec::new();
     for (k, t) in tris.iter().enumerate() {
-        for i in 0..3 {
-            let (p, q, r1) = (t[i], t[(i + 1) % 3], t[(i + 2) % 3]);
+        for (p, q, r1) in [(t[0], t[1], t[2]), (t[1], t[2], t[0]), (t[2], t[0], t[1])] {
             if p.v > q.v || shared.get(&(p.v.min(q.v), p.v.max(q.v))).copied() != Some(2) {
                 continue;
             }
-            let Some(&(k2, j)) = by_edge.get(&(q.v, p.v)) else { continue };
+            let Some(&(k2, j)) = by_edge.get(&(q.v, p.v)) else {
+                continue;
+            };
             let Some(t2) = tris.get(k2) else { continue };
             if k2 == k {
                 continue;
             }
-            let r2 = t2[(j + 2) % 3];
+            let Some(&r2) = t2.get((j + 2) % 3) else {
+                continue;
+            };
             if r2.v == r1.v {
                 continue;
             }
@@ -613,8 +790,14 @@ fn quads(face: u32, tris: Vec<[Corner; 3]>, positions: &[Vec3], o: &PolyOptions)
         if used.get(k).copied().unwrap_or(true) || used.get(k2).copied().unwrap_or(true) {
             continue;
         }
-        let (Some(a), Some(b)) = (tris.get(k), tris.get(k2)) else { continue };
-        out.push(Poly { face, corners: quad.to_vec(), tris: vec![*a, *b] });
+        let (Some(a), Some(b)) = (tris.get(k), tris.get(k2)) else {
+            continue;
+        };
+        out.push(Poly {
+            face,
+            corners: quad.to_vec(),
+            tris: vec![*a, *b],
+        });
         if let Some(u) = used.get_mut(k) {
             *u = true;
         }
@@ -624,7 +807,11 @@ fn quads(face: u32, tris: Vec<[Corner; 3]>, positions: &[Vec3], o: &PolyOptions)
     }
     for (k, t) in tris.into_iter().enumerate() {
         if !used.get(k).copied().unwrap_or(false) {
-            out.push(Poly { face, corners: t.to_vec(), tris: vec![t] });
+            out.push(Poly {
+                face,
+                corners: t.to_vec(),
+                tris: vec![t],
+            });
         }
     }
     out
@@ -641,8 +828,12 @@ fn quad_score(p: [Vec3; 4], o: &PolyOptions) -> Option<f64> {
     }
     let n = (n1 + n2).normalized()?;
     let mut score = 0.0;
-    for i in 0..4 {
-        let (prev, cur, next) = (p[(i + 3) % 4], p[i], p[(i + 1) % 4]);
+    for (prev, cur, next) in [
+        (p[3], p[0], p[1]),
+        (p[0], p[1], p[2]),
+        (p[1], p[2], p[3]),
+        (p[2], p[3], p[0]),
+    ] {
         let (a, b) = (cur - prev, next - cur);
         let (la, lb) = (a.len(), b.len());
         if la <= 0.0 || lb <= 0.0 || a.cross(b).dot(n) <= la * lb * 1e-9 {
@@ -658,6 +849,28 @@ fn quad_score(p: [Vec3; 4], o: &PolyOptions) -> Option<f64> {
     Some(score)
 }
 
+/// The root of `v` in the union-find `parent`, compressing the path on the way.
+fn find(parent: &mut [u32], v: u32) -> u32 {
+    let mut r = v;
+    while let Some(&up) = parent.get(r as usize) {
+        if up == r {
+            break;
+        }
+        r = up;
+    }
+    let mut at = v;
+    while let Some(&up) = parent.get(at as usize) {
+        if up == r {
+            break;
+        }
+        if let Some(slot) = parent.get_mut(at as usize) {
+            *slot = r;
+        }
+        at = up;
+    }
+    r
+}
+
 /// For each vertex, the vertex it is welded to: vertices on open edges closer than the weld
 /// distance are joined (the lowest index stands for them all).
 fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
@@ -665,11 +878,18 @@ fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
     let mut uses: HashMap<(u32, u32), u32> = HashMap::new();
     for p in polys {
         for (i, a) in p.corners.iter().enumerate() {
-            let b = p.corners.get((i + 1) % p.corners.len()).map_or(a.v, |c| c.v);
+            let b = p
+                .corners
+                .get((i + 1) % p.corners.len())
+                .map_or(a.v, |c| c.v);
             *uses.entry((a.v.min(b), a.v.max(b))).or_insert(0) += 1;
         }
     }
-    let mut open: Vec<u32> = uses.iter().filter(|(_, n)| **n == 1).flat_map(|(e, _)| [e.0, e.1]).collect();
+    let mut open: Vec<u32> = uses
+        .iter()
+        .filter(|(_, n)| **n == 1)
+        .flat_map(|(e, _)| [e.0, e.1])
+        .collect();
     if open.is_empty() {
         return parent;
     }
@@ -679,45 +899,47 @@ fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
         eps
     } else {
         let big = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
-        let (lo, hi) = positions.iter().fold((big, -big), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        let (lo, hi) = positions
+            .iter()
+            .fold((big, -big), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
         let diag = (hi - lo).len();
-        if diag.is_finite() { (diag * 1e-9).max(1e-9) } else { 1e-9 }
+        if diag.is_finite() {
+            (diag * 1e-9).max(1e-9)
+        } else {
+            1e-9
+        }
     };
-    let cell = |p: Vec3| [(p.x / eps).floor() as i64, (p.y / eps).floor() as i64, (p.z / eps).floor() as i64];
+    let cell = |p: Vec3| {
+        [
+            (p.x / eps).floor() as i64,
+            (p.y / eps).floor() as i64,
+            (p.z / eps).floor() as i64,
+        ]
+    };
     let mut grid: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
     for &v in &open {
         if let Some(p) = positions.get(v as usize) {
             grid.entry(cell(*p)).or_default().push(v);
         }
     }
-    fn find(parent: &mut [u32], v: u32) -> u32 {
-        let mut r = v;
-        while let Some(&up) = parent.get(r as usize) {
-            if up == r {
-                break;
-            }
-            r = up;
-        }
-        let mut at = v;
-        while let Some(&up) = parent.get(at as usize) {
-            if up == r {
-                break;
-            }
-            if let Some(slot) = parent.get_mut(at as usize) {
-                *slot = r;
-            }
-            at = up;
-        }
-        r
-    }
     for &v in &open {
-        let Some(&p) = positions.get(v as usize) else { continue };
+        let Some(&p) = positions.get(v as usize) else {
+            continue;
+        };
         let c = cell(p);
         for dx in -1..=1 {
             for dy in -1..=1 {
                 for dz in -1..=1 {
-                    let (Some(x), Some(y), Some(z)) = (c[0].checked_add(dx), c[1].checked_add(dy), c[2].checked_add(dz)) else { continue };
-                    let Some(near) = grid.get(&[x, y, z]) else { continue };
+                    let (Some(x), Some(y), Some(z)) = (
+                        c[0].checked_add(dx),
+                        c[1].checked_add(dy),
+                        c[2].checked_add(dz),
+                    ) else {
+                        continue;
+                    };
+                    let Some(near) = grid.get(&[x, y, z]) else {
+                        continue;
+                    };
                     for &u in near {
                         if u <= v || positions.get(u as usize).is_none_or(|q| q.dist(p) > eps) {
                             continue;
@@ -734,13 +956,17 @@ fn weld_open(positions: &[Vec3], polys: &[Poly], eps: f64) -> Vec<u32> {
             }
         }
     }
-    (0..parent.len()).map(|v| find(&mut parent, u32::try_from(v).unwrap_or(u32::MAX))).collect()
+    (0..parent.len())
+        .map(|v| find(&mut parent, u32::try_from(v).unwrap_or(u32::MAX)))
+        .collect()
 }
 
 /// A polygon's normal from its corners (the sum of its edges' cross products), for corners
 /// whose normal is missing.
 fn polygon_normal(corners: &[Corner], positions: &[Vec3]) -> Vec3 {
-    area_vector(corners, positions).normalized().unwrap_or(Vec3::Z)
+    area_vector(corners, positions)
+        .normalized()
+        .unwrap_or(Vec3::Z)
 }
 
 /// Twice a polygon's area along its normal (the sum of its edges' cross products).
@@ -748,14 +974,17 @@ fn area_vector(corners: &[Corner], positions: &[Vec3]) -> Vec3 {
     let p = |c: &Corner| positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO);
     let mut n = Vec3::ZERO;
     for (i, c) in corners.iter().enumerate() {
-        n += p(c).cross(corners.get((i + 1) % corners.len()).map_or(p(c), p));
+        n += p(c).cross(corners.get((i + 1) % corners.len()).map_or_else(|| p(c), p));
     }
     n
 }
 
 /// A polygon still faces the way it did before welding (`before`), with some area left.
 fn keeps_turning(before: &[Corner], after: &[Corner], positions: &[Vec3]) -> bool {
-    let (b, a) = (area_vector(before, positions), area_vector(after, positions));
+    let (b, a) = (
+        area_vector(before, positions),
+        area_vector(after, positions),
+    );
     let scale = b.len() * a.len();
     scale > 0.0 && b.dot(a) > 1e-9 * scale
 }
@@ -768,19 +997,27 @@ fn coplanar(tris: &[[Corner; 3]], positions: &[Vec3]) -> bool {
     let big = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
     let (mut lo, mut hi) = (big, -big);
     for t in tris {
-        let (Some(a), Some(b), Some(c)) = (pos(&t[0]), pos(&t[1]), pos(&t[2])) else { return false };
+        let (Some(a), Some(b), Some(c)) = (pos(&t[0]), pos(&t[1]), pos(&t[2])) else {
+            return false;
+        };
         normal += (b - a).cross(c - a);
         for p in [a, b, c] {
             (lo, hi) = (lo.min(p), hi.max(p));
         }
     }
-    let (Some(n), Some(origin)) = (normal.normalized(), tris.first().and_then(|t| pos(&t[0]))) else { return false };
+    let (Some(n), Some(origin)) = (normal.normalized(), tris.first().and_then(|t| pos(&t[0])))
+    else {
+        return false;
+    };
     let size = (hi - lo).len();
     if !size.is_finite() {
         return false;
     }
     let tolerance = 1e-6 * size;
-    tris.iter().flatten().filter_map(pos).all(|p| (p - origin).dot(n).abs() <= tolerance)
+    tris.iter()
+        .flatten()
+        .filter_map(pos)
+        .all(|p| (p - origin).dot(n).abs() <= tolerance)
 }
 
 #[cfg(test)]

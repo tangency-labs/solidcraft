@@ -10,7 +10,7 @@ and the B-rep edges marked. The `live.meshes` command sends them in this form
 
 ## How a body becomes polygons
 
-The body's display tessellation is joined face by face (`crates/geom/src/poly_mesh.rs`):
+The body's display tessellation is joined face by face (`solidcore/crates/solidcore-tess/src/poly_mesh.rs`):
 
 - A planar face whose triangles have one boundary loop is one polygon (an n-gon) through its
   boundary points. A planar face with holes becomes a few convex polygons through its boundary
