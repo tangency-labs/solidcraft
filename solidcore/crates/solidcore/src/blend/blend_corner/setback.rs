@@ -1993,8 +1993,8 @@ fn order_round_ends(
         return Ok(ends);
     }
     let origin = vertex::point(target, vertex)?;
-    let mut surfaces = Vec::with_capacity(actual.len());
-    let mut sides = Vec::with_capacity(actual.len());
+    let mut surfaces = Vec::new();
+    let mut sides = Vec::new();
     for model in &models {
         let Some(real) = actual.get(model.index) else {
             return Ok(ends);
