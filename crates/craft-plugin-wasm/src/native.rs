@@ -1953,7 +1953,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         forms: false,
         failed: None,
         calls: 0,
-        max_calls: if dialog { MAX_CALLS } else { MAX_IMPORT_CALLS },
+        max_calls: if dialog { limits.host_calls } else { MAX_IMPORT_CALLS },
         log_bytes: 0,
         deadline: dialog_deadline.map_or_else(|| GuestDeadline::new(limits.deadline_ms), GuestDeadline::until),
         // A large converter has a large indirect-call table.
