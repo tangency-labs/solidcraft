@@ -7,8 +7,9 @@
 //! which the test asserts, so the check that the read-only call does not can fail.
 //!
 //! Also: faces kept as their definition (a screw thread's walls) against a plane, two faces
-//! that touch at one point with the points asked for (a ball resting on the plate), and a
-//! read-only call on bodies an earlier `intersect_faces` left its caches on.
+//! that touch at one point with the points asked for (a ball resting on the plate: the contact
+//! point among them), and a read-only call on bodies an earlier `intersect_faces` left its
+//! caches on.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
@@ -330,6 +331,7 @@ fn a_ball_resting_on_the_plate_with_points_asked_for() {
     };
     let (ball, p) = make(&mut k);
     let top = face_at(&k, &p, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let mut points = Vec::new();
     for &f in ball.face_list() {
         let before = state(&k, &ball, &p);
         let got = intersect_faces_read_only(&k, &ball, f, &p, top, true).unwrap();
@@ -339,7 +341,14 @@ fn a_ball_resting_on_the_plate_with_points_asked_for() {
             intersect_faces(&k, FaceBodies::Two(&mut ball2, &mut p2), f, top, true).unwrap();
         assert_eq!(format!("{:?}", got.curves), format!("{:?}", there.curves));
         assert_eq!(format!("{:?}", got.points), format!("{:?}", there.points));
+        points.extend(got.points.unwrap_or_default());
     }
+    // the ball touches the plate at the foot of its centre
+    let foot = Point3::new(50.0, 50.0, 10.0);
+    assert!(
+        points.iter().any(|q| q.distance(foot) <= 1e-6),
+        "no point at the contact: {points:?}"
+    );
 }
 
 #[test]
