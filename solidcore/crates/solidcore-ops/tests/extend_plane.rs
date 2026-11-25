@@ -314,3 +314,27 @@ fn a_plane_face_that_is_its_whole_box_grows_its_plane() {
     assert_eq!(grown(Continuation::Tangent), natural);
     assert_eq!(grown(Continuation::Curvature), natural);
 }
+
+/// A distance below the side's resolution on a whole plane face is no extension, whatever the
+/// route: [`Error::NoEffect`], not a refusal of the trim's route it would otherwise fall back to.
+#[test]
+fn a_sub_resolution_extension_of_a_whole_plane_face_has_no_effect() {
+    let (flat, _) = flat_skin();
+    let (mut record, _) = flat.to_record().unwrap();
+    record.faces[0].domain = plane_box(&record);
+    let (body, order) = Body::from_record(&record, true).unwrap();
+    let edge = edge_through(&body, &order, [9.0, 4.0, 0.0]);
+    for how in [
+        Continuation::Natural,
+        Continuation::Tangent,
+        Continuation::Curvature,
+    ] {
+        assert!(
+            matches!(
+                extend_sheet(&body, &order, edge, 1e-14, how),
+                Err(Error::NoEffect)
+            ),
+            "{how:?}"
+        );
+    }
+}

@@ -191,12 +191,18 @@ impl Mod {
         }
     }
 
-    /// The value on the canvas.
-    pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
+    /// The value on the canvas. A move shows its `move_field` (see
+    /// [`crate::dialogs_move::value_field`]).
+    pub fn primary(&mut self, move_field: usize) -> Option<(&'static str, ValueKind, &mut String)> {
         match self {
             Mod::Scale { factor } => Some(("Factor", ValueKind::Unitless, factor)),
             Mod::Offset { distance, .. } => Some(("Distance", ValueKind::Length, distance)),
-            Mod::Move { x, .. } => Some(("X Distance", ValueKind::Length, x)),
+            Mod::Move { x, y, z, angle, .. } => Some(match move_field {
+                1 => ("Y Distance", ValueKind::Length, y),
+                2 => ("Z Distance", ValueKind::Length, z),
+                5 => ("Angle", ValueKind::Angle, angle),
+                _ => ("X Distance", ValueKind::Length, x),
+            }),
             // The handles in the viewport are its manipulator; the window has the numbers.
             Mod::Transform { .. } => None,
             Mod::Mirror => None,
@@ -340,6 +346,21 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     app.tool = None;
     app.dialog = Some(dialog);
     true
+}
+
+/// Merge Lines (#20317): the selected lines become one. It has no picks of its own: with fewer
+/// than two lines selected, the status bar says what to select.
+pub fn merge_selected_lines(app: &mut SolveApp) {
+    let curves: Vec<String> =
+        app.session.selection.iter().filter_map(|s| if let Sel::SketchCurve { id, .. } = s { Some(id.clone()) } else { None }).collect();
+    if curves.len() < 2 {
+        let hint = app.tr("ui.merge_lines_pick").to_owned();
+        app.set_status(hint, false);
+        return;
+    }
+    if let Err(e) = app.run("sketch.merge_lines", json!({ "curves": curves })) {
+        app.set_status(e, true);
+    }
 }
 
 /// The equation curve the selection is, when it is one curve that has formulas.
