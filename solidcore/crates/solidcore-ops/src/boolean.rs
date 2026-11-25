@@ -92,6 +92,22 @@ fn expect_of(
     operands: &mut [(Brep, Proof)],
     contract: Contract,
 ) -> KernelResult<Expect> {
+    if contract == Contract::Proved && operands.len() >= 2 {
+        let taken: Vec<(Brep, Proof)> = operands
+            .iter_mut()
+            .map(|(b, p)| (std::mem::take(b), std::mem::take(p)))
+            .collect();
+        let checked = crate::session::run_parallel(k, taken, |wk, (mut b, proof)| {
+            let is_solid = Expect::under(wk, &mut b, proof, contract)? != Expect::FACES;
+            Ok((b, is_solid))
+        })?;
+        let mut all = true;
+        for ((dst_b, _), (b, is_solid)) in operands.iter_mut().zip(checked) {
+            *dst_b = b;
+            all &= is_solid;
+        }
+        return Ok(if all { Expect::SOLID } else { Expect::FACES });
+    }
     let mut all = true;
     for (b, proof) in operands.iter_mut() {
         all &= Expect::under(k, b, std::mem::take(proof), contract)? != Expect::FACES;
@@ -326,21 +342,25 @@ pub fn union_all_with(bodies: Vec<Body>, contract: Contract) -> Result<Body> {
         let expect = expect_of(k, &mut held, contract)?;
         let mut level: Vec<Brep> = held.into_iter().map(|(b, _)| b).collect();
         while level.len() > 1 {
-            let mut next = Vec::new();
+            let mut pairs = Vec::with_capacity(level.len() / 2);
+            let mut odd = None;
             let mut it = level.into_iter();
             while let Some(a) = it.next() {
                 match it.next() {
-                    Some(mut b) => {
-                        let mut a = a;
-                        matched_tolerances(k, &mut a, &mut b)?;
-                        let mut r = sm::boolean(k, a, b, BooleanOperation::Union)?.result;
-                        if contract == Contract::Proved {
-                            after_boolean(k, &mut r)?;
-                        }
-                        next.push(r);
-                    }
-                    None => next.push(a),
+                    Some(b) => pairs.push((a, b)),
+                    None => odd = Some(a),
                 }
+            }
+            let mut next = crate::session::run_parallel(k, pairs, |wk, (mut a, mut b)| {
+                matched_tolerances(wk, &mut a, &mut b)?;
+                let mut r = sm::boolean(wk, a, b, BooleanOperation::Union)?.result;
+                if contract == Contract::Proved {
+                    after_boolean(wk, &mut r)?;
+                }
+                Ok(r)
+            })?;
+            if let Some(carry) = odd {
+                next.push(carry);
             }
             level = next;
         }
@@ -518,6 +538,41 @@ mod tests {
         let u = union_all(vec![a]).unwrap();
         let v = u.volume(1e-8).unwrap();
         assert!((v - 2.0).abs() < 2.0 * 1e-9, "{v}");
+    }
+
+    /// Many overlapping boxes through parallel level-by-level `union_all_with(Contract::Proved)`
+    /// produce the exact closed-form volume and counts deterministically for even and odd counts.
+    #[test]
+    fn parallel_union_all_is_exact_and_deterministic() {
+        all_fixes();
+        for n in [16usize, 17usize] {
+            let make = || {
+                (0..n)
+                    .map(|i| make_box([(i as f64) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+                    .collect::<Vec<_>>()
+            };
+            let u1 = union_all_with(make(), Contract::Proved).unwrap();
+            let u2 = union_all_with(make(), Contract::Proved).unwrap();
+            let want = 1.0 + ((n - 1) as f64) * 0.5;
+            let v1 = u1.volume(1e-8).unwrap();
+            let v2 = u2.volume(1e-8).unwrap();
+            assert!((v1 - want).abs() < 1e-7, "n={n}: {v1} vs {want}");
+            assert_eq!(u1.counts().unwrap(), u2.counts().unwrap());
+            assert!((v1 - v2).abs() < 1e-12, "n={n}: {v1} vs {v2}");
+        }
+    }
+
+    /// Parallel `union_all` stops cleanly and returns `Error::Cancelled` when cancelled.
+    #[test]
+    fn parallel_union_all_respects_cancellation() {
+        all_fixes();
+        let boxes: Vec<Body> = (0..12)
+            .map(|i| make_box([(i as f64) * 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap())
+            .collect();
+        let token = solidcore::kernel::CancelToken::new();
+        token.cancel();
+        let res = crate::cancel::within(&token, || union_all(boxes));
+        assert!(matches!(res, Err(Error::Cancelled)), "{res:?}");
     }
 
     /// A boolean that fails hands the failure callback its operands as they came in, not the

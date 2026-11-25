@@ -243,6 +243,122 @@ fn give_back(k: Kernel) {
     drop(surplus);
 }
 
+/// Runs `work` over `items` in parallel using up to [`most_idle`] pooled kernels on native
+/// targets (or serially on `k` when `items.len() <= 1`, on `wasm32`, or on single-core hosts),
+/// returning results in the exact input order.
+///
+/// Every worker kernel starts clean ([`start_clean`]) with the same `fixes`, `cancel` token, and
+/// `memoize_curve_caches` flag as `k`, and is returned to the idle pool only if it finishes
+/// without cancellation or panic. On error, unstarted items are skipped and the first error in
+/// deterministic input order is returned once in-flight workers complete.
+pub(crate) fn run_parallel<T, R, F>(
+    k: &mut Kernel,
+    items: Vec<T>,
+    work: F,
+) -> solidcore::Result<Vec<R>>
+where
+    T: Send,
+    R: Send,
+    F: Fn(&mut Kernel, T) -> solidcore::Result<R> + Sync,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        return items.into_iter().map(|item| work(k, item)).collect();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        let n = items.len();
+        let workers = n.min(most_idle());
+        if workers <= 1 {
+            return items.into_iter().map(|item| work(k, item)).collect();
+        }
+        let inputs: Vec<Mutex<Option<T>>> =
+            items.into_iter().map(|item| Mutex::new(Some(item))).collect();
+        let outputs: Vec<Mutex<Option<solidcore::Result<R>>>> =
+            (0..n).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let fixes = k.fixes;
+        let cancel = k.cancel.clone();
+        let memoize = k.memoize_curve_caches;
+
+        let run_loop = |wk: &mut Kernel| {
+            loop {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                if wk.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+                    stop.store(true, Ordering::Release);
+                    break;
+                }
+                let idx = next.fetch_add(1, Ordering::AcqRel);
+                let Some(slot) = inputs.get(idx) else {
+                    break;
+                };
+                let Some(item) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() else {
+                    continue;
+                };
+                let res = work(wk, item);
+                if res.is_err() {
+                    stop.store(true, Ordering::Release);
+                }
+                if let Some(out) = outputs.get(idx) {
+                    *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(res);
+                }
+            }
+        };
+
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(workers - 1);
+            for _ in 1..workers {
+                let run_loop = &run_loop;
+                let cancel = cancel.clone();
+                handles.push(scope.spawn(move || {
+                    let mut wk = take();
+                    start_clean(&mut wk);
+                    wk.fixes = fixes;
+                    wk.cancel.clone_from(&cancel);
+                    wk.memoize_curve_caches = memoize;
+                    run_loop(&mut wk);
+                    let cancelled = wk.cancel.as_ref().is_some_and(CancelToken::is_cancelled);
+                    wk.cancel = None;
+                    if !cancelled {
+                        give_back(wk);
+                    }
+                }));
+            }
+            // The calling thread participates using its own kernel `k`.
+            run_loop(k);
+            for h in handles {
+                if let Err(payload) = h.join() {
+                    resume_unwind(payload);
+                }
+            }
+        });
+
+        let mut results = Vec::with_capacity(n);
+        for slot in outputs {
+            match slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                Some(Ok(v)) => results.push(v),
+                Some(Err(e)) => return Err(e),
+                None => {
+                    return Err(if k.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+                        SolidError::cancelled("solidcore_ops::session::run_parallel")
+                    } else {
+                        SolidError::invalid_input(
+                            "solidcore_ops::session::run_parallel",
+                            "parallel worker stopped without producing a result",
+                        )
+                    });
+                }
+            }
+        }
+        Ok(results)
+    }
+}
+
 thread_local! {
     /// This thread's own fixes, when it named some ([`set_thread_fixes`]).
     static THREAD_FIXES: Cell<Option<UpstreamFixes>> = const { Cell::new(None) };
