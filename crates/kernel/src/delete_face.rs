@@ -828,6 +828,8 @@ mod tests {
 
     #[test]
     fn delete_one_round_or_its_ball_corner_on_a_rounded_housing() {
+        use solidcraft_geom::Vec3Geom;
+
         let origin = Vec3::new(11.0, -7.0, 4.0);
         let size = Vec3::new(36.0, 29.0, 24.0);
         let radius = 3.0;
