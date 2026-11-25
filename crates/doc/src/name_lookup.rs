@@ -391,6 +391,74 @@ fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Opt
     whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
 }
 
+/// The pieces of a saved whole closed edge that a later feature split by putting a vertex on it
+/// (#21997: a whole-turn revolve join's turned seam does): the saved name then answers to the
+/// numbered edges between its faces (`…~1`, `…~2`). Every such piece is returned when they join
+/// end to end, through the vertices they share in the B-rep, into the one closed curve the saved
+/// edge was, and the reference's point lies on one of them, measured on its exact curve: the
+/// pieces together are that edge, as a pick made today stores one name per piece of it. Pieces
+/// that do not close again (a later feature took part of the curve), a point on none of them, or
+/// numbered edges that each close on their own (several whole edges between the same faces), and
+/// the name asks to be picked again.
+pub(crate) fn recover_split_closed_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<Vec<EdgeHit>> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // A numbered name (`~k`) already names one of several edges: [`resuffixed_edge`] reads those.
+    if strip_edge_number(name).len() != name.len() {
+        return None;
+    }
+    let faces = naming::names(b);
+    let record = b.body.record();
+    // The B-rep's edges between the name's faces, each face answering exactly (see [`exactly`]).
+    let mut cands: Vec<usize> = Vec::new();
+    for (i, e) in record.edges.iter().enumerate() {
+        let [p, q] = e.uses.as_slice() else { continue };
+        if edge_match(&faces, p.face as usize, q.face as usize, name).is_some_and(exactly) {
+            cands.push(i);
+        }
+    }
+    let reach = pick_reach(b);
+    let on_curve = |i: usize| solidcraft_kernel::edge_distance(&b.body, i, near).ok().flatten().is_some_and(|d| d <= reach);
+    // The piece the reference's point lies on, on its exact curve.
+    let start = cands.iter().copied().find(|&i| on_curve(i))?;
+    // The pieces that join with it through the vertices they share in the B-rep.
+    let mut pieces = vec![start];
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for &i in &cands {
+            if pieces.contains(&i) {
+                continue;
+            }
+            let shares = pieces
+                .iter()
+                .any(|&j| record.edges.get(j).zip(record.edges.get(i)).is_some_and(|(a, e)| a.vertices.iter().any(|v| e.vertices.contains(v))));
+            if shares {
+                pieces.push(i);
+                grew = true;
+            }
+        }
+    }
+    // The one closed curve the saved edge was: more than one piece, and every vertex of it the
+    // end of exactly two of them.
+    if pieces.len() < 2 {
+        return None;
+    }
+    let mut ends: Vec<u32> = pieces.iter().filter_map(|&i| record.edges.get(i)).flat_map(|e| e.vertices).collect();
+    ends.sort_unstable();
+    if !ends.chunk_by(|a, b| a == b).all(|group| group.len() == 2) {
+        return None;
+    }
+    let mut hits = Vec::new();
+    for &i in &pieces {
+        let on_point = on_curve(i);
+        let point = if on_point { near } else { solidcraft_kernel::edge_middle(&b.body, i).ok().flatten()? };
+        hits.push(EdgeHit { edge: i, point, verified: false, on_point });
+    }
+    Some(hits)
+}
+
 /// Where a stored vertex name was found.
 #[derive(Clone, Copy, Debug)]
 pub struct VertexHit {
