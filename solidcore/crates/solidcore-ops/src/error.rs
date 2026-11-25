@@ -147,6 +147,9 @@ pub enum Error {
     CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
+    /// A split that cut no face, where a tool ran into a face and ended inside it: its curve on
+    /// the face is a crack, which cuts nothing off.
+    ToolStopsShort,
     /// Faces moved, but the tangent blends on them cannot follow them (taken off, the faces
     /// moved, put back at their own sizes): `exact` where they would need a continuation that
     /// cannot be made exactly, else where they cannot be put back as they were; `why` in the
@@ -549,6 +552,7 @@ impl Error {
             Error::NoEffect => "NoEffect",
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
+            Error::ToolStopsShort => "ToolStopsShort",
             Error::BlendsNotFollowed { .. } => "BlendsNotFollowed",
             Error::DraftCutsThrough { .. } => "DraftCutsThrough",
             Error::Profile(..) => "Profile",
@@ -1078,6 +1082,10 @@ impl std::fmt::Display for Error {
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
+            Error::ToolStopsShort => write!(
+                f,
+                "the tool ends inside the face it runs into, so it cuts nothing off"
+            ),
             Error::BlendsNotFollowed { exact: true, why } => write!(
                 f,
                 "the blends on the moved faces need a continuation that cannot be made exactly: {why}"

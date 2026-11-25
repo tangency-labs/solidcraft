@@ -13,6 +13,7 @@ Work: ROADMAP.md, CONTRIBUTING.md ("Where help is wanted most"), `help wanted`, 
 - Never crash: no unwrap/expect/panic/unsafe outside tests; errors use `Result`; input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
 - Model decisions (operations, bodies, face/edge picks and names, depths, nearness) use exact geometry; meshes only for display, export, previews, mesh bodies (`xtask/mesh-decisions/` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command; programmatic calls never open dialogs: `.agents/skills/solidcraft-commands/SKILL.md`.
+- Kernel ops and math go in `solidcore/`; features call its API: `.agents/skills/solidcraft-layers/SKILL.md`.
 - Only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`/`app-geometry`, `docs/layers.md`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
 - Rust-only app code; builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
@@ -31,7 +32,7 @@ Dev: `.agents/skills/` (`.claude/skills` symlink; Windows: Developer Mode, `git 
 
 | Skill | When |
 |---|---|
-| `.agents/skills/solidcraft-contributing/SKILL.md` | a fork, a claim, every PR's rules |
+| `.agents/skills/solidcraft-contributing/SKILL.md` | a feature, a fork, a claim, every PR's rules |
 | `.agents/skills/solidcraft-file-pr/SKILL.md` | opening a PR |
 | `.agents/skills/solidcraft-babysit-pr/SKILL.md` | after a push: CI, review |
 | `.agents/skills/solidcraft-full-stop/SKILL.md` | a change end to end |
