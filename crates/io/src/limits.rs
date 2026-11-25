@@ -184,6 +184,10 @@ fn resolve(adjustable: bool, preferred: FileLimits, flag: u64) -> FileLimits {
 
 /// The largest STEP or import file read now.
 pub fn max_step_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().step).unwrap_or(usize::MAX)
 }
 
@@ -196,7 +200,7 @@ pub fn max_design_bytes() -> usize {
     usize::try_from(effective().design).unwrap_or(usize::MAX)
 }
 
-/// A design file limit below the smallest the app allows, for this test's thread only, so a test
+/// A file limit for this test's thread only, so a test
 /// can pass the limit with a small design.
 #[cfg(test)]
 pub(crate) mod test_cap {
@@ -229,6 +233,36 @@ pub fn too_large(kind: Kind, size: u64) -> String {
 /// Refuse a `size`-byte file of this kind before it is read.
 pub fn check(kind: Kind, size: u64) -> Result<(), String> {
     if size > kind.limit() { Err(too_large(kind, size)) } else { Ok(()) }
+}
+
+/// The memory reading a `size`-byte file at `path` may need and the memory there is for it, in
+/// bytes, when that is more than the machine can spare (#15588). Only a STEP text (`.step`,
+/// `.stp`) is measured this way; an IGES, FreeCAD or Rhino file is not.
+pub fn memory_short(path: &str, size: u64) -> Option<(u64, u64)> {
+    let step = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
+    if !step {
+        return None;
+    }
+    match solidcraft_kernel::step_check_memory(usize::try_from(size).unwrap_or(usize::MAX)) {
+        Err(solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed, available }) => Some((needed as u64, available as u64)),
+        _ => None,
+    }
+}
+
+/// A warning, logged and returned, when a `size`-byte STEP file at `path` may need more memory
+/// than the machine can spare, naming that memory (#15588). It is a warning only: a valid file is
+/// always opened, from the app, scripts, the control channel and the CLI alike.
+pub fn memory_warning(path: &str, size: u64) -> Option<String> {
+    let (needed, available) = memory_short(path, size)?;
+    let message = format!(
+        "{}; opening it anyway, but SolidCraft may slow down or run out of memory",
+        solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed: needed as usize, available: available as usize }
+    );
+    log::warn!("{path}: {message}");
+    Some(message)
 }
 
 /// [`crate::vfs::read`] with this kind's limit; a file over it is refused, before reading, with
@@ -383,5 +417,28 @@ mod tests {
             assert!(set_preferred(preferred).is_err() && set_override(Some(2 * GB)).is_err());
             assert_eq!(effective(), FileLimits::DEFAULT);
         }
+    }
+    /// #15588: a STEP file that may need more memory than the machine can spare is named, with
+    /// that memory, before it is read, and warned about, never refused; other files aren't
+    /// measured this way.
+    #[test]
+    fn a_step_file_that_may_need_more_memory_than_there_is_is_warned_about() {
+        let peak = solidcraft_kernel::services::step::p21::PEAK_PER_BYTE as u64;
+        // As if the machine could spare 64 MB: a 2 MB file is over it.
+        solidcraft_kernel::step_with_memory_to_spare(64 << 20, || {
+            assert_eq!(memory_short("small.step", MB), None);
+            let size = 2 * MB + 1;
+            assert_eq!(memory_short("big.step", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.STP", size), Some((size * peak, 64 << 20)));
+            assert_eq!(memory_short("big.igs", size), None);
+            assert_eq!(memory_short("big.FCStd", size), None);
+            let message = memory_warning("big.step", size).unwrap();
+            assert!(
+                message.starts_with("STEP file needs about 64 MB of memory to read, more than the 64 MB available for it; opening it anyway"),
+                "{message}"
+            );
+            assert_eq!(memory_warning("small.step", MB), None);
+            assert_eq!(memory_warning("big.igs", size), None);
+        });
     }
 }

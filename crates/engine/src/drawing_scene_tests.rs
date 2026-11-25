@@ -7,6 +7,7 @@ use solidcraft_doc::drawing::projection_symbol::title_block_paper;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
+use solidcraft_geom::drawing_sheet::DrawingBorderProfile;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::{NoPictures, ObjectKind};
@@ -236,7 +237,10 @@ fn without_text(group: &Group) -> Group {
 fn border(s: &Session, sheet: u64) -> Vec<Group> {
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet)
+    let mut groups = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    // The frame's labels follow the lines of the drawing border's group (#20121).
+    groups[0].items.extend(labels(record).frame.into_iter().map(Item::Text));
+    groups
 }
 
 /// The box round the ends of `group`'s stroke pieces, and how long they are in all.
@@ -646,6 +650,39 @@ fn a_sheet_with_no_views_is_its_border() {
     assert_eq!((serde_json::to_string(&scene.groups).unwrap(), views.len()), (serde_json::to_string(&border(&s, second)).unwrap(), 0));
 }
 
+/// The text a scene's border groups print, run by run.
+fn frame_text(scene: &Scene) -> Vec<String> {
+    let border = scene.groups.iter().filter(|group| group.kind == ObjectKind::DrawingBorder);
+    border.flat_map(|group| group.items.iter()).filter_map(|item| if let Item::Text(run) = item { Some(run.text.clone()) } else { None }).collect()
+}
+
+/// A sheet's frame prints its zones' numbers and letters and its size as text of the border (#20121),
+/// in a font the scene holds, on a scene that still validates; a border saved before, whose profile
+/// asked for none, prints none.
+#[test]
+fn a_sheets_frame_prints_its_zone_labels_and_size() {
+    let (mut s, sheet, _) = front_and_top();
+    let SheetScene { scene, .. } = built(&s, sheet);
+    scene.validate().unwrap();
+    let mut texts = frame_text(&scene);
+    texts.sort();
+    // A3 flat: columns 1 to 8 above and below, rows A to F left and right, and the size.
+    let mut expected: Vec<String> =
+        ["1", "2", "3", "4", "5", "6", "7", "8"].iter().chain(&["A", "B", "C", "D", "E", "F"]).map(|t| t.to_string()).collect();
+    expected = expected.iter().cloned().chain(expected.iter().cloned()).chain(["A3".to_string()]).collect();
+    expected.sort();
+    assert_eq!(texts, expected);
+    assert!(!scene.fonts.is_empty());
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    for record in &mut d.sheets {
+        let record = Arc::make_mut(record);
+        record.border = record.border.map(|border| DrawingBorderProfile { zone_labels: false, ..border });
+    }
+    s.doc_mut().put_drawing(Arc::new(d));
+    let SheetScene { scene, .. } = built(&s, sheet);
+    assert_eq!(frame_text(&scene), Vec::<String>::new());
+}
+
 /// A view in `visible_hidden` is drawn as its snapshot is, its hidden lines dashed under its outline,
 /// and a sheet's provider sees the style's change as any other's: the last lines show until the view
 /// is drawn again, and it ends at the built scene. The pocket is 40 x 10 mm into the back face, so
@@ -762,11 +799,11 @@ fn the_provider_draws_a_view_a_step_until_it_is_the_built_scene() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let order = if front < top { [front, top] } else { [top, front] };
     let whole = built(&s, sheet).scene;
+    // The border's three groups with the font table their frame labels are set in (#20121).
+    let mut border_scene = Scene::new(whole.size_mm, whole.groups[..3].to_vec());
+    border_scene.add_fonts(whole.fonts.clone());
     let first = extract(&mut s, sheet).unwrap();
-    assert_eq!(
-        (bytes(&first.scene), first.stale.as_slice(), first.views.len()),
-        (bytes(&Scene::new(whole.size_mm, whole.groups[..3].to_vec())), &order[..], 0)
-    );
+    assert_eq!((bytes(&first.scene), first.stale.as_slice(), first.views.len()), (bytes(&border_scene), &order[..], 0));
     let again = extract(&mut s, sheet).unwrap();
     assert!(Arc::ptr_eq(&again.scene, &first.scene) && again.generation == first.generation);
     assert_eq!(s.drawing_scenes.projections, 0);
@@ -814,6 +851,137 @@ fn a_moved_group_moves_its_picture() {
     let picture = |min: Vec2, max: Vec2| Item::Picture(Picture { source: 3, rect: Aabb2 { min, max }, opacity: 0.5 });
     let group = Group { object: 7, kind: ObjectKind::View, items: vec![picture(Vec2::new(1.0, 2.0), Vec2::new(11.0, 7.0))] };
     assert_eq!(moved(&group, Vec2::new(50.0, -2.0)).items, [picture(Vec2::new(51.0, 0.0), Vec2::new(61.0, 5.0))]);
+}
+
+/// A frustum (radius 10 below, 2.5 on top, 15 high) less a hole of 4 across along Y through x 6.5,
+/// z 6, from #19751: its hidden lines hold pieces far shorter than a unit in the last place at the
+/// sheet's 160 mm. Moved onto the sheet, such a piece's ends are one point. The front view draws at
+/// 1:1 and 2:1.
+#[test]
+fn a_view_with_pieces_too_short_to_see_draws() {
+    for scale in ["1:1", "2:1"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 2.5, "height": 15, "body_name": "Cone"}));
+        let hole = json!({"radius": 2, "height": 30, "base": [6.5, -15, 6], "axis": "Y", "operation": "cut", "targets": ["Cone"]});
+        run(&mut s, "solid.cylinder", hole);
+        run(&mut s, "drawing.create", json!({}));
+        let sheet = s.drawing("test").unwrap().sheets[0].id;
+        let made = run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": scale, "position_mm": [150, 150]}));
+        let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+        settled(&mut s, sheet);
+        let status = built(&s, sheet).views.into_iter().find(|v| v.view == view).map(|v| v.status);
+        assert_eq!(status, Some(Status::Drawn), "at {scale}");
+    }
+}
+
+/// A piece the shift onto the sheet leaves with its ends at one point is left out: from a stroke
+/// (which still closes when it did), from a fill's loop, and a stroke of nothing else is left out
+/// whole. The pieces left are moved exactly, and the scene takes the group.
+#[test]
+fn a_moved_group_leaves_out_a_piece_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    // 1e-14 is under half a unit in the last place at 160, so 160 + 1e-14 is 160.
+    let (a, b, c) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5), Vec2::new(0.0, 0.0));
+    let line = |a, b| Seg2::Line { a, b };
+    let triangle = vec![line(c, a), line(a, b), line(b, c)];
+    let stroke = |path: Vec<Seg2>, closed| Item::Stroke { path, closed, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: Loop2 { segs: triangle.clone() }, holes: Vec::new() } };
+    let items = vec![stroke(triangle.clone(), true), stroke(vec![line(a, b)], false), fill];
+    let group = Group { object: 7, kind: ObjectKind::View, items };
+    let placed = moved(&group, by);
+    let shifted = |p: Vec2| p + by;
+    let kept = vec![line(shifted(c), shifted(a)), line(shifted(b), shifted(c))];
+    assert_eq!(placed.items, [stroke(kept.clone(), true), Item::Fill { region: Region2 { outer: Loop2 { segs: kept }, holes: Vec::new() } }]);
+    assert_eq!(Scene::new(Vec2::new(420.0, 297.0), vec![placed]).validate(), Ok(()));
+}
+
+/// The shift leaves out a curve of any kind whose points it rounds to one point: a cubic, a conic
+/// and a Bézier. A piece the scene refused before the shift, and one the shift takes past the
+/// paper's 1e5 mm, stay for the scene to refuse and name.
+#[test]
+fn a_moved_group_leaves_out_a_curve_of_any_kind_the_shift_makes_one_point() {
+    let by = Vec2::new(150.0, 150.0);
+    let (a, b) = (Vec2::new(10.0, -7.5), Vec2::new(10.0 + 1e-14, -7.5));
+    let mut controls = [a; solidcore_record::MAX_BEZIER_CTRL];
+    controls[1] = b;
+    let gone = [Seg2::Cubic { p0: a, p1: b, p2: a, p3: b }, Seg2::Conic { a, apex: b, b: a, w: 1.0 }, Seg2::Bezier { n: 4, p: controls }];
+    let far = Seg2::Line { a, b: Vec2::new(99_990.0, -7.5) };
+    let refused = Seg2::Line { a, b: Vec2::new(f64::NAN, -7.5) };
+    for seg in gone {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items, [], "{seg:?}");
+    }
+    for seg in [far, refused] {
+        let group =
+            Group { object: 7, kind: ObjectKind::View, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None }] };
+        assert_eq!(moved(&group, by).items.len(), 1, "{seg:?}");
+    }
+}
+
+/// On a sheet whose pieces the paper scene all takes, moving a group is what it was before pieces
+/// could be left out: every point plus the offset, byte for byte, for views, dimensions and the
+/// border alike.
+#[test]
+fn a_moved_group_of_good_pieces_is_every_point_moved() {
+    let (mut s, sheet, ..) = holed();
+    let by = Vec2::new(20.0, -20.0);
+    let scene = settled(&mut s, sheet).scene;
+    let groups = scene.groups.iter().filter(|g| g.items.iter().any(|i| matches!(i, Item::Stroke { .. })));
+    let mut strokes = 0;
+    for group in groups {
+        let segs = |path: &[Seg2]| path.iter().map(|seg| seg.mapped(|p| p + by, ArcMap::turn(0.0, false))).collect::<Vec<_>>();
+        let every_point = group.items.iter().map(|item| match item {
+            Item::Stroke { path, closed, width_mm, pattern } => {
+                strokes += 1;
+                Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm, pattern: pattern.clone() }
+            }
+            Item::Fill { region } => Item::Fill {
+                region: Region2 {
+                    outer: Loop2 { segs: segs(&region.outer.segs) },
+                    holes: region.holes.iter().map(|l| Loop2 { segs: segs(&l.segs) }).collect(),
+                },
+            },
+            Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
+            Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
+        });
+        let every_point = Group { object: group.object, kind: group.kind, items: every_point.collect() };
+        assert_eq!(bytes_of(&moved(group, by)), bytes_of(&every_point), "{:?}", group.kind);
+    }
+    assert!(strokes > 20, "{strokes} strokes: the border, the views and the dimension");
+}
+
+/// A view the sheet still can't take names the line it can't draw and what is wrong with it, and
+/// suggests no scale: here an edge past the paper's 1e5 mm once moved to its centre.
+#[test]
+fn a_view_the_sheet_refuses_names_the_line() {
+    let (s, ..) = front_and_top();
+    let record = s.drawing("test").unwrap().sheets[0].clone();
+    let line = |a: [f64; 2], b: [f64; 2]| Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) };
+    let stroke = |seg| Item::Stroke { path: vec![seg], closed: false, width_mm: 0.5, pattern: None };
+    let items = vec![stroke(line([0.0, 0.0], [10.0, 0.0])), stroke(line([0.0, 0.0], [99_990.0, 0.0]))];
+    let shown = Shown { index: 0, path: Vec::new(), body: "Block".into(), reference: false };
+    let owners = Owners {
+        bodies: vec![shown],
+        items: vec![Some((0, Source::Edge { edge: 2, tangent: false })), Some((0, Source::Edge { edge: 5, tangent: false }))],
+    };
+    let drawn = Drawn {
+        hatches: Vec::new(),
+        group: Some(Arc::new(Group { object: 7, kind: ObjectKind::View, items })),
+        status: Status::Drawn,
+        stats: None,
+        boundary: None,
+        frame: None,
+        owners: Some(Arc::new(owners)),
+        why: None,
+    };
+    let (_, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, Vec2::new(150.0, 150.0), &drawn)].into_iter())
+        .unwrap()
+        .finish()
+        .unwrap();
+    let status = states.into_iter().find(|v| v.view == 7).map(|v| v.status);
+    let why = "paper scene: non-finite or excessive coordinate";
+    assert_eq!(status, Some(Status::Failed(format!("Block's edge 5 can't be drawn on the sheet: {why}"))));
 }
 
 /// After a model change (going back to a checkpoint taken before a tower was added) both views are
@@ -1207,6 +1375,86 @@ fn two_assembled_one_apart() -> (Session, u64, [u64; 3], u64) {
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, sheet, views, apart)
+}
+
+/// Centre references read the assembled model. Refuse new ones on exploded views and hold
+/// existing records rather than placing them against the wrong part positions.
+#[test]
+fn centre_annotations_on_exploded_views_are_refused_or_held() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name": "Part"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 52, "base": [50, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"]}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [150, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let apart =
+        run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}))["view"].as_u64().unwrap();
+    let (mut s, sheet, [front, top]) = front_and_top_of(s);
+    let edge = json!({"point": [56, 0, 10], "path": [first]});
+    let a = json!({"point": [0, 0, 0], "path": [first]});
+    let b = json!({"point": [100, 0, 0], "path": [first]});
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"exploded": apart}}));
+    let mark_params = |view| json!({"view": ids::encode(view), "edge": edge, "overshoot_mm": 2.0});
+    let line_params = |view| json!({"view": ids::encode(view), "a": a, "b": b, "overshoot_mm": 2.0});
+    for (cmd, params) in [("drawing.center_mark.add", mark_params(top)), ("drawing.center_line.add", line_params(top))] {
+        let error = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(error.contains("on an exploded view"), "{error}");
+    }
+
+    let mark = run(&mut s, "drawing.center_mark.add", mark_params(front))["mark"].clone();
+    let line = run(&mut s, "drawing.center_line.add", line_params(front))["line"].clone();
+    let edit = json!({"view": ids::encode(front), "set": {"exploded": apart}});
+    let error = s.execute("drawing.view.edit", &edit).unwrap_err().to_string();
+    assert!(error.contains("exploded view with centre annotations"), "{error}");
+    let before = settled(&mut s, sheet);
+    let mark_id = ids::decode(mark.as_str().unwrap()).unwrap();
+    let line_id = ids::decode(line.as_str().unwrap()).unwrap();
+    assert!(before.scene.groups.iter().any(|group| group.object == mark_id));
+    assert!(before.scene.groups.iter().any(|group| group.object == line_id));
+
+    // A saved file can still contain this combination, so the scene must be safe to read.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let view = d.views.iter_mut().find(|view| view.id == front).unwrap();
+    Arc::make_mut(view).settings.exploded = Some(Exploded::View(apart));
+    s.doc_mut().put_drawing(Arc::new(d));
+    let pending = extract(&mut s, sheet).unwrap();
+    assert!(pending.stale.contains(&front));
+    assert!(pending.scene.groups.iter().any(|group| group.object == mark_id));
+    assert!(pending.scene.groups.iter().any(|group| group.object == line_id));
+    let shown = settled(&mut s, sheet);
+    let once = built(&s, sheet);
+    assert_eq!(bytes(&shown.scene), bytes(&once.scene));
+    assert_eq!(shown.annotation_failures, once.annotation_failures);
+    for id in [mark_id, line_id] {
+        assert!(!shown.scene.groups.iter().any(|group| group.object == id));
+        assert!(shown.annotation_failures.iter().any(|failure| failure.object == id && failure.reason.contains("exploded view")));
+    }
+    for (cmd, params) in [("drawing.center_mark.inspect", json!({"mark": mark})), ("drawing.center_line.inspect", json!({"line": line}))] {
+        let reply = run(&mut s, cmd, params);
+        assert!(reply["warnings"].as_array().unwrap().iter().any(|warning| warning.as_str().unwrap().contains("exploded view")), "{reply}");
+    }
+    // An exploded saved view that has no visible bodies has no frame either. Both one-shot and
+    // provider scenes still explain the omitted records, and Check names each record correctly.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let view = d.views.iter_mut().find(|view| view.id == front).unwrap();
+    Arc::make_mut(view).settings.hide = Some(vec![vec![first], vec![second]].into());
+    s.doc_mut().put_drawing(Arc::new(d));
+    let placeholder = settled(&mut s, sheet);
+    assert!(matches!(placeholder.views.iter().find(|v| v.view == front).unwrap().status, Status::Placeholder(_)));
+    assert_eq!(placeholder.annotation_failures, built(&s, sheet).annotation_failures);
+    for id in [mark_id, line_id] {
+        assert!(placeholder.annotation_failures.iter().any(|failure| failure.object == id && failure.reason.contains("exploded view")));
+    }
+    let check = run(&mut s, "drawing.check", json!({"sheet": ids::encode(sheet)}));
+    for (id, kind) in [(mark_id, "centre_mark"), (line_id, "centre_line")] {
+        assert!(
+            check["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|finding| finding["kind"] == "failed" && finding["object"]["kind"] == kind && finding["object"]["id"] == ids::encode(id)),
+            "{check}"
+        );
+    }
 }
 
 /// An exploded view is up to date by what it draws, not by what the design places: moving its parts
@@ -2286,6 +2534,7 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         sketches: Vec::new(),
         fills: Vec::new(),
         notes: Vec::new(),
+        annotation_failures: Vec::new(),
         balloons: Vec::new(),
         tables: Vec::new(),
         tags: Vec::new(),
@@ -3006,6 +3255,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         fonts: Vec::new(),
         why: None,
         pending: false,
+        layout: Default::default(),
     };
     let too_many = dimension(1, vec![stroke(Vec2::X); MAX_RECORDS + 1]);
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
@@ -3026,7 +3276,12 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
 fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (s, sheet, [front, _]) = front_and_top();
     let d = s.drawing("test").unwrap().clone();
-    let record = sheet_of(&d, sheet).unwrap();
+    // On a sheet whose frame prints no labels: the font table is the dimensions' alone (the frame's
+    // zone letters and numbers would add their glyphs to it, #20121).
+    let record = &Sheet {
+        border: sheet_of(&d, sheet).unwrap().border.map(|b| DrawingBorderProfile { zone_labels: false, ..b }),
+        ..sheet_of(&d, sheet).unwrap().clone()
+    };
     let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
     let view = Drawn {
         hatches: Vec::new(),
@@ -3053,6 +3308,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             fonts,
             why: None,
             pending: false,
+            layout: Default::default(),
         }
     };
     let glyphs = |one: &DrawnDimension| one.fonts[0].glyphs.len();
@@ -4135,6 +4391,686 @@ fn each_drawn_body_comes_with_the_state_its_view_drew_from() {
     assert_eq!((from_design.len(), from_design.iter().filter(|design| **design).count()), (6, 4));
 }
 
+#[test]
+fn manual_centre_mark_is_shared_by_one_shot_and_cached_scenes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 52, "base": [40, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"}),
+    );
+    let state = s.model.state();
+    let mesh = state.body("Block").unwrap().mesh();
+    let centre = solidcore_record::Vec3::new(40.0, 0.0, 10.0);
+    let edge = mesh.edges.iter().position(|line| !line.is_empty() && line.iter().all(|p| (p.dist(centre) - 6.0).abs() < 1e-6)).unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let added =
+        run(&mut s, "drawing.center_mark.add", json!({"view": ids::encode(front), "edge": {"body": "Block", "index": edge}, "overshoot_mm": 2.0}));
+    let mark = added["mark"].as_str().unwrap().to_owned();
+    let mark_id = ids::decode(&mark).unwrap();
+    let group = |scene: &Scene| scene.groups.iter().find(|g| g.kind == ObjectKind::CentreMark && g.object == mark_id).unwrap().clone();
+    let once = built(&s, sheet).scene;
+    let cached = settled(&mut s, sheet).scene;
+    assert_eq!(group(&once), group(&cached));
+    let original = group(&once);
+    let folder = crate::tests::Folder::new("manual-centre-mark");
+    let path = folder.path("mark.solidcraft");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(run(&mut reopened, "drawing.center_mark.inspect", json!({"mark":mark}))["status"], "ok");
+    assert_eq!(group(&settled(&mut reopened, sheet).scene), original);
+    assert_eq!(original.items.len(), 2);
+    for item in &original.items {
+        let Item::Stroke { path, pattern, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 10.0).abs() < 1e-6);
+        let pattern = pattern.as_ref().unwrap();
+        let middle = (pattern.phase_mm + path[0].length() / 2.0).rem_euclid(pattern.lengths_mm.iter().sum());
+        assert!((middle - 1.8).abs() < 1e-6);
+    }
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    let item = json!({"type":"drawing", "drawing":drawing_id, "object":mark});
+    assert_eq!(run(&mut s, "select.set", json!({"items":[item]}))["selected"], 1);
+    let removed = run(&mut s, "selection.delete", json!({"items":[item]}));
+    assert_eq!(removed["centre_marks"], json!([mark]));
+    assert!(s.execute("drawing.center_mark.inspect", &json!({"mark":mark})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_mark.inspect", json!({"mark":mark}))["status"], "ok");
+    run(&mut s, "drawing.center_mark.edit", json!({"mark": mark, "overshoot_mm": 4.0}));
+    let edited = extract(&mut s, sheet).unwrap().scene;
+    for item in &group(&edited).items {
+        let Item::Stroke { path, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 14.0).abs() < 1e-6);
+    }
+    assert_eq!(group(&built(&s, sheet).scene), group(&edited));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(group(&extract(&mut s, sheet).unwrap().scene), original);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [200.0, 150.0]}, "scale": "1:1"}}));
+    let moved = settled(&mut s, sheet).scene;
+    assert_eq!(group(&built(&s, sheet).scene), group(&moved));
+    let (old_lo, old_hi, _) = reach(&original);
+    let (new_lo, new_hi, _) = reach(&group(&moved));
+    let old_centre = (old_lo + old_hi) * 0.5;
+    let new_centre = (new_lo + new_hi) * 0.5;
+    let expected = Vec2::new(200.0, 150.0) + (old_centre - Vec2::new(150.0, 150.0)) * 2.0;
+    assert!(new_centre.dist(expected) < 1e-6);
+    for item in &group(&moved).items {
+        let Item::Stroke { path, .. } = item else { panic!("expected a stroke") };
+        assert!((path[0].length() - 16.0).abs() < 1e-6);
+    }
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Hole"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut s, "drawing.center_mark.inspect", json!({"mark": mark}))["status"], "lost");
+    let lost = settled(&mut s, sheet);
+    assert!(!lost.scene.groups.iter().any(|g| g.kind == ObjectKind::CentreMark && g.object == mark_id));
+    assert!(lost.annotation_failures.iter().any(|failure| failure.object == mark_id && !failure.reason.is_empty()));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(group(&built(&s, sheet).scene), group(&settled(&mut s, sheet).scene));
+}
+
+#[test]
+fn manual_centre_line_tracks_view_scale_and_cached_scene() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({
+            "view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0
+        }),
+    );
+    let line = added["line"].as_str().unwrap().to_owned();
+    let line_id = ids::decode(&line).unwrap();
+    let group = |scene: &Scene| scene.groups.iter().find(|g| g.kind == ObjectKind::CentreLine && g.object == line_id).unwrap().clone();
+    let initial = group(&built(&s, sheet).scene);
+    assert_eq!(group(&settled(&mut s, sheet).scene), initial);
+    let folder = crate::tests::Folder::new("manual-centre-line");
+    let path = folder.path("line.solidcraft");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "file.save", json!({"path":path}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":path}));
+    run(&mut reopened, "drawing.open", json!({"drawing":drawing}));
+    assert_eq!(run(&mut reopened, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+    assert_eq!(group(&settled(&mut reopened, sheet).scene), initial);
+    assert!((reach(&initial).2 - 54.0).abs() < 1e-6);
+    let Item::Stroke { pattern, .. } = &initial.items[0] else { panic!("expected stroke") };
+    assert!(pattern.is_some());
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert!(exported["svg"].as_str().unwrap().contains("stroke-dasharray="));
+    run(&mut s, "drawing.center_line.edit", json!({"line": line, "overshoot_mm": 4.0}));
+    let edited = group(&extract(&mut s, sheet).unwrap().scene);
+    assert!((reach(&edited).2 - 58.0).abs() < 1e-6);
+    assert_eq!(group(&built(&s, sheet).scene), edited);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(group(&extract(&mut s, sheet).unwrap().scene), initial);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [200.0, 150.0]}, "scale": "1:1"}}));
+    let scaled = group(&settled(&mut s, sheet).scene);
+    assert!((reach(&scaled).2 - 104.0).abs() < 1e-6);
+    let (old_lo, old_hi, _) = reach(&initial);
+    let (new_lo, new_hi, _) = reach(&scaled);
+    let old_mid = (old_lo + old_hi) * 0.5;
+    let new_mid = (new_lo + new_hi) * 0.5;
+    let expected = Vec2::new(200.0, 150.0) + (old_mid - Vec2::new(150.0, 150.0)) * 2.0;
+    assert!(new_mid.dist(expected) < 1e-6);
+    assert_eq!(group(&built(&s, sheet).scene), scaled);
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert!(reply["objects"].as_array().unwrap().iter().any(|object| object["object"] == line && object["kind"] == "centre_line"));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let item = json!({"type":"drawing", "drawing": drawing, "object": line});
+    assert_eq!(run(&mut s, "select.set", json!({"items":[item]}))["selected"], 1);
+    let removed = run(&mut s, "selection.delete", json!({"items":[item]}));
+    assert_eq!(removed["centre_lines"], json!([line]));
+    assert!(s.execute("drawing.center_line.inspect", &json!({"line":line})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+    let view_item = json!({"type":"drawing", "drawing": drawing, "object": ids::encode(front)});
+    let removed = run(&mut s, "selection.delete", json!({"items":[view_item], "contents":"delete"}));
+    assert_eq!(removed["centre_lines"], json!([line]));
+    assert!(s.execute("drawing.center_line.inspect", &json!({"line":line})).is_err());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line":line}))["status"], "ok");
+}
+
+/// Dimensions and centre annotations share the provider's cache; neither edit can discard the
+/// other, and the title block stays above both as in a sheet with dimensions alone.
+#[test]
+fn centre_annotations_coexist_with_dimensions_and_title_block() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let dimension = top_edge(&mut s, front);
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    Arc::make_mut(&mut drawing.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let first = settled(&mut s, sheet);
+    assert_eq!(bytes(&first.scene), bytes(&built(&s, sheet).scene));
+    let kinds: Vec<_> = first.scene.groups.iter().map(|group| group.kind).collect();
+    let position = |kind| kinds.iter().position(|found| *found == kind).unwrap();
+    assert!(position(ObjectKind::View) < position(ObjectKind::Dimension));
+    assert!(position(ObjectKind::Dimension) < position(ObjectKind::CentreLine));
+    assert_eq!(kinds.last(), Some(&ObjectKind::TitleBlock));
+    assert!(first.dimensions.iter().any(|state| state.dimension == dimension && state.drawn));
+    assert!(first.objects.iter().any(|object| object.object == line && object.kind == ObjectKind::CentreLine));
+
+    run(&mut s, "drawing.dimension.edit", json!({"dimension": ids::encode(dimension), "set": {"offset_mm": 20.0}}));
+    let edited_dimension = settled(&mut s, sheet);
+    assert_ne!(group_of(&first.scene, dimension), group_of(&edited_dimension.scene, dimension));
+    assert_eq!(group_of(&first.scene, line), group_of(&edited_dimension.scene, line));
+    assert_eq!(bytes(&edited_dimension.scene), bytes(&built(&s, sheet).scene));
+
+    run(&mut s, "drawing.center_line.edit", json!({"line": ids::encode(line), "overshoot_mm": 4.0}));
+    let edited_line = settled(&mut s, sheet);
+    assert_ne!(group_of(&edited_dimension.scene, line), group_of(&edited_line.scene, line));
+    assert_eq!(group_of(&edited_dimension.scene, dimension), group_of(&edited_line.scene, dimension));
+    assert_eq!(edited_dimension.dimensions, edited_line.dimensions);
+    assert_eq!(bytes(&edited_line.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// View notes, centre annotations and sheet notes share the scene and export without losing one
+/// another when a sheet note changes and the provider assembles the sheet again.
+#[test]
+fn centre_annotations_and_notes_share_the_scene_and_export() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let view_note = view_note(&mut s, front, None, [0.0, -30.0], sheet_of_count());
+    let sheet_note = sheet_note(&mut s, sheet, [60.0, 40.0], json!("General note"));
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let shown = settled(&mut s, sheet);
+    let once = built(&s, sheet);
+    assert_eq!((bytes(&shown.scene), &shown.notes, &shown.annotation_failures), (bytes(&once.scene), &once.notes, &once.annotation_failures));
+    let positions = |scene: &Scene| {
+        let at = |id| scene.groups.iter().position(|group| group.object == id).unwrap();
+        (at(view_note), at(line), at(sheet_note))
+    };
+    let (view_at, line_at, sheet_at) = positions(&shown.scene);
+    assert!(view_at < line_at && line_at < sheet_at);
+    assert_eq!(text_and_tips(group_of(&shown.scene, view_note)).0, vec!["Sheet 1 of 1".to_string()]);
+
+    run(&mut s, "drawing.note.edit", json!({"note": ids::encode(sheet_note), "set": {"content": "Revised note"}}));
+    let revised = settled(&mut s, sheet);
+    assert_eq!(text_and_tips(group_of(&revised.scene, sheet_note)).0, vec!["Revised note".to_string()]);
+    assert_eq!(group_of(&shown.scene, line), group_of(&revised.scene, line));
+    assert_eq!(bytes(&revised.scene), bytes(&built(&s, sheet).scene));
+    let reply = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let exported = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(exported["notes"], reply["notes"]);
+    assert_eq!(exported.get("annotation_failures"), reply.get("annotation_failures"));
+}
+
+#[test]
+fn centre_annotations_and_dimension_inspect_keep_the_deferred_sheet_contract() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let dimension = top_edge(&mut s, front);
+    view_note(&mut s, front, None, [0.0, -30.0], sheet_of_count());
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let accepted = settled(&mut s, sheet);
+    let inspect = run(&mut s, "drawing.dimension.inspect", json!({"dimension": ids::encode(dimension)}));
+    assert!(inspect.get("layout").is_some(), "{inspect}");
+    let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+    let current = run(&mut s, "drawing.dimension.inspect", json!({"dimension": ids::encode(dimension)}));
+    assert!(current.get("layout").is_some(), "{current}");
+    assert_ne!(inspect["layout"], current["layout"]);
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    assert_eq!(bytes(&accepted.scene), bytes(&held.scene));
+    assert_eq!(group_of(&accepted.scene, line), group_of(&held.scene, line));
+    assert_eq!(run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}))["svg"], export["svg"]);
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert!(updated.stale.is_empty());
+    assert_ne!(group_of(&accepted.scene, line), group_of(&updated.scene, line));
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn centre_annotations_on_configuration_views_are_refused_or_omitted() {
+    let (mut s, sheet, [front, top], row) = configured_front_and_top();
+    let dimension = top_edge(&mut s, front);
+    let params = |view| json!({"view": ids::encode(view), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0});
+    let added = run(&mut s, "drawing.center_line.add", params(front));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let accepted = settled(&mut s, sheet);
+    let edit = json!({"view": ids::encode(front), "set": {"configuration": "Long"}});
+    let error = s.execute("drawing.view.edit", &edit).unwrap_err().to_string();
+    assert!(error.contains("configuration of its own with centre annotations"), "{error}");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"configuration": "Long"}}));
+    for (command, params) in [
+        ("drawing.center_line.add", params(top)),
+        ("drawing.center_mark.add", json!({"view": ids::encode(top), "edge": [0, 0, 0], "overshoot_mm": 2.0})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("configuration of its own"), "{error}");
+    }
+    // A file can bring this combination. Keep the accepted frame until its job finishes.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    Arc::make_mut(d.views.iter_mut().find(|view| view.id == front).unwrap()).settings.configuration =
+        Some(solidcraft_doc::drawing_view::ViewConfiguration::Row(row));
+    s.doc_mut().put_drawing(Arc::new(d));
+    let pending = extract(&mut s, sheet).unwrap();
+    assert_eq!(group_of(&pending.scene, line), group_of(&accepted.scene, line));
+    let updated = settled(&mut s, sheet);
+    assert!(!updated.scene.groups.iter().any(|group| group.object == line));
+    assert!(updated.annotation_failures.iter().any(|failure| failure.object == line && failure.reason.contains("configuration of its own")));
+    assert!(updated.dimensions.iter().any(|state| state.dimension == dimension && state.drawn));
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+    let inspected = run(&mut s, "drawing.center_line.inspect", json!({"line": ids::encode(line)}));
+    assert!(inspected["warnings"].as_array().unwrap().iter().any(|warning| warning.as_str().unwrap().contains("configuration of its own")));
+}
+
+#[test]
+fn centre_annotations_wait_for_their_view_and_keep_its_old_frame_until_redrawn() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({
+            "view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0
+        }),
+    );
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let first = extract(&mut s, sheet).unwrap();
+    assert!(!first.scene.groups.iter().any(|g| g.object == line), "an undrawn view has no annotation frame");
+    let old = settled(&mut s, sheet);
+    assert!((reach(group_of(&old.scene, line)).2 - 54.0).abs() < 1e-6);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+    let pending = extract(&mut s, sheet).unwrap();
+    assert!(pending.stale.contains(&front));
+    assert_eq!(group_of(&pending.scene, front), group_of(&old.scene, front));
+    assert_eq!(group_of(&pending.scene, line), group_of(&old.scene, line), "old view and annotation remain one snapshot");
+    let current = settled(&mut s, sheet);
+    assert!((reach(group_of(&current.scene, line)).2 - 104.0).abs() < 1e-6);
+    assert_eq!(bytes(&current.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn a_centre_annotation_is_omitted_when_its_view_exceeds_the_scene_budget() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({
+            "view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0
+        }),
+    );
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+    assert!(s.drawing_scenes.views[&front].marks.iter().any(|mark| mark.object == line && mark.group.is_some()));
+    overfill(&mut s, front);
+    let scene = extract(&mut s, sheet).unwrap();
+    let status = &scene.views.iter().find(|v| v.view == front).unwrap().status;
+    let Status::Failed(why) = status else { panic!("expected the oversized view to be omitted") };
+    assert!(!scene.scene.groups.iter().any(|g| g.object == line));
+    assert!(!scene.objects.iter().any(|object| object.object == line));
+    assert!(scene.annotation_failures.iter().any(|failure| failure.object == line && failure.view == front && &failure.reason == why));
+    assert!(s.drawing_scenes.views[&front].marks.iter().any(|mark| mark.object == line && mark.group.is_some()));
+    scene.scene.validate().unwrap();
+}
+
+#[test]
+fn deferred_reopen_keeps_centre_annotations_with_their_view_until_update() {
+    let (mut s, sheet, front, _, drawing) = holed();
+    let state = s.model.state();
+    let mesh = state.body("Block").unwrap().mesh();
+    let centre = solidcore_record::Vec3::new(50.0, 0.0, 10.0);
+    let edge = mesh.edges.iter().position(|line| !line.is_empty() && line.iter().all(|p| (p.dist(centre) - 6.0).abs() < 1e-6)).unwrap();
+    let mark =
+        run(&mut s, "drawing.center_mark.add", json!({"view": ids::encode(front), "edge": {"body": "Block", "index": edge}, "overshoot_mm": 2.0}));
+    let mark = ids::decode(mark["mark"].as_str().unwrap()).unwrap();
+    let line = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    let dimension = front_edge(&mut s, front);
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    let previous: Vec<_> = [front, dimension, mark, line].into_iter().map(|id| bytes_of(group_of(&before.scene, id))).collect();
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    // A background file export reads the scratch copy before the window takes its kept lines back.
+    let request = json!({"sheet": ids::encode(sheet), "format": "svg"});
+    let scratch = s.scratch_as_shown().execute("drawing.export", &request).unwrap();
+    let svg = scratch["svg"].as_str().unwrap();
+    for (id, kind) in [(mark, "centre_mark"), (line, "centre_line")] {
+        assert!(svg.contains(&format!("<g data-object=\"{id}\" data-kind=\"{kind}\">")));
+    }
+    let session = run(&mut s, "drawing.export", request);
+    assert_eq!((&scratch["svg"], &scratch["out_of_date"]), (&session["svg"], &session["out_of_date"]));
+    let held = settled(&mut s, sheet);
+    assert!(held.stale.contains(&front));
+    let held_groups: Vec<_> = [front, dimension, mark, line].into_iter().map(|id| bytes_of(group_of(&held.scene, id))).collect();
+    assert_eq!(held_groups, previous, "the old view, dimension and both annotations are retained together");
+    assert!(begin(&mut s).is_none(), "a deferred view cannot start an update");
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert!(!updated.stale.contains(&front));
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn centre_annotations_follow_accepted_jobs_and_ignore_cancelled_or_reordered_results() {
+    for latest_first in [false, true] {
+        let (mut s, sheet, front, _, _) = holed();
+        let state = s.model.state();
+        let mesh = state.body("Block").unwrap().mesh();
+        let centre = solidcore_record::Vec3::new(50.0, 0.0, 10.0);
+        let edge = mesh.edges.iter().position(|line| !line.is_empty() && line.iter().all(|p| (p.dist(centre) - 6.0).abs() < 1e-6)).unwrap();
+        let mark = run(
+            &mut s,
+            "drawing.center_mark.add",
+            json!({"view": ids::encode(front), "edge": {"body": "Block", "index": edge}, "overshoot_mm": 2.0}),
+        );
+        let mark = ids::decode(mark["mark"].as_str().unwrap()).unwrap();
+        let line = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+        let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+        let before = settled(&mut s, sheet);
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+        let held = extract(&mut s, sheet).unwrap();
+        for id in [front, mark, line] {
+            assert_eq!(group_of(&held.scene, id), group_of(&before.scene, id));
+        }
+        let draw_front = |s: &mut Session| {
+            let (d, views, state) = drawable(s).unwrap();
+            let (_, view, _) = views.into_iter().find(|(id, ..)| *id == front).unwrap();
+            Job(Work::View(job_for(s, &d, front, view, state))).run()
+        };
+        let earlier = draw_front(&mut s);
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+        extract(&mut s, sheet).unwrap();
+        let latest = draw_front(&mut s);
+        let built_now = built(&s, sheet);
+        let assert_shown = |s: &mut Session, expected: &Scene| {
+            let now = extract(s, sheet).unwrap();
+            for id in [front, mark, line] {
+                assert_eq!(group_of(&now.scene, id), group_of(expected, id));
+            }
+        };
+        if latest_first {
+            assert!(finish(&mut s, latest));
+            assert_shown(&mut s, &built_now.scene);
+            assert!(!finish(&mut s, earlier));
+        } else {
+            assert!(!finish(&mut s, earlier));
+            assert_shown(&mut s, &before.scene);
+            assert!(finish(&mut s, latest));
+        }
+        assert_shown(&mut s, &built_now.scene);
+        let end = settled(&mut s, sheet);
+        assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene));
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+        extract(&mut s, sheet).unwrap();
+        let cancelled = begin(&mut s).unwrap().run();
+        cancel(&mut s);
+        assert!(!finish(&mut s, cancelled));
+        let after = extract(&mut s, sheet).unwrap();
+        for id in [front, mark, line] {
+            assert_eq!(group_of(&after.scene, id), group_of(&end.scene, id));
+        }
+        assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+        run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:2"}}));
+        extract(&mut s, sheet).unwrap();
+        let stale = begin(&mut s).unwrap().run();
+        run(&mut s, "drawing.center_line.edit", json!({"line": ids::encode(line), "overshoot_mm": 3.0}));
+        assert!(!finish(&mut s, stale), "an annotation edit invalidates the in-flight job");
+        let end = settled(&mut s, sheet);
+        assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene));
+    }
+}
+
+/// A valid association can project outside the paper limits after its occurrence is hidden.
+/// An annotation failure must not leave the view job waiting forever.
+#[test]
+fn an_off_paper_centre_line_does_not_prevent_view_publication() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name": "Part"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [300000, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let dimension = run(
+        &mut s,
+        "drawing.dimension.add",
+        json!({"view": ids::encode(front), "kind": {"linear": {
+            "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [10, 0, 0], "path": [first]}
+        }}}),
+    );
+    let dimension = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
+    let valid = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(front), "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [10, 0, 0], "path": [first]}, "overshoot_mm": 2.0}),
+    );
+    let valid = ids::decode(valid["line"].as_str().unwrap()).unwrap();
+    let invalid = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(front), "a": {"point": [300000, 0, 0], "path": [second]}, "b": {"point": [300010, 0, 0], "path": [second]}, "overshoot_mm": 2.0}),
+    );
+    let invalid = ids::decode(invalid["line"].as_str().unwrap()).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"hide": [[second]]}}));
+    extract(&mut s, sheet).unwrap();
+    loop {
+        let job = begin(&mut s).expect("the annotated view needs drawing");
+        let Work::View(view_job) = &job.0 else { panic!("expected a view job") };
+        let is_front = view_job.ticket.view == front;
+        let accepted = finish(&mut s, job.run());
+        if is_front {
+            assert!(accepted, "a bad annotation must not prevent its view from being published");
+            let published = extract(&mut s, sheet).unwrap();
+            assert!(published.scene.groups.iter().any(|group| group.object == front));
+            assert!(published.dimensions.iter().any(|state| state.dimension == dimension && state.drawn));
+            assert!(published.scene.groups.iter().any(|group| group.object == valid));
+            assert!(published.annotation_failures.iter().any(|failure| failure.object == invalid));
+            break;
+        }
+        assert!(accepted, "the other view should be published");
+    }
+    let shown = settled(&mut s, sheet);
+    let one_shot = built(&s, sheet);
+    assert!(shown.stale.is_empty());
+    assert_eq!(bytes(&shown.scene), bytes(&one_shot.scene));
+    assert!(shown.scene.groups.iter().any(|group| group.object == front));
+    assert!(shown.scene.groups.iter().any(|group| group.object == valid));
+    assert!(!shown.scene.groups.iter().any(|group| group.object == invalid));
+    assert_eq!(shown.annotation_failures, one_shot.annotation_failures);
+    assert_eq!(shown.annotation_failures.len(), 1);
+    let failure = &shown.annotation_failures[0];
+    assert_eq!((failure.object, failure.view, failure.kind), (invalid, front, ObjectKind::CentreLine));
+    assert!(failure.reason.contains("coordinate limit"), "{:?}", failure);
+    let checked_failure = |s: &mut Session| {
+        let check = run(s, "drawing.check", json!({"sheet": ids::encode(sheet)}));
+        check["findings"].as_array().unwrap().iter().any(|finding| {
+            finding["kind"] == "failed"
+                && finding["object"]["kind"] == "centre_line"
+                && finding["object"]["id"] == json!(ids::encode(invalid))
+                && finding["why"].as_str().is_some_and(|why| why.contains("coordinate limit"))
+        })
+    };
+    assert!(checked_failure(&mut s), "the check reports the accepted annotation failure");
+    let params = json!({"sheet": ids::encode(sheet)});
+    let scene = run(&mut s, "drawing.scene", params.clone());
+    let export = run(&mut s, "drawing.export", params);
+    assert_eq!(scene["annotation_failures"], export["annotation_failures"]);
+    let export_schema = output_schema_for::<crate::schema::drawing_export::ExportResult>();
+    assert!(conforms(export_schema.as_value(), export_schema.as_value(), &export), "{export}");
+    assert_eq!(scene["annotation_failures"][0]["object"], ids::encode(invalid));
+    assert!(scene["annotation_failures"][0]["reason"].as_str().unwrap().contains("coordinate limit"));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+
+    // An unaccepted job cannot replace either the view or its annotation failures.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:1"}}));
+    let pending = extract(&mut s, sheet).unwrap();
+    assert!(pending.stale.contains(&front));
+    assert_eq!(pending.annotation_failures, shown.annotation_failures);
+    let cancelled = begin(&mut s).unwrap().run();
+    cancel(&mut s);
+    assert!(!finish(&mut s, cancelled));
+    assert_eq!(extract(&mut s, sheet).unwrap().annotation_failures, shown.annotation_failures);
+    let updated = settled(&mut s, sheet);
+    assert_eq!(updated.annotation_failures, built(&s, sheet).annotation_failures);
+
+    // Closing a deferred drawing retains failures along with the last shown view.
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    extract(&mut s, sheet).unwrap();
+    run(&mut s, "drawing.update", json!({}));
+    let before_close = settled(&mut s, sheet);
+    let drawing = s.open_drawing.unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let reopened = extract(&mut s, sheet).unwrap();
+    assert_eq!(reopened.annotation_failures, before_close.annotation_failures);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    let held = extract(&mut s, sheet).unwrap();
+    assert_eq!(held.annotation_failures, before_close.annotation_failures);
+    assert!(checked_failure(&mut s), "a deferred check retains the accepted failure");
+    run(&mut s, "drawing.update", json!({}));
+    let recovered = settled(&mut s, sheet);
+    assert!(recovered.annotation_failures.is_empty());
+    assert!(recovered.scene.groups.iter().any(|group| group.object == invalid));
+    assert!(!checked_failure(&mut s), "the check clears the failure after the update");
+}
+
+/// A crowded sheet drops only the annotation that does not fit, and keeps a later smaller one.
+#[test]
+fn centre_annotations_respect_the_cumulative_paper_budget() {
+    let (s, sheet, [front, _]) = front_and_top();
+    let d = s.drawing("test").unwrap().clone();
+    let record = sheet_of(&d, sheet).unwrap();
+    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+    let stroke = Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::X }], closed: false, width_mm: 0.18, pattern: None };
+    // Group records are one plus two per stroke. Leave three or four records for the line.
+    let count = (MAX_RECORDS - assembly.records - 4) / 2;
+    let filler = Group { object: front, kind: ObjectKind::View, items: vec![stroke.clone(); count] };
+    assembly.add(&filler, &[], Vec2::ZERO, DrawnFor::View).unwrap_or_else(|_| panic!("filler fits"));
+    let mark =
+        |object, kind, count| Mark { object, view: front, kind, group: Some(Group { object, kind, items: vec![stroke.clone(); count] }), why: None };
+    assembly.add_centre_annotation(mark(1, ObjectKind::CentreMark, 2));
+    assembly.add_centre_annotation(mark(2, ObjectKind::CentreLine, 1));
+    assert_eq!(assembly.annotation_failures.len(), 1);
+    let failure = &assembly.annotation_failures[0];
+    assert_eq!((failure.object, failure.view, failure.kind), (1, front, ObjectKind::CentreMark));
+    assert!(failure.reason.contains("record budget"));
+    let (scene, _, objects, _, _, _) = assembly.finish().unwrap();
+    assert!(!scene.groups.iter().any(|g| g.object == 1));
+    assert!(scene.groups.iter().any(|g| g.object == 2));
+    assert!(objects.iter().any(|o| o.object == 2));
+}
+
+#[test]
+fn manual_centre_annotations_use_the_shared_sheet_hit_test() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius": 6, "height": 52, "base": [50, -1, 10], "axis": "Y", "operation": "cut", "targets": ["Block"], "name": "Hole"}),
+    );
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let view = ids::encode(front);
+    let mark = run(&mut s, "drawing.center_mark.add", json!({"view": view, "edge": [56, 0, 10], "overshoot_mm": 2.0}));
+    let mark = ids::decode(mark["mark"].as_str().unwrap()).unwrap();
+    let line = run(&mut s, "drawing.center_line.add", json!({"view": view, "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    let scene = settled(&mut s, sheet);
+    let ask = |s: &mut Session, id| {
+        let (lo, hi, _) = reach(group_of(&scene.scene, id));
+        let point = (lo + hi) * 0.5;
+        run(s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [point.x, point.y], "band_mm": 0.0}))
+    };
+    assert_eq!(ask(&mut s, mark)["hit"]["object"], ids::encode(mark));
+    assert_eq!(ask(&mut s, line)["hit"]["object"], ids::encode(line));
+
+    // The check reports both kinds when their visible strokes extend beyond the paper.
+    run(&mut s, "drawing.center_mark.edit", json!({"mark": ids::encode(mark), "overshoot_mm": 1000.0}));
+    run(&mut s, "drawing.center_line.edit", json!({"line": ids::encode(line), "overshoot_mm": 1000.0}));
+    let check = run(&mut s, "drawing.check", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<crate::schema::drawing_check::CheckResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &check), "{check}");
+    let findings = check["findings"].as_array().unwrap();
+    for (id, kind) in [(mark, "centre_mark"), (line, "centre_line")] {
+        assert!(
+            findings.iter().any(|finding| {
+                finding["kind"] == "outside_sheet" && finding["object"]["kind"] == kind && finding["object"]["id"] == json!(ids::encode(id))
+            }),
+            "{check}"
+        );
+    }
+
+    // A saved mark whose occurrence can no longer be found keeps its own failed finding.
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    let at = drawing.centre_mark_index(mark).unwrap();
+    Arc::make_mut(drawing.centre_marks.get_mut(at).unwrap()).edge.path = vec![999];
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let check = run(&mut s, "drawing.check", json!({"sheet": ids::encode(sheet)}));
+    assert!(
+        check["findings"].as_array().unwrap().iter().any(|finding| {
+            finding["kind"] == "failed" && finding["object"]["kind"] == "centre_mark" && finding["object"]["id"] == json!(ids::encode(mark))
+        }),
+        "{check}"
+    );
+}
+
+#[test]
+fn closing_and_deleting_a_drawing_cleans_up_its_retained_centre_annotations() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = s.open_drawing.unwrap();
+    let line = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    assert!(settled(&mut s, sheet).scene.groups.iter().any(|group| group.object == line));
+    run(&mut s, "drawing.close", json!({}));
+    assert!(
+        s.drawing_scenes.kept.of(drawing).is_some_and(|kept| kept.views.values().any(|view| view.marks.iter().any(|group| group.object == line)))
+    );
+    assert!(s.drawing_scenes.views.is_empty() && s.drawing_scenes.last.is_none() && s.drawing_scenes.shown.is_none());
+    run(&mut s, "drawing.delete", json!({"drawing": ids::encode(drawing)}));
+    assert!(s.drawing_scenes.kept.of(drawing).is_none());
+}
+
+/// A motion-study view uses a different placement just like a joint pose, so a centre line cannot
+/// be attached to it or moved there through a view edit.
+#[test]
+fn centre_annotations_refuse_a_motion_study_view() {
+    let (mut s, designed, _) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "motion.study", json!({"name": "Open", "steps": 10, "keys": [{"joint": "Hinge", "points": [[0, 0], [10, 90]]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let posed = run(
+        &mut s,
+        "drawing.view.base",
+        json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": [250, 150], "pose": {"study": "Open", "step": 4}}),
+    )["view"]
+        .clone();
+    let line = |view| json!({"view": view, "a": [0, 0, 0], "b": [40, 0, 0], "overshoot_mm": 2.0});
+    let err = s.execute("drawing.center_line.add", &line(posed)).unwrap_err().to_string();
+    assert!(err.contains("position of its own"), "{err}");
+    run(&mut s, "drawing.center_line.add", line(json!(ids::encode(designed))));
+    let err = s
+        .execute("drawing.view.edit", &json!({"view": ids::encode(designed), "set": {"pose": {"study": "Open", "step": 4}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("centre annotations") && err.contains("position of its own"), "{err}");
+}
+
 /// A view placed apart from its projection place has its label above it (#13044): a group of its
 /// own kind, painted with the views' annotations, its box over the view's boundary and centred on it,
 /// and its state on the view. Moved, it sits at its offset from the view's centre and goes where the
@@ -4562,7 +5498,9 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
             pattern: None,
         }],
     };
-    let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
+    // This assembly has no frame text (`assemble_with_sketches` gives it none): the border's lines alone.
+    let lines = record.border.as_ref().unwrap().layout(&record.sheet).unwrap().paper(sheet);
+    let left = MAX_RECORDS - lines.iter().map(Group::records).sum::<usize>();
     let view = Drawn {
         hatches: Vec::new(),
         group: Some(Arc::new(group(10, ObjectKind::View, left - 12))),
@@ -5371,6 +6309,201 @@ fn a_rule_change_draws_the_flat_view_again() {
     assert!(stale.contains(&flat), "{stale:?}");
     settled(&mut s, sheet);
     assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
+}
+
+#[test]
+fn centre_annotations_and_view_labels_follow_the_same_moved_view() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"place": {"at": [300.0, 220.0]}}}));
+    let line =
+        run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(top), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}))["line"]
+            .as_str()
+            .map(|id| ids::decode(id).unwrap())
+            .unwrap();
+    let before = settled(&mut s, sheet);
+    assert_eq!(bytes(&before.scene), bytes(&built(&s, sheet).scene));
+    let centre =
+        |shown: &SheetView, object, kind| shown.objects.iter().find(|item| item.object == object && item.kind == kind).unwrap().bounds_mm.center();
+    let line_before = centre(&before, line, ObjectKind::CentreLine);
+    let label_before = centre(&before, top, ObjectKind::ViewLabel);
+    let evaluations = s.evaluations;
+    run(&mut s, "drawing.view.move", json!({"view": ids::encode(top), "to_mm": [320.0, 230.0]}));
+    assert_eq!(s.evaluations, evaluations);
+    let moved = settled(&mut s, sheet);
+    for (object, kind, old) in [(line, ObjectKind::CentreLine, line_before), (top, ObjectKind::ViewLabel, label_before)] {
+        assert!(centre(&moved, object, kind).dist(old + Vec2::new(20.0, 10.0)) < 1e-8);
+    }
+    assert_eq!(bytes(&moved.scene), bytes(&built(&s, sheet).scene));
+    assert!(moved.annotation_failures.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+}
+
+#[test]
+fn centre_line_gaps_follow_dimension_edits_and_survive_svg_export() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":50,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.box", json!({"corner":[50,0,0],"length":10,"width":10,"height":20,"body_name":"Post","operation":"new"}));
+    let (mut s, sheet, [front, _]) = front_and_top_of(s);
+    let line = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[50,0,0],"b":[50,0,20],"overshoot_mm":30.0}));
+    let line = ids::decode(line["line"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let original = group_of(&before.scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    // Move the short dimension text away so only the painted line crosses at x=150.
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[20.0,0.0]},"override_text":"1"}}));
+    let crossing = settled(&mut s, sheet);
+    let cut = group_of(&crossing.scene, line);
+    let ends = |group: &Group| -> Vec<(f64, f64)> {
+        group
+            .items
+            .iter()
+            .map(|item| {
+                let Item::Stroke { path, .. } = item else { panic!("expected stroke") };
+                (path[0].start().y, path[0].end().y)
+            })
+            .collect()
+    };
+    // The view's top edge is at y=155; the dimension line is at y=165. A 1 mm
+    // clearance on each side leaves [115,164] and [166,185].
+    assert_eq!(ends(cut), vec![(115.0, 164.0), (166.0, 185.0)]);
+    assert_eq!(bytes(&crossing.scene), bytes(&built(&s, sheet).scene));
+    let svg = run(&mut s, "drawing.export", json!({"sheet":ids::encode(sheet)}));
+    let svg = svg["svg"].as_str().unwrap();
+    let marker = format!("<g data-object=\"{line}\" data-kind=\"centre_line\">");
+    let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
+    let Item::Stroke { path, .. } = &cut.items[0] else { panic!("expected stroke") };
+    let x = path[0].start().x;
+    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis.
+    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.82"), (format!("M{x} 131L{x} 112"), "3.22")] {
+        assert!(
+            xml.split("<path ")
+                .filter_map(|path| path.split_once('>'))
+                .any(|(tag, _)| { tag.contains(&format!("d=\"{d}\"")) && tag.contains(&format!("stroke-dashoffset=\"{phase}\"")) }),
+            "{xml}"
+        );
+    }
+
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":20.0}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(ends(group_of(&moved.scene, line)), vec![(115.0, 174.0), (176.0, 185.0)]);
+    assert_eq!(bytes(&moved.scene), bytes(&built(&s, sheet).scene));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "selection.delete", json!({"items":[{"type":"drawing","drawing":drawing,"object":ids::encode(dimension)}]}));
+    let restored = settled(&mut s, sheet);
+    assert_eq!(group_of(&restored.scene, line), &original);
+}
+
+#[test]
+fn centre_line_gap_follows_measured_dimension_text_and_deferred_publication() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[0,0,20],"b":[100,0,20],"overshoot_mm":2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let original = group_of(&settled(&mut s, sheet).scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    // Dimension line y=153 is parallel to centre line y=155; only its measured text crosses it.
+    run(
+        &mut s,
+        "drawing.dimension.edit",
+        json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-2.0,"text":{"at":[0.0,0.0]},"override_text":"WIDE TEXT"}}),
+    );
+    let accepted = settled(&mut s, sheet);
+    let first = group_of(&accepted.scene, line).clone();
+    assert_eq!(first.items.len(), 2, "measured text alone cuts the centre line");
+    let layout = &s.drawing_scenes.dimensions[&dimension].drawn.layout;
+    let text = layout.text_boxes.first().unwrap();
+    let left = text.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) + 150.0 - 1.0;
+    let right = text.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) + 150.0 + 1.0;
+    let Item::Stroke { path: first_path, .. } = &first.items[0] else { panic!("expected stroke") };
+    let Item::Stroke { path: second_path, .. } = &first.items[1] else { panic!("expected stroke") };
+    assert!((first_path[0].end().x - left).abs() < 1e-7);
+    assert!((second_path[0].start().x - right).abs() < 1e-7);
+    assert_eq!(bytes(&accepted.scene), bytes(&built(&s, sheet).scene));
+    run(&mut s, "drawing.set", json!({"updates":"deferred"}));
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[100.0,0.0]}}}));
+    let held = settled(&mut s, sheet);
+    assert_eq!(group_of(&held.scene, line), &first, "deferred sheet keeps its accepted text gap");
+    assert_eq!(bytes(&held.scene), bytes(&accepted.scene));
+    run(&mut s, "drawing.update", json!({}));
+    let updated = settled(&mut s, sheet);
+    assert_eq!(group_of(&updated.scene, line), &original, "moving text away restores the stroke");
+    assert_eq!(bytes(&updated.scene), bytes(&built(&s, sheet).scene));
+}
+
+#[test]
+fn centre_gap_pieces_keep_the_original_dash_phase() {
+    use solidcraft_kernel::drawing_centre_mark::GapObstacles;
+    let original = marks::group(42, Vec2::ZERO, 5.0, 2.0).unwrap();
+    let obstacles = GapObstacles { lines: vec![(Vec2::new(2.0, -1.0), Vec2::new(2.0, 1.0))], boxes: Vec::new() };
+    let cut = marks::cut_gaps(original.clone(), &obstacles).unwrap();
+    assert_eq!(cut.items.len(), 3);
+    let Item::Stroke { pattern: Some(first), .. } = &original.items[0] else { panic!("expected patterned stroke") };
+    let Item::Stroke { path, pattern: Some(later), .. } = &cut.items[1] else { panic!("expected second piece") };
+    let original_start = Vec2::new(-7.0, 0.0);
+    let distance = path[0].start().dist(original_start);
+    let period: f64 = first.lengths_mm.iter().sum();
+    assert!((later.phase_mm - (first.phase_mm + distance).rem_euclid(period)).abs() < 1e-9);
+}
+
+#[test]
+fn an_arrow_tip_without_a_painted_dimension_line_does_not_cut_a_centre_line() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let added = run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(front),"a":[0,0,0],"b":[0,0,20],"overshoot_mm":30.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let original = group_of(&settled(&mut s, sheet).scene, line).clone();
+    let dimension = top_edge(&mut s, front);
+    run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"text":{"at":[20.0,0.0]},"override_text":"1"}}));
+    let with_dimension = settled(&mut s, sheet);
+    assert_eq!(group_of(&with_dimension.scene, line), &original, "the unpainted arrow-tip span is not a dimension-line crossing");
+    assert_eq!(bytes(&with_dimension.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A saved view changed to a flat pattern must not reuse its old model-edge annotations.
+#[test]
+fn saved_centres_do_not_reuse_model_edges_on_a_flat_view() {
+    let mut s = plate();
+    let drawing_id = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":20,"base":[150,0,10],"axis":"Y","operation":"new","body_name":"Pin"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":10,"corner":[200,0,0],"operation":"new","body_name":"ReferenceBox"}));
+    run(&mut s, "drawing.open", json!({"drawing":drawing_id}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let flat = ids::decode(
+        run(&mut s, "drawing.view.flat", json!({"sheet":"Sheet 1","body":"Plate","scale":"1:2","position_mm":[300,150]}))["view"].as_str().unwrap(),
+    )
+    .unwrap();
+    let base =
+        ids::decode(run(&mut s, "drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:2","position_mm":[100,150]}))["view"].as_str().unwrap())
+            .unwrap();
+    let mark = ids::decode(
+        run(&mut s, "drawing.center_mark.add", json!({"view":ids::encode(base),"edge":[156,0,10],"overshoot_mm":2.0}))["mark"].as_str().unwrap(),
+    )
+    .unwrap();
+    let line = ids::decode(
+        run(&mut s, "drawing.center_line.add", json!({"view":ids::encode(base),"a":[200,0,0],"b":[220,0,0],"overshoot_mm":2.0}))["line"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    let shown = settled(&mut s, sheet);
+    for id in [mark, line] {
+        assert!(shown.scene.groups.iter().any(|g| g.object == id));
+    }
+    let mut drawing = (**s.drawing("test").unwrap()).clone();
+    let flat_kind = drawing.view(flat).unwrap().kind.clone();
+    let view = drawing.views.iter_mut().find(|v| v.id == base).unwrap();
+    Arc::make_mut(view).kind = flat_kind;
+    drawing.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(drawing));
+    let once = built(&s, sheet);
+    let kept = extract(&mut s, sheet).unwrap();
+    for (path, scene, failures) in [("one-shot", &once.scene, &once.annotation_failures), ("cached", kept.scene.as_ref(), &kept.annotation_failures)]
+    {
+        for id in [mark, line] {
+            assert!(!scene.groups.iter().any(|g| g.object == id), "{path} retained model geometry");
+            assert!(failures.iter().any(|f| f.object == id && f.reason.contains("flat pattern")), "{path}: {failures:?}");
+        }
+    }
 }
 
 /// [`front_and_top`]'s block with a hole drilled Ø6.8 16 deep down from the middle of its top, and an

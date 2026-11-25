@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -562,6 +562,56 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
         }
     }
     shapes.iter().map(|s| walk(&s.shape, colour)).sum()
+}
+
+#[test]
+fn projected_and_lost_point_colours_require_the_project_option() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_lost":"#ef1256","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    let source = h.app.session.doc.features.last().unwrap().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for lost in [false, true] {
+        if lost {
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("timeline.suppress", json!({"feature":source,"suppressed":true})).unwrap();
+            h.app.edit_sketch(sketch);
+        }
+        for enhanced in [false, true, false] {
+            h.call("ui.set", json!({"projectLinkTools":enhanced}));
+            h.settle();
+            let projected = egui::Color32::from_rgb(0x12, 0xab, 0x34);
+            let missing = egui::Color32::from_rgb(0xef, 0x12, 0x56);
+            if enhanced {
+                let expected = if lost { missing } else { projected };
+                assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}: projected corners show their reference status");
+            } else {
+                assert_eq!(points_in(&h.shapes, projected), 0, "projected point colours are opt-in");
+                assert_eq!(points_in(&h.shapes, missing), 0, "lost point colours are opt-in");
+                let determined = egui::Color32::from_rgb(0xab, 0x34, 0x12);
+                let free = egui::Color32::from_rgb(0x34, 0x12, 0xab);
+                assert!(points_in(&h.shapes, determined) + points_in(&h.shapes, free) >= 4, "lost={lost}: main's point colours remain visible");
+            }
+        }
+    }
 }
 
 #[test]

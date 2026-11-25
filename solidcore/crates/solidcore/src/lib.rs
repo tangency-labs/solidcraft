@@ -52,12 +52,11 @@ pub mod curve;
 pub mod develop;
 pub mod eval;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
 pub mod mass;
+pub mod mesh_reduce;
 pub mod nurbs;
 pub mod offset;
 pub mod primitive;
