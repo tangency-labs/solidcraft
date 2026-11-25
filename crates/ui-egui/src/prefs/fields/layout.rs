@@ -121,6 +121,8 @@ macro_rules! layout_preferences {
             ribbon_icon_grid: bool = false, PAGE_LAYOUT;
             /// Show command names beneath ribbon icons, independently of workspace layout.
             ribbon_labels: bool = true, PAGE_LAYOUT;
+            /// Use large icons beside tool names in ribbon drop-down lists.
+            ribbon_large_list_icons: bool = false, PAGE_LAYOUT;
             /// After a ribbon panel menu is open, hover another panel to switch to its menu.
             ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
             /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,

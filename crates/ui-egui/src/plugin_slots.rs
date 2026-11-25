@@ -458,6 +458,7 @@ impl RibbonGroup {
                 .entries
                 .iter()
                 .map(|e| ribbon::MoreRow {
+                    large: false,
                     id: &e.command,
                     label: &e.label,
                     icon: "prefs_plugins",

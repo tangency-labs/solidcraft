@@ -255,14 +255,21 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
                         crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
                         ui_kit::row(ui, app.tr("prefs.menus"), |ui| {
-                            let mut selected = usize::from(app.preferences.ribbon_icon_grid);
+                            let mut selected = if app.preferences.ribbon_icon_grid {
+                                1
+                            } else if app.preferences.ribbon_large_list_icons {
+                                2
+                            } else {
+                                0
+                            };
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[app.tr("prefs.menu_list"), app.tr("prefs.menu_grid")],
+                                &[app.tr("prefs.menu_list"), app.tr("prefs.menu_grid"), app.tr("prefs.menu_large_list")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
+                                app.preferences.ribbon_large_list_icons = selected == 2;
                             }
                         });
                         let response = setting::construct_menu_groups(app, ui);

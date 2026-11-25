@@ -6722,6 +6722,7 @@ mod tests {
             ("construct_menu_groups", json!(false), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
+            ("ribbon_large_list_icons", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
@@ -7166,6 +7167,54 @@ mod tests {
         assert!(!reader.keymap.custom.contains_key("view.home"));
         assert_eq!(reader.ui.dark, writer.ui.dark);
         assert_eq!(reader.prefs(), writer.prefs(), "both tabs save the same settings");
+    }
+
+    #[test]
+    fn ribbon_menu_choices_apply_cancel_restart_and_restore_defaults() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        assert!(!h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid);
+        assert!(!lenient(&json!({})).ribbon_large_list_icons, "older settings retain the original list");
+        let choose = |h: &mut crate::scenario::Harness, label: &str| {
+            let handle = format!("dialog:Menus:{label}");
+            reveal_preference(h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+        };
+        h.call("ui.prefs", json!({"language":"en","open":"Layout"}));
+        choose(&mut h, "List with large icons");
+        assert!(h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid);
+        assert_eq!(saved_prefs(&h.app)["preferences"]["ribbon_large_list_icons"], false, "an unapplied edit is not saved");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid);
+
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        choose(&mut h, "List with large icons");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restarted = SolveApp::new(Default::default(), Default::default());
+        restarted.load_prefs(&h.app.prefs());
+        assert!(restarted.preferences.ribbon_large_list_icons && !restarted.preferences.ribbon_icon_grid);
+        choose(&mut h, "Large icons");
+        assert!(!h.app.preferences.ribbon_large_list_icons && h.app.preferences.ribbon_icon_grid);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid, "Cancel restores the applied choice");
+
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        choose(&mut h, "List");
+        assert!(!h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid);
+        h.call("ui.prefs", json!({"button":"ok"}));
+        restarted.load_prefs(&h.app.prefs());
+        assert!(!restarted.preferences.ribbon_large_list_icons && !restarted.preferences.ribbon_icon_grid);
+
+        set(&mut h.app, &json!({"ribbon_large_list_icons":true})).unwrap();
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert!(!h.app.preferences.ribbon_large_list_icons && !h.app.preferences.ribbon_icon_grid);
+        for value in [json!("true"), json!(1), json!(null)] {
+            let before = h.app.preferences.clone();
+            assert!(set(&mut h.app, &json!({"ribbon_large_list_icons":value})).is_err());
+            assert_eq!(h.app.preferences, before, "invalid input changes nothing");
+        }
     }
 
     /// Bodies folders (#4217): Several bodies only by default, also in preferences saved before it

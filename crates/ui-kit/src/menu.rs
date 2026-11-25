@@ -488,6 +488,7 @@ pub struct MenuItem<'a> {
     pub swatch: Option<Color32>,
     pub danger: bool,
     pub submenu: bool,
+    pub large: bool,
 }
 
 impl<'a> MenuItem<'a> {
@@ -503,7 +504,34 @@ impl<'a> MenuItem<'a> {
             swatch: None,
             danger: false,
             submenu: false,
+            large: false,
         }
+    }
+
+    /// Match the large row painter, including its shortcut, arrow and caller's pin target.
+    pub fn large_width(&self, ui: &Ui, trailing: f32) -> f32 {
+        let t = Tokens::get();
+        let label = ui.painter().layout_no_wrap(
+            solidcraft_ui_text::tr_command(self.id, self.label).to_string(),
+            FontId::proportional(t.font_label),
+            t.form_ink,
+        );
+        let shortcut = if self.shortcut.is_empty() {
+            0.0
+        } else {
+            ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), t.form_dim).size().x
+                + t.space_8
+        };
+        (t.space_16 * 2.0
+            + t.space_8
+            + t.space_2
+            + label.size().x
+            + shortcut
+            + t.space_8
+            + trailing
+            + if self.submenu { t.space_16 } else { 0.0 }
+            + Self::trailing_check_width(self.icon, self.checked.is_some()))
+        .ceil()
     }
 
     /// The row for a menu entry, `lit` when it is chosen with the keys or its flyout is open. A
@@ -520,6 +548,7 @@ impl<'a> MenuItem<'a> {
             checked: (item.shortcut == "current").then_some(true),
             swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
             submenu: !item.children.is_empty(),
+            large: false,
         }
     }
 
@@ -530,9 +559,14 @@ impl<'a> MenuItem<'a> {
 
     pub fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
+        let icon_column = if self.large { t.space_16 * 2.0 + t.space_8 } else { t.control_height };
         // Areas first measure intrinsic content. Filling their provisional available
         // width would make a flipped submenu cover its parent and consume the opening click.
-        let width = if ui.is_sizing_pass() {
+        let width = if self.large {
+            let margin = Menu::frame().total_margin();
+            let limit = (ui.ctx().content_rect().width() - margin.left - margin.right).max(0.0);
+            if ui.is_sizing_pass() { self.large_width(ui, 0.0).min(limit) } else { ui.available_width().min(limit) }
+        } else if ui.is_sizing_pass() {
             let label = ui.painter().layout_no_wrap(
                 solidcraft_ui_text::tr_command(self.id, self.label).to_string(),
                 FontId::proportional(t.font_label),
@@ -541,18 +575,25 @@ impl<'a> MenuItem<'a> {
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
             let check = Self::trailing_check_width(self.icon, self.checked.is_some());
-            (t.control_height + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing + check).min(ui.available_width())
+            (icon_column + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing + check).min(ui.available_width())
         } else {
             ui.available_width()
         };
-        let (r, response) =
-            ui.allocate_exact_size(vec2(width, t.control_height + t.space_2), if self.enabled { Sense::click() } else { Sense::hover() });
+        let (r, response) = ui.allocate_exact_size(vec2(width, icon_column + t.space_2), if self.enabled { Sense::click() } else { Sense::hover() });
         self.paint(ui, r, &response, 0.0);
         response
     }
 
     /// Ribbon rows retain their own drag/focus IDs and reserve a trailing pin target.
-    pub fn paint(&self, ui: &Ui, r: Rect, response: &Response, trailing: f32) {
+    pub fn paint(&self, ui: &mut Ui, r: Rect, response: &Response, trailing: f32) {
+        self.paint_sized(ui, r, response, trailing, self.large);
+    }
+
+    pub fn paint_large(&self, ui: &mut Ui, r: Rect, response: &Response, trailing: f32) {
+        self.paint_sized(ui, r, response, trailing, true);
+    }
+
+    fn paint_sized(&self, ui: &mut Ui, r: Rect, response: &Response, trailing: f32, large: bool) {
         let t = Tokens::get();
         let enabled = self.enabled && ui.is_enabled();
         let hot = enabled && (self.highlighted || response.hovered() || response.has_focus());
@@ -578,7 +619,9 @@ impl<'a> MenuItem<'a> {
         if hot {
             painter.rect_filled(r, t.control_radius, t.accent_soft);
         }
-        let icon = Rect::from_center_size(pos2(r.left() + t.control_height / 2.0, r.center().y), vec2(t.space_16, t.space_16));
+        let icon_size = if large { t.space_16 * 2.0 } else { t.space_16 };
+        let icon_column = if large { icon_size + t.space_8 } else { t.control_height };
+        let icon = Rect::from_center_size(pos2(r.left() + icon_column / 2.0, r.center().y), vec2(icon_size, icon_size));
         if let Some(on) = self.checked.filter(|_| self.icon.is_blank()) {
             if on {
                 super::checks::paint_check_glyph(&painter, icon, false, t.form_primary);
@@ -606,7 +649,7 @@ impl<'a> MenuItem<'a> {
         let check_width = Self::trailing_check_width(self.icon, self.checked.is_some());
         if check_width > 0.0 {
             if self.checked == Some(true) {
-                let check = Rect::from_center_size(pos2(right - t.space_8, r.center().y), icon.size());
+                let check = Rect::from_center_size(pos2(right - t.space_8, r.center().y), vec2(t.space_16, t.space_16));
                 super::checks::paint_check_glyph(&painter, check, false, t.form_primary);
             }
             right -= check_width;
@@ -630,12 +673,34 @@ impl<'a> MenuItem<'a> {
                 response.clone().backing_on_hover_text(whole);
             }
         }
-        let left = r.left() + t.control_height + t.space_2;
-        let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_label), ink);
-        job.wrap.max_width = (right - left).max(0.0);
-        job.wrap.max_rows = 1;
-        let galley = painter.layout_job(job);
-        painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
+        let left = r.left() + icon_column + t.space_2;
+        if large {
+            // Keep the icon, typography and row height fixed even at the screen-width limit.
+            let galley = painter.layout_no_wrap(label.to_string(), FontId::proportional(t.font_label), ink);
+            let text_rect = Rect::from_min_max(pos2(left, r.top()), pos2(right.max(left), r.bottom()));
+            if galley.size().x > text_rect.width() {
+                let mut text_ui = ui.new_child(egui::UiBuilder::new().id_salt(response.id.with("large_label")).max_rect(text_rect));
+                egui::ScrollArea::horizontal()
+                    .auto_shrink([false, false])
+                    .min_scrolled_width(0.0)
+                    .max_width(text_rect.width())
+                    .max_height(text_rect.height())
+                    .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
+                    .show(&mut text_ui, |ui| {
+                        let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x, text_rect.height()), Sense::hover());
+                        let clipped = painter.with_clip_rect(painter.clip_rect().intersect(ui.clip_rect()).intersect(text_rect));
+                        clipped.galley(pos2(rect.left(), r.center().y - galley.size().y / 2.0), galley, ink);
+                    });
+            } else {
+                painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
+            }
+        } else {
+            let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_label), ink);
+            job.wrap.max_width = (right - left).max(0.0);
+            job.wrap.max_rows = 1;
+            let galley = painter.layout_job(job);
+            painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
+        }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
         if enabled && response.hovered() {
@@ -957,10 +1022,11 @@ mod tests {
         const HOST: TextureId = TextureId::User(7);
         let ctx = crate::test_support::context();
         let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
-        for checked in [false, true] {
+        for (checked, large) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let mut row = MenuItem::new(&item.id, &item.label, item.icon.as_icon());
                 row.checked = Some(checked);
+                row.large = large;
                 row.show(ui);
             });
             output.textures_delta.clear();
@@ -983,6 +1049,75 @@ mod tests {
         let named = ItemIcon::from("delete");
         assert!(named == "delete" && matches!(named.as_icon(), Icon::Kit("delete")));
         assert_eq!(serde_json::to_value(&named).unwrap(), serde_json::json!("delete"));
+    }
+
+    #[test]
+    fn large_menu_labels_are_complete_at_intrinsic_and_limited_widths() {
+        let ctx = crate::test_support::context();
+        let label = "A very long command name with all of its words visible";
+        for (large, limited) in [(true, false), (true, true), (false, true)] {
+            let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                let mut item = MenuItem::new("long_command", label, "");
+                item.shortcut = "Ctrl+Shift+X";
+                let width = if limited { 220.0 } else { item.large_width(ui, 26.0) };
+                let (rect, response) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
+                if large {
+                    item.paint_large(ui, rect, &response, 26.0);
+                } else {
+                    item.paint(ui, rect, &response, 26.0);
+                }
+                assert_eq!(rect.height(), 40.0);
+            });
+            let text = crate::test_support::text_shapes(&output).find(|text| text.galley.job.text == label).unwrap();
+            assert_eq!(text.galley.elided, !large, "only the original view truncates at a limited width");
+            assert_eq!(text.galley.rows.len(), 1, "the row height and typography stay fixed");
+            assert_eq!(text.galley.job.sections[0].format.font_id.size, Tokens::get().font_label);
+        }
+    }
+
+    #[test]
+    fn a_large_menu_label_can_scroll_to_its_end_in_a_narrow_text_slot() {
+        let ctx = crate::test_support::context();
+        let label = "A command with a long name and a reachable final word";
+        let mut label_right = 0.0;
+        let mut clip_right = 0.0;
+        let mut label_left = 0.0;
+        let mut clip_left = 0.0;
+        for frame in 0..40 {
+            let mut events = vec![egui::Event::PointerMoved(pos2(65.0, 20.0))];
+            if (2..12).contains(&frame) {
+                events.push(egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(-1000.0, 0.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+            }
+            let input = egui::RawInput { events, time: Some(f64::from(frame) / 60.0), ..Default::default() };
+            let output = crate::test_support::raw_frame(&ctx, input, |ui| {
+                let item = MenuItem::new("narrow_command", label, "");
+                let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 40.0));
+                let response = ui.interact(rect, ui.scope_id().with("narrow_command"), Sense::click());
+                item.paint_large(ui, rect, &response, 0.0);
+                assert!(!response.clicked(), "scrolling must not activate the command");
+            });
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape
+                        && text.galley.job.text == label
+                    {
+                        label_left = text.pos.x;
+                        label_right = text.pos.x + text.galley.size().x;
+                        clip_left = clipped.clip_rect.left();
+                        clip_right = clipped.clip_rect.right();
+                    }
+                });
+            }
+        }
+        assert!(clip_right - clip_left < 64.0, "exercise a slot narrower than egui's default minimum");
+        assert!(label_left < clip_left, "the label moved horizontally");
+        assert!(label_right <= clip_right + 1.0, "the final word is reachable: label ends at {label_right}, slot ends at {clip_right}");
     }
 
     #[test]

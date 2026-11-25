@@ -1537,6 +1537,7 @@ impl PanelButton {
 
 /// A row of a panel in the » menu.
 struct PanelMoreRow {
+    large: bool,
     id: &'static str,
     label: &'static str,
     icon: &'static str,
@@ -1657,6 +1658,7 @@ impl RibbonPanels {
                         let checked =
                             (persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed).then(|| persistent_pressed(app, c.id));
                         PanelMoreRow {
+                            large: app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid,
                             id: c.id,
                             label: info.label,
                             icon: info.icon,
@@ -1736,6 +1738,7 @@ impl RibbonPanels {
                         .more
                         .iter()
                         .map(|m| ribbon::MoreRow {
+                            large: m.large,
                             id: m.id,
                             label: m.label,
                             icon: m.icon,
@@ -1780,6 +1783,7 @@ impl RibbonPanels {
                             .buttons
                             .iter()
                             .map(|b| ribbon::MoreRow {
+                                large: false,
                                 id: &b.id,
                                 label: &b.label,
                                 icon: &b.icon,
@@ -2441,6 +2445,7 @@ pub(crate) fn assistant_state(app: &SolveApp) -> crate::ui_kit::AssistantEntrySt
 /// SolidCraft's group menus: the search's accent, its pin tips and where rows publish.
 fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
     ribbon::MenuStyle {
+        large: app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid,
         pin_tip: solidcraft_ui_text::tr_label("Pin to Toolbar"),
         unpin_tip: solidcraft_ui_text::tr_label("Remove from Toolbar"),
         accent: crate::workspace::tab_accent(&Tokens::get(), &app.ui.tab),
@@ -2540,6 +2545,21 @@ fn dropdown_keys(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engi
 
 /// How wide a panel drop-down's rows are: the widest label and shortcut, at least 200.
 fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_engine::CommandSpec]) -> f32 {
+    if menu_style(app).large {
+        let width = cmds
+            .iter()
+            .map(|c| {
+                let row = RowData::new(app, c);
+                let mut item = ui_kit::MenuItem::new(c.id, &row.label, row.icon);
+                item.shortcut = &row.shortcut;
+                item.checked = dropdown_checkable(app, c.id).then(|| persistent_pressed(app, c.id));
+                item.large_width(ui, 26.0)
+            })
+            .fold(200.0, f32::max);
+        let margin = ui_kit::Menu::frame().total_margin();
+        let limit = (ui.ctx().content_rect().width() - margin.left - margin.right - ui.spacing().scroll.allocated_width()).max(0.0);
+        return width.min(limit);
+    }
     let rows: Vec<_> = cmds
         .iter()
         .map(|c| {
@@ -2835,6 +2855,7 @@ fn sketch_create_menu(
                 // The row translates its own label.
                 let mut item = crate::ui_kit::MenuItem::new(f.label, f.label, first.icon);
                 item.submenu = true;
+                item.large = app.preferences.ribbon_large_list_icons && !app.preferences.ribbon_icon_grid;
                 let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
                     dropdown_keys(app, ui, &variants);
                     let variants_w = dropdown_width(app, ui, &variants);
@@ -4917,8 +4938,26 @@ mod dropdown_tests {
         let (_, list) = open(&mut h);
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.app.preferences.ribbon_icon_grid, "the list stays the default");
+        assert!(!h.app.preferences.ribbon_large_list_icons);
+        h.call("ui.prefs", json!({"ribbon_large_list_icons": true}));
+        let (_, large_list) = open(&mut h);
+        assert_eq!(
+            list.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            large_list.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            "large list keeps every command in the same order"
+        );
+        for pair in large_list.windows(2) {
+            assert_eq!(pair[0].1.x, pair[1].1.x, "large list keeps one column");
+            assert!((pair[0].1.y - pair[1].1.y).abs() >= 39.9, "large icons have room between rows");
+        }
+        let saved = serde_json::to_string(&h.app.preferences).unwrap();
+        let restored: crate::prefs::Prefs = serde_json::from_str(&saved).unwrap();
+        assert!(restored.ribbon_large_list_icons, "large list selection survives saving");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.call("ui.prefs", json!({"ribbon_large_list_icons": true}));
         h.call("ui.prefs", json!({"ribbon_icon_grid": true}));
         assert!(h.app.preferences.ribbon_icon_grid);
+        assert!(!menu_style(&h.app).large, "the icon grid takes precedence when both settings are enabled");
         let (menu, grid) = open(&mut h);
         let ids = |rows: &[(String, egui::Pos2)]| rows.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&grid), ids(&list), "the grid shows the list's commands in its order");
