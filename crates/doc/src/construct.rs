@@ -419,7 +419,7 @@ pub fn placed_edge_pick(doc: &Document, st: &ModelState, geo: &GeoRef) -> Option
     let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return None };
     let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name).ok()?;
     let world_name = doc.world_body_name(st, &body.name, doc.model_body_component(body), path);
-    let point = solidcore_ops::affine::apply_point(&frame, hit.point.into());
+    let point = solidcraft_kernel::services::affine::apply_point(&frame, hit.point.into());
     Some((world_name, hit.edge, point.into()))
 }
 
@@ -814,7 +814,7 @@ pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
 }
 
 fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
-    let direction = solidcore_ops::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
+    let direction = solidcraft_kernel::services::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
         .filter(|_| origin.is_finite())
         .ok_or_else(|| bad("the axis has no direction"))?;
     Ok((origin, direction.into()))
@@ -843,8 +843,8 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
             } else {
                 doc.path_transform(component, author_path).ok_or_else(|| DocError::reselect(name.as_str()))?
             };
-            let inverse = solidcore_ops::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
-            let (origin, direction) = solidcore_ops::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
+            let inverse = solidcraft_kernel::services::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
+            let (origin, direction) = solidcraft_kernel::services::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
                 .map_err(|_| bad("the axis has no direction"))?;
             Ok((origin.into(), direction.into()))
         }
@@ -857,7 +857,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
-    solidcore_ops::affine::canonical_axis_direction(d.into()).into()
+    solidcraft_kernel::services::affine::canonical_axis_direction(d.into()).into()
 }
 
 /// The direction of a straight line a feature is turned parallel to: a straight model edge, a

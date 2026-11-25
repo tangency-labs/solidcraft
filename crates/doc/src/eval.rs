@@ -9954,7 +9954,7 @@ fn feature_tools_with_constructor(
         } => {
             let line_from_world = |origin: Vec3, direction: Vec3| {
                 let (origin, direction) =
-                    solidcore_ops::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
+                    solidcraft_kernel::services::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
                         .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
                 Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
@@ -9971,9 +9971,9 @@ fn feature_tools_with_constructor(
                         let (origin, direction) = construction_axis_in(None, st, name, f.component)?;
                         // line_in_frame maps into its argument's local frame. Its argument must
                         // therefore be the inverse of the owner-to-feature transfer frame.
-                        let inverse =
-                            solidcore_ops::affine::inverse(&frame).map_err(|_| DocError::Invalid("the recorded transfer frame is invalid".into()))?;
-                        let (origin, direction) = solidcore_ops::affine::line_in_frame(&inverse, origin.into(), direction.into())
+                        let inverse = solidcraft_kernel::services::affine::inverse(&frame)
+                            .map_err(|_| DocError::Invalid("the recorded transfer frame is invalid".into()))?;
+                        let (origin, direction) = solidcraft_kernel::services::affine::line_in_frame(&inverse, origin.into(), direction.into())
                             .map_err(|_| DocError::Invalid("the recorded transfer axis is invalid".into()))?;
                         (origin.into(), direction.into())
                     } else {

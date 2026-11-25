@@ -7998,8 +7998,8 @@ fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Re
             }
             let name =
                 solidcraft_engine::doc::naming::edge_names(source_body).into_iter().nth(*index).filter(|name| !name.is_empty()).ok_or(AXIS_PICK)?;
-            let inverse = solidcore_ops::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
-            let at = solidcore_ops::affine::apply_point(&inverse, (*point).into());
+            let inverse = solidcraft_kernel::services::affine::inverse(&frame).map_err(|_| AXIS_PICK)?;
+            let at = solidcraft_kernel::services::affine::apply_point(&inverse, (*point).into());
             Ok(json!({"type":"placed_edge", "body":source, "path":path, "at":at, "name":name}))
         }
         Sel::SketchCurve { id, .. } => {
