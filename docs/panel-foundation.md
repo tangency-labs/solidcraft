@@ -2,8 +2,8 @@
 
 The public contracts are `solidcraft_engine::panels` and
 `solidcraft_ui_egui::panel_runtime`. The shared host presents Browser, History,
-Assistant, Sketch Options, Bill of Materials and the Render Scene Browser, Library,
-Inspector and Shots. Feature editors remain draggable cards and Assistant retains
+Assistant, Sketch Options, Bill of Materials, the Parts library and the Render Scene
+Browser, Library, Inspector and Shots. Feature editors remain draggable cards and Assistant retains
 its own native window. Synthetic controllers exercise the host contract in tests.
 
 ## Production content integration
@@ -52,7 +52,8 @@ ordered outer to inner; each contains a contiguous vertical stack of sections.
 Each section contains ordered tabs. Inactive tabs still constrain composite size
 limits. Registrations declare allowed zones, PinOuter, Content/Fill height policy,
 text-heavy content, surface preference, header actions and independent
-`closable`/`hot_closable` flags. No generic host branches on product panel names.
+`closable`/`hot_closable` flags, and `collapse_keeps_bottom` (a collapsed floating panel shows its
+header at its expanded bottom edge). No generic host branches on product panel names.
 History and Shots allow Bottom. Synthetic kinds can allow all zones. Quick close is an affordance, not the close capability itself.
 
 Layout is application/workspace preference data. It never enters CAD files,

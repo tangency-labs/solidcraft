@@ -12,8 +12,21 @@
 //! The resize zones are as wide as Windows' own resize border at the window's scale
 //! ([`resize_border_px`]), corners win where they overlap the edges ([`resize_hit`]). An app that
 //! answers the system's hit test itself (SolidCraft's `apps/solidcraft/src/native_frame.rs`) uses
-//! them there, so the OS shows its resize cursors and resizes from the first frame; elsewhere egui
-//! zones above everything else start an OS resize ([`resize_zones`]). The web build has neither.
+//! them there for the top edge (the system's own frame is kept on the left, right and bottom), so
+//! the OS shows its resize cursors and resizes from the first frame; elsewhere egui zones above
+//! everything else start an OS resize ([`resize_zones`]). The web build has neither.
+//!
+//! Such an app also answers the hit test from the bar itself ([`caption`]): every window that
+//! draws the bar publishes what it laid out, each pass, and the app's one window procedure
+//! answers for all of them. The bare bar is then the system's caption, so Windows drags the
+//! window from the first pixel, and the maximize button is the system's, so hovering it shows
+//! Windows 11's snap layouts. What the system keeps for itself there comes back from the
+//! procedure as the input the UI would have had on a bar of its own: the pointer's place, a
+//! right-click on the bare bar, and a press on the bare bar or on the maximize button. So what
+//! shows while the pointer is on the bar stays shown, the bar's menu opens, and whatever closes
+//! on a press elsewhere closes, with no code of its own. The bar leaves such a press to the
+//! system ([`drag_area`], [`caption_buttons`]). A window nothing answers for keeps the bar as
+//! the UI's own.
 //!
 //! Nothing here knows an app's state: closing is a [`WindowAction::Close`] the app answers (it may
 //! ask about unsaved work first).
@@ -33,7 +46,13 @@ use egui::{
 };
 use solidcraft_theme::Tokens;
 
+pub mod caption;
 pub mod native_menu;
+
+/// Associate a native pop-out with the SolidCraft viewport that opened it.
+pub fn popout_viewport(builder: ViewportBuilder, owner: egui::ViewportId) -> ViewportBuilder {
+    builder.with_native_owner(owner)
+}
 
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
@@ -182,9 +201,23 @@ impl TitleBar {
 /// The bar's background: a press-and-drag on empty space moves the window, a double-click
 /// toggles maximize. Call it before laying out the bar so its buttons, registered later, take
 /// their clicks.
+///
+/// Where the system answers for the window ([`caption`]) it does both itself, from the first
+/// pixel: the bar laid out here is what the window hands it.
 pub fn drag_area(ui: &Ui, rect: Rect) {
     let ctx = ui.ctx();
+    install(ctx);
+    // The bar this pass, for the system's hit test. The key and the pass number are read before
+    // taking the data lock: egui's context lock is not re-entrant.
+    let (key, pass) = (bar_key(ctx), ctx.cumulative_pass_nr());
+    ctx.data_mut(|d| d.insert_temp(key, (rect, pass)));
     let resp = ui.interact(rect, Id::unique("titlebar-drag"), Sense::click_and_drag());
+    // Where the system answers for the window, the move and the maximize are its own. A press on
+    // the bare bar still reaches the UI ([`caption`]), so that whatever closes on a press
+    // elsewhere closes: the bar does nothing with it.
+    if systems_window(ctx).is_some() {
+        return;
+    }
     // egui hands a drag that starts on a click-only widget to the drag-sensing background below
     // it, so remember whether the press itself landed on bare background.
     if ctx.input(|i| i.pointer.any_pressed()) {
@@ -385,11 +418,17 @@ fn caption_tip(c: Caption, max: bool) -> &'static str {
 pub fn caption_buttons(ui: &mut Ui, bar: Rect) -> Option<WindowAction> {
     let t = Tokens::get();
     let max = maximized(ui.ctx());
+    // The system answers for this window: the maximize button is its own (snap layouts).
+    let systems = systems_window(ui.ctx());
     let mut clicked = None;
     for (i, c) in CAPTIONS.into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
         let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
+        // The pointer over the system's maximize button reaches the UI as anywhere else; the
+        // press is the system's, and the window procedure says while it is held.
+        let systems_maximize = systems.filter(|_| c == Caption::Maximize);
+        let held = systems_maximize.is_some_and(caption::maximize_pressed);
+        let fill = match (resp.is_pointer_button_down_on() || held, resp.hovered()) {
             (true, _) => t.app_bar_hover_subtle,
             (_, true) => t.app_bar_hover_button,
             _ if resp.has_focus() => t.app_bar_hover_button,
@@ -397,7 +436,20 @@ pub fn caption_buttons(ui: &mut Ui, bar: Rect) -> Option<WindowAction> {
         };
         ui.painter().rect_filled(r, 0.0, fill);
         paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, t.app_bar_text));
-        if resp.backing_on_hover_text(caption_tip(c, max)).clicked() {
+        // No tooltip of the UI's over the system's button: its snap layouts open there. A screen
+        // reader still gets the button's name.
+        let tip = caption_tip(c, max);
+        let resp = if systems_maximize.is_some() {
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
+            resp
+        } else {
+            resp.backing_on_hover_text(tip)
+        };
+        // A pointer click on the system's maximize button maximizes from the window procedure: here
+        // it is a press like any other on the bar, and no action of the UI's. The keyboard and a
+        // screen reader still press the button here.
+        let systems_click = systems_maximize.is_some() && resp.clicked_by(PointerButton::Primary);
+        if resp.clicked() && !systems_click {
             clicked = Some(match c {
                 Caption::Minimize => WindowAction::Minimize,
                 Caption::Maximize => WindowAction::Toggle,
@@ -460,10 +512,11 @@ pub fn dpi_scaled_size(size: (i32, i32), old_dpi: u32, new_dpi: u32) -> Option<(
 }
 
 /// Invisible resize zones along the window's edges, above everything else; a press in one
-/// starts an OS resize in that direction. None while the window is maximized or fullscreen.
+/// starts an OS resize in that direction. None while the window is maximized or fullscreen, and
+/// none in a window the system answers for: its frame resizes it.
 pub fn resize_zones(ui: &mut Ui) {
     let ctx = ui.ctx().clone();
-    if maximized(&ctx) || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
+    if maximized(&ctx) || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) || systems_window(&ctx).is_some() {
         return;
     }
     let w = ctx.content_rect();
@@ -479,12 +532,235 @@ pub fn resize_zones(ui: &mut Ui) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The system's caption
+//
+// Where the desktop app answers the system's hit test (Windows), every window that draws the bar
+// hands it over through [`caption`]. One egui plugin, added by the first bar drawn, does it for
+// every window: at the end of each pass it publishes the bar that pass laid out, and at the start
+// of each pass it gives the UI what the system kept for itself since the window's last one.
+
+/// The native window the current viewport is shown in, where the integration tells (Windows).
+fn native_window(ctx: &egui::Context) -> Option<u64> {
+    ctx.input(|i| i.viewport().native_window)
+}
+
+/// The current viewport's native window when the system answers for it: its title bar and frame
+/// are the system's. `None` where the bar is the UI's own.
+fn systems_window(ctx: &egui::Context) -> Option<u64> {
+    native_window(ctx).filter(|window| caption::is_hooked(*window))
+}
+
+/// Where a window keeps the bar it laid out this pass. Each window of the app has its own: a
+/// pop-out view draws its bar inside the main window's frame.
+fn bar_key(ctx: &egui::Context) -> Id {
+    Id::unique("titlebar-bar-this-pass").with(ctx.viewport_id())
+}
+
+/// The bar this window laid out this pass ([`drag_area`]), if it laid one out.
+fn bar_this_pass(ctx: &egui::Context) -> Option<Rect> {
+    let (key, pass) = (bar_key(ctx), ctx.cumulative_pass_nr());
+    ctx.data(|d| d.get_temp::<(Rect, u64)>(key)).filter(|(_, at)| *at == pass).map(|(r, _)| r)
+}
+
+/// Make every window of `ctx` that draws the bar hand it to the platform's side ([`caption`]).
+/// Cheap to call every frame: the plugin is added once. The app calls it at its start, so the
+/// first pass already hands its bar over; [`drag_area`] calls it too, and a plugin added during
+/// a pass is first called in the next one.
+pub fn install(ctx: &egui::Context) {
+    let installed = Id::unique("titlebar-system-caption-installed");
+    if !ctx.data(|d| d.get_temp::<bool>(installed).unwrap_or(false)) {
+        ctx.add_plugin(SystemCaption);
+        ctx.data_mut(|d| d.insert_temp(installed, true));
+    }
+}
+
+/// The plugin: one for all the windows of a context.
+struct SystemCaption;
+
+impl egui::Plugin for SystemCaption {
+    fn debug_name(&self) -> &'static str {
+        "solidcraft_system_caption"
+    }
+
+    // Raw input, before the pass: what the system kept for itself goes in as the input the UI
+    // would otherwise have had.
+    fn input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        let Some(window) = input.viewports.get(&input.viewport_id).and_then(|v| v.native_window) else { return };
+        if let Some(reported) = caption::take_reported(window) {
+            give_reported(ctx, input, &reported);
+        }
+    }
+
+    // Last: everything that can lie over the bar (menus, popups, windows) is laid out by now.
+    fn on_end_pass(&mut self, ui: &mut Ui) {
+        publish_caption(ui.ctx());
+    }
+}
+
+/// The events of a click with `button` at `pos`: the pointer there, the button down, the button up.
+fn click(pos: Pos2, button: PointerButton, modifiers: egui::Modifiers) -> [egui::Event; 3] {
+    let button_event = |pressed| egui::Event::PointerButton { pos, button, pressed, modifiers };
+    [egui::Event::PointerMoved(pos), button_event(true), button_event(false)]
+}
+
+/// Put what the platform `reported` for a window into the `input` of its pass, as the input the
+/// UI would have had on a bar of its own. The pointer over the caption is the pointer anywhere
+/// else (hover, a bar that shows while the pointer is on it). A press the system took is a press
+/// where it was, on the bare bar or on the maximize button: whatever closes on a press elsewhere
+/// closes, and the bar itself leaves the press to the system ([`drag_area`],
+/// [`caption_buttons`]). A right-click is a right-click.
+fn give_reported(ctx: &egui::Context, input: &mut egui::RawInput, reported: &caption::Reported) {
+    let ppp = reported.pixels_per_point;
+    let at = |(x, y): (i32, i32)| pos2(x as f32 / ppp, y as f32 / ppp);
+    let modifiers = ctx.input(|i| i.modifiers);
+    // Presses and clicks happened before whatever the pass's own events tell: they go first.
+    let mut first: Vec<egui::Event> = Vec::new();
+    for press in &reported.presses {
+        first.extend(click(at(*press), PointerButton::Primary, modifiers));
+    }
+    for secondary in &reported.secondary_clicks {
+        first.extend(click(at(*secondary), PointerButton::Secondary, modifiers));
+    }
+    match reported.pointer {
+        // Before the pass's own events: it left for the client area, whose moves follow, or for
+        // somewhere else.
+        caption::PointerChange::Left => first.push(egui::Event::PointerGone),
+        // After them: on its way onto the caption the pointer left the client area.
+        caption::PointerChange::Moved(p) => input.events.push(egui::Event::PointerMoved(at(p))),
+        // The window's own word that the pointer left the client area can come after the UI was
+        // told it is on the caption: it still is.
+        caption::PointerChange::Same => {
+            if let Some(p) = reported.pointer_at
+                && input.events.iter().any(|event| matches!(event, egui::Event::PointerGone))
+            {
+                input.events.push(egui::Event::PointerMoved(at(p)));
+            }
+        }
+    }
+    input.events.splice(0..0, first);
+}
+
+/// End of a pass: hand the bar this window laid out in it (none: the window has no caption now)
+/// to the platform's side, and ask the platform to answer for the window the first time it has
+/// a bar.
+fn publish_caption(ctx: &egui::Context) {
+    let Some(window) = native_window(ctx) else { return };
+    let layout = bar_this_pass(ctx).and_then(|bar| caption_layout(ctx, bar));
+    if caption::publish(window, ctx, ctx.viewport_id(), ctx.pixels_per_point(), layout)
+        && let Some(hook) = caption::platform()
+    {
+        hook(window);
+    }
+}
+
+/// `bar` as the platform's side needs it: whatever takes clicks or drags over the bar's own drag
+/// area (the caption) in this pass is the UI's, but for the maximize button. As in egui's own hit
+/// test, that is what the bar's layer lays out after the drag area, and the layers in front of
+/// it: a bar that slides in over a view leaves the view under it out. `None` when the drag area
+/// took no place among this pass's widgets (a pass that only measures): nothing is the caption.
+fn caption_layout(ctx: &egui::Context, bar: Rect) -> Option<caption::CaptionLayout> {
+    let drag_id = Id::unique("titlebar-drag");
+    let max_id = caption_id(Caption::Maximize);
+    // How far to the front a layer is, as the hit test sorts them: by its order, then by its place
+    // among the areas. A layer that takes no pointer (a tooltip) is in front of nothing.
+    let areas: Vec<LayerId> = ctx.memory(|m| m.layer_ids().collect());
+    let depth = |layer: LayerId| (layer.order, areas.iter().position(|l| *l == layer));
+    let mut interactive = Vec::new();
+    let mut maximize = None;
+    let laid_out = ctx.viewport(|v| {
+        let Some((drag_layer, drag_index)) = v.this_pass.widgets.order(drag_id) else { return false };
+        let drag_depth = depth(drag_layer);
+        for (layer, widgets) in v.this_pass.widgets.layers() {
+            let first = if *layer == drag_layer {
+                drag_index + 1
+            } else if layer.order.allow_interaction() && depth(*layer) > drag_depth {
+                0
+            } else {
+                continue;
+            };
+            for w in widgets.iter().skip(first) {
+                if !w.visible || !(w.sense.senses_click() || w.sense.senses_drag()) {
+                    continue;
+                }
+                let r = w.interact_rect.intersect(bar);
+                if !r.is_positive() {
+                    continue;
+                }
+                if w.id == max_id {
+                    maximize = Some(r);
+                } else {
+                    interactive.push(r);
+                }
+            }
+        }
+        true
+    });
+    if !laid_out {
+        return None;
+    }
+    let ppp = ctx.pixels_per_point();
+    let px = |r: Rect| {
+        caption::PxRect::new(
+            (r.min.x * ppp).floor() as i32,
+            (r.min.y * ppp).floor() as i32,
+            (r.max.x * ppp).ceil() as i32,
+            (r.max.y * ppp).ceil() as i32,
+        )
+    };
+    Some(caption::CaptionLayout { bar: px(bar), interactive: interactive.into_iter().map(px).collect(), maximize: maximize.map(px) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportCommand, ViewportId, pos2, vec2};
 
     const BAR: f32 = 34.0;
+
+    /// Each test that hands a bar to the platform's side has native windows of its own: the list
+    /// of them is one per process.
+    const WINDOWS: u64 = 0xC4A0_0000;
+
+    /// What the system took in one window is input for that window's UI only: a pop-out view
+    /// draws inside the main window's frame, and each has its own presses.
+    #[test]
+    fn a_press_on_one_windows_caption_is_no_press_in_another() {
+        let (main_window, pop_out_window) = (WINDOWS + 60, WINDOWS + 61);
+        let ctx = crate::test_support::context();
+        install(&ctx);
+        let bar = Rect::from_min_size(Pos2::ZERO, vec2(600.0, BAR));
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0));
+        let pop_out = ViewportId::from_hash_of("pop-out view with a caption");
+        // One frame of both windows: whether each saw a press.
+        let frame = || {
+            let mut input = RawInput { screen_rect: Some(screen), ..Default::default() };
+            if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
+                v.native_window = Some(main_window);
+            }
+            let (mut main, mut other) = (false, false);
+            let _ = ctx.run_ui(input, |ui| {
+                drag_area(ui, bar);
+                main = ui.input(|i| i.pointer.any_pressed());
+                let mut child = RawInput { viewport_id: pop_out, screen_rect: Some(screen), ..Default::default() };
+                let info = egui::ViewportInfo { parent: Some(ViewportId::ROOT), native_window: Some(pop_out_window), ..Default::default() };
+                child.viewports.insert(pop_out, info);
+                let _ = ui.ctx().run_ui(child, |ui| {
+                    drag_area(ui, bar);
+                    other = ui.input(|i| i.pointer.any_pressed());
+                });
+            });
+            (main, other)
+        };
+        assert_eq!(frame(), (false, false));
+        caption::pressed(pop_out_window, 300, 17);
+        assert_eq!(frame(), (false, true));
+        assert_eq!(frame(), (false, false), "once");
+        caption::pressed(main_window, 300, 17);
+        assert_eq!(frame(), (true, false));
+        caption::closed(main_window);
+        caption::closed(pop_out_window);
+    }
 
     /// A headless window `width` pt wide that draws only a title bar, from plain inputs.
     struct Bar {
@@ -493,14 +769,21 @@ mod tests {
         width: f32,
         time: f64,
         maximized: bool,
+        /// The native window it is shown in, as the desktop integration tells on Windows.
+        window: Option<u64>,
         /// The rect the bar handed its contents, and the action it returned, last frame.
         content: Option<Rect>,
         action: Option<WindowAction>,
+        /// Last frame had a pointer press.
+        pressed: bool,
     }
 
     impl Bar {
         fn new(bar: TitleBar, width: f32) -> Self {
-            Self { ctx: crate::test_support::context(), bar, width, time: 0.0, maximized: false, content: None, action: None }
+            let ctx = crate::test_support::context();
+            // As the app does at its start.
+            install(&ctx);
+            Self { ctx, bar, width, time: 0.0, maximized: false, window: None, content: None, action: None, pressed: false }
         }
 
         fn rect(&self) -> Rect {
@@ -517,14 +800,16 @@ mod tests {
             };
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
                 v.maximized = Some(self.maximized);
+                v.native_window = self.window;
             }
             let (bar, rect) = (self.bar, self.rect());
-            let (mut content, mut action) = (None, None);
+            let (mut content, mut action, mut pressed) = (None, None, false);
             let mut out = self.ctx.run_ui(input, |ui| {
                 action = bar.show(ui, rect, |_, r| content = Some(r));
+                pressed = ui.input(|i| i.pointer.any_pressed());
             });
             out.textures_delta.clear();
-            (self.content, self.action) = (content, action);
+            (self.content, self.action, self.pressed) = (content, action, pressed);
             out.viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()
         }
 
@@ -648,6 +933,253 @@ mod tests {
             );
             assert!(!run(release_stale_input, batches).0, "the native hook lets go of a button it may not hear released: {batches:?}");
         }
+    }
+
+    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true };
+
+    #[test]
+    fn a_window_that_draws_the_bar_publishes_it_for_the_systems_hit_test() {
+        use caption::CaptionHit;
+        let window = WINDOWS + 1;
+        let mut w = Bar::new(OWN, 1200.0);
+        let ppp = w.ctx.pixels_per_point();
+        let hit = |p: Pos2| caption::hit(window, (p.x * ppp) as i32, (p.y * ppp) as i32);
+        let bare = pos2(600.0, BAR / 2.0);
+        // Where the integration names no native window (other systems, the web), nothing is
+        // handed over.
+        w.frame(vec![]);
+        assert_eq!((hit(bare), caption::title_bar(window)), (CaptionHit::Outside, None));
+        // With one, each pass publishes the bar it laid out.
+        w.window = Some(window);
+        w.frame(vec![]);
+        let at = |c: Caption| w.ctx.read_response(caption_id(c)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
+        assert_eq!(hit(bare), CaptionHit::Drag, "the bare bar is the caption");
+        assert_eq!(hit(at(Caption::Maximize)), CaptionHit::MaximizeButton);
+        assert_eq!(hit(at(Caption::Minimize)), CaptionHit::Client);
+        assert_eq!(hit(at(Caption::Close)), CaptionHit::Client);
+        assert_eq!(hit(pos2(600.0, 300.0)), CaptionHit::Outside);
+        let (bar, maximize) = caption::title_bar(window).expect("the bar is published");
+        assert_eq!((bar.min_x, bar.min_y, bar.max_x, bar.max_y), (0, 0, (1200.0 * ppp).ceil() as i32, (BAR * ppp).ceil() as i32));
+        assert!(maximize.is_some_and(|m| m.min_x > bar.min_x && m.max_x < bar.max_x), "{maximize:?} in {bar:?}");
+        // A pass that draws no bar (the system's own title bar, full screen): no caption.
+        w.bar = TitleBar { traffic_lights: false, caption_buttons: false };
+        w.frame(vec![]);
+        assert_eq!((hit(bare), caption::title_bar(window)), (CaptionHit::Outside, None));
+        // And the bar again as soon as it is drawn again.
+        w.bar = OWN;
+        w.frame(vec![]);
+        assert_eq!(hit(bare), CaptionHit::Drag);
+        caption::closed(window);
+    }
+
+    /// A pop-out view draws its bar inside the main window's frame, as an immediate viewport
+    /// does: each window publishes its own bar, and neither touches the other's.
+    #[test]
+    fn each_window_publishes_its_own_bar() {
+        use caption::CaptionHit;
+        let (main_window, pop_out_window) = (WINDOWS + 10, WINDOWS + 11);
+        let ctx = crate::test_support::context();
+        install(&ctx);
+        let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
+        let pop_out_bar = Rect::from_min_size(Pos2::ZERO, vec2(480.0, BAR));
+        let pop_out = ViewportId::from_hash_of("pop-out view");
+        let main_input = || {
+            let mut input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 700.0))), ..Default::default() };
+            if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
+                v.native_window = Some(main_window);
+            }
+            input
+        };
+        let (mut main, mut other) = (None, None);
+        let _ = ctx.run_ui(main_input(), |ui| {
+            drag_area(ui, bar);
+            let mut child =
+                RawInput { viewport_id: pop_out, screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(480.0, 320.0))), ..Default::default() };
+            let info = egui::ViewportInfo { parent: Some(ViewportId::ROOT), native_window: Some(pop_out_window), ..Default::default() };
+            child.viewports.insert(pop_out, info);
+            let _ = ui.ctx().run_ui(child, |ui| {
+                drag_area(ui, pop_out_bar);
+                other = bar_this_pass(ui.ctx());
+            });
+            main = bar_this_pass(ui.ctx());
+        });
+        assert_eq!(other, Some(pop_out_bar), "the pop-out's own bar");
+        assert_eq!(main, Some(bar), "the main window's bar, not the pop-out's laid out after it");
+        let ppp = ctx.pixels_per_point();
+        let px = |v: f32| (v * ppp) as i32;
+        assert_eq!(caption::hit(main_window, px(900.0), px(BAR / 2.0)), CaptionHit::Drag);
+        assert_eq!(caption::hit(pop_out_window, px(900.0), px(BAR / 2.0)), CaptionHit::Outside, "the pop-out's bar is 480 wide");
+        assert_eq!(caption::hit(pop_out_window, px(240.0), px(BAR / 2.0)), CaptionHit::Drag);
+        // A window that lays out no bar this pass has none: last pass's bar is not this pass's.
+        // The pop-out, not drawn in this frame, keeps the bar of its own last pass.
+        let mut stale = Some(bar);
+        let _ = ctx.run_ui(main_input(), |ui| stale = bar_this_pass(ui.ctx()));
+        assert_eq!(stale, None);
+        assert_eq!(caption::hit(main_window, px(900.0), px(BAR / 2.0)), CaptionHit::Outside);
+        assert_eq!(caption::hit(pop_out_window, px(240.0), px(BAR / 2.0)), CaptionHit::Drag);
+        caption::closed(main_window);
+        caption::closed(pop_out_window);
+    }
+
+    /// The system keeps the pointer over its caption for itself. The window procedure says where
+    /// it is, and the UI sees it there as anywhere else in the window: what shows while the
+    /// pointer is on the bar stays shown.
+    #[test]
+    fn the_pointer_over_the_systems_caption_still_reaches_the_ui() {
+        let window = WINDOWS + 20;
+        let mut w = Bar::new(OWN, 1200.0);
+        w.window = Some(window);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        let ppp = w.ctx.pixels_per_point();
+        let on_caption = Some(((600.0 * ppp) as i32, (10.0 * ppp) as i32));
+        let hover = |w: &Bar| w.ctx.input(|i| i.pointer.hover_pos());
+        assert_eq!(hover(&w), None);
+        caption::pointer(window, on_caption);
+        w.frame(vec![]);
+        assert_eq!(hover(&w), Some(pos2(600.0, 10.0)));
+        w.frame(vec![]);
+        assert_eq!(hover(&w), Some(pos2(600.0, 10.0)), "it stays there");
+        // The window's own word that the pointer left the client area may come a frame late.
+        w.frame(vec![Event::PointerGone]);
+        assert_eq!(hover(&w), Some(pos2(600.0, 10.0)), "still on the caption");
+        // On into the client area: the window's own events say where it is.
+        caption::pointer(window, None);
+        w.frame(vec![Event::PointerMoved(pos2(600.0, 300.0))]);
+        assert_eq!(hover(&w), Some(pos2(600.0, 300.0)));
+        // Back onto the caption (the window's own events say it left the client area), then out
+        // of the window altogether.
+        caption::pointer(window, on_caption);
+        w.frame(vec![Event::PointerGone]);
+        assert_eq!(hover(&w), Some(pos2(600.0, 10.0)), "on the caption, not gone");
+        caption::pointer(window, None);
+        w.frame(vec![]);
+        assert_eq!(hover(&w), None);
+        caption::closed(window);
+    }
+
+    /// A right-click on the system's caption comes back from the window procedure as the
+    /// right-click it is anywhere else in the window (the app's menu for the bar opens as it does
+    /// on a bar that is the UI's own), and a press the system takes on the caption or on the
+    /// maximize button as the press on the bar it is where the bar is the UI's own: whatever
+    /// closes on a press elsewhere sees it, and the bar does nothing with it.
+    #[test]
+    fn what_the_system_takes_on_its_caption_comes_back_to_the_ui() {
+        let window = WINDOWS + 30;
+        let mut w = Bar::new(OWN, 1200.0);
+        w.window = Some(window);
+        w.frame(vec![]);
+        caption::hooked(window);
+        let at = pos2(400.0, BAR / 2.0);
+        let ppp = w.ctx.pixels_per_point();
+        let right_click = |w: &Bar| w.ctx.input(|i| (i.pointer.secondary_clicked(), i.pointer.interact_pos()));
+        assert!(!right_click(&w).0);
+        caption::secondary_click(window, (at.x * ppp) as i32, (at.y * ppp) as i32);
+        w.frame(vec![]);
+        assert_eq!(right_click(&w), (true, Some(at)), "a right-click, where it was");
+        w.frame(vec![]);
+        assert!(!right_click(&w).0, "once");
+        // A press on the caption: this window's next frame has it, that frame only. The move and
+        // the maximize on a double press are the system's: the bar sends the window nothing.
+        assert!(!w.pressed);
+        let (x, y) = ((at.x * ppp) as i32, (at.y * ppp) as i32);
+        caption::pressed(window, x, y);
+        let commands = w.frame(vec![]);
+        assert!(w.pressed);
+        assert!(commands.is_empty(), "{commands:?}");
+        caption::pressed(window, x, y);
+        let commands = w.frame(vec![]);
+        assert!(w.pressed && commands.is_empty(), "a second press at once: {commands:?}");
+        let commands = w.frame(vec![]);
+        assert!(!w.pressed && commands.is_empty(), "for one frame: {commands:?}");
+        // A press on the system's maximize button is a press too, and no click on the UI's.
+        let maximize = w.ctx.read_response(caption_id(Caption::Maximize)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
+        caption::pressed(window, (maximize.x * ppp) as i32, (maximize.y * ppp) as i32);
+        let commands = w.frame(vec![]);
+        assert!(w.pressed);
+        assert_eq!((w.action, commands.len()), (None, 0));
+        // On a bar that is the UI's own the same presses are the UI's to act on.
+        caption::closed(window);
+        w.window = None;
+        let (commands, actions) = w.gesture(&[maximize]);
+        assert_eq!((actions, commands.len()), (vec![WindowAction::Toggle], 0));
+    }
+
+    /// A pointer click on the system's maximize button is the system's. The keyboard has no such
+    /// click: Enter on the focused button still presses the UI's.
+    #[test]
+    fn the_keyboard_still_presses_the_systems_maximize_button() {
+        let window = WINDOWS + 70;
+        let mut w = Bar::new(OWN, 1200.0);
+        w.window = Some(window);
+        w.frame(vec![]);
+        caption::hooked(window);
+        w.frame(vec![]);
+        w.ctx.memory_mut(|m| m.request_focus(caption_id(Caption::Maximize)));
+        w.frame(vec![]);
+        let enter = |pressed| Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        w.frame(vec![enter(true)]);
+        let on_press = w.action;
+        w.frame(vec![enter(false)]);
+        assert!(on_press == Some(WindowAction::Toggle) || w.action == Some(WindowAction::Toggle), "{on_press:?}, then {:?}", w.action);
+        caption::closed(window);
+    }
+
+    /// A bar that slides in over a view (a pop-out's) is on a layer of its own. The view under it
+    /// takes nothing of the caption; a menu in front of the bar takes its part.
+    #[test]
+    fn only_what_lies_over_the_bar_takes_the_caption_from_it() {
+        use caption::CaptionHit;
+        let window = WINDOWS + 50;
+        let ctx = crate::test_support::context();
+        install(&ctx);
+        let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
+        let frame = |menu: bool| {
+            let mut input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 700.0))), ..Default::default() };
+            if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
+                v.native_window = Some(window);
+            }
+            let _ = ctx.run_ui(input, |ui| {
+                // The view fills the window and takes clicks and drags.
+                ui.interact(ui.max_rect(), Id::unique("view"), Sense::click_and_drag());
+                let layer = |order, name: &'static str| LayerId::new(order, Id::unique(name));
+                let top = ui.new_child(egui::UiBuilder::new().layer_id(layer(Order::Middle, "bar over the view")).max_rect(bar));
+                drag_area(&top, bar);
+                if menu {
+                    let front = ui.new_child(egui::UiBuilder::new().layer_id(layer(Order::Foreground, "menu over the bar")).max_rect(ui.max_rect()));
+                    front.interact(Rect::from_min_size(pos2(300.0, 0.0), vec2(200.0, 300.0)), Id::unique("menu row"), Sense::click());
+                }
+            });
+        };
+        let ppp = ctx.pixels_per_point();
+        let hit = |x: f32| caption::hit(window, (x * ppp) as i32, (BAR / 2.0 * ppp) as i32);
+        frame(false);
+        assert_eq!(hit(400.0), CaptionHit::Drag, "the view under the bar takes nothing of it");
+        frame(true);
+        assert_eq!((hit(400.0), hit(900.0)), (CaptionHit::Client, CaptionHit::Drag), "a menu in front of the bar takes its part");
+        caption::closed(window);
+    }
+
+    #[test]
+    fn a_window_the_system_answers_for_lays_out_no_resize_zones() {
+        let window = WINDOWS + 40;
+        let ctx = crate::test_support::context();
+        let zones_laid_out = || {
+            // Two passes: a response is read from the pass before as well.
+            for _ in 0..2 {
+                let mut input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 700.0))), ..Default::default() };
+                if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
+                    v.native_window = Some(window);
+                }
+                let _ = ctx.run_ui(input, resize_zones);
+            }
+            ctx.read_response(Id::unique(("titlebar-resize", 0usize))).is_some()
+        };
+        assert!(zones_laid_out(), "the UI's own resize zones");
+        caption::hooked(window);
+        assert!(!zones_laid_out(), "the system's frame resizes the window");
+        caption::closed(window);
+        assert!(zones_laid_out());
     }
 
     #[test]

@@ -2655,7 +2655,8 @@ fn assert_host_geometry(h: &PanelMountHarness, host: &HostLayout) {
         control.bounds.validate().unwrap();
         assert!(host.capacity.contains_rect(control.bounds), "reachable control: {control:?}");
         assert!(!control.accessible_name.is_empty());
-        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.bounds)), "input must remain within actual paint");
+        assert!(control.bounds.contains_rect(control.ink));
+        assert!(host.painted.iter().any(|paint| paint.contains_rect(control.ink)), "drawn handle must remain within actual paint");
     }
     if let Some(viewport) = host.viewport {
         viewport.validate().unwrap();
@@ -3260,6 +3261,37 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
         assert!(state.transaction_live);
         assert_eq!((state.applies, state.cancels, state.finishes), (0, 0, 0));
         assert_eq!(raw.content.commands.calls, 0);
+    }
+}
+
+/// Float lifts a listed panel (the 2D Timeline) off where it shows, at its shown size and a
+/// step up and in; any other panel floats at the free area's top-left corner at its saved size.
+#[test]
+fn raw_host_float_puts_a_listed_panel_where_it_showed_and_others_at_the_corner() {
+    for in_place in [true, false] {
+        let mut h = PanelMountHarness::new(false).unwrap();
+        open_editor(&mut h);
+        let mut raw = RawPanelHost::new(h, 1.0);
+        raw.host.set_float_in_place(if in_place { vec![id("editor")] } else { Vec::new() });
+        raw.frame(Vec::new(), false);
+        let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let frame = raw.host.frame().unwrap();
+        let shown = frame.layout.sections.iter().find(|card| card.section == docked.id).unwrap().outer;
+        let capacity = frame.layout.capacity;
+        raw.menu(id("editor"));
+        raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Floating) }, true);
+        raw.frame(Vec::new(), false);
+        let floated = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let step = solidcraft_theme::Tokens::get().space_24;
+        if in_place {
+            let origin = Point { x: shown.origin.x + step, y: shown.origin.y - step };
+            assert_eq!(floated.location, SectionLocation::Floating { origin });
+            let width = shown.size.width.min(capacity.size.width - 2.0 * step);
+            assert_eq!(floated.size, Size { width, height: shown.size.height });
+        } else {
+            assert_eq!(floated.location, SectionLocation::Floating { origin: capacity.origin });
+            assert_eq!(floated.size, docked.size);
+        }
     }
 }
 
@@ -4703,6 +4735,17 @@ fn host_metrics_and_public_geometry_reject_hostile_values_before_pointer_arithme
     assert!(update.action.is_none());
     assert_eq!(update.rejection.unwrap().rule, Rule::Bounds);
     assert!(!interaction.is_captured());
+}
+
+#[test]
+fn host_layout_refuses_a_control_reaching_past_its_capacity() {
+    let h = host_logs(1, Zone::Left);
+    let mut layout = host_layout(&h, 1280.0, 800.0, Direction::Ltr);
+    layout.validate().unwrap();
+    let edge = right(layout.capacity);
+    let control = layout.controls.iter_mut().find(|control| matches!(control.target, HostPointerTarget::Header { .. })).unwrap();
+    control.bounds.size.width = edge - control.bounds.origin.x + 8.0;
+    assert_eq!(layout.validate().unwrap_err().detail, "host control outside paint");
 }
 
 #[test]
@@ -8139,7 +8182,8 @@ fn raw_resize_card(scale: f32, restored_side: bool) -> (RawPanelHost, HostContro
         .iter()
         .find(|control| {
             matches!(&control.target,
-                HostControlTarget::Pointer(HostPointerTarget::Resize { section: target, .. }) if *target == section("editor-section")
+                HostControlTarget::Pointer(HostPointerTarget::Resize { section: target, edge })
+                    if *target == section("editor-section") && (restored_side || *edge == HostResizeEdge::BottomRight)
             )
         })
         .expect("mounted card must publish its resize control")
@@ -8155,6 +8199,9 @@ fn resize_card_delta(target: &HostControlTarget, extent: f32) -> egui::Vec2 {
             HostResizeEdge::Right => egui::vec2(extent, 0.0),
             HostResizeEdge::Top => egui::vec2(0.0, -extent),
             HostResizeEdge::Bottom => egui::vec2(0.0, extent),
+            HostResizeEdge::TopLeft => egui::vec2(-extent, -extent),
+            HostResizeEdge::TopRight => egui::vec2(extent, -extent),
+            HostResizeEdge::BottomLeft => egui::vec2(-extent, extent),
             HostResizeEdge::BottomRight => egui::vec2(extent, extent),
         },
         _ => panic!("expected an actual card resize control"),
@@ -8642,6 +8689,370 @@ fn shared_modal_receives_reserved_escape_once_and_keeps_the_restored_header_and_
                 (retained.reparents, retained.cancels, retained.applies, retained.finishes, retained.destroys)
             );
         }
+    }
+}
+
+fn raw_floating_card(scale: f32, rtl: bool, closable: bool, tabbed: bool) -> RawPanelHost {
+    raw_floating_card_sized(scale, rtl, closable, tabbed, Size { width: 280.0, height: 240.0 })
+}
+
+fn raw_floating_card_sized(scale: f32, rtl: bool, closable: bool, tabbed: bool, size: Size) -> RawPanelHost {
+    raw_floating_card_with_grab(scale, rtl, closable, tabbed, size, true)
+}
+
+fn raw_floating_card_with_grab(scale: f32, rtl: bool, closable: bool, tabbed: bool, size: Size, wide_grab: bool) -> RawPanelHost {
+    let mut content = host_with_specs(|spec| {
+        spec.max_size = Size { width: 360.0, height: 360.0 };
+        spec.min_size.height = spec.min_size.height.min(size.height);
+        spec.features.hot_closable = closable;
+    });
+    open_editor(&mut content);
+    content
+        .dispatch(vec![Mutation::Move {
+            instance: id("editor"),
+            destination: Destination::NewSection {
+                section: section("editor-section"),
+                index: 0,
+                location: SectionLocation::Floating { origin: Point { x: 200.0, y: 180.0 } },
+                size,
+            },
+        }])
+        .unwrap();
+    if tabbed {
+        content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+        content
+            .dispatch(vec![Mutation::Move {
+                instance: id("neighbour"),
+                destination: Destination::JoinTab { section: section("editor-section"), index: 1 },
+            }])
+            .unwrap();
+    }
+    if rtl {
+        let mut environment = content.runtime.environment().clone();
+        environment.direction = Direction::Rtl;
+        content.runtime.set_environment(environment, &mut content.local).unwrap();
+    }
+    let mut raw = RawPanelHost::new(content, scale);
+    if wide_grab {
+        raw.host.set_wide_grab(true);
+    }
+    raw.prime_foreign_window();
+    for _ in 0..4 {
+        raw.frame(Vec::new(), false);
+    }
+    raw
+}
+
+fn floating_card_outer(raw: &RawPanelHost) -> LogicalRect {
+    raw.host.frame().unwrap().layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap().outer
+}
+
+/// Handles straddle the border by 4 px. Header-side presses land outside the card.
+fn floating_press_point(card: LogicalRect, edge: HostResizeEdge) -> egui::Pos2 {
+    let (x, y, right, bottom) = (card.origin.x, card.origin.y, card.origin.x + card.size.width, card.origin.y + card.size.height);
+    let (mid_x, mid_y) = (x + card.size.width / 2.0, y + card.size.height / 2.0);
+    match edge {
+        HostResizeEdge::Left => egui::pos2(x + 2.0, mid_y),
+        HostResizeEdge::Right => egui::pos2(right - 2.0, mid_y),
+        HostResizeEdge::Top => egui::pos2(mid_x, y - 2.0),
+        HostResizeEdge::Bottom => egui::pos2(mid_x, bottom + 2.0),
+        HostResizeEdge::TopLeft => egui::pos2(x - 2.0, y - 2.0),
+        HostResizeEdge::TopRight => egui::pos2(right + 2.0, y - 2.0),
+        HostResizeEdge::BottomLeft => egui::pos2(x + 2.0, bottom - 2.0),
+        HostResizeEdge::BottomRight => egui::pos2(right - 2.0, bottom - 2.0),
+    }
+}
+
+fn raw_drag_floating_card(scale: f32, rtl: bool, edge: HostResizeEdge, delta: egui::Vec2) -> LogicalRect {
+    let mut raw = raw_floating_card(scale, rtl, false, false);
+    let at = floating_press_point(floating_card_outer(&raw), edge);
+    raw.frame(vec![egui::Event::PointerMoved(at)], false);
+    raw.pointer(at, true, false);
+    assert!(raw.host.interaction().is_captured(), "{edge:?} must capture the press");
+    raw.frame(vec![egui::Event::PointerMoved(at + delta)], false);
+    raw.pointer(at + delta, false, true);
+    raw.frame(Vec::new(), false);
+    floating_card_outer(&raw)
+}
+
+fn rect_tuple(outer: LogicalRect) -> (f32, f32, f32, f32) {
+    (outer.origin.x, outer.origin.y, outer.size.width, outer.size.height)
+}
+
+#[test]
+fn floating_card_resizes_from_every_edge_and_corner_keeping_the_opposite_side() {
+    // The card is at (200, 180), 280 x 240.
+    let cases = [
+        (HostResizeEdge::Left, egui::vec2(-30.0, 0.0), (170.0, 180.0, 310.0, 240.0)),
+        (HostResizeEdge::Right, egui::vec2(40.0, 0.0), (200.0, 180.0, 320.0, 240.0)),
+        (HostResizeEdge::Top, egui::vec2(0.0, -20.0), (200.0, 160.0, 280.0, 260.0)),
+        (HostResizeEdge::Bottom, egui::vec2(0.0, 40.0), (200.0, 180.0, 280.0, 280.0)),
+        (HostResizeEdge::TopLeft, egui::vec2(-30.0, -20.0), (170.0, 160.0, 310.0, 260.0)),
+        (HostResizeEdge::TopRight, egui::vec2(40.0, -20.0), (200.0, 160.0, 320.0, 260.0)),
+        (HostResizeEdge::BottomLeft, egui::vec2(-30.0, 40.0), (170.0, 180.0, 310.0, 280.0)),
+        (HostResizeEdge::BottomRight, egui::vec2(40.0, 40.0), (200.0, 180.0, 320.0, 280.0)),
+    ];
+    for (edge, delta, expected) in cases {
+        assert_eq!(rect_tuple(raw_drag_floating_card(1.0, false, edge, delta)), expected, "{edge:?}");
+    }
+}
+
+#[test]
+fn floating_edges_stay_physical_under_rtl_and_exact_at_scale_two() {
+    let left = egui::vec2(-30.0, 0.0);
+    let top_left = egui::vec2(-30.0, -20.0);
+    assert_eq!(rect_tuple(raw_drag_floating_card(1.0, true, HostResizeEdge::Left, left)), (170.0, 180.0, 310.0, 240.0));
+    assert_eq!(rect_tuple(raw_drag_floating_card(1.0, true, HostResizeEdge::TopLeft, top_left)), (170.0, 160.0, 310.0, 260.0));
+    assert_eq!(rect_tuple(raw_drag_floating_card(2.0, false, HostResizeEdge::Left, left)), (170.0, 180.0, 310.0, 240.0));
+}
+
+#[test]
+fn floating_left_and_top_resize_stop_at_the_panel_minimum_with_the_far_edge_fixed() {
+    let outer = raw_drag_floating_card(1.0, false, HostResizeEdge::Left, egui::vec2(400.0, 0.0));
+    assert_eq!((outer.size.width, outer.origin.x + outer.size.width), (160.0, 480.0));
+    let outer = raw_drag_floating_card(1.0, false, HostResizeEdge::TopLeft, egui::vec2(400.0, 400.0));
+    assert_eq!(rect_tuple(outer), (320.0, 300.0, 160.0, 120.0));
+}
+
+#[test]
+fn floating_handles_agree_with_input_regions_and_leave_content_presses_alone() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    let card = floating_card_outer(&raw);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    for edge in [HostResizeEdge::Left, HostResizeEdge::Right, HostResizeEdge::Top, HostResizeEdge::Bottom, HostResizeEdge::TopRight] {
+        let at = floating_press_point(card, edge);
+        let point = Point { x: at.x, y: at.y };
+        assert_eq!(layout.hit_test(point), Some(HostPointerTarget::Resize { section: section("editor-section"), edge }), "{edge:?}");
+        assert!(layout.consumes_pointer(point), "{edge:?} grab outside the card still consumes the pointer");
+    }
+    let header = raw.host.frame().unwrap().layout.sections.iter().find(|candidate| candidate.section == section("editor-section")).unwrap().header;
+    let reach = super::layout::FLOATING_GRAB_REACH;
+    let tokens = solidcraft_theme::Tokens::get();
+    let (outer_box, inner_box) =
+        (egui_rect(card).expand(reach), egui_rect(card).shrink2(egui::vec2(tokens.space_4.min(reach), tokens.space_2.min(reach))));
+    for control in layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })) {
+        let bounds = control.bounds;
+        assert!(outer_box.contains_rect(egui_rect(bounds)), "{control:?} stays within the reach outside the card");
+        if !matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north()) {
+            assert!(!egui_rect(bounds).intersect(inner_box).is_positive(), "{control:?} reaches no deeper than the content inset");
+        }
+        if matches!(control.target, HostPointerTarget::Resize { edge: HostResizeEdge::Left | HostResizeEdge::Right, .. }) {
+            assert!(bounds.origin.y >= header.origin.y + header.size.height, "side bands start below the header");
+        }
+    }
+    let inside = egui::pos2(card.origin.x + 6.0, card.origin.y + card.size.height / 2.0);
+    assert!(!matches!(layout.hit_test(Point { x: inside.x, y: inside.y }), Some(HostPointerTarget::Resize { .. })));
+    raw.frame(vec![egui::Event::PointerMoved(inside)], false);
+    raw.pointer(inside, true, false);
+    assert!(!raw.host.interaction().is_captured(), "a press past the 4 px inner band belongs to the content");
+    let (inset_x, inset_y) = (tokens.space_4, tokens.space_2);
+    let (right, bottom) = (card.origin.x + card.size.width, card.origin.y + card.size.height);
+    for (name, at) in [
+        ("above the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y - 1.0 }),
+        ("above the bottom inset at the corner", Point { x: right - inset_x - 1.0, y: bottom - inset_y - 1.0 }),
+        ("inside the right inset", Point { x: right - inset_x - 1.0, y: card.origin.y + card.size.height / 2.0 }),
+    ] {
+        assert!(!matches!(layout.hit_test(at), Some(HostPointerTarget::Resize { .. })), "{name} belongs to the content");
+    }
+    for (name, at) in [
+        ("the bottom inset", Point { x: card.origin.x + card.size.width / 2.0, y: bottom - inset_y + 0.5 }),
+        ("the right inset", Point { x: right - inset_x + 0.5, y: card.origin.y + card.size.height / 2.0 }),
+    ] {
+        assert!(matches!(layout.hit_test(at), Some(HostPointerTarget::Resize { .. })), "{name} resizes");
+    }
+}
+
+#[test]
+fn a_short_wide_floating_card_creates_every_handle_it_shares_with_the_header_before_the_header_controls() {
+    let mut raw = raw_floating_card_sized(1.0, false, true, true, Size { width: 280.0, height: 40.0 });
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let card = layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap();
+    assert!(card.header.size.height >= card.outer.size.height, "the header is the whole inline card");
+    let menu = layout.controls.iter().position(|control| matches!(control.target, HostPointerTarget::Menu { .. })).unwrap();
+    let resizes = || layout.controls.iter().enumerate().filter(|(_, control)| matches!(control.target, HostPointerTarget::Resize { .. }));
+    for (index, control) in resizes() {
+        assert!(index < menu, "{control:?} touches the inline header, so header controls must win over it");
+    }
+    let overlap = layout.controls.iter().find_map(|control| {
+        let header_control =
+            !matches!(control.target, HostPointerTarget::Resize { .. } | HostPointerTarget::Surface { .. } | HostPointerTarget::Header { .. });
+        let shared = resizes()
+            .map(|(_, handle)| egui_rect(handle.bounds).intersect(egui_rect(control.bounds)))
+            .find(|shared| header_control && shared.is_positive())?;
+        Some((control.target.clone(), shared.center()))
+    });
+    let (target, centre) = overlap.expect("a header control and a resize handle share pixels");
+    assert_eq!(layout.hit_test(Point { x: centre.x, y: centre.y }), Some(target.clone()));
+    raw.frame(vec![egui::Event::PointerMoved(centre)], false);
+    raw.pointer(centre, true, false);
+    assert!(!raw.host.interaction().is_captured(), "a press on {target:?} never starts a resize");
+}
+
+#[test]
+fn by_default_a_floating_card_keeps_only_its_bottom_right_handle_inside_the_card() {
+    let raw = raw_floating_card_with_grab(1.0, false, false, false, Size { width: 280.0, height: 240.0 }, false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let card = floating_card_outer(&raw);
+    let handles: Vec<_> = layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })).collect();
+    assert_eq!(handles.len(), 1);
+    assert!(matches!(handles[0].target, HostPointerTarget::Resize { edge: HostResizeEdge::BottomRight, .. }));
+    assert!(card.contains_rect(handles[0].bounds));
+    assert_eq!(handles[0].bounds, handles[0].ink);
+}
+
+#[test]
+fn turning_wide_grab_off_again_returns_a_floating_card_to_its_bottom_right_handle() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    raw.host.set_wide_grab(false);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let handles: Vec<_> = layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })).collect();
+    assert_eq!(handles.len(), 1);
+    assert!(matches!(handles[0].target, HostPointerTarget::Resize { edge: HostResizeEdge::BottomRight, .. }));
+}
+
+#[test]
+fn a_floating_card_publishes_eight_named_handles_and_one_tab_stop() {
+    let mut raw = raw_floating_card(1.0, false, false, false);
+    let (_, output) = raw.frame(Vec::new(), false);
+    let nodes = output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter();
+    let splitters: Vec<_> = nodes.filter(|(_, node)| node.role() == egui::accesskit::Role::Splitter).collect();
+    let names: std::collections::BTreeSet<_> = splitters.iter().map(|(_, node)| node.label().unwrap_or_default()).collect();
+    assert_eq!((splitters.len(), names.len()), (8, 8), "a screen reader gets eight distinctly named handles");
+    let focusable = splitters.iter().filter(|(_, node)| node.supports_action(egui::accesskit::Action::Focus)).count();
+    assert_eq!(focusable, 1, "only the bottom-right handle is a Tab stop");
+}
+
+#[test]
+fn floating_resize_handles_leave_every_header_tab_alone_in_both_directions() {
+    for rtl in [false, true] {
+        let raw = raw_floating_card(1.0, rtl, false, true);
+        let layout = &raw.host.frame().unwrap().layout;
+        let card = layout.sections.iter().find(|card| card.section == section("editor-section")).unwrap();
+        assert_eq!(card.tabs.len(), 2, "rtl={rtl}");
+        for tab in &card.tabs {
+            for control in layout.controls.iter().filter(|control| matches!(control.target, HostPointerTarget::Resize { .. })) {
+                assert!(
+                    !egui_rect(control.bounds).intersect(egui_rect(tab.bounds)).is_positive()
+                        || matches!(control.target, HostPointerTarget::Resize { edge, .. } if edge.moves_north()),
+                    "rtl={rtl}: {control:?} overlaps {tab:?}"
+                );
+            }
+            let leading =
+                Point { x: if rtl { tab.bounds.origin.x + tab.bounds.size.width - 1.0 } else { tab.bounds.origin.x + 1.0 }, y: middle(tab.bounds).y };
+            assert_eq!(layout.hit_test(leading), Some(HostPointerTarget::Tab { instance: tab.instance.clone() }), "rtl={rtl}");
+        }
+    }
+}
+
+#[test]
+fn a_press_on_a_floating_close_button_closes_even_inside_a_resize_corner() {
+    let close = HostControlTarget::Pointer(HostPointerTarget::Close { instance: id("editor") });
+    for inside_corner in [false, true] {
+        let mut raw = raw_floating_card(1.0, false, true, false);
+        let bounds = raw_control(&raw, &close).bounds;
+        let corner = raw_control(
+            &raw,
+            &HostControlTarget::Pointer(HostPointerTarget::Resize { section: section("editor-section"), edge: HostResizeEdge::TopRight }),
+        )
+        .bounds;
+        let at = if inside_corner {
+            let at = Point { x: bounds.origin.x + bounds.size.width - 1.0, y: bounds.origin.y + 1.0 };
+            assert!(corner.contains(at), "the probe point lies inside the top-right corner square");
+            egui::pos2(at.x, at.y)
+        } else {
+            raw.at(close.clone())
+        };
+        let before = raw.content.runtime.layout().inspect().revision;
+        raw.frame(vec![egui::Event::PointerMoved(at)], false);
+        raw.pointer(at, true, false);
+        assert!(!raw.host.interaction().is_captured(), "a close press never starts a resize");
+        raw.pointer(at, false, true);
+        raw.frame(Vec::new(), false);
+        assert_eq!(raw.content.runtime.layout().inspect().revision, before + 1);
+        assert!(raw.host.frame().unwrap().layout.sections.iter().all(|card| card.section != section("editor-section")));
+    }
+}
+
+#[test]
+fn a_press_three_logical_pixels_off_a_docked_sash_still_captures_it() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.host.set_wide_grab(true);
+    raw.frame(Vec::new(), false);
+    let sash = raw.host.frame().unwrap().layout.sashes.first().unwrap().clone();
+    let target = HostControlTarget::Pointer(HostPointerTarget::Sash { first: sash.first, second: sash.second });
+    let control = raw_control(&raw, &target);
+    assert_eq!(control.ink, sash.bounds, "the drawn sash keeps its width");
+    assert!(control.bounds.size.height.min(control.bounds.size.width) >= 8.0);
+    let centre = raw.at(target);
+    let off = if sash.bounds.size.height < sash.bounds.size.width { egui::vec2(0.0, 3.0) } else { egui::vec2(3.0, 0.0) };
+    raw.frame(vec![egui::Event::PointerMoved(centre + off)], false);
+    raw.pointer(centre + off, true, false);
+    assert!(raw.host.interaction().is_captured());
+}
+
+#[test]
+fn by_default_a_docked_sash_grabs_only_what_it_draws() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let sash = layout.sashes.first().unwrap().clone();
+    let control = layout.control(&HostPointerTarget::Sash { first: sash.first, second: sash.second }).unwrap();
+    assert_eq!(control.bounds, sash.bounds);
+    assert_eq!(control.ink, sash.bounds);
+}
+
+#[test]
+fn turning_wide_grab_off_and_on_again_rebuilds_the_docked_sash_grab() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    let frame = |raw: &mut RawPanelHost, wide: bool| {
+        raw.host.set_wide_grab(wide);
+        raw.frame(Vec::new(), false);
+        let layout = raw.host.frame().unwrap().layout.clone();
+        let sash = layout.sashes.first().unwrap().clone();
+        let control = layout.control(&HostPointerTarget::Sash { first: sash.first, second: sash.second }).unwrap().clone();
+        (control.bounds, sash.bounds, layout.input.len(), layout.occlusion.len())
+    };
+    let (wide_grab, ink, wide_input, wide_occlusion) = frame(&mut raw, true);
+    let (narrow_grab, _, narrow_input, narrow_occlusion) = frame(&mut raw, false);
+    assert_ne!(wide_grab, ink);
+    assert_eq!(narrow_grab, ink);
+    assert!(narrow_input < wide_input && narrow_occlusion < wide_occlusion);
+    assert_eq!(frame(&mut raw, true), (wide_grab, ink, wide_input, wide_occlusion));
+}
+
+#[test]
+fn a_widened_docked_sash_grab_stays_inside_the_input_area_and_the_cards_content_inset() {
+    let mut content = PanelMountHarness::new(false).unwrap();
+    open_editor(&mut content);
+    content.dispatch(vec![fixture_open("fixture.log", "neighbour", "neighbour-section", Zone::Left, 1).unwrap()]).unwrap();
+    let mut raw = RawPanelHost::new(content, 1.0);
+    raw.host.set_wide_grab(true);
+    raw.frame(Vec::new(), false);
+    let layout = raw.host.frame().unwrap().layout.clone();
+    let sash = layout.sashes.first().unwrap().clone();
+    let target = HostPointerTarget::Sash { first: sash.first, second: sash.second };
+    let control = layout.control(&target).unwrap();
+    assert!(control.bounds.size.width.max(control.bounds.size.height) >= sash.bounds.size.width.max(sash.bounds.size.height));
+    let tokens = solidcraft_theme::Tokens::get();
+    let (reach, inset) = if sash.bounds.size.width < sash.bounds.size.height {
+        ((control.bounds.size.width - sash.bounds.size.width) / 2.0, tokens.space_4)
+    } else {
+        ((control.bounds.size.height - sash.bounds.size.height) / 2.0, tokens.space_2)
+    };
+    assert!(reach > 0.0 && reach <= inset, "the grab reaches into a card by no more than the inset render_slot leaves around its content");
+    for point in [control.bounds.origin, middle(control.bounds)] {
+        assert_eq!(layout.hit_test(point).as_ref(), Some(&target));
+        assert!(layout.consumes_pointer(point), "hit-testing and input regions agree");
     }
 }
 
@@ -13673,6 +14084,55 @@ fn plugin_panels_register_declared_zones_and_draw_virtual_table_actions() {
 }
 
 #[test]
+fn plugin_panels_table_rows_support_optional_indent_level() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    let ctx = crate::fonts::test_context();
+
+    // Set row 0 with no indent, row 1 with indent 2, and row 2 with an oversized indent 20 (clamped to MAX_TABLE_ROW_INDENT = 8)
+    panel
+        .data
+        .set_data(&[
+            Datum { path: "/tools/0/name".into(), value: UiValue::Text("Root Setup".into()) },
+            Datum { path: "/tools/1/name".into(), value: UiValue::Text("Pocket Operation".into()) },
+            Datum { path: "/tools/1/indent".into(), value: UiValue::Integer(2) },
+            Datum { path: "/tools/2/name".into(), value: UiValue::Text("Deep Nested Item".into()) },
+            Datum { path: "/tools/2/indent".into(), value: UiValue::Integer(20) },
+        ])
+        .unwrap();
+    panel.data.merge_frame();
+
+    let output = crate::test_support::frame(&ctx, Default::default(), |ui| super::plugin::draw(ui, &panel, 0, &mut Vec::new(), "in", 0));
+
+    let Some(shape_root) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Root Setup") else {
+        panic!("root setup shape missing")
+    };
+    let Some(shape_indented) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Pocket Operation") else {
+        panic!("indented shape missing")
+    };
+    let Some(shape_clamped) = crate::test_support::text_shapes(&output).find(|shape| shape.galley.job.text == "Deep Nested Item") else {
+        panic!("clamped shape missing")
+    };
+
+    let base_x = shape_root.pos.x;
+    let expected_indent_2 = base_x + 2.0 * super::plugin::TABLE_ROW_INDENT;
+    let expected_clamped_8 = base_x + (MAX_TABLE_ROW_INDENT as f32) * super::plugin::TABLE_ROW_INDENT;
+
+    assert!(
+        (shape_indented.pos.x - expected_indent_2).abs() < 1e-3,
+        "indent level 2 shifts first cell by 28.0 pt: got {}, expected {}",
+        shape_indented.pos.x,
+        expected_indent_2
+    );
+    assert!(
+        (shape_clamped.pos.x - expected_clamped_8).abs() < 1e-3,
+        "indent level 20 clamped to 8 shifts first cell by 112.0 pt: got {}, expected {}",
+        shape_clamped.pos.x,
+        expected_clamped_8
+    );
+}
+
+#[test]
 fn plugin_panels_sync_errors_remain_observable_until_a_successful_frame() {
     let mut h = plugin_panel_harness();
     let mut panel = plugin_table_snapshot();
@@ -14571,6 +15031,7 @@ fn desktop_panel_windows_reserve_ids_only_after_commit_and_fit_the_current_monit
     let origin = builder.position.unwrap();
     assert!(monitor.contains_rect(egui::Rect::from_min_size((origin.to_vec2() * 2.0).to_pos2(), size * 2.0)));
     assert_eq!(builder.min_inner_size, Some(egui::vec2(min.width, min.height)));
+    assert_eq!(builder.native_owner, Some(egui::ViewportId::ROOT));
 
     adapter.commit(&[HostEffect::ReleaseNative { host: host.clone() }]);
     assert!(adapter.viewport_id(&host).is_none());

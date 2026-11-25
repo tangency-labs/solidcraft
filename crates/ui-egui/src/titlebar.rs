@@ -30,7 +30,7 @@ pub(crate) fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::window_chrome::{BUTTON_WIDTH, CAPTIONS, caption_id};
+    use crate::window_chrome::{BUTTON_WIDTH, CAPTIONS, caption, caption_id};
     use egui::{Event, PointerButton, Pos2, RawInput, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
     use solidcraft_engine::Session;
     use solidcraft_theme::Tokens;
@@ -43,6 +43,8 @@ mod tests {
         width: f32,
         time: f64,
         maximized: bool,
+        /// The native window it is shown in, as the desktop integration tells on Windows.
+        window: Option<u64>,
         /// Lay out the whole window (`SolveApp::ui`) rather than only the bar and the zones.
         full: bool,
     }
@@ -52,7 +54,30 @@ mod tests {
             let ctx = crate::fonts::test_context();
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.custom_titlebar = true;
-            Self { ctx, app, width, time: 0.0, maximized: false, full: false }
+            Self { ctx, app, width, time: 0.0, maximized: false, window: None, full: false }
+        }
+
+        /// A window the system answers for, as the Windows desktop app's are: shown in a native
+        /// window of its own (the list of them is one per process) whose title bar and frame are
+        /// the system's.
+        fn systems(width: f32) -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x5C7B_0000);
+            let mut w = Self::new(width);
+            let window = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            caption::hooked(window);
+            w.window = Some(window);
+            w
+        }
+
+        /// The native window of a window made by [`Self::systems`] (0 for any other).
+        fn native(&self) -> u64 {
+            self.window.unwrap_or_default()
+        }
+
+        /// The client pixel of `p`, as the window procedure names points.
+        fn px(&self, p: Pos2) -> (i32, i32) {
+            let ppp = self.ctx.pixels_per_point();
+            ((p.x * ppp) as i32, (p.y * ppp) as i32)
         }
 
         /// One frame with `events`, the input going through `release_press_taken_by_os` first
@@ -67,6 +92,7 @@ mod tests {
             };
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
                 v.maximized = Some(self.maximized);
+                v.native_window = self.window;
             }
             // As the desktop app's raw-input hook does first.
             crate::window_chrome::release_press_taken_by_os(&self.ctx, &mut input);
@@ -333,6 +359,44 @@ mod tests {
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
     }
 
+    /// A drag that starts on a tab or an application bar button belongs to that control, in the
+    /// custom title bar (Windows, Linux) and the integrated one (macOS) alike: it never asks the OS
+    /// to move the window, whatever its direction and however many tabs there are. Empty bar space
+    /// still does.
+    #[test]
+    fn drags_from_tabs_and_bar_items_never_move_the_window() {
+        for integrated in [false, true] {
+            for tabs in [1, 3] {
+                let mut w = Win::new(1600.0);
+                w.app.custom_titlebar = !integrated;
+                w.app.integrated_titlebar = integrated;
+                w.app.home.open = false;
+                for _ in 1..tabs {
+                    assert!(crate::documents::open_tab(&mut w.app, Session::default()).is_ok());
+                }
+                w.frame(vec![]);
+                w.frame(vec![]);
+                let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+                let mut names = vec!["tab:design:0", "appbar:file", "appbar:undo", "titlebar:home"];
+                if tabs > 1 {
+                    names.push("tab:design:2");
+                }
+                for name in names {
+                    let from = crate::scenario::handle_at(name).unwrap_or_else(|| panic!("{name}"));
+                    for by in [vec2(40.0, 0.0), vec2(-30.0, 0.0), vec2(4.0, 30.0), vec2(30.0, -2.0)] {
+                        w.time += 1.0;
+                        let cmds = w.gesture(&[from, from + by * 0.25, from + by * 0.5, from + by]);
+                        assert_eq!(starts(&cmds), 0, "integrated={integrated} tabs={tabs}: a drag from {name} by {by:?} moved the window: {cmds:?}");
+                    }
+                }
+                w.time += 1.0;
+                let empty = pos2(900.0, 17.0);
+                let cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+                assert_eq!(starts(&cmds), 1, "integrated={integrated} tabs={tabs}: empty bar space moves the window: {cmds:?}");
+            }
+        }
+    }
+
     /// On X11 the window manager keeps the release of the press that started a window move or
     /// resize: every drag on the bar or the design's tab still moves the window and every edge
     /// drag still resizes, not every other one (#13334).
@@ -352,13 +416,16 @@ mod tests {
             let cmds = w.gesture_os_keeps_release(&[east, east + vec2(6.0, 0.0)]);
             assert_eq!(cmds, vec![ViewportCommand::BeginResize(ResizeDirection::East)], "resize {round}");
         }
-        // The only design's tab is part of the title bar: a drag on it moves the window too.
+        // A drag on the design's tab belongs to the tab: it never moves the window.
         let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
         for round in 1..=2 {
-            let cmds = w.gesture_os_keeps_release(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]);
-            assert_eq!(starts(&cmds), 1, "tab drag {round}: {cmds:?}");
+            let cmds = w.gesture(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]); // no OS move starts, so the release arrives
+            assert_eq!(starts(&cmds), 0, "tab drag {round}: {cmds:?}");
             w.time += 1.0;
         }
+        let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "bar drag after the tab drags: {cmds:?}");
+        w.time += 1.0;
         // A real release that does arrive later is ignored: no click, so no maximize.
         let mut cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
         cmds.extend(w.frame(vec![]).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default());
@@ -409,5 +476,91 @@ mod tests {
         let p = pos2(1199.0, 350.0);
         let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
+    }
+
+    /// Bare bar in a 1600 pt wide window, as the drag test above uses it.
+    const BARE: Pos2 = pos2(900.0, 17.0);
+
+    /// The whole window, a design open, 1600 pt wide.
+    fn whole(mut w: Win) -> Win {
+        w.full = true;
+        w.app.home.open = false;
+        w.frame(vec![]);
+        w.frame(vec![]);
+        w
+    }
+
+    /// Where Windows answers for the window (#13996), every frame hands it the bar: the bare bar
+    /// is Windows' caption (it drags the window, and snaps it), the maximize button is Windows'
+    /// own (snap layouts), and the bar's controls stay the UI's.
+    #[test]
+    fn the_app_bar_is_the_systems_caption_where_the_system_answers_for_the_window() {
+        use caption::CaptionHit;
+        let mut w = whole(Win::systems(1600.0));
+        let window = w.native();
+        for _ in 0..3 {
+            w.frame(vec![]);
+            let hit = |p: Pos2| {
+                let (x, y) = w.px(p);
+                caption::hit(window, x, y)
+            };
+            assert_eq!(hit(BARE), CaptionHit::Drag, "the bare bar");
+            assert_eq!(hit(w.caption(Caption::Maximize).center()), CaptionHit::MaximizeButton);
+            assert_eq!(hit(w.caption(Caption::Minimize).center()), CaptionHit::Client);
+            assert_eq!(hit(w.caption(Caption::Close).center()), CaptionHit::Client);
+            assert_eq!(hit(pos2(BARE.x, 400.0)), CaptionHit::Outside, "below the bar");
+        }
+        // The system's frame resizes the window: no zones of the UI's own, whoever draws it.
+        w.app.native_resize_border = false;
+        let p = pos2(1599.0, 350.0);
+        let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
+        assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
+        caption::closed(window);
+    }
+
+    /// Where nothing answers for the window (other systems, the web), nothing is handed over and
+    /// the bar stays egui's: a drag on the bare bar moves the window through egui, once past its
+    /// drag threshold.
+    #[test]
+    fn without_a_system_that_answers_the_title_bar_stays_eguis() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let mut w = whole(Win::new(1600.0));
+        assert_eq!(starts(&w.gesture(&[BARE, BARE + vec2(2.0, 0.0)])), 0);
+        w.time += 1.0;
+        let cmds = w.gesture(&[BARE, BARE + vec2(12.0, 4.0), BARE + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "{cmds:?}");
+    }
+
+    /// A right-click on the bare bar opens the application bar's own menu. Where Windows answers
+    /// for the window that click is Windows', and comes back from the window procedure to open
+    /// the same menu; a press Windows takes on the bare bar comes back too and closes it, as a
+    /// press on a bar of the UI's own does.
+    #[test]
+    fn a_right_click_on_the_systems_caption_opens_the_application_bars_menu_as_before() {
+        let app_bar_menu = |w: &Win| w.app.viewport.context_menu.is_some() && matches!(w.app.menu.target, crate::context_menu::Target::AppBar { .. });
+        // The bar is the UI's own: egui sees the click.
+        let mut own = whole(Win::new(1600.0));
+        let button = |pressed| Event::PointerButton { pos: BARE, button: PointerButton::Secondary, pressed, modifiers: Default::default() };
+        own.frame(vec![Event::PointerMoved(BARE), button(true), button(false)]);
+        own.frame(vec![]);
+        assert!(app_bar_menu(&own), "the application bar's menu");
+        // The system answers for the window: the window procedure hands the click back.
+        let mut w = whole(Win::systems(1600.0));
+        assert!(!app_bar_menu(&w));
+        let (x, y) = w.px(BARE);
+        caption::secondary_click(w.native(), x, y);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(app_bar_menu(&w), "the same menu");
+        // The menu opened at the click and lies over the bar there: beside it the bar is still the
+        // system's caption. A press the system takes there is a press on the bar to the UI, as on
+        // a bar of its own: the menu closes by the code that closes it on any press elsewhere.
+        let (x, y) = w.px(BARE - vec2(60.0, 0.0));
+        assert_eq!(caption::hit(w.native(), x, y), caption::CaptionHit::Drag, "beside the menu");
+        caption::pressed(w.native(), x, y);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(w.app.viewport.context_menu.is_none(), "a press on the caption closes it");
+        caption::closed(w.native());
     }
 }

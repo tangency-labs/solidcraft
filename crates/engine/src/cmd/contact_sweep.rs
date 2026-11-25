@@ -148,7 +148,7 @@ impl ContactGeometry {
     pub(super) fn new(s: &Session) -> Result<Self> {
         let assembly = &s.doc.assembly;
         let sets: Vec<Vec<u64>> = if assembly.contact_all {
-            vec![s.doc.occurrences.iter().map(|o| o.id).collect()]
+            vec![s.doc.active_occurrences().map(|o| o.id).collect()]
         } else {
             assembly.contact_sets.iter().filter(|set| !set.suppressed).map(|set| set.occurrences.clone()).collect()
         };
@@ -163,6 +163,7 @@ impl ContactGeometry {
             return Ok(out);
         }
         let state = s.model.state();
+        let doc = s.doc.active_assembly();
         let mut meshes: HashMap<String, (Arc<Mesh>, f64)> = HashMap::new();
         let mut stack = vec![(0, Vec::<u64>::new())];
         let mut count = 0;
@@ -171,7 +172,7 @@ impl ContactGeometry {
             if count > MAX_PLACEMENTS || path.len() > 64 {
                 return Err(limit("assembly exceeds contact sweep placement budget"));
             }
-            for occurrence in s.doc.occurrences.iter().filter(|o| o.parent == component) {
+            for occurrence in doc.occurrences.iter().filter(|o| o.parent == component) {
                 let mut child = path.clone();
                 child.push(occurrence.id);
                 stack.push((occurrence.component, child));
@@ -320,12 +321,14 @@ impl ContactGeometry {
     /// How many samples the motion from `start` to `end` needs (no part passes through another
     /// between two), and how many the sampling and transform budgets allow.
     pub(super) fn samples_within(&self, start: &Session, end: &Session) -> Result<(usize, usize)> {
-        let a = joints::joint_values(&start.doc.assembly);
-        let b = joints::joint_values(&end.doc.assembly);
+        let start_doc = start.doc.active_assembly();
+        let end_doc = end.doc.active_assembly();
+        let a = joints::joint_values(&start_doc.assembly);
+        let b = joints::joint_values(&end_doc.assembly);
         let bounds = self.bounds(start)?.union(&self.bounds(end)?);
         let state = start.model.state();
         let (mut linear, mut angular, mut radius) = (0.0, 0.0, 0.0_f64);
-        for joint in start.doc.assembly.joints.iter().filter(|j| !j.suppressed) {
+        for joint in start_doc.assembly.joints.iter().filter(|j| !j.suppressed) {
             for (index, _) in joint.kind.dofs().iter().enumerate() {
                 let delta = (a.get(&joint.id).and_then(|q| q.get(index)).copied().unwrap_or(0.0)
                     - b.get(&joint.id).and_then(|q| q.get(index)).copied().unwrap_or(0.0))
@@ -335,9 +338,9 @@ impl ContactGeometry {
                     if delta == 0.0 {
                         continue;
                     }
-                    for session in [start, end] {
+                    for doc in [&*start_doc, &*end_doc] {
                         for (side, origin) in [&joint.a, &joint.b].into_iter().enumerate() {
-                            let frame = session.doc.origin_world(&state, origin)?;
+                            let frame = doc.origin_world(&state, origin)?;
                             let frame = if side == 0 { joint.offset_frame_a(frame) } else { frame };
                             let pivot = apply_point(&frame, Vec3::ZERO);
                             let far = Vec3::new(

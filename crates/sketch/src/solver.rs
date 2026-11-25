@@ -22,17 +22,24 @@ use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
+use crate::sparse::{Normal, Pattern};
 use crate::union_find::{find, union};
 
 #[path = "cursor.rs"]
 mod cursor;
 pub use cursor::{move_line_towards, move_point_towards};
 
+#[path = "lm_memo.rs"]
+mod lm_memo;
+
 #[path = "redundancy.rs"]
 mod redundancy;
 pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
 
 const MAX_ITERS: usize = 500;
+/// Components of at least this many unknowns solve LM's steps with the sparse factorisation
+/// ([`Pattern`]); smaller ones with the dense elimination, which costs little at their size.
+const SPARSE_MIN_VARS: usize = 64;
 /// Variables in one connected component. Each component is solved as a dense system: an n by n
 /// matrix for the Levenberg-Marquardt step, rows by n for the Jacobian. 4,000 variables is a
 /// 128 MB matrix; past that the request grows to gigabytes and an allocation failure aborts the
@@ -367,7 +374,9 @@ impl State<'_> {
                 // A general weighted spline has no Seg2 form. Its display chords pull an
                 // on-curve point off the spline, including points used as Break/Trim boundaries.
                 if let Some(record) = nurbs.as_ref().and_then(|n| n.rational_record(&p, *degree)) {
-                    let Some(hit) = solidcore_ops::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else { return f64::INFINITY };
+                    let Some(hit) = solidcraft_kernel::services::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else {
+                        return f64::INFINITY;
+                    };
                     let Some((_, tangent)) = solidcraft_geom::brep::eval::CurveEval::new(&record).ok().and_then(|c| c.derivs(hit.parameter)) else {
                         return f64::INFINITY;
                     };
@@ -945,6 +954,7 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
 
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
 /// touch point (better conditioned than the distance form when an end point is on the curve).
+#[derive(Debug)]
 enum Block<'a> {
     Closure { a: usize, b: usize },
     Arc { c: usize, a: usize, b: usize },
@@ -1364,6 +1374,118 @@ fn local_system(
     (r, j, owner)
 }
 
+/// A large component's normal equations kept sparse ([`Normal`]), with what fills them each
+/// iteration: per block, the component's columns it reads (each once, in the order of its
+/// variables) and the slot of each pair of them in the matrix.
+struct SparseSystem {
+    pattern: Pattern,
+    normal: Normal,
+    slots: crate::sparse::Slots,
+    blocks: Vec<BlockColumns>,
+    /// A block's small Jacobian, rows by its columns, reused.
+    jac: Vec<f64>,
+}
+
+struct BlockColumns {
+    /// The variable of each column, and the column.
+    vars: Vec<(usize, usize)>,
+    /// Per pair of columns `(i, j)`, at `i * m + j`: its slot in the normal matrix.
+    pairs: Vec<Option<usize>>,
+}
+
+impl SparseSystem {
+    fn new(blocks: &[(Block, Vec<usize>)], col: &[usize], n: usize) -> SparseSystem {
+        let groups: Vec<Vec<usize>> =
+            blocks.iter().map(|(_, bv)| bv.iter().filter_map(|v| col.get(*v).copied().filter(|c| *c < n)).collect()).collect();
+        let pattern = Pattern::new(n, &groups);
+        let normal = Normal::new(n, &groups);
+        let slots = pattern.bind(&normal);
+        let blocks = blocks
+            .iter()
+            .map(|(_, bv)| {
+                let mut vars: Vec<(usize, usize)> = Vec::new();
+                for &v in bv {
+                    if let Some(c) = col.get(v).copied().filter(|c| *c < n)
+                        && !vars.iter().any(|(_, seen)| *seen == c)
+                    {
+                        vars.push((v, c));
+                    }
+                }
+                let pairs = vars.iter().flat_map(|&(_, ci)| vars.iter().map(move |&(_, cj)| (ci, cj))).map(|(ci, cj)| normal.slot(ci, cj)).collect();
+                BlockColumns { vars, pairs }
+            })
+            .collect();
+        SparseSystem { pattern, normal, slots, blocks, jac: Vec::new() }
+    }
+
+    /// Fill the normal matrix and `g` (`Jᵀr`) for the residuals `r` at `x`: the Jacobian
+    /// [`local_system`] would build, block by block, each entry summed over the rows in order
+    /// as there. False when an entry falls outside the structure (never, for the blocks it was
+    /// made for): the caller builds the matrix densely instead.
+    fn fill(&mut self, sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f64], r: &[f64], g: &mut [f64]) -> bool {
+        self.normal.clear();
+        let mut plus = Vec::new();
+        let mut minus = Vec::new();
+        let mut row = 0;
+        let mut whole = true;
+        for ((b, _), cols) in blocks.iter().zip(&self.blocks) {
+            plus.clear();
+            block_residuals(&State { sk, lay, x }, b, &mut plus);
+            let rows = plus.len();
+            let m = cols.vars.len();
+            self.jac.clear();
+            self.jac.resize(rows * m, 0.0);
+            for (i, &(v, _)) in cols.vars.iter().enumerate() {
+                let Some(x0) = x.get(v).copied() else { continue };
+                let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
+                let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0 + h;
+                }
+                plus.clear();
+                block_residuals(&State { sk, lay, x }, b, &mut plus);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0 - h;
+                }
+                minus.clear();
+                block_residuals(&State { sk, lay, x }, b, &mut minus);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0;
+                }
+                for k in 0..rows {
+                    let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
+                    if let Some(slot) = self.jac.get_mut(k * m + i) {
+                        *slot = if k == 0 { opening.unwrap_or(d) } else { d };
+                    }
+                }
+            }
+            for k in 0..rows {
+                let ri = r.get(row + k).copied().unwrap_or(0.0);
+                let Some(jrow) = self.jac.get(k * m..(k + 1) * m) else { continue };
+                for (i, &di) in jrow.iter().enumerate() {
+                    if di == 0.0 {
+                        continue;
+                    }
+                    if let Some(gi) = cols.vars.get(i).and_then(|(_, c)| g.get_mut(*c)) {
+                        *gi += di * ri;
+                    }
+                    for (j, &dj) in jrow.iter().enumerate() {
+                        if dj == 0.0 {
+                            continue;
+                        }
+                        match cols.pairs.get(i * m + j).copied().flatten().and_then(|s| self.normal.vals.get_mut(s)) {
+                            Some(a) => *a += di * dj,
+                            None => whole = false,
+                        }
+                    }
+                }
+            }
+            row += rows;
+        }
+        whole
+    }
+}
+
 /// An infinite line's direction derivative must be sampled within its defining span. The
 /// usual coordinate-sized step can cross its other end and measure a half-turn instead
 /// of the local slope when the saved defining points are very close (#11001).
@@ -1416,9 +1538,11 @@ fn lm_in(
     if !budget.counts_numeric() {
         return lm_run(sk, lay, blocks, vars, x, col, MAX_ITERS, None, give_up).unwrap_or((0, f64::INFINITY));
     }
-    let mut meter = Budget::new(usize::MAX);
-    let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
-    budget.charge_numeric(meter.spent());
+    let mut meter = Budget::new(if budget.numeric_stops() { budget.numeric_left().unwrap_or(0) } else { usize::MAX });
+    // A value edit's run is taken again like an unbudgeted one: a remembered run costs no work.
+    let memo = budget.numeric_stops();
+    let out = lm_run_with(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter), false, memo).unwrap_or((0, f64::INFINITY));
+    budget.charge_numeric(if meter.exhausted() { usize::MAX } else { meter.spent() });
     out
 }
 
@@ -1451,8 +1575,110 @@ fn lm_capped_with_budget(
     lm_run(sk, lay, blocks, vars, x, col, max_iters, budget, false)
 }
 
-/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]).
+/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]). A run
+/// of a large component made before in the same edit's solve is taken again ([`lm_memo`]).
 fn lm_run(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
+    budget: Option<&mut Budget>,
+    give_up: bool,
+) -> Option<(usize, f64)> {
+    lm_run_with(sk, lay, blocks, vars, x, col, max_iters, budget, give_up, false)
+}
+
+/// [`lm_run`]; with `memo_budgeted`, a run with a work budget is also taken again and remembered
+/// unless its budget cut it short (a value edit's, #17905). Other budgeted runs (a live drag
+/// frame's) charge their work to it: always made.
+fn lm_run_with(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
+    mut budget: Option<&mut Budget>,
+    give_up: bool,
+    memo_budgeted: bool,
+) -> Option<(usize, f64)> {
+    let key = ((budget.is_none() || memo_budgeted) && lm_memo::remembers(vars.len()) && lm_memo::active())
+        .then(|| run_key(sk, lay, blocks, vars, x, col, max_iters, give_up));
+    if let Some(key) = &key
+        && let Some((values, out)) = lm_memo::get(key)
+    {
+        #[cfg(test)]
+        lm_vars::add(vars.len());
+        for (&v, value) in vars.iter().zip(values) {
+            if let Some(slot) = x.get_mut(v) {
+                *slot = value;
+            }
+        }
+        return out;
+    }
+    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget.as_deref_mut(), give_up);
+    // A cancelled run, or one its budget cut, stopped part way: not its result.
+    if let Some(key) = key
+        && !cancelled()
+        && !budget.is_some_and(|b| b.exhausted())
+    {
+        lm_memo::put(key, lm_memo::Entry { values: vars.iter().map(|v| x.get(*v).copied().unwrap_or(f64::NAN)).collect(), out });
+    }
+    out
+}
+
+/// Everything an LM run reads, hashed ([`lm_memo`]): the sketch (its constants and curves; its
+/// constraints it reads through the blocks), the layout, the blocks with their values, the
+/// variables and their columns, the whole starting point bit for bit, the iteration cap and
+/// whether it gives up when stalled.
+fn run_key(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &[f64],
+    col: &[usize],
+    max_iters: usize,
+    give_up: bool,
+) -> [u64; 2] {
+    let mut key = lm_memo::Key::new();
+    key.usize(max_iters);
+    key.usize(usize::from(give_up));
+    key.bytes(sk.solve_fingerprint().as_bytes());
+    key.usize(lay.n);
+    key.usize(lay.points);
+    for v in lay.pvar.iter().chain(&lay.rvar) {
+        key.usize(v.unwrap_or(usize::MAX));
+    }
+    for (slide, heavy) in lay.slide.iter().zip(&lay.heavy) {
+        key.usize(usize::from(*slide) + 2 * usize::from(*heavy));
+    }
+    key.usize(blocks.len());
+    for (b, bv) in blocks {
+        key.bytes(format!("{b:?}").as_bytes());
+        key.usize(bv.len());
+        for v in bv {
+            key.usize(*v);
+        }
+    }
+    key.usize(vars.len());
+    for v in vars {
+        key.usize(*v);
+        key.usize(col.get(*v).copied().unwrap_or(usize::MAX));
+    }
+    key.usize(x.len());
+    for v in x {
+        key.f64(*v);
+    }
+    key.finish()
+}
+
+/// [`lm_run`]'s iteration.
+fn lm_compute(
     sk: &Sketch,
     lay: &Layout,
     blocks: &[(Block, Vec<usize>)],
@@ -1472,6 +1698,9 @@ fn lm_run(
     let n = vars.len();
     #[cfg(test)]
     lm_vars::add(n);
+    // A large component's steps are solved on the sparse structure of its normal equations
+    // (see `sparse`): the unknowns each block reads are where the matrix can have entries.
+    let mut sparse = (n >= SPARSE_MIN_VARS).then(|| SparseSystem::new(blocks, col, n));
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
     let mut f = norm2(&r);
@@ -1510,23 +1739,22 @@ fn lm_run(
         }
         #[cfg(feature = "solver-profiling")]
         profiling::count(|c| c.outer_iterations = c.outer_iterations.saturating_add(1));
+        #[cfg(test)]
+        lm_work::add(n);
+        #[cfg(feature = "solver-profiling")]
         let (_, j, _) = local_system(sk, lay, blocks, x, col, n);
         // Normal equations of this component.
         #[cfg(feature = "solver-profiling")]
         let normal_timer = profiling::timer(Phase::NormalEquations);
-        let mut a = Mat::zeros(n, n);
         let mut g = vec![0.0; n];
-        for row in 0..j.rows {
-            let ri = r.get(row).copied().unwrap_or(0.0);
-            let nz: Vec<(usize, f64)> = (0..n).map(|li| (li, j.get(row, li))).filter(|(_, d)| *d != 0.0).collect();
-            for &(li, di) in &nz {
-                if let Some(gi) = g.get_mut(li) {
-                    *gi += di * ri;
-                }
-                for &(lk, dk) in &nz {
-                    a.add(li, lk, di * dk);
-                }
-            }
+        // A large component's matrix is kept sparse (its Jacobian read block by block, each
+        // entry summed over the rows in the same order as the dense matrix's): the same entries,
+        // without clearing and scanning a dense n by n matrix every iteration.
+        let mut dense_a = None;
+        let filled = sparse.as_mut().is_some_and(|sys| sys.fill(sk, lay, blocks, x, &r, &mut g));
+        if !filled {
+            g.fill(0.0);
+            dense_a = Some(normal_equations(&local_system(sk, lay, blocks, x, col, n).1, &r, n, &mut g));
         }
         #[cfg(feature = "solver-profiling")]
         drop(normal_timer);
@@ -1556,14 +1784,27 @@ fn lm_run(
                 profiling::finish_run(run, StopReason::WorkBudget, max_abs(&r));
                 return Some((it, max_abs(&r)));
             }
-            let mut m = a.clone();
-            for (i, w) in weight.iter().enumerate() {
-                m.add(i, i, lambda * w + 1e-12);
-            }
+            let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = solve_unless(m, rhs, &mut 0.0, &cancelled);
+            let dense = |a: &Mat| {
+                let mut m = a.clone();
+                for (i, s) in shift.iter().enumerate() {
+                    m.add(i, i, *s);
+                }
+                solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
+            // is left to the dense elimination, as every step was before.
+            let step = match (&dense_a, &sparse) {
+                (Some(a), _) => dense(a),
+                (None, Some(sys)) => sys
+                    .pattern
+                    .solve_bound(&sys.normal, &sys.slots, &shift, &rhs, &cancelled)
+                    .or_else(|| if cancelled() { None } else { dense(&sys.normal.dense()) }),
+                (None, None) => None,
+            };
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
             if cancelled() {
@@ -1627,6 +1868,25 @@ fn cancelled() -> bool {
     crate::cancel::is_cancelled()
 }
 
+/// The dense normal matrix `JᵀJ` of a component's Jacobian `j` (`n` columns), adding `Jᵀr` to
+/// `g`.
+fn normal_equations(j: &Mat, r: &[f64], n: usize, g: &mut [f64]) -> Mat {
+    let mut a = Mat::zeros(n, n);
+    for row in 0..j.rows {
+        let ri = r.get(row).copied().unwrap_or(0.0);
+        let nz: Vec<(usize, f64)> = (0..n).map(|li| (li, j.get(row, li))).filter(|(_, d)| *d != 0.0).collect();
+        for &(li, di) in &nz {
+            if let Some(gi) = g.get_mut(li) {
+                *gi += di * ri;
+            }
+            for &(lk, dk) in &nz {
+                a.add(li, lk, di * dk);
+            }
+        }
+    }
+    a
+}
+
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
     budget.as_deref_mut().is_none_or(|b| b.try_charge(work))
 }
@@ -1659,6 +1919,44 @@ pub(crate) mod lm_vars {
     /// The LM runs since the last call.
     pub(crate) fn runs() -> usize {
         RUNS.with(|c| c.replace(0))
+    }
+}
+
+/// The variables LM worked on, summed over its outer iterations on this thread, for tests that
+/// measure the work one solve spends.
+#[cfg(test)]
+pub(crate) mod lm_work {
+    use std::cell::Cell;
+
+    thread_local! {
+        static WORK: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn add(n: usize) {
+        WORK.with(|c| c.set(c.get() + n));
+    }
+
+    /// The work since the last call.
+    pub(crate) fn take() -> usize {
+        WORK.with(|c| c.replace(0))
+    }
+}
+
+/// A test's override of the value edit's dense LM work allowance (#17905).
+#[cfg(test)]
+pub(crate) mod edit_work_override {
+    use std::cell::Cell;
+
+    thread_local! {
+        static OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    pub(crate) fn set(work: Option<usize>) {
+        OVERRIDE.with(|c| c.set(work));
+    }
+
+    pub(super) fn get() -> Option<usize> {
+        OVERRIDE.with(|c| c.get())
     }
 }
 
@@ -2052,6 +2350,22 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// [`solve_after_edit`] with only the requested diagnostics. Continuation, branch checks and
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
+    // Its continuation and step tries repeat runs of one another ([`lm_memo`]).
+    lm_memo::scope(|| solve_after_edit_now(sk, old, stored, analysis))
+}
+
+/// [`solve_after_edit_with_analysis`] remembering nothing, and the same remembering runs of
+/// components of any size with the runs it took again: for tests that the two are the same.
+#[cfg(test)]
+pub(crate) fn solve_after_value_edit_both(sk: &Sketch, old: &DrivingValues) -> ((Sketch, SolveReport), (Sketch, SolveReport), usize) {
+    let mut plain = sk.clone();
+    let plain_report = solve_after_edit_now(&mut plain, old, None, Analysis::Full);
+    let mut remembered = sk.clone();
+    let (report, hits) = lm_memo::tests::any_size(|| solve_after_edit_with_analysis(&mut remembered, old, None, Analysis::Full));
+    ((plain, plain_report), (remembered, report), hits)
+}
+
+fn solve_after_edit_now(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
     let drawn: Vec<Vec2> = stored.map_or_else(|| sk.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
     // A constraint added since `old` has no value there. Measure what it reads on the drawn
     // geometry and use that as the value it was edited from: otherwise neither the value's
@@ -2073,11 +2387,12 @@ pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stor
     }
     let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
     let before = stored.is_none().then(|| sk.clone());
-    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
+    let mut budget = Budget::full().for_edit(edit_work());
+    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut budget);
     let report = if report.keeps_orientation() {
         report
     } else {
-        match before.and_then(|before| solve_in_steps(&before, &old, analysis)) {
+        match before.and_then(|before| solve_in_steps(&before, &old, analysis, &mut budget)) {
             Some((stepped, stepped_report)) => {
                 *sk = stepped;
                 stepped_report
@@ -2161,7 +2476,7 @@ pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
 /// values a step before still reaches them keeping every turn (the linkage family in
 /// `continuation_tests`). `None` when no try reaches the new values keeping every orientation,
 /// when nothing that can be stepped changed, or when the sketch is not solved for the old values.
-fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Option<(Sketch, SolveReport)> {
+fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis, budget: &mut Budget) -> Option<(Sketch, SolveReport)> {
     let changed: Vec<(usize, f64, f64)> = start
         .constraints
         .iter()
@@ -2177,10 +2492,16 @@ fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Op
         return None;
     }
     'tries: for steps in EDIT_STEPS {
+        if budget.numeric_exhausted() {
+            return None;
+        }
         let mut at = start.clone();
         let mut values = old.clone();
         let mut last = None;
         for k in 1..=steps {
+            if budget.numeric_exhausted() {
+                return None;
+            }
             let t = k as f64 / steps as f64;
             for &(i, was, new) in &changed {
                 if let Some(c) = at.constraints.get_mut(i) {
@@ -2189,7 +2510,10 @@ fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Op
             }
             let from: Vec<Option<f64>> = at.constraints.iter().map(|c| values.get(&c.id).copied()).collect();
             let step_analysis = if k == steps { analysis } else { Analysis::StatusOnly };
-            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut Budget::full());
+            let left_before = budget.numeric_left().unwrap_or(0);
+            let mut step = Budget::full().for_edit(left_before);
+            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut step);
+            budget.charge_numeric(left_before - step.numeric_left().unwrap_or(0));
             if !report.keeps_orientation() {
                 continue 'tries;
             }
@@ -2634,6 +2958,16 @@ fn nudge_line_angles(sk: &Sketch, lay: &Layout, x: &mut [f64]) {
 
 /// Continuation steps an edit in sixty-fourths of it: the smallest sub-step is one of them.
 const SUBSTEPS: usize = 64;
+/// The dense LM work one value edit may spend over all its solves (#17905).
+const EDIT_WORK: usize = if 256_000_000_000u64 > usize::MAX as u64 { usize::MAX } else { 256_000_000_000u64 as usize };
+/// [`EDIT_WORK`], or a test's override of it.
+fn edit_work() -> usize {
+    #[cfg(test)]
+    if let Some(w) = edit_work_override::get() {
+        return w;
+    }
+    EDIT_WORK
+}
 /// LM iterations one continuation may spend over all its sub-steps (taken and halved).
 const CONTINUATION_ITERS: usize = 4 * MAX_ITERS;
 /// Triangles of distance dimensions whose turn one component's fold check reads.
@@ -3079,6 +3413,7 @@ fn continue_values(
     col: &[usize],
     x: &mut [f64],
     edit: &ValueEdit,
+    budget: &mut Budget,
 ) -> (usize, bool) {
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.continuation_runs = c.continuation_runs.saturating_add(1));
@@ -3087,13 +3422,22 @@ fn continue_values(
     let mut blocks: Vec<(Block, Vec<usize>)> = sub.iter().map(|(b, v)| (copy_block(b), v.clone())).collect();
     let (mut t, mut h, mut spent) = (0, SUBSTEPS / 2, 0);
     let mut trial = x.to_vec();
-    while t < SUBSTEPS && spent < CONTINUATION_ITERS {
+    let stops = budget.numeric_stops();
+    while t < SUBSTEPS && spent < CONTINUATION_ITERS && !(stops && budget.numeric_exhausted()) {
         let next = (t + h).min(SUBSTEPS);
         if let Some(kinds) = arena.get(next) {
             edit.point_at(&mut blocks, kinds);
         }
         trial.copy_from_slice(x);
-        let (its, residual) = lm_capped(sk, lay, &blocks, vars, &mut trial, col, MAX_ITERS.min(CONTINUATION_ITERS - spent));
+        let cap = MAX_ITERS.min(CONTINUATION_ITERS - spent);
+        let (its, residual) = if stops {
+            let mut meter = Budget::new(budget.numeric_left().unwrap_or(0));
+            let out = lm_run_with(sk, lay, &blocks, vars, &mut trial, col, cap, Some(&mut meter), false, true).unwrap_or((0, f64::INFINITY));
+            budget.charge_numeric(if meter.exhausted() { usize::MAX } else { meter.spent() });
+            out
+        } else {
+            lm_capped(sk, lay, &blocks, vars, &mut trial, col, cap)
+        };
         spent += its.max(1);
         if edit.holds(residual, &State { sk, lay, x: &trial }) {
             x.copy_from_slice(&trial);
@@ -3642,7 +3986,7 @@ fn solve_inner(
                         *s = *s0;
                     }
                 }
-                let (its, mut done) = continue_values(sk, &lay, &sub, vars, &col, &mut from, &edit);
+                let (its, mut done) = continue_values(sk, &lay, &sub, vars, &col, &mut from, &edit, budget);
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.

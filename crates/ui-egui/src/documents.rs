@@ -241,6 +241,8 @@ pub struct Documents {
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,
+    /// File > Revert to Saved is asking whether to drop the active design's unsaved changes.
+    pub reverting: bool,
     /// Quitting: the tabs answered so far with Don't Save (`None`: not quitting).
     pub quitting: Option<Vec<usize>>,
     /// The "save changes?" button the arrow keys have picked; Enter gives it.
@@ -587,6 +589,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
+    // every frame, so it no longer syncs them when the design comes to the front (#21594).
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     if !presenting {
@@ -2957,11 +2962,21 @@ fn view_tab<'a>(
     }
 }
 
-/// A tab's menu: rename its design (`rename`: the translated label), close it, the others, or
-/// all of them.
-fn tab_menu(rename: &str) -> [crate::app_bar::TabMenuRow<'_>; 4] {
+/// The translated labels of a tab's Rename and Save rows, and the Save As shortcut shown beside it.
+struct TabMenuText {
+    rename: String,
+    save: String,
+    save_as: String,
+    save_as_key: String,
+}
+
+/// A tab's menu: rename its design, save it, save it under another name, close it, the others, or
+/// all of them. Save and Save As show their shortcuts on the shown design's tab, where they apply.
+fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 6] {
     [
-        crate::app_bar::TabMenuRow::new("ui.renameTab", rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.renameTab", &text.rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.saveTab", &text.save, "Ctrl+S"),
+        crate::app_bar::TabMenuRow::new("ui.saveTabAs", &text.save_as, &text.save_as_key),
         crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
         crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
         crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
@@ -3004,8 +3019,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
     let new_tip = app.tr("ui.start_page").to_string();
-    let rename_label = app.tr("ui.rename_design_tab").to_string();
-    let menu = tab_menu(&rename_label);
+    let menu_text = TabMenuText {
+        rename: app.tr("ui.rename_design_tab").to_string(),
+        save: app.tr("ui.save").to_string(),
+        save_as: format!("{}…", app.tr("ui.save_as")),
+        save_as_key: crate::keymap::effective(app, "file.save_as").unwrap_or_default(),
+    };
+    let menu = tab_menu(&menu_text);
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
     let current_window = app.view_windows.current_window();
     let design_views: Vec<Vec<_>> = (0..n)
@@ -3262,7 +3282,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped, mut renamed) = (None, None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut saved) = (None, None, None, None, None, None);
     let mut window_drop = false;
     for action in actions {
         match action {
@@ -3270,6 +3290,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
                 "ui.renameTab" => renamed = Some(tab),
+                "ui.saveTab" => saved = Some((tab, false)),
+                "ui.saveTabAs" => saved = Some((tab, true)),
                 "ui.closeTab" => shut = Some(tab),
                 "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
                 "ui.closeAllTabs" => many = Some((0..n).collect()),
@@ -3323,6 +3345,9 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    if let Some((tab, as_new)) = saved.filter(|_| idle) {
+        save_tab(app, tab, as_new);
+    }
     // Rename from the menu: the design's tab is shown first (over the start page too), so its
     // name is edited in place.
     if let Some(tab) = renamed.filter(|_| idle) {
@@ -3333,6 +3358,25 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if let Some((name, _)) = info.get(tab).filter(|_| shown == tab && !app.home.open) {
             start_tab_rename(app, name, Rect::ZERO);
         }
+    }
+}
+
+/// Save design `i` from its tab's menu, as File › Save does (`as_new`: as File › Save As does).
+/// Another tab's design is shown first, as the "save changes?" prompt does before it saves one,
+/// so a question Save asks (where to save a new design, a read-only or changed file) is about the
+/// design in view.
+fn save_tab(app: &mut SolveApp, i: usize, as_new: bool) {
+    if app.file_picker_busy() || i >= app.docs.count() || app.docs.group.is_some() {
+        return;
+    }
+    let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    if i != shown || app.home.open {
+        switch(app, i);
+    }
+    if as_new {
+        crate::toolbar::save_as(app);
+    } else {
+        crate::toolbar::save(app);
     }
 }
 
@@ -3366,9 +3410,65 @@ pub enum Answer {
     Cancel,
 }
 
+/// File > Revert to Saved: read the active design again from the file it was opened or saved as.
+/// With unsaved changes it asks first ([`revert_prompt`]), as they cannot be undone afterwards.
+pub fn revert(app: &mut SolveApp) {
+    if app.session.path.is_none() {
+        return;
+    }
+    if app.session.is_dirty() {
+        app.docs.reverting = true;
+    } else {
+        revert_now(app);
+    }
+}
+
+/// Close the active tab without asking and open its file again in its place. The file is checked
+/// first, so a missing or unreadable one leaves the tab and its changes where they were.
+fn revert_now(app: &mut SolveApp) {
+    app.docs.reverting = false;
+    let Some(path) = app.session.path.clone() else { return };
+    if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return;
+    }
+    if let Err(e) = solidcraft_engine::io::vfs::check(&path) {
+        app.set_status(e.to_string(), true);
+        return;
+    }
+    if !solidcraft_engine::io::vfs::is_file(&path) {
+        app.set_status(format!("{path}: the file is not there to revert to"), true);
+        return;
+    }
+    let active = app.docs.active;
+    close(app, active, true);
+    app.open_path_async(&path);
+}
+
+/// The question File > Revert to Saved asks when the design has unsaved changes.
+fn revert_prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.docs.reverting {
+        return;
+    }
+    let name = tabs_info(app).get(app.docs.active).map(|x| x.0.clone()).unwrap_or_default();
+    let question = solidcraft_ui_text::format("document.revert_changes", &[("name", &crate::i18n::tr_name(&name))]);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_revert_prompt"), "status_warning", solidcraft_ui_text::tr("ui.revert_question"))
+        .tone(ui_kit::Tone::Warning)
+        .actions(solidcraft_ui_text::tr("ui.revert"), solidcraft_ui_text::tr("ui.cancel"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &question, ui_kit::Text::Report("question", false));
+        });
+    match action {
+        ui_kit::Action::Ok => revert_now(app),
+        ui_kit::Action::Cancel => app.docs.reverting = false,
+        _ if closed => app.docs.reverting = false,
+        _ => {}
+    }
+}
+
 /// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    revert_prompt(app, ctx);
     quit_step(app);
     // Saved, it asks the Capture Position question first (#9736): that question is the one to
     // answer meanwhile, not this one again.
@@ -3612,20 +3712,6 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
-}
-
-/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
-pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
-    std::iter::once(&app.session)
-        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
-        .map(|session| {
-            // The guard reads only paths and links, never model geometry or undo state.
-            let mut copy = Session::default();
-            copy.doc = session.doc.clone();
-            copy.path = session.path.clone();
-            copy
-        })
-        .collect()
 }
 
 /// Files in any open tab, including linked parts, must not disappear underneath it.
@@ -4846,6 +4932,69 @@ mod tests {
         assert_eq!(h.app.docs.count(), 3, "Cancel keeps the remaining tabs");
     }
 
+    /// A design saved to a file, then changed in the app and not saved again.
+    fn saved_then_changed(h: &mut crate::scenario::Harness) -> std::path::PathBuf {
+        let file = h.dir.join("revert.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":6})).unwrap();
+        assert!(h.app.session.is_dirty());
+        file
+    }
+
+    #[test]
+    fn revert_to_saved_asks_first_and_then_brings_back_the_saved_design() {
+        let mut h = crate::scenario::Harness::new();
+        let file = saved_then_changed(&mut h);
+        let saved = std::fs::read(&file).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(h.app.docs.reverting, "unsaved changes are asked about, not dropped");
+        assert_eq!(h.app.session.doc.features.len(), 2, "nothing is reloaded before the answer");
+        revert_now(&mut h.app);
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 1, "the sphere added after the save is gone");
+        assert!(!h.app.session.is_dirty() && !h.app.docs.reverting);
+        assert_eq!(h.app.docs.count(), 1, "the tab was replaced, not joined by a second one");
+        assert_eq!(h.app.session.path.as_deref().map(std::path::Path::new), Some(file.as_path()));
+        assert_eq!(std::fs::read(&file).unwrap(), saved, "reverting never writes the file");
+    }
+
+    #[test]
+    fn revert_to_saved_without_changes_reloads_what_another_program_wrote() {
+        let mut h = crate::scenario::Harness::new();
+        let file = h.dir.join("outside.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        // Another copy of the app adds a second feature to the same file.
+        let mut other = Session::default();
+        other.execute("doc.open", &json!({"path":file.to_string_lossy()})).unwrap();
+        other.execute("solid.sphere", &json!({"diameter":9})).unwrap();
+        other.execute("file.save_as", &json!({"path":file.to_string_lossy()})).unwrap();
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting, "nothing to lose, so nothing to ask");
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
+    #[test]
+    fn revert_to_saved_is_refused_without_a_file_and_keeps_changes_when_the_file_is_gone() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        assert!(!crate::toolbar::FileAction::Revert.enabled(&h.app), "a design with no file has nothing to revert to");
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting);
+        let file = saved_then_changed(&mut h);
+        std::fs::remove_file(&file).unwrap();
+        revert_now(&mut h.app);
+        h.settle();
+        let (text, _, error) = h.app.status.clone().expect("a message");
+        assert!(error && text.contains("not there"), "{text}");
+        assert_eq!(h.app.session.doc.features.len(), 3, "the changes are still in the tab");
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
     #[test]
     fn grouped_row_discard_closes_only_its_tab_without_saving() {
         let mut h = crate::scenario::Harness::new();
@@ -5129,6 +5278,61 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// Save in a tab's menu saves that design to its file, from another tab too (it is shown
+    /// first); a design never saved asks where, as File › Save does. Save As always asks, and
+    /// the design then lives in the new file.
+    #[test]
+    fn save_and_save_as_in_a_tabs_menu_save_that_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let first = h.dir.join("first.sc");
+        h.app.run("file.save_as", json!({"path": first})).unwrap();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        assert!(h.app.session.is_dirty());
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 3, "width": 3, "height": 3})).unwrap();
+        h.frames(3);
+        let menu = |h: &mut crate::scenario::Harness, tab: usize, row: &str| {
+            h.step(&json!({"click": {"handle": format!("tab:design:{tab}")}, "button": "right"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": format!("tab_menu:{row}")}})).unwrap();
+            h.frames(2);
+            h.settle();
+        };
+        // Save on the other tab's menu: that design is shown and written to its own file.
+        menu(&mut h, 0, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 0);
+        assert!(!h.app.session.is_dirty(), "saved");
+        assert_eq!(h.app.session.path.as_deref(), first.to_str());
+        let on_disk = std::fs::read(&first).unwrap();
+        // Save on a design never saved asks where (the scenario's picker answers in its folder).
+        menu(&mut h, 1, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 1);
+        assert!(h.app.session.path.is_some() && !h.app.session.is_dirty(), "saved where the picker said");
+        // Save As writes a new file and leaves the old one as it was.
+        let before = h.app.session.path.clone();
+        switch(&mut h.app, 0);
+        h.app.run("component.rename", json!({"component": 0, "name": "Plate Mk2"})).unwrap();
+        switch(&mut h.app, 1);
+        h.frames(2);
+        menu(&mut h, 0, "ui.saveTabAs");
+        assert_eq!(h.app.docs.active, 0);
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Plate Mk2.sc").to_str(), "Save As offers the design's name");
+        assert_eq!(std::fs::read(&first).unwrap(), on_disk, "the first file is kept as it was");
+        switch(&mut h.app, 1);
+        assert_eq!(h.app.session.path, before, "the other design keeps its own file");
+        // Over the start page, Save shows the design before it saves it.
+        h.app.run("solid.box", json!({"length": 4, "width": 4, "height": 4})).unwrap();
+        h.app.home.open = true;
+        h.frames(2);
+        menu(&mut h, 1, "ui.saveTab");
+        assert!(!h.app.home.open, "the start page gives way to the design");
+        assert!(!h.app.session.is_dirty(), "and it is saved");
     }
 
     /// The menu's Rename edits the design's name in its tab, as a double-click does; on a tab
