@@ -2050,6 +2050,61 @@ mod tests {
         }
     }
 
+    /// tangency-labs/solidcraft#16686: supports only within the tolerance of their class
+    /// (here the second cylinder's radius 1e-9 larger than the spine was made for) have no
+    /// spine on both offsets exactly. The spine is refused as on them, and proved within
+    /// the tolerance of the one it is off: every point of it is exactly 1e-9 from that
+    /// cylinder. The proof is a bound (twice the residual over a lower bound of the gradient,
+    /// plus the segments' slack), so a tolerance ten times that admits it; one of half that
+    /// cannot be proved, as no bound is below the true distance.
+    #[test]
+    fn a_spine_off_an_offset_by_less_than_the_tolerance_is_proved_near_it() {
+        let cyl = |point: Point3, dir: Vec3, radius: f64| BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point,
+            dir,
+            radius,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let a = cyl(Point3::ZERO, Vec3::new(0.0, 0.0, 1.0), 3.5);
+        let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);
+        let node = Point3::new(0.0, 3.5, 0.0);
+        let on = |phi: f64| {
+            let y = 2.0 + 1.5 * phi.cos();
+            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
+        };
+        let arc = nodal_quartic(
+            &a,
+            &b,
+            node,
+            on(0.3) - node,
+            on(2.0 * PI - 0.3) - node,
+            false,
+        )
+        .unwrap();
+        let off = 1e-9;
+        let wider = cyl(b.point, b.dir, b.radius + off);
+        for i in 0..16 {
+            let lo = f64::from(i) / 16.0;
+            let hi = f64::from(i + 1) / 16.0;
+            let curve = segment_curve(&arc.segment(lo, hi));
+            let offsets = [a.implicit(), wider.implicit()];
+            // without the distance: refused
+            assert!(!crate::surface::implicit::curve_on_quadrics(&curve, &offsets).unwrap());
+            assert!(
+                crate::surface::implicit::spine_near_offsets(&curve, &offsets, 10.0 * off).unwrap(),
+                "segment {i} is not proved within {:e}",
+                10.0 * off
+            );
+            assert!(
+                !crate::surface::implicit::spine_near_offsets(&curve, &offsets, 0.5 * off).unwrap(),
+                "segment {i} is proved nearer than it is"
+            );
+        }
+    }
+
     /// The identities survive changes of scale, frame, ordering and projective chart.
     #[test]
     fn nodal_quartic_identities_hold_at_other_scales_frames_and_directions() {

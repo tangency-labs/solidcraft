@@ -2015,7 +2015,8 @@ pub fn arc_section_implicit(
 /// offsets' meridians cross, the crossing nearest the classified centre); for the conic,
 /// conic-pair and nodal-quartic classes the canal surface of the ball's radius about
 /// `leader`, the round's rational centre line (its parameter the net's through `map`),
-/// which must lie on both offsets. `None` for
+/// which must lie on both offsets, or be proved within the tolerance the class was read
+/// within of one it is not on (supports only that close to the class). `None` for
 /// a traced round, a blend classified without its inputs, offsets whose meridians do not
 /// cross and a rational class without its leader.
 pub fn class_surface(
@@ -2060,6 +2061,7 @@ pub fn class_surface(
                 map: *map,
                 offsets: [blend.offsets[0].implicit(), blend.offsets[1].implicit()],
                 radius: r,
+                within: blend.inputs.map_or(0.0, |i| i.tol),
             });
         }
         BlendSpine::Traced => None,

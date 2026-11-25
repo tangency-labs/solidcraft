@@ -878,7 +878,8 @@ pub type QuadricEquation = ([[f64; 3]; 3], [f64; 3], f64);
 /// The surface an exact class lies on (#2485), derived from its supports: an analytic
 /// surface by its implicit equation (the line, circle and point classes), or the canal
 /// surface of a rational spine (the conic, conic-pair and nodal-quartic classes): the
-/// points at the ball's radius from the spine, the spine on both faces' offsets.
+/// points at the ball's radius from the spine, the spine on both faces' offsets or proved
+/// within the tolerance the class was read within of them ([`spine_near_offsets`]).
 #[derive(Debug, Clone)]
 pub enum ClassSurface {
     /// An analytic surface.
@@ -893,6 +894,9 @@ pub enum ClassSurface {
         offsets: [QuadricEquation; 2],
         /// The ball's radius.
         radius: f64,
+        /// The tolerance the class was read within: how far the spine may be proved from
+        /// an offset it is not on ([`spine_near_offsets`]).
+        within: f64,
     },
 }
 
@@ -947,11 +951,12 @@ pub fn check_exact_net(k: &Kernel, net: &Surface, check: &ExactNetCheck) -> Resu
             map,
             offsets,
             radius,
+            within,
         } => {
-            if !spine_on_offsets(spine, offsets)? {
+            if !spine_near_offsets(spine, offsets, *within)? {
                 return Err(SolidError::invalid_input(
                     OP_EXACT,
-                    "the spine is off the faces' offsets",
+                    "the spine is further from the faces' offsets than the tolerance the class was read within",
                 ));
             }
             lies_on_canal(&form, spine, map, *radius)?
@@ -1002,12 +1007,48 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     Ok((out, origin))
 }
 
+/// One quadric's equation over one Bezier segment of a rational curve ([`curve_segments`],
+/// `O` the curve's first point): the computed Bernstein coefficients of
+/// `Y.A.Y + 2 (b + A O).Y V + q(O) V^2` (the quadric about `O`, homogeneous `(Y, V)`), the
+/// rounding each is within, `gamma_K` times the size of its terms in the curve's absolute
+/// points (the move to `O` is exact algebra; its rounding is theirs), as [`lies_on`], and
+/// that absolute size, `|Y| + |O| V`.
+fn segment_residual(
+    seg: &CurveSegment,
+    quadric: &QuadricEquation,
+    oa: &[f64; 3],
+) -> (BPoly, f64, f64) {
+    let dot3 = |x: &[f64; 3], y: &[f64; 3]| x.iter().zip(y).map(|(p, q)| p * q).sum::<f64>();
+    let &(a, b, c) = quadric;
+    let (y, v) = seg;
+    // the quadric about O: A, b' = b + A O, c' = O.A.O + 2 b.O + c
+    let ao = a.map(|row| dot3(&row, oa));
+    let b1 = [b[0] + ao[0], b[1] + ao[1], b[2] + ao[2]];
+    let c1 = c + dot3(oa, &ao) + 2.0 * dot3(&b, oa);
+    let amax = a.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let bmax = b.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let omax = oa.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let p = v.p;
+    let vv = v.mul(v);
+    let mut f = vv.combine(c1, &vv, 0.0);
+    for (yi, (bi, arow)) in y.iter().zip(b1.iter().zip(a.iter())) {
+        f = f.combine(1.0, &yi.mul(v), 2.0 * bi);
+        for (yj, aij) in y.iter().zip(arow) {
+            f = f.combine(1.0, &yi.mul(yj), *aij);
+        }
+    }
+    let ys = y.iter().map(BPoly::max_abs).fold(0.0_f64, f64::max);
+    let vs = v.max_abs();
+    // the terms of the quadric in the spine's own (absolute) homogeneous points: the
+    // move to O is exact algebra, its rounding that of these terms
+    let ya = ys + omax * vs;
+    let scale = amax * ya * ya + 2.0 * bmax * ya * vs + c.abs() * vs * vs;
+    (f, gamma(8 * (p + 1) + 16) * scale, ya)
+}
+
 /// Whether the rational curve `spine` lies on both quadrics `offsets`: on every Bezier
-/// segment, every Bernstein coefficient of `Y.A.Y + 2 (b + A O).Y V + q(O) V^2` (the
-/// quadric about the spine's first point `O`, homogeneous `(Y, V)`) is within the
-/// rounding of computing it, `gamma_K` times the size of its terms in the spine's
-/// absolute points (the move to `O` is exact algebra; its rounding is theirs), as
-/// [`lies_on`].
+/// segment, every Bernstein coefficient of the quadric's equation in the segment's
+/// homogeneous points ([`segment_residual`]) is within the rounding of computing it.
 ///
 /// # Errors
 ///
@@ -1015,38 +1056,211 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
 fn spine_on_offsets(spine: &BSplineCurve, offsets: &[QuadricEquation; 2]) -> Result<bool> {
     let (segs, o) = curve_segments(spine)?;
     let oa = [o.x, o.y, o.z];
-    let dot3 = |x: &[f64; 3], y: &[f64; 3]| x.iter().zip(y).map(|(p, q)| p * q).sum::<f64>();
-    for &(a, b, c) in offsets {
-        // the quadric about O: A, b' = b + A O, c' = O.A.O + 2 b.O + c
-        let ao = a.map(|row| dot3(&row, &oa));
-        let b1 = [b[0] + ao[0], b[1] + ao[1], b[2] + ao[2]];
-        let c1 = c + dot3(&oa, &ao) + 2.0 * dot3(&b, &oa);
-        let amax = a.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
-        let bmax = b.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
-        let omax = oa.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
-        for (y, v) in &segs {
-            let p = v.p;
-            let vv = v.mul(v);
-            let mut f = vv.combine(c1, &vv, 0.0);
-            for (yi, (bi, arow)) in y.iter().zip(b1.iter().zip(a.iter())) {
-                f = f.combine(1.0, &yi.mul(v), 2.0 * bi);
-                for (yj, aij) in y.iter().zip(arow) {
-                    f = f.combine(1.0, &yi.mul(yj), *aij);
+    Ok(offsets.iter().all(|q| on_quadric(&segs, q, &oa)))
+}
+
+/// Whether every segment of `segs` lies on `quadric` to the rounding of checking it
+/// ([`segment_residual`]).
+fn on_quadric(segs: &[CurveSegment], quadric: &QuadricEquation, oa: &[f64; 3]) -> bool {
+    segs.iter().all(|seg| {
+        let (f, tol, _) = segment_residual(seg, quadric, oa);
+        f.c.iter().all(|x| x.abs() <= tol)
+    })
+}
+
+/// Not the fork's (tangency-labs/solidcraft#16686): whether the rational curve `spine`
+/// lies on each quadric of `offsets` ([`on_quadric`]) or, where it does not, every one of
+/// its points is proved within `within` of that quadric's surface
+/// ([`segment_distance_bound`]).
+///
+/// A rational class is read within the body's tolerance (two cylinders whose axes meet
+/// within it, of radii equal within it), so supports only that close to the class have no
+/// spine on both offsets exactly: the spine is made on one of them (the plane section of
+/// the first, for a conic pair) and is off the other by the supports' distance from the
+/// class. As the circle class's torus ([`crate::surface::procedural_blend::exact::ExactRound::supports_distance`]),
+/// the round then keeps its own spine, a proved distance (at most the tolerance the class
+/// was read within) from the supports' offsets.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bezier decomposition.
+pub(crate) fn spine_near_offsets(
+    spine: &BSplineCurve,
+    offsets: &[QuadricEquation; 2],
+    within: f64,
+) -> Result<bool> {
+    let (segs, o) = curve_segments(spine)?;
+    let oa = [o.x, o.y, o.z];
+    for q in offsets {
+        if on_quadric(&segs, q, &oa) {
+            continue;
+        }
+        for seg in &segs {
+            // halved (de Casteljau at 1/2) where the bound is not proved, at most
+            // NEAR_DEPTH times; an explicit stack, first half first
+            let mut todo = vec![(seg.clone(), 0_usize)];
+            while let Some((piece, depth)) = todo.pop() {
+                let near = segment_distance_bound(&piece, q, &oa, seg, depth).is_some_and(|d| {
+                    matches!(
+                        d.partial_cmp(&within),
+                        Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+                    )
+                });
+                if near {
+                    continue;
                 }
-            }
-            let ys = y.iter().map(BPoly::max_abs).fold(0.0_f64, f64::max);
-            let vs = v.max_abs();
-            // the terms of the quadric in the spine's own (absolute) homogeneous points: the
-            // move to O is exact algebra, its rounding that of these terms
-            let ya = ys + omax * vs;
-            let scale = amax * ya * ya + 2.0 * bmax * ya * vs + c.abs() * vs * vs;
-            let tol = gamma(8 * (p + 1) + 16) * scale;
-            if !f.c.iter().all(|x| x.abs() <= tol) {
-                return Ok(false);
+                if depth >= NEAR_DEPTH {
+                    return Ok(false);
+                }
+                todo.push((sub_segment(&piece, 0.5, 1.0), depth + 1));
+                todo.push((sub_segment(&piece, 0.0, 0.5), depth + 1));
             }
         }
     }
     Ok(true)
+}
+
+/// How many halvings [`spine_near_offsets`] makes of one Bezier segment before it gives
+/// up: a piece whose distance it cannot prove within the tolerance after this many is
+/// refused (the gradient's direction turns less over a shorter piece).
+const NEAR_DEPTH: usize = 8;
+
+/// Not the fork's (tangency-labs/solidcraft#16686): a certified bound on how far every
+/// point of the rational curve segment `seg` (a piece of `root`, halved `depth` times) lies from the surface of `quadric`
+/// (`q(x) = x.A.x + 2 b.x + c = 0`); `None` where it cannot be proved: a weight that is not
+/// positive, a gradient not proved away from zero over the segment (the axis of a cylinder
+/// or the apex of a cone), a residual too large for the bound's quadratic argument, or a
+/// bound that is not finite.
+///
+/// PROVEN. Both bounds below are ratios of Bernstein polynomials with positive
+/// denominators, bounded by the extreme ratio of their coefficients: for `w_k > 0` and
+/// Bernstein weights `B_k(t) >= 0`, `sum B_k a_k / sum B_k w_k` lies between the least and
+/// the largest `a_k / w_k` (each `a_k >= m w_k` sums to `sum B_k a_k >= m sum B_k w_k`).
+///
+/// The residual. The equation's Bernstein coefficients `f_k` in the segment's homogeneous
+/// points are computed within `tau` ([`segment_residual`]), and `q(X) = f(t) / V(t)^2`.
+/// `V^2`'s coefficients `w_k` are sums of products of the positive control weights with
+/// positive binomial quotients (each binomial a chain of at most `2p` roundings), so each
+/// computed `w_k` is within `gamma_{10(p+1)+16}` of its value, relative: its value is at
+/// least `w_k (1 - gamma_{10(p+1)+16})`. Hence `|q(X)| <= Q = max_k (|f_k| + tau) / w_k`
+/// (the lowered `w_k`) on the whole segment; for a spine a constant `c` off the quadric
+/// (`f = c V^2`) this is `c` to the rounding, not `c (V_max / V_0)^2`.
+///
+/// The gradient. `grad q = 2 (A X + b) = 2 G / V` with `G = A Y + (b + A O) V` (`Y` the
+/// homogeneous point about `O`), linear in the control points, so `G`'s Bernstein
+/// coefficients `G_k` are those of the control points, computed within
+/// `gamma_16 (3 |A| |Y|_abs + |b| V_max)` each (`|Y|_abs` the absolute size). For a unit-ish
+/// `n` (the coefficients' sum, normalised), `G.n / V` is a ratio whose coefficients, less
+/// their rounding and `G`'s error times `|n|_1`, over the control weights `V_k`, are at
+/// least `d0`; with `d0 > 0`, `|grad q| >= 2 |G| / V >= 2 (G.n) / (|n| V) >= g = 2 d0 / |n|`
+/// on the whole segment.
+///
+/// The distance. Along the unit gradient `u` from a point `X`,
+/// `q(X + t u) = q(X) + t |grad q| + t^2 u.A.u` and `|u.A.u| <= |A|_2 <= 3 max|A_ij|`, so
+/// where `g^2 >= 4 |A|_2 Q` the quadratic changes sign within `|t| <= 2 Q / g` (at
+/// `t = -2 q / |grad q|` signed toward the surface, its value is
+/// `-q + 4 q^2 u.A.u / |grad q|^2`, of the other sign or 0): the surface is that close.
+/// The Bezier decomposition's own rounding (a chain of at most `p` convex combinations per
+/// point) moves a point by at most `2 gamma_{4p+4} |Y|_abs (1 + V_max / V0) / V0`
+/// ([`distance_bound`]'s slack), which is added. A piece halved `depth` times
+/// ([`sub_segment`] at `1/2`: the halving of each product exact, one rounding per sum, `p`
+/// levels per halving) is a chain of `depth (p + 1)` more convex combinations of the
+/// root's points, so the slack is taken with `gamma_{4p+4+4 depth (p+1)}` and the root's
+/// sizes and least weight (each piece's points are convex combinations of the root's).
+/// Every step is grown by a few roundings.
+fn segment_distance_bound(
+    seg: &CurveSegment,
+    quadric: &QuadricEquation,
+    oa: &[f64; 3],
+    root: &CurveSegment,
+    depth: usize,
+) -> Option<f64> {
+    let grow = 1.0 + 8.0 * f64::EPSILON;
+    let shrink = 1.0 - 8.0 * f64::EPSILON;
+    let (f, tau, ya) = segment_residual(seg, quadric, oa);
+    let (y, v) = seg;
+    let p = v.p;
+    let v0 = v.c.iter().copied().fold(f64::INFINITY, f64::min);
+    let vmax = v.max_abs();
+    if !(v0 > 0.0 && v0 * v0 >= f64::MIN_POSITIVE && vmax.is_finite()) {
+        return None;
+    }
+    // |q| <= the largest |f_k| + tau over V^2's (lowered) coefficient
+    let vv = v.mul(v);
+    let w_low = 1.0 - gamma(10 * (p + 1) + 16);
+    if f.c.len() != vv.c.len() {
+        return None;
+    }
+    let mut q_bound = 0.0_f64;
+    for (fk, wk) in f.c.iter().zip(&vv.c) {
+        let w = wk * w_low * shrink;
+        if !(w > 0.0 && w.is_finite()) {
+            return None;
+        }
+        q_bound = q_bound.max((fk.abs() + tau) * grow / w * grow);
+    }
+    let &(a, b, _) = quadric;
+    let dot3 = |x: &[f64; 3], y: &[f64; 3]| x.iter().zip(y).map(|(p, q)| p * q).sum::<f64>();
+    let ao = a.map(|row| dot3(&row, oa));
+    let b1 = [b[0] + ao[0], b[1] + ao[1], b[2] + ao[2]];
+    let amax = a.iter().flatten().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let bmax = b.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let g_err = gamma(16) * (3.0 * amax * ya + bmax * vmax) * grow;
+    // G's Bernstein coefficients, one per control point, with that point's weight
+    let mut gc: Vec<([f64; 3], f64)> = Vec::new();
+    for k in 0..=p {
+        let yk = [
+            y[0].c.get(k).copied()?,
+            y[1].c.get(k).copied()?,
+            y[2].c.get(k).copied()?,
+        ];
+        let vk = v.c.get(k).copied()?;
+        let row = |i: usize| -> Option<f64> {
+            let ar = a.get(i)?;
+            Some(dot3(ar, &yk) + b1.get(i)? * vk)
+        };
+        gc.push(([row(0)?, row(1)?, row(2)?], vk));
+    }
+    let sum = gc.iter().fold([0.0_f64; 3], |s, (g, _)| {
+        [s[0] + g[0], s[1] + g[1], s[2] + g[2]]
+    });
+    let len = dot3(&sum, &sum).sqrt();
+    if !(len > 0.0 && len.is_finite()) {
+        return None;
+    }
+    let n = sum.map(|x| x / len);
+    let n_len = dot3(&n, &n).sqrt() * grow;
+    let n_one = n.iter().map(|x| x.abs()).sum::<f64>() * grow;
+    let d0 = gc
+        .iter()
+        .map(|(g, vk)| {
+            let d = dot3(g, &n);
+            let size = g.iter().zip(&n).map(|(x, y)| (x * y).abs()).sum::<f64>();
+            (d - gamma(4) * size * grow - g_err * n_one) * shrink / (vk * grow)
+        })
+        .fold(f64::INFINITY, f64::min);
+    if !(d0 > 0.0 && d0.is_finite()) {
+        return None;
+    }
+    let g = 2.0 * d0 * shrink / n_len * shrink;
+    let a_norm = 3.0 * amax * grow;
+    if !(g * g * shrink >= 4.0 * a_norm * q_bound * grow) {
+        return None;
+    }
+    let off = 2.0 * q_bound / g * grow;
+    // the decomposition's and the halvings' rounding, in the root's sizes
+    let (ry, rv) = root;
+    let omax = oa.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    let r_vmax = rv.max_abs();
+    let r_ya = ry.iter().map(BPoly::max_abs).fold(0.0_f64, f64::max) + omax * r_vmax;
+    let r_v0 = rv.c.iter().copied().fold(f64::INFINITY, f64::min);
+    if !(r_v0 > 0.0 && r_vmax.is_finite() && r_ya.is_finite()) {
+        return None;
+    }
+    let chain = (4 * p + 4).checked_add(depth.checked_mul(4 * (p + 1))?)?;
+    let slack = 2.0 * gamma(chain) * r_ya * (1.0 + r_vmax / r_v0) / r_v0 * grow;
+    let bound = (off + slack) * grow;
+    bound.is_finite().then_some(bound)
 }
 
 /// Whether the rational curve `curve` lies on both quadrics `q` (each `X.A.X + 2 b.X + c = 0`),
