@@ -69,6 +69,11 @@ pub enum GrooveRefusal {
     /// parallel).
     #[error("the faces give no direction for the joint")]
     DirectionUndetermined,
+    /// The search for a direction the faces all run straight along was not decided (ops
+    /// [`Straight::Undecided`]: too many faces for its budget, or bands it cannot reach): the
+    /// joint may run straight, but no direction is proved. Not a fault of the picks.
+    #[error("the joint's direction could not be decided for these faces")]
+    DirectionUndecided,
     /// An ops call failed.
     #[error(transparent)]
     Ops(#[from] solidcraft_kernel::services::Error),
@@ -189,7 +194,8 @@ pub fn chain(pick: &GroovePick<'_>, part: JointPart) -> Result<Chain> {
 ///
 /// # Errors
 /// [`GrooveRefusal::OuterFaceNotPlane`]; [`GrooveRefusal::ArrowFaceNotAtToe`] for a chain with no
-/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::GrooveFaceNotStraight`];
+/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
+/// [`GrooveRefusal::GrooveFaceNotStraight`];
 /// [`GrooveRefusal::GrooveFaceNotProved`]; [`GrooveRefusal::Invalid`] for a chain with no face.
 /// The errors of the ops calls otherwise.
 pub fn joint_frame(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<Plane> {
@@ -218,6 +224,7 @@ pub fn joint_frame(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<P
     let d = match straight_direction(&reads)? {
         Straight::Along { direction, .. } => direction,
         Straight::Undetermined => return Err(GrooveRefusal::DirectionUndetermined),
+        Straight::Undecided => return Err(GrooveRefusal::DirectionUndecided),
         Straight::NotStraight { face } => {
             let (part, face) = at(face)?;
             return Err(GrooveRefusal::GrooveFaceNotStraight { part, face });
