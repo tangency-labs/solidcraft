@@ -150,16 +150,17 @@ fn unsupported_modified_face_offers_explicit_fixed_plane_without_live_links() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Modified"})).unwrap();
-    // An intentional split gives the +z source two distinct planar pieces. A
-    // strict attachment cannot claim the original whole-face certificate.
-    h.app.run("solid.split_face", json!({"body":"Modified","faces":[[5,5,10]],"plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
+    // A notch makes the top a C; a split across its arms leaves two pieces on one side of the
+    // plane, told apart only by place. A strict attachment cannot claim either by exact history.
+    h.app.run("solid.box", json!({"length":6,"width":4,"height":5,"corner":[4,3,5],"operation":"cut","targets":["Modified"]})).unwrap();
+    h.app.run("solid.split_face", json!({"body":"Modified","faces":[[2,5,10]],"plane":{"origin":[7,0,0],"normal":[1,0,0]}})).unwrap();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
     h.step(&json!({"start":"sketch.create"})).unwrap();
-    h.step(&json!({"click":{"world":[2.5,5,10]}})).unwrap();
+    h.step(&json!({"click":{"world":[8.5,1.5,10]}})).unwrap();
     assert!(h.app.session.active_sketch.is_none());
     assert!(h.app.dialog.as_ref().unwrap().error.is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
@@ -478,6 +479,35 @@ fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() 
         }
         assert_eq!(h.app.session.doc.to_json(), before);
     }
+}
+
+/// #14675: a construction plane built from a sketch made after this one. The panel says the
+/// sketch moves after the plane, the preview has no error, and OK moves it there and redefines it.
+#[test]
+fn redefine_panel_moves_the_sketch_after_a_later_plane_and_says_so() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch4"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"Sketch5"})).unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[0,40]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.finish_sketch();
+    h.app.run("construct.plane.along_path", json!({"path":{"sketch":"Sketch5","curve":line},"t":0.5,"name":"Plane5"})).unwrap();
+    let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"]);
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_none(), "no hint before a plane is chosen");
+    h.step(&json!({"widget":"Plane5"})).unwrap();
+    h.settle();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_some(), "the panel says the sketch moves");
+    assert_eq!(h.app.preview.error, None);
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"], "the preview moves nothing");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none(), "applied");
+    assert_eq!(order(&h), ["Sketch5", "Plane5", "Sketch4"]);
 }
 
 /// #5103: Redefine Sketch Plane names the plane a sketch is on now, not only "no body-face
