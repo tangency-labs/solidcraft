@@ -1718,3 +1718,103 @@ fn a_profile_bezier_with_an_ordinary_end_extrudes_one_wall_per_curve() {
     .expect("the extrude is a solid");
     assert_eq!(body.counts().unwrap()[0], 5);
 }
+
+/// #22184's profile traversed the other way round: its Bézier starts with the sharp turn.
+fn reversed(profile: Vec<Curve>) -> Vec<Curve> {
+    profile
+        .into_iter()
+        .rev()
+        .map(|c| match c {
+            Curve::Nurbs {
+                degree,
+                mut points,
+                knots,
+            } => {
+                // the knots 0, 0, 0, 0, 1, 1, 1, 1 read the same backwards
+                points.reverse();
+                Curve::Nurbs {
+                    degree,
+                    points,
+                    knots,
+                }
+            }
+            Curve::Line { start, end } => Curve::Line {
+                start: end,
+                end: start,
+            },
+            arc @ Curve::Arc { .. } => arc,
+        })
+        .collect()
+}
+
+/// The issue's plate: 100 x 80, 2 mm thick, its top face the plane x = 2 that the profiles
+/// above lie in (y in [-30, 30] and z in [-20, 20] inside it); 16000 mm^3.
+fn plate() -> Body {
+    make_box([0.0, -50.0, -40.0], [2.0, 100.0, 80.0]).unwrap()
+}
+
+/// The same profile with its Bézier's sharp turn at its start: the same closed solid,
+/// 15596.287689399 mm^3 (the area does not depend on the direction the loop is read).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_start_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = reversed(bezier_profile(|y, z| [2.0, y, z], sharp_leg()));
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Join: the profile extruded 10 mm off the plate's top and united with it, a valid
+/// solid of 16000 + 15596.287689399 mm^3 (the extrusion touches the plate only on its cap).
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_joins_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let joined = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Union)
+        .expect("the union is a solid")
+        .expect("the union is not empty");
+    assert!(joined.check(CheckLevel::All).unwrap().is_valid());
+    let v = joined.volume(1e-10).unwrap();
+    assert!((v - 31596.287689399).abs() <= 1e-6, "{v}");
+}
+
+/// #22184's Cut: the profile extruded 2 mm into the plate and subtracted, through it; a
+/// valid solid of 16000 - 2 x 1559.6287689399 = 12880.7424621202 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_cuts_through_its_plate() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let tool = extrude(
+        &profile,
+        [-1.0, 0.0, 0.0],
+        2.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let cut = solidcore_ops::boolean::boolean(plate(), tool, solidcore_ops::BooleanOp::Subtract)
+        .expect("the cut is a solid")
+        .expect("the cut is not empty");
+    assert!(cut.check(CheckLevel::All).unwrap().is_valid());
+    let v = cut.volume(1e-10).unwrap();
+    assert!((v - 12880.7424621202).abs() <= 1e-6, "{v}");
+}

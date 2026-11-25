@@ -4128,15 +4128,19 @@ mod tests {
         curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])
     }
 
-    #[test]
-    fn a_cubic_that_turns_sharply_at_its_end_is_cut_there_exactly() {
-        // #22184: the last control 0.05 from the end at 225 degrees; the radius of curvature
-        // falls to 1.2e-4 at t = 1, below test 14's 7.0e-3 (the curve's size over 1e4)
-        let k = Kernel::default();
+    /// The last control of #22184's cubic: `leg` from its end at 225 degrees. At t = 1 the
+    /// velocity is 3 leg u (u the unit direction from that control to the end) and the
+    /// acceleration 6 (P1 - 2 P2 + P3), so the radius of curvature there is
+    /// |v|^3 / |v x a| = 1.5 leg^2 / |u x (P1 - P3)| = 1.5 leg^2 / (45 / sqrt 2):
+    /// 1.18e-4 for leg 0.05.
+    fn sharp_cubic(leg: f64) -> BSplineCurve {
         let ang = 225.0_f64.to_radians();
-        let c = issue_22184_cubic([30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()]);
-        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
-        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        issue_22184_cubic([30.0 + leg * ang.cos(), 15.0 + leg * ang.sin()])
+    }
+
+    /// `pieces` are `c` cut exactly: they start and end where it does, meet consecutively
+    /// at one parameter and one point, each passes test 14 and lies on `c`.
+    fn assert_cut_exactly(k: &Kernel, c: &BSplineCurve, pieces: &[BSplineCurve]) {
         assert!(pieces.len() >= 2);
         let ends = |p: &BSplineCurve| {
             let i = p.natural_interval();
@@ -4151,20 +4155,75 @@ mod tests {
             pieces[pieces.len() - 1].natural_interval().max(),
             whole.max()
         );
-        assert_eq!(ends(&pieces[0])[0], ends(&c)[0]);
-        assert_eq!(ends(&pieces[pieces.len() - 1])[1], ends(&c)[1]);
+        assert_eq!(ends(&pieces[0])[0], ends(c)[0]);
+        assert_eq!(ends(&pieces[pieces.len() - 1])[1], ends(c)[1]);
         for w in pieces.windows(2) {
             // consecutive pieces meet at one parameter and one point
             assert_eq!(w[0].natural_interval().max(), w[1].natural_interval().min());
             assert_eq!(ends(&w[0])[1], ends(&w[1])[0]);
         }
-        for p in &pieces {
-            assert_eq!(p.small_radius(&k).unwrap(), SmallRadius::Nowhere);
+        for p in pieces {
+            assert_eq!(p.small_radius(k).unwrap(), SmallRadius::Nowhere);
             // the same curve: the piece's middle is the whole curve's point there
             let t = p.natural_interval().evaluate(0.5);
             let d = p.evaluate_point(t).unwrap() - c.evaluate_point(t).unwrap();
             assert!(d.length() <= 1e-12, "{d:?}");
         }
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_at_its_end_is_cut_there_exactly() {
+        // #22184: the radius of curvature falls to 1.2e-4 at t = 1, below test 14's 7.0e-3
+        // (the curve's size over 1e4)
+        let k = Kernel::default();
+        let c = sharp_cubic(0.05);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
+        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        assert_cut_exactly(&k, &c, &pieces);
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_at_its_start_is_cut_there_exactly() {
+        // #22184's cubic with its controls reversed: the same curve read from (30, 15), the
+        // sharp turn at t = 0
+        let k = Kernel::default();
+        let ang = 225.0_f64.to_radians();
+        let pts = [
+            [30.0, 15.0],
+            [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()],
+            [-10.0, 20.0],
+            [-30.0, -20.0],
+        ]
+        .map(|[x, y]| [x, y, 0.0]);
+        let c = curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(0));
+        let pieces = c.split_sharp_ends(&k).unwrap().expect("cut");
+        assert_cut_exactly(&k, &c, &pieces);
+    }
+
+    #[test]
+    fn a_cubic_that_turns_sharply_inside_is_not_cut() {
+        // (0, 0), (10, 10), (e, 10), (10, 0): at t = 1/2 the velocity is (0.75 e, 0) and the
+        // acceleration (-3 e, -60), so for e = 0.01 the radius of curvature there is
+        // |v|^3 / |v x a| = (0.75 e)^2 / 60 = 9.4e-7, far below test 14's tolerance (the
+        // curve's size, about 14, over 1e4) and inside the curve: it is left as given
+        let k = Kernel::default();
+        let pts = [[0.0, 0.0], [10.0, 10.0], [0.01, 10.0], [10.0, 0.0]].map(|[x, y]| [x, y, 0.0]);
+        let c = curve(3, &pts, &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::Elsewhere);
+        assert!(c.split_sharp_ends(&k).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_cubic_too_sharp_at_its_end_to_cut_off_is_not_cut() {
+        // leg 1e-3: the radius at t = 1 is 1.5e-6 / 31.82 = 4.7e-8 (`sharp_cubic`). A piece
+        // cut off there has a tolerance of its average speed over 1e4, which tends to the
+        // end's speed, 3 leg = 3e-3, over 1e4 = 3e-7 as the piece shrinks, and the speed
+        // only grows away from the end: no piece passes, so the curve is left as given
+        let k = Kernel::default();
+        let c = sharp_cubic(1e-3);
+        assert_eq!(c.small_radius(&k).unwrap(), SmallRadius::End(1));
+        assert!(c.split_sharp_ends(&k).unwrap().is_none());
     }
 
     #[test]
