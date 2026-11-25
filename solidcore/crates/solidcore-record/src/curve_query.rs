@@ -1,4 +1,5 @@
-//! Curve queries as data: where a curve is nearest a point ([`CurvePoint`]), where two curves
+//! Curve queries as data: where a curve is nearest a point or a ray ([`CurvePoint`],
+//! [`CurveRayPoint`]), where two curves
 //! cross ([`Crossing`]), where a curve meets a plane ([`PlaneSection`], [`PlanePart`]), what an
 //! imported cubic Bézier stands as ([`CubicStanding`], [`CubicPiece`]) and what a fit spline's
 //! bounds certify ([`FitSplineBounds`]). Plain data: the queries themselves are the kernel's,
@@ -17,6 +18,19 @@ pub struct CurvePoint {
     /// Its distance from the given point: the kernel solve's (not certified). A solution
     /// within the tolerance of an end is snapped to that end and keeps the solve's distance, so
     /// it is the distance to `point` within the tolerance.
+    pub distance: f64,
+}
+
+/// The point of a free curve nearest a ray.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CurveRayPoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The distance between the two: the kernel solve's (not certified).
     pub distance: f64,
 }
 

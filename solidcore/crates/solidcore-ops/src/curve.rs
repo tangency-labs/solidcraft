@@ -1065,19 +1065,6 @@ pub fn crossings(
     })?
 }
 
-/// The point of a free curve nearest a ray ([`closest_to_ray`]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CurveRayPoint {
-    /// The curve's parameter there, the record's.
-    pub parameter: f64,
-    /// The curve's point there.
-    pub point: [f64; 3],
-    /// The ray's point nearest it.
-    pub on_ray: [f64; 3],
-    /// The distance between the two: the kernel solve's (not certified).
-    pub distance: f64,
-}
-
 /// The point of `curve` nearest the ray from `origin` along `direction`, over the record's own
 /// range (as [`closest_point`] takes it): a pick through the view lands on the curve drawn
 /// under the pointer in any view, where the curve point nearest one point of the ray does so
