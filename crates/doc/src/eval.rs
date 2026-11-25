@@ -5443,6 +5443,46 @@ impl Model {
         true
     }
 
+    /// Follow a rename of parameter `old` to `new` without evaluating anything (#611): `doc` is
+    /// `previous` with only that rename ([`Document::param_rename_from`]), so every feature reads
+    /// the same values under the new name and keeps its result. False, leaving the model as it
+    /// was, when the model isn't the design's, a value differs or fails, a message quotes the old
+    /// name, or the rename reached what a result keeps a copy of or the model doesn't evaluate: a
+    /// sketch (its solved copy keeps its expressions), sheet metal or plastic rules, canvases,
+    /// placements or joints: evaluate then.
+    pub fn rename_param(&mut self, previous: &Document, doc: &Document, old: &str, new: &str) -> bool {
+        if self.results.len() != doc.features.len() || self.results.iter().zip(&doc.features).any(|(r, f)| r.id != f.id || r.stale) {
+            return false;
+        }
+        if previous.features.len() != doc.features.len()
+            || previous.features.iter().zip(&doc.features).any(|(a, b)| matches!(a.kind, FeatureKind::Sketch { .. }) && a != b)
+            || previous.sheet != doc.sheet
+            || previous.plastic != doc.plastic
+            || previous.canvases != doc.canvases
+            || previous.occurrences != doc.occurrences
+            || previous.assembly != doc.assembly
+        {
+            return false;
+        }
+        let (mut before, before_errors) = evaluation_values(previous);
+        let (after, after_errors) = evaluation_values(doc);
+        if !before_errors.is_empty() || !after_errors.is_empty() {
+            return false;
+        }
+        if let Some(v) = before.remove(old) {
+            before.insert(new.to_string(), v);
+        }
+        if before != after {
+            return false;
+        }
+        let quotes = |m: &String| m.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w == old);
+        if self.results.iter().any(|r| [&r.error, &r.warning].into_iter().flatten().any(quotes)) {
+            return false;
+        }
+        self.refingerprint(doc);
+        true
+    }
+
     /// Set every result's fingerprint to `doc`'s, so the next evaluation reuses every result
     /// (after a change that builds nothing differently).
     pub fn refingerprint(&mut self, doc: &Document) {

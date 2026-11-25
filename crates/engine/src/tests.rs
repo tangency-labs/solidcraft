@@ -8527,6 +8527,62 @@ fn cheap_commands_on_thousands_of_bodies_evaluate_nothing() {
     assert_eq!(meshes(&s), shown, "every body keeps its mesh");
 }
 
+/// #611: renaming a parameter changes no value, so it recomputes no feature, and nor do its
+/// undo and redo: the design is the one evaluating the renamed design gives, with the same
+/// bodies and volume. A parameter another parameter is worked out from is renamed the same way.
+/// A rename that also changes a value is evaluated.
+#[test]
+fn renaming_a_parameter_recomputes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "40", "unit": "mm"}));
+    run(&mut s, "parameters.add", json!({"name": "hole", "expression": "w / 10"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "w", "width": 20, "height": 5, "body_name": "Plate"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"diameter": "hole", "height": 7, "base": [4, 4, -1], "operation": "cut", "targets": ["Plate"], "name": "Hole"}),
+    );
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 4, "spacing1": "w / 4", "name": "Holes"}));
+    let fresh = |s: &Session| {
+        let mut f = Session::new((*s.doc).clone());
+        (volume(&mut f), f.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>())
+    };
+    let bodies = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let shown = (volume(&mut s), bodies(&s));
+    let length = |s: &Session| {
+        let f = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap();
+        serde_json::to_value(&f.kind).unwrap()["length"].clone()
+    };
+    for (command, params) in [
+        ("parameters.rename", json!({"name": "w", "new_name": "plate_w"})),
+        ("parameters.rename", json!({"name": "hole", "new_name": "hole_d"})),
+        ("edit.undo", json!({})),
+        ("edit.undo", json!({})),
+        ("edit.redo", json!({})),
+    ] {
+        s.evaluations = 0;
+        run(&mut s, command, params);
+        assert_eq!(s.model.last_recomputed, 0, "{command} recomputed a feature");
+        assert_eq!(s.evaluations, 0, "{command} evaluated the design");
+        assert_eq!((volume(&mut s), bodies(&s)), shown, "{command} kept the design");
+        assert_eq!(fresh(&s), shown, "{command}: evaluating the design gives the same");
+    }
+    assert_eq!(length(&s), json!("plate_w"));
+    assert_eq!(s.doc.param("hole").map(|p| p.expr.as_str()), Some("plate_w / 10"));
+
+    // A rename that also changes a value builds the design again.
+    let before = s.doc.clone();
+    let mut changed = (*before).clone();
+    changed.rename_param("plate_w", "w").unwrap();
+    changed.set_param("w", "60 mm", None, None).unwrap();
+    s.doc = std::sync::Arc::new(changed);
+    s.refresh_from(&before, false);
+    assert!(s.model.last_recomputed > 0, "a changed value is evaluated");
+    let moved = (volume(&mut s), bodies(&s));
+    assert_eq!(fresh(&s), moved);
+    assert!(rel(moved.0, shown.0) > 0.1, "{} vs {}", moved.0, shown.0);
+}
+
 /// #3397: a new, empty component changes nothing a feature reads, so creating one recomputes
 /// nothing, the first component of a design included: not a targeted cut, a Combine, a To
 /// Object extrude or a sketch on a face without a construction certificate (a legacy face

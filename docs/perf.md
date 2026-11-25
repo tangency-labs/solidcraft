@@ -895,6 +895,12 @@ can still recompute (oracle 61, 62): solving the sketch moves its points by roun
 its inputs are not exactly the old ones. Oracle 59's first parameter edit fails (a recipe
 expression the bench's `* 1.02` can't scale) and is left out.
 
+Renaming a parameter changes no value, so it recomputes no feature (#611): as for a body or a
+feature rename (#3044), the model keeps every result and takes the renamed design's fingerprints.
+A rename that reaches a sketch, sheet metal or plastic rules, canvases or placements is still
+evaluated. On the 20 x 20 hole plate (`parameters.rename` of the box length) the step went from
+22413 ms (every feature evaluated) to 1.2 ms (none).
+
 
 ## Prism pairs, body measurements and the evaluation cache budget (2026-10-13)
 
