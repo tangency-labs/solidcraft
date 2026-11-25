@@ -450,6 +450,9 @@ pub fn split_body(body: &Body, tool: &Tool) -> Result<Option<(Body, Body)>> {
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
 }
 
+/// A body's two parts behind and in front of a tool, `None` where a side is left empty.
+type Parts = Option<(Brep, Brep)>;
+
 /// [`split_body`] by a tool whose surface closes on itself both ways (a sphere, a whole torus):
 /// its one-face sheet is then a closed shell, the solid the surface bounds, which a slice does
 /// not take; the part behind the surface (inside it, its normal pointing out) is the body's
@@ -461,7 +464,7 @@ fn by_closed_tool(
     body: &Body,
     tool: &Made,
     tolerance: f64,
-) -> solidcore::Result<Result<Option<Option<(Brep, Brep)>>>> {
+) -> solidcore::Result<Result<Option<Parts>>> {
     if !is_manifold_solid(&body.lock())? {
         return Ok(Err(Error::NotSolid));
     }
