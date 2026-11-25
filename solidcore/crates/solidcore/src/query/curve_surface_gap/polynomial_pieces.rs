@@ -41,11 +41,13 @@
 //! | Rust                      | Upstream |
 //! |---------------------------|----------|
 //! | [`trim_distance_bound`]   | none     |
+//! | [`trim_distance_lower_bound`] | none |
 //!
 //! Deviations: none (new code). The bisection is bounded by `MAX_PIECES` and `MAX_DEPTH`
-//! of [`super`], and polls cancellation at every piece.
+//! of [`super`] (the lower bound's by [`LOWER_PIECES`]), and polls cancellation at every
+//! piece.
 
-use super::{NetSurface, CLOSE_ABSOLUTE, CLOSE_RELATIVE, MAX_DEPTH, MAX_PIECES, OP};
+use super::{NetSurface, CLOSE_ABSOLUTE, MAX_DEPTH, MAX_PIECES, OP};
 use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::series::V3;
@@ -751,7 +753,8 @@ const PREIMAGE_STEPS: usize = 24;
 ///
 /// A piece whose bound is at most `accept` is closed at once, so a result at most `accept`
 /// says only that (the distance is no larger). Any other piece is closed once its bound is
-/// within `CLOSE_RELATIVE` of its end values (or within `floor` or `CLOSE_ABSOLUTE` of
+/// within the share `close` of its end values (`CLOSE_RELATIVE` as most bounds close; a
+/// smaller one closes nearer the distance at the cost of more pieces, within the same budget) (or within `floor` or `CLOSE_ABSOLUTE` of
 /// them), and is bisected until then: above `accept` the result stands that close above
 /// the largest `|C(φ(s)) − S(W(s))|` at the pieces' ends, each the distance to a point of
 /// `C` the guesses found near.
@@ -762,6 +765,9 @@ const PREIMAGE_STEPS: usize = 24;
 /// before `MAX_DEPTH` or `MAX_PIECES` (its bound may stand far above the distance: a loose
 /// bound is not returned). On the last piece the budget allows, the constant maps at its
 /// two ends are tried beside the line.
+///
+/// With the bound comes the witness: the trim's parameter where the plain floating-point gap
+/// the bisection met was largest, where [`trim_distance_lower_bound`] may look.
 ///
 /// # Errors
 ///
@@ -776,8 +782,12 @@ pub(crate) fn trim_distance_bound(
     surface: &Surface,
     floor: f64,
     accept: f64,
-) -> Result<Option<f64>> {
+    close: f64,
+) -> Result<Option<TrimDistance>> {
     k.check_cancelled(OP)?;
+    if !(close.is_finite() && close >= 0.0) {
+        return Ok(None);
+    }
     let ([elo, ehi], [lo, hi]) = (edge, trim);
     let ordered = |a: f64, b: f64| a.is_finite() && b.is_finite() && a < b;
     if !(ordered(elo, ehi) && ordered(lo, hi) && floor.is_finite() && floor >= 0.0) {
@@ -868,6 +878,8 @@ pub(crate) fn trim_distance_bound(
         .rev()
         .collect();
     let mut worst = 0.0_f64;
+    // (the largest plain floating-point gap met, and where)
+    let mut witness = (f64::NEG_INFINITY, lo);
     let mut made = stack.len();
     while let Some((a, b, ta, tb, depth)) = stack.pop() {
         k.check_cancelled(OP)?;
@@ -934,12 +946,13 @@ pub(crate) fn trim_distance_bound(
                 for (s, t) in [(a, ta), (b, tb)] {
                     if let Some(g) = gap_at(s, t)? {
                         scale = scale.max(g);
+                        if g > witness.0 {
+                            witness = (g, s);
+                        }
                     }
                 }
                 let term = (Ivl::from(bound) - Ivl::from(scale)).hi;
-                if bound <= accept
-                    || term <= (CLOSE_RELATIVE * scale).max(floor).max(CLOSE_ABSOLUTE)
-                {
+                if bound <= accept || term <= (close * scale).max(floor).max(CLOSE_ABSOLUTE) {
                     worst = worst.max(bound);
                     continue;
                 }
@@ -965,8 +978,168 @@ pub(crate) fn trim_distance_bound(
     if !worst.is_finite() {
         return Ok(None);
     }
-    Ok(super::plus_net_offset(worst, off))
+    Ok(
+        super::plus_net_offset(worst, off).map(|bound| TrimDistance {
+            bound,
+            witness: witness.1,
+        }),
+    )
 }
+
+/// What [`trim_distance_bound`] proves: the bound, and a parameter of the trim to look for
+/// a lower bound at.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TrimDistance {
+    /// The proved upper bound on `sup_s dist(S(W(s)), C([edge]))`.
+    pub(crate) bound: f64,
+    /// The parameter `s` of the trim where the plain floating-point gap the bisection met
+    /// was largest (a piece's end): a witness only, which proves nothing by itself
+    /// ([`trim_distance_lower_bound`] encloses the distance there).
+    pub(crate) witness: f64,
+}
+
+/// Not upstream (#20643): a proved lower bound on `dist(S(W(s)), C([edge]))` at the one
+/// parameter `s` of the UV curve `W`, so a lower bound on `sup_s dist(S(W(s)), C([edge]))`
+/// ([`trim_distance_bound`] bounds it above).
+///
+/// The point is enclosed in outward-rounded intervals: `W(s)` from `W`'s stored control
+/// points, weights and knots, the net's point at that box (`NetSurface::partials`, its slack
+/// past the net's end taken off), and a cone's (or cylinder's) distance off its net
+/// ([`super::cone_net_offset`]) taken off. `C − P` is enclosed over pieces of `edge` (first
+/// cut at `C`'s knots) moved by the middle of `P`'s box ([`curve_derivs_over_about`]), and
+/// the least magnitude of each piece's enclosure bounds the distance from `P` to it below.
+/// The piece with the least such bound is bisected, best first, until that least bound is
+/// past `over` (the distance is then shown past it) or [`LOWER_PIECES`] pieces are made
+/// (the least bound, a lower bound still, is returned).
+///
+/// `None` where the point or a piece is not enclosed: a surface that is not a NURBS net or
+/// whose net is not parameterised as the surface, an empty, unordered or not finite range,
+/// or one past either curve's domain.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn trim_distance_lower_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    edge: [f64; 2],
+    uv: &BSplineCurve,
+    s: f64,
+    surface: &Surface,
+    over: f64,
+) -> Result<Option<f64>> {
+    use super::{minus, norm_lower};
+    use crate::blend::fillet_section::certificate::{curve_derivs_over, curve_derivs_over_about};
+    k.check_cancelled(OP)?;
+    let [elo, ehi] = edge;
+    if !(elo.is_finite() && ehi.is_finite() && elo < ehi && s.is_finite()) {
+        return Ok(None);
+    }
+    let Ok(w) = uv.evaluate_point(s) else {
+        return Ok(None);
+    };
+    let mut surface = surface.clone_for_evaluation()?;
+    surface.detach_for_edit();
+    let Some(net) = NetSurface::of(k, &surface, &[Point2::new(w.x, w.y)])? else {
+        return Ok(None);
+    };
+    let Some(off) = super::cone_net_offset(k, &surface, &net, uv)? else {
+        return Ok(None);
+    };
+    let (Some(cn), Some(wn)) = (stored_nurbs(curve), stored_nurbs(uv)) else {
+        return Ok(None);
+    };
+    let within = |n: &NurbsCurve, a: f64, b: f64| match (n.u.get(n.p), n.u.get(n.n)) {
+        (Some(&d0), Some(&d1)) => d0 <= a && b <= d1,
+        _ => false,
+    };
+    if !(within(&cn, elo, ehi) && within(&wn, s, s)) {
+        return Ok(None);
+    }
+    let w = curve_derivs_over(&wn, Ivl::from(s), 0, None)?;
+    let (point, slack) = match net.partials(&w, 0, 0) {
+        Ok((p, slack)) => (p.at(0, 0), slack),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let mid = |a: Ivl| 0.5 * (a.lo + a.hi);
+    let about = [mid(point.x), mid(point.y), mid(point.z)];
+    if !about.iter().all(|x| x.is_finite()) {
+        return Ok(None);
+    }
+    // `P − about`, enclosed
+    let local = minus(
+        point,
+        V3 {
+            x: Ivl::from(about[0]),
+            y: Ivl::from(about[1]),
+            z: Ivl::from(about[2]),
+        },
+    );
+    // the least distance from the box of `P` to `C` over `[a, b]`, a lower bound
+    let piece = |a: f64, b: f64| -> Result<Option<f64>> {
+        let c = curve_derivs_over_about(&cn, Ivl::new(a, b), 0, None, about)?;
+        Ok(c.first().and_then(|&c0| norm_lower(minus(c0, local))))
+    };
+    let mut ends = vec![elo];
+    let mut cuts: Vec<f64> =
+        cn.u.iter()
+            .copied()
+            .filter(|&x| elo < x && x < ehi)
+            .collect();
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    ends.extend(cuts);
+    ends.push(ehi);
+    if ends.len() > LOWER_PIECES {
+        return Ok(None);
+    }
+    let mut pieces = Vec::new();
+    for pair in ends.windows(2) {
+        let &[a, b] = pair else {
+            return Ok(None);
+        };
+        let Some(d) = piece(a, b)? else {
+            return Ok(None);
+        };
+        pieces.push((d, a, b));
+    }
+    // (the point's distance off the net's point: the slack past the net's end and a cone's
+    // distance off its net, each taken off rounded down)
+    let less = |d: f64| {
+        (Ivl::from(d) - Ivl::from(slack) - Ivl::from(off))
+            .lo
+            .max(0.0)
+    };
+    let mut made = pieces.len();
+    loop {
+        k.check_cancelled(OP)?;
+        let Some((at, &(least, a, b))) = pieces
+            .iter()
+            .enumerate()
+            .min_by(|x, y| (x.1).0.total_cmp(&(y.1).0))
+        else {
+            return Ok(None);
+        };
+        let lower = less(least);
+        let m = 0.5 * (a + b);
+        if lower > over || made + 2 > LOWER_PIECES || !(a < m && m < b) {
+            return Ok(lower.is_finite().then_some(lower));
+        }
+        let (Some(d0), Some(d1)) = (piece(a, m)?, piece(m, b)?) else {
+            return Ok(None);
+        };
+        pieces.swap_remove(at);
+        pieces.push((d0, a, m));
+        pieces.push((d1, m, b));
+        made += 2;
+    }
+}
+
+/// The pieces of the curve [`trim_distance_lower_bound`] makes at most: it stops there with
+/// the bound it has.
+const LOWER_PIECES: usize = 1 << 12;
 
 /// The ulps (of its middle) [`trim_distance_bound`] pulls each end of a piece's line in by,
 /// so the line's values, enclosed with outward rounding, stay inside the knot span (and the
@@ -983,6 +1156,7 @@ mod tests {
     };
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};
+    use crate::query::curve_surface_gap::CLOSE_RELATIVE;
 
     /// [`trim_distance_bound`] of `uv`'s image over `trim` from `curve` over `[0, 1]`.
     fn distance(
@@ -994,7 +1168,18 @@ mod tests {
         floor: f64,
         accept: f64,
     ) -> Result<Option<f64>> {
-        trim_distance_bound(k, curve, [0.0, 1.0], uv, trim, s, floor, accept)
+        trim_distance_bound(
+            k,
+            curve,
+            [0.0, 1.0],
+            uv,
+            trim,
+            s,
+            floor,
+            accept,
+            CLOSE_RELATIVE,
+        )
+        .map(|d| d.map(|d| d.bound))
     }
 
     /// A stationary quotient's enclosure is as narrow as its own variation, not as wide as its
@@ -1335,7 +1520,18 @@ mod tests {
         for range in [[0.5, 0.5], [0.7, 0.3], [f64::NAN, 1.0], [0.0, 1.5]] {
             let g = distance(&k, &curve, &uv, &s, range, 1e-9, 1e-5).unwrap();
             assert_eq!(g, None, "{range:?}");
-            let g = trim_distance_bound(&k, &curve, range, &uv, [0.0, 1.0], &s, 1e-9, 1e-5);
+            let g = trim_distance_bound(
+                &k,
+                &curve,
+                range,
+                &uv,
+                [0.0, 1.0],
+                &s,
+                1e-9,
+                1e-5,
+                CLOSE_RELATIVE,
+            )
+            .map(|d| d.map(|d| d.bound));
             assert_eq!(g.unwrap(), None, "edge {range:?}");
         }
         let token = crate::kernel::CancelToken::default();
@@ -1351,8 +1547,17 @@ mod tests {
         );
         // (a cancelled kernel stops the trim bound before any range it would refuse)
         for range in [[0.0, 1.0], [0.7, 0.3], [f64::NAN, 1.0]] {
-            let stopped =
-                trim_distance_bound(&cancelled, &curve, range, &uv, [0.0, 1.0], &s, 1e-9, 1e-5);
+            let stopped = trim_distance_bound(
+                &cancelled,
+                &curve,
+                range,
+                &uv,
+                [0.0, 1.0],
+                &s,
+                1e-9,
+                1e-5,
+                CLOSE_RELATIVE,
+            );
             assert!(
                 matches!(&stopped, Err(e) if e.is_cancelled()),
                 "{range:?} {stopped:?}"

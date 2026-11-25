@@ -68,7 +68,7 @@ pub(crate) const MAX_PIECES: usize = 1 << 15;
 /// The deepest bisection of one piece.
 const MAX_DEPTH: u32 = 30;
 /// A piece is closed once its second-order term is at most this fraction of its end values.
-const CLOSE_RELATIVE: f64 = 1.0e-3;
+pub(crate) const CLOSE_RELATIVE: f64 = 1.0e-3;
 /// ... or at most this absolute amount, whatever the caller's floor: below any tolerance a
 /// model carries.
 const CLOSE_ABSOLUTE: f64 = 1.0e-13;
@@ -4226,8 +4226,8 @@ pub fn crv_on_surf_trim_gap_bound(
         return Ok(None);
     };
     let (Some(r_face), Some(r_curve)) = (
-        bisection_residual(surface, &face_net),
-        bisection_residual(cos.surface(), &curve_net),
+        bisection_residual(k, surface, &face_net, None)?,
+        bisection_residual(k, cos.surface(), &curve_net, None)?,
     ) else {
         return Ok(None);
     };

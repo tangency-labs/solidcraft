@@ -554,6 +554,16 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 /// as the end check left it: a raise is made only to a bound closed on the distance itself.
 /// No trim and no other geometry changes; a tolerance is only raised.
 ///
+/// A raise is made only where it is proved needed (#20643): the upper bound is refined over
+/// a fixed budget of rounds (`COVER_ROUNDS`, each closing the pieces a thousand times finer)
+/// and an edge is raised only where a proved lower bound on the distance, at the point of the
+/// trim where the bisection met its largest gap ([`trim_distance_lower_bound`]), is past its
+/// tolerance; the raise is then to the least upper bound the rounds proved. An edge whose
+/// upper bound comes within its tolerance in any round, or whose lower bound is not shown
+/// past it within the budget, keeps its tolerance.
+///
+/// [`trim_distance_lower_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_lower_bound
+///
 /// Each raise, and each vertex tolerance it cascades to, is recorded with the value before
 /// it ([`Brep::trim_cover_raises`]): the fit tolerance along a raised edge
 /// (`topology::edgeuse::p3::fit_tolerance`) stays the one the read had made, so covering a
@@ -612,12 +622,18 @@ enum KeptTrimGap {
     Bounded(EdgeId, f64),
     /// The distance is not enclosed.
     Unbounded,
+    /// (#20643) The distance is enclosed past the tolerance, but no lower bound past it was
+    /// proved within the refinement budget ([`COVER_ROUNDS`]): the tolerance stays.
+    Undecided,
 }
 
 /// The proved distance of edge use `eu`'s own UV trim curve's image from its edge's curve
 /// ([`cover_kept_uv_trim_curves`]).
 fn kept_trim_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<KeptTrimGap> {
-    use crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound;
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::query::curve_surface_gap::polynomial_pieces::{
+        trim_distance_bound, trim_distance_lower_bound,
+    };
     use edge as ed;
 
     let Some(trim) = eu1::uv_trim_curve_pointer(b, eu)? else {
@@ -639,24 +655,71 @@ fn kept_trim_gap(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<KeptTrimGap> {
     }
     let tol = ed::tolerance(b, e)?;
     let ivl = ed::interval(b, e)?;
-    let floor = tol / 100.0;
     // a distance this small is all the cover needs to know: with the net's bound and the
     // sum's rounding below, it is within the tolerance
     let accept = tol / (1.0 + 8.0 * f64::EPSILON) - net_bound;
     let edge_range = [ivl.min(), ivl.max()];
     let own = trim.natural_interval();
     let trim_range = [own.min(), own.max()];
-    let gap = trim_distance_bound(k, &c, edge_range, &w, trim_range, surface, floor, accept)?;
-    let Some(gap) = gap else {
-        return Ok(KeptTrimGap::Unbounded);
-    };
-    // the sum's rounding, covered
-    let bound = (gap + net_bound) * (1.0 + 4.0 * f64::EPSILON);
-    if !bound.is_finite() {
-        return Ok(KeptTrimGap::Unbounded);
+    // (#20643 ruling) the enclosure is refined round by round ([`COVER_ROUNDS`]) until the
+    // upper bound is within the tolerance (no raise), or its lower bound is past it and the
+    // rounds have closed the upper bound as near as they can (a raise to the least upper
+    // bound); undecided when the rounds run out, and the tolerance then stays.
+    let mut upper = f64::INFINITY;
+    let mut past = false;
+    for (round, &(close, share)) in COVER_ROUNDS.iter().enumerate() {
+        let floor = tol * share;
+        let d = trim_distance_bound(
+            k, &c, edge_range, &w, trim_range, surface, floor, accept, close,
+        )?;
+        // the sum's rounding, covered
+        let bound = d.map(|d| (d.bound + net_bound) * (1.0 + 4.0 * f64::EPSILON));
+        let (Some(d), Some(bound)) = (d, bound.filter(|x| x.is_finite())) else {
+            // (a later round's budget running out leaves the earlier rounds' bounds standing)
+            if round == 0 {
+                return Ok(KeptTrimGap::Unbounded);
+            }
+            break;
+        };
+        upper = upper.min(bound);
+        if upper <= tol {
+            return Ok(KeptTrimGap::Bounded(e, upper));
+        }
+        if !past {
+            let lower = trim_distance_lower_bound(
+                k,
+                &c,
+                edge_range,
+                &w,
+                d.witness,
+                surface,
+                tol + net_bound,
+            )?;
+            // the net's own distance from the definition, taken off rounded down
+            past = lower.is_some_and(|l| (Ivl::from(l) - Ivl::from(net_bound)).lo > tol);
+        }
     }
-    Ok(KeptTrimGap::Bounded(e, bound))
+    Ok(if past {
+        KeptTrimGap::Bounded(e, upper)
+    } else {
+        KeptTrimGap::Undecided
+    })
 }
+
+/// The rounds [`kept_trim_gap`] refines an edge use's distance in, as `(close, floor share)`:
+/// a piece of [`trim_distance_bound`] closes within `close` of its end values or within
+/// `floor share` of the edge's tolerance. The first is the cover's own (`CLOSE_RELATIVE`,
+/// `1e-3`, and a hundredth), so an edge use within
+/// its tolerance is decided as before; each later one is a thousand times finer (the last
+/// floor, for a tolerance of `1e-5`, is the pieces' absolute floor of `1e-13`), each within
+/// the bisection's own piece and depth budget. The refinement budget is these three rounds.
+///
+/// [`trim_distance_bound`]: crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound
+const COVER_ROUNDS: [(f64, f64); 3] = [
+    (crate::query::curve_surface_gap::CLOSE_RELATIVE, 1.0e-2),
+    (1.0e-6, 1.0e-5),
+    (1.0e-9, 1.0e-8),
+];
 
 /// The B-spline form of `c` that [`trim_distance_bound`] encloses: a line's B-spline part
 /// made with its NURB, the B-spline part of any other curve that is one (`None` for the
@@ -3954,9 +4017,10 @@ mod tests {
                 s,
                 tol / 1000.0,
                 0.0,
+                crate::query::curve_surface_gap::CLOSE_RELATIVE,
             )
             .unwrap()
-            .map_or(f64::INFINITY, |g| g + net),
+            .map_or(f64::INFINITY, |g| g.bound + net),
             _ => f64::INFINITY,
         })
     }
@@ -4004,6 +4068,184 @@ mod tests {
             worst = worst.max(best.min(at(0.5 * (lo + hi), p)));
         }
         worst
+    }
+
+    /// Edge use `eu`'s own trim, edge and face as the cover reads them: the edge curve's and
+    /// trim's B-spline forms, the edge interval, the trim's interval and the face's surface.
+    #[allow(clippy::type_complexity)]
+    fn cover_inputs(
+        b: &Brep,
+        eu: EdgeuseId,
+    ) -> Option<(BSplineCurve, BSplineCurve, [f64; 2], [f64; 2], &Surface)> {
+        let trim = eu1::uv_trim_curve_pointer(b, eu).unwrap()?;
+        let e = eu1::edge(b, eu).unwrap().unwrap();
+        let f = eu1::face(b, eu).unwrap().unwrap();
+        let s = face2::surface(b, f).unwrap().unwrap();
+        let c = edge::curve(b, e).unwrap().unwrap();
+        let i = edge::interval(b, e).unwrap();
+        let own = trim.natural_interval();
+        Some((
+            nurb_form(c).unwrap().unwrap().into_owned(),
+            nurb_form(trim).unwrap().unwrap().into_owned(),
+            [i.min(), i.max()],
+            [own.min(), own.max()],
+            s,
+        ))
+    }
+
+    /// The bound the cover's first round proves for edge use `eu` against tolerance `tol`
+    /// (the one the cover raised to before #20643's refinement), the surface net's own
+    /// distance from its definition counted in as [`kept_trim_gap`] counts it, with its
+    /// witness.
+    fn first_round(
+        k: &Kernel,
+        b: &Brep,
+        eu: EdgeuseId,
+        tol: f64,
+    ) -> crate::query::curve_surface_gap::polynomial_pieces::TrimDistance {
+        use crate::query::curve_surface_gap::polynomial_pieces::trim_distance_bound;
+        let (c, w, edge_range, trim_range, s) = cover_inputs(b, eu).unwrap();
+        let net_bound = net_bound(s);
+        let accept = tol / (1.0 + 8.0 * f64::EPSILON) - net_bound;
+        let d = trim_distance_bound(
+            k,
+            &c,
+            edge_range,
+            &w,
+            trim_range,
+            s,
+            tol / 100.0,
+            accept,
+            crate::query::curve_surface_gap::CLOSE_RELATIVE,
+        )
+        .unwrap()
+        .unwrap();
+        crate::query::curve_surface_gap::polynomial_pieces::TrimDistance {
+            bound: (d.bound + net_bound) * (1.0 + 4.0 * f64::EPSILON),
+            ..d
+        }
+    }
+
+    /// The net's own distance from the definition it is kept for ([`kept_trim_gap`]).
+    fn net_bound(s: &Surface) -> f64 {
+        s.procedural_definition().map_or(0.0, |d| d.bound())
+    }
+
+    /// `Fillet/blade_hub_1.smb` edge 97: the kept trim of its edge use 360 runs its cone's
+    /// whole u period, from the seam round to the seam, about 2.4e-5 off the edge, past the
+    /// file's tolerance (1.97e-5). The cover raises it only on a proved lower bound past the
+    /// tolerance (#20643, case (ii)), and to the least upper bound its refinement rounds
+    /// prove: below the first round's bound (the raise without the refinement), and at or
+    /// above a dense sample of the distance.
+    #[test]
+    fn a_seam_to_seam_trim_raises_to_its_refined_bound() {
+        use crate::query::curve_surface_gap::polynomial_pieces::trim_distance_lower_bound;
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, "Fillet/blade_hub_1.smb");
+        let e = EdgeId::from_index(97);
+        let &(before, after) = b.trim_cover_raises().edges.get(&e).unwrap();
+        assert!((before - 1.974742938566892e-5).abs() < 1e-18, "{before:e}");
+        assert_eq!(edge::tolerance(&b, e).unwrap(), after);
+        let mut seen = 0;
+        for eu in edgeuses(&b, None).unwrap() {
+            if eu1::edge(&b, eu).unwrap() != Some(e) {
+                continue;
+            }
+            let Some((cb, w, edge_range, _, s)) = cover_inputs(&b, eu) else {
+                continue;
+            };
+            if eu.index() != 360 {
+                continue;
+            }
+            assert!(matches!(s.kind(), SurfaceKind::Cone(_)), "{:?}", s.kind());
+            // (the trim spans the surface's whole u period: it starts and ends on the seam)
+            let f = eu1::face(&b, eu).unwrap().unwrap();
+            let d = b.face(f).unwrap().uv_domain.u_interval();
+            let trim = eu1::uv_trim_curve_pointer(&b, eu).unwrap().unwrap();
+            let own = trim.natural_interval();
+            let us = [own.min(), own.max()].map(|t| trim.evaluate_point(&k, t).unwrap().x);
+            assert!(
+                (us[0] - us[1]).abs() >= (d.max() - d.min()) * (1.0 - 1e-9),
+                "{us:?} over {d:?}"
+            );
+            let first = first_round(&k, &b, eu, before);
+            assert!(after < first.bound, "{after:e} not below {:e}", first.bound);
+            // (the lower bound is the trim's distance from the net: past the tolerance by
+            // more than the net's own distance from the surface)
+            let net = net_bound(s);
+            let over = before + net;
+            let lower = trim_distance_lower_bound(&k, &cb, edge_range, &w, first.witness, s, over)
+                .unwrap()
+                .unwrap();
+            assert!(
+                lower - net > before && lower <= after,
+                "{lower:e} {net:e} {after:e}"
+            );
+            let sampled = sampled_distance(&k, &b, eu, 256);
+            assert!(sampled <= after, "{sampled:e} {after:e}");
+            seen += 1;
+        }
+        assert!(seen > 0);
+    }
+
+    /// `Solids/extrusion_old.smb` edges 18 and 19: full circles whose kept trims the first
+    /// round bounds past the file's tolerance (5.4516e-4) by about 4e-6, the cone's distance
+    /// off its net (the seam's tear, about 1.05e-7) counted in. The refinement brings the upper
+    /// bound to within 1e-8 of the tolerance but proves no lower bound past it (the tear is
+    /// taken off that side too): undecided (#20643, case (iii)), so the tolerance stays the
+    /// file's. Without the refinement rule the cover raised both to the first round's bound.
+    #[test]
+    fn an_undecided_raise_keeps_the_tolerance() {
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, "Solids/extrusion_old.smb");
+        assert!(b.trim_cover_raises().is_empty());
+        let mut seen = 0;
+        for e in [18, 19].map(EdgeId::from_index) {
+            let tol = edge::tolerance(&b, e).unwrap();
+            assert!((tol - 5.451593209797976e-4).abs() < 1e-15, "{tol:e}");
+            for eu in edgeuses(&b, None).unwrap() {
+                if eu1::edge(&b, eu).unwrap() != Some(e) || cover_inputs(&b, eu).is_none() {
+                    continue;
+                }
+                let first = first_round(&k, &b, eu, tol);
+                if first.bound <= tol {
+                    continue;
+                }
+                assert!(first.bound > tol + 1e-6, "{:e} {tol:e}", first.bound);
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 2);
+    }
+
+    /// `Solids/revolution.smb` edges 13 and 14: kept trims the first round bounds past the
+    /// file's tolerance (5.4516e-4), which the second round's finer cover proves within it
+    /// (#20643, case (i)): the tolerance stays the file's, and a dense sample of each trim's
+    /// distance stays under it. Without the refinement rule the cover raised both to the first
+    /// round's bound.
+    #[test]
+    fn a_refined_bound_within_the_tolerance_keeps_it() {
+        let mut k = Kernel::default();
+        let b = read_brep_file(&mut k, "Solids/revolution.smb");
+        let mut seen = 0;
+        for e in [13, 14].map(EdgeId::from_index) {
+            assert!(!b.trim_cover_raises().edges.contains_key(&e));
+            let tol = edge::tolerance(&b, e).unwrap();
+            assert!((tol - 5.4515932098e-4).abs() < 1e-14, "{tol:e}");
+            for eu in edgeuses(&b, None).unwrap() {
+                if eu1::edge(&b, eu).unwrap() != Some(e) || cover_inputs(&b, eu).is_none() {
+                    continue;
+                }
+                let first = first_round(&k, &b, eu, tol);
+                if first.bound <= tol {
+                    continue;
+                }
+                let sampled = sampled_distance(&k, &b, eu, 256);
+                assert!(sampled <= tol, "{sampled:e} {tol:e}");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 2, "{seen}");
     }
 
     /// Every UV trim curve a read keeps lies within its edge's tolerance of the edge, the

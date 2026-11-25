@@ -1615,9 +1615,20 @@ mod tests {
             let axis = (n1 - n0) * (1.0 / (n1 - n0).length());
             let off = p - n0;
             let across = (off - axis * off.dot(axis)).length();
-            let g = trim_distance_bound(&k, &curve, [0.0, 1.0], &uv, [0.0, 1.0], &s, 1.0e-14, 0.0)
-                .unwrap()
-                .unwrap();
+            let g = trim_distance_bound(
+                &k,
+                &curve,
+                [0.0, 1.0],
+                &uv,
+                [0.0, 1.0],
+                &s,
+                1.0e-14,
+                0.0,
+                crate::query::curve_surface_gap::CLOSE_RELATIVE,
+            )
+            .map(|d| d.map(|d| d.bound))
+            .unwrap()
+            .unwrap();
             assert!(g >= across, "{e:e}: {g:e} under {across:e}");
             // (the trim's box's residual: the seam's tear counted only near the seam)
             let net = NetSurface::of(&k, &s, &[]).unwrap().unwrap();
