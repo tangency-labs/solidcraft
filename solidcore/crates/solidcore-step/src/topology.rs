@@ -375,6 +375,27 @@ const FEATURE_MARGIN: f64 = 0.25;
 /// as the solid's tolerance, such edges read as zero-length edges, coincident edges and loops
 /// that turn the wrong way, and the kernel refuses every operation on the solid.
 fn feature_tolerance(brep: &Brep, stated: f64) -> Option<f64> {
+    let shortest = shortest_edge(brep);
+    // An edge as long as the stated tolerance or longer is one that tolerance tells apart.
+    if shortest >= stated {
+        return None;
+    }
+    let fine = (FEATURE_MARGIN * shortest).max(MIN_TOLERANCE);
+    (fine < stated).then_some(fine)
+}
+
+/// Whether a solid read at a finer tolerance than its file states still tells its shortest
+/// edge apart: no edge's own tolerance may reach that edge's length. An edge that lies off its
+/// faces' surfaces carries its gap as its tolerance, whatever the solid was read at; a gap as
+/// long as the shortest edge makes the finer read no finer where it matters, and its tolerances
+/// mixed four orders of magnitude apart (1.6e-6 mm beside 2.6e-4 mm on one face of an Inventor
+/// plate) leave the next boolean on that face with coincident edges (issue #18848).
+fn fine_read_holds(fine: &Brep, shortest: f64) -> bool {
+    fine.edges.iter().all(|e| e.tolerance < shortest)
+}
+
+/// The shortest distance between the two vertices of an edge, infinite when there is none.
+fn shortest_edge(brep: &Brep) -> f64 {
     let mut shortest = f64::INFINITY;
     for e in &brep.edges {
         let [a, b] = e.vertices;
@@ -387,12 +408,7 @@ fn feature_tolerance(brep: &Brep, stated: f64) -> Option<f64> {
             shortest = d;
         }
     }
-    // An edge as long as the stated tolerance or longer is one that tolerance tells apart.
-    if shortest >= stated {
-        return None;
-    }
-    let fine = (FEATURE_MARGIN * shortest).max(MIN_TOLERANCE);
-    (fine < stated).then_some(fine)
+    shortest
 }
 
 fn read_with<'a>(
@@ -412,7 +428,18 @@ fn read_with<'a>(
     // Read again at the tolerance its own features set; the faces count against the budget once.
     let after = *budget;
     *budget = before;
+    let shortest = shortest_edge(&first.brep);
     match read_at(ex, reader, item, fine, budget, trims, left_out, sheets) {
+        // Its edges' own gaps undo the finer read: as the file states it, with a note why.
+        Ok(solid) if !fine_read_holds(&solid.brep, shortest) => {
+            *budget = after;
+            let widest = solid.brep.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+            let mut solid = first;
+            solid.notes.push(format!(
+                "the file states a tolerance of {stated} mm, but the part has edges as short as {shortest:.3e} mm; read at {fine:.3e} mm, edges off their faces keep gaps up to {widest:.3e} mm, at least its shortest edge, so it is read as stated"
+            ));
+            Ok(solid)
+        }
         Ok(mut solid) => {
             solid.notes.push(format!(
                 "the file states a tolerance of {stated} mm, but the part has edges as short as {:.3e} mm: read at {fine:.3e} mm",
