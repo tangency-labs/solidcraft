@@ -917,6 +917,20 @@ impl GpuScene {
         GpuScene { palette: Arc::new(palette), ..Default::default() }
     }
 
+    /// The sizes of the lists a sketch scene fills (`lines`, `overlay`, `under`, `trans`), for
+    /// [`GpuScene::reserve_lists`] on the next one.
+    pub fn capacity_hint(&self) -> [usize; 4] {
+        [self.lines.len(), self.overlay.len(), self.under.len(), self.trans.len()]
+    }
+
+    /// Room for the sizes [`GpuScene::capacity_hint`] gave. Only capacity: no byte changes.
+    pub fn reserve_lists(&mut self, sizes: [usize; 4]) {
+        self.lines.reserve(sizes[0]);
+        self.overlay.reserve(sizes[1]);
+        self.under.reserve(sizes[2]);
+        self.trans.reserve(sizes[3]);
+    }
+
     /// Intern an ephemeral colour (grid, highlight, sketch, preview) into this scene's palette.
     pub fn color(&mut self, rgba: [u8; 4]) -> PaletteIndex {
         Arc::make_mut(&mut self.palette).intern(rgba)
@@ -1351,11 +1365,8 @@ impl GpuScene {
         self.shadow.extend_from_slice(&NO_VALUE.to_le_bytes());
     }
     pub fn trans_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
-        for v in p.iter().chain(&n) {
-            self.trans.extend_from_slice(&v.to_le_bytes());
-        }
-        self.trans.extend_from_slice(&c.0.to_le_bytes());
-        self.trans.extend_from_slice(&NO_VALUE.to_le_bytes());
+        // The same bytes as a line record: position, normal, palette index, no value.
+        self.trans.extend_from_slice(&line_record(p, n, c, NO_VALUE));
     }
     /// A line shown only where the model hides it.
     pub fn hidden_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
@@ -1391,11 +1402,7 @@ impl GpuScene {
     }
     /// A line under everything (see [`GpuScene::under`]).
     pub fn under_line(&mut self, a: [f32; 3], b: [f32; 3], c: PaletteIndex, width: f32) {
-        for v in a.iter().chain(&b) {
-            self.under.extend_from_slice(&v.to_le_bytes());
-        }
-        self.under.extend_from_slice(&c.0.to_le_bytes());
-        self.under.extend_from_slice(&width.to_le_bytes());
+        self.under.extend_from_slice(&line_record(a, b, c, width.to_bits()));
     }
     /// A translucent triangle of a plane a section does not cut (see [`GpuScene::guide_trans`]).
     pub fn guide_tri(&mut self, p: [f32; 3], c: PaletteIndex) {

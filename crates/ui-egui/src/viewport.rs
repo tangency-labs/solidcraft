@@ -324,6 +324,8 @@ pub struct ViewportState {
     patches: u64,
     /// Model scenes built since the viewport started (a scene with levels filled in is not one).
     pub(crate) scenes_built: u64,
+    /// Sketch scenes built since the viewport started: one per change of what that scene shows.
+    pub(crate) sketch_scenes_built: u64,
     /// The GPU target that last received this view's scene uploads.
     scene_target: Option<u64>,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
@@ -3376,10 +3378,14 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
     refresh_wireframe(app, proj);
     let sk = sketch_scene_key(app, proj);
     if sk != app.viewport.sketch_key {
-        let scene = build_sketch_scene(app, proj);
+        // The last scene's sizes are this one's best guess: the lists are filled in one go
+        // instead of growing (and copying) through many reallocations.
+        let hint = app.viewport.sketch_slot.lock().ok().and_then(|slot| slot.as_ref().map(GpuScene::capacity_hint));
+        let scene = build_sketch_scene_with(app, proj, hint);
         if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
             *slot = Some(scene);
         }
+        app.viewport.sketch_scenes_built += 1;
         app.viewport.sketch_key = sk;
     }
 }
@@ -3416,8 +3422,15 @@ fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
 
 /// View-dependent geometry: grid, sketch feedback and the ground shadow's visibility.
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
+    build_sketch_scene_with(app, proj, None)
+}
+
+fn build_sketch_scene_with(app: &SolveApp, proj: &Proj, hint: Option<[usize; 4]>) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
+    if let Some(sizes) = hint {
+        sc.reserve_lists(sizes);
+    }
     let st = crate::open_meshing::shown_world(app);
     if ground_shadow_shown(app) {
         let geometry = shadow_geometry(app, &st);
@@ -21075,6 +21088,58 @@ mod grid_plane_tests {
         let state = crate::open_meshing::session_world(&h.app.session);
         assert!(on(state.sketches.first().map(|s| s.plane), "XZ"), "the click sketches on XZ");
         assert!(previewed_sketch_plane(&h.app).is_none(), "the open sketch has its own grid");
+    }
+
+    /// The sketch scene is built when what it shows changes (the camera moves its grid and the
+    /// sampling of its curves), and not again while nothing has changed.
+    #[test]
+    fn the_sketch_scene_is_not_built_again_while_nothing_changed() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        refresh_sketch_scene(&mut app, &proj);
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "built once");
+        for _ in 0..5 {
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "five still frames build nothing");
+        app.cam.yaw += 0.1;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "an orbit moves the grid and the sampling");
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "and holding still builds nothing again");
+        app.preferences.sketch_halo = !app.preferences.sketch_halo;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 3, "a change of what the scene shows builds it");
+    }
+
+    /// The capacity hint only reserves room: the scene's bytes are those of one built without it.
+    #[test]
+    fn a_capacity_hint_leaves_the_sketch_scene_unchanged() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 12.0})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        let plain = build_sketch_scene(&app, &proj);
+        let hinted = build_sketch_scene_with(&app, &proj, Some(plain.capacity_hint()));
+        assert!(!plain.under.is_empty() && !plain.lines.is_empty());
+        assert_eq!((&plain.lines, &plain.overlay, &plain.under, &plain.trans), (&hinted.lines, &hinted.overlay, &hinted.under, &hinted.trans));
+        assert_eq!(plain.palette.entries(), hinted.palette.entries());
     }
 
     /// A finished sketch is depth-tested unless the preference draws reference geometry through
