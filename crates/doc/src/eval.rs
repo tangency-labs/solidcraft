@@ -1460,6 +1460,46 @@ impl ModelState {
     }
 }
 
+/// The role of each face of `split` (Split Face's result, `from` the face of the body before
+/// each came from) that is a piece of one of the faces `picked`: which side of the tool it lies
+/// on (`+`/`-` of a plane or a tool face, `in`/`out` of a closed sketch curve, `left`/`right` of
+/// an open one), and with several sketch curves each curve's side by its number (`in:2`, a piece
+/// inside the second; `out`, outside every closed one). `None` for every other face, and for a
+/// piece whose side the tool can't tell: it is told apart by the faces around it, as before.
+fn split_piece_roles(split: &kernel::Body, from: &[usize], picked: &[usize], tool: &kernel::SplitTool) -> Vec<Option<String>> {
+    let pieces: Vec<usize> = (0..from.len()).filter(|i| from.get(*i).is_some_and(|f| picked.contains(f))).collect();
+    let mut roles = vec![None; from.len()];
+    let Ok(sides) = kernel::split_piece_sides(split, &pieces, tool) else { return roles };
+    let many = sides.fields.len() > 1;
+    for (face, of) in pieces.iter().zip(&sides.sides) {
+        let mut parts: Vec<String> = Vec::new();
+        let mut known = true;
+        for (k, (kind, side)) in sides.fields.iter().zip(of).enumerate() {
+            let Some(first) = *side else {
+                known = false;
+                break;
+            };
+            let word = match (kind, first) {
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, true) => "+",
+                (kernel::FieldKind::Plane | kernel::FieldKind::Face, false) => "-",
+                (kernel::FieldKind::Loop, true) => "in",
+                (kernel::FieldKind::Loop, false) if many => continue,
+                (kernel::FieldKind::Loop, false) => "out",
+                (kernel::FieldKind::Curve, true) => "left",
+                (kernel::FieldKind::Curve, false) => "right",
+            };
+            parts.push(if many { format!("{word}:{}", k + 1) } else { word.to_string() });
+        }
+        if !known {
+            continue;
+        }
+        if let Some(slot) = roles.get_mut(*face) {
+            *slot = Some(if parts.is_empty() { "out".to_string() } else { parts.join(".") });
+        }
+    }
+    roles
+}
+
 /// The key [`ModelState::stamp`] gives body `name` that a feature evaluated with cache key `key`
 /// made or changed.
 fn made_body_key(key: u64, name: &str) -> u64 {
@@ -15126,12 +15166,12 @@ fn eval_feature_kind(
                     picked.push(fi);
                 }
             }
-            let nb = match (tool, sketch) {
+            let split_tool = match (tool, sketch) {
                 (Some(t), _) => {
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Face { body: &tb.body, face })?
+                    kernel::SplitTool::Face { body: &tb.body, face }
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
@@ -15150,14 +15190,13 @@ fn eval_feature_kind(
                     if curves.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to split with", ss.name)));
                     }
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Curves { plane: ss.plane, curves, along: None })?
+                    kernel::SplitTool::Curves { plane: ss.plane, curves, along: None }
                 }
-                (None, None) => {
-                    let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
-                    kernel::split_faces(&mb.body, &picked, &kernel::SplitTool::Plane(pl))?
-                }
+                (None, None) => kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?),
             };
-            let nb = Traced::step(nb, &[&mb.traced()]);
+            let (nb, from) = kernel::split_faces_with_map(&mb.body, &picked, &split_tool)?;
+            let pieces = split_piece_roles(&nb, &from, &picked, &split_tool);
+            let nb = Traced::step(nb, &[&mb.traced()]).with_pieces(pieces);
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = mb.remade(nb);
             }
