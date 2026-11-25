@@ -406,7 +406,9 @@ fn seam_angles(k: &Kernel, b: &mut Brep, radius: f64) -> Vec<f64> {
 /// volumes by [`radial_hole`]: 103844.0029879396.
 #[test]
 fn a_closed_shell_whose_hole_offset_crosses_the_seam_builds() {
-    use solidcore::offset::offset_executive::p2::{shell_brep_simple, OffsetOptions, ShellOptions};
+    use solidcore::offset::offset_executive::p2::{
+        shell_brep_simple_reporting, OffsetOptions, ShellOptions,
+    };
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
     let mut k = Kernel::default();
@@ -445,7 +447,14 @@ fn a_closed_shell_whose_hole_offset_crosses_the_seam_builds() {
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    let mut b = shell_brep_simple(&mut k, &part, options, &[]).unwrap();
+    let made = shell_brep_simple_reporting(&mut k, &part, options, &[]).unwrap();
+    // every seam turned and turned back: no turn failed
+    assert!(
+        made.seams.not_cleared.is_empty() && made.seams.not_restored.is_empty(),
+        "{:?}",
+        made.seams
+    );
+    let mut b = made.shell;
     let c = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
     assert!(c.is_valid(), "{:?}", c.lines());
     // the drum's two sides, its two caps, the hole's and its offset's walls and ends

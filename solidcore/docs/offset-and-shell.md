@@ -408,7 +408,13 @@ first turns the seam of each cone or cylinder face whose loops are a band and ho
 axis to the middle of the widest angle the holes leave free (`offset/shell_seams.rs`): the
 offset keeps each face's loops, so a hole whose offset grows past a seam its rim did not reach
 would cross an edge nothing splits. The faces the shell keeps get their seams
-back afterwards. An inward closed shell refused for a thin feature
+back afterwards. A face that is not such a band is left, and the reason is kept as a value
+(`Leave`), not as an error. A turn that is tried and fails is a failure: the face keeps the
+seam it had, and the turn's typed cause goes into the shell's `SeamReport`
+(`shell_brep_simple_reporting`). It does not refuse the shell, because a seam turn moves no
+point of the body. If a turn before the shell fails, the shell builds, or is refused, exactly
+as it would without that turn. If a turn back fails, the result is the same valid body, with
+that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
 then each other feature on its own.
 

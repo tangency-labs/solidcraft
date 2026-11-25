@@ -14,7 +14,7 @@
 //! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
-//! | [`offset_brep_simple`], [`shell_brep_simple`], [`local_operation_simple`] | (not upstream) the API calls with their own notification identities |
+//! | [`offset_brep_simple`], [`shell_brep_simple`], [`shell_brep_simple_reporting`], [`SimpleShell`], [`local_operation_simple`] | (not upstream) the API calls with their own notification identities |
 //! | [`faceuse_offset`] | `SmOffsetGeometryCreation::FaceuseOffset` over the owned B-rep |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
@@ -106,6 +106,7 @@ use crate::topology::proto_topology::p1::CopyBrepMap;
 #[cfg(test)]
 use crate::geom::attribute::ObjectKey;
 use crate::offset::offset_geometry_creation::make_edges_on_analytics_exact;
+use crate::offset::shell_seams::SeamReport;
 use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
@@ -2359,22 +2360,49 @@ pub(crate) fn copy_local_sweep_attributes(
     attributes::write_back_attributes(target, &attributes::result_key, &store)
 }
 
-/// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
-/// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
-/// source's attributes reach the result as upstream's notifications carry them; the
-/// source is not changed. The working copy's cones and cylinders have their seams turned
-/// clear of the holes in them first, and the faces the shell keeps are turned back after
-/// it (`shell_seams`, solidcore#3353).
+/// (not upstream) [`shell_brep_simple_reporting`]'s body, without its report of the seam
+/// turns that failed: such a turn moves no point of the body (`shell_seams`), so a caller
+/// that only takes the body loses nothing of it.
 ///
 /// # Errors
 ///
-/// Those of [`api_shell_brep_full`]; a cancellation of a seam's turn.
+/// Those of [`shell_brep_simple_reporting`].
 pub fn shell_brep_simple(
     kernel: &mut Kernel,
     original: &Brep,
     options: ShellOptions,
     faces: &[FaceId],
 ) -> Result<Brep> {
+    shell_brep_simple_reporting(kernel, original, options, faces).map(|made| made.shell)
+}
+
+/// A shell of [`shell_brep_simple_reporting`]: the body, and the seam turns that failed.
+#[derive(Debug)]
+pub struct SimpleShell {
+    /// The shell.
+    pub shell: Brep,
+    /// The faces whose seam was not turned clear of their holes before the shell, or not
+    /// turned back after it, each with its cause ([`SeamReport`]).
+    pub seams: SeamReport,
+}
+
+/// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
+/// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
+/// source's attributes reach the result as upstream's notifications carry them; the
+/// source is not changed. The working copy's cones and cylinders have their seams turned
+/// clear of the holes in them first, and the faces the shell keeps are turned back after
+/// it (`shell_seams`, solidcore#3353). A turn that fails leaves its face's seam where it
+/// was and is reported with its cause in [`SimpleShell::seams`]; it refuses nothing.
+///
+/// # Errors
+///
+/// Those of [`api_shell_brep_full`]; a cancellation, or an unported step, of a seam's turn.
+pub fn shell_brep_simple_reporting(
+    kernel: &mut Kernel,
+    original: &Brep,
+    options: ShellOptions,
+    faces: &[FaceId],
+) -> Result<SimpleShell> {
     let source_id = BrepId::from_index(0);
     // The working copy keeps the faces' definitions (not upstream: an exact round's
     // definition rides beside its net, #2485), so that a round offsets by its definition
@@ -2383,7 +2411,7 @@ pub fn shell_brep_simple(
     let mut source = original.clone_standing_for_self_keeping_definitions()?;
     // (not upstream, solidcore#3353) a cylinder's seam turned clear of the holes in it, so
     // that no hole's offset crosses it; turned back on the faces the shell keeps
-    let turned = crate::offset::shell_seams::seams_clear_of_loops(kernel, &mut source)?;
+    let cleared = crate::offset::shell_seams::seams_clear_of_loops(kernel, &mut source)?;
     source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
     let mut records = attributes::simple_records(&source);
     let mut store = AttributeStore::default();
@@ -2414,8 +2442,14 @@ pub fn shell_brep_simple(
         },
         &mut notifications,
     )?;
-    crate::offset::shell_seams::seams_back(kernel, &mut shell, &turned)?;
-    Ok(shell)
+    let not_restored = crate::offset::shell_seams::seams_back(kernel, &mut shell, &cleared.turned)?;
+    Ok(SimpleShell {
+        shell,
+        seams: SeamReport {
+            not_cleared: cleared.not_cleared,
+            not_restored,
+        },
+    })
 }
 
 /// `SmOffsetGeometryCreation(distance, approx_tol_3d).FaceuseOffset(faceuse, TRUE)`: the
