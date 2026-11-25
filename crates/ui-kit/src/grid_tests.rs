@@ -379,6 +379,42 @@ fn refuse_reopens_a_keyboard_commit_with_its_text() {
 }
 
 #[test]
+fn editing_grid_cell_has_one_inside_focus_or_error_ring_without_corner_fragments() {
+    let (ctx, mut sheet) = focused(2);
+    sheet.value_required = true;
+    press(&ctx, &mut sheet, Key::ArrowRight, Modifiers::NONE);
+    press(&ctx, &mut sheet, Key::F2, Modifiers::NONE);
+    let t = solidcraft_theme::Tokens::get();
+    for error in [false, true] {
+        if error {
+            frame(&ctx, &mut sheet, key_with(Key::Delete, Modifiers::NONE));
+            let out = press(&ctx, &mut sheet, Key::Enter, Modifiers::NONE);
+            assert_eq!(out.refused.as_deref(), Some("needs a value"));
+        }
+        let (_, output) = run(&ctx, &mut sheet, vec![], Modifiers::NONE);
+        let rect = registry::rect_of("grid:g:r0:value").unwrap();
+        let mut rings = Vec::new();
+        for s in &output.shapes {
+            crate::test_support::each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && r.stroke.width > 0.0
+                    && r.rect.width() <= rect.width() + 8.0
+                    && r.rect.intersects(rect)
+                {
+                    assert!(s.clip_rect.contains_rect(r.rect), "no clipped outer ring: {r:?}");
+                    rings.push(r.clone());
+                }
+            });
+        }
+        assert_eq!(rings.len(), 1, "error {error}: {rings:?}");
+        assert_eq!(rings[0].rect, rect);
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+        assert_eq!(rings[0].stroke, if error { egui::Stroke::new(1.0, t.form_error) } else { egui::Stroke::new(1.5, crate::selection_ink(&t)) });
+    }
+}
+
+#[test]
 fn only_the_visible_rows_of_ten_thousand_are_built() {
     let ctx = crate::test_support::context();
     let mut sheet = Sheet::new(10_000);
@@ -406,4 +442,59 @@ fn every_cell_reads_as_column_and_row_with_its_value() {
     assert_eq!(cell.value(), Some("1 mm"));
     assert!(registry::rect_of("grid:g:r1:value").is_some(), "and a stable handle");
     assert!(registry::rect_of("dialog:table:g:r1:cell:Value").is_some(), "the table's own handles stay");
+}
+
+/// A favourite and its original row can share a table without sharing widget identity or edits.
+#[test]
+fn sections_share_one_table_but_keep_independent_editors_for_repeated_row_keys() {
+    let ctx = crate::test_support::context();
+    let mut first = Sheet::new(1);
+    let mut second = Sheet::new(1);
+    second.grows = true;
+    let mut draw = |events: Vec<Event>| {
+        registry::clear_handles();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(600.0, 500.0))),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        crate::test_support::raw_frame(&ctx, input, |ui| {
+            crate::scope(ui, |ui| {
+                let columns = first.columns();
+                let layout: Vec<_> = columns.iter().map(|c| c.layout(None)).collect();
+                table_custom(ui, "sections", &layout, "Empty", |ui, table| {
+                    table.headers(ui, |_, _| false);
+                    for (id, sheet) in [("first", &mut first), ("second", &mut second)] {
+                        table.group(ui, id, id, sheet.row_count(), &mut true);
+                        let out = Grid::new(id).show_in(ui, table, sheet, |_, _, _| {});
+                        sheet.apply(&out.edits);
+                    }
+                });
+            });
+        });
+    };
+    draw(vec![]);
+    draw(vec![]);
+    let first_row = registry::rect_of("dialog:table:sections:first:r0").unwrap();
+    let second_row = registry::rect_of("dialog:table:sections:second:r0").unwrap();
+    assert!(first_row.bottom() < second_row.top());
+    for section in ["first", "second"] {
+        let cell = registry::rect_of(&format!("dialog:table:sections:{section}:r0:cell:Value")).unwrap();
+        assert_eq!(cell.x_range(), registry::rect_of("dialog:column:sections:Value").unwrap().x_range());
+        assert_eq!(registry::rect_of(&format!("dialog:column:{section}:Value")), registry::rect_of("dialog:column:sections:Value"));
+        assert_eq!(registry::rect_of(&format!("dialog:table:{section}:r0:cell:Value")), Some(cell));
+        assert_eq!(registry::rect_of(&format!("dialog:table:{section}:r0")), registry::rect_of(&format!("dialog:table:sections:{section}:r0")));
+    }
+    assert_eq!(registry::rect_of("dialog:table:second:add"), registry::rect_of("dialog:table:sections:add"));
+    assert!(registry::handle_at("dialog:table:second:add").is_some());
+    Grid::select(&ctx, Grid::state_of("second"), "r0", 0, 1);
+    draw(vec![]);
+    draw(vec![Event::Text("changed".into())]);
+    draw(vec![]);
+    draw(key_with(Key::Enter, Modifiers::NONE));
+    draw(vec![]);
+    assert_eq!(first.cell(0, 1), "0 mm");
+    assert_eq!(second.cell(0, 1), "changed");
+    assert!(Grid::editing(&ctx, Grid::state_of("first")).is_none());
 }
