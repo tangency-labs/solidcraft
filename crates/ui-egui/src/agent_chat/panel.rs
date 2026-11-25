@@ -1472,19 +1472,23 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if let Some(options) = chat.config_options.clone() {
         config_selects(chat, ui, &options);
     }
-    ui.horizontal(|ui| {
-        let b = if chat.state().running() {
-            ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
-        } else {
-            let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
-            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
-        };
-        solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
-        if b.clicked() {
-            chat.actions.push(if chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
-        }
-    });
-    if let Some(a) = &chat.auth_status {
+    if chat.state().shows_stop() || !chat.state().running() {
+        ui.horizontal(|ui| {
+            let b = if chat.state().shows_stop() {
+                ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
+            } else {
+                let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+                ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
+            };
+            solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(if chat.state().shows_stop() { PanelAction::Disconnect } else { PanelAction::Connect });
+            }
+        });
+    }
+    if chat.state().shows_auth_status()
+        && let Some(a) = &chat.auth_status
+    {
         ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
