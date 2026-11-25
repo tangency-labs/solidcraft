@@ -576,6 +576,8 @@ pub struct HostGeometryPolicy {
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub(crate) hidden_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
+    /// Actions that sit at the header's right end, beside the menu, also in a one-row header.
+    pub(crate) trailing_header_actions: BTreeMap<InstanceId, BTreeSet<ControlId>>,
     pub(crate) header_title_widths: BTreeMap<InstanceId, f32>,
     /// Panels whose content takes the title's place in the header, with the narrowest width
     /// that content takes (`ContentSlot::Title`).
@@ -596,6 +598,7 @@ impl PartialEq for HostGeometryPolicy {
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
             && self.hidden_header_actions == other.hidden_header_actions
+            && self.trailing_header_actions == other.trailing_header_actions
             && self.header_title_widths == other.header_title_widths
             && self.header_content == other.header_content
             && self.tab_title_widths == other.tab_title_widths
@@ -620,6 +623,7 @@ impl Default for HostGeometryPolicy {
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
             hidden_header_actions: BTreeMap::new(),
+            trailing_header_actions: BTreeMap::new(),
             header_title_widths: BTreeMap::new(),
             header_content: BTreeMap::new(),
             tab_title_widths: BTreeMap::new(),
@@ -1269,7 +1273,11 @@ fn append_section(
         rect(outer.origin.x, outer.origin.y, outer.size.width, if inline { outer.size.height } else { metrics.header_height.min(outer.size.height) });
     let visible_actions = spec.header_actions.iter().filter(|action| header_action_visible(policy, instance, &action.id));
     let action_count = visible_actions.clone().count();
-    let primary_count = 1 + usize::from(collapsible) + usize::from(spec.features.hot_closable);
+    let trailing = |action: &&HeaderActionSpec| policy.trailing_header_actions.get(instance).is_some_and(|ids| ids.contains(&action.id));
+    // A one-row header with actions at its right end keeps the collapse button's place empty, so
+    // they line up with those of a taller header that takes its place (the 1D and 2D History).
+    let hold_collapse = !collapsible && visible_actions.clone().any(|action| trailing(&action));
+    let primary_count = 1 + usize::from(collapsible || hold_collapse) + usize::from(spec.features.hot_closable);
     let control_count = action_count + primary_count;
     let split = !side_strip
         && !inline
@@ -1289,7 +1297,9 @@ fn append_section(
     let extent = metrics.control_extent.min(header.size.height).min(header.size.width / control_count as f32);
     let primary_extent = if split { metrics.control_extent.min(header.size.height).min(header.size.width / primary_count as f32) } else { extent };
     let header_controls = if split { primary_count } else { control_count };
-    let edge_margin = ((header.size.height - primary_extent) / 2.0).min((header.size.width - header_controls as f32 * primary_extent).max(0.0));
+    // Held to a standard header's height, so a one-row header's right end lines up with it.
+    let margin_height = if hold_collapse { metrics.header_height.min(header.size.height) } else { header.size.height };
+    let edge_margin = ((margin_height - primary_extent) / 2.0).max(0.0).min((header.size.width - header_controls as f32 * primary_extent).max(0.0));
     let mut cursor = if out.direction == Direction::Ltr { right(header) - edge_margin } else { header.origin.x + edge_margin };
     let take = |cursor: &mut f32, row: LogicalRect, extent: f32| {
         let x = if out.direction == Direction::Ltr { *cursor - extent } else { *cursor };
@@ -1299,6 +1309,9 @@ fn append_section(
     };
     let close = spec.features.hot_closable.then(|| take(&mut cursor, header, primary_extent));
     let collapse = collapsible.then(|| take(&mut cursor, header, primary_extent));
+    if hold_collapse {
+        take(&mut cursor, header, primary_extent);
+    }
     let menu = take(&mut cursor, header, primary_extent);
     let mut actions = Vec::new();
     let mut strip_bottom = bottom(header);
@@ -1324,10 +1337,13 @@ fn append_section(
         let title_x = if out.direction == Direction::Ltr { leading } else { leading - title_width };
         let title = positive_rect(title_x, header.origin.y, title_width, header.size.height);
         leading += if out.direction == Direction::Ltr { title_width } else { -title_width };
-        for action in visible_actions.clone() {
+        for action in visible_actions.clone().filter(|action| !trailing(action)) {
             let x = if out.direction == Direction::Ltr { leading } else { leading - extent };
             actions.push((action.id.clone(), rect(x, header.origin.y + (header.size.height - extent) / 2.0, extent, extent)));
             leading += if out.direction == Direction::Ltr { extent } else { -extent };
+        }
+        for action in visible_actions.clone().filter(|action| trailing(action)).collect::<Vec<_>>().into_iter().rev() {
+            actions.push((action.id.clone(), take(&mut cursor, header, extent)));
         }
         let content = if out.direction == Direction::Ltr {
             positive_rect(leading, header.origin.y, cursor - leading, header.size.height)

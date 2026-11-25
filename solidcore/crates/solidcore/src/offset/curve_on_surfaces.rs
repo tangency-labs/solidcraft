@@ -419,37 +419,68 @@ fn in_one_patch(lines: &(Vec<f64>, Vec<f64>), p: Point2, q: Point2) -> bool {
     open(&lines.0, p.x, q.x) && open(&lines.1, p.y, q.y)
 }
 
-/// A surface parameter of the surface point nearest the curve's at `t`, `None` where none
-/// is found: of the point's parameters (a seam or a pole has several), the one nearest
-/// `near` when given, so a segment's two feet are taken on the same side of a seam.
+/// The surface parameters of the surface point nearest the curve's at `t` (a seam or a pole
+/// has several), `None` where none is found.
 ///
 /// # Errors
 ///
 /// A cancellation or an unported dependency of the evaluation or the closest-point
 /// solve (see [`ignored`]); any other failure is `None` (the segment is not proved).
-fn foot(
-    k: &Kernel,
-    s: &Surface,
-    t: f64,
-    curve: &Curve,
-    near: Option<Point2>,
-) -> Result<Option<Point2>> {
+fn feet_at(k: &Kernel, s: &Surface, t: f64, curve: &Curve) -> Result<Option<Vec<Point2>>> {
     let Some(p) = ignored(curve.evaluate_point(k, t))? else {
         return Ok(None);
     };
     let Some(cp) = ignored(surface_closest_point(k, s, p))? else {
         return Ok(None);
     };
+    Ok(Some(cp.uvs))
+}
+
+/// Of the parameters `uvs` of one surface point, the one nearest `near` when given (so a
+/// segment's two feet are taken on the same side of a seam), else the first; finite ones
+/// only.
+fn pick_foot(uvs: &[Point2], near: Option<Point2>) -> Option<Point2> {
     let finite = |uv: &&Point2| uv.x.is_finite() && uv.y.is_finite();
-    Ok(match near {
-        None => cp.uvs.iter().find(finite).copied(),
-        Some(w) => cp
-            .uvs
+    match near {
+        None => uvs.iter().find(finite).copied(),
+        Some(w) => uvs
             .iter()
             .filter(finite)
             .min_by(|x, y| x.distance(w).total_cmp(&y.distance(w)))
             .copied(),
-    })
+    }
+}
+
+/// The closest points one [`on_surface`] check has found, by the curve parameter's bits
+/// (not upstream). Neighbouring segments share their ends, and a halved segment its
+/// parent's: each point is solved for once. The memo holds what [`feet_at`] returned, so a
+/// foot is picked from the same parameters as without it.
+#[derive(Default)]
+struct Feet {
+    found: std::collections::HashMap<u64, Option<Vec<Point2>>>,
+}
+
+impl Feet {
+    /// A surface parameter of the surface point nearest the curve's at `t` ([`feet_at`],
+    /// [`pick_foot`]), `None` where none is found.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`feet_at`].
+    fn foot(
+        &mut self,
+        k: &Kernel,
+        s: &Surface,
+        t: f64,
+        curve: &Curve,
+        near: Option<Point2>,
+    ) -> Result<Option<Point2>> {
+        let uvs = match self.found.entry(t.to_bits()) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => e.insert(feet_at(k, s, t, curve)?),
+        };
+        Ok(uvs.as_deref().and_then(|uvs| pick_foot(uvs, near)))
+    }
 }
 
 type IV3 = V3<Ivl>;
@@ -610,6 +641,16 @@ fn on_surface(
     budget: &mut usize,
 ) -> Result<bool> {
     let lines = crease_lines(c);
+    let mut feet = Feet::default();
+    // (`gap_at` by its arguments' bits: a segment's ends are its pieces' first and last
+    // nodes, and its neighbour's ends; the bound is a function of them alone)
+    let mut gaps: std::collections::HashMap<(u64, u64, u64), Option<f64>> =
+        std::collections::HashMap::new();
+    let mut gap = |t: f64, w: Point2| {
+        *gaps
+            .entry((t.to_bits(), w.x.to_bits(), w.y.to_bits()))
+            .or_insert_with(|| gap_at(cn, c, t, w))
+    };
     // the knot spans inside the interval
     let (lo, hi) = (interval.min(), interval.max());
     let mut cuts = vec![lo];
@@ -637,13 +678,13 @@ fn on_surface(
             if !charge(budget) {
                 return Ok(false);
             }
-            let Some(wa) = foot(k, s, a, curve, None)? else {
+            let Some(wa) = feet.foot(k, s, a, curve, None)? else {
                 return Ok(false);
             };
-            let Some(wb) = foot(k, s, b, curve, Some(wa))? else {
+            let Some(wb) = feet.foot(k, s, b, curve, Some(wa))? else {
                 return Ok(false);
             };
-            match (gap_at(cn, c, a, wa), gap_at(cn, c, b, wb)) {
+            match (gap(a, wa), gap(b, wb)) {
                 (Some(ga), Some(gb)) if ga.max(gb) > tol => return Ok(false),
                 (Some(_), Some(_)) => {}
                 _ => return Ok(false),
@@ -660,7 +701,7 @@ fn on_surface(
                         };
                         ta < tb
                             && in_one_patch(&lines, *pa, *pb)
-                            && match (gap_at(cn, c, *ta, *pa), gap_at(cn, c, *tb, *pb)) {
+                            && match (gap(*ta, *pa), gap(*tb, *pb)) {
                                 (Some(ga), Some(gb)) => bend(cn, c, *ta, *tb, *pa, *pb)
                                     .is_some_and(|e| round_up(ga.max(gb) + e) <= tol),
                                 _ => false,
@@ -1164,7 +1205,7 @@ mod tests {
         assert!(Checked::of(&k, &off).is_none());
     }
 
-    /// `foot` passes its calls through `ignored`: an ordinary failure (a parameter that is
+    /// `Feet::foot` passes its calls through `ignored`: an ordinary failure (a parameter that is
     /// not a number) is an unproved segment, `Ok(None)`, while a cancellation is passed on.
     /// The closest-point solve on these nets does not poll the token itself, so the check's
     /// own per-segment poll is what returns `Cancelled` here.
@@ -1172,8 +1213,9 @@ mod tests {
     fn a_failed_foot_is_unproved_and_a_cancelled_check_is_passed_on() {
         let (s, c) = (plane(0.0), arc(0.0));
         let k = Kernel::default();
-        assert!(foot(&k, &s, 0.5, &c, None).expect("foot").is_some());
-        assert_eq!(foot(&k, &s, f64::NAN, &c, None).expect("foot"), None);
+        let mut feet = Feet::default();
+        assert!(feet.foot(&k, &s, 0.5, &c, None).expect("foot").is_some());
+        assert_eq!(feet.foot(&k, &s, f64::NAN, &c, None).expect("foot"), None);
         let mut k = Kernel::default();
         let token = crate::kernel::CancelToken::new();
         k.set_cancel_token(token.clone());

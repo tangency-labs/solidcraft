@@ -93,6 +93,8 @@ macro_rules! layout_preferences {
             keep_work_on_tab_switch: bool = false, PAGE_LAYOUT;
             /// Shared workspace composition; system windows and popups retain their purpose.
             layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
+            /// Restore the former Surface Create and Convert sections.
+            legacy_surface_toolbar: bool = false, PAGE_LAYOUT => check_id("prefs.legacy_surface_toolbar");
             /// Preview card density in the document browser; Large preserves the existing layout.
             library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
             /// Preview panel placement and reflow while dragging. Off shows the drop outline.
@@ -148,6 +150,15 @@ macro_rules! layout_preferences {
             /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
             /// as the rest of the title bar does, as before.
             tab_double_click_renames: bool = true, PAGE_LAYOUT;
+            /// Two-dimensional (2D) Timeline with multi-track component layout,
+            /// two-tier header, movable corridor brackets, and feature grouping.
+            timeline_2d: bool = false, PAGE_LAYOUT;
+            /// Whether unoccupied cells in the 2D timeline grid display subtle alignment dots (·).
+            timeline_2d_cell_dots: bool = true, PAGE_LAYOUT;
+            /// Allow activating components directly by clicking component tracks or radio indicators in the 2D timeline.
+            timeline_2d_component_activation: bool = true, PAGE_LAYOUT;
+            /// How unsuppressing an upstream feature affects downstream dependents in the 2D timeline DAG.
+            timeline_2d_unsuppress_mode: Timeline2dUnsuppressMode = Default::default(), PAGE_LAYOUT;
             /// Vertical History starts with the active component's Bodies folder and the Origin (#6490).
             timeline_origin_bodies: bool = false, PAGE_LAYOUT;
             /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom

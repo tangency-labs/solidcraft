@@ -229,7 +229,9 @@ fn replay(unit_id: &str) -> usize {
         if refit {
             crate::refit::state::set(Some(crate::refit::state::Refit::default()));
         }
-        let line = run(u.as_ref(), case);
+        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
+        let line =
+            crate::wr450_rows::with_mains_choices_for(unit_id, name, || run(u.as_ref(), case));
         if refit {
             let r = crate::refit::state::take().expect("refit lost");
             if r.replaced == 0 || !r.failures.is_empty() {
@@ -257,7 +259,18 @@ fn replay(unit_id: &str) -> usize {
         }
         let line = run(u.as_ref(), case);
         let committed = golden.get(name);
-        if WITHIN_COMPARATOR.contains(&(unit_id, name)) {
+        if crate::wr450_rows::below_comparator(unit_id, name)
+            && !WITHIN_COMPARATOR.contains(&(unit_id, name))
+        {
+            // (the WR-450 retirement moves it below the comparator: the committed line is
+            // main's, which `wr450_rows` shows the run is with main's choices put back)
+            match committed {
+                Some(g) if g != &line && diff(g, &line, u.abs_floors()).is_none() => {}
+                _ => failures.push(format!(
+                    "{name}: the row does not agree with the committed golden line"
+                )),
+            }
+        } else if WITHIN_COMPARATOR.contains(&(unit_id, name)) {
             // (the committed line is main's: the run agrees with it, not to the bit)
             match committed {
                 Some(g) if g == &line => {
@@ -304,6 +317,11 @@ const WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("topology.brep_p10", "read_Fillet_sphere_plane"),
 ];
 
+/// Whether `case` of `unit_id` is a [`WITHIN_COMPARATOR`] row.
+pub(crate) fn within_comparator(unit_id: &str, case: &str) -> bool {
+    WITHIN_COMPARATOR.contains(&(unit_id, case))
+}
+
 /// Runs every row of `unit_id` in [`TRIM_COVER`] with the reads' kept-trim cover raises put
 /// back (at least one per row) and as is; returns the row count. A row in
 /// [`TRIM_COVER_REFIT`] has the found spheres' fitted NURB put back as well for the first
@@ -347,24 +365,32 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             .iter()
             .find(|r| r.0 == unit_id && r.1 == name)
             .map(|r| r.2);
-        // (a row the WR-493 retirement moves too: main had the fitted NURB)
-        let line = if let Some(raised) = joined {
-            assert!(
-                !TRIM_COVER_REFIT.contains(&(unit_id, name)),
-                "{unit_id} {name}: joined and refit"
-            );
-            let mut out = run_raw(u.as_ref(), case);
-            for (key, count) in put_back_joined(&mut out, raised) {
-                failures.push(format!(
-                    "{name}: {count} values {key:e} raised by the joined cover, not as listed"
-                ));
-            }
-            encode(&case.name, &out)
-        } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
-            refit_run(case, &mut failures)
-        } else {
-            run_without_classified_trims(u.as_ref(), case)
-        };
+        // (a row the WR-493 retirement moves too: main had the fitted NURB; one the WR-450
+        // retirement moves too: main's choices at its seams)
+        let (line, turned) =
+            crate::wr450_rows::with_mains_choices_counting_gate(unit_id, name, || {
+                if let Some(raised) = joined {
+                    assert!(
+                        !TRIM_COVER_REFIT.contains(&(unit_id, name)),
+                        "{unit_id} {name}: joined and refit"
+                    );
+                    let mut out = run_raw(u.as_ref(), case);
+                    for (key, count) in put_back_joined(&mut out, raised) {
+                        failures.push(format!(
+                        "{name}: {count} values {key:e} raised by the joined cover, not as listed"
+                    ));
+                    }
+                    encode(&case.name, &out)
+                } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
+                    refit_run(case, &mut failures)
+                } else {
+                    run_without_classified_trims(u.as_ref(), case)
+                }
+            });
+        // (a row the carry gate reaches only in this put-back run: it turned a trim away there)
+        if crate::wr450_rows::GATE_REPLAY_ONLY.contains(&(unit_id, name)) && turned == 0 {
+            failures.push(format!("{name}: the carry gate turned no trim away"));
+        }
         let Some(Mode::Substitute {
             reads,
             undone,
@@ -379,10 +405,17 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
-        if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
+        // (a row the WR-450 retirement moved past the comparator was re-blessed: its
+        // committed line is this branch's run, and main's is the put-back above)
+        if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name))
+            && !crate::wr450_rows::moved(unit_id, name)
+        {
             // (the committed line is main's: the run agrees with it, not to the bit, and
             // with the fitted NURB put back it is the line)
             match committed {
@@ -458,7 +491,10 @@ const TRIM_COVER_REFIT: &[(&str, &str)] = &[
 /// fitted NURB on main): their committed line stays main's. (#20179 re-blessed
 /// `corpus.parity`'s `Fillet__sphere_diff_3cylinders.smb` and `topology.face_p3`'s
 /// `uv_trim_f0`/`f1`/`f4`/`f5`/`f8`/`f9`, which its classified trims move: their put-back
-/// above is main's hash, and their committed line is now this branch's run.)
+/// above is main's hash, and their committed line is now this branch's run. The WR-450
+/// retirement, #18923, re-blessed those of them in `wr450_rows`' `DATA` the same way: their
+/// put-back, with main's choices at its seams, is main's hash, and their committed line is
+/// this branch's run.)
 const TRIM_COVER_WITHIN_COMPARATOR: &[(&str, &str)] = &[
     ("blend.fillet_removal", "nurb_fillet_face18"),
     ("heal.stitch_p1", "file_boolean_trees_result.smb_advanced"),
@@ -655,27 +691,30 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 /// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
 /// hash is of the row with that change, from Linux CI.
 /// Each hash is of the line without the `fillet_point_step` key, which recorded the retired
-/// step latch (#18916).
+/// step latch (#18916). The drop tracer's clamped-sliver rule (a span whose clamped UV image
+/// is one point within the drop's tolerances is left out) moves all four in their
+/// `mass_properties` only, so each hash is of the row with that rule;
+/// `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x9e43_eafe_0171_4c09,
+        0x751d_c931_5b45_292d,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0xe2ec_b89d_309a_54a8,
+        0x5132_edc0_4baf_f026,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x9fc9_deff_361b_7066,
+        0xc413_26f0_108d_e3f1,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x5669_c3ab_dde7_2e76,
+        0xd7e9_450b_63e6_d0d1,
     ),
 ];
 
@@ -683,6 +722,7 @@ const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
 /// branch's committed line.
 #[test]
 fn rows_the_lazy_raise_keeps_are_main_s() {
+    let mut failures = Vec::new();
     for &(unit_id, name, main_hash) in KEPT_MAIN_ROW {
         assert!(
             !TRIM_COVER.iter().any(|r| r.0 == unit_id && r.1 == name)
@@ -696,13 +736,17 @@ fn rows_the_lazy_raise_keeps_are_main_s() {
             .get(name)
             .unwrap_or_else(|| panic!("{unit_id}: no case {name}"));
         let line = run(u.as_ref(), case);
-        assert_eq!(hash(&line), main_hash, "{unit_id} {name}: not main's line");
-        assert_eq!(
-            golden.get(name),
-            Some(&line),
-            "{unit_id} {name}: not the committed line"
-        );
+        if hash(&line) != main_hash {
+            failures.push(format!(
+                "{unit_id} {name}: not main's line ({:#018x})",
+                hash(&line)
+            ));
+        }
+        if golden.get(name) != Some(&line) {
+            failures.push(format!("{unit_id} {name}: not the committed line"));
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// Writes, per `unit<TAB>case` line of `$TOLSUB_CASES`, one JSON line to `$TOLSUB_OUT`:
@@ -745,7 +789,9 @@ fn record() {
 /// `uv_trim_f2`, `f3`, `f10` and `f11` rows (each with its `_rebuild`) hold main's blessed line
 /// after #20939 cleared their gap-cache flags (main at 1562e5f516). The two
 /// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
-/// the put-back is shown to keep them.
+/// the put-back is shown to keep them. `uv_trim_f7_rebuild` holds the run with the drop
+/// tracer's clamped-sliver rule, which moves that row's rebuilt face-7 trim alone
+/// (`certify::trim_tolerance` certifies its moved tolerance).
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -856,7 +902,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0xc8792b6ad7002c8b,
+        0x50fca59ea3c3d0cc,
     ),
     (
         "topology.face_p3",
@@ -903,7 +949,10 @@ fn classified_read_rows_are_mains_without_the_trims() {
             failures.push(format!("{unit_id} {name}: no read put back"));
         }
         if hash(&line) != main_hash {
-            failures.push(format!("{unit_id} {name}: not main's row"));
+            failures.push(format!(
+                "{unit_id} {name}: not main's row ({:#018x})",
+                hash(&line)
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

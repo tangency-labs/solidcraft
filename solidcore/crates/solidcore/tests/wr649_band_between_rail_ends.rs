@@ -1,5 +1,5 @@
-//! Regression test for WR-649 (the fork's tangency-labs/smlib@d548305): with
-//! `fillet_refuse_overlapping_bands` (WR-542) and the mitre at a concave face corner
+//! Regression test for WR-649 (the fork's tangency-labs/smlib@d548305): with the bands'
+//! check (WR-542) and the mitre at a concave face corner
 //! (WR-642), a blend's band on a face is its rail between the rail's end vertices. The
 //! rails are not trimmed yet when the bands are checked, and run on past the corners that end
 //! them; sampled over the whole curve, the rail of SolidCraft's #871 part's plate-top round
@@ -103,9 +103,8 @@ fn edge_through(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
     found[0]
 }
 
-fn round_the_ends(r: f64, fixed: bool) -> Result<(usize, f64), String> {
+fn round_the_ends(r: f64) -> Result<(usize, f64), String> {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_overlapping_bands = fixed;
     let mut b = part(&mut k);
     let mut ids = Vec::new();
     for x in [23.5, 9.5] {
@@ -135,7 +134,7 @@ fn round_the_ends(r: f64, fixed: bool) -> Result<(usize, f64), String> {
 #[test]
 fn wr649_end_face_rounds_mitred_at_concave_corners() {
     let r = 0.5;
-    let (faces, v) = round_the_ends(r, true).expect("r 0.5 builds");
+    let (faces, v) = round_the_ends(r).expect("r 0.5 builds");
     let expected = v0() - 2.0 * 107.6 * r * r * (1.0 - PI / 4.0);
     println!("r {r}: {faces} faces, volume {v:.6} against {expected:.6}");
     assert_eq!(faces, 38);
@@ -147,17 +146,7 @@ fn wr649_end_face_rounds_mitred_at_concave_corners() {
         v - expected
     );
     // r 1: the rounds overlap across the 1.26 wall, still no room
-    assert!(round_the_ends(1.0, true).is_err());
-}
-
-#[test]
-fn wr649_without_the_band_check() {
-    // Off, the band check does not run (upstream SMLib has none). r 0.5 builds the same
-    // body, and r 1 is not refused (the body it builds is not a manifold solid).
-    let (faces, v) = round_the_ends(0.5, false).expect("r 0.5 builds");
-    assert_eq!(faces, 38);
-    let (on_faces, on_v) = round_the_ends(0.5, true).expect("r 0.5 builds");
-    assert_eq!((faces, v.to_bits()), (on_faces, on_v.to_bits()));
+    assert!(round_the_ends(1.0).is_err());
 }
 
 // === Mirrored shell-rim refusals (solidcore#2903) ===========================================

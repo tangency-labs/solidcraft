@@ -60,6 +60,7 @@ circle_tt	false
 circle_ttt	false
 close	false
 coil	false
+collision_auto	false
 colored_components	false
 combine	false
 compare	false
@@ -174,11 +175,16 @@ fold	false
 folder	false
 frame_member	false
 frame_plate	false
+frame_trim	false
 gear	false
 graph	false
 grid	false
 ground	false
 ground_shadow	false
+gusset	false
+gusset_side_center	false
+gusset_side_negative	false
+gusset_side_positive	false
 help	false
 hem	false
 hole	false
@@ -207,6 +213,7 @@ material	false
 measure	false
 mesh_body	false
 mesh_export	false
+mesh_reduce	false
 min_radius	false
 mirror	false
 motion_link	false
@@ -229,7 +236,9 @@ panel_reset_height	false
 params	false
 paste	false
 path_flange	false
+pattern_center	false
 pattern_circ	false
+pattern_flip	false
 pattern_path	false
 pattern_rect	false
 perforate	false
@@ -381,6 +390,7 @@ svg	false
 sweep	false
 text	false
 thread	false
+timeline_2d	false
 timeline_play	false
 timeline_stop	false
 torus	false
