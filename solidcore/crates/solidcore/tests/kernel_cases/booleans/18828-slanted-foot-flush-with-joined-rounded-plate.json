@@ -1,0 +1,124 @@
+{
+ "area": "booleans",
+ "bodies": {
+  "b14": {
+   "keeping_splines": false,
+   "trusted": true
+  },
+  "b17": {
+   "keeping_splines": false,
+   "trusted": true
+  }
+ },
+ "calls": [
+  {
+   "inputs": [
+    "b14"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b15"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b15"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b16"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b17"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b18"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b18"
+   ],
+   "op": "copy",
+   "outputs": [
+    "b19"
+   ],
+   "params": {}
+  },
+  {
+   "inputs": [
+    "b16"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b20"
+   ],
+   "params": {
+    "operand": 0
+   }
+  },
+  {
+   "inputs": [
+    "b19"
+   ],
+   "op": "tagged",
+   "outputs": [
+    "b21"
+   ],
+   "params": {
+    "operand": 1
+   }
+  },
+  {
+   "inputs": [
+    "b20",
+    "b21"
+   ],
+   "op": "boolean",
+   "outputs": [
+    "b22"
+   ],
+   "params": {
+    "op": "union"
+   }
+  }
+ ],
+ "case": "18828-slanted-foot-flush-with-joined-rounded-plate",
+ "expected": {
+  "body_count": 1,
+  "edges": 42,
+  "faces": 16,
+  "method": "V = plate + foot - overlap. Plate: 1.6 x (10 x 10.3 - (4 - pi) x 2^2) = 159.3061929830. Foot: the parallelogram's horizontal sides are 1.3689488324 long and 3.2189233612 apart, area 4.4065413768, times 8.2 = 36.1336392900. Overlap: the foot's part with y in [-15.938417685876269, -15.43842] (0.5 deep), where for each x the plate spans z from 2.1 up to 10.3 for |x| <= 3 and up to 8.3 + sqrt(4 - (|x| - 3)^2) over the corner; the double integral over the foot's cross-section in that strip (its sides are straight lines, so the integral is of sqrt over linear limits, evaluated to 30 digits) is 5.5110672323. V = 159.3061929830 + 36.1336392900 - 5.5110672323 = 189.9287650407; one body. Tolerance 1e-6 relative. The face, edge and vertex counts are worked out from the intended body, not taken from the kernel. Faces: the plate has 10 and the foot 6. The two tops lie in one plane and become one face, and the foot's inner slanted side becomes two faces that do not meet (a sliver above the corner cylinder between the foot's buried end and the touch at (-3, -15.817157, 10.3), and the part in front of the plate; between them the side is inside the plate), so 10 + 6 - 1 + 1 = 16. Vertices: the plate's 16 less the corner of its front outline at (-3, -15.43842, 10.3), which now lies inside the top face, plus 13 new ones: the touch, the 2 top corners of the foot's buried end, the 2 points where that end's upright edges meet the corner cylinder, the 4 corners of the notch the foot leaves in the plate's front face, and the 4 corners of the foot's free end; 15 + 13 = 28. Edges, counted round each face: the plate's back 8, bottom 4, left and right sides 4 each, the three corners the foot does not reach 4 each, the corner it crosses 7 (its back arc, its line on the left side, the front arc up to the foot, the foot's outer side, the foot's buried end, the foot's inner side, and its line on the top back from the touch), the front 11, the top 9, the foot's buried end 4, the sliver 3, the inner side in front of the plate 4, the outer side 6, the free end 4 and the foot's bottom 4. That is 84, and every edge lies on two faces, so 42. Check: 28 - 42 + 16 = 2.",
+  "source": "analytic",
+  "sources": [
+   "tangency-labs/solidcraft#18828"
+  ],
+  "tolerance": {
+   "rel": 1e-06
+  },
+  "vertices": 28,
+  "volume_mm3": 189.92876504068,
+  "what": "a slanted foot (a parallelogram in XY with corners (-4.4254936281927515, -15.938417685876269), (-3.0565447957777483, -15.938417685876269), (-1.5555361814781503, -12.71949432476632), (-2.9244850138931535, -12.71949432476632), extruded from z 2.1 to 10.3) joined to a plate whose top is flush with the foot's top: a rounded rectangle x -5..5, z 0..10.3 with corner radius 2, extruded along y from -15.43842 to -16.43842 and joined with the same outline from -16.43842 to -17.03842 (so one prism 1.6 thick, its vertex tolerances grown to 2.3e-5 by the first join). The foot's top lies in the plate's top plane and crosses the line x = -3 where that plane meets the corner cylinder, and the foot's inner slanted side crosses that line at y = -15.817 inside the plate. The join failed in make_faceuse with 'the related vertex is not an end of the edge use'; the same plate made as one 1.6 thick extrude joined, and the mirrored foot on the right joined."
+ },
+ "expressible": true,
+ "operation_expressible": true,
+ "records": "18828-slanted-foot-flush-with-joined-rounded-plate.bodies.json.gz",
+ "result": [
+  {
+   "body": "Tile",
+   "made": "b22"
+  }
+ ],
+ "sources": [
+  "tangency-labs/solidcraft#18828"
+ ],
+ "ungraded": [],
+ "what": "a slanted foot (a parallelogram in XY with corners (-4.4254936281927515, -15.938417685876269), (-3.0565447957777483, -15.938417685876269), (-1.5555361814781503, -12.71949432476632), (-2.9244850138931535, -12.71949432476632), extruded from z 2.1 to 10.3) joined to a plate whose top is flush with the foot's top: a rounded rectangle x -5..5, z 0..10.3 with corner radius 2, extruded along y from -15.43842 to -16.43842 and joined with the same outline from -16.43842 to -17.03842 (so one prism 1.6 thick, its vertex tolerances grown to 2.3e-5 by the first join). The foot's top lies in the plate's top plane and crosses the line x = -3 where that plane meets the corner cylinder, and the foot's inner slanted side crosses that line at y = -15.817 inside the plate. The join failed in make_faceuse with 'the related vertex is not an end of the edge use'; the same plate made as one 1.6 thick extrude joined, and the mirrored foot on the right joined.",
+ "why_not": []
+}
