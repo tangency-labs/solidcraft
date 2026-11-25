@@ -4519,6 +4519,82 @@ fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
     }
 }
 
+/// solidcore#3388: an edge's tolerance raised to cover the gap between its kernel-made pcurve
+/// and its curve was 1.5 times the gap, so the record check, which takes half the tolerance,
+/// reported a Bad Gap on every such edge. The patch is bilinear, (10 u, 10 v, u v) mm; its four
+/// sides are straight quadratic splines whose middle point is a quarter along, so they run at an
+/// uneven pace, which no closed form at a steady pace lifts onto and the kernel makes every
+/// pcurve. Each side is affine along its iso-line, so its exact pcurve is the same spline over
+/// (x / 10, y / 10); the kernel's are those moved 1e-4 along u, about 1e-3 mm off, far past the
+/// 1e-5 mm the file states, so the reader alone raises the tolerance.
+#[test]
+fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
+    use crate::assembly::{Assembly, Bound, Kind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    const SHIFT: f64 = 1e-4;
+    struct Shifted(AtomicUsize);
+    impl Trims for Shifted {
+        fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+            let mut out = Vec::new();
+            for l in &face.loops {
+                let mut pcs = Vec::new();
+                for u in l {
+                    if let Some(pc) = &u.pcurve {
+                        pcs.push(pc.clone());
+                        continue;
+                    }
+                    self.0.fetch_add(1, Ordering::Relaxed);
+                    let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                    let BCurve::Spline { knots, points } = e.curve else { return Err(format!("{:?}", e.curve)) };
+                    let points = points.iter().map(|p| [p[0] / 10.0 + SHIFT, p[1] / 10.0]).collect();
+                    pcs.push(Curve2::Spline { knots: knots.clone(), points });
+                }
+                out.push(pcs);
+            }
+            Ok(out)
+        }
+    }
+    let trims = Shifted(AtomicUsize::new(0));
+    let mut a = Assembly::new(1e-5, Some(&trims));
+    let points = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 1.0], [0.0, 10.0, 0.0]];
+    let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
+    let mut edges = Vec::new();
+    for k in 0..4 {
+        let next = (k + 1) % 4;
+        let [p, q] = [points[k], points[next]];
+        let quarter = std::array::from_fn(|i| p[i] + 0.25 * (q[i] - p[i]));
+        let side = BCurve::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![p, quarter, q] };
+        edges.push(a.add_edge(k as u64, side, [0.0, 1.0], [vs[k], vs[next]]).unwrap());
+    }
+    let patch = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![points[0], points[3]], vec![points[1], points[2]]],
+    };
+    let f = a.add_face(1, patch, vec![Bound::Edges(edges)], Some(0), true).unwrap();
+    let s = a.finish(1, "shifted trims".into(), vec![vec![(f, true)]], Kind::Model).unwrap();
+    assert_eq!(trims.0.load(Ordering::Relaxed), 4, "the kernel makes every pcurve");
+    let f = &s.brep.faces[0];
+    let surface = SurfaceEval::new(f.parameters()).unwrap();
+    let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
+    for u in edges {
+        let e = &s.brep.edges[u.edge as usize];
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let gap = (0..=1000)
+            .map(|k| {
+                let t = f64::from(k) / 1000.0;
+                let q = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                surface.point(q).unwrap().dist(curve.point(t).unwrap())
+            })
+            .fold(0.0, f64::max);
+        assert!(gap > 1e-3 - 1e-9, "the pcurve is as the kernel made it: {gap}");
+        assert!(0.5 * e.tolerance > gap, "the zone tolerance {} covers the gap {gap}", 0.5 * e.tolerance);
+    }
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+}
+
 /// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
 /// alternating 1 and 0.9, on uniform knots over [0, 1]: its speed is about 1000, so a 5e-8 mm edge
 /// spans 5e-11 of its parameter, which the kernel resolves, and its knots stay the file's bit for

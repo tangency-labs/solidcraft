@@ -68,9 +68,6 @@ pub(crate) const OPEN_DOMAIN_SPAN: f64 = 1e-3;
 /// Most faces a refusal of failed pcurves names (`face #origin` each), so a reader can leave
 /// them out of one read again together; the rest are named by the next read's refusal.
 pub(crate) const MAX_NAMED_FAILURES: usize = 64;
-/// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
-/// record check measures it: with margin, as a vertex's.
-pub(crate) const EDGE_GAP_MARGIN: f64 = 1.5;
 
 /// A body (a solid or a sheet) assembled into a record ([`Assembly::finish`]).
 #[derive(Clone, Debug)]
@@ -676,7 +673,9 @@ impl<'t> Assembly<'t> {
     /// uncertainty states (an intersection curve written looser than its context). Each use's
     /// gap, between its pcurve on the surface and its edge's curve, is measured along the edge as
     /// the record check measures it, and the edge's tolerance covers it, as a vertex's covers its
-    /// gap: the pcurves are as made and the record says how far its geometry agrees.
+    /// gap: the pcurves are as made and the record says how far its geometry agrees. The check
+    /// takes half the tolerance (the zone), so the margin is [`pcurve::SURFACE_GAP_MARGIN`], as
+    /// for an edge off its face's surface (solidcore#3388: 1.5 left the zone at 0.75 of the gap).
     fn raise_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
         for (l, pc) in edge_loops.iter().zip(pcs) {
@@ -696,7 +695,7 @@ impl<'t> Assembly<'t> {
                         gap = gap.max(s.dist(p));
                     }
                 }
-                self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
+                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
             }
         }
         Ok(())
