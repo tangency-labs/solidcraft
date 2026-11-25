@@ -4333,3 +4333,142 @@ fn a_face_pattern_fitted_to_the_edges_sits_flush_with_them() {
     let (xs, ys) = top_centres(&mut s, json!({"layout": {"type": "spacing", "spacing": 12}}));
     assert_eq!((ends(&xs).0, ends(&xs).1, ends(&ys).0, ends(&ys).1), (Some(2000), Some(98_000), Some(2000), Some(58_000)));
 }
+
+/// Regression (#21548): deleting sibling occurrences of a component whose body was patterned and
+/// then mirrored must not break the mirror when `mirror_copy_frame` migrates the pattern copy
+/// between the root and the now-single-placed component (and adding a sibling occurrence back
+/// must not break it in the reverse direction either).
+#[test]
+fn deleting_or_adding_sibling_occurrences_keeps_mirror_of_pattern_copy_working() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mirror-pattern-occ-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let plate_path = dir.join("plate.sc");
+
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 10, "width": 10, "height": 2, "center": [0, 0, 1], "body_name": "P"}));
+    run(&mut plate, "file.save", json!({"path": plate_path.to_string_lossy()}));
+
+    // 1) Start with 3 occurrences of `P`, pattern body on occurrence #3, mirror both, then delete
+    // the two unrelated sibling occurrences (count 3 -> 1) and verify dry_run + compute_all + geometry.
+    let mut s = Session::default();
+    let o1 = run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy()}))["occurrence"].as_u64().unwrap();
+    let o2 =
+        run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [20, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+    let o3 =
+        run(&mut s, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [40, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+
+    let frames = s.doc.body_frames_with_source(&s.model.state());
+    let third = frames.iter().find(|(_, _, _, path, _)| path == &vec![o3]).map(|(w, ..)| w.clone()).expect("third occurrence body");
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": [third], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "REP"}));
+    let copy_name = s
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| s.doc.feature(b.feature).is_some_and(|f| f.name == "REP"))
+        .map(|b| b.name.clone())
+        .expect("pattern copy");
+    run(&mut s, "solid.mirror", json!({"bodies": [third, copy_name], "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "SYM"}));
+
+    let sym_bboxes = |s: &Session| -> Vec<([f64; 3], [f64; 3])> {
+        let st = s.model.state();
+        let mut out: Vec<_> = s
+            .doc
+            .body_frames_with_source(&st)
+            .into_iter()
+            .filter_map(|(_, own, _, _, m)| {
+                let mb = st.body(&own)?;
+                if !s.doc.feature(mb.feature).is_some_and(|f| f.name == "SYM") {
+                    return None;
+                }
+                let placed = solidcraft_kernel::transform_matrix(&mb.body, m).ok()?;
+                let bb = solidcraft_kernel::measure(&placed).ok()?.bbox;
+                Some(([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0[1].total_cmp(&b.0[1]).then(a.0[0].total_cmp(&b.0[0])));
+        out
+    };
+    let before = sym_bboxes(&s);
+    assert_eq!(before.len(), 2, "{before:?}");
+
+    // Dry run must not predict SYM failing when deleting the two unrelated occurrences.
+    let dry = run(&mut s, "selection.delete", json!({"occurrences": [o1, o2], "dry_run": true}));
+    let would_fail: Vec<&str> = dry["would_fail"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    assert!(!would_fail.contains(&"SYM"), "dry_run must not fail SYM: {dry}");
+
+    run(&mut s, "selection.delete", json!({"occurrences": [o1, o2]}));
+    run(&mut s, "timeline.compute_all", json!({}));
+    let sym_id = s.doc.features.iter().find(|f| f.name == "SYM").unwrap().id;
+    assert_eq!(s.model.result(sym_id).and_then(|r| r.error.as_deref()), None, "SYM must stay healthy after deleting sibling occurrences");
+    let after = sym_bboxes(&s);
+    assert_eq!(after.len(), 2, "{after:?}");
+    for (a, b) in before.iter().zip(&after) {
+        for i in 0..3 {
+            assert!((a.0[i] - b.0[i]).abs() < 1e-6 && (a.1[i] - b.1[i]).abs() < 1e-6, "before={a:?} after={b:?}");
+        }
+    }
+
+    // Moving the remaining occurrence after downward migration must still invalidate SYM's pose
+    // cache and move both mirrored copies across the z=10 mirror plane.
+    run(&mut s, "occurrence.move", json!({"occurrence": o3, "translate": [0, 0, 2], "capture": true}));
+    let moved = sym_bboxes(&s);
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    for (a, b) in after.iter().zip(&moved) {
+        assert!((b.0[0] - a.0[0]).abs() < 1e-6 && (b.0[1] - a.0[1]).abs() < 1e-6, "after={a:?} moved={b:?}");
+        assert!((b.0[2] - (a.0[2] - 2.0)).abs() < 1e-6 && (b.1[2] - (a.1[2] - 2.0)).abs() < 1e-6, "after={a:?} moved={b:?}");
+    }
+
+    // 2) Reverse direction: start with 1 occurrence so REP puts the copy inside the component and
+    // SYM stores `[[o1], [o1]]`, then insert a 2nd occurrence (count 1 -> 2) which migrates the
+    // copy up to root; SYM must still evaluate cleanly with identical geometry.
+    let mut s2 = Session::default();
+    let r1 = run(&mut s2, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "translate": [40, 0, 0]}))["occurrence"]
+        .as_u64()
+        .unwrap();
+    let first = s2
+        .doc
+        .body_frames_with_source(&s2.model.state())
+        .into_iter()
+        .find(|(_, _, _, path, _)| path == &vec![r1])
+        .map(|(w, ..)| w)
+        .expect("single occurrence body");
+    run(&mut s2, "solid.pattern.rectangular", json!({"bodies": [first], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "REP"}));
+    let copy2 = s2
+        .model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| s2.doc.feature(b.feature).is_some_and(|f| f.name == "REP"))
+        .map(|b| b.name.clone())
+        .expect("pattern copy");
+    run(&mut s2, "solid.mirror", json!({"bodies": [first, copy2], "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}, "name": "SYM"}));
+    let sym2_id = s2.doc.features.iter().find(|f| f.name == "SYM").unwrap().id;
+    let before2 = sym_bboxes(&s2);
+    assert_eq!(before2.len(), 2, "{before2:?}");
+    let _r2 =
+        run(&mut s2, "component.insert_design", json!({"path": plate_path.to_string_lossy(), "reuse": true, "translate": [80, 0, 0]}))["occurrence"]
+            .as_u64()
+            .unwrap();
+    run(&mut s2, "timeline.compute_all", json!({}));
+    assert_eq!(s2.model.result(sym2_id).and_then(|r| r.error.as_deref()), None, "SYM must stay healthy after adding a 2nd occurrence");
+    let after2 = sym_bboxes(&s2);
+    assert_eq!(after2.len(), 2, "{after2:?}");
+    for (a, b) in before2.iter().zip(&after2) {
+        for i in 0..3 {
+            assert!((a.0[i] - b.0[i]).abs() < 1e-6 && (a.1[i] - b.1[i]).abs() < 1e-6, "before2={a:?} after2={b:?}");
+        }
+    }
+
+    // 3) Deleting the referenced occurrence itself (`o3`) still fails SYM as expected.
+    run(&mut s, "selection.delete", json!({"occurrences": [o3]}));
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert!(s.model.result(sym_id).and_then(|r| r.error.as_deref()).is_some(), "deleting the referenced occurrence must still fail SYM");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

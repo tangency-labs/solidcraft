@@ -1272,7 +1272,6 @@
     "sketch_finish.edit": "Upravit náčrt",
     "sketch_finish.finished": "{name} dokončen",
     "sketch_mode.announcement": "{view}, režim náčrtu",
-    "sketch_mode.editing": "Úpravy",
     "sketch_mode.model_card_unavailable": "Před zahájením náčrtu zde otevřete pohled Model",
     "sketch_mode.view_name": "{view} · {sketch}",
     "sketch_panel.edge_on_hint": "{planes} jsou z tohoto pohledu vidět z boku, takže na ně zde nelze kliknout. Vyberte je ve složce Počátek v prohlížeči, nebo v Předvolby > Náčrt > Když náčrt skončí zvolte Vrátit se k předchozímu pohledu.",

@@ -343,6 +343,37 @@ fn remove_old_temps(path: &Path) {
     }
 }
 
+/// A save the file or its folder refuses: no permission to write there. It travels
+/// inside an `io::Error` of kind `PermissionDenied`, so a caller can tell it from any other
+/// failure and show its message as it is (it already names the file).
+#[derive(Debug)]
+pub struct WriteDenied {
+    path: PathBuf,
+}
+
+impl std::fmt::Display for WriteDenied {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "can't write {}: it is read-only or you don't have permission", self.path.display())
+    }
+}
+
+impl std::error::Error for WriteDenied {}
+
+/// Whether `error` is a [`WriteDenied`].
+pub fn is_write_denied(error: &std::io::Error) -> bool {
+    error.get_ref().is_some_and(|inner| inner.is::<WriteDenied>())
+}
+
+/// The bare "Permission denied (os error 13)" of a refused save becomes a [`WriteDenied`] naming
+/// the file. A refusal already explained (the Windows one) and any other error stay as they are.
+fn explain_denied(error: std::io::Error, path: &Path) -> std::io::Error {
+    if error.kind() == std::io::ErrorKind::PermissionDenied && error.raw_os_error().is_some() {
+        log::debug!("save of {} refused: {error}", path.display());
+        return std::io::Error::new(std::io::ErrorKind::PermissionDenied, WriteDenied { path: path.to_path_buf() });
+    }
+    error
+}
+
 /// Write `bytes` to `path` atomically; with `backup`, the file being replaced is kept as
 /// `<path>.bak` first. A symbolic link at `path` is followed (the file it points to is replaced,
 /// the link stays), and the file keeps the permissions it had. The app's own folders (autosave,
@@ -354,7 +385,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<
         let _ = backup;
         return crate::vfs::write(&path.to_string_lossy(), bytes);
     }
-    write_steps(&resolve_links(path)?, bytes, backup, None)
+    resolve_links(path).and_then(|target| write_steps(&target, bytes, backup, None)).map_err(|e| explain_denied(e, path))
 }
 
 /// Write `bytes` to the file named `path` itself, atomically: a link at `path` is never followed,
@@ -1237,6 +1268,46 @@ mod tests {
             assert_eq!(fs::read(&p)?, b"two");
             let _ = fs::remove_dir_all(&d);
             Ok(())
+        }
+
+        /// A folder that refuses new files gives a typed error naming the file, for a file already
+        /// there and for a new one, where the OS said only "Permission denied (os error 13)".
+        #[test]
+        fn a_save_into_a_folder_that_refuses_it_says_so() {
+            let d = dir("read-only-folder");
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"old", false).unwrap();
+            fs::set_permissions(&d, fs::Permissions::from_mode(0o555)).unwrap();
+            // Someone who may write anywhere (root) cannot be refused, so there is nothing to test.
+            if fs::File::create(d.join("probe")).is_ok() {
+                fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+                let _ = fs::remove_dir_all(&d);
+                return;
+            }
+            for target in [p.clone(), d.join("new.solidcraft")] {
+                let e = write_atomic(&target, b"new", false).unwrap_err();
+                assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+                assert!(is_write_denied(&e), "{e}");
+                assert!(e.to_string().contains(&*target.to_string_lossy()), "{e}");
+            }
+            assert_eq!(fs::read(&p).unwrap(), b"old");
+            fs::set_permissions(&d, fs::Permissions::from_mode(0o755)).unwrap();
+            let _ = fs::remove_dir_all(&d);
+        }
+
+        /// Other failures keep their own kind, and a read-only file is still replaced as before.
+        #[test]
+        fn other_failures_are_not_called_permission_errors() {
+            let d = dir("not-denied");
+            let e = write_atomic(&d.join("missing").join("a.solidcraft"), b"x", false).unwrap_err();
+            assert!(!is_write_denied(&e), "{e}");
+            assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+            let p = d.join("a.solidcraft");
+            write_atomic(&p, b"old", false).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o444)).unwrap();
+            write_atomic(&p, b"new", false).unwrap();
+            assert_eq!(fs::read(&p).unwrap(), b"new");
+            let _ = fs::remove_dir_all(&d);
         }
     }
 }

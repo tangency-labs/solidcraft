@@ -30,5 +30,9 @@
   "zh": {
     "ui.table.gallery.cell_selection": "单元格选择",
     "ui.table.gallery.range_selection": "范围选择"
+  },
+  "fr": {
+    "ui.table.gallery.cell_selection": "Sélection de cellule",
+    "ui.table.gallery.range_selection": "Sélection d’une plage"
   }
 }
