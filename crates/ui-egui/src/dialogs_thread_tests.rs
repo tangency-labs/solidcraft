@@ -915,3 +915,22 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     assert_eq!(d.inputs[0].items.len(), 2, "the failed saved reference is not silently dropped");
     assert!(apply_commands(&app, &d).is_err());
 }
+
+/// A stud is chamfered at both ends: with the start chamfered, "Chamfer both ends" sends the
+/// command's `tip: both`, and unticking it goes back to the start alone (#20629).
+#[test]
+fn a_thread_can_be_chamfered_at_both_ends() {
+    let mut h = shaft();
+    // A checkbox, not a labelled row: its own handle is what is drawn.
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_none(), "only offered once the start is chamfered");
+    choose(&mut h, "Start", "Chamfer");
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_some());
+    assert_eq!(params(&h)["tip"], "start");
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "both");
+    assert_eq!(options(&h).tip, ThreadTip::Both);
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "start");
+    choose(&mut h, "Start", "None");
+    assert!(params(&h).get("tip").is_none());
+}

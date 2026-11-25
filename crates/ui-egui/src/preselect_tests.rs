@@ -2091,7 +2091,7 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
             // Both ends of the shaft are free: a length starts from the end picked.
             let top = crate::dialogs::edge_sel(&h.app.session, Vec3::new(4.0, 0.0, 4.0)).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
-            d.inputs.iter_mut().find(|i| i.label == "Start end (optional)").unwrap().items = vec![top];
+            d.inputs.iter_mut().find(|i| i.label == "Start side (optional)").unwrap().items = vec![top];
         }
         if h.app.dialog.as_ref().unwrap().previews() {
             wait_feature_preview(&mut h);
