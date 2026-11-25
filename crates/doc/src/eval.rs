@@ -5452,7 +5452,7 @@ impl Model {
     /// Follow a rename of parameter `old` to `new` without evaluating anything (#611): `doc` is
     /// `previous` with only that rename ([`Document::param_rename_from`]), so every feature reads
     /// the same values under the new name and keeps its result. False, leaving the model as it
-    /// was, when the model isn't the design's, a value differs or fails, a message quotes the old
+    /// was, when the results aren't `previous`'s, a value differs or fails, a message quotes the old
     /// name, or the rename reached what the model doesn't evaluate: sheet metal or plastic rules,
     /// canvases, placements or joints: evaluate then. A sketch the rename reached keeps its
     /// solve: the solved copies the states keep of it take the new name as the design's sketch
@@ -5474,6 +5474,18 @@ impl Model {
         let (after, after_errors) = evaluation_values(doc);
         if !before_errors.is_empty() || !after_errors.is_empty() {
             return false;
+        }
+        // The results must be `previous`'s: each keeps the fingerprint evaluating `previous` gives
+        // it ([`Model::refingerprint_from`]'s chain, over the states the results keep).
+        let marker = previous.marker.unwrap_or(usize::MAX);
+        let (empty, mut prev) = (ModelState::default(), 0);
+        let mut st = &empty;
+        for (i, (r, f)) in self.results.iter().zip(&previous.features).enumerate() {
+            prev = chain_fingerprint(previous, &before, f, prev, i >= marker, &self.import_digests, Some(st));
+            if r.fingerprint != prev {
+                return false;
+            }
+            st = &*r.state;
         }
         if let Some(v) = before.remove(old) {
             before.insert(new.to_string(), v);
