@@ -2955,7 +2955,7 @@
   "nav.maya.help": "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
   "nav.maya_horizontal_zoom.help": "Alt+right drag: right zooms in, left zooms out. Turn off to restore vertical drag zoom.",
   "nav.maya_horizontal_zoom.label": "Maya: horizontal drag zoom",
-  "nav.nx.help": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+  "nav.nx.help": "Middle drag orbits, middle + right drag or Shift+middle pans, middle + left drag or Ctrl+middle zooms; right drag leaves the camera",
   "nav.openscad.help": "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
   "nav.orbit_cursor_wrap.help": "An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning. Off: the drag stops at the edge of the screen. Has no effect on Wayland or in the browser.",
   "nav.orbit_cursor_wrap.label": "Wrap the cursor while orbiting",

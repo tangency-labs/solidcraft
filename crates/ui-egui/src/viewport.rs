@@ -8854,7 +8854,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
         // click already allows the pointer a few points of travel, as a mouse moves while it is
         // clicked.
-        if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) {
+        // A right click while the middle button is held is the preset's middle + right chord (NX's
+        // pan, #22063), not a click of its own.
+        let chord = ui.input(|i| i.pointer.middle_down()) && crate::prefs::nav_chord(app, crate::prefs::NavButton::Right).is_some();
+        if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !chord {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
