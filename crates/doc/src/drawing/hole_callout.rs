@@ -270,7 +270,8 @@ fn later_motion(doc: &Document, model: &Model, vals: &BTreeMap<String, Value>, i
     Ok(m)
 }
 
-/// What the id `id`, which names no feature, names instead, if anything.
+/// What the id `id`, which names no feature, names instead, if anything: a component or an
+/// occurrence, or any item [`Document::next_item_id`] gives ids to.
 fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
     let a = &doc.assembly;
     [
@@ -280,10 +281,13 @@ fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
         ("a timeline folder", doc.timeline_groups.iter().any(|g| g.id == id)),
         ("a canvas", doc.canvases.iter().any(|c| c.id == id)),
         ("a point cloud", doc.point_clouds.iter().any(|c| c.id == id)),
+        ("a note", doc.notes.iter().any(|n| n.id == id)),
         ("a joint", a.joints.iter().any(|j| j.id == id)),
         ("a contact set", a.contact_sets.iter().any(|c| c.id == id)),
         ("a motion study", a.studies.iter().any(|s| s.id == id)),
         ("an exploded view", a.exploded.iter().any(|v| v.id == id)),
+        ("a rigid group", a.rigid_groups.iter().any(|g| g.id == id)),
+        ("a configuration row", doc.configs.rows.iter().any(|r| r.id == id)),
     ]
     .into_iter()
     .find_map(|(kind, is)| is.then_some(kind))
@@ -313,6 +317,12 @@ fn measure(
     let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, to, .. } = &f.kind else {
         return Err(DocError::Invalid("not a hole".into()));
     };
+    // Measured as the evaluator drills it: a hole at sketch points in its sketch's frame, meeting
+    // each body it cuts where that body is shown (#17623). `frames` holds each such body's frame
+    // until the bore is found; the callout gives the hole in the frame of the body it is in.
+    let frames = crate::eval::ToolFrames::install(doc, f, before);
+    let (before, own) = (crate::eval::targets_as_shown(before, f, &[])?, crate::eval::targets_as_shown(own, f, &[])?);
+    let before: &ModelState = &before;
     let (holes, dir) = crate::eval::hole_spots(doc, vals, before, f)?;
     if holes.is_empty() || holes.len() > MAX_HOLES {
         return Err(DocError::Invalid(format!("a hole needs 1…{MAX_HOLES} points")));
@@ -377,7 +387,7 @@ fn measure(
     let thread_depth = thread_depth.map(|t| t + recess).filter(|t| t.is_finite());
     // The face it starts on, named in the model before it (where the feature drilled it).
     let start_face = crate::naming::face_names_at(before, &[at]).into_iter().next().unwrap_or_default();
-    let Some(made) = bore_floor(own, &bore, at, dir, r, depth) else {
+    let Some(made) = bore_floor(&own, &bore, at, dir, r, depth) else {
         // A sheet is rebuilt from its own record with the hole in it, so the hole's faces aren't
         // named after it.
         let reason = if in_sheet(before, at, dir, r) {
@@ -388,7 +398,9 @@ fn measure(
         return Ok(Resolution::Failed { reason: reason.into() });
     };
     // Where later moves of its body put it, and the feature's other holes with it.
-    let m = motion(&made.body)?;
+    let frame = crate::eval::tool_frame(&made.body).unwrap_or(crate::IDENTITY);
+    drop(frames);
+    let m = crate::mat_mul(&motion(&made.body)?, &frame);
     let (start, direction) = (crate::apply_point(&m, at), crate::apply_vector(&m, dir));
     let Some(now) = bore_floor(after, &bore, start, direction, r, depth) else {
         let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, *p)).collect();
@@ -515,6 +527,13 @@ fn bore_floor(st: &ModelState, prefix: &str, at: Vec3, dir: Vec3, r: f64, depth:
         let spots = crate::naming::face_spots(b);
         for (name, spot) in names.iter().zip(spots.iter()) {
             let Some(spot) = spot.filter(|_| name.starts_with(prefix)) else { continue };
+            // The wall is a cylinder along the axis. Its radius is checked wherever its spot lies:
+            // a wall moved out lies past the radius the spots are looked for in below.
+            let cylinder = match spot.surface {
+                Some(FaceSurface::Cylinder { axis, radius, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => Some(radius),
+                _ => None,
+            };
+            changed |= cylinder.is_some_and(|radius| (radius - r).abs() > 1e-4 * (1.0 + r));
             let v = spot.point - at;
             let along = affine::distance_along(at.into(), dir.into(), spot.point.into());
             let off = (v - dir * along).len();
@@ -522,14 +541,11 @@ fn bore_floor(st: &ModelState, prefix: &str, at: Vec3, dir: Vec3, r: f64, depth:
             if along <= 0.0 || off > r * 1.001 + 1e-6 {
                 continue;
             }
-            // The wall is a cylinder about the axis; a flat bottom or a drill point lies across
-            // it. Only a face of no known surface is told by where its spot is: the wall at the
-            // radius (a facet of a curved face lies inside it by its sag, so this is a fallback).
+            // A flat bottom or a drill point lies across the axis. Only a face of no known surface
+            // is told by where its spot is: the wall at the radius (a facet of a curved face lies
+            // inside it by its sag, so this is a fallback).
             let across = match spot.surface {
-                Some(FaceSurface::Cylinder { axis, radius, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => {
-                    changed |= (radius - r).abs() > 1e-4 * (1.0 + r);
-                    false
-                }
+                _ if cylinder.is_some() => false,
                 Some(FaceSurface::Plane { normal, .. }) if cosine(Vec3::from(normal), dir).abs() > 1.0 - 1e-6 => {
                     // A flat floor lies at the depth (a drill point's cone, below it, isn't checked).
                     changed |= depth.is_some_and(|d| (along - d).abs() > 1e-4 * (1.0 + d));

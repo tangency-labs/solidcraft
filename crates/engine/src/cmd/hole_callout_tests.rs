@@ -165,14 +165,17 @@ fn counterbore_and_countersink_callouts_keep_their_hole() {
     assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"units": "in", "decimals": 2}))), ["Ø0.2598 THRU", "⌴ Ø0.4331 ↧ 0.2677"]);
 }
 
+/// The flange's 6 points, 60° apart on a Ø95 circle from (47.5, 0): 47.5 · √3/2 = 41.13620667976083.
+const POINTS: [(f64, f64); 6] =
+    [(47.5, 0.0), (23.75, 41.13620667976083), (-23.75, 41.13620667976083), (-47.5, 0.0), (-23.75, -41.13620667976083), (23.75, -41.13620667976083)];
+
 /// A flange plate 120 x 120 x 15 with 6 points on a Ø95 circle (sketch `Pts` on its top face).
 fn flange_with_points(s: &mut Session) -> Vec<String> {
     run(s, "solid.box", json!({"corner": [-60, -60, 0], "length": 120, "width": 120, "height": 15, "name": "Flange"}));
     run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
     let ids: Vec<String> = (0..6).map(|i| format!("p{i}")).collect();
-    for (i, id) in ids.iter().enumerate() {
-        let a = std::f64::consts::TAU * i as f64 / 6.0;
-        run(s, "sketch.point", json!({"point": [47.5 * a.cos(), 47.5 * a.sin()], "id": id}));
+    for (id, (x, y)) in ids.iter().zip(POINTS) {
+        run(s, "sketch.point", json!({"point": [x, y], "id": id}));
     }
     run(s, "sketch.finish", json!({}));
     run(s, "solid.hole", json!({"sketch": "Pts", "points": ids, "diameter": 9, "name": "Holes"}));
@@ -183,14 +186,13 @@ fn flange_with_points(s: &mut Session) -> Vec<String> {
 fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
     let mut s = Session::default();
     let ids = flange_with_points(&mut s);
-    for (i, id) in ids.iter().enumerate() {
+    for (id, (x, y)) in ids.iter().zip(POINTS) {
         let c = callout_with(&mut s, "Holes", Some(id), json!({}));
         assert_eq!(c["status"], "resolved", "{c}");
         assert_eq!(c["callout"]["count"], 6, "{c}");
         assert_eq!(lines(&c), ["6× Ø9.00 THRU"]);
         // Each callout is its own hole, at its own point.
-        let a = std::f64::consts::TAU * i as f64 / 6.0;
-        assert!(near(&c["callout"]["start"][0], 47.5 * a.cos()) && near(&c["callout"]["start"][1], 47.5 * a.sin()), "{id}: {c}");
+        assert!(near(&c["callout"]["start"][0], x) && near(&c["callout"]["start"][1], y), "{id}: {c}");
     }
     // A point the feature doesn't drill is lost, keeping its ids.
     let other = callout_with(&mut s, "Holes", Some("nowhere"), json!({}));
@@ -210,8 +212,8 @@ fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
         let c = callout_with(&mut s, "Holes", Some(id), json!({}));
         assert_eq!(c["status"], "resolved", "{c}");
         assert_eq!(lines(&c), ["5× Ø9.00 THRU"]);
-        let a = std::f64::consts::TAU * i as f64 / 6.0;
-        assert!(near(&c["callout"]["start"][0], 47.5 * a.cos()) && near(&c["callout"]["start"][1], 47.5 * a.sin()), "{id}: {c}");
+        let (x, y) = POINTS[i];
+        assert!(near(&c["callout"]["start"][0], x) && near(&c["callout"]["start"][1], y), "{id}: {c}");
     }
     // Undo brings p3's hole back, at p3.
     run(&mut s, "edit.undo", json!({}));
@@ -340,6 +342,12 @@ fn hostile_callout_input_is_refused_without_a_panic() {
     };
     let component = run(&mut s, "component.create", json!({"name": "Bought"}))["component"].as_u64().unwrap_or_default();
     let occurrence = std::sync::Arc::make_mut(&mut s.doc).add_occurrence(component, 0, solidcraft_doc::IDENTITY).unwrap_or_default();
+    // Notes, rigid groups and configuration rows take their ids from the design's shared counter too.
+    let note = run(&mut s, "note.add", json!({"anchor": [0, 0, 0], "text": "Deburr"}))["note"].as_u64().unwrap_or_default();
+    let doc = std::sync::Arc::make_mut(&mut s.doc);
+    let (group, row) = (doc.allocate_id().unwrap_or_default(), doc.allocate_id().unwrap_or_default());
+    doc.assembly.rigid_groups.push(solidcraft_doc::joints::RigidGroup { id: group, name: "Kit".into(), component, members: vec![occurrence] });
+    doc.configs.rows.push(solidcraft_doc::config::ConfigRow { id: row, name: "Short".into(), cells: Vec::new() });
     // Ids: unknown, malformed, of another kind of feature or of an item that is no feature; each
     // refused for its own reason.
     for (p, why) in [
@@ -352,6 +360,9 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         (json!({}), "feature"),
         (json!({"feature": component}), "is a component"),
         (json!({"feature": occurrence}), "is an occurrence"),
+        (json!({"feature": note}), "is a note"),
+        (json!({"feature": group}), "is a rigid group"),
+        (json!({"feature": row}), "is a configuration row"),
         (json!({"feature": holes, "point": 7}), "point"),
         (json!({"feature": holes, "point": ""}), "point"),
         (json!({"feature": holes, "point": "p\u{0}1"}), "point"),
@@ -565,6 +576,37 @@ fn a_hole_in_a_part_placed_twice_reads_once_in_the_parts_own_frame() {
     assert!((dir(2) + 1.0).abs() < 1e-6, "{h}");
 }
 
+/// A hole at a sketch point drills in its sketch's frame and meets a part placed elsewhere where
+/// that part is shown (#17623). Its callout finds the bore there too, and gives it in the part's
+/// own frame, like a hole the part drills itself.
+#[test]
+fn a_root_hole_at_a_point_on_a_moved_part_reads_in_the_parts_own_frame() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Base block"}));
+    run(&mut s, "component.create", json!({"name": "Cap", "parent": "root"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Cap block"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    // Cap shown at x = 50…90; its own frame keeps it at x = 0…40, on top of Base's.
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "translate": [50, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [70, 15, 10]}, "name": "Pts", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [70, 15], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"sketch": "Pts", "points": ["c"], "single": true, "diameter": 5, "depth": 4, "participants": ["*"], "name": "H"}),
+    );
+    assert!(solid_at(&s, 20.0, 15.0, 8.0), "Base is not drilled at the hole's place in Cap's frame");
+    let h = callout(&mut s, "H");
+    assert_eq!(h["status"], "resolved", "{h}");
+    assert_eq!(lines(&h), ["Ø5.00 ↧ 4.00"]);
+    let at = |k: usize| h["callout"]["start"][k].as_f64().unwrap_or(f64::NAN);
+    let dir = |k: usize| h["callout"]["direction"][k].as_f64().unwrap_or(f64::NAN);
+    assert!((at(0) - 20.0).abs() < 1e-6 && (at(1) - 15.0).abs() < 1e-6 && (at(2) - 10.0).abs() < 1e-6, "{h}");
+    assert!((dir(2) + 1.0).abs() < 1e-6, "{h}");
+}
+
 #[test]
 fn a_later_edit_of_the_holes_own_faces_reads_failed() {
     let mut s = Session::default();
@@ -577,6 +619,37 @@ fn a_later_edit_of_the_holes_own_faces_reads_failed() {
     let c = callout(&mut s, "Blind");
     assert_eq!(c["status"], "failed", "{c}");
     assert!(c["reason"].as_str().is_some_and(|r| r.contains("changed the hole")), "{c}");
+}
+
+/// A wall moved out lies off the feature's radius, where no wall of the hole was looked for: the
+/// blind hole kept its floor at the feature's depth and read resolved, at its old diameter.
+#[test]
+fn a_later_edit_that_widens_or_narrows_a_holes_wall_reads_failed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    // Ø5 holes on y = 15: blind 4 deep at x = 10 and 23, through at x = 36 and 49.
+    for (name, x, depth) in [("BlindA", 10, Some(4)), ("BlindB", 23, Some(4)), ("ThruA", 36, None), ("ThruB", 49, None)] {
+        let mut p = json!({"position": [x, 15, 8], "diameter": 5, "name": name});
+        if let Some(d) = depth {
+            p["depth"] = json!(d);
+        }
+        run(&mut s, "solid.hole", p);
+    }
+    // Each wall moved 0.5 one way or the other (a hole's wall faces into the hole): it keeps its
+    // faces' names, but no longer is Ø5.
+    for (x, distance) in [(12.5, 0.5), (25.5, -0.5), (38.5, 0.5), (51.5, -0.5)] {
+        run(&mut s, "solid.offset_face", json!({"faces": [[x, 15, 6]], "body": "Plate", "distance": distance}));
+    }
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    for name in ["BlindA", "BlindB"] {
+        let c = callout(&mut s, name);
+        assert_eq!(c["status"], "failed", "{name}: {c}");
+        assert!(c["reason"].as_str().is_some_and(|r| r.contains("changed the hole")), "{name}: {c}");
+    }
+    for name in ["ThruA", "ThruB"] {
+        let c = callout(&mut s, name);
+        assert_eq!(c["status"], "failed", "{name}: {c}");
+    }
 }
 
 #[test]

@@ -16736,12 +16736,12 @@ fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
 
 /// The frames of [`TOOL_FRAMES`] for the feature being evaluated; what was there before is put
 /// back when it is dropped.
-struct ToolFrames(Vec<(String, Mat)>);
+pub(crate) struct ToolFrames(Vec<(String, Mat)>);
 
 impl ToolFrames {
     /// For a feature with drawn tools (see [`tools_component`]): the bodies placed differently
     /// from the component its tools are made in, so they meet them where they are shown (#3383).
-    fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
+    pub(crate) fn install(doc: &Document, f: &Feature, st: &ModelState) -> Option<ToolFrames> {
         if doc.occurrences.is_empty() && doc.body_offsets.is_empty() {
             return None;
         }
@@ -16770,7 +16770,7 @@ impl Drop for ToolFrames {
 
 /// The matrix taking the evaluated feature's drawn tools into body `name`'s frame (`None`: the
 /// same frame).
-fn tool_frame(name: &str) -> Option<Mat> {
+pub(crate) fn tool_frame(name: &str) -> Option<Mat> {
     TOOL_FRAMES.with(|t| t.borrow().iter().find(|(n, _)| n == name).map(|(_, m)| *m))
 }
 
@@ -16779,7 +16779,7 @@ fn tool_frame(name: &str) -> Option<Mat> {
 /// component's frame. A through-all extent, and every test of where a tool meets its targets, is
 /// measured on it, so a target in another, moved component is met where it is shown (#3383).
 /// The model itself when no such body is placed differently.
-fn targets_as_shown<'a>(st: &'a ModelState, f: &Feature, targets: &[String]) -> Result<std::borrow::Cow<'a, ModelState>> {
+pub(crate) fn targets_as_shown<'a>(st: &'a ModelState, f: &Feature, targets: &[String]) -> Result<std::borrow::Cow<'a, ModelState>> {
     let names: &[String] = if targets.is_empty() { &f.participants } else { targets };
     let all = names.iter().any(|n| n == "*");
     let mut out: Option<ModelState> = None;
