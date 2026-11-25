@@ -315,6 +315,21 @@ pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
     Some((t, if !m.closed && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
+/// Check whether an indexed mesh is closed after identifying vertices by the supplied keys.
+/// Compact matching keys to indices so the edge table stores only small keys.
+pub fn mesh_edges_closed_by<K: Eq + Hash>(positions: &[Vec3], indices: &[[u32; 3]], key: impl Fn(Vec3) -> K) -> bool {
+    let mut unique = HashMap::new();
+    let vertices = positions
+        .iter()
+        .map(|&p| {
+            let next = unique.len();
+            *unique.entry(key(p)).or_insert(next)
+        })
+        .collect::<Vec<_>>();
+    drop(unique);
+    triangle_edges_closed(indices.iter().map(|&[a, b, c]| Some([*vertices.get(a as usize)?, *vertices.get(b as usize)?, *vertices.get(c as usize)?])))
+}
+
 /// Whether each side is used by exactly two triangles in opposite directions.
 /// The caller supplies the vertex keys. A missing triangle or a repeated corner
 /// prevents the sides from forming a closed surface.

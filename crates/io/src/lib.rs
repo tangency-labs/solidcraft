@@ -1168,24 +1168,6 @@ pub fn mass_properties(b: &solidcraft_kernel::Body) -> Result<Option<MassPropert
     Ok(Mesh { positions, triangles, ..Mesh::default() }.mass_properties())
 }
 
-/// Check how the STL reader will identify shared vertices. Assign temporary
-/// indices to exact coordinate keys so the edge table only stores small keys.
-fn stl_mesh_closed<K: Eq + std::hash::Hash>(mesh: &Mesh, key: impl Fn(Vec3) -> K) -> bool {
-    let mut unique = std::collections::HashMap::new();
-    let vertices = mesh
-        .positions
-        .iter()
-        .map(|&p| {
-            let next = unique.len();
-            *unique.entry(key(p)).or_insert(next)
-        })
-        .collect::<Vec<_>>();
-    drop(unique);
-    solidcraft_kernel::triangle_edges_closed(
-        mesh.triangles.iter().map(|&[a, b, c]| Some([*vertices.get(a as usize)?, *vertices.get(b as usize)?, *vertices.get(c as usize)?])),
-    )
-}
-
 /// Binary STL of several meshes (one solid).
 pub fn stl_binary(meshes: &[Mesh], name: &str) -> Vec<u8> {
     let n: usize = meshes.iter().map(|m| m.triangles.len()).sum();
@@ -1800,8 +1782,9 @@ pub fn export_with_parts_noted(
                 let (m, mut n) = body_mesh(b, body, quality)?;
                 // Our reader uses f32 for both encodings. ASCII also needs
                 // to close at the full precision written to the file.
-                let closed = stl_mesh_closed(&m, |p| p.to_f32().map(|x| (x + 0.0).to_bits()))
-                    && (format == Format::StlBinary || stl_mesh_closed(&m, |p| [p.x, p.y, p.z].map(|x| (x + 0.0).to_bits())));
+                let closed = solidcraft_kernel::mesh_edges_closed_by(&m.positions, &m.triangles, |p| p.to_f32().map(|x| (x + 0.0).to_bits()))
+                    && (format == Format::StlBinary
+                        || solidcraft_kernel::mesh_edges_closed_by(&m.positions, &m.triangles, |p| [p.x, p.y, p.z].map(|x| (x + 0.0).to_bits())));
                 if closed {
                     return Ok((m, n));
                 }
