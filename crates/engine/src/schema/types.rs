@@ -707,9 +707,9 @@ keyword_param!(
     /// `solid.fillet`'s `turn`.
     FilletTurnParam,
     "turn",
-    &["mitre", "swept"],
-    "mitre or swept",
-    "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+    &["auto", "mitre", "swept"],
+    "auto, mitre or swept",
+    "How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along a boss's base, at its upright edges): auto (the default, mitre with edge_radii) sweeps each turn where the swept turn builds and mitres the rest, never refused where the mitre builds; mitre runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal, the side edge is curved or tangent, or the ball cannot pass it (a side edge of the rounds' own convexity: a pocket's or a box's corner edge). Matching ignores case."
 );
 keyword_param!(
     /// `plastic.lip`'s `type`.

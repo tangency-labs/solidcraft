@@ -892,6 +892,123 @@ fn scale_takes_a_factor_per_axis() {
     assert!(kind(&h).get("factors").is_none(), "{}", kind(&h));
     assert!((size(&h) - Vec3::new(30.0, 30.0, 30.0)).len() < 1e-6, "{:?}", size(&h));
 }
+
+/// Scale's base point: with none picked, a new Scale grows the bodies about their centre, not the
+/// world origin; a picked vertex is the point that stays put; reopening the Scale keeps its point.
+#[test]
+fn scale_about_a_base_point_or_the_bodies_centre() {
+    // `on_box`: the base point is one of the box's vertices; otherwise it is the design origin,
+    // which the viewport hands over as a vertex of no body.
+    let scaled = |base: Option<Vec3>, on_box: bool| -> (Harness, u64) {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+        if let Some(point) = base {
+            d.inputs[1].items = vec![Sel::Vertex { body: if on_box { body } else { String::new() }, point }];
+        }
+        let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+        *factor = "2".into();
+        for (command, params) in apply_commands(&h.app, &d).unwrap() {
+            h.app.run(&command, params).unwrap();
+        }
+        let id = h.app.session.doc.features.last().unwrap().id;
+        (h, id)
+    };
+    let bounds = |h: &Harness| h.app.session.model.state().bodies[0].mesh().bounds();
+    let near = |a: Vec3, b: Vec3| (a - b).len() < 1e-6;
+
+    // The box spans (10,0,0)..(20,10,10), centre (15,5,5): doubled about it.
+    let (h, _) = scaled(None, true);
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(5.0, -5.0, -5.0)) && near(b.max, Vec3::new(25.0, 15.0, 15.0)), "{b:?}");
+
+    // About its corner (10,0,0): that corner stays where it is.
+    let (h, id) = scaled(Some(Vec3::new(10.0, 0.0, 0.0)), true);
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(10.0, 0.0, 0.0)) && near(b.max, Vec3::new(30.0, 20.0, 20.0)), "{b:?}");
+
+    // Reopened and applied again, the Scale keeps the corner, as the vertex it was.
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let (_, params) = apply_commands(&h.app, &d).unwrap().into_iter().next().unwrap();
+    assert_eq!(params["params"]["about"]["type"], json!("vertex"), "{params}");
+    assert!(params["params"].get("origin").is_none_or(serde_json::Value::is_null), "{params}");
+
+    // About the design origin: the box doubles and moves away from it.
+    let (h, _) = scaled(Some(Vec3::ZERO), false);
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(20.0, 0.0, 0.0)) && near(b.max, Vec3::new(40.0, 20.0, 20.0)), "{b:?}");
+
+    // About the box's top face: the centre of that face, (15,5,10), stays put.
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
+    let st = h.app.session.model.state();
+    let body = st.bodies[0].name.clone();
+    let b = &st.bodies[0].body;
+    let top = b.faces((b.size() * 2e-3).max(1e-3)).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+    d.inputs[1].items = vec![Sel::Face { body, index: top.index, point: Vec3::new(12.0, 3.0, 10.0) }];
+    let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+    *factor = "2".into();
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let b = bounds(&h);
+    assert!(near(b.min, Vec3::new(5.0, -5.0, -10.0)) && near(b.max, Vec3::new(25.0, 15.0, 10.0)), "{b:?}");
+
+    // A shaft's side face stands for the centre of its nearer round end: picked near the bottom
+    // of a cylinder standing on (10,0,0), that end's centre is the base point.
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"base": [10, 0, 0], "radius": 5, "height": 10})).unwrap();
+    let st = h.app.session.model.state();
+    let body = st.bodies[0].name.clone();
+    let b = &st.bodies[0].body;
+    let side = b.faces((b.size() * 2e-3).max(1e-3)).unwrap().into_iter().find(|f| f.plane_normal.is_none()).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+    d.inputs[1].items = vec![Sel::Face { body, index: side.index, point: Vec3::new(15.0, 0.0, 2.0) }];
+    let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+    *factor = "2".into();
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let b = bounds(&h);
+    assert!((b.min.z - 0.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "the bottom end stays: {b:?}");
+}
+
+/// What a Scale grows its bodies about follows the features before it: the bodies' centre and a
+/// picked vertex are found again when an earlier parameter changes, not kept as old coordinates.
+#[test]
+fn scale_about_follows_the_features_before_it() {
+    let bounds = |h: &Harness| h.app.session.model.state().bodies[0].mesh().bounds();
+    let near = |a: Vec3, b: Vec3| (a - b).len() < 1e-6;
+    let scaled = |far_corner: bool| -> Harness {
+        let mut h = Harness::new();
+        h.app.run("parameters.add", json!({"name": "len", "expression": "10 mm"})).unwrap();
+        h.app.run("solid.box", json!({"length": "len", "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+        if far_corner {
+            d.inputs[1].items = vec![Sel::Vertex { body, point: Vec3::new(20.0, 10.0, 10.0) }];
+        }
+        let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+        *factor = "2".into();
+        for (command, params) in apply_commands(&h.app, &d).unwrap() {
+            h.app.run(&command, params).unwrap();
+        }
+        h.app.run("parameters.change", json!({"name": "len", "expression": "20 mm"})).unwrap();
+        h
+    };
+    // The box is now (10,0,0)..(30,10,10), centre (20,5,5): doubled about that, not the old (15,5,5).
+    let b = bounds(&scaled(false));
+    assert!(near(b.min, Vec3::new(0.0, -5.0, -5.0)) && near(b.max, Vec3::new(40.0, 15.0, 15.0)), "{b:?}");
+    // The far corner moved to (30,10,10) and stays put there.
+    let b = bounds(&scaled(true));
+    assert!(near(b.min, Vec3::new(-10.0, -10.0, -10.0)) && near(b.max, Vec3::new(30.0, 10.0, 10.0)), "{b:?}");
+}
 form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);
 form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z Distance", "X Angle", "Y Angle", "Z Angle"]);
@@ -1086,6 +1203,12 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
             let mut h = fixture();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400,"height":950}));
+            // The system's fallback faces are read on a thread (slow where large CJK faces are
+            // installed) and the fonts are set up again once they are in, which can change the
+            // card's text: on CI that landed between the two reads below (#21495). Read them now
+            // (this waits for that thread's search) and let the app set its fonts up with them.
+            crate::fonts::setup_fonts_for(&h.ctx, "en", &h.app.preferences.ui_font);
+            h.frames(2);
             h.app.dialog = Some(representative(&h, command));
             // The card settles on its own; its preview (joint.create's is an error row here)
             // comes from a worker, which a loaded machine can finish a frame later.
@@ -1752,6 +1875,67 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("section_size").is_none(), "{p}");
     assert!(p.get("revolutions").is_some() && p.get("pitch").is_some(), "{p}");
     assert!(p.get("operation").is_some(), "{p}");
+}
+
+/// A coil from a sketch profile takes its section from the sketch, so the dialog shows neither the
+/// Section rows nor Start angle and never sends them, even remembered from an earlier coil
+/// (#17870): `solid.coil` refuses them with `sketch`.
+#[test]
+fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("section".into(), json!("square"));
+    d.extra.insert("section_position".into(), json!("outside"));
+    d.extra.insert("start_angle".into(), json!("30 deg"));
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"shown": label}})).unwrap_or_else(|e| panic!("without a profile: {e}"));
+    }
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"not_shown": label}})).unwrap_or_else(|e| panic!("with a profile: {e}"));
+    }
+    h.step(&json!({"expect":{"shown": "Clockwise"}})).unwrap();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.coil");
+    for key in ["section", "section_position", "start_angle"] {
+        assert!(p.get(key).is_none(), "{key} sent with a sketch profile: {p}");
+    }
+    h.app.run(id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+}
+
+/// Flip winds the coil the other way along its axis (#17870): down from a sketch profile, and
+/// reversed on any axis the coil already has. The option itself is never sent.
+#[test]
+fn coil_flip_winds_the_coil_down_its_axis() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("flip".into(), json!(true));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([0.0, 0.0, -1.0]), "{p}");
+    assert!(p.get("flip").is_none(), "{p}");
+    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([-1.0, 0.0, 0.0]), "{p}");
+    d.extra.remove("axis");
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    h.step(&json!({"expect":{"shown": "Flip"}})).unwrap();
+    let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { axis, .. } => Some(axis.0),
+        _ => None,
+    });
+    assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
 }
 
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the

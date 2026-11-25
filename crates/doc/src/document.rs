@@ -571,6 +571,18 @@ impl ThinSide {
     }
 }
 
+/// What a Scale grows its bodies about. Each evaluation finds the point again, so it follows
+/// the features before the Scale when they change.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ScaleAbout {
+    /// The centre of the bodies' exact bounding box, as the features before the Scale leave them.
+    Centre,
+    /// A picked vertex, sketch point, construction point, circular edge or face (a flat face's
+    /// middle, a hole's or shaft's round end), found by its reference.
+    Pick { at: GeoRef },
+}
+
 /// Revolve axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -969,8 +981,11 @@ pub enum FeatureKind {
         /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         setbacks: Vec<CornerSetback>,
-        /// How two rounds turn where they meet at a sharp side edge: in a mitre (the default) or
-        /// swept round it (a constant-radius, exact, rolling-corner fillet without setbacks only).
+        /// How two rounds turn where they meet at a sharp side edge: in a mitre, swept round it
+        /// (a constant-radius, exact, rolling-corner fillet without setbacks only), or each turn
+        /// swept where the swept turn builds and mitred where not (`auto`, what `solid.fillet`
+        /// gives a new fillet). A fillet saved without it, as every fillet before `auto` was
+        /// (`format/pending/fillet-auto-turn.rs`), is mitred.
         #[serde(default, skip_serializing_if = "FilletTurn::is_mitre")]
         turn: FilletTurn,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
@@ -1393,8 +1408,13 @@ pub enum FeatureKind {
     /// Scale bodies about a point (uniform, or per axis).
     Scale {
         bodies: Vec<BodyName>,
+        /// The fixed point it scales about when `about` is not given (the design origin in
+        /// designs saved before `about`).
         #[serde(default)]
         origin: Position,
+        /// What it scales about, found again on each evaluation: the bodies' centre or a pick.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        about: Option<ScaleAbout>,
         #[walk(unitless = "Scale factor")]
         factor: Expr,
         /// Per-axis factors instead of `factor`.
@@ -2720,6 +2740,10 @@ pub enum FilletTurn {
     /// The rounds end at the side edge and the corner is their section revolved about it, a
     /// torus tangent to both (`solidcraft_kernel::FilletTurn::Swept`).
     Swept,
+    /// Each turn swept where the swept turn builds (the rolling ball can pass the side edge) and
+    /// mitred where it does not, decided per corner (`solidcraft_kernel::FilletTurn::Auto`):
+    /// never refused where the mitre builds, and taking every option the mitre takes.
+    Auto,
 }
 
 /// Why a swept turn is refused with a fillet's other options: the kernel sweeps the turn of two
@@ -2743,6 +2767,7 @@ impl FilletTurn {
         match self {
             FilletTurn::Mitre => solidcraft_kernel::FilletTurn::Mitre,
             FilletTurn::Swept => solidcraft_kernel::FilletTurn::Swept,
+            FilletTurn::Auto => solidcraft_kernel::FilletTurn::Auto,
         }
     }
 }
