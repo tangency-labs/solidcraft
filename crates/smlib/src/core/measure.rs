@@ -276,8 +276,8 @@ pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
     check_with(body, level, false)
 }
 
-/// [`check`]; `stoppable` is kept for its callers: solidcore-ops checks a copy, so the token over
-/// this thread's work stops it either way.
+/// [`check`], stopped by the token over this thread's work when `stoppable` (a body the caller
+/// consumes); a body others read too is never stopped part way (solidcore#3247).
 pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Result<CheckReport> {
     check_scoped(body, level, stoppable, ValidityScope::Body)
 }
@@ -290,10 +290,9 @@ pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scop
         CheckLevel::Geometry => solidcore_ops::check::CheckLevel::Geometry,
         CheckLevel::All => solidcore_ops::check::CheckLevel::All,
     };
-    // solidcore-ops checks a copy, so the token over this thread's work stops it whether or not
-    // the body is the caller's to consume (`stoppable`): a stopped check leaves the body as it was.
-    let _ = stoppable;
-    let c = ops_as("check", &[("brep", body)], refused, || body.check_scoped(lv, scope))?;
+    let checked = || ops_as("check", &[("brep", body)], refused, || body.check_scoped(lv, scope));
+    // a body others read too is checked whatever the token says (solidcore#3247)
+    let c = if stoppable { checked()? } else { crate::stop::unstoppable(checked)? };
     Ok(CheckReport { failures: c.failures, text: c.text })
 }
 
@@ -304,7 +303,11 @@ fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) 
         solidcore_ops::Error::Unported(upstream) => {
             Error::Solidcore(format!("smlib_brep_check: {upstream}: not supported yet: solidcore has not ported it"))
         }
-        solidcore_ops::Error::Unsupported(why) => Error::Solidcore(format!("smlib_brep_check: not supported yet: {why}")),
+        // solidcore-ops' one refusal of a body it cannot check: the naming scheme it cannot know
+        solidcore_ops::Error::Unsupported(_) => Error::Solidcore(
+            "smlib_brep_check: not supported yet: the body names its geometry owners by its maker's keys (NamingScheme::Unknown), which the check cannot know"
+                .into(),
+        ),
         e => super::call::error(call, e, detail),
     }
 }
