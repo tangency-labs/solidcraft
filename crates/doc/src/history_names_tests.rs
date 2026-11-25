@@ -440,14 +440,26 @@ fn piece_overlap_and_resuffixed_lookup_survive_adjacent_neighbour_changes() {
     assert_eq!(piece_overlap(&after, 0, "side#[bottom,hole1]#2"), None);
     assert_eq!(unique_resuffixed_on_body(&after, "side#[bottom,hole1]#2"), None);
 
-    // Pattern copies stay isolated by instance suffix (`…#[…]@F9.1`, suffix after qualifier).
-    let mut copy_after = after;
-    for face in std::sync::Arc::make_mut(&mut copy_after.faces) {
-        face.push_str("@F9.1");
-    }
+    // Pattern copies stay isolated by instance suffix (`…#[…]@F9.1`, suffix after qualifier),
+    // including when copied neighbours carry the same instance suffix in `info.bounds`.
+    let copy_after = qualify(
+        named(&[
+            "side#[bottom,hole1,hole2,hole3]@F9.1",
+            "side#[back,top]@F9.1",
+            "bottom@F9.1",
+            "hole1@F9.1",
+            "hole2@F9.1",
+            "hole3@F9.1",
+            "top@F9.1",
+            "back@F9.1",
+        ]),
+        &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, 7)],
+    );
     assert_eq!(piece_overlap(&copy_after, 0, "side#[bevel,bottom,hole1,hole2,hole3]@F9.1"), Some((4, 5)));
     assert_eq!(piece_overlap(&copy_after, 0, "side#[bevel,bottom]@F9.2"), None);
     assert_eq!(piece_overlap(&copy_after, 0, &stored), None);
+    assert_eq!(unique_resuffixed_on_body(&copy_after, "side#[bevel,bottom,hole1,hole2,hole3]@F9.1"), Some(0));
+    assert_eq!(unique_resuffixed_on_body(&copy_after, "side#[bevel,bottom,hole1,hole2,hole3]@F9.2"), None);
 }
 
 /// #22047: an unmoved planar face piece keeps resolving through `locate_face`, `locate_one`,
@@ -505,6 +517,16 @@ fn a_planar_face_piece_stays_resolved_when_an_adjacent_cut_shortens() {
     assert_eq!(one.face, main_after);
     assert!(crate::name_lookup::face_has_name(after_body, main_after, &stored));
     assert_eq!(after_doc.lineage_face_indices(after_body, &stored).unwrap(), vec![main_after]);
+    assert_eq!(crate::name_lookup::face_body(&after_state, &stored).map(|b| b.name.as_str()), Some("Body1"));
+
+    // An exact-match body must win over an overlap-only body in `face_body`, matching `locate_face`.
+    let mut exact_body = before_body.clone();
+    exact_body.name = "ExactBody".into();
+    let mut overlap_body = after_body.clone();
+    overlap_body.name = "OverlapBody".into();
+    let mut mixed = crate::ModelState::default();
+    mixed.bodies = vec![overlap_body, exact_body];
+    assert_eq!(crate::name_lookup::face_body(&mixed, &stored).map(|b| b.name.as_str()), Some("ExactBody"));
 
     // Splitting the main +x piece itself so two pieces each keep one hole must stay ambiguous.
     let (split_doc, split_model) = build("30", true);

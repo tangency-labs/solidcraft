@@ -767,7 +767,19 @@ pub(crate) fn piece_overlap(names: &Names, index: usize, name: &str) -> Option<(
     if around.is_empty() || crate::naming::strip_piece(current) != crate::naming::strip_piece(stem) {
         return None;
     }
-    let matched = around.iter().filter(|f| info.bounds.contains(**f) || info.bounds.iter().any(|bound| rounds_the_edge(bound, current, f))).count();
+    let matched = around
+        .iter()
+        .filter(|f| {
+            let suffixed = (!at.is_empty()).then(|| format!("{f}{at}"));
+            let target = suffixed.as_deref().unwrap_or(f);
+            info.bounds.contains(target)
+                || (!at.is_empty() && info.bounds.contains(**f))
+                || info.bounds.iter().any(|bound| {
+                    let (bound_core, bound_at) = instance_suffix(bound);
+                    (bound_at == at || bound_at.is_empty()) && rounds_the_edge(bound_core, current, f)
+                })
+        })
+        .count();
     Some((matched, around.len()))
 }
 

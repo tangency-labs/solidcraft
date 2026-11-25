@@ -814,6 +814,14 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         return None;
     }
     let beside_index = beside_index_named(b, faces);
+    let mut resuffixed_cache: std::collections::HashMap<&str, Option<usize>> = std::collections::HashMap::new();
+    for (k, _) in wanted.match_indices('|') {
+        for part in [wanted.get(..k), wanted.get(k + 1..)].into_iter().flatten() {
+            if qualified(part) {
+                resuffixed_cache.entry(part).or_insert_with(|| unique_resuffixed_on_body(faces, part));
+            }
+        }
+    }
     // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
     let side = |f: usize, x: &str| -> Option<bool> {
         let level = crate::history_names::matches(faces, f, x)?;
@@ -829,7 +837,7 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
         (level == Match::Stem
             && qualified(x)
-            && (faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece()) || unique_resuffixed_on_body(faces, x) == Some(f)))
+            && (faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece()) || resuffixed_cache.get(x).copied().flatten() == Some(f)))
         .then_some(true)
     };
     let mut cands: Vec<usize> = Vec::new();
@@ -1265,8 +1273,14 @@ pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelB
     }
     let solids = || st.bodies.iter().filter(|b| !b.body.is_mesh());
     naming::warm_names(solids());
-    let mut holders = solids().filter(|b| body_has_face_named(b, name));
-    match (holders.next(), holders.next()) {
+    let mut exact = solids().filter(|b| body_has_exact_face_named(b, name));
+    match (exact.next(), exact.next()) {
+        (Some(b), None) => return Some(b),
+        (Some(_), Some(_)) => return None,
+        (None, _) => {}
+    }
+    let mut fallback = solids().filter(|b| unique_resuffixed_on_body(&naming::names(b), name).is_some());
+    match (fallback.next(), fallback.next()) {
         (Some(b), None) => Some(b),
         _ => None,
     }
@@ -1463,14 +1477,19 @@ pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
     }
 }
 
+/// Whether some face of a body matches the stored name directly (without neighbour-overlap
+/// fallback).
+fn body_has_exact_face_named(b: &ModelBody, name: &str) -> bool {
+    let names = naming::names(b);
+    (0..names.faces.len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
+}
+
 /// Whether some face of a body is exactly the face a stored name names (see [`face_has_name`]).
 pub(crate) fn body_has_face_named(b: &ModelBody, name: &str) -> bool {
     if legacy_name(name).is_some() {
         return false;
     }
-    let names = naming::names(b);
-    (0..names.faces.len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
-        || unique_resuffixed_on_body(&names, name).is_some()
+    body_has_exact_face_named(b, name) || unique_resuffixed_on_body(&naming::names(b), name).is_some()
 }
 
 /// The faces of a body that are the stored name's face or pieces of it (by stem). A name saved
