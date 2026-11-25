@@ -1746,12 +1746,11 @@ pub(crate) fn paint_sketch(
     let mut wires = 0;
     for wire in preview.wires.iter().filter_map(|index| sketch.sketch.wires.get(*index)) {
         let line: Vec<egui::Pos2> = wire.pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
-        match line.as_slice() {
-            [point] => painter.circle_filled(*point, 3.0, stroke.color),
-            _ => {
-                painter.add(egui::Shape::line(line, stroke));
-                wires += 1;
-            }
+        if let [point] = line.as_slice() {
+            painter.circle_filled(*point, 3.0, stroke.color);
+        } else {
+            painter.add(egui::Shape::line(line, stroke));
+            wires += 1;
         }
     }
     preview.curves.len() + wires
