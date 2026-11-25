@@ -1,6 +1,6 @@
 # Goldens rows moved by retiring `brep_ray_classifies_current_trims` (WR-732, #18934)
 
-Measured against `main` at c00b2c6962: each row the retirement moves, its first moved value
+Measured against `main` at fbf7ed50bc: each row the retirement moves, its first moved value
 (main's, then this branch's), how many values of the row move, and why (below the table; the
 WR-732 addendum of 2026-11-23 has the change itself).
 
@@ -11,11 +11,11 @@ WR-732 addendum of 2026-11-23 has the change itself).
 | `blend.feature_executive` | `fillet_each_fillet1019` | `values.base_geometry.blocks[1][0]`: 100.39631497429602 → 100.39631497420498 | 6 | comparator |
 | `blend.feature_executive` | `single_face_fillet1019_3` | `values.base_geometry.blocks[1][0]`: 100.39631497429602 → 100.39631497420498 | 6 | comparator |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-bottle-e8-r0.1` | `values.mass_properties[0]`: 33.092189853151744 → 33.0921897026184 | 2 | integration |
-| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1` | `values.mass_properties[0]`: 38227.381745950406 → 38227.38173952555 | 10 | fillet |
-| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` | `values.mass_properties[0]`: 38192.70239711213 → 38192.70239068727 | 10 | fillet |
+| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1` | `values.mass_properties[0]`: 38227.4301927405 → 38227.43018631564 | 11 | fillet |
+| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5` | `values.mass_properties[0]`: 38192.75084423395 → 38192.75083780909 | 11 | fillet |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1` | `values.mass_properties[0]`: 38235.992674532565 → 38235.99266808096 | 9 | read |
-| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1` | `values.mass_properties[0]`: 38227.38174592814 → 38227.38173950328 | 9 | fillet |
-| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5` | `values.mass_properties[0]`: 38192.70239761001 → 38192.70239118515 | 10 | fillet |
+| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1` | `values.mass_properties[0]`: 38227.43019270412 → 38227.430186279256 | 8 | fillet |
+| `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5` | `values.mass_properties[0]`: 38192.750844302136 → 38192.75083787727 | 8 | fillet |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1` | `values.mass_properties[0]`: 38235.992674532565 → 38235.99266808096 | 9 | read |
 | `blend.fillet_executive_p3` | `stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5` | `values.mass_properties[0]`: 38235.992674532565 → 38235.99266808096 | 9 | read |
 | `blend.fillet_executive_p3` | `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1` | `values.mass_properties[0]`: 38235.992674532565 → 38235.99266808096 | 9 | read |
