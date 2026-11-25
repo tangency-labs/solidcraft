@@ -1855,16 +1855,16 @@ pub fn tagged_mesh_with_edges(body: &solidcraft_kernel::Body, tolerance: f64) ->
     }
     // The mesh path the exports take ([`export_mesh_noted`]), so at the export's chord this is
     // the tagged 3MF's mesh.
-    let (m, _) = body.export_mesh(&solidcraft_kernel::MeshSpec::chord(tolerance))?;
+    let (Mesh { positions, triangles, tri_face, edges, edge_faces, .. }, _) = body.export_mesh(&solidcraft_kernel::MeshSpec::chord(tolerance))?;
     // Weld with each triangle's own index as its tag: the pieces of a split triangle keep it,
     // and its face follows from it.
-    let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
+    let n = u32::try_from(triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
     let (positions, triangles, origin, paths) =
-        threemf::weld_tagged_lines(&m.positions, &m.triangles, &(0..n).collect::<Vec<_>>(), weld_eps(body), &m.edges);
-    let tri_faces: Vec<u32> = origin.iter().map(|t| m.tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
+        threemf::weld_tagged_lines(&positions, &triangles, &(0..n).collect::<Vec<_>>(), weld_eps(body), &edges);
+    let tri_faces: Vec<u32> = origin.iter().map(|t| tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
     let most = tri_faces.iter().max().map_or(0, |f| f.saturating_add(1));
     let faces = u32::try_from(body.face_count()).unwrap_or(u32::MAX).max(most);
-    Ok((TaggedMesh { positions, triangles, tri_faces, faces }, paths, m.edge_faces))
+    Ok((TaggedMesh { positions, triangles, tri_faces, faces }, paths, edge_faces))
 }
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`

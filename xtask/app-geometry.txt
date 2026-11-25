@@ -891,7 +891,7 @@ crates/io/src/threemf.rs:flatten triangles
 crates/io/src/threemf.rs:indexed triangles
 crates/io/src/threemf.rs:parse_model triangles
 crates/io/src/threemf.rs:read_3mf triangles
-crates/io/src/threemf.rs:weld_tagged dot
+crates/io/src/threemf.rs:weld_tagged_lines dot
 crates/io/src/urdf.rs:append triangles
 crates/io/src/urdf.rs:inertial dot
 crates/io/src/urdf.rs:metres triangles
