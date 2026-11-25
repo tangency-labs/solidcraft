@@ -227,3 +227,25 @@ fn a_refused_fillet_carries_the_kernel_calls_code() {
     let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
     assert_eq!(&row["error_code"], timeline_code, "{row}");
 }
+
+/// The application checks surface regularity as well as closure. The three-sided end of
+/// this inside round must be a trimmed plane even where its arc is tangent to a side.
+#[test]
+fn inside_round_at_a_pocket_opening_passes_the_face_geometry_check() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":75,"width":75,"height":75,"body_name":"Block"}));
+    let mut edges = Vec::new();
+    for a in [0.0, 75.0] {
+        for b in [0.0, 75.0] {
+            edges.extend([[37.5, a, b], [a, 37.5, b], [a, b, 37.5]]);
+        }
+    }
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":edges,"radius":5}));
+    run(&mut s, "solid.box", json!({"length":65,"width":65,"height":65,"corner":[5,0,5],"body_name":"Pocket"}));
+    run(&mut s, "solid.combine", json!({"target":"Block","tools":["Pocket"],"operation":"cut"}));
+    let measure = |s: &mut Session| run(s, "inspect.measure", json!({"bodies":["Block"]}))["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    let before = measure(&mut s);
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[5,32.5,5]],"radius":2}));
+    let gained = measure(&mut s) - before;
+    assert!((gained - 65.0 * (4.0 - std::f64::consts::PI)).abs() < 1e-5, "{gained}");
+}
