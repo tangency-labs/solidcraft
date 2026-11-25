@@ -92,7 +92,11 @@ fn a_link_out_of_the_package_is_not_followed() {
     std::os::unix::fs::symlink(&outside, dir.join("icons")).unwrap();
     let schema = json!({"type":"object","x-solidcraft-icon":"seat.svg","properties":{"p":{"type":"string","oneOf":[
         {"const":"a","x-solidcraft-icon":"icons/seat.svg"}]}}});
-    assert!(load(&dir, "links", &[entry(schema)]).is_empty());
+    for kind in [solidcraft_engine::plugin::EntryKind::Command, solidcraft_engine::plugin::EntryKind::Importer] {
+        let mut declared = entry(schema.clone());
+        declared.kind = kind;
+        assert!(load(&dir, "links", &[declared]).is_empty());
+    }
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_dir_all(outside);
 }
@@ -200,4 +204,102 @@ fn ribbon_group_icons_are_loaded_from_the_package_and_missing_or_invalid_images_
     assert_eq!(buttons[1].icon, GENERIC);
     assert_eq!(buttons[2].icon, GENERIC);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallback() {
+    use crate::app_bar::FileRow;
+    use crate::plugin_menu::{command_icon, open_entry, ribbon_buttons, rows};
+    use crate::plugin_slots::{Slot, items};
+
+    let red = SEAT.replace("#236ead", "#ff0000");
+    let wrong_size = SEAT.replace(r#"viewBox="0 0 64 64""#, r#"viewBox="0 0 640 640""#);
+    let big = SEAT.replace("<title>Seat</title>", &"<title>x</title>".repeat(5000));
+    let root = package(
+        "importer-drawn",
+        &[("imports/seat.svg", SEAT), ("imports/red.svg", &red), ("imports/size.svg", &wrong_size), ("imports/big.svg", &big)],
+    );
+    let cases = [
+        ("custom", Some(json!("seat.svg"))),
+        ("missing", Some(json!("missing.svg"))),
+        ("invalid", Some(json!("red.svg"))),
+        ("size", Some(json!("size.svg"))),
+        ("big", Some(json!("big.svg"))),
+        ("outside", Some(json!("../seat.svg"))),
+        ("wrong-type", Some(json!(7))),
+        ("default", None),
+    ];
+    let entries: Vec<_> = cases
+        .iter()
+        .map(|(name, icon)| {
+            let mut schema = json!({"type":"object"});
+            if let Some(icon) = icon {
+                schema[KEY] = icon.clone();
+            }
+            json!({"name":name,"kind":"importer","extensions":["sample"],"input_schema":schema,
+                "slots":[{"kind":"menu","name":"File"},{"kind":"menu","name":"Help"},{"kind":"ribbon","name":"Inspect"}]})
+        })
+        .collect();
+    std::fs::write(root.join("imports/entry.wasm"), []).unwrap();
+    std::fs::write(
+        root.join("imports/plugin.json"),
+        json!({"id":"imports","name":"Imports","version":"1","capabilities":["formats@0.1"],
+            "runtime":{"module":"entry.wasm","commands":[],"entries":entries}})
+        .to_string(),
+    )
+    .unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.plugin_state.plugins_dir = Some(root.clone());
+    h.app.plugin_menu.listed = crate::plugin_menu::list(&h.app, Some(&root));
+    h.app.plugin_menu.loaded = true;
+    assert_eq!(h.app.plugin_menu.listed.len(), 1);
+    let plugin = &h.app.plugin_menu.listed[0];
+    assert_eq!(plugin.images.len(), 1, "only the valid image is loaded");
+    let custom = plugin.images["seat.svg"].clone();
+    assert!(!solidcraft_ui_kit::icons::resolve(&custom).placeholder);
+    let expected: Vec<_> = (0..cases.len()).map(|i| if i == 0 { custom.as_str() } else { GENERIC }).collect();
+    for (entry, icon) in plugin.entries.iter().zip(&expected) {
+        assert_eq!(command_icon(plugin, entry), *icon);
+        let mut command = entry.clone();
+        command.kind = solidcraft_engine::plugin::EntryKind::Command;
+        assert_eq!(command_icon(plugin, &command), *icon, "the same resolver handles both entry kinds");
+    }
+    assert_eq!(ribbon_buttons(&h.app).iter().map(|b| b.icon.as_str()).collect::<Vec<_>>(), expected);
+    let plugin_rows = rows(&h.app);
+    let FileRow::Sub { rows: sub, .. } = &plugin_rows[3] else { panic!("one submenu for these importer entries") };
+    let menu_icons: Vec<_> = sub.iter().filter_map(|row| if let FileRow::Item(item) = row { Some(item.icon.as_str()) } else { None }).collect();
+    let mut expected_menu = expected.clone();
+    *expected_menu.last_mut().unwrap() = "";
+    assert_eq!(menu_icons, expected_menu, "an unannotated Plugins menu row keeps its previous appearance");
+
+    // Harness startup already started discovery for its original plugins folder. Replacing
+    // that folder invalidates the old snapshot, including an in-flight empty discovery.
+    crate::plugin_slots::invalidate(&mut h.app);
+    crate::plugin_slots::refresh(&mut h.app);
+    crate::plugin_slots::wait_for_discovery(&mut h.app);
+    for name in ["File", "Help"] {
+        let entries = items(&h.app, Slot::Menu(name));
+        assert_eq!(entries.iter().map(|item| item.icon.as_str()).collect::<Vec<_>>(), expected);
+    }
+    let file = crate::toolbar::file_rows(&h.app);
+    let file_icons: Vec<_> = file
+        .iter()
+        .filter_map(|row| match row {
+            FileRow::Item(item) if item.id.starts_with("imports.") => Some(item.icon.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(file_icons, expected, "File menu rows use the same checked icons");
+    crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+        let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
+        let group = groups[0].group(ui);
+        assert_eq!(group.buttons.iter().map(|button| button.icon).collect::<Vec<_>>(), expected);
+        assert_eq!(group.more.iter().map(|row| row.icon).collect::<Vec<_>>(), expected);
+    });
+    for (i, icon) in expected.iter().enumerate() {
+        open_entry(&mut h.app, 0, i);
+        assert_eq!(h.app.plugin_menu.dialogs.pop().unwrap().icon, *icon);
+    }
+    let _ = std::fs::remove_dir_all(root);
 }

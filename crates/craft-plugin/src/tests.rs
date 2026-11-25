@@ -195,6 +195,30 @@ fn metadata_normalization_and_legacy_entries() {
 }
 
 #[test]
+fn entry_images_share_bounded_paths_and_sources() {
+    let schema = json!({"type":"object", "x-solidcraft-icon":"entry.svg", "properties":{
+        "series":{"oneOf":[{"const":"a","x-solidcraft-icon":"icons/a.svg"},{"const":"b","x-solidcraft-icon":7}]}
+    }});
+    assert_eq!(images::referenced(&schema), ["entry.svg", "icons/a.svg"]);
+    assert_eq!(images::annotations(&schema).len(), 3, "lint also sees non-string annotations");
+    assert!(images::annotations(&json!({"type":"object"})).is_empty());
+    for path in ["entry.svg", "icons/a-1.svg"] {
+        assert!(images::valid_path(path));
+    }
+    for path in ["/entry.svg", "../entry.svg", "icons/../entry.svg", "icons\\entry.svg", "entry.png", "icons//entry.svg"] {
+        assert!(!images::valid_path(path), "{path}");
+    }
+    let mut svg = b"<svg viewBox=\"0 0 64 64\"></svg>".to_vec();
+    assert!(images::source(&svg).is_ok());
+    svg.resize(images::MAX_BYTES, b' ');
+    assert!(images::source(&svg).is_ok(), "the size limit is inclusive");
+    svg.push(b' ');
+    assert!(images::source(&svg).is_err());
+    assert!(images::source(b"<svg viewBox='0 0 32 32'></svg>").is_err());
+    assert!(images::source(&[0xff]).is_err());
+}
+
+#[test]
 fn declared_inputs_effects_and_slots_are_readable() {
     let mut value = manifest();
     value["runtime"]["entries"] = json!([{"name":"inspect","effect":"read",
@@ -439,6 +463,24 @@ fn design_listeners_require_a_read_entry_and_design_capability() {
         assert!(matches!(parse(&invalid), Err(HostError::InvalidManifest { .. })));
     }
     assert!(parse(&manifest()).unwrap().runtime.unwrap().listeners.is_empty());
+}
+
+#[test]
+fn optional_design_capabilities_authorize_listeners_only_when_supported() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "host@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"refresh","effect":"read"}]);
+    value["runtime"]["listeners"] = json!([{"entry":"refresh","on":["design.changed"]}]);
+    for capability in ["design@0.1", "design@0.1.3"] {
+        value["optional_capabilities"] = json!([capability, "future@0.1"]);
+        let parsed = parse(&value).unwrap();
+        assert_eq!(parsed.granted_capabilities(), ["commands@0.2", "host@0.1", capability]);
+        assert_eq!(parsed.runtime.unwrap().listeners[0].entry, "refresh");
+    }
+    value["optional_capabilities"] = json!(["design@99.0"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.listeners"));
+    value["runtime"]["listeners"] = json!([]);
+    assert_eq!(parse(&value).unwrap().granted_capabilities(), ["commands@0.2", "host@0.1"]);
 }
 
 #[test]
@@ -966,6 +1008,183 @@ fn capabilities_are_checked_at_load_with_plain_refusals() {
     assert!(parse_manifest(groups.to_string().as_bytes(), "sample").is_err());
 }
 
+#[test]
+fn minimum_host_version_is_checked_before_fields_capabilities_and_legacy_api() {
+    let mut value = manifest();
+    value["min_host_version"] = json!("2.1.0");
+    for change in [
+        |value: &mut Value| value["future_field"] = json!(true),
+        |value: &mut Value| value["capabilities"] = json!(["future@0.1"]),
+        |value: &mut Value| value["runtime"]["api"] = json!("future:plugin@9.0.0"),
+    ] {
+        let mut future = value.clone();
+        change(&mut future);
+        let refusal = parse_manifest_for_version(future.to_string().as_bytes(), "sample", "SolidCraft", "2.0.9").unwrap_err();
+        assert!(matches!(&refusal, HostError::InvalidManifest { field, .. } if field == "min_host_version"));
+        let message = refusal.to_string();
+        assert!(message.contains("SolidCraft 2.1.0") && message.contains("SolidCraft is 2.0.9"), "{message}");
+        assert!(!message.contains("future_field") && !message.contains("future@") && !message.contains("future:plugin"), "{message}");
+    }
+    assert!(parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", "2.1.0").is_ok());
+    value["min_host_version"] = json!(env!("CARGO_PKG_VERSION"));
+    assert!(parse(&value).is_ok(), "the default parser uses the crate's host version");
+}
+
+#[test]
+fn minimum_host_versions_use_semantic_version_precedence() {
+    for (minimum, current, supported) in [
+        ("1.2.3", "1.2.2", false),
+        ("1.2.3", "1.2.3", true),
+        ("1.2.3", "1.10.0", true),
+        ("1.2.3", "2.0.0", true),
+        ("1.2.3", "1.2.3-rc.1", false),
+        ("1.2.3-rc.1", "1.2.3", true),
+        ("1.2.3-rc.2", "1.2.3-rc.10", true),
+        ("1.2.3-rc.10", "1.2.3-rc.2", false),
+        ("1.2.3+build.z", "1.2.3+build.a", true),
+        ("1.2.3+build.a", "1.2.3", true),
+        ("0.0.0", "0.0.0", true),
+    ] {
+        let mut value = manifest();
+        value["min_host_version"] = json!(minimum);
+        let parsed = parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", current);
+        assert_eq!(parsed.is_ok(), supported, "minimum {minimum}, current {current}: {parsed:?}");
+        if supported {
+            assert_eq!(parsed.unwrap().min_host_version.as_deref(), Some(minimum));
+        }
+    }
+}
+
+#[test]
+fn minimum_host_version_requires_a_complete_semantic_version_string() {
+    for minimum in [
+        json!(null),
+        json!(true),
+        json!(123),
+        json!([]),
+        json!({}),
+        json!(""),
+        json!("1"),
+        json!("1.2"),
+        json!("v1.2.3"),
+        json!(" 1.2.3"),
+        json!("1.2.3 "),
+        json!("01.2.3"),
+        json!("1.2.3-01"),
+        json!("1.2.3+"),
+        json!("1.2.3.4"),
+        json!("18446744073709551616.0.0"),
+    ] {
+        let mut value = manifest();
+        value["min_host_version"] = minimum.clone();
+        value["unknown_field"] = json!(true);
+        let parsed = parse_manifest_for_version(value.to_string().as_bytes(), "sample", "SolidCraft", "2.0.0");
+        assert!(matches!(parsed, Err(HostError::InvalidManifest { field, .. }) if field == "min_host_version"), "{minimum}");
+    }
+}
+
+#[test]
+fn extension_metadata_accepts_unknown_keys_but_other_manifest_fields_stay_strict() {
+    let mut value = manifest();
+    let legacy = parse(&value).unwrap();
+    assert!(legacy.min_host_version.is_none() && legacy.optional_capabilities.is_empty() && legacy.extensions.is_empty());
+    let serialized = serde_json::to_value(legacy).unwrap();
+    for field in ["min_host_version", "optional_capabilities", "extensions"] {
+        assert!(serialized.get(field).is_none(), "empty {field} is omitted");
+    }
+    value["extensions"] = json!({"future":{"arbitrary":[null,true,3,"text",{"another":false}]},"vendor.example":42,
+        "min_host_version":"999.0.0","capabilities":["future@0.1"]});
+    let parsed = parse(&value).unwrap();
+    assert_eq!(json!(parsed.extensions), value["extensions"]);
+    assert_eq!(parsed.granted_capabilities(), ["commands@0.1"]);
+    for extension in [json!(null), json!(false), json!(42), json!("metadata"), json!([])] {
+        value["extensions"] = extension;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    }
+    value["extensions"] = json!({});
+    value["future"] = json!(true);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { reason, .. }) if reason.contains("unknown field `future`")));
+    value.as_object_mut().unwrap().remove("future");
+    value["runtime"]["future"] = json!(true);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { reason, .. }) if reason.contains("unknown field `future`")));
+}
+
+#[test]
+fn optional_capabilities_grant_supported_versions_and_preserve_declared_strings() {
+    let mut value = manifest();
+    value["optional_capabilities"] = json!(["host@0.1.7", "future@0.1", "forms@0.1", "dialog@0.1", "evaluate@0.3"]);
+    let parsed = parse(&value).unwrap();
+    assert_eq!(parsed.optional_capabilities.len(), 5);
+    assert_eq!(parsed.granted_capabilities(), ["commands@0.1", "host@0.1.7", "forms@0.1", "dialog@0.1"]);
+    for version in ["host@0.0", "host@0.2", "host@1.0", "host@0.1"] {
+        value["optional_capabilities"] = json!([version]);
+        assert_eq!(parse(&value).unwrap().granted_capabilities().len(), if version == "host@0.1" { 2 } else { 1 }, "{version}");
+    }
+    let mut importing = importer();
+    importing["optional_capabilities"] = json!(["evaluate@0.1.4", "host@0.1", "future@0.1"]);
+    assert_eq!(parse(&importing).unwrap().granted_capabilities(), ["formats@0.1", "evaluate@0.1.4", "host@0.1"]);
+}
+
+#[test]
+fn optional_capabilities_are_bounded_well_formed_and_never_duplicate_required_names() {
+    for optional in [
+        json!(["future"]),
+        json!(["future@x"]),
+        json!(["Future@0.1"]),
+        json!(["future@0.1.2.3"]),
+        json!(["future@0.1-beta"]),
+        json!(["future@4294967296.1"]),
+        json!(["future@0.1", "future@0.2"]),
+        json!(["commands@0.2"]),
+    ] {
+        let mut value = manifest();
+        value["optional_capabilities"] = optional.clone();
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "optional_capabilities"), "{optional}");
+    }
+    for optional in [json!(null), json!({}), json!("host@0.1"), json!([true])] {
+        let mut value = manifest();
+        value["optional_capabilities"] = optional;
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    }
+    let mut value = manifest();
+    value["optional_capabilities"] = json!((0..16).map(|index| format!("future-{index}@0.1")).collect::<Vec<_>>());
+    assert_eq!(parse(&value).unwrap().granted_capabilities(), ["commands@0.1"]);
+    value["optional_capabilities"].as_array_mut().unwrap().push(json!("future-16@0.1"));
+    assert!(
+        matches!(parse(&value), Err(HostError::InvalidManifest { field, reason }) if field == "optional_capabilities" && reason.contains("at most 16"))
+    );
+    value["optional_capabilities"] = json!([]);
+    value["capabilities"] = json!((0..17).map(|index| format!("future-{index}@0.1")).collect::<Vec<_>>());
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, reason }) if field == "capabilities" && reason.contains("at most 16")));
+}
+
+#[test]
+fn optional_capabilities_keep_runtime_kind_and_storage_requirements() {
+    let mut command = manifest();
+    command["capabilities"] = json!([]);
+    command["optional_capabilities"] = json!(["commands@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut importing = importer();
+    importing["capabilities"] = json!([]);
+    importing["optional_capabilities"] = json!(["formats@0.1"]);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut command = manifest();
+    command["optional_capabilities"] = json!(["evaluate@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    command["optional_capabilities"] = json!(["storage@0.1"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    command["runtime"]["data_format"] = json!(1);
+    assert_eq!(parse(&command).unwrap().granted_capabilities(), ["commands@0.1", "storage@0.1"]);
+    command["optional_capabilities"] = json!(["storage@0.2"]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    command["runtime"].as_object_mut().unwrap().remove("data_format");
+    assert_eq!(parse(&command).unwrap().granted_capabilities(), ["commands@0.1"]);
+    importing["capabilities"] = json!(["formats@0.1"]);
+    importing["optional_capabilities"] = json!(["storage@0.1"]);
+    importing["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
 fn importer() -> Value {
     json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
         "module":"sample.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["f3d","ipt"]}],
@@ -1068,6 +1287,52 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     newer["capabilities"] = json!(["formats@0.3"]);
     newer["runtime"]["entries"][0]["kind"] = json!("printer");
     assert!(matches!(parse(&newer), Err(HostError::UnsupportedCapability { .. })));
+}
+
+#[test]
+fn user_storage_is_additive_and_needs_a_command_or_importer_runtime_but_no_design_format() {
+    let mut value = manifest();
+    for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
+        value["capabilities"] = json!(["commands@0.1", capability]);
+        assert!(parse(&value).is_ok());
+    }
+    value["capabilities"] = json!(["commands@0.2", "storage@0.1", "user-storage@0.1"]);
+    value["runtime"]["data_format"] = json!(1);
+    assert!(parse(&value).is_ok());
+    value["capabilities"] = json!(["commands@0.2", "user-storage@0.2"]);
+    assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
+    let mut value = importer();
+    for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
+        value["capabilities"] = json!(["formats@0.2", capability]);
+        assert!(parse(&value).is_ok());
+    }
+    value["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    value["capabilities"] = json!(["formats@0.2", "storage@0.1", "user-storage@0.1"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut value = manifest();
+    value["capabilities"] = json!(["user-storage@0.1"]);
+    value.as_object_mut().unwrap().remove("runtime");
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
+#[test]
+fn user_storage_budgets_include_json_overhead_and_keys_use_utf8_bytes() {
+    // {"k":""} is eight bytes; allow exactly 64 KiB, refuse one more byte.
+    let exact = BTreeMap::from([("k".into(), json!("x".repeat(MAX_USER_STORAGE_BYTES - 8)))]);
+    assert_eq!(serde_json::to_vec(&exact).unwrap().len(), MAX_USER_STORAGE_BYTES);
+    check_user_storage(&exact).unwrap();
+    let larger = BTreeMap::from([("k".into(), json!("x".repeat(MAX_USER_STORAGE_BYTES - 7)))]);
+    assert_eq!(check_user_storage(&larger).unwrap_err(), HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() });
+    let mut keys: BTreeMap<_, _> = (0..MAX_USER_STORAGE_KEYS).map(|i| (format!("k{i}"), json!(null))).collect();
+    check_user_storage(&keys).unwrap();
+    keys.insert("k0".into(), json!({"replacement":true}));
+    check_user_storage(&keys).unwrap();
+    keys.insert("one-more".into(), json!(null));
+    assert_eq!(check_user_storage(&keys).unwrap_err(), HostError::LimitExceeded { limit: "user-storage keys (128)".into() });
+    check_user_storage_key(&"é".repeat(64)).unwrap();
+    assert!(check_user_storage_key(&"é".repeat(65)).is_err());
+    assert!(check_user_storage_key("bad\nkey").is_err());
 }
 
 #[test]
@@ -1521,6 +1786,159 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         schema[keyword][0]["additionalProperties"] = json!(false);
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
+}
+
+#[test]
+fn file_conditions_are_typed_host_facts_and_cannot_be_spoofed_by_options() {
+    let schema = json!({"type":"object","required":["parts"],"properties":{
+        "extension":{"type":"string"},
+        "parts":{"type":"integer","minimum":1,"x-solidcraft-visible-when":{"all":[
+            {"file":"extension","in":["asm","assembly"]},
+            {"file":"format","eq":"sample.convert"},
+            {"not":{"file":"size","eq":0}}
+        ]}},
+        "mode":{"type":"string","oneOf":[
+            {"const":"part"}, {"const":"assembly","x-solidcraft-when":{"file":"extension","eq":"asm"}}
+        ],"x-solidcraft-defaults":[{"when":{"file":"name","eq":"parts.asm"},"value":"assembly"}]}
+    }});
+    let mut file = dialog::FileFacts { name: "parts.asm".into(), extension: "asm".into(), size: 24, format: "sample.convert".into(), generation: 1 };
+    conditions::validate_conditions(&schema).unwrap();
+    assert!(conditions::uses_file_facts(&schema));
+    let bound = conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    assert!(check_input(&bound, &json!({"extension":"txt"})).is_err(), "parts is required for the actual file");
+    assert!(check_input(&bound, &json!({"parts":2,"mode":"assembly"})).is_ok());
+    file.extension = "txt".into();
+    let bound = conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    assert_eq!(prepare_input(&bound, &json!({"extension":"asm","parts":"hidden"})).unwrap(), json!({"extension":"asm"}));
+    assert!(check_input(&bound, &json!({"mode":"assembly"})).is_err());
+    for condition in [
+        json!({"file":"path","eq":"/secret"}),
+        json!({"file":"size","eq":-1}),
+        json!({"file":"extension","eq":1}),
+        json!({"file":"generation","eq":1}),
+        json!({"file":"name","eq":"x","field":"parts"}),
+    ] {
+        let bad = json!({"type":"object","properties":{"part":{"type":"string","x-solidcraft-visible-when":condition}}});
+        assert!(conditions::validate_conditions(&bad).is_err());
+    }
+}
+
+#[test]
+fn dialog_field_updates_are_bounded_and_preserve_types_conditions_and_directory_semantics() {
+    let schema = json!({"type":"object","properties":{
+        "part":{"type":"string"},
+        "folder":{"type":"string","format":"directory"},
+        "count":{"type":"integer","minimum":1}
+    }});
+    let update = json!({"fields":{"part":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}});
+    let updated = dialog::apply_update(&schema, &update).unwrap();
+    assert_eq!(updated["properties"]["part"]["default"], "plate");
+    assert_eq!(updated["properties"]["folder"], schema["properties"]["folder"]);
+    for fields in [
+        json!({"undeclared":{"default":1}}),
+        json!({"part":{"type":"integer"}}),
+        json!({"folder":{"format":"text"}}),
+        json!({"folder":{"enum":["/etc"]}}),
+        json!({"count":{"default":0}}),
+        json!({"part":{"oneOf":[{"const":"plate","x-solidcraft-when":{"all":[]}}]}}),
+        json!({"part":{"enum":[]}}),
+        json!({"part":{"enum":[4]}}),
+        json!({"part":{"description":"x".repeat(dialog::MAX_UPDATE_BYTES)}}),
+    ] {
+        assert!(dialog::apply_update(&schema, &json!({"fields":fields})).is_err());
+    }
+    let mut importing = importer();
+    importing["capabilities"] = json!(["formats@0.2", "dialog@0.1"]);
+    assert!(parse_manifest(importing.to_string().as_bytes(), "sample").is_ok());
+    let mut command = manifest();
+    command["capabilities"] = json!(["commands@0.2", "dialog@0.1"]);
+    command["runtime"]["entries"][0] = json!({"name":"make","dialog_hook":true});
+    assert!(parse_manifest(command.to_string().as_bytes(), "sample").is_ok());
+    command["capabilities"] = json!(["commands@0.2"]);
+    assert!(parse_manifest(command.to_string().as_bytes(), "sample").is_err());
+}
+
+#[test]
+fn folder_read_annotations_are_explicit_bounded_and_only_on_top_level_directories() {
+    let directory = json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+    let schema = json!({"type":"object","properties":{"library":directory}});
+    assert_eq!(directory_read_fields(&schema).unwrap(), BTreeSet::from(["library".into()]));
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.2", "folders@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+    assert!(parse(&value).is_ok());
+    for property in [
+        json!({"type":"string","format":"directory","x-solidcraft-grant":"write"}),
+        json!({"type":"string","x-solidcraft-grant":"read"}),
+        json!({"type":"integer","format":"directory","x-solidcraft-grant":"read"}),
+        json!({"type":"string","format":"directory","x-solidcraft-grant":true}),
+        json!({"type":"object","properties":{"nested":directory}}),
+        json!({"type":"array","items":directory}),
+    ] {
+        value["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{"library":property}});
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{property}");
+    }
+    assert!(directory_read_fields(&json!({"type":"object","oneOf":[schema]})).is_err());
+    let properties: serde_json::Map<_, _> = (0..33).map(|i| (format!("folder{i}"), directory.clone())).collect();
+    assert!(directory_read_fields(&json!({"type":"object","properties":properties})).is_err());
+    assert!(directory_read_fields(&json!({"type":"object","properties":{"old":{"type":"string","format":"directory"}}})).unwrap().is_empty());
+}
+
+#[test]
+fn folder_read_annotations_under_other_schema_keywords_are_rejected_at_manifest_load() {
+    let directory = json!({"type":"string","format":"directory","x-solidcraft-grant":"read"});
+    let plain_directory = json!({"type":"string","format":"directory"});
+    for keyword in ["additionalItems", "contains", "contentSchema", "dependencies", "propertyNames", "unevaluatedItems", "unevaluatedProperties"] {
+        for top_level_grant in [false, true] {
+            let mut schema = json!({"type":"object","properties":{}});
+            if top_level_grant {
+                schema["properties"]["library"] = directory.clone();
+            }
+            schema[keyword] = if keyword == "dependencies" { json!({"mode":directory}) } else { directory.clone() };
+            let error = directory_read_fields(&schema).unwrap_err();
+            assert!(matches!(error, HostError::InvalidManifest { ref field, .. } if field.contains(keyword)), "{keyword}: {error}");
+            let mut value = manifest();
+            value["runtime"]["entries"] = json!([{"name":"make","input_schema":schema}]);
+            assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{keyword}: {top_level_grant}");
+
+            schema[keyword] = if keyword == "dependencies" { json!({"mode":plain_directory}) } else { plain_directory.clone() };
+            let expected = if top_level_grant { BTreeSet::from(["library".into()]) } else { BTreeSet::new() };
+            assert_eq!(directory_read_fields(&schema).unwrap(), expected, "{keyword}: {top_level_grant}");
+            value["runtime"]["entries"][0]["input_schema"] = schema;
+            assert!(parse(&value).is_ok(), "{keyword}: {top_level_grant}");
+        }
+    }
+}
+
+#[test]
+fn an_importer_may_choose_its_file_first_and_old_manifests_keep_their_shape() {
+    let mut value = importer();
+    let old = parse(&value).unwrap().runtime.unwrap();
+    assert!(!old.entries[0].file_first, "absent keeps the options-first dialog");
+    let old_shape = serde_json::to_value(&old.entries[0]).unwrap();
+    assert!(old_shape.get("file_first").is_none(), "an importer without it serializes as before: {old_shape}");
+    value["runtime"]["entries"][0]["file_first"] = json!(true);
+    let entry = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert!(entry.file_first);
+    let saved = serde_json::to_value(&entry).unwrap();
+    assert_eq!(saved["file_first"], true);
+    let again: Entry = serde_json::from_value(saved.clone()).unwrap();
+    assert!(again.file_first && serde_json::to_value(&again).unwrap() == saved, "it round-trips");
+    value["runtime"]["entries"][0]["file_first"] = json!(false);
+    let explicit = parse(&value).unwrap().runtime.unwrap().entries.remove(0);
+    assert!(!explicit.file_first && serde_json::to_value(&explicit).unwrap() == old_shape);
+    // A hostile value is refused: only a boolean, and only an importer.
+    for hostile in [json!("yes"), json!(1), json!(null), json!([true]), json!({"on":true})] {
+        let mut bad = importer();
+        bad["runtime"]["entries"][0]["file_first"] = hostile.clone();
+        assert!(matches!(parse(&bad), Err(HostError::InvalidManifest { .. })), "{hostile}");
+    }
+    let mut command = manifest();
+    command["runtime"]["entries"] = json!([{"name":"make","file_first":true}]);
+    assert!(matches!(parse(&command), Err(HostError::InvalidManifest { field, .. }) if field.contains("file_first")));
+    let mut exporting = exporter();
+    exporting["runtime"]["entries"][0]["file_first"] = json!(true);
+    assert!(matches!(parse(&exporting), Err(HostError::InvalidManifest { field, .. }) if field.contains("file_first")));
 }
 
 #[test]
