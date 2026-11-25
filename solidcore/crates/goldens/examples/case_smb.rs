@@ -104,7 +104,7 @@ fn smb_bytes(k: &Kernel, b: &Brep) -> solidcore::Result<Vec<u8>> {
         surface_key: &|_: FaceId| ObjectKey(0),
     };
     let mut all = Vec::new();
-    let mut data = BrepData::from_brep(b, &env, &mut all)?;
+    let mut data = BrepData::from_brep(k, b, &env, &mut all)?;
     data.write_to_file_with_nurbs(k, FileType::Ascii)
 }
 

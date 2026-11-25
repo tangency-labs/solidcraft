@@ -74,10 +74,12 @@ fn vs_pbr_inst(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
     @location(9) s: u32,
 ) -> PbrOut {
     let q = vec4<f32>(p, 1.0);
+    // Without the model's hover mark (`HOVER_FLAG`), which is never part of an index.
+    let c = word & 0x7fffffffu;
     // Moved with its body, like every other placement (`placed_by` in viewport.wgsl): by its own
     // motion, else its entry's (read only while something moves).
     var m = 0u;

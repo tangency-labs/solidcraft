@@ -1547,6 +1547,46 @@ mod tests {
             .collect()
     }
 
+    /// The unit's cases named in `names`.
+    fn rows(names: &[&str]) -> Vec<Case> {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let cases = Runner.cases(&ctx).expect("cases");
+        cases
+            .into_iter()
+            .filter(|c| names.contains(&c.name.as_str()))
+            .collect()
+    }
+
+    /// Replays the `MoveSeam` rows named in `names`: what each breaks of the invariants
+    /// 0-3 above, and each replay that is not its committed golden row.
+    fn replay(names: &[&str]) -> Vec<String> {
+        let rows = rows(names);
+        assert_eq!(rows.len(), names.len(), "every named row is a case");
+        let golden =
+            crate::golden::read(&crate::golden::default_dir(), "topology.face_p1").expect("golden");
+        let mut problems = Vec::new();
+        for case in &rows {
+            AFTER_MOVE_SEAM.with(|c| *c.borrow_mut() = None);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let out = run_rust(&inputs).expect("row runs");
+            // the checks before the op take the B-rep `&mut`; the row must still be the
+            // committed golden one, so they changed nothing the row records
+            if golden.get(&case.name) != Some(&crate::golden::encode(&case.name, &out)) {
+                problems.push(format!("{}: the replay is not the committed golden row", case.name));
+            }
+            match AFTER_MOVE_SEAM.with(|c| c.borrow_mut().take()) {
+                Some(found) => {
+                    problems.extend(found.into_iter().map(|p| format!("{}: {p}", case.name)));
+                }
+                None => problems.push(format!("{}: MoveSeam did not run", case.name)),
+            }
+        }
+        problems
+    }
+
     /// The widest edge-end gap at each vertex, with the largest coordinate seen there.
     fn end_gaps(b: &Brep) -> Vec<(VertexId, f64, f64)> {
         let k = crate::runner_kernel();
@@ -1667,6 +1707,190 @@ mod tests {
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// #21697: the `MoveSeam` rows on `torus.smb` whose face properties report both seams
+    /// crossed. The torus's surface has unequal periods (U `[0, 120]`, V
+    /// `[0, 48.284]`), and its combined walk measured the V spans with the U period and
+    /// minimum, and moved the V seam onto the face: before the fix every row broke a
+    /// `check_brep` gap check (and `torus.smb_1_f5_op9`, which may split, put edge ends
+    /// outside the face's domain). Each replay must keep the invariants 0-3 above.
+    const TORUS_BOTH: [&str; 6] = [
+        "seam_torus.smb_p5_f0_0",
+        "seam_torus.smb_p5_f1_0",
+        "seam_torus.smb_p5_f2_0",
+        "seam_torus.smb_p5_f3_0",
+        "torus.smb_0_f1_op9",
+        "torus.smb_1_f5_op9",
+    ];
+
+    #[test]
+    fn move_seam_both_on_the_torus_keeps_its_edges() {
+        let problems = replay(&TORUS_BOTH);
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// A square torus with unequal periods: bilinear, U round a square cross-section of
+    /// half-diagonal 1 (knots `0, 0.25, .., 1`: period 1), V round a square ring of
+    /// half-diagonal 4 in the `z = 0` plane (knots `v0, v0 + 3, .., v0 + 12`: period 12).
+    /// Net row `i` (U) column `j` (V) is the ring corner `c_j` plus the section offset
+    /// `a_i * c_j / 4 + b_i * z`, with `(a, b)` going `(1, 0), (0, 1), (-1, 0), (0, -1)`.
+    /// The first and last rows and columns are equal, so the surface closes exactly in
+    /// both directions. The V row at knot `v0 + 9` is the section at ring corner
+    /// `(0, -4, 0)`, where `x = 0` and `y <= -3` (the row at `v0 + 3`, the other with
+    /// `x = 0`, has `y >= 3`); the U column at knot 0.75 is the section offset `(0, -1)`,
+    /// the only one where `z = -1`.
+    fn square_torus(v0: f64) -> BssIn {
+        let ring = [[4.0, 0.0], [0.0, 4.0], [-4.0, 0.0], [0.0, -4.0], [4.0, 0.0]];
+        let section = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0], [1.0, 0.0]];
+        let net = section
+            .iter()
+            .map(|[a, b]| {
+                ring.iter()
+                    .map(|[x, y]| [x + a * x / 4.0, y + a * y / 4.0, *b, 1.0])
+                    .collect()
+            })
+            .collect();
+        BssIn {
+            oob: false,
+            form: 0,
+            net,
+            p: 1,
+            q: 1,
+            u: vec![0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0],
+            v: [0.0, 0.0, 3.0, 6.0, 9.0, 12.0, 12.0]
+                .iter()
+                .map(|v| v + v0)
+                .collect(),
+        }
+    }
+
+    /// What [`move_seam_both_on_square_torus`] did.
+    struct BothRun {
+        /// The move's result (the default when it refused; `found` then names the refusal).
+        result: fp1::MoveSeamResult,
+        /// The invariants (0-3 above) the move broke.
+        found: Vec<String>,
+        /// The face's surface after the move.
+        surface: solidcore::surface::surface::Surface,
+    }
+
+    /// `move_seam` on the face over `dom` (`[u0, v0, u1, v1]`) of [`square_torus`]`(v0)`,
+    /// its face properties reporting both seams crossed and closed at C1 (set by hand, as
+    /// in [`move_seam_props_c1_closure_on_a_non_periodic_surface`]).
+    fn move_seam_both_on_square_torus(v0: f64, dom: [f64; 4]) -> BothRun {
+        let mut k = crate::runner_kernel();
+        let src = BrepIn::Face {
+            surface: SrfIn::Bspline(square_torus(v0)),
+            dom,
+        };
+        let Ok(Ok((mut b, _))) = own_brep(&src, false, false) else {
+            panic!("the torus face did not build");
+        };
+        let faces: Vec<FaceId> = b.faces().ids().collect();
+        let [f] = faces[..] else {
+            panic!("the torus is one face, got {}", faces.len());
+        };
+        let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut Vec::new())
+            .unwrap_or_else(|_| panic!("HasSeamProblem failed on the torus"));
+        let before = before(&mut b);
+        let mut fp = FaceProps::<H>::new();
+        fp.bad_crossed_seam_dir = SurfParamType::Both;
+        fp.bad_missing_seam_dir = SurfParamType::Neither;
+        fp.bad_near_miss_seam_dir = SurfParamType::Neither;
+        fp.closed_u = Tri::True;
+        fp.closed_val_u = ContinuityType::C1;
+        fp.closed_v = Tri::True;
+        fp.closed_val_v = ContinuityType::C1;
+        let r = fp1::move_seam(
+            &mut k,
+            &mut b,
+            f,
+            key_of(EntityRef::Face(f)),
+            &mut cu,
+            &mut cv,
+            problem,
+            fp1::MoveSeamOptions::default(),
+            Some(&fp),
+            &|_| None,
+        );
+        let refused = r.as_ref().err().map(ToString::to_string);
+        let found = problems(&mut b, &before, refused);
+        BothRun {
+            result: r.unwrap_or_default(),
+            found,
+            surface: b.face(f).unwrap().surface.clone().unwrap(),
+        }
+    }
+
+    /// Asserts that `s`'s U seam is the old column at U = 0.75 (`z = -1`) and, when
+    /// `v_moved`, its V seam the old row at V = `v0 + 9` (`x = 0`, `y <= -3`): every point
+    /// of each is an affine combination of net points with those coordinates.
+    fn assert_seams(s: &solidcore::surface::surface::Surface, v_moved: bool) {
+        let k = crate::runner_kernel();
+        let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let (du, dv) = (d.u_interval(), d.v_interval());
+        for t in [0.0, 0.1, 0.35, 0.5, 0.8, 1.0] {
+            let on_u_seam = s
+                .evaluate_point(&k, solidcore::math::Point2::new(du.min(), dv.evaluate(t)))
+                .unwrap();
+            assert_eq!(on_u_seam.z, -1.0, "U seam point {on_u_seam:?} at V fraction {t}");
+            if v_moved {
+                let on_v_seam = s
+                    .evaluate_point(&k, solidcore::math::Point2::new(du.evaluate(t), dv.min()))
+                    .unwrap();
+                assert_eq!(on_v_seam.x, 0.0, "V seam point {on_v_seam:?} at U fraction {t}");
+                assert!(on_v_seam.y <= -3.0, "V seam point {on_v_seam:?} at U fraction {t}");
+            }
+        }
+    }
+
+    /// #21697: the combined walk (seams crossed in both directions, `fix_seam_both`)
+    /// builds the V extent a V walk would: from the first sample, each V span measured
+    /// against the V period. The face covers U in `[0.1, 0.6]` and V in `[1, 7]` of
+    /// [`square_torus`]`(0)`. The walk samples each edge at seven points, so a V edge
+    /// steps 1 in V: the short way round in a V period of 12, but past half the U period
+    /// of 1. Before the fix the V extent started as the point at the V seam, which no span
+    /// of this face touches, and each V span was taken the long way round; the V seam
+    /// moved into the face, to V = 3, and broke its edges. Walked in V, the extent is
+    /// `[1, 7]`, the unused V is `[7, 1]` across the seam, its middle 10, and the nearest
+    /// knot whose band of a tenth of the period (1.2) either side keeps off the extent is
+    /// 9: the V seam moves to the old V = 9, as a walk in V alone moves it. U is the same
+    /// with or without the fix: unused `[0.6, 1.1]`, middle 0.85, knot 0.75 (band 0.1).
+    #[test]
+    fn move_seam_both_walks_v_as_the_v_walk_does() {
+        let run = move_seam_both_on_square_torus(0.0, [0.1, 1.0, 0.6, 7.0]);
+        assert!(run.found.is_empty(), "{}", run.found.join("\n"));
+        assert_eq!(run.result.u, fp1::FixSeamPlanType::MoveOutOfFace);
+        assert_eq!(
+            run.result.v,
+            fp1::FixSeamPlanType::MoveOutOfFace,
+            "the V seam was not moved out of the face"
+        );
+        assert_seams(&run.surface, true);
+    }
+
+    /// #21697: the combined walk offsets each V sample by the V minimum, not the U one.
+    /// [`square_torus`]`(6)`: V in `[6, 18]`, U in `[0, 1]`; the face covers U in
+    /// `[0.1, 0.6]` and the whole V period. Measured from the V minimum the V extent is
+    /// the full period, so there is no place off the face for the V seam: V is left as it
+    /// is (`NoChanges`, the V domain still `[6, 18]`), and U moves to 0.75 as on
+    /// `square_torus(0)`. Offset by the U minimum, 0, the samples run past the period and
+    /// the extent is not built.
+    #[test]
+    fn move_seam_both_offsets_v_by_the_v_minimum() {
+        let run = move_seam_both_on_square_torus(6.0, [0.1, 6.0, 0.6, 18.0]);
+        assert!(run.found.is_empty(), "{}", run.found.join("\n"));
+        assert_eq!(run.result.u, fp1::FixSeamPlanType::MoveOutOfFace);
+        assert_eq!(run.result.v, fp1::FixSeamPlanType::NoChanges);
+        let k = crate::runner_kernel();
+        let dv = run
+            .surface
+            .natural_uv_domain_with_nurb(&k)
+            .unwrap()
+            .v_interval();
+        assert_eq!((dv.min(), dv.max()), (6.0, 18.0));
+        assert_seams(&run.surface, false);
     }
 
     /// A square tube `|x| + |y| = 1`, `z` in `[0, 1]`: bilinear, U along `z`, V round the
