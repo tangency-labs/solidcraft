@@ -1106,6 +1106,12 @@ impl Body {
         }
     }
 
+    /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
+    pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
+        let reach = self.size().max(1.0) * 100.0;
+        self.nearest_face_query(p, reach).ok().flatten()
+    }
+
     /// The face of `self` nearest `p` within `tol`, or `None`.
     pub fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
         self.face_and_dist_at(p, tol).map(|(_, f)| f)
@@ -1127,12 +1133,6 @@ impl Body {
                 (d <= tol).then_some((d, f))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
-    }
-
-    /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
-    pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
-        let reach = self.size().max(1.0) * 100.0;
-        self.nearest_face_query(p, reach).ok().flatten()
     }
 
     /// The face holding `p` within the body's modelling tolerance. Distances are to the exact
