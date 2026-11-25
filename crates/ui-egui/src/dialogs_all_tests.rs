@@ -2120,6 +2120,67 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     }
 }
 
+/// A coil from a sketch profile takes its section from the sketch, so the dialog shows neither the
+/// Section rows nor Start angle and never sends them, even remembered from an earlier coil
+/// (#17870): `solid.coil` refuses them with `sketch`.
+#[test]
+fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("section".into(), json!("square"));
+    d.extra.insert("section_position".into(), json!("outside"));
+    d.extra.insert("start_angle".into(), json!("30 deg"));
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"shown": label}})).unwrap_or_else(|e| panic!("without a profile: {e}"));
+    }
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    for label in ["Section position", "Start angle"] {
+        h.step(&json!({"expect":{"not_shown": label}})).unwrap_or_else(|e| panic!("with a profile: {e}"));
+    }
+    h.step(&json!({"expect":{"shown": "Clockwise"}})).unwrap();
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.coil");
+    for key in ["section", "section_position", "start_angle"] {
+        assert!(p.get(key).is_none(), "{key} sent with a sketch profile: {p}");
+    }
+    h.app.run(id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+}
+
+/// Flip winds the coil the other way along its axis (#17870): down from a sketch profile, and
+/// reversed on any axis the coil already has. The option itself is never sent.
+#[test]
+fn coil_flip_winds_the_coil_down_its_axis() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("flip".into(), json!(true));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([0.0, 0.0, -1.0]), "{p}");
+    assert!(p.get("flip").is_none(), "{p}");
+    d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([-1.0, 0.0, 0.0]), "{p}");
+    d.extra.remove("axis");
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.app.dialog = Some(d.clone());
+    h.frames(2);
+    h.step(&json!({"expect":{"shown": "Flip"}})).unwrap();
+    let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { axis, .. } => Some(axis.0),
+        _ => None,
+    });
+    assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
+}
+
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
 /// section, so the end cut it kept from the coil is not sent (#20737).
 #[test]

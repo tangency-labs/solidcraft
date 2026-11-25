@@ -1382,7 +1382,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
+        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
