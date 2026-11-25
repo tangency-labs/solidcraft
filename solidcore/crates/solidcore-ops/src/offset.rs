@@ -235,10 +235,15 @@ fn offset_refused(
                 largest: Some(largest),
             }
         }
+        // a rounded offset's tube that folds (#13685): the wall is the tube's radius
+        OffsetFailure::TubeFolds { largest, .. } => return Error::WallFolds { largest },
         OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
         OffsetFailure::EdgeVanishes { .. } => OffsetRefusal::EdgeVanishes,
         // an offset not certified regular is no fold: its own reason (#14783)
-        OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },
+        OffsetFailure::NotCertified { distance, .. }
+        | OffsetFailure::TubeNotCertified { distance, .. } => {
+            OffsetRefusal::NotCertified { distance }
+        }
         OffsetFailure::Collapses {
             distance, radius, ..
         } => OffsetRefusal::Collapses { distance, radius },

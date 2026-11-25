@@ -985,8 +985,8 @@ fn loft_blend(
     if sections.iter().any(|s| section_in_space(st, s)) {
         let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
         let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
-        let turns = solidcore_ops::sweep::railed::open_section_turns(&ends).map_err(|e| match e {
-            solidcore_ops::Error::Unsupported(_) => {
+        let turns = solidcraft_kernel::services::sweep::railed::open_section_turns(&ends).map_err(|e| match e {
+            solidcraft_kernel::services::Error::Unsupported(_) => {
                 DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into())
             }
             e => DocError::Invalid(e.to_string()),
@@ -1008,7 +1008,8 @@ fn loft_blend(
 /// along the run with no curvature to repeat there.
 fn point_frames(pts: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<kernel::Frame>> {
     let pts: Vec<[f64; 3]> = pts.iter().map(|&p| p.into()).collect();
-    let frames = solidcore_ops::sweep::railed::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let frames =
+        solidcraft_kernel::services::sweep::railed::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
     Ok(frames
         .into_iter()
         .map(|f| kernel::Frame { p: f.p.into(), leave: f.leave.into(), bend: f.bend.into(), bend_change: f.bend_change.into() })

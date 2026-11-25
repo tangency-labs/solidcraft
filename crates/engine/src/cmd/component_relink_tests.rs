@@ -94,7 +94,9 @@ fn deleting_a_hole_point_keeps_surviving_linked_joints() {
 fn legacy_hole_names_keep_their_numbering_until_a_point_is_lost() {
     let plate = three_hole_plate();
     let mut old: Value = serde_json::from_str(&plate.doc.to_json()).unwrap();
-    old["format_pending"].as_array_mut().unwrap().retain(|name| name != "hole-point-face-roles");
+    // The design as the release before v67 (`hole-point-face-roles.rs`) saved it.
+    old["format"] = json!(solidcraft_doc::format::format_string(66));
+    old.as_object_mut().unwrap().remove("format_pending");
     let mut legacy = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
     let legacy_names = |s: &mut Session| {
         let result = run(s, "model.faces", json!({"body": "Body1"}));
