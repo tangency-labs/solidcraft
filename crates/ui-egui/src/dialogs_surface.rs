@@ -16,7 +16,8 @@ use solidcraft_engine::kernel::{Construction, Continuity};
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
 use crate::selection::{
-    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, items, point_value as pt,
+    AXES, AXIS_PICKS, BODIES, CURVES, EDGES, FACES, PLANES, PROFILES, SKETCH_LINES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, items,
+    point_value as pt,
 };
 use crate::ui_kit;
 
@@ -259,7 +260,11 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             SelInput::new("Keep of the other surface", FACES, true).places(),
         ],
         Surf::Untrim { .. } => vec![SelInput::new("Face", FACES, false), SelInput::new("Holes (edges on them)", EDGES, true)],
-        Surf::SplitFace => vec![SelInput::new("Faces to split", FACES, true), SelInput::new("Splitting tool", PLANES | FACES, false)],
+        Surf::SplitFace => vec![
+            SelInput::new("Faces to split", FACES, true),
+            // A sketch's curves divide the faces, as the command does (#17555).
+            SelInput::new("Splitting tool", PLANES | FACES | SKETCH_LINES, false),
+        ],
         _ => k.simple_inputs(),
     }
 }
@@ -481,6 +486,25 @@ fn tool(app: &SolveApp, sel: Option<&Sel>) -> Result<(&'static str, Value), Stri
         },
         _ => Err("pick a plane or a face as the tool".into()),
     }
+}
+
+/// The sketch a splitting tool names: the sketch of the curve picked in the viewport (#17555).
+fn tool_sketch(app: &SolveApp, picks: &[Sel]) -> Option<u64> {
+    picks.iter().find_map(|sel| match sel {
+        Sel::ExternalSketchCurve { sketch, .. } => Some(*sketch),
+        Sel::SketchCurve { sketch: Some(sketch), .. } => Some(*sketch),
+        Sel::SketchCurve { .. } => crate::dialogs::picks_sketch(app, picks, None),
+        _ => None,
+    })
+}
+
+/// The tool input's pick for a sketch: one of its curves stands for the whole sketch, whose
+/// curves divide the face (#17555).
+fn sketch_tool(app: &SolveApp, sketch: u64) -> Option<Sel> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = st.sketch(sketch)?;
+    let id = ss.sketch.curves.iter().find(|c| !c.construction).map(|c| c.id.clone())?;
+    Some(Sel::ExternalSketchCurve { sketch, id })
 }
 
 /// One curve of a boundary surface as the dialog picks it: sketch curves of one sketch, or edges
@@ -926,9 +950,21 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(1, "the splitting tool")?;
             let faces: Vec<Value> = items(inputs, 0).face_points().into_iter().map(pt).collect();
             let body = items(inputs, 0).iter().find_map(|x| if let Sel::Face { body, .. } = x { Some(body.clone()) } else { None });
-            let (key, t) = tool(app, items(inputs, 1).first())?;
             let mut p = json!({"faces": faces, "body": body});
-            p[key] = t;
+            // A sketch: its curves divide the faces (#17555).
+            match tool_sketch(app, items(inputs, 1)) {
+                Some(sketch) => {
+                    p["sketch"] = json!(sketch);
+                    // A split that is edited keeps the `loops` it was made with.
+                    if !extra.contains_key("loops") {
+                        p["loops"] = json!(true);
+                    }
+                }
+                None => {
+                    let (key, t) = tool(app, items(inputs, 1).first())?;
+                    p[key] = t;
+                }
+            }
             ("solid.split_face", p)
         }
     };
@@ -958,7 +994,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
     // Stored values the dialog shows no box for, sent back unchanged on OK.
     let mut kept = Map::new();
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, .. } => {
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
@@ -1285,21 +1321,21 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             )
         }
         FeatureKind::SplitFace { faces, plane, tool, sketch, loops, .. } => {
-            // The dialog has no box for a sketch: a split by sketch curves keeps its sketch and
-            // `loops` as they were, so OK on the dialog does not turn it into a split by a plane.
+            // The splitting tool: a plane, a face, or the sketch whose curves divide the face
+            // (#17555). A sketch that is gone keeps its place in the kept values, as before.
+            let tool_pick = sketch.and_then(|sketch| sketch_tool(app, sketch.0));
             if let Some(sketch) = sketch {
-                kept.insert("sketch".into(), json!(sketch.0));
-                if *loops {
-                    kept.insert("loops".into(), json!(true));
+                // A split that is edited keeps the `loops` it was made with.
+                kept.insert("loops".into(), json!(*loops));
+                if tool_pick.is_none() {
+                    kept.insert("sketch".into(), json!(sketch.0));
                 }
             }
-            (
-                Surf::SplitFace,
-                vec![
-                    faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(),
-                    tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
-                ],
-            )
+            let tool_items: Vec<Sel> = match tool_pick {
+                Some(sel) => vec![sel],
+                None => tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
+            };
+            (Surf::SplitFace, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_items])
         }
         _ => return None,
     };

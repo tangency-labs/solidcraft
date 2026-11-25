@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_revolve")
         .contract(&SURFACE_REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -96,7 +96,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_loft")
         .contract(&SURFACE_LOFT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
+        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); faced?: bool (default true: through planar sketch sections, the walls face out of the region closed sections bound, as solid.loft's faces do, and an open section's direction crossed with its sketch normal, as surface.extrude's; false: each wall along its skinned surface's normal, as surface lofts saved before it keep); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
     CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_offset")
@@ -424,7 +424,11 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle2")?;
     }
     let symmetric = bool_(p, "symmetric").unwrap_or(false) || str_(p, "direction").is_some_and(|d| d.eq_ignore_ascii_case("symmetric"));
-    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric })
+    let faced = match p.get("faced") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
+    };
+    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced })
 }
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
@@ -525,7 +529,11 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let (rails, rail_fit) = super::features::guide_rails(s, p, cmd, "loft", None)?;
-    add_feature(s, p, FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit })
+    let faced = match p.get("faced") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
+    };
+    add_feature(s, p, FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced })
 }
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1124,6 +1132,49 @@ mod tests {
         assert!(s.execute("surface.revolve", &json!({"sketch": "S", "curves": ["side"], "axis": "y", "angle": "400 deg"})).is_err());
     }
 
+    /// A surface revolve's walls face out of the profile, as Surface Extrude's do: the end faces
+    /// of a rectangle turned half a turn face away from each other. A design saved before `faced`
+    /// keeps the faces it built (both ends facing -Z) through an edit, a redefine and reopening,
+    /// and a new surface revolve in it faces its faces.
+    #[test]
+    fn surface_revolve_faces_follow_the_profile_and_older_designs_keep_theirs() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let turn = |name: &str, body: &str| json!({"sketch": "R", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "180 deg", "symmetric": true, "name": name, "body_name": body});
+        run(&mut s, "surface.revolve", turn("Turn", "Ring"));
+        // The z of the unit normals of the end faces at z = 0 and z = 10.
+        let ends = |s: &Session, body: &str| {
+            let st = s.world_state().unwrap();
+            let faces = st.body(body).unwrap().body.faces(1e-6).unwrap();
+            let at = |z: f64| faces.iter().find(|f| (f.centroid.z - z).abs() < 1e-6).and_then(|f| f.plane_normal).unwrap().z;
+            (at(0.0).round(), at(10.0).round())
+        };
+        let faced = |s: &Session, name: &str| matches!(s.doc.find_feature(name).unwrap().kind, FeatureKind::SurfaceRevolve { faced: true, .. });
+        assert_eq!(ends(&s, "Ring"), (-1.0, 1.0));
+        assert!(faced(&s, "Turn"));
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("faced");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "timeline.edit", json!({"feature": "Turn", "set": {"angle": "90 deg"}}));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut params = turn("Turn", "Ring");
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": "surface.revolve", "params": params}));
+        assert!(!faced(&s, "Turn"));
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(ends(&s, "Ring"), (-1.0, -1.0));
+        run(&mut s, "surface.revolve", turn("NewTurn", "NewRing"));
+        assert!(faced(&s, "NewTurn"));
+        assert_eq!(ends(&s, "NewRing"), (-1.0, 1.0));
+    }
+
     /// Surface Sweep: a line along y carried up a path in the XZ plane, straight then round a
     /// quarter turn (every point of it 5 from the arc's axis: 10 × (5 + 5π/2)), or round a
     /// corner (10 × both legs); a rectangle's walls up the straight leg; undo, redo, reopening.
@@ -1203,6 +1254,51 @@ mod tests {
         assert!(
             s.execute("surface.loft", &json!({"sections": [{"sketch": "A", "curves": ["a", "apart"]}, {"sketch": "B", "curves": ["b"]}]})).is_err()
         );
+    }
+
+    /// A surface loft's walls face out of the region its closed sections bound, as a solid
+    /// loft's do: the four walls between two squares face away from the middle. A design saved
+    /// before `faced` keeps the walls it built through an edit, a redefine and reopening, and a
+    /// new surface loft in it faces its walls.
+    #[test]
+    fn surface_loft_walls_face_out_and_older_designs_keep_theirs() {
+        let mut s = Session::default();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Mid"}));
+        for (sketch, plane) in [("A", "XY"), ("B", "Mid")] {
+            run(&mut s, "sketch.create", json!({"plane": plane, "name": sketch}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        let loft = |name: &str, body: &str| json!({"sections": [{"sketch": "A", "profiles": [0]}, {"sketch": "B", "profiles": [0]}], "name": name, "body_name": body});
+        run(&mut s, "surface.loft", loft("Skin", "Walls"));
+        // How many of the walls face away from the middle (5, 5).
+        let out = |s: &Session, body: &str| {
+            let st = s.world_state().unwrap();
+            let faces = st.body(body).unwrap().body.faces(1e-6).unwrap();
+            assert_eq!(faces.len(), 4);
+            faces.iter().filter(|f| f.plane_normal.unwrap().dot(f.centroid - solidcore_record::Vec3::new(5.0, 5.0, f.centroid.z)) > 0.0).count()
+        };
+        let faced = |s: &Session, name: &str| matches!(s.doc.find_feature(name).unwrap().kind, FeatureKind::SurfaceLoft { faced: true, .. });
+        assert_eq!(out(&s, "Walls"), 4);
+        assert!(faced(&s, "Skin"));
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("faced");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert!(!faced(&s, "Skin"));
+        let legacy = out(&s, "Walls");
+        assert!(legacy < 4, "the legacy build faces some walls in");
+        let mut params = loft("Skin", "Walls");
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Skin", "command": "surface.loft", "params": params}));
+        assert!(!faced(&s, "Skin"));
+        assert_eq!(out(&s, "Walls"), legacy);
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(out(&s, "Walls"), legacy);
+        run(&mut s, "surface.loft", loft("NewSkin", "NewWalls"));
+        assert!(faced(&s, "NewSkin"));
+        assert_eq!(out(&s, "NewWalls"), 4);
     }
 
     /// Surface Loft through sections drawn in a 3D sketch (#15367): two 3D lines 30 apart make a

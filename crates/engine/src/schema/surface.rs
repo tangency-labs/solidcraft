@@ -841,6 +841,12 @@ pub struct SurfaceLoftParams {
     /// How the rails reshape the sections. Default: scale. Used only with `rails`.
     #[serde(default)]
     pub rail_fit: Option<RailFitParam>,
+    /// Through planar sketch sections, the walls face out of the region closed sections bound,
+    /// as `solid.loft`'s faces do, and along an open section's direction crossed with its sketch
+    /// normal, as `surface.extrude`'s. Default: true. False keeps each wall along its skinned
+    /// surface's normal, as surface lofts saved before it build.
+    #[serde(default)]
+    pub faced: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

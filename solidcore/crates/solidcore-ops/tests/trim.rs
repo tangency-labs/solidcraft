@@ -540,13 +540,14 @@ fn a_dropped_curve_past_a_faces_boundary_is_cut_at_the_boundary() {
 
 /// On a whole cylinder (radius 10 about Z, 40 high, with its two flat ends) the wall is one
 /// face closed on its seam, the ruling at y = 0, x = 10. A slot drawn facing the wall from
-/// +y, -x or -y lies clear of the seam and cuts out [`slot_area_on_cylinder`]'s piece, within
-/// the bound of [`a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area`]; the flat
-/// ends, on which the dropped slot bounds nothing, stay whole. Facing the wall from +x the
-/// slot's round ends cross the seam, and the kernel's drop does not follow a curve round a
-/// seam: it gives them no curve. That is refused with its reason, never cut as half a slot.
+/// +y, -x or -y lies clear of the seam and cuts out [`slot_area_on_cylinder`]'s piece as one
+/// face, within the bound of [`a_slot_dropped_onto_a_half_cylinder_cuts_out_its_closed_form_area`];
+/// the flat ends, on which the dropped slot bounds nothing, stay whole. Facing the wall from +x
+/// the slot's round ends cross the seam (#20836): the drop splits them cleanly on the seam, so
+/// the cut keeps the slot as two faces joined along the body's seam edge (still one region,
+/// since the seam is not a cut line) with the same closed-form area.
 #[test]
-fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
+fn a_slot_across_a_closed_faces_seam_cuts_like_one_clear_of_it() {
     let (r, a, d) = (10.0_f64, 3.0_f64, 20.0_f64);
     let can = solidcore_ops::make_cylinder([0.0; 3], r, 40.0).unwrap();
     assert_eq!(can.counts().unwrap()[0], 3, "a wall and two ends");
@@ -569,20 +570,25 @@ fn a_slot_across_a_closed_faces_seam_is_refused_and_one_clear_of_it_cuts() {
             end(12.0, PI),
         ]
     };
-    for n in [[0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
+    for (n, want_faces) in [
+        ([0.0, 1.0], 1),
+        ([-1.0, 0.0], 1),
+        ([0.0, -1.0], 1),
+        ([1.0, 0.0], 2),
+    ] {
         let foot = [n[0] * r, n[1] * r, 20.0];
         let kept = trim_by_dropped_curves(&can, &[facing(n).to_vec()], &[foot], TOL).unwrap();
-        assert_eq!(kept.counts().unwrap()[0], 1, "{n:?}: the piece alone");
+        assert_eq!(
+            kept.counts().unwrap()[0],
+            want_faces,
+            "{n:?}: expected {want_faces} face(s)"
+        );
         assert!(
             (area(&kept) - inside).abs() < TOL * 2.0 * PI * a,
             "{n:?}: inside {} against {inside}",
             area(&kept)
         );
     }
-    assert!(matches!(
-        trim_by_dropped_curves(&can, &[facing([1.0, 0.0]).to_vec()], &[[r, 0.0, 20.0]], TOL),
-        Err(Error::Unsupported(_))
-    ));
     assert_eq!(can.counts().unwrap()[0], 3, "the cylinder stays as it was");
 }
 
