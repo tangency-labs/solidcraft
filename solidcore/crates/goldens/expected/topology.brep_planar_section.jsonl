@@ -130,7 +130,7 @@
 {"case":"gen0094","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[179835.01092026557,179839.01092026557,15727543.755223524]],"n":187},"status":[0.0]}}
 {"case":"gen0095","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,-1.0,0.0],"status":[0.0]}}
 {"case":"issue_1451_box_x5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56453.0,56455.0,2066246.0]],"n":99},"status":[0.0]}}
-{"case":"nurb_fillet_section","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[140646.77860969972,140808.21587171053,14926955.506128814]],"n":238},"status":[0.0]}}
+{"case":"nurb_fillet_section","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[140647.06998014255,140808.5072410787,14927006.907881932]],"n":238},"status":[0.0]}}
 {"case":"sphere_equator","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0],"status":[0.0]}}
 {"case":"strut_box_diagonal_forced","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[140869.5,140871.5,14936152.0]],"n":233},"status":[0.0]}}
 {"case":"strut_box_x6_embedded_edge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0],"status":[0.0]}}
@@ -145,13 +145,11 @@
 {"case":"upstream_ellips_ts2_plane7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28221.631724958082,28223.631724958082,397380.60942754126]],"n":49},"status":[0.0]}}
 {"case":"upstream_ellips_ts2_plane8","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_ellips_ts2_plane9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
-{"case":"upstream_torus_a_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_a_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[57285.371045672975,57587.396265528616,2158541.181020123]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_a_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[114749.97665339755,115149.10287857286,9660056.157688644]],"n":187},"status":[0.0]}}
 {"case":"upstream_torus_a_plane3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_a_plane4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[142247.4271731755,142509.8442421154,15178927.38289584]],"n":233},"status":[0.0]}}
 {"case":"upstream_torus_a_plane5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56885.317092816185,56987.396265528616,2121272.4375576694]],"n":95},"status":[0.0]}}
-{"case":"upstream_torus_a_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
@@ -159,7 +157,6 @@
 {"case":"upstream_torus_b_plane4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_b_plane6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
-{"case":"upstream_torus_c_plane0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}
 {"case":"upstream_torus_c_plane1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56185.3168261495,58015.55403805972,2117022.4035145734]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_c_plane2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56274.483012264296,57996.30655876851,2119993.703805844]],"n":95},"status":[0.0]}}
 {"case":"upstream_torus_c_plane3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,-1.0],"status":[0.0]}}

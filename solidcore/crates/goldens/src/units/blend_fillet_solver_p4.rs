@@ -16,9 +16,7 @@
 //!   call (80 values, whatever the status) and both offset distances. Surfaces of
 //!   revolution are built as unit `surface.surf_of_revolution_p1` builds them (cylinder,
 //!   cone, sphere and torus shapes from line and circle generators); the build status is
-//!   compared when one fails. Every case runs on a fresh [`Kernel`], where the
-//!   library's `sdStaticStep` starts unlatched as on a first call; the step the case
-//!   leaves latched is compared (`fillet_point_step`, ND-3).
+//!   compared when one fails. Every case runs on a fresh [`Kernel`].
 //! - `calc_geom`: `CalcFilletGeom` on a rectangle sheet's edge (the reference wrapper's layout):
 //!   a non-B-spline (`SmHermiteCurve`) edge curve, and a B-spline edge curve with the
 //!   solver's bare fillet geometry (the one the `SmFilletSolver` constructor adds; no
@@ -211,11 +209,6 @@ fn point_values(p: &PointIn) -> Vec<f64> {
 }
 
 // ---- outputs ------------------------------------------------------------------------------
-
-// ---- C++ side -----------------------------------------------------------------------------
-
-/// Compared key: the `sdStaticStep` latch (ND-3) after the case.
-const POINT_STEP: &str = "fillet_point_step";
 
 // ---- Rust side ----------------------------------------------------------------------------
 
@@ -726,7 +719,7 @@ fn rust_calc_case(k: &Kernel, c: &CalcCase) -> Result<Output, Fail> {
         .values("knots_in", knots_in))
 }
 
-/// Every case runs on a fresh kernel, whose `sdStaticStep` latch sets itself.
+/// Every case runs on a fresh kernel.
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let r = match i {
@@ -734,8 +727,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::CalcGeom(c) => rust_calc_case(&k, c),
     };
     match r {
-        // read as the C++ probe reads `sdStaticStep` (its crossing point latches 1e-5)
-        Ok(o) => Ok(o.values(POINT_STEP, vec![k.fillet_point_step.get().unwrap_or(1.0e-5)])),
+        Ok(o) => Ok(o),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }
@@ -1692,9 +1684,6 @@ impl UnitDiff for Runner {
         Ok(v)
     }
 
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
-
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
@@ -1716,4 +1705,122 @@ mod tests {
         assert!(n > 150, "{n}");
     }
 
+    /// tangency-labs/solidcraft#18634: `gen0179` and `gen0416` evaluate a plane `a` of
+    /// domain `[0, 1e-6]^2` at `v < 0`, just outside it. Their seam gap is the plane's
+    /// side, `1e-6`, whose computed square `1.0000000000000002e-12` main compared with
+    /// `SM_EFF_ZERO (1 + max |P|)` (about `1.000001e-12`) and so called the plane periodic
+    /// in v, moving the point across the plane to `v + 1e-6`. The seam test now also needs
+    /// a surface whose squared gap exceeds `SM_EFF_ZERO` (as here) to reach farther than
+    /// that allowance from the seam, which a plane never does
+    /// (its chord to the middle of the domain is half its gap), so the plane is not
+    /// periodic. The test decides which of the two parameters the reported point is at:
+    /// its coordinates in the plane's frame, `(P - o) . X / sx` and `(P - o) . Y / sy`
+    /// (the frame is orthonormal), are each within `err` of the true ones, `err =
+    /// (gamma(10) + 12 eps) (|P| + |o|) / s` with `s` the scale (`gamma(10)` for a
+    /// difference, a 3-term dot product, a quotient and the frame measurements; `12 eps`
+    /// for the frame's measured departure from unit, `|X|^2 - 1 <= 8 eps`, and from
+    /// orthogonal, `4 eps`). The point is the one at the given `uv` when its v is nearer `v`
+    /// than `v + 1e-6` by more than `2 err`, and its u is in `[0, 1e-6]` widened by `err`.
+    #[test]
+    fn tiny_plane_rows_are_the_plane_at_the_given_uv() {
+        let gamma = |n: f64| n * f64::EPSILON / 2.0 / (1.0 - n * f64::EPSILON / 2.0);
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let norm = |a: [f64; 3]| dot(a, a).sqrt();
+        for name in ["gen0179", "gen0416"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let a = &case.inputs["a"];
+            assert_eq!(a["kind"], "plane", "{name}");
+            let vec = |key: &str| -> Vec<f64> { serde_json::from_value(a[key].clone()).unwrap() };
+            let v3 = |key: &str| -> [f64; 3] {
+                let c = vec(key);
+                [c[0], c[1], c[2]]
+            };
+            let (o, x, y, scale) = (v3("o"), v3("x"), v3("y"), vec("scale"));
+            assert_eq!(vec("domain"), [0.0, 0.0, 1e-6, 1e-6], "{name}");
+            for e in [x, y] {
+                assert!((norm(e) - 1.0).abs() <= 4.0 * f64::EPSILON, "{name}: unit");
+            }
+            assert!(dot(x, y).abs() <= 4.0 * f64::EPSILON, "{name}: orthogonal");
+            let out = Runner.run_rust(&case).unwrap();
+            let pt = &out.values["point"];
+            let (u, v) = (pt[5], pt[6]);
+            assert!(v < 0.0 && (0.0..=1e-6).contains(&u), "{name}: uv ({u}, {v})");
+            let p = [pt[13], pt[14], pt[15]];
+            let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            let reach = norm(p) + norm(o);
+            let err = |sc: f64| (gamma(10.0) + 12.0 * f64::EPSILON) * reach / sc;
+            let (pu, pv) = (dot(d, x) / scale[0], dot(d, y) / scale[1]);
+            let (eu, ev) = (err(scale[0]), err(scale[1]));
+            assert!(pu >= -eu && pu <= 1e-6 + eu, "{name}: u {pu}");
+            assert!(
+                (pv - v).abs() + 2.0 * ev < (pv - (v + 1e-6)).abs(),
+                "{name}: v {pv} against {v} and {}",
+                v + 1e-6
+            );
+        }
+    }
+
+}
+
+/// #21383: the 16 rows the G1R change moved, each replayed: the case's own
+/// `ComputePointValues` runs, and then every extension the solver's offset surfaces (and
+/// any offset nested in their bases) hold is certified (`crate::g1r_cert::ExtensionWatch`):
+/// bit for bit the extension a fresh G1R evaluation of the base's NURB builds, each of
+/// its steps certified by `certify_step`. Every row's solver holds at least one
+/// extension, and at least one step has varying weight ratios (the new row): the moved
+/// values are solved on certified G1 extensions (PROVEN, up to the rounding the
+/// certificate's header bounds).
+#[cfg(test)]
+mod g1r_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 16] = ["gen0062", "gen0086", "gen0174", "gen0178", "gen0206", "gen0246", "gen0268", "gen0313", "gen0323", "gen0339", "gen0376", "gen0381", "gen0389", "gen0404", "gen0474", "gen0476"];
+
+    #[test]
+    fn each_moved_row_solves_on_certified_g1_extensions() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let k = Kernel::default();
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let Inputs::PointValues(i) = c.parse::<Inputs>().unwrap() else {
+                panic!("{}: not a point case", c.name)
+            };
+            let a = rust_surface(&k, &i.a).unwrap().unwrap();
+            let b = i.b.as_ref().map(|s| rust_surface(&k, s).unwrap().unwrap());
+            let b_id = u32::from(b.is_some());
+            let bs = b.unwrap_or_else(|| a.clone());
+            let inner = cr_solver(&k, i.tol, i.ang_tol, i.tangency_tol, i.radii, i.orient, a, bs, b_id)
+                .unwrap_or_else(|_| panic!("{}: solver", c.name));
+            let mut ops = ShimSolver { inner, fd: i.fd, extend: None };
+            let mut point = rust_point(&point_values(&i.point)).unwrap();
+            let prev = i.prev.as_ref().map(|p| rust_point(&point_values(p)).unwrap());
+            let _ = FilletSolver::compute_point_values(
+                &mut ops,
+                &k,
+                i.uv.map(p2),
+                &ext(i.dom1),
+                &ext(i.dom2),
+                i.dir,
+                &mut point,
+                prev.as_ref(),
+            );
+            let (mut growths, mut mixed) = (0, 0);
+            for slot in ops.solver().surfaces.iter().flatten() {
+                let mut w = ExtensionWatch::default();
+                w.observe(&k, &slot.surface.surface)
+                    .unwrap_or_else(|e| panic!("{}: {e}", c.name));
+                growths += w.growths;
+                mixed += w.mixed;
+            }
+            eprintln!("{}: {growths} extensions, {mixed} mixed steps", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+            assert!(mixed > 0, "{}: no step with varying ratios", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
+    }
 }

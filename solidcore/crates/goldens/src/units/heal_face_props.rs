@@ -2061,3 +2061,69 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #21326 (WR-647 part B): a sphere of radius 1 with two circle loops of radius
+    /// 0.866 at z = +-0.5 and face tolerance 1 (fixture `stage3_sph_two_tol1`) passes
+    /// `SetProps_Stage3`. A classification input on a loop edge ends inside an interval
+    /// whose rest stays within the edge's tolerance (its midpoint 0.58 from the edge,
+    /// tolerance 1.00001); splitting it there left that rest unlabelled and the face was
+    /// refused (`SM_ERR_NOTYET_HEAL_FACE`, 1040, no loop tree root).
+    #[test]
+    fn sphere_two_loops_at_tolerance_one_passes_stage3() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let case = ctx
+            .fixture_cases(Runner.id())
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "stage3_sph_two_tol1")
+            .unwrap();
+        let v = rust(&case.parse().unwrap()).unwrap().values.get("v").cloned().unwrap();
+        // the Stage 3 classification status (1040 = NoLoopTreeRoot before the fix)
+        assert_eq!(v.first(), Some(&1000.0));
+    }
+
+    /// The values of the Stage 3 script of generated case `s3gen{i}`.
+    fn stage3_values(i: usize) -> Vec<f64> {
+        let seed = CaseContext::seed_for("heal.face_props/stage3", i);
+        let c = gen_stage3(&mut Rng::new(seed));
+        let out = rust(&c).unwrap();
+        out.values.get("v").cloned().unwrap()
+    }
+
+    /// #18342: a plane face 8 x 8 with one circle loop of radius 0.6 (`s3gen0225`, zone
+    /// tolerance 0.1) passes `SetProps_Stage3` with one outer loop. The bisector's crossings
+    /// of the circle, far from its ends in 3D but within the face's UV tolerance of its
+    /// start in the bisector's own parameter, were taken as touches on the bisector's start
+    /// and the face was refused (`SM_ERR_NOTYET_HEAL_FACE`, 1040).
+    #[test]
+    fn plane_with_one_circle_passes_stage3_with_one_outer_loop() {
+        let v = stage3_values(225);
+        // op 0's status and snapshot, then op 6 (Stage 3): its status, then its snapshot
+        let stage3 = 1 + SNAP_LEN;
+        assert_eq!(v.get(stage3), Some(&1000.0), "status");
+        // snapshot field 34: outer_loop_cnt
+        assert_eq!(v.get(stage3 + 1 + 34), Some(&1.0), "outer loops");
+    }
+
+    /// #18342: four concentric circles on a plane face (`s3gen0275`, radii 2.90, 1.66,
+    /// 1.07 and 0.63, the second and fourth clockwise as holes must be, the first
+    /// clockwise too) nest as one chain: one outer loop, one loop of the wrong
+    /// orientation (the outermost) and two nested loops (the two inside the first hole).
+    #[test]
+    fn concentric_circles_nest_as_one_chain_in_stage3() {
+        let v = stage3_values(275);
+        assert_eq!(v.first(), Some(&1000.0), "status");
+        // snapshot fields 34, 37 and 39: outer_loop_cnt, bad_orient_loop_cnt,
+        // bad_nested_loop_cnt
+        assert_eq!(v.get(1 + 34), Some(&1.0), "outer loops");
+        assert_eq!(v.get(1 + 37), Some(&1.0), "wrongly oriented loops");
+        assert_eq!(v.get(1 + 39), Some(&2.0), "nested loops");
+    }
+}

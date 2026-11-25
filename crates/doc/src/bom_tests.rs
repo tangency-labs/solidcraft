@@ -1,0 +1,1194 @@
+use serde_json::json;
+
+use super::*;
+use crate::BomType::{Inseparable, Normal, Phantom, Purchased, Reference};
+use crate::{IDENTITY, Occurrence};
+
+/// A new component placed once in `parent`, and that placement.
+fn add(doc: &mut Document, name: &str, parent: u64) -> (u64, u64) {
+    let component = doc.add_component(Some(name), parent).unwrap();
+    (component, doc.occurrences.last().unwrap().id)
+}
+
+/// Another placement of `component` in `parent`.
+fn place(doc: &mut Document, component: u64, parent: u64) -> u64 {
+    doc.add_occurrence(component, parent, IDENTITY).unwrap()
+}
+
+/// A part property as a file holds it (reading never validates).
+fn set(doc: &mut Document, component: u64, key: &str, value: &str) {
+    doc.components.iter_mut().find(|c| c.id == component).unwrap().metadata.0.insert(key.into(), json!(value));
+}
+
+fn number(doc: &mut Document, component: u64, part_number: &str) {
+    set(doc, component, "part_number", part_number);
+}
+
+fn typed(doc: &mut Document, component: u64, bom_type: BomType) {
+    set(doc, component, "bom_type", bom_type.as_str());
+}
+
+/// What `request` lists for `doc` (none of whose components has bodies), with each row's members.
+fn listed(doc: &Document, request: Request) -> Result<Bom> {
+    let state = ModelState::default();
+    list_with(&mut Tree::new(doc, &state), &request, true)
+}
+
+fn view(view: View) -> Request {
+    Request { view, ..Request::default() }
+}
+
+fn folded(view: View) -> Request {
+    Request { view, fold: true, ..Request::default() }
+}
+
+/// Each row, followed by the rows under it: item, names, type, count and each.
+fn rows(bom: &Bom) -> Vec<(String, String, BomType, u64, u64)> {
+    bom.rows_deep().into_iter().map(|(item, r)| (item_text(&item), r.names.join("; "), r.bom_type, r.count, r.each)).collect()
+}
+
+fn row(item: &str, names: &str, bom_type: BomType, count: u64, each: u64) -> (String, String, BomType, u64, u64) {
+    (item.into(), names.into(), bom_type, count, each)
+}
+
+#[test]
+fn the_view_and_grouping_words_are_the_commands() {
+    for v in View::ALL {
+        assert_eq!(View::parse(v.as_str()), Some(v));
+    }
+    for g in Group::ALL {
+        assert_eq!(Group::parse(g.as_str()), Some(g));
+    }
+    assert_eq!((View::default().as_str(), Group::default().as_str()), ("flat", "part_number"), "what assembly.bom lists by default");
+    for word in ["", "deep", "Flat", "part number"] {
+        assert_eq!((View::parse(word), Group::parse(word)), (None, None), "{word}");
+    }
+}
+
+#[test]
+fn an_empty_assembly_lists_nothing_and_weighs_nothing() {
+    let mut doc = Document::default();
+    let empty = listed(&doc, Request { mass: true, ..Request::default() }).unwrap();
+    assert!(empty.rows.is_empty());
+    assert_eq!(empty.total, Total { occurrences: 0, mass: Mass::Unknown(Unknown::NothingToWeigh) });
+    assert_eq!(listed(&doc, Request::default()).unwrap().total.mass, Mass::NotAsked, "weighed only when asked");
+    // A component that holds nothing, as the assembly listed; one that isn't there is refused.
+    let (part, _) = add(&mut doc, "Part", 0);
+    for v in View::ALL {
+        assert!(listed(&doc, Request { source: part, view: v, ..Request::default() }).unwrap().rows.is_empty());
+    }
+    assert!(listed(&doc, Request { source: 999, ..Request::default() }).is_err());
+}
+
+#[test]
+fn one_part_is_one_row_named_by_its_lowest_member() {
+    let mut doc = Document::default();
+    let (part, occurrence) = add(&mut doc, "Part", 0);
+    for (v, stands_for) in [(View::PartsOnly, Holds::Own), (View::FirstLevel, Holds::All)] {
+        let bom = listed(&doc, view(v)).unwrap();
+        let [r] = bom.rows.as_slice() else { panic!("{bom:?}") };
+        assert_eq!(r.key, RowKey { parents: vec![], member: Member { component: part, bom_type: Normal } });
+        assert_eq!((r.item, r.count, r.each, r.stands_for, r.mass), (1, 1, 1, stands_for, Mass::NotAsked));
+        assert_eq!((&r.components, &r.names, &r.members), (&vec![part], &vec!["Part".to_string()], &vec![vec![occurrence]]));
+        assert!(r.children.is_empty() && r.materials.is_empty() && r.part_number.is_empty());
+        assert_eq!(bom.total.occurrences, 1);
+    }
+}
+
+#[test]
+fn a_row_is_named_by_its_lowest_member_not_by_its_part_number() {
+    let mut doc = Document::default();
+    let (a, oa) = add(&mut doc, "A", 0);
+    let (b, ob) = add(&mut doc, "B", 0);
+    number(&mut doc, a, "P");
+    number(&mut doc, b, "P");
+    let bom = listed(&doc, Request::default()).unwrap();
+    let [r] = bom.rows.as_slice() else { panic!("{bom:?}") };
+    assert_eq!((r.key.member.component, &r.components, &r.members, r.part_number.as_str()), (a, &vec![a, b], &vec![vec![oa], vec![ob]], "P"));
+    // Renumbering the lower one: its row goes with it, and the other's row is named by the other.
+    number(&mut doc, a, "Q");
+    let bom = listed(&doc, Request::default()).unwrap();
+    let keys: Vec<(&str, u64)> = bom.rows.iter().map(|r| (r.part_number.as_str(), r.key.member.component)).collect();
+    assert_eq!(keys, [("P", b), ("Q", a)]);
+}
+
+#[test]
+fn one_part_number_counted_as_two_types_is_two_rows() {
+    let mut doc = Document::default();
+    let (a, _) = add(&mut doc, "Made", 0);
+    let (b, _) = add(&mut doc, "Bought", 0);
+    number(&mut doc, a, "P");
+    number(&mut doc, b, "P");
+    typed(&mut doc, b, Purchased);
+    // A second placement of the made one, counted as bought: it joins the bought row.
+    let second = place(&mut doc, a, 0);
+    doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().bom_type = Some(Purchased);
+    for v in View::ALL {
+        let bom = listed(&doc, view(v)).unwrap();
+        assert_eq!(rows(&bom), [row("1", "Made", Normal, 1, 1), row("2", "Made; Bought", Purchased, 2, 2)], "{v:?}");
+        let keys: Vec<Member> = bom.rows.iter().map(|r| r.key.member).collect();
+        assert_eq!(keys, [Member { component: a, bom_type: Normal }, Member { component: a, bom_type: Purchased }]);
+    }
+}
+
+#[test]
+fn a_phantom_in_a_phantom_promotes_what_it_holds_into_the_level_it_sits_in() {
+    let mut doc = Document::default();
+    let (kit, okit) = add(&mut doc, "Kit", 0);
+    let (set_, oset) = add(&mut doc, "Set", kit);
+    let oset2 = place(&mut doc, set_, kit);
+    let (screw, oscrew) = add(&mut doc, "Screw", set_);
+    let oscrew2 = place(&mut doc, screw, set_);
+    let alone = place(&mut doc, screw, 0);
+    typed(&mut doc, kit, Phantom);
+    typed(&mut doc, set_, Phantom);
+    let mut paths = vec![vec![okit, oset, oscrew], vec![okit, oset, oscrew2], vec![okit, oset2, oscrew], vec![okit, oset2, oscrew2], vec![alone]];
+    paths.sort();
+    for v in View::ALL {
+        let bom = listed(&doc, view(v)).unwrap();
+        assert_eq!(rows(&bom), [row("1", "Screw", Normal, 5, 5)], "{v:?}");
+        assert_eq!(bom.rows[0].members, paths);
+    }
+}
+
+#[test]
+fn a_reference_counts_nowhere_and_its_own_list_lists_what_it_holds() {
+    let mut doc = Document::default();
+    let (fixture, ofixture) = add(&mut doc, "Fixture", 0);
+    add(&mut doc, "Pin", fixture);
+    typed(&mut doc, fixture, Reference);
+    for v in View::ALL {
+        let bom = listed(&doc, Request { mass: true, ..view(v) }).unwrap();
+        assert_eq!((bom.rows.len(), bom.total.occurrences), (0, 0), "{v:?}");
+        assert_eq!(bom.total.mass, Mass::Unknown(Unknown::NothingToWeigh));
+        assert_eq!(rows(&listed(&doc, Request { source: fixture, view: v, ..Request::default() }).unwrap()), [row("1", "Pin", Normal, 1, 1)]);
+    }
+    // An occurrence counted as a reference, its component normal: the same.
+    set(&mut doc, fixture, "bom_type", "normal");
+    assert_eq!(rows(&listed(&doc, Request::default()).unwrap()), [row("1", "Pin", Normal, 1, 1)]);
+    doc.occurrences.iter_mut().find(|o| o.id == ofixture).unwrap().bom_type = Some(Reference);
+    assert!(listed(&doc, Request::default()).unwrap().rows.is_empty());
+}
+
+#[test]
+fn a_list_walks_64_levels_and_refuses_a_65th() {
+    let mut doc = Document::default();
+    let mut parent = 0;
+    for level in 1..=64 {
+        parent = add(&mut doc, &format!("L{level}"), parent).0;
+    }
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert_eq!(rows(&bom), [row("1", "L64", Normal, 1, 1)]);
+    assert_eq!(bom.rows[0].members[0].len(), 64);
+    add(&mut doc, "L65", parent);
+    assert!(listed(&doc, Request::default()).is_err(), "refused, never listed in part");
+    // The first level only walks what the design places directly.
+    assert_eq!(rows(&listed(&doc, view(View::FirstLevel)).unwrap()), [row("1", "L1", Normal, 1, 1)]);
+}
+
+#[test]
+fn one_placement_budget_covers_the_whole_list_folded_parts_included() {
+    let mut doc = Document::default();
+    let (a, _) = add(&mut doc, "A", 0);
+    for _ in 1..1000 {
+        place(&mut doc, a, 0);
+    }
+    let (b, _) = add(&mut doc, "B", a);
+    for _ in 1..99 {
+        place(&mut doc, b, a);
+    }
+    // 1,000 As holding 99 Bs each: 100,000 placements, as many as one list walks.
+    let flat = listed(&doc, Request::default()).unwrap();
+    assert_eq!((rows(&flat), flat.total.occurrences), (vec![row("1", "B", Normal, 99_000, 99_000)], 99_000));
+    number(&mut doc, a, "A-1");
+    let kit = listed(&doc, folded(View::PartsOnly)).unwrap();
+    assert_eq!((rows(&kit), kit.total.occurrences), (vec![row("1", "A", Normal, 1000, 1000), row("1.1", "B", Normal, 99_000, 99)], 100_000));
+    let (a_row, b_row) = (&kit.rows[0], &kit.rows[0].children[0]);
+    assert_eq!(b_row.key, RowKey { parents: vec![a_row.key.member], member: Member { component: b, bom_type: Normal } });
+    assert_eq!(a_row.stands_for, Holds::All, "a folded part's row is the kit");
+    // One placement more, anywhere, is refused, folded or not: a folded part's contents are walked
+    // under the list's budget, not one of their own.
+    add(&mut doc, "C", 0);
+    for request in [Request::default(), folded(View::PartsOnly), folded(View::FirstLevel)] {
+        assert!(listed(&doc, request).is_err(), "{request:?}");
+    }
+    assert_eq!(listed(&doc, view(View::FirstLevel)).unwrap().total.occurrences, 1001, "the first level walks 1,001");
+}
+
+/// Kits used to be compared as text (`"#12×1"`): a part without a part number, whose id is 12,
+/// read the same as a part numbered "#12", and a part numbered "P×1\nQ" the same as a P and a Q.
+#[test]
+fn kits_are_told_apart_by_what_they_hold_not_by_how_it_reads() {
+    let mut doc = Document::default();
+    let bolt = |doc: &mut Document, name: &str| {
+        let (id, _) = add(doc, name, 0);
+        number(doc, id, "BOLT");
+        id
+    };
+    let (b1, b2, b3, b4) = (bolt(&mut doc, "Bolt 1"), bolt(&mut doc, "Bolt 2"), bolt(&mut doc, "Bolt 3"), bolt(&mut doc, "Bolt 4"));
+    let (plain, _) = add(&mut doc, "Plain", b1);
+    let (spelled, _) = add(&mut doc, "Spelled", b2);
+    number(&mut doc, spelled, &format!("#{plain}"));
+    let (pq, _) = add(&mut doc, "PQ", b3);
+    number(&mut doc, pq, "P×1\nQ");
+    let (p, _) = add(&mut doc, "P", b4);
+    let (q, _) = add(&mut doc, "Q", b4);
+    number(&mut doc, p, "P");
+    number(&mut doc, q, "Q");
+    let bolts = |doc: &Document| -> Vec<Vec<u64>> {
+        let bom = listed(doc, folded(View::PartsOnly)).unwrap();
+        bom.rows.iter().filter(|r| r.part_number == "BOLT").map(|r| r.components.clone()).collect()
+    };
+    let mut each: Vec<Vec<u64>> = bolts(&doc);
+    each.sort();
+    assert_eq!(each, [vec![b1], vec![b2], vec![b3], vec![b4]], "four kits, four rows");
+    // The same parts by part number are one kit, whichever definitions they are.
+    let b5 = bolt(&mut doc, "Bolt 5");
+    let (p2, _) = add(&mut doc, "P again", b5);
+    let (q2, _) = add(&mut doc, "Q again", b5);
+    number(&mut doc, p2, "P");
+    number(&mut doc, q2, "Q");
+    assert!(bolts(&doc).contains(&vec![b4, b5]));
+    let bom = listed(&doc, folded(View::PartsOnly)).unwrap();
+    let both = bom.rows.iter().find(|r| r.components == [b4, b5]).unwrap();
+    let inside: Vec<(&str, &[u64], u64, u64)> =
+        both.children.iter().map(|c| (c.part_number.as_str(), c.components.as_slice(), c.each, c.count)).collect();
+    assert_eq!(inside, [("P", &[p, p2][..], 1, 2), ("Q", &[q, q2][..], 1, 2)], "each bolt's, counted for both");
+    // The same parts counted as another type are another kit: a bolt whose Q is bought is a row of its own.
+    let b6 = bolt(&mut doc, "Bolt 6");
+    let (p3, _) = add(&mut doc, "P third", b6);
+    let (q3, bought) = add(&mut doc, "Q third", b6);
+    number(&mut doc, p3, "P");
+    number(&mut doc, q3, "Q");
+    doc.occurrences.iter_mut().find(|o| o.id == bought).unwrap().bom_type = Some(Purchased);
+    let each = bolts(&doc);
+    assert!(each.contains(&vec![b4, b5]) && each.contains(&vec![b6]), "{each:?}");
+}
+
+/// All levels walks under the list's one budget: 100,000 placements and 64 levels are listed, and
+/// one more of either is refused, never listed in part.
+#[test]
+fn all_levels_lists_at_each_cap_and_refuses_one_more() {
+    let mut doc = Document::default();
+    let (part, _) = add(&mut doc, "Part", 0);
+    let base = doc.occurrences.iter().map(|o| o.id).max().unwrap_or(0);
+    let placement = |id: u64| Occurrence {
+        id,
+        component: part,
+        parent: 0,
+        name: format!("Part:{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
+    doc.occurrences.extend((1..MAX_PLACEMENTS as u64).map(|i| placement(base + i)));
+    let all = listed(&doc, view(View::AllLevels)).unwrap();
+    assert_eq!((all.rows.len(), all.total.occurrences), (1, MAX_PLACEMENTS as u64));
+    doc.occurrences.push(placement(base + MAX_PLACEMENTS as u64));
+    assert!(listed(&doc, view(View::AllLevels)).is_err(), "100,001 placements");
+    let mut doc = Document::default();
+    let mut parent = 0;
+    for i in 0..MAX_PLACEMENT_DEPTH {
+        parent = add(&mut doc, &format!("L{i}"), parent).0;
+    }
+    let all = listed(&doc, view(View::AllLevels)).unwrap();
+    assert_eq!(all.rows_deep().last().map(|(item, _)| item.len()), Some(MAX_PLACEMENT_DEPTH));
+    add(&mut doc, "Too deep", parent);
+    assert!(listed(&doc, view(View::AllLevels)).is_err(), "65 levels");
+}
+
+/// Two parts with one part number are one row only when what they hold is the same all the way
+/// down: here they differ two levels below, so in all levels they are two rows, each with its own.
+#[test]
+fn kits_are_compared_to_any_depth() {
+    let mut doc = Document::default();
+    let (a, _) = add(&mut doc, "A", 0);
+    let (b, _) = add(&mut doc, "B", 0);
+    let (x1, _) = add(&mut doc, "X1", a);
+    let (x2, _) = add(&mut doc, "X2", b);
+    let (bolt, _) = add(&mut doc, "Bolt", x1);
+    for (id, part_number) in [(a, "P"), (b, "P"), (x1, "X"), (x2, "X"), (bolt, "BOLT")] {
+        number(&mut doc, id, part_number);
+    }
+    let all = listed(&doc, view(View::AllLevels)).unwrap();
+    assert_eq!(
+        rows(&all),
+        [
+            row("1", "A", Normal, 1, 1),
+            row("1.1", "X1", Normal, 1, 1),
+            row("1.1.1", "Bolt", Normal, 1, 1),
+            row("2", "B", Normal, 1, 1),
+            row("2.1", "X2", Normal, 1, 1)
+        ],
+        "two P rows, never one with children at each 0"
+    );
+    // The same contents two levels down: one row again.
+    let (bolt2, _) = add(&mut doc, "Bolt 2", x2);
+    number(&mut doc, bolt2, "BOLT");
+    let all = listed(&doc, view(View::AllLevels)).unwrap();
+    assert_eq!(rows(&all), [row("1", "A; B", Normal, 2, 2), row("1.1", "X1; X2", Normal, 2, 1), row("1.1.1", "Bolt; Bolt 2", Normal, 2, 1)]);
+}
+
+/// What a folded part holds is listed as parts only lists it, in parts only and the first level,
+/// and isn't folded again: a numbered subassembly inside it is listed through its parts. In all
+/// levels it is listed in all levels again, so that subassembly is a row with its own rows.
+#[test]
+fn what_a_folded_part_holds_is_listed_as_parts_only_lists_it() {
+    let mut doc = Document::default();
+    let (machine, _) = add(&mut doc, "Machine", 0);
+    let (gearbox, _) = add(&mut doc, "Gearbox", machine);
+    let (shaft, _) = add(&mut doc, "Shaft", gearbox);
+    place(&mut doc, shaft, gearbox);
+    add(&mut doc, "Pin", gearbox);
+    for (id, part_number) in [(machine, "M-1"), (gearbox, "GB-1"), (shaft, "SH-1")] {
+        number(&mut doc, id, part_number);
+    }
+    for v in [View::PartsOnly, View::FirstLevel] {
+        let bom = listed(&doc, folded(v)).unwrap();
+        assert_eq!(rows(&bom), [row("1", "Machine", Normal, 1, 1), row("1.1", "Shaft", Normal, 2, 2), row("1.2", "Pin", Normal, 1, 1)], "{v:?}");
+    }
+    let all = listed(&doc, folded(View::AllLevels)).unwrap();
+    let nested = [
+        row("1", "Machine", Normal, 1, 1),
+        row("1.1", "Gearbox", Normal, 1, 1),
+        row("1.1.1", "Shaft", Normal, 2, 2),
+        row("1.1.2", "Pin", Normal, 1, 1),
+    ];
+    assert_eq!(rows(&all), nested);
+    let assemblies: Vec<(String, bool)> = all.rows_deep().into_iter().map(|(_, r)| (r.names.join("; "), r.assembly)).collect();
+    let expected = [("Machine", true), ("Gearbox", true), ("Shaft", false), ("Pin", false)].map(|(name, assembly)| (name.to_string(), assembly));
+    assert_eq!(assemblies, expected, "a row that places others is an assembly");
+}
+
+/// Bolt (purchased) holding a nut; Frame (inseparable) holding a plate, a purchased clip and a
+/// weld kit (phantom) of a rivet and a purchased insert; Fixture (reference) holding a pin; Set
+/// (phantom) holding a screw; Sub (normal, numbered, no bodies) holding a washer. Each is placed
+/// once.
+fn mixed() -> (Document, BTreeMap<&'static str, u64>) {
+    let mut doc = Document::default();
+    let mut at = BTreeMap::new();
+    for (name, parent, bom_type) in [
+        ("Bolt", "", Purchased),
+        ("Nut", "Bolt", Normal),
+        ("Frame", "", Inseparable),
+        ("Plate", "Frame", Normal),
+        ("Clip", "Frame", Purchased),
+        ("Weld kit", "Frame", Phantom),
+        ("Rivet", "Weld kit", Normal),
+        ("Insert", "Weld kit", Purchased),
+        ("Fixture", "", Reference),
+        ("Pin", "Fixture", Normal),
+        ("Set", "", Phantom),
+        ("Screw", "Set", Normal),
+        ("Sub", "", Normal),
+        ("Washer", "Sub", Normal),
+    ] {
+        let parent = doc.find_component(parent).unwrap_or(0);
+        let (id, occurrence) = add(&mut doc, name, parent);
+        typed(&mut doc, id, bom_type);
+        at.insert(name, occurrence);
+    }
+    let sub = doc.find_component("Sub").unwrap();
+    number(&mut doc, sub, "SUB-1");
+    (doc, at)
+}
+
+#[test]
+fn row_of_finds_the_row_a_placement_is_counted_in() {
+    let (doc, at) = mixed();
+    let path = |names: &[&str]| -> Vec<u64> { names.iter().map(|n| at[*n]).collect() };
+    let state = ModelState::default();
+    let mut tree = Tree::new(&doc, &state);
+    let name = |r: std::result::Result<(Vec<u32>, &Row), Unlisted>| r.map(|(_, r)| r.names.join("; "));
+    let flat = list_with(&mut tree, &Request::default(), true).unwrap();
+    // Made for its rows alone, a list keeps no members.
+    assert!(list(&mut tree, &Request::default()).unwrap().rows.iter().all(|r| r.members.is_empty()));
+    let cases: &[(&[&str], std::result::Result<&str, Unlisted>)] = &[
+        (&["Bolt"], Ok("Bolt")),
+        (&["Bolt", "Nut"], Ok("Bolt")),
+        (&["Frame"], Ok("Frame")),
+        (&["Frame", "Plate"], Ok("Frame")),
+        (&["Frame", "Clip"], Ok("Clip")),
+        (&["Frame", "Weld kit"], Ok("Frame")),
+        (&["Frame", "Weld kit", "Rivet"], Ok("Frame")),
+        (&["Frame", "Weld kit", "Insert"], Ok("Insert")),
+        (&["Fixture"], Err(Unlisted::Reference)),
+        (&["Fixture", "Pin"], Err(Unlisted::Reference)),
+        (&["Set"], Err(Unlisted::NoRow)),
+        (&["Set", "Screw"], Ok("Screw")),
+        (&["Sub"], Err(Unlisted::NoRow)),
+        (&["Sub", "Washer"], Ok("Washer")),
+        (&[], Err(Unlisted::NoRow)),
+        (&["Nut"], Err(Unlisted::NotFound)),
+    ];
+    for (names, found) in cases {
+        assert_eq!(name(flat.row_of(&tree, &path(names))), found.map(String::from), "{names:?}");
+    }
+    assert_eq!(flat.row_of(&tree, &[999]).err(), Some(Unlisted::NotFound));
+    assert_eq!(flat.row_of(&tree, &vec![at["Bolt"]; 65]).err(), Some(Unlisted::NotFound));
+    let stands: Vec<(String, Holds)> = flat.rows.iter().map(|r| (r.names.join("; "), r.stands_for)).collect();
+    let want = [
+        ("Bolt", Holds::All),
+        ("Clip", Holds::All),
+        ("Frame", Holds::AllButPurchased),
+        ("Insert", Holds::All),
+        ("Screw", Holds::Own),
+        ("Washer", Holds::Own),
+    ];
+    assert_eq!(stands, want.map(|(n, h)| (n.to_string(), h)));
+
+    let top = list_with(&mut tree, &view(View::FirstLevel), true).unwrap();
+    let cases: &[(&[&str], &str)] = &[(&["Sub", "Washer"], "Sub"), (&["Set", "Screw"], "Screw"), (&["Frame", "Clip"], "Frame")];
+    for (names, found) in cases {
+        assert_eq!(name(top.row_of(&tree, &path(names))), Ok(found.to_string()), "{names:?}");
+    }
+    assert!(top.rows.iter().all(|r| r.stands_for == Holds::All));
+
+    let kit = list_with(&mut tree, &folded(View::PartsOnly), true).unwrap();
+    let (_, sub) = kit.row_of(&tree, &path(&["Sub"])).unwrap();
+    let (_, washer) = kit.row_of(&tree, &path(&["Sub", "Washer"])).unwrap();
+    assert_eq!((sub.names.join(""), sub.stands_for, washer.names.join("")), ("Sub".into(), Holds::All, "Washer".into()));
+    assert_eq!(washer.key.parents, [sub.key.member]);
+}
+
+/// Each placement is counted in one row or none, every view and grouping: the counts, the
+/// members and the total agree, and `row_of` finds each member's row.
+#[test]
+fn every_placement_is_in_one_row_or_none() {
+    let (mut doc, _) = mixed();
+    // More of the same: the subassembly and the bolt placed again, the washer twice in the subassembly.
+    for name in ["Sub", "Bolt"] {
+        let id = doc.find_component(name).unwrap();
+        place(&mut doc, id, 0);
+    }
+    let (washer, sub) = (doc.find_component("Washer").unwrap(), doc.find_component("Sub").unwrap());
+    place(&mut doc, washer, sub);
+    let state = ModelState::default();
+    let mut tree = Tree::new(&doc, &state);
+    for v in View::ALL {
+        for fold in [false, true] {
+            for group in Group::ALL {
+                let request = Request { view: v, fold, group, ..Request::default() };
+                let bom = list_with(&mut tree, &request, true).unwrap();
+                let deep = bom.rows_deep();
+                let mut seen: Vec<&Vec<u64>> = deep.iter().flat_map(|(_, r)| &r.members).collect();
+                assert_eq!(seen.len() as u64, bom.total.occurrences, "{request:?}");
+                assert!(deep.iter().all(|(_, r)| r.count == r.members.len() as u64), "{request:?}");
+                seen.sort();
+                seen.dedup();
+                assert_eq!(seen.len() as u64, bom.total.occurrences, "a placement in two rows: {request:?}");
+                for (_, r) in &deep {
+                    for m in &r.members {
+                        assert_eq!(bom.row_of(&tree, m).map(|(_, found)| &found.key), Ok(&r.key), "{request:?} {m:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_damaged_files_structure_is_listed_or_refused_never_followed_forever() {
+    let mut doc = Document::default();
+    let (a, _) = add(&mut doc, "A", 0);
+    let ghost = |id, component, parent| Occurrence {
+        id,
+        component,
+        parent,
+        name: format!("{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
+    // An occurrence of a component that isn't there has no row and counts nowhere.
+    doc.occurrences.push(ghost(900, 999, 0));
+    assert_eq!(rows(&listed(&doc, Request::default()).unwrap()), [row("1", "A", Normal, 1, 1)]);
+    // A component placed inside itself: refused at the depth limit, never walked forever.
+    doc.occurrences.push(ghost(901, a, a));
+    assert!(listed(&doc, Request::default()).is_err());
+    // At the first level A is one row, but its material and its mass are what it holds: both walk inside.
+    assert!(listed(&doc, Request { mass: true, ..view(View::FirstLevel) }).is_err(), "weighing it walks inside");
+    assert!(listed(&doc, view(View::FirstLevel)).is_err(), "naming its material walks inside");
+}
+
+/// Moved from the engine's tests with the rule (it was `row_mass`), now with the reason.
+#[test]
+fn a_row_has_a_mass_only_when_its_definitions_are_weighed_and_agree() {
+    let (steel, aluminium, surface, empty): (Weighed, Weighed, Weighed, Weighed) =
+        (Some((392.5, 1)), Some((6.48, 1)), Some((0.0, 1)), Some((0.0, 0)));
+    assert_eq!(agree(&[steel, steel]), Mass::Grams(392.5));
+    assert_eq!(agree(&[steel, aluminium]), Mass::Unknown(Unknown::Differs));
+    assert_eq!(agree(&[surface, surface]), Mass::Grams(0.0), "a body that weighs nothing (a surface) is weighed");
+    assert_eq!(agree(&[surface, steel]), Mass::Unknown(Unknown::Differs));
+    assert_eq!(agree(&[empty]), Mass::Unknown(Unknown::NothingToWeigh), "nothing to weigh");
+    assert_eq!(agree(&[steel, empty]), Mass::Unknown(Unknown::Differs), "one weighs something, one nothing");
+    assert_eq!(agree(&[empty, steel]), Mass::Unknown(Unknown::Differs), "whichever comes first");
+    assert_eq!(agree(&[empty, empty]), Mass::Unknown(Unknown::NothingToWeigh));
+    assert_eq!(agree(&[None]), Mass::Unknown(Unknown::Unmeasurable), "not measured");
+    assert_eq!(agree(&[aluminium, None, steel]), Mass::Unknown(Unknown::Unmeasurable), "whichever definition it is");
+    assert_eq!(agree(&[]), Mass::Unknown(Unknown::NothingToWeigh));
+}
+
+/// What a row's part stands for leaves out a reference, and an inseparable part's purchased parts,
+/// which its list shows beside it; phantoms and inseparable parts inside are weighed through.
+#[test]
+fn what_adds_to_a_row_follows_what_it_stands_for() {
+    for t in BomType::ALL {
+        assert!(!adds(Holds::Own, t), "{t:?}");
+        assert_eq!(adds(Holds::All, t), t != Reference, "{t:?}");
+        assert_eq!(adds(Holds::AllButPurchased, t), !matches!(t, Reference | Purchased), "{t:?}");
+    }
+}
+
+/// `how` applied to the view `request` lists, its numbering saved as the engine saves it; whether
+/// anything changed.
+fn numbered(doc: &mut Document, request: Request, how: Numbering) -> bool {
+    let state = ModelState::default();
+    let Some(numbers) = super::number(&mut Tree::new(doc, &state), &request, how).unwrap() else { return false };
+    let saved = &mut doc.assembly.item_numbers;
+    saved.retain(|n| (n.source, n.view) != (numbers.source, numbers.view));
+    saved.push(numbers);
+    true
+}
+
+/// [`record`] as the engine runs it after a change; whether anything changed.
+fn recorded(doc: &mut Document) -> bool {
+    let state = ModelState::default();
+    let Some(numbers) = record(&mut Tree::new(doc, &state)) else { return false };
+    doc.assembly.item_numbers = numbers;
+    true
+}
+
+const RENUMBER: Numbering = Numbering::Renumber { start: 1, step: 1, order: Order::List };
+
+/// Each row, followed by the rows under it: item, names, and its numbering flags as letters
+/// (provisional, locked, duplicate).
+fn items(bom: &Bom) -> Vec<(String, String, String)> {
+    bom.rows_deep()
+        .into_iter()
+        .map(|(item, r)| {
+            let flags = [(r.provisional, 'p'), (r.locked, 'l'), (r.duplicate, 'd')].iter().filter(|(on, _)| *on).map(|(_, c)| *c).collect();
+            (item_text(&item), r.names.join("; "), flags)
+        })
+        .collect()
+}
+
+fn item(item: &str, names: &str, flags: &str) -> (String, String, String) {
+    (item.into(), names.into(), flags.into())
+}
+
+/// Parts A, B and C at the top, part numbers P1 to P3.
+fn three_parts() -> (Document, [(u64, u64); 3]) {
+    let mut doc = Document::default();
+    let parts = ["A", "B", "C"].map(|name| add(&mut doc, name, 0));
+    for (i, (part, _)) in parts.iter().enumerate() {
+        number(&mut doc, *part, &format!("P{}", i + 1));
+    }
+    (doc, parts)
+}
+
+#[test]
+fn numbering_a_view_saves_its_numbers_and_new_rows_take_the_next() {
+    let (mut doc, [_, (b, ob), _]) = three_parts();
+    // Never numbered: positions, provisional, and nothing saved by a change.
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert!(!bom.numbered);
+    assert_eq!(items(&bom), [item("1", "A", "p"), item("2", "B", "p"), item("3", "C", "p")]);
+    assert!(!recorded(&mut doc), "a design never numbered saves nothing");
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert!(!numbered(&mut doc, Request::default(), RENUMBER), "the same numbers again change nothing");
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert!(bom.numbered);
+    assert_eq!(items(&bom), [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")]);
+    // A new part, first by part number: the highest number + 1, listed by it, saved by the next change.
+    let (d, _) = add(&mut doc, "D", 0);
+    number(&mut doc, d, "P0");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("4", "D", "p")));
+    assert!(recorded(&mut doc));
+    assert!(!recorded(&mut doc), "saved once");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("4", "D", "")));
+    // B removed leaves a gap, and back it has its number again.
+    doc.occurrences.retain(|o| o.id != ob);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("3", "C", ""), item("4", "D", "")]);
+    assert!(!recorded(&mut doc), "a gap isn't filled");
+    // Setting another row's number keeps B's: it isn't listed, but it is saved.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![1], item: None, locked: Some(true) }));
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![1], item: None, locked: Some(false) }));
+    let (e, _) = add(&mut doc, "E", 0);
+    assert!(recorded(&mut doc));
+    place(&mut doc, b, 0);
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert_eq!(items(&bom), [item("1", "A", ""), item("2", "B", ""), item("3", "C", ""), item("4", "D", ""), item("5", "E", "")]);
+    assert_eq!(bom.rows.last().map(|r| r.key.member.component), Some(e));
+    // A renumber closing the gaps in item order, or in the list's order (by part number).
+    doc.occurrences.retain(|o| o.component != b);
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: 1, step: 1, order: Order::Item }));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("3", "D", ""), item("4", "E", "")]);
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: 10, step: 5, order: Order::List }));
+    assert_eq!(
+        items(&listed(&doc, Request::default()).unwrap()),
+        [item("10", "D", ""), item("15", "A", ""), item("20", "C", ""), item("25", "E", "")]
+    );
+    // The renumber forgot B: back, it is new.
+    place(&mut doc, b, 0);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("26", "B", "p")));
+}
+
+/// A view numbered twice, which only a damaged file has: listing reads the first numbering, and
+/// recording drops the second, so a change never lists the view again for it.
+#[test]
+fn a_view_numbered_twice_keeps_its_first_numbering() {
+    let (mut doc, _) = three_parts();
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    let mut second = doc.assembly.item_numbers[0].clone();
+    second.items.iter_mut().for_each(|i| i.number += 10);
+    doc.assembly.item_numbers.push(second);
+    let first = [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")];
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), first);
+    assert!(recorded(&mut doc));
+    assert_eq!(doc.assembly.item_numbers.len(), 1);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), first);
+    assert!(!recorded(&mut doc));
+}
+
+#[test]
+fn a_row_keeps_its_number_through_a_part_number_edit() {
+    let (mut doc, [(a, _), _, _]) = three_parts();
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    number(&mut doc, a, "P9");
+    assert!(!recorded(&mut doc), "no new row");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")]);
+}
+
+/// The defect the plan names: a renumber with locked rows never gives two rows one number.
+#[test]
+fn a_renumber_keeps_locked_numbers_and_never_gives_two_rows_one() {
+    let (mut doc, _) = three_parts();
+    let (d, _) = add(&mut doc, "D", 0);
+    number(&mut doc, d, "P4");
+    // Setting a number numbers the view first; one another row has is marked on both.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![3], item: Some(2), locked: Some(true) }));
+    assert_eq!(
+        items(&listed(&doc, Request::default()).unwrap()),
+        [item("1", "A", ""), item("2", "B", "d"), item("2", "C", "ld"), item("4", "D", "")]
+    );
+    for (start, step, want) in [(1, 1, ["1", "3", "2", "4"]), (2, 1, ["3", "4", "2", "5"]), (1, 2, ["1", "3", "2", "5"])] {
+        assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start, step, order: Order::List }));
+        let bom = listed(&doc, Request::default()).unwrap();
+        let by_name: BTreeMap<String, (String, String)> = items(&bom).into_iter().map(|(i, n, f)| (n, (i, f))).collect();
+        let got: Vec<&str> = ["A", "B", "C", "D"].iter().map(|n| by_name[*n].0.as_str()).collect();
+        assert_eq!(got, want, "from {start} by {step}");
+        assert!(bom.rows.iter().all(|r| !r.duplicate), "from {start} by {step}");
+        assert_eq!(by_name["C"].1, "l");
+    }
+    // Unlocked, the next renumber moves it.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![2], item: None, locked: Some(false) }));
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "B", ""), item("3", "C", ""), item("4", "D", "")]);
+}
+
+#[test]
+fn all_levels_are_numbered_within_each_parent() {
+    let mut doc = Document::default();
+    let (frame, _) = add(&mut doc, "Frame", 0);
+    let (bolt, _) = add(&mut doc, "Bolt", 0);
+    number(&mut doc, frame, "F");
+    number(&mut doc, bolt, "B");
+    let (beam, _) = add(&mut doc, "Beam", frame);
+    number(&mut doc, beam, "F1");
+    let all = view(View::AllLevels);
+    assert!(numbered(&mut doc, all, RENUMBER));
+    assert_eq!(items(&listed(&doc, all).unwrap()), [item("1", "Bolt", ""), item("2", "Frame", ""), item("2.1", "Beam", "")]);
+    // A plate in the frame is the frame's next; the design's parts-only view isn't numbered.
+    let (plate, _) = add(&mut doc, "Plate", frame);
+    number(&mut doc, plate, "F0");
+    assert_eq!(items(&listed(&doc, all).unwrap()).last(), Some(&item("2.2", "Plate", "p")));
+    assert!(recorded(&mut doc));
+    assert_eq!(items(&listed(&doc, all).unwrap()).last(), Some(&item("2.2", "Plate", "")));
+    assert!(!listed(&doc, Request::default()).unwrap().numbered);
+    // Renumbered in the list's order, each level from the start.
+    assert!(numbered(&mut doc, all, Numbering::Renumber { start: 5, step: 5, order: Order::List }));
+    assert_eq!(
+        items(&listed(&doc, all).unwrap()),
+        [item("5", "Bolt", ""), item("10", "Frame", ""), item("10.5", "Plate", ""), item("10.10", "Beam", "")]
+    );
+    // A component's own list is numbered apart from the design's.
+    let own = Request { source: frame, ..all };
+    assert!(!listed(&doc, own).unwrap().numbered);
+    assert!(numbered(&mut doc, own, RENUMBER));
+    assert_eq!(items(&listed(&doc, own).unwrap()), [item("1", "Plate", ""), item("2", "Beam", "")]);
+    assert_eq!(items(&listed(&doc, all).unwrap())[2], item("10.5", "Plate", ""));
+}
+
+/// A numbering keeps the list options it was made with: the next change saves the rows they list.
+/// A list with other options reads the same numbers by row, the rest provisional.
+#[test]
+fn a_numbering_keeps_its_list_options_and_other_lists_read_its_numbers() {
+    let (mut doc, [_, (b, _), _]) = three_parts();
+    number(&mut doc, b, "P1");
+    let by_definition = Request { group: Group::Definition, ..Request::default() };
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A; B", ""), item("2", "C", "")]);
+    assert_eq!(items(&listed(&doc, by_definition).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("3", "B", "p")]);
+    assert!(!recorded(&mut doc), "the numbering lists by part number: nothing new");
+    assert!(numbered(&mut doc, by_definition, Numbering::Set { row: vec![3], item: Some(7), locked: None }));
+    let saved = &doc.assembly.item_numbers;
+    assert_eq!((saved.len(), saved[0].group), (1, Group::Definition), "one numbering a view, with the options last used");
+    assert_eq!(items(&listed(&doc, by_definition).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("7", "B", "")]);
+}
+
+#[test]
+fn numbers_are_refused_outside_their_range_and_rows_are_found_as_shown() {
+    let (mut doc, _) = three_parts();
+    let refused = |doc: &mut Document, how: Numbering| {
+        let state = ModelState::default();
+        super::number(&mut Tree::new(doc, &state), &Request::default(), how).unwrap_err().to_string()
+    };
+    for (start, step) in [(0, 1), (1, 0), (MAX_ITEM + 1, 1)] {
+        assert!(refused(&mut doc, Numbering::Renumber { start, step, order: Order::List }).contains("1 to 999999"), "{start} by {step}");
+    }
+    assert!(refused(&mut doc, Numbering::Renumber { start: MAX_ITEM - 1, step: 1, order: Order::List }).contains("passes 999999"));
+    assert!(refused(&mut doc, Numbering::Renumber { start: 1, step: MAX_ITEM, order: Order::List }).contains("passes 999999"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![4], item: Some(1), locked: None }).contains("item 4"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![1, 1], item: Some(1), locked: None }).contains("item 1.1"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![1], item: Some(0), locked: None }).contains("1 to 999999"));
+    assert!(doc.assembly.item_numbers.is_empty(), "nothing saved");
+    // The highest number is taken; a renumber that would pass it is refused whole.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: MAX_ITEM - 2, step: 1, order: Order::List }));
+    assert_eq!(listed(&doc, Request::default()).unwrap().rows.last().map(|r| r.item), Some(MAX_ITEM));
+}
+
+/// A damaged file's numbers: one out of range is no number, and of a key saved twice the first
+/// holds. A component's numbering goes with it.
+#[test]
+fn saved_numbers_are_read_leniently_and_go_with_their_component() {
+    let (mut doc, [(a, _), (b, _), (c, _)]) = three_parts();
+    let key = |component| RowKey { parents: vec![], member: Member { component, bom_type: Normal } };
+    let saved = |key, number| ItemNumber { key, number, locked: false };
+    doc.assembly.item_numbers.push(ItemNumbers {
+        source: 0,
+        view: View::PartsOnly,
+        group: Group::PartNumber,
+        fold: false,
+        purchased_contents: false,
+        suppressed_parts: false,
+        items: vec![saved(key(a), 4), saved(key(a), 9), saved(key(b), 0), saved(key(c), MAX_ITEM + 1)],
+    });
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("4", "A", ""), item("5", "B", "p"), item("6", "C", "p")]);
+    let (sub, _) = add(&mut doc, "Sub", 0);
+    add(&mut doc, "Inner", sub);
+    assert!(numbered(&mut doc, Request { source: sub, ..Request::default() }, RENUMBER));
+    assert_eq!(doc.assembly.item_numbers.len(), 2);
+    doc.components.retain(|c| c.id != sub);
+    doc.occurrences.retain(|o| o.component != sub && o.parent != sub);
+    assert!(recorded(&mut doc));
+    assert_eq!(doc.assembly.item_numbers.iter().map(|n| n.source).collect::<Vec<_>>(), [0], "the design's is kept");
+}
+
+/// Numbers are saved in the design under `assembly.item_numbers`, and change no geometry.
+#[test]
+fn item_numbers_are_saved_and_are_part_properties() {
+    let (mut doc, _) = three_parts();
+    let before = doc.clone();
+    assert!(numbered(&mut doc, Request { fold: true, ..view(View::AllLevels) }, RENUMBER));
+    assert!(doc.differs_only_in_part_properties(&before));
+    assert!(!doc.differs_only_in_part_properties(&doc.clone()), "no change is no part-properties change");
+    let json = serde_json::to_value(&doc.assembly).unwrap();
+    let first = &json["item_numbers"][0];
+    assert_eq!(
+        (&first["source"], &first["levels"], &first["group_by"], &first["group_children"]),
+        (&json!(0), &json!("all"), &json!("part_number"), &json!(true))
+    );
+    assert_eq!(first["items"][0], json!({"member": {"component": doc.components[0].id, "bom_type": "normal"}, "number": 1}));
+    // Through the whole design, as a save writes it: a design whose assembly holds only numbers keeps them.
+    assert_eq!(Document::from_json(&doc.to_json()).unwrap().assembly, doc.assembly);
+    assert!(serde_json::to_value(&before.assembly).unwrap().get("item_numbers").is_none(), "a design never numbered saves nothing new");
+}
+
+#[test]
+fn a_quantity_is_pieces_or_a_length_with_the_designs_parameters() {
+    let mut doc = Document::default();
+    doc.set_param("span", "100", Some("mm"), None).unwrap();
+    doc.set_param("packs", "3", Some(""), None).unwrap();
+    let amount = |text: &str| super::amount(&doc, text);
+    assert_eq!(amount("4").unwrap(), Amount::Pieces(4.0));
+    assert_eq!(amount("packs * 4").unwrap(), Amount::Pieces(12.0));
+    assert_eq!(amount("2.5 m").unwrap(), Amount::Length(2500.0));
+    assert_eq!(amount("10 in").unwrap(), Amount::Length(254.0));
+    assert_eq!(amount("2 * span + 50").unwrap(), Amount::Length(250.0), "a bare number beside a length is mm");
+    let refused = |text: &str| amount(text).unwrap_err().to_string();
+    assert!(refused("90 deg").contains("a number of pieces or a length"), "{}", refused("90 deg"));
+    assert!(refused("span * span").contains("not supported yet: area"));
+    for mass_or_volume in ["span^3", "50 g", "0.5 kg", "2 lb", "500 ml"] {
+        assert!(refused(mass_or_volume).contains("not supported yet: mass and volume"), "{mass_or_volume}: {}", refused(mass_or_volume));
+    }
+    for out_of_range in ["0", "-1", "-2 m", "1e9 + 1", "1001 km"] {
+        assert!(refused(out_of_range).contains("above 0"), "{out_of_range}: {}", refused(out_of_range));
+    }
+    assert_eq!(amount("1e9").unwrap(), Amount::Pieces(1e9), "the cap itself");
+    assert!(refused("cable_length").contains("unknown parameter `cable_length`"));
+    assert!(amount("").is_err() && amount("2 *").is_err());
+}
+
+#[test]
+fn a_rows_quantity_adds_up_its_placements() {
+    let mut doc = Document::default();
+    doc.set_param("cable_length", "2.5", Some("m"), None).unwrap();
+    let (cable, _) = add(&mut doc, "Cable", 0);
+    set(&mut doc, cable, "bom_quantity", "cable_length");
+    place(&mut doc, cable, 0);
+    place(&mut doc, cable, 0);
+    let (pack, _) = add(&mut doc, "Pack", 0);
+    set(&mut doc, pack, "bom_quantity", "4");
+    place(&mut doc, pack, 0);
+    add(&mut doc, "Plate", 0);
+    // Two definitions of one part number: one with a length, one a piece.
+    let (hose, _) = add(&mut doc, "Hose", 0);
+    let (hose_b, _) = add(&mut doc, "Hose B", 0);
+    number(&mut doc, hose, "H-1");
+    number(&mut doc, hose_b, "H-1");
+    set(&mut doc, hose, "bom_quantity", "500 mm");
+    // A subassembly placed twice holding the pack once.
+    let (kit, _) = add(&mut doc, "Kit", 0);
+    place(&mut doc, kit, 0);
+    place(&mut doc, pack, kit);
+    let quantities = |doc: &Document, request: Request| -> Vec<(String, Quantity)> {
+        listed(doc, request).unwrap().rows_deep().into_iter().map(|(_, r)| (r.names.join("; "), r.quantity)).collect()
+    };
+    let q = quantities(&doc, view(View::PartsOnly));
+    let of = |q: &[(String, Quantity)], name: &str| q.iter().find(|(n, _)| n == name).map(|(_, q)| *q);
+    assert_eq!(of(&q, "Cable"), Some(Quantity::Length(7500.0)), "{q:?}");
+    assert_eq!(of(&q, "Pack"), Some(Quantity::Pieces(16.0)), "two of its own and one in each kit: {q:?}");
+    assert_eq!(of(&q, "Plate"), Some(Quantity::Count));
+    assert_eq!(of(&q, "Hose; Hose B"), Some(Quantity::Unknown(Uncounted::Mixed)));
+    // The kit's row in the top level; its own pack listed under it in all levels.
+    let q = quantities(&doc, view(View::AllLevels));
+    assert_eq!(q.iter().filter(|(n, _)| n == "Pack").map(|(_, q)| *q).collect::<Vec<_>>(), [Quantity::Pieces(8.0), Quantity::Pieces(8.0)], "{q:?}");
+    // A placement without a quantity beside packs counts one piece: a box of 4 and a loose one.
+    let (boxed, _) = add(&mut doc, "Box", 0);
+    let (loose, _) = add(&mut doc, "Loose", 0);
+    number(&mut doc, boxed, "K-1");
+    number(&mut doc, loose, "K-1");
+    set(&mut doc, boxed, "bom_quantity", "4");
+    assert_eq!(of(&quantities(&doc, view(View::PartsOnly)), "Box; Loose"), Some(Quantity::Pieces(5.0)));
+    // A parameter deleted (a damaged file): that row is unknown, the list still works.
+    doc.params.retain(|p| p.name != "cable_length");
+    let q = quantities(&doc, view(View::PartsOnly));
+    assert_eq!(of(&q, "Cable"), Some(Quantity::Unknown(Uncounted::Invalid)));
+    assert_eq!(of(&q, "Pack"), Some(Quantity::Pieces(16.0)));
+}
+
+#[test]
+fn a_virtual_component_holding_something_is_named() {
+    let mut doc = Document::default();
+    let (grease, _) = add(&mut doc, "Grease", 0);
+    let (frame, _) = add(&mut doc, "Frame", 0);
+    let (bolt, _) = add(&mut doc, "Bolt", frame);
+    assert!(doc.virtual_holding().is_empty());
+    set_virtual(&mut doc, grease);
+    assert!(doc.virtual_holding().is_empty(), "an empty virtual component holds nothing");
+    place(&mut doc, bolt, grease);
+    assert_eq!(doc.virtual_holding(), [grease]);
+    set_virtual(&mut doc, frame);
+    assert_eq!(doc.virtual_holding(), [grease, frame]);
+}
+
+fn set_virtual(doc: &mut Document, component: u64) {
+    doc.components.iter_mut().find(|c| c.id == component).unwrap().metadata.0.insert("virtual".into(), json!(true));
+}
+
+#[test]
+fn a_quantity_uses_its_parameters_as_any_expression_does() {
+    let mut doc = Document::default();
+    doc.set_param("span", "100", Some("mm"), None).unwrap();
+    let (cable, _) = add(&mut doc, "Cable", 0);
+    set(&mut doc, cable, "bom_quantity", "2 * span");
+    assert_eq!(doc.param_users("span"), [crate::ParamUser::Quantity { component: cable, name: "Cable".into() }]);
+    assert!(doc.remove_param("span").unwrap_err().to_string().contains("component Cable (quantity)"));
+    assert_eq!(doc.rename_param("span", "width").unwrap(), 1);
+    assert_eq!(doc.components[0].metadata.bom_quantity(), Some("2 * width"));
+    assert_eq!(amount(&doc, "2 * width").unwrap(), Amount::Length(200.0));
+}
+
+/// A balloon's item reads the row its part is counted in, by a path from the top of the design: in
+/// all levels with the rows it is under, in a component's list only below that component, and the
+/// reasons there is none stay apart.
+#[test]
+fn item_of_reads_a_balloons_row() {
+    let (doc, at) = mixed();
+    let path = |names: &[&str]| -> Vec<u64> { names.iter().map(|n| at[*n]).collect() };
+    let state = ModelState::default();
+    let mut tree = Tree::new(&doc, &state);
+    let all = list_with(&mut tree, &Request { view: View::AllLevels, ..Request::default() }, true).unwrap();
+    let (washer, _) = all.row_of(&tree, &path(&["Sub", "Washer"])).unwrap();
+    assert_eq!(washer.len(), 2, "under its subassembly");
+    assert_eq!(all.item_of(&tree, &path(&["Sub", "Washer"])), Ok(item_text(&washer)));
+    assert!(all.item_of(&tree, &path(&["Sub", "Washer"])).unwrap().contains('.'));
+
+    let sub = doc.find_component("Sub").unwrap();
+    let of_sub = list_with(&mut tree, &Request { source: sub, ..Request::default() }, true).unwrap();
+    assert_eq!(of_sub.item_of(&tree, &path(&["Sub", "Washer"])), Ok("1".to_string()), "cut to start below Sub");
+    assert_eq!(of_sub.item_of(&tree, &path(&["Sub"])), Err(Unlisted::NoRow), "the assembly listed has no row");
+    assert_eq!(of_sub.item_of(&tree, &path(&["Bolt"])), Err(Unlisted::NotFound), "not through Sub");
+    assert_eq!(of_sub.item_of(&tree, &[]), Err(Unlisted::NotFound));
+
+    assert_eq!(all.item_of(&tree, &path(&["Fixture", "Pin"])), Err(Unlisted::Reference));
+    assert_eq!(all.item_of(&tree, &[999]), Err(Unlisted::NotFound));
+    assert_eq!(all.item_of(&tree, &vec![at["Bolt"]; 65]), Err(Unlisted::NotFound));
+    assert!(of_sub.item_of(&tree, &vec![at["Sub"]; 65]).is_err());
+    assert_eq!(all.item_of(&tree, &[]), Err(Unlisted::NoRow));
+}
+
+/// A 10 mm box in `component`, suppressed as a configuration row would set it.
+fn boxed(doc: &mut Document, component: u64, suppressed: bool) -> u64 {
+    let kind = serde_json::from_value(json!({"type": "box", "corner": [0, 0, 0], "length": "10", "width": "10", "height": "10"})).unwrap();
+    let id = doc.add_feature(kind, None).unwrap();
+    let f = doc.feature_mut(id).unwrap();
+    (f.component, f.suppressed) = (component, suppressed);
+    id
+}
+
+/// A rectangle sketch in `component`, and an extrude of it, suppressed or not: the sketch's id.
+fn sketched(doc: &mut Document, component: u64, extrude_suppressed: Option<bool>) -> u64 {
+    let mut sketch = solidcraft_sketch::Sketch::new();
+    let corners: Vec<_> = [(0., 0.), (5., 0.), (5., 5.), (0., 5.)]
+        .into_iter()
+        .map(|(x, y)| sketch.add_point(solidcore_record::Vec2::new(x, y), None).unwrap())
+        .collect();
+    for i in 0..4 {
+        sketch.add_line_pts(corners[i], corners[(i + 1) % 4], None).unwrap();
+    }
+    let plane = crate::PlaneRef::Custom { plane: solidcore_record::Plane::XY };
+    let sk = doc.add_feature(crate::FeatureKind::Sketch { plane, sketch }, None).unwrap();
+    doc.feature_mut(sk).unwrap().component = component;
+    if let Some(suppressed) = extrude_suppressed {
+        let extrude = crate::FeatureKind::Extrude {
+            thin: None,
+            sketch: crate::SketchId(sk),
+            profiles: crate::ProfileSel::All,
+            extent: serde_json::from_value(json!({"distance": "2"})).unwrap(),
+            operation: crate::Operation::NewBody,
+            targets: vec![],
+        };
+        let id = doc.add_feature(extrude, None).unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        (f.component, f.suppressed) = (component, suppressed);
+    }
+    sk
+}
+
+/// What `request` lists for `doc` as its model evaluates, with each row's members.
+fn evaluated(doc: &Document, request: Request) -> Bom {
+    let mut model = crate::Model::new();
+    model.evaluate(doc);
+    let state = model.state();
+    list_with(&mut Tree::new(doc, &state), &request, true).unwrap()
+}
+
+/// Two parts with a box each, the second's suppressed: a configuration switched it off.
+fn one_switched_off() -> (Document, u64) {
+    let mut doc = Document::default();
+    let (on, _) = add(&mut doc, "On", 0);
+    let (off, _) = add(&mut doc, "Off", 0);
+    boxed(&mut doc, on, false);
+    let feature = boxed(&mut doc, off, true);
+    (doc, feature)
+}
+
+/// Cam (10 Nov 2026): a part a configuration switches off is not included. It counts nowhere, in
+/// every view, and weighs nothing as before; `suppressed_parts` lists it as placed.
+#[test]
+fn a_part_a_configuration_switches_off_counts_nowhere() {
+    let (doc, _) = one_switched_off();
+    for v in View::ALL {
+        let bom = evaluated(&doc, Request { mass: true, ..view(v) });
+        assert_eq!((rows(&bom), bom.total.occurrences), (vec![row("1", "On", Normal, 1, 1)], 1), "{v:?}");
+        let shown = evaluated(&doc, Request { mass: true, suppressed_parts: true, ..view(v) });
+        assert_eq!(rows(&shown), [row("1", "Off", Normal, 1, 1), row("2", "On", Normal, 1, 1)], "{v:?}");
+        assert_eq!(shown.rows[0].mass, Mass::Unknown(Unknown::NothingToWeigh));
+        assert!(matches!(bom.total.mass, Mass::Grams(g) if g > 0.0), "{v:?}");
+        assert_eq!(bom.total.mass, shown.total.mass, "the assembly weighs the same: {v:?}");
+    }
+}
+
+/// Only a part with no bodies and a suppressed feature of its own is switched off: an empty part, a
+/// virtual one, one with a sketch alone, and one with a live body beside a suppressed feature are
+/// listed; one whose extrude is suppressed, its sketch not, is switched off.
+#[test]
+fn only_a_part_without_bodies_and_with_a_suppressed_feature_is_switched_off() {
+    let mut doc = Document::default();
+    add(&mut doc, "Empty", 0);
+    let (grease, _) = add(&mut doc, "Grease", 0);
+    set_virtual(&mut doc, grease);
+    set(&mut doc, grease, "bom_quantity", "3 m");
+    let (drawn, _) = add(&mut doc, "Sketch only", 0);
+    sketched(&mut doc, drawn, None);
+    let (trimmed, _) = add(&mut doc, "Trimmed", 0);
+    boxed(&mut doc, trimmed, false);
+    boxed(&mut doc, trimmed, true);
+    let (flat, _) = add(&mut doc, "Flat", 0);
+    sketched(&mut doc, flat, Some(true));
+    let names = |bom: &Bom| -> Vec<String> { bom.rows.iter().map(|r| r.names.join("; ")).collect() };
+    for v in View::ALL {
+        let bom = evaluated(&doc, view(v));
+        assert_eq!(names(&bom), ["Empty", "Grease", "Sketch only", "Trimmed"], "{v:?}");
+        assert_eq!(bom.rows[1].quantity, Quantity::Length(3000.0));
+    }
+    // The extrude switched on again: the part is listed.
+    let extrude = doc.features.iter().rposition(|f| f.component == flat).unwrap();
+    doc.features[extrude].suppressed = false;
+    assert_eq!(names(&evaluated(&doc, Request::default())), ["Empty", "Flat", "Grease", "Sketch only", "Trimmed"]);
+}
+
+/// A subassembly holding only a switched-off part is still a row where it is one (it places
+/// something), with nothing under it; a folded part holding one doesn't list it.
+#[test]
+fn a_switched_off_part_leaves_its_subassembly_and_its_kit() {
+    let mut doc = Document::default();
+    let (sub, osub) = add(&mut doc, "Sub", 0);
+    boxed(&mut doc, sub, true);
+    let (off, ooff) = add(&mut doc, "Off", sub);
+    boxed(&mut doc, off, true);
+    assert!(rows(&evaluated(&doc, view(View::PartsOnly))).is_empty());
+    assert_eq!(rows(&evaluated(&doc, view(View::FirstLevel))), [row("1", "Sub", Normal, 1, 1)]);
+    assert_eq!(rows(&evaluated(&doc, view(View::AllLevels))), [row("1", "Sub", Normal, 1, 1)], "nothing under it");
+    // A balloon left on it reads no row.
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let mut tree = Tree::new(&doc, &state);
+    let all = list_with(&mut tree, &view(View::AllLevels), true).unwrap();
+    assert_eq!(all.item_of(&tree, &[osub, ooff]), Err(Unlisted::NoRow));
+    let (kit, _) = add(&mut doc, "Kit", 0);
+    number(&mut doc, kit, "K-1");
+    boxed(&mut doc, kit, false);
+    let (pin, _) = add(&mut doc, "Pin", kit);
+    boxed(&mut doc, pin, false);
+    place(&mut doc, off, kit);
+    let kits = evaluated(&doc, folded(View::PartsOnly));
+    assert_eq!(rows(&kits), [row("1", "Kit", Normal, 1, 1), row("1.1", "Pin", Normal, 1, 1)]);
+    // Shown, it is listed in the kit and, through the subassembly, as a row of its own.
+    let shown = evaluated(&doc, Request { suppressed_parts: true, ..folded(View::PartsOnly) });
+    let want = [row("1", "Kit", Normal, 1, 1), row("1.1", "Off", Normal, 1, 1), row("1.2", "Pin", Normal, 1, 1), row("2", "Off", Normal, 1, 1)];
+    assert_eq!(rows(&shown), want);
+}
+
+/// A part's finish is what its row says, from its finish property, else its free property of that
+/// name; a single-part design (its own bodies, no component placed) is its own row, and its material
+/// and finish are the design's own properties.
+#[test]
+fn a_rows_finish_and_a_single_part_designs_own_material_and_finish() {
+    let mut doc = Document::default();
+    let (plate, _) = add(&mut doc, "Plate", 0);
+    let (cover, _) = add(&mut doc, "Cover", 0);
+    let (lid, _) = add(&mut doc, "Lid", 0);
+    for (id, key, text) in [(plate, "finish", "Powder coat, RAL 9005, matt"), (cover, "finish", "")] {
+        set(&mut doc, id, key, text);
+    }
+    doc.components.iter_mut().find(|c| c.id == cover).unwrap().properties.insert("finish".into(), "Zinc plate".into());
+    for id in [plate, cover, lid] {
+        boxed(&mut doc, id, false);
+    }
+    let finishes = |doc: &Document| {
+        let mut rows: Vec<(String, String)> =
+            evaluated(doc, view(View::PartsOnly)).rows.iter().map(|r| (r.names.join("; "), r.finish.clone())).collect();
+        rows.sort();
+        rows
+    };
+    let want = [("Cover", "Zinc plate"), ("Lid", ""), ("Plate", "Powder coat, RAL 9005, matt")].map(|(n, f)| (n.to_string(), f.to_string()));
+    assert_eq!(finishes(&doc), want, "the free property, none, the property");
+
+    let mut single = Document::default();
+    boxed(&mut single, 0, false);
+    single.metadata.0.insert("material".into(), json!("CRS, 16 ga"));
+    single.metadata.0.insert("finish".into(), json!("Zinc plate, clear"));
+    let bom = evaluated(&single, Request::default());
+    assert_eq!(bom.rows.len(), 1);
+    let row = &bom.rows[0];
+    assert_eq!(
+        (row.materials.as_slice(), row.finish.as_str(), row.statics.as_slice()),
+        (&["CRS, 16 ga".to_string()][..], "Zinc plate, clear", &[Static::Material][..])
+    );
+}
+
+/// What an assembly is made of leaves out a part switched off inside it: its static material names
+/// nothing, as its bodies weigh nothing, whether or not the list shows it.
+#[test]
+fn a_switched_off_parts_static_material_names_nothing_around_it() {
+    let mut doc = Document::default();
+    let (sub, _) = add(&mut doc, "Sub", 0);
+    let (on, _) = add(&mut doc, "On", sub);
+    boxed(&mut doc, on, false);
+    set(&mut doc, on, "material", "S355");
+    let (off, _) = add(&mut doc, "Off", sub);
+    boxed(&mut doc, off, true);
+    set(&mut doc, off, "material", "Brass");
+    for request in [view(View::FirstLevel), Request { suppressed_parts: true, ..view(View::FirstLevel) }] {
+        let bom = evaluated(&doc, request);
+        assert_eq!(bom.rows[0].materials, ["S355"], "{request:?}");
+    }
+}
+
+/// A feature rolled back (the marker before it) isn't switched off by a configuration, suppressed
+/// or not: its part is listed as before.
+#[test]
+fn a_part_rolled_back_is_listed_as_before() {
+    let (mut doc, _) = one_switched_off();
+    let (later, _) = add(&mut doc, "Later", 0);
+    let (later_off, _) = add(&mut doc, "Later off", 0);
+    boxed(&mut doc, later, false);
+    boxed(&mut doc, later_off, true);
+    doc.marker = Some(2);
+    let names: Vec<String> = evaluated(&doc, Request::default()).rows.iter().map(|r| r.names.join("; ")).collect();
+    assert_eq!(names, ["Later", "Later off", "On"]);
+}
+
+/// A numbered row a configuration switches off keeps its number, and has it again when switched
+/// on; a numbering made with `suppressed_parts` keeps it, so its view lists the same rows.
+#[test]
+fn a_switched_off_row_keeps_its_number_and_a_numbering_keeps_the_option() {
+    let (mut doc, feature) = one_switched_off();
+    let suppress = |doc: &mut Document, on: bool| doc.feature_mut(feature).unwrap().suppressed = on;
+    suppress(&mut doc, false);
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "Off", ""), item("2", "On", "")]);
+    suppress(&mut doc, true);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("2", "On", "")]);
+    assert!(!recorded(&mut doc), "nothing new to save");
+    suppress(&mut doc, false);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "Off", ""), item("2", "On", "")]);
+    // Numbered with the option, the view lists the part while it is off, and saves its number.
+    let shown = Request { suppressed_parts: true, view: View::FirstLevel, ..Request::default() };
+    suppress(&mut doc, true);
+    assert!(numbered(&mut doc, Request { view: View::FirstLevel, ..Request::default() }, RENUMBER));
+    let saved = doc.assembly.item_numbers.iter().find(|n| n.view == View::FirstLevel).unwrap();
+    assert_eq!((saved.items.len(), saved.request().suppressed_parts), (1, false));
+    assert!(numbered(&mut doc, shown, RENUMBER));
+    let saved = doc.assembly.item_numbers.iter().find(|n| n.view == View::FirstLevel).unwrap();
+    assert_eq!((saved.items.len(), saved.request()), (2, shown));
+}
+
+/// `show_suppressed_parts` is saved with a numbering only when true, and a design without it reads
+/// false.
+#[test]
+fn a_numberings_suppressed_parts_option_is_saved_only_when_true() {
+    let numbering = ItemNumbers {
+        source: 0,
+        view: View::AllLevels,
+        group: Group::PartNumber,
+        fold: false,
+        purchased_contents: false,
+        suppressed_parts: true,
+        items: Vec::new(),
+    };
+    let saved = serde_json::to_value(&numbering).unwrap();
+    assert_eq!(saved["show_suppressed_parts"], json!(true));
+    assert_eq!(serde_json::from_value::<ItemNumbers>(saved).unwrap(), numbering);
+    let off = ItemNumbers { suppressed_parts: false, ..numbering };
+    let saved = serde_json::to_value(&off).unwrap();
+    assert!(saved.get("show_suppressed_parts").is_none(), "{saved}");
+    let older = json!({"source": 0, "levels": "all", "items": []});
+    assert_eq!(serde_json::from_value::<ItemNumbers>(older).unwrap(), off);
+}

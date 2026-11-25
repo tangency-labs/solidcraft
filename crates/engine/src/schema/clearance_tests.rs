@@ -11,7 +11,10 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ClearanceParams>(), &["against", "bodies", "clearance", "min_volume", "nearest", "skip_within", "tolerance"]);
+    assert_keys(
+        input_schema_for::<ClearanceParams>(),
+        &["against", "bodies", "clearance", "envelopes", "min_volume", "nearest", "skip_within", "tolerance"],
+    );
 }
 
 /// The handler reads the numbers and `skip_within` before the bodies, so each of these fails
@@ -19,6 +22,7 @@ fn schemas_and_the_key_check_agree() {
 #[test]
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
+        ("inspect.clearance", json!({"envelopes": "yes"})),
         ("inspect.clearance", json!({"min_volume": -1})),
         ("inspect.clearance", json!({"min_volume": "x"})),
         ("inspect.clearance", json!({"min_volume": 2e9})),
@@ -59,4 +63,33 @@ fn a_clearance_check_replies_with_its_schema() {
     assert!(r["near"].as_array().is_some_and(|n| !n.is_empty()) && r["nearest"]["A"].is_array(), "{r}");
     matches(&run(&mut s, "inspect.clearance", json!({"against": ["A"], "skip_within": null})), false);
     matches(&run(&mut s, "inspect.clearance", json!({"clearence": 3})), true);
+}
+
+/// #22050: unchecked entries with optional non-boolean `distance_mm` and mesh-derived `exact: false`
+/// match the `inspect.clearance` output schema.
+#[test]
+fn unchecked_distance_and_exact_conform_to_output_schema() {
+    use super::Unchecked;
+
+    let schema = output_schema_for::<Clearance>();
+    let schema = schema.as_value();
+    let reply = Clearance {
+        overlaps: Vec::new(),
+        near: Vec::new(),
+        nearest: Default::default(),
+        unchecked: vec![
+            Unchecked { a: "A".into(), b: Some("B".into()), reason: "relate".into(), distance_mm: Some(0.0), exact: None },
+            Unchecked { a: "C".into(), b: Some("D".into()), reason: "gaps".into(), distance_mm: Some(0.25), exact: Some(false) },
+            Unchecked { a: "Mesh".into(), b: None, reason: "mesh body: not checked".into(), distance_mm: None, exact: None },
+        ],
+        bodies: 4,
+        pairs_checked: 2,
+        pairs_reused: 0,
+        pairs_pruned: 0,
+        truncated: false,
+        ms: 1.0,
+        param_warnings: Vec::new(),
+    };
+    let v = serde_json::to_value(&reply).unwrap();
+    assert!(conforms(schema, schema, &v), "{v} doesn't match {schema}");
 }

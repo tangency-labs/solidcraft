@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.file.export_mjcf": "Export MJCF"
+  },
+  "ar": {
+    "cmd.file.export_mjcf": "تصدير MJCF"
+  },
+  "he": {
+    "cmd.file.export_mjcf": "ייצוא MJCF"
+  },
+  "ja": {
+    "cmd.file.export_mjcf": "MJCF をエクスポート"
+  },
+  "vi": {
+    "cmd.file.export_mjcf": "Xuất tệp MJCF"
+  },
+  "zh": {
+    "cmd.file.export_mjcf": "导出 MJCF"
+  },
+  "de": {
+    "cmd.file.export_mjcf": "Als MJCF exportieren"
+  },
+  "ko": {
+    "cmd.file.export_mjcf": "MJCF 내보내기"
+  }
+}

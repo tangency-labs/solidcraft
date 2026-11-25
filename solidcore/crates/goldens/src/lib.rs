@@ -23,9 +23,19 @@ pub mod constructor;
 pub mod dump;
 pub mod fixtures;
 pub mod flat;
+#[cfg(test)]
+pub(crate) mod g1r_cert;
 pub mod golden;
+#[cfg(test)]
+pub(crate) mod interval;
 pub mod jobs;
 pub mod json;
+#[cfg(test)]
+mod kept_trim_rows;
+#[cfg(test)]
+mod merged_vertex_rows;
+#[cfg(test)]
+mod operand_trim_rows;
 pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
@@ -37,13 +47,34 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
+pub(crate) mod trim_hook;
+#[cfg(test)]
+pub(crate) mod trims_on_edges;
 pub mod util;
+#[cfg(test)]
+mod wr459_rows;
+#[cfg(test)]
+mod wr495_rows;
 
-pub use case::{Case, CaseContext, CaseSource};
-pub use compare::{compare, AbsFloor, CaseDiff, Mismatch, REL_TOL};
-pub use output::{Deferred, Output, Topology};
+pub use case::Case;
+pub use case::CaseContext;
+pub use case::CaseSource;
+pub use compare::compare;
+pub use compare::AbsFloor;
+pub use compare::CaseDiff;
+pub use compare::Mismatch;
+pub use compare::REL_TOL;
+pub use output::Deferred;
+pub use output::Output;
+pub use output::Topology;
 pub use rng::Rng;
-pub use runner::{RunOptions, UnitDiff};
+pub use runner::RunOptions;
+pub use runner::UnitDiff;
+
+/// A runner's kernel: [`solidcore::Kernel::default`].
+pub(crate) fn runner_kernel() -> solidcore::Kernel {
+    solidcore::Kernel::default()
+}
 
 /// Error from the harness itself (bad fixture, missing file, ...), as opposed
 /// to an operation's error.

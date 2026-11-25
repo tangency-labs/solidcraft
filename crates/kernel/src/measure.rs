@@ -107,11 +107,62 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
     Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
 }
 
+/// How far `b` reaches along `plane`'s normal, measured from the plane: the least and greatest
+/// level of its points, `[low, high]`, as solidcore-ops measures it
+/// ([`solidcore_ops::Body::levels_along`]: the body moved rigidly into the plane's own frame and
+/// its exact box read there), so the span is the body's own, not the shadow of its world box.
+/// A mesh body has no solidcore form and is refused.
+pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
+    let Some(form) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
+    };
+    let (ops, _) = &*form;
+    let (o, x, y) = (plane.origin, plane.x, plane.y);
+    ops.levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
+        .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
+
+    #[test]
+    fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
+        let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let mut unavailable = exact.clone();
+        // A cached refusal is how ops_body represents a B-rep it could not convert.
+        unavailable.ops = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(()));
+        assert!(mesh.is_mesh() && !unavailable.is_mesh());
+        for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
+            assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
+        }
+        for (a, b) in [(&exact, &unavailable), (&unavailable, &exact)] {
+            assert!(
+                matches!(crate::faces_closest(a, &[0], b, &[0]), Err(crate::KernelError::Failed(message)) if message.contains("exact measurement is unavailable"))
+            );
+        }
+    }
+
+    /// The selected sides of nested cylinders are their radii apart; whole-body distance
+    /// would instead see coincident caps. Both witnesses belong to the selected surfaces.
+    #[test]
+    fn selected_cylinder_faces_measure_their_exact_gap() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 5.0).unwrap();
+        let b = cylinder(Vec3::ZERO, Vec3::Z, 35.0, 5.0).unwrap();
+        let side = |b: &Body| {
+            (0..b.record().faces.len())
+                .filter(|&f| matches!(crate::face_surface(b, f), Some(crate::FaceSurface::Cylinder { .. })))
+                .collect::<Vec<_>>()
+        };
+        let (af, bf) = (side(&a), side(&b));
+        assert!(!af.is_empty() && !bf.is_empty());
+        let c = crate::faces_closest(&a, &af, &b, &bf).unwrap().unwrap();
+        assert!(c.exact && (c.distance - 15.0).abs() < 1e-9, "{c:?}");
+        assert!((c.from.x.hypot(c.from.y) - 20.0).abs() < 1e-9 && (c.to.x.hypot(c.to.y) - 35.0).abs() < 1e-9, "{c:?}");
+    }
 
     /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
     /// they are the textbook ones.
@@ -131,6 +182,23 @@ mod tests {
         let got = measure_mass(&ring).unwrap().volume;
         assert!((got - want).abs() < 1e-3 * want, "{got} against {want}");
         assert!(measure(&ring).unwrap().merged.faces > 0);
+    }
+
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        let block = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let raised = solidcore_record::Plane { origin: Vec3::new(3.0, 4.0, 5.0), ..solidcore_record::Plane::XY };
+        let [lo, hi] = levels_along(&block, &raised).unwrap();
+        assert!((lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9, "{lo} {hi}");
+        // A plane through the origin whose normal is (1, 1, 0)/sqrt 2: the box's corners reach
+        // from 0 to 20/sqrt 2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let tilted = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::new(0.0, 0.0, 1.0), y: Vec3::new(s, -s, 0.0) };
+        assert!((tilted.normal() - Vec3::new(s, s, 0.0)).len() < 1e-12, "{:?}", tilted.normal());
+        let [lo, hi] = levels_along(&block, &tilted).unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
     }
 
     /// A body's exact box is measured once and its clones share it; a moved copy is a new body
@@ -161,6 +229,24 @@ mod tests {
         let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
         assert!(crate::apart(&plate, &far).unwrap());
         assert!(plate.bounds.lock().unwrap().is_some());
+    }
+
+    /// Bodies whose vertices' boxes meet are not joined apart, and no exact box is measured to
+    /// show it (a Combine join onto a rounded spline body measured it for tens of seconds);
+    /// bodies whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn bodies_among_each_others_vertices_are_not_joined_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let on_top = crate::box_solid(Vec3::new(10.0, 10.0, 1.0), Vec3::new(20.0, 20.0, 5.0)).unwrap();
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::union_apart(&[plate.clone(), far.clone(), on_top.clone()]).unwrap().is_none());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*on_top.bounds.lock().unwrap(), None);
+        assert_eq!(*far.bounds.lock().unwrap(), None);
+        // Clear of each other: the exact boxes show it, measured as before, and they are joined.
+        let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
+        assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
+        assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre

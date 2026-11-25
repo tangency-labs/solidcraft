@@ -9,23 +9,29 @@
 //!
 //! The booleans keep free-form curves exact: every boundary of a result is a piece of an
 //! operand's boundary, cut where it crosses the other, never refitted.
+//!
+//! [`fill_channel`] is the kernel's channel fill (`solidcore::prism::fill`) in the record's
+//! types, its typed refusal with the size that builds returned as a value.
 
 // The range tests refuse NaN by negation (`!(x > y)`), kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 use solidcore::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
+use solidcore::error::Reason;
 use solidcore::eval::Frame;
 use solidcore::kernel::{Kernel, Tolerances};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
-use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
+use solidcore::prism::{extrude, fill, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
+pub use solidcore::error::fill::{FillFailure, FillSide};
+pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
-pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
+pub use solidcore::prism::profile::ProfileRefusal;
 
 use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
@@ -33,6 +39,13 @@ use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
+
+/// Whether a generated cubic matches a trimmed interval of a source cubic, in either direction.
+/// Other segment kinds give false.
+#[must_use]
+pub fn cubic_contains(source: &Seg2, piece: &Seg2) -> bool {
+    convert::seg2(source).cubic_contains(&convert::seg2(piece))
+}
 
 /// The tolerance (mm) the planar booleans take: at least this.
 pub const MIN_TOLERANCE: f64 = 1e-9;
@@ -45,8 +58,8 @@ pub const EXTRUDE_TOLERANCE: f64 = 1e-7;
 struct Out<T>(std::result::Result<T, Error>);
 
 impl<T> Answer for Out<T> {
-    fn refusal(&self) -> Option<String> {
-        self.0.as_ref().err().map(ToString::to_string)
+    fn refusal(&self) -> Option<Error> {
+        self.0.as_ref().err().cloned()
     }
 }
 
@@ -428,6 +441,17 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
 
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
+}
+
 /// The directed parameter interval of a recognized ellipse arc, in the input plane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EllipseArc {
@@ -513,4 +537,150 @@ pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
 #[must_use]
 pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
     convert::loop2(lp).placement(&convert::loop2(other), tol)
+}
+
+/// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
+#[must_use]
+pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {
+    extrude::symmetric_offset_intervals(gap, half)
+}
+
+/// Probe points along both wings of a symmetric-offset extrude for auto-operation detection.
+#[must_use]
+pub fn symmetric_offset_probe_points(
+    base: Vec3,
+    n: Vec3,
+    start: f64,
+    d: f64,
+    near_limit: f64,
+) -> [Vec3; 4] {
+    extrude::symmetric_offset_probe_points(
+        [base.x, base.y, base.z],
+        [n.x, n.y, n.z],
+        start,
+        d,
+        near_limit,
+    )
+    .map(|[x, y, z]| Vec3::new(x, y, z))
+}
+
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal from `sketch`'s origin ([`extrude::level_on_plane`]): an extrude's end on a flat face
+/// at a slant to it.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal or a level that is not finite.
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    extrude::level_on_plane(
+        &convert::plane(sketch),
+        convert::vec3(point),
+        &convert::plane(plane),
+    )
+    .map_err(crate::error::status)
+}
+
+/// The least and the most level of `plane` above `sketch` over the outer loops of `regions`
+/// ([`extrude::plane_rise`]): how far a flat face at a slant to an extrude rises across its
+/// profiles.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal, no outer segment or a malformed segment;
+/// [`Error::Status`] for a free-form piece whose search does not settle.
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    let regions: Vec<_> = regions.iter().map(convert::region2).collect();
+    extrude::plane_rise(&convert::plane(sketch), &convert::plane(plane), &regions)
+        .map_err(crate::error::status)
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the outer loops of
+/// `regions` ([`extrude::plane_gap`]): the gap an extrude From one flat face To another runs
+/// across its profiles.
+///
+/// # Errors
+///
+/// As [`plane_rise`].
+pub fn plane_gap(
+    sketch: &Plane,
+    from: &Plane,
+    to: &Plane,
+    regions: &[Region2],
+) -> Result<(f64, f64)> {
+    let regions: Vec<_> = regions.iter().map(convert::region2).collect();
+    extrude::plane_gap(
+        &convert::plane(sketch),
+        &convert::plane(from),
+        &convert::plane(to),
+        &regions,
+    )
+    .map_err(crate::error::status)
+}
+
+/// A channel filled by [`fill_channel`] ([`fill::Filled`] in the record's types).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelFill {
+    /// The filled section: one counter-clockwise loop, no holes.
+    pub region: Region2,
+    /// How deep the channel reaches, measured as the depth is.
+    pub channel_depth: f64,
+    /// How deep it is filled.
+    pub filled_depth: f64,
+    /// Whether the channel is open on the far side.
+    pub through: bool,
+    /// What a caller may report.
+    pub notes: Vec<FillNote>,
+}
+
+/// Why [`fill_channel`] refuses a fill, and the size that builds where there is one (the
+/// kernel's [`FillFailure`] and its fit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FillRefusal {
+    /// Why.
+    pub why: FillFailure,
+    /// The nearest size that builds (a face's height or depth), where there is one.
+    pub fit: Option<f64>,
+}
+
+/// [`fill_channel`]'s answer inside [`run`]: a fill or its refusal, neither an error.
+struct Filling(std::result::Result<ChannelFill, FillRefusal>);
+
+impl Answer for Filling {}
+
+/// The channel between the walls `left` and `right` filled with `options`
+/// ([`fill::fill`]): the depth measured along `depth_normal` from the deeper toe where it is
+/// given, else from the chord. A refusal the kernel types ([`FillFailure`]) comes back as
+/// `Ok(Err(..))` with its fit.
+///
+/// # Errors
+/// [`Error::Refused`] for walls, a normal, contours or a depth the kernel refuses as input;
+/// the kernel's other errors.
+pub fn fill_channel(
+    left: &[Seg2],
+    right: &[Seg2],
+    depth_normal: Option<Vec2>,
+    options: &FillOptions,
+) -> Result<std::result::Result<ChannelFill, FillRefusal>> {
+    let channel = fill::Channel {
+        left: left.iter().map(convert::seg2).collect(),
+        right: right.iter().map(convert::seg2).collect(),
+        depth_normal: depth_normal.map(convert::vec2),
+    };
+    let out = run("fill_channel", |k| match fill::fill(k, &channel, options) {
+        Ok(f) => Ok(Filling(Ok(ChannelFill {
+            region: convert::record_region2(&f.region),
+            channel_depth: f.channel_depth,
+            filled_depth: f.filled_depth,
+            through: f.through,
+            notes: f.notes,
+        }))),
+        Err(e) => match e.failure().map(|f| &f.reason) {
+            Some(&Reason::Fill(why)) => Ok(Filling(Err(FillRefusal {
+                why,
+                fit: e.fit().map(|f| f.size),
+            }))),
+            _ => Err(e),
+        },
+    })?;
+    Ok(out.0)
 }

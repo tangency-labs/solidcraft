@@ -10,8 +10,10 @@
 //! Two faces with the same name are pieces of one face (a cut split it). Each piece is told apart
 //! by the faces around it that the others do not have: `F2:top#[F2:side:l4,F4:side:l4]` is the
 //! piece of `F2:top` bounded by the block's left wall and the slot's left wall. Pieces nothing
-//! around them tells apart are numbered (`#1`, `#2`): in the order of what they came from when
-//! that differs (exact), else in the kernel's order (unverified). A face made of several (a
+//! around them tells apart are numbered (`#1`, `#2`): in the order along their definition where
+//! the feature says where each starts (exact; a sheet's hole wall along its sketch curve), else in
+//! the order of what they came from when that differs (exact), else by place (unverified). A face
+//! made of several (a
 //! coplanar join) takes one name and keeps the others as aliases: a reference to one of them is
 //! to a face that is no longer as it was picked, and finds nothing. A face a feature built from
 //! several of its own roles (a side drawn in collinear pieces) has each of them as a name
@@ -53,6 +55,10 @@ pub(crate) struct FaceInfo {
     /// Whether the name follows exact history (`false`: worked out from geometry, or a piece
     /// numbered because the faces around it did not tell it apart).
     pub verified: bool,
+    /// The name a Split Face piece had before Split Face named its pieces (told apart by the
+    /// faces around it, see [`split_pieces`]): a reference a design saved then holds finds this very
+    /// face by it.
+    pub former: Option<String>,
 }
 
 impl Names {
@@ -89,6 +95,11 @@ struct Named {
     /// What it came from (`None`: not known): faces with one name but different origins (an
     /// extrude's two caps both above its sketch plane) are numbered in this order.
     origins: Option<Vec<FaceOrigin>>,
+    /// Its place among the faces made for one part of the definition that made it, where the
+    /// feature says (see `lineage::GrownFace`): faces with one name are numbered in this order first.
+    ordinal: Option<usize>,
+    /// See [`FaceInfo::former`].
+    former: Option<String>,
 }
 
 /// Names of a body (`b`, made by `o`'s feature) from its lineage; `None` when the lineage does
@@ -103,15 +114,105 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
     let mut named: Vec<Option<Named>> = h.faces.iter().map(|f| from_origins(f, &operands, fid)).collect();
     if named.iter().any(Option::is_none) {
         let geometric = crate::naming::geometric_names(b, o, named.len());
-        for (slot, name) in named.iter_mut().zip(geometric) {
-            if slot.is_none() {
-                *slot = Some(Named { name: crate::naming::strip_piece(&name).to_string(), verified: false, ..Named::default() });
+        // A face only a tool without roles made (a thread's groove) is named from geometry, after
+        // the face of the body before it that it lies on or beside. Where exact history already
+        // gives that name to a face of this body, the guess would share it with the face that owns
+        // it and leave both without a name of their own (the untouched end face of a threaded
+        // part, #18460): the tool's face is named by its place instead, still unverified.
+        let exact: BTreeSet<String> = named.iter().flatten().map(|n| crate::naming::strip_piece(&n.name).to_string()).collect();
+        for (fi, (slot, name)) in named.iter_mut().zip(geometric).enumerate() {
+            if slot.is_some() {
+                continue;
             }
+            let name = crate::naming::strip_piece(&name);
+            let taken = exact.contains(name) && h.faces.get(fi).is_some_and(|face| built_by_unnamed_tool(face, &operands));
+            let name = if taken { format!("F{fid}:face:{fi}") } else { name.to_string() };
+            *slot = Some(Named { name, verified: false, ..Named::default() });
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
-    let centres = || crate::naming::face_centres(b);
-    Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
+    let centres = || crate::naming::face_centres(b).unwrap_or_default();
+    let parents: Vec<(String, bool)> = named.iter().map(|n| (n.name.clone(), n.verified)).collect();
+    let names = qualify_at(named, &adjacency(h), by_place(&o.feature, &centres));
+    Some(match lineage.pieces.as_deref() {
+        Some(pieces) => split_pieces(names, &parents, pieces, fid, &centres),
+        None => names,
+    })
+}
+
+/// What starts the role of a piece of a Split Face (`F7:split:in`): no face has it.
+const SPLIT_ROLE: &str = "split:";
+
+/// Whether a piece qualifier is a Split Face's piece role (`F7:split:in`), not a face around it.
+pub(crate) fn is_split_role(q: &str) -> bool {
+    q.strip_prefix('F')
+        .and_then(|rest| rest.split_once(':'))
+        .is_some_and(|(id, role)| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) && role.starts_with(SPLIT_ROLE))
+}
+
+/// Whether `name` names a piece of a face a Split Face cut, by the feature's own name for it: then
+/// it stands for that piece alone, not every piece of the face.
+pub fn names_split_piece(name: &str) -> bool {
+    crate::piece_names::piece_parts(name).is_some_and(|(_, around)| around.iter().any(|q| is_split_role(q)))
+}
+
+/// The pieces a Split Face (feature `fid`) cut faces into, named by it: each piece is the face it
+/// came from (`parents`, its name before the split), qualified by the feature and the piece's
+/// role there (`pieces`): `F1:+z#[F7:split:in]` is the piece of `F1:+z` inside Split Face F7's loop, as
+/// an Extrude names its faces `F3:top`, `F3:side:c1`. A reference to the face it came from still
+/// finds every piece; one to a piece finds that piece alone, wherever upstream edits move it.
+/// What the faces around a piece called it before (`F1:+z#[F1:+x,F1:+y]`, or the face's bare name
+/// for the piece nothing around it told apart) stays its [`FaceInfo::former`] name, so a design
+/// saved before still finds it. Pieces with one role (an open curve crossing a face twice) are
+/// numbered by place, and not exact.
+fn split_pieces(mut names: Names, parents: &[(String, bool)], pieces: &[Option<String>], fid: u64, centres: &dyn Fn() -> Vec<Vec3>) -> Names {
+    if pieces.len() != names.faces.len() || parents.len() != names.faces.len() {
+        return names;
+    }
+    let mut faces: Vec<String> = names.faces.as_ref().clone();
+    let mut renamed: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    for (i, role) in pieces.iter().enumerate() {
+        let (Some(role), Some((parent, exact)), Some(info), Some(slot)) = (role, parents.get(i), names.info.get_mut(i), faces.get_mut(i)) else {
+            continue;
+        };
+        // Its side of the tool is exact: the name is as exact as the face it came from.
+        info.verified = *exact;
+        let marker = format!("F{fid}:{SPLIT_ROLE}{role}");
+        let (stem, inherited, tie) = split_piece(parent);
+        let mut key: BTreeSet<&str> = inherited.iter().map(String::as_str).collect();
+        key.insert(marker.as_str());
+        let key: Vec<&str> = key.into_iter().collect();
+        let name = piece_name(&stem, &key, tie.as_deref());
+        info.former = Some(std::mem::replace(slot, name.clone()));
+        info.bounds.insert(marker);
+        renamed.entry(name).or_default().push(i);
+    }
+    // Pieces on one side of every field: numbered along their spread.
+    let worked_out = std::cell::OnceCell::new();
+    for (name, same) in renamed.into_iter().filter(|(_, same)| same.len() > 1) {
+        let at: &Vec<Vec3> = worked_out.get_or_init(centres);
+        let order =
+            if at.len() == faces.len() { crate::naming::along_spread(same.iter().filter_map(|i| Some((*i, *at.get(*i)?))).collect()) } else { same };
+        for (k, i) in order.into_iter().enumerate() {
+            if let Some(slot) = faces.get_mut(i) {
+                *slot = format!("{name}#{}", k + 1);
+            }
+            if let Some(info) = names.info.get_mut(i) {
+                info.verified = false;
+            }
+        }
+    }
+    names.faces = Arc::new(faces);
+    names
+}
+
+/// Whether `face` came only from faces of tools the feature built whose roles are not known.
+fn built_by_unnamed_tool(face: &FaceProv, operands: &[OperandNames]) -> bool {
+    !face.origins.is_empty()
+        && face.origins.iter().all(|origin| match *origin {
+            FaceOrigin::Face { operand, face } => operands.get(operand).is_some_and(|op| op.is_unnamed_tool_face(face)),
+            _ => false,
+        })
 }
 
 /// Pairs of faces that share an edge, from a history.
@@ -146,8 +247,13 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
-            Operand::Made(_) | Operand::CopiedTool { .. } => {
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
+            }
+            // Grown from a body before the feature: named after its faces.
+            Operand::Grown { body: Some(name), .. } => {
+                let body = o.before.body(name)?;
+                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
             Operand::Stage(stage) => {
                 let body = &stage.body;
@@ -156,7 +262,7 @@ impl<'a> OperandNames<'a> {
                     .get_or_init(|| {
                         Arc::new(derive(body, o, &stage.lineage).unwrap_or_else(|| {
                             let names = crate::naming::geometric_names(body, o, body.body.face_count());
-                            let centres = || crate::naming::face_centres(body);
+                            let centres = || crate::naming::face_centres(body).unwrap_or_default();
                             Names::unverified(names, &crate::naming::mesh_adjacency(body), by_place(&o.feature, &centres))
                         }))
                     })
@@ -164,6 +270,13 @@ impl<'a> OperandNames<'a> {
                 Some(OperandNames { operand, body: Some(body.clone()), names, edges: OnceLock::new() })
             }
         }
+    }
+
+    /// Whether face `face` is a face of a tool the feature built whose roles are not known (a
+    /// thread's narrowing sleeve): it has no name to give, and says nothing about the face it
+    /// merged into.
+    fn is_unnamed_tool_face(&self, face: usize) -> bool {
+        matches!(self.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty))
     }
 
     /// The name of face `face`.
@@ -176,6 +289,8 @@ impl<'a> OperandNames<'a> {
                 synonyms: info.synonyms.clone(),
                 verified: info.verified,
                 origins: None,
+                ordinal: None,
+                former: info.former.clone(),
             })
         };
         match self.operand {
@@ -188,24 +303,48 @@ impl<'a> OperandNames<'a> {
                     synonyms: copied(&n.synonyms),
                     verified: n.verified,
                     origins: None,
+                    ordinal: None,
+                    former: n.former.as_ref().map(|f| format!("{f}@F{fid}.{instance}")),
                 }
             }),
             Operand::Inner(_) => {
                 given(&self.names).map(|n| Named { name: format!("F{fid}:inner({})", n.name), verified: n.verified, ..Named::default() })
             }
-            Operand::Made(roles) => {
-                let (first, rest) = roles.get(face)?.split_first()?;
-                Some(Named {
-                    name: format!("F{fid}:{first}"),
-                    synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
-                    verified: true,
-                    ..Named::default()
-                })
-            }
+            Operand::Made(roles) => made_face(roles, face, fid),
+            Operand::Rebuilt { roles, feature } => made_face(roles, face, *feature),
             Operand::CopiedTool { roles, feature, instance } => {
                 let named = |role: &String| format!("F{feature}:{role}@F{fid}.{instance}");
                 let (first, rest) = roles.get(face)?.split_first()?;
                 Some(Named { name: named(first), synonyms: rest.iter().map(named).collect(), verified: true, ..Named::default() })
+            }
+            Operand::Grown { faces, .. } => {
+                let grown = faces.get(face)?.as_ref()?;
+                let feature = grown.feature.unwrap_or(fid);
+                // After the faces it was grown from: their name, the one they are all pieces of.
+                let around = |k: usize| {
+                    let info = self.names.info.get(k)?;
+                    Some(Named { name: self.names.faces.get(k)?.clone(), verified: info.verified, ..Named::default() })
+                };
+                let after = |on: &[usize]| -> Option<Option<Named>> {
+                    if on.is_empty() {
+                        return Some(None);
+                    }
+                    Some(Some(merged(on.iter().map(|&k| around(k)).collect::<Option<Vec<_>>>()?)?))
+                };
+                let (name, verified) = match (after(grown.on.as_slice())?, after(grown.across.as_slice())?) {
+                    // Grown at the edge between them: after the edge, its sides' names in order
+                    // (as `edge_names` writes an edge), inside its own name as a blend's edge is.
+                    (Some(on), Some(across)) => {
+                        let mut sides = [on.name, across.name];
+                        sides.sort();
+                        let [a, b] = sides;
+                        let edge = if a == b { a } else { format!("{a}|{b}") };
+                        (format!("F{feature}:{}({edge})", grown.role), on.verified && across.verified)
+                    }
+                    (Some(on), None) | (None, Some(on)) => (format!("F{feature}:{}:{}", grown.role, on.name), on.verified),
+                    (None, None) => (format!("F{feature}:{}", grown.role), true),
+                };
+                Some(Named { name, verified, ordinal: grown.ordinal, ..Named::default() })
             }
         }
     }
@@ -223,9 +362,25 @@ impl<'a> OperandNames<'a> {
                 };
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } => None,
+            Operand::Copy { .. }
+            | Operand::Inner(_)
+            | Operand::Made(_)
+            | Operand::CopiedTool { .. }
+            | Operand::Rebuilt { .. }
+            | Operand::Grown { .. } => None,
         }
     }
+}
+
+/// The name of face `face` of a body feature `fid` built, from its roles.
+fn made_face(roles: &[Vec<String>], face: usize, fid: u64) -> Option<Named> {
+    let (first, rest) = roles.get(face)?.split_first()?;
+    Some(Named {
+        name: format!("F{fid}:{first}"),
+        synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
+        verified: true,
+        ..Named::default()
+    })
 }
 
 /// A face's name from what it came from; `None` when an origin cannot be named exactly.
@@ -235,7 +390,17 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
     let mut names: Vec<Named> = Vec::with_capacity(origins.len());
     for origin in origins.iter().copied() {
         let named = match origin {
-            FaceOrigin::Face { operand, face } => operands.get(operand)?.face(face, fid)?,
+            FaceOrigin::Face { operand, face } => {
+                let op = operands.get(operand)?;
+                match op.face(face, fid) {
+                    Some(named) => named,
+                    // A face of an unnamed tool merged into a named face (a narrowing sleeve's end
+                    // flush with the part's face) does not change what the named face is. A face
+                    // made only of such faces keeps no name: `merged` gets none to merge.
+                    None if op.is_unnamed_tool_face(face) => continue,
+                    None => return None,
+                }
+            }
             FaceOrigin::Edge { operand, edge } => {
                 let (edge, verified) = operands.get(operand)?.edge(edge)?;
                 Named { name: format!("F{fid}:blend({edge})"), verified, ..Named::default() }
@@ -260,6 +425,11 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
 /// whose name it takes stay its synonyms.
 fn merged(names: Vec<Named>) -> Option<Named> {
     let verified = names.iter().all(|n| n.verified);
+    // One face's place along its definition; a face made of several has none.
+    let ordinal = match names.as_slice() {
+        [one] => one.ordinal,
+        _ => None,
+    };
     let first = names.first()?.name.clone();
     let mut common = Some(first.as_str());
     while let Some(c) = common {
@@ -270,6 +440,11 @@ fn merged(names: Vec<Named>) -> Option<Named> {
     }
     let name = common_piece(&names).or_else(|| common.map(str::to_string)).unwrap_or(first);
     let (mut aliases, mut synonyms): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    // The former name of the face whose name it takes, when only one face has it (see `FaceInfo::former`).
+    let former = match names.as_slice() {
+        [one] => one.former.clone(),
+        _ => None,
+    };
     for n in names {
         let (kept, merged) = if n.name == name { (n.synonyms, n.aliases) } else { (Vec::new(), [vec![n.name], n.synonyms, n.aliases].concat()) };
         for synonym in kept {
@@ -283,7 +458,7 @@ fn merged(names: Vec<Named>) -> Option<Named> {
             }
         }
     }
-    Some(Named { name, aliases, synonyms, verified, origins: None })
+    Some(Named { name, aliases, synonyms, verified, origins: None, ordinal, former })
 }
 
 /// The name the faces have in common: their stem, the faces their qualifiers share and the
@@ -360,16 +535,20 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
     };
     let n = named.len();
     let mut bounds: Vec<BTreeSet<String>> = vec![BTreeSet::new(); n];
+    // A face named only by its place in the kernel's order (`F7:face:12`, unverified) does not
+    // tell its neighbours apart: the next evaluation can give that number to another face, and
+    // a piece qualified by it would change its name, or take another's, while still exact.
+    let tells_apart = |x: &Named, stem: &str| x.verified || !named_by_index(stem);
     for &(a, b) in adjacent {
         let (Some(na), Some(nb)) = (named.get(a), named.get(b)) else { continue };
         let (sa, sb) = (crate::naming::strip_piece(&na.name), crate::naming::strip_piece(&nb.name));
         if a == b || sa == sb {
             continue;
         }
-        if let Some(set) = bounds.get_mut(a) {
+        if let Some(set) = bounds.get_mut(a).filter(|_| tells_apart(nb, sb)) {
             set.insert(sb.to_string());
         }
-        if let Some(set) = bounds.get_mut(b) {
+        if let Some(set) = bounds.get_mut(b).filter(|_| tells_apart(na, sa)) {
             set.insert(sa.to_string());
         }
     }
@@ -421,12 +600,21 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
                 }
                 continue;
             }
-            // The faces around them don't tell these apart: numbered by what they came from when
-            // that differs (exact), else in the kernel's order (unverified).
+            // The faces around them don't tell these apart: numbered along their definition where
+            // the feature says where each starts and no two start at one place (exact, #7990
+            // change 4), else by what they came from when that differs (exact), else in the
+            // kernel's order (unverified).
             let mut tied = tied;
+            let ordinals: Option<Vec<usize>> = tied.iter().map(|i| named.get(*i).and_then(|x| x.ordinal)).collect();
+            let along = ordinals.is_some_and(|mut o| {
+                o.sort_unstable();
+                o.windows(2).all(|w| w[0] < w[1])
+            });
             let origins: Vec<Option<&Vec<FaceOrigin>>> = tied.iter().map(|i| named.get(*i).and_then(|x| x.origins.as_ref())).collect();
-            let distinct = origins.iter().all(Option::is_some) && origins.iter().collect::<BTreeSet<_>>().len() == origins.len();
-            if distinct && !by_place {
+            let distinct = along || (origins.iter().all(Option::is_some) && origins.iter().collect::<BTreeSet<_>>().len() == origins.len());
+            if along {
+                tied.sort_by_key(|i| named.get(*i).and_then(|x| x.ordinal));
+            } else if distinct && !by_place {
                 tied.sort_by_key(|i| named.get(*i).and_then(|x| x.origins.clone()));
             } else if distinct {
                 // By what they came from, but not by where it stood in its operand's face order:
@@ -471,9 +659,14 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
         .into_iter()
         .zip(bounds)
         .zip(verified)
-        .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified })
+        .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified, former: x.former })
         .collect();
     Names { faces: Arc::new(names), info }
+}
+
+/// Whether `stem` names a face by its index alone (`F7:face:12`, `Body1:face:3`).
+pub(crate) fn named_by_index(stem: &str) -> bool {
+    stem.rsplit_once(":face:").is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit()))
 }
 
 /// The most bytes a face name may take: a command takes a face name of at most this many
@@ -570,6 +763,11 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     let name = canonical.as_deref().unwrap_or(name);
     let today = crate::persistent_name::written_now(face);
     let current: &str = &today;
+    // The very piece of a Split Face, by the name the faces around it gave it before the feature
+    // named its pieces (a design saved then).
+    if info.and_then(|i| i.former.as_deref()) == Some(name) {
+        return Some(Match::Exact);
+    }
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });
@@ -593,9 +791,15 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     // piece of, whole again since, which they still bound: the piece is all of it (#11731). Only a
     // piece told apart by faces: a numbered one (`#2`, nothing told it apart) says nothing about
     // which part of the whole face it was.
+    // A Split Face's piece role its own name carries tells it apart too, when the piece was split
+    // again since (the role is no face around it).
+    let own: Vec<&str> =
+        crate::piece_names::piece_parts(current).map(|(_, around)| around.into_iter().filter(|q| is_split_role(q)).collect()).unwrap_or_default();
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
         && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
-        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f))))
+        && info.is_some_and(|i| {
+            around.iter().all(|f| i.bounds.contains(*f) || own.contains(f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, current, f)))
+        })
     {
         return Some(Match::Piece);
     }
@@ -639,6 +843,39 @@ fn rounds_the_edge(bound: &str, here: &str, face: &str) -> bool {
     let face = crate::naming::strip_piece(face);
     let sides = |n: &str| crate::naming::strip_piece(n).to_string();
     crate::naming::blend_sides(bound).is_some_and(|(a, b)| (sides(a) == here && sides(b) == face) || (sides(a) == face && sides(b) == here))
+}
+
+/// How many of the bounding faces in a stored piece qualifier (`stem#[a, b, …]`, without a tie
+/// number) still bound face `index`, and how many the qualifier lists: `(matched, total)`.
+/// `None` when `name` is not a neighbour-qualified piece name, or `index` is not a face of the
+/// same stem and copy instance.
+pub(crate) fn piece_overlap(names: &Names, index: usize, name: &str) -> Option<(usize, usize)> {
+    let face = names.faces.get(index)?;
+    let info = names.info.get(index)?;
+    let canonical = crate::persistent_name::written_now(name);
+    let today = crate::persistent_name::written_now(face);
+    let ((name_core, at), (current, here)) = (instance_suffix(&canonical), instance_suffix(&today));
+    if at != here || !name_core.ends_with(']') || !current.ends_with(']') {
+        return None;
+    }
+    let (stem, around) = crate::piece_names::piece_parts(name_core)?;
+    if around.is_empty() || crate::naming::strip_piece(current) != crate::naming::strip_piece(stem) {
+        return None;
+    }
+    let matched = around
+        .iter()
+        .filter(|f| {
+            let suffixed = (!at.is_empty()).then(|| format!("{f}{at}"));
+            let target = suffixed.as_deref().unwrap_or(f);
+            info.bounds.contains(target)
+                || (!at.is_empty() && info.bounds.contains(**f))
+                || info.bounds.iter().any(|bound| {
+                    let (bound_core, bound_at) = instance_suffix(bound);
+                    (bound_at == at || bound_at.is_empty()) && rounds_the_edge(bound_core, current, f)
+                })
+        })
+        .count();
+    Some((matched, around.len()))
 }
 
 /// A name and the pattern instances after it (`F3:top#[F4:side]@F9.1` is `F3:top#[F4:side]` and

@@ -170,6 +170,50 @@ fn skip_within_leaves_out_a_components_own_pairs() {
     }
 }
 
+/// A bought assembly with its envelope, and a part beside it: a 10 mm housing with a 4 mm insert
+/// in a component, the envelope around both, and a bracket 1.5 mm clear of the housing.
+fn bought_with_envelope(s: &mut Session) {
+    run(s, "component.create", json!({"name": "Bought"}));
+    cube(s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(s, "component.create", json!({"name": "Insert part"}));
+    cube(s, "Insert", 4.0, [8.0, 3.0, 3.0]);
+    run(s, "component.activate", json!({"component": "root"}));
+    run(s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    cube(s, "Bracket", 10.0, [13.5, 0.0, 0.0]);
+}
+
+/// A component's envelope is left out unless named; with `envelopes` it is checked instead of
+/// the bodies inside it, and it is never paired with a body inside it.
+#[test]
+fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
+    let mut s = Session::default();
+    bought_with_envelope(&mut s);
+    // By default: the bodies themselves. The insert sits in the housing; the bracket is 1.5 mm
+    // past the insert (which reaches x = 12).
+    let all = run(&mut s, "inspect.clearance", json!({"clearance": 2}));
+    let overlaps: Vec<[String; 2]> = all["overlaps"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(overlaps, vec![["Housing".to_string(), "Insert".to_string()]], "{all}");
+    let near: Vec<[String; 2]> = all["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Insert".to_string()]], "{all}");
+    assert_eq!(all["bodies"], 3, "the envelope is left out: {all}");
+    // With envelopes: the envelope (0..12 along X) and the bracket, 1.5 mm apart, and nothing else.
+    let env = run(&mut s, "inspect.clearance", json!({"clearance": 2, "envelopes": true}));
+    assert_eq!(env["overlaps"].as_array().map(Vec::len), Some(0), "{env}");
+    let near: Vec<[String; 2]> = env["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Envelope".to_string()]], "{env}");
+    assert!((f(&env["near"][0]["distance_mm"]) - 1.5).abs() < 1e-6, "{env}");
+    assert_eq!(env["bodies"], 2, "{env}");
+    // A body named inside an envelope means the envelope; one named against it too.
+    let named = run(&mut s, "inspect.clearance", json!({"bodies": ["Bracket"], "against": ["Insert"], "clearance": 2, "envelopes": true}));
+    assert_eq!(pair(&named["near"][0]), ["Bracket", "Envelope"], "{named}");
+    // Named without `envelopes`, the envelope is checked, but never against what it encloses.
+    let named = run(&mut s, "inspect.clearance", json!({"bodies": ["Envelope", "Housing", "Bracket"], "clearance": 2}));
+    assert_eq!(named["overlaps"].as_array().map(Vec::len), Some(0), "{named}");
+    let near: Vec<[String; 2]> = named["near"].as_array().into_iter().flatten().map(pair).collect();
+    assert_eq!(near, vec![["Bracket".to_string(), "Envelope".to_string()]], "{named}");
+    assert!(s.execute("inspect.clearance", &json!({"envelopes": "yes"})).is_err());
+}
+
 /// Parameters out of range are refused, not guessed at.
 #[test]
 fn bad_parameters_are_refused() {
@@ -557,4 +601,228 @@ fn a_pin_through_a_d_bore_of_its_size_overlaps_the_flat() {
     assert_eq!(res["unchecked"].as_array().map(Vec::len), Some(0), "{res}");
     assert_eq!(overlaps.len(), 1, "{res}");
     assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 0.05 * want, "{want} {res}");
+}
+
+/// #21554: a pair whose overlap boolean failed (`unchecked`) must not fall through to
+/// `nearest_lists`, where `body_distance` would report the colliding pair as `0.0` mm contact.
+#[test]
+fn unchecked_pairs_are_excluded_from_nearest() {
+    use std::cell::RefCell;
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+
+    use super::{PairContext, PairResult, collect_pair_results};
+
+    let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
+    // A overlaps B and D (both unchecked) and sits 5 mm clear of C; B touches C (0 mm) and D.
+    let names = ["A", "B", "C", "D"];
+    let subjects = [0, 1, 2, 3];
+    let boxes = [bx(0.0, 10.0), bx(5.0, 15.0), bx(15.0, 25.0), bx(2.0, 12.0)];
+    let allowed = |i: usize, j: usize| i != j;
+    let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap: 0.0, min_volume: 0.01, nearest: 2 };
+
+    // (0, 1) failed in measure_pair (`r.unchecked`); (3, 0) failed as `Err` (reversed indices).
+    let close = [(0, 1), (3, 0)];
+    let results = [
+        Ok(PairResult { unchecked: Some("an intersection was missed".into()), ..PairResult::default() }),
+        Err(solidcraft_kernel::KernelError::Failed("boolean failed".into())),
+    ];
+    let mut unchecked = Vec::new();
+    let asked = RefCell::new(Vec::new());
+    let summary = collect_pair_results(&ctx, &close, results, &mut unchecked, |pairs| {
+        asked.borrow_mut().extend_from_slice(pairs);
+        pairs
+            .iter()
+            .map(|&(i, j)| {
+                let d = match (i.min(j), i.max(j)) {
+                    (0, 1) | (0, 3) | (1, 2) | (1, 3) => 0.0,
+                    (0, 2) => 5.0,
+                    (2, 3) => 3.0,
+                    _ => 100.0,
+                };
+                Ok(Some(d))
+            })
+            .collect()
+    });
+
+    assert!(summary.overlaps.is_empty());
+    assert!(summary.near.is_empty());
+    assert_eq!(unchecked.len(), 2);
+    assert!(asked.borrow().iter().all(|&p| p != (0, 1) && p != (0, 3)), "unchecked pairs must never be sent to body_distance: {:?}", asked.borrow());
+
+    let a_near: Vec<(&str, f64)> = summary.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
+    assert_eq!(a_near, vec![("C", 5.0)], "A must only report checked neighbour C: {a_near:?}");
+    assert!(summary.nearest["B"].iter().all(|n| n.body != "A"), "B must not report unchecked A: {:?}", summary.nearest["B"]);
+    assert!(summary.nearest["D"].iter().all(|n| n.body != "A"), "D must not report unchecked A: {:?}", summary.nearest["D"]);
+
+    // Checked overlaps keep appearing in `nearest` at 0.0 mm as documented.
+    let mut unchecked_ok = Vec::new();
+    let overlap_results = [
+        Ok(PairResult { overlap: Some((5.0, 20.0, bx(5.0, 10.0), Vec3::new(7.5, 5.0, 5.0))), ..PairResult::default() }),
+        Ok(PairResult { unchecked: Some("an intersection was missed".into()), ..PairResult::default() }),
+    ];
+    let summary_ok = collect_pair_results(&ctx, &close, overlap_results, &mut unchecked_ok, |pairs| {
+        pairs
+            .iter()
+            .map(|&(i, j)| {
+                let d = match (i.min(j), i.max(j)) {
+                    (0, 2) => 5.0,
+                    (1, 2) | (1, 3) => 0.0,
+                    (2, 3) => 3.0,
+                    _ => 100.0,
+                };
+                Ok(Some(d))
+            })
+            .collect()
+    });
+    assert_eq!(summary_ok.overlaps.len(), 1);
+    assert_eq!(unchecked_ok.len(), 1);
+    let a_near_ok: Vec<(&str, f64)> = summary_ok.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
+    assert_eq!(a_near_ok, vec![("B", 0.0), ("C", 5.0)]);
+}
+
+/// #22050: a tenon seated flush inside a matching slot/window (nominally coincident faces,
+/// vertices within ~3e-5 mm) is flush contact (0 mm), not left in `unchecked`, while a tenon
+/// that actually penetrates the slot wall is reported as an overlap (never falsely cleared),
+/// and a small clearance gap reports its exact gap.
+#[test]
+fn flush_tenon_in_slot_is_contact_and_penetration_is_overlap() {
+    let make_slotted_plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 50, "width": 50, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+        run(s, "solid.box", json!({"length": 10, "width": 10, "height": 14, "corner": [0, 0, -2], "operation": "new", "body_name": "Cut"}));
+        run(s, "solid.combine", json!({"operation": "cut", "target": "Plate", "tools": ["Cut"]}));
+    };
+
+    // Flush contact cases: exact flush, shifted 3e-5 mm along the slot axis, and stepped tenon
+    // with a shoulder sitting flush on top of the plate while its bottom vertices are 3e-5 mm
+    // from the plate's bottom vertices.
+    for (label, z_shift, shoulder) in [("exact_flush", 0.0, false), ("shifted_3e5", 3e-5, false), ("flush_shoulder_3e5", 3e-5, true)] {
+        let mut s = Session::default();
+        make_slotted_plate(&mut s);
+        let tenon_height = if shoulder { 10.0 - z_shift } else { 10.0 };
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 10, "height": tenon_height, "corner": [0, 0, z_shift], "operation": "new", "body_name": "Tenon"}),
+        );
+        if shoulder {
+            run(
+                &mut s,
+                "solid.box",
+                json!({"length": 16, "width": 16, "height": 4, "corner": [-3, -3, 10.0], "operation": "join", "targets": ["Tenon"]}),
+            );
+        }
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{label}: {r}");
+        assert_eq!(r["overlaps"], json!([]), "{label}: {r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "{label}: {r}");
+        assert_eq!(f(&near[0]["distance_mm"]), 0.0, "{label}: {r}");
+        assert_eq!(f(&r["nearest"]["Tenon"][0]["distance_mm"]), 0.0, "{label}: {r}");
+    }
+
+    // Genuine interference: tenon penetrating one slot wall by 0.2 mm (20 mm³) and 0.01 mm (1 mm³).
+    for depth in [0.2, 0.01] {
+        let mut s = Session::default();
+        make_slotted_plate(&mut s);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 10, "height": 10, "corner": [-depth, 0, 3e-5], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "depth {depth}: {r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "depth {depth}: {r}");
+        let want = depth * 10.0 * (10.0 - 3e-5);
+        assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 1e-2 * want, "depth {depth}: {r}");
+    }
+
+    // Tiny penetration (3e-5 mm over a 50 × 10 mm wall = 0.015 mm³ >= min_volume) must never be
+    // falsely cleared as flush contact.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 80, "width": 80, "height": 10, "corner": [-15, -15, 0], "body_name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 14, "corner": [0, 0, -2], "operation": "new", "body_name": "Cut"}));
+        run(&mut s, "solid.combine", json!({"operation": "cut", "target": "Plate", "tools": ["Cut"]}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 50, "width": 50, "height": 10, "corner": [-3e-5, 0, 3e-5], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
+        assert!(!overlaps.is_empty() || !unchecked.is_empty(), "3e-5 penetration must not be cleared: {r}");
+    }
+
+    // Small-gap clearance: tenon shrunk inside the slot by 0.05 mm and 3e-5 mm all round.
+    for gap in [0.05, 3e-5] {
+        let mut s = Session::default();
+        make_slotted_plate(&mut s);
+        let size = 10.0 - 2.0 * gap;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": size, "width": size, "height": 10, "corner": [gap, gap, 3e-5], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "gap {gap}: {r}");
+        assert_eq!(r["overlaps"], json!([]), "gap {gap}: {r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "gap {gap}: {r}");
+        assert!((f(&near[0]["distance_mm"]) - gap).abs() < 1e-6, "gap {gap}: {r}");
+    }
+}
+
+/// #22050: when an overlap check still fails and lands in `unchecked`, a computable non-boolean
+/// minimum distance is reported on the `unchecked` entry while keeping the pair omitted from
+/// `overlaps`, `near`, and `nearest` (#21554).
+#[test]
+fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_nearest() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+    use solidcraft_kernel::BodyDistance;
+
+    use super::{PairContext, PairResult, collect_pair_results};
+
+    let bx = |x0: f64, x1: f64| Aabb3 { min: Vec3::new(x0, 0.0, 0.0), max: Vec3::new(x1, 10.0, 10.0) };
+    let names = ["A", "B", "C", "D"];
+    let subjects = [0, 1, 2, 3];
+    let boxes = [bx(0.0, 10.0), bx(10.0, 20.0), bx(25.0, 35.0), bx(10.0, 20.0)];
+    let allowed = |i: usize, j: usize| i != j;
+    let ctx = PairContext { names: &names, subjects: &subjects, boxes: &boxes, allowed: &allowed, gap: 1.0, min_volume: 0.01, nearest: 2 };
+
+    let close = [(0, 1), (0, 3)];
+    let results = [
+        Ok(PairResult {
+            unchecked: Some("relate conflict".into()),
+            distance: Some(BodyDistance { distance: 0.0, from: Vec3::new(10.0, 5.0, 5.0), to: Vec3::new(10.0, 5.0, 5.0), exact: true }),
+            ..PairResult::default()
+        }),
+        Ok(PairResult {
+            unchecked: Some("certified_vertex_gaps".into()),
+            distance: Some(BodyDistance { distance: 0.25, from: Vec3::new(10.0, 5.0, 5.0), to: Vec3::new(10.25, 5.0, 5.0), exact: false }),
+            ..PairResult::default()
+        }),
+    ];
+    let mut unchecked = Vec::new();
+    let summary = collect_pair_results(&ctx, &close, results, &mut unchecked, |pairs| {
+        pairs.iter().map(|&(i, j)| Ok(Some(if (i.min(j), i.max(j)) == (0, 2) { 15.0 } else { 5.0 }))).collect()
+    });
+
+    assert!(summary.overlaps.is_empty());
+    assert!(summary.near.is_empty());
+    assert_eq!(unchecked.len(), 2);
+    assert_eq!(unchecked[0].distance_mm, Some(0.0));
+    assert_eq!(unchecked[0].exact, None);
+    assert_eq!(unchecked[1].distance_mm, Some(0.25));
+    assert_eq!(unchecked[1].exact, Some(false));
+    let exact_json = serde_json::to_value(&unchecked[0]).unwrap();
+    let mesh_json = serde_json::to_value(&unchecked[1]).unwrap();
+    assert!(exact_json.get("exact").is_none(), "{exact_json}");
+    assert_eq!(mesh_json.get("exact"), Some(&json!(false)), "{mesh_json}");
+    let a_near: Vec<(&str, f64)> = summary.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
+    assert_eq!(a_near, vec![("C", 15.0)]);
 }

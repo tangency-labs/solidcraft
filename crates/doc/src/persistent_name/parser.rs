@@ -189,6 +189,14 @@ impl<'a> Parser<'a> {
                     let offsets = FaceName::parse_at(inner, depth + 1)?;
                     self.skip_past(close)?;
                     FaceName { base: Base::Inner { feature, offsets: Box::new(offsets) }, suffixes: Vec::new() }
+                } else if rest.starts_with("relief(") {
+                    // A sheet's corner relief wall, after the edge between where its two bends
+                    // stand: the edge must read, and the role is kept as written.
+                    let (inner, close) = self.nested_text(at + "relief(".len())?;
+                    EdgeName::parse_at(inner, depth + 1)?;
+                    self.skip_past(close)?;
+                    let role = self.s.get(at..=close).ok_or(NameError::Expected { at, what: "a name" })?;
+                    FaceName { base: Base::Made { feature, role: Role::Other(role.to_string()) }, suffixes: Vec::new() }
                 } else if self.keyword("blend") {
                     self.at += 2;
                     self.blend(feature, depth)?

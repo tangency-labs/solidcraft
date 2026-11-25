@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -90,7 +90,10 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let mut document = doc::Document::default();
     let component = document.add_component(Some("Imported part"), 0).unwrap();
     let feature = document
-        .add_feature(doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+        .add_feature(
+            doc::FeatureKind::Import { file: "glass.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
         .unwrap();
     document.features.iter_mut().find(|f| f.id == feature).unwrap().component = component;
     let mut session = Session::new(document);
@@ -156,7 +159,7 @@ fn selection_does_not_rebuild_the_model_scene() {
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
-        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     h.frame();
     let key = h.app.viewport.key;
     let highlight = h.app.viewport.hl_key;
@@ -264,8 +267,14 @@ fn appearance_edits_upload_palette_rows_only() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
-    app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     app.fit_view();
     let name = app.session.world_state().unwrap().bodies[0].name.clone();
@@ -290,6 +299,94 @@ fn appearance_edits_upload_palette_rows_only() {
     let glass = draw(&app);
     assert_eq!(glass.geometry, 0, "a see-through body's colour edit uploads no geometry: {glass:?}");
     assert!(glass.palette > 0, "it writes the palette: {glass:?}");
+}
+
+/// A part placed many times goes to the GPU once: drawn indirectly, its triangles are uploaded
+/// to the indirect draws' buffer alone, not to buffers of their own as well, and its shared
+/// edges (where the device draws them) to the edges' buffer; a scene adding a part that fits
+/// the buffers' room uploads that part's triangles and edges alone, not again every part before
+/// it (a design being opened adds parts at every scene); and the same parts again upload none,
+/// nor a highlight lighting a placement's edges. Every placement is drawn each time. Skipped
+/// without a GPU adapter.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_placed_parts_triangles_and_edges_are_uploaded_once_and_a_part_added_alone_after() {
+    const SIZE: u32 = 64;
+    let Some(mut frames) = crate::gpu::OffscreenFrames::new(SIZE, false) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.viewport.gpu = frames.target();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.cylinder", json!({"radius": 5, "height": 10, "base": [30, 0, 0]})).unwrap();
+    app.fit_view();
+    // The cylinder first: the buffers made for it have room for half as much again, which the
+    // box added after fits in (a part that does not fit makes them again, with every part).
+    let meshes: Vec<_> = app.session.model.state().bodies.iter().rev().map(|b| std::sync::Arc::new(crate::gpu::SharedTris::new(&b.mesh()))).collect();
+    assert_eq!(meshes.len(), 2, "a cylinder and a box");
+    assert!(meshes[1].vertices.len() * 2 < meshes[0].vertices.len(), "the box is the smaller");
+    let with_edges = frames.target().is_some_and(|t| t.edges);
+    let edges: Vec<_> = app
+        .session
+        .model
+        .state()
+        .bodies
+        .iter()
+        .rev()
+        .map(|b| std::sync::Arc::new(solidcraft_viewport_gpu::view::SharedEdges::new(&b.mesh(), |_| true, Vec::new())))
+        .collect();
+    let edge_bytes = |k: usize| if with_edges { edges[k].levels.iter().map(|(r, _)| r.len() as u64).sum() } else { 0 };
+    let bytes = |k: usize| (meshes[k].vertices.len() + meshes[k].indices.len() * 4) as u64 + edge_bytes(k);
+    // Each part placed three times, close together (all in view).
+    let scene = |parts: usize| {
+        let mut sc = crate::gpu::GpuScene::default();
+        let red = sc.color([200, 30, 30, 255]);
+        for (k, tris) in meshes.iter().take(parts).enumerate() {
+            let mut inst = solidcraft_viewport_gpu::view::InstancedMesh {
+                key: k as u64 + 1,
+                tris: tris.clone(),
+                instances: Vec::new(),
+                look: solidcraft_viewport_gpu::view::InstanceLook::Opaque,
+                levels: Vec::new(),
+                closed: true,
+                edges: with_edges.then(|| edges[k].clone()),
+            };
+            for i in 0..3 {
+                inst.place([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.5 * i as f32], [0.0, 0.0, 1.0, 0.0]], red);
+            }
+            sc.instanced.push(inst);
+        }
+        sc
+    };
+    let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let mut key = 0;
+    let mut draw = |parts: usize| {
+        key += 1;
+        let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene(parts))));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &slot), (0, &none)));
+        (frames.uploads(), frames.stats().triangles)
+    };
+    let drawn = |parts: usize| meshes.iter().take(parts).map(|t| 3 * (t.indices.len() as u64 / 3)).sum::<u64>();
+    let (one, triangles) = draw(1);
+    assert_eq!(one.geometry, bytes(0), "the first part's triangles and edges, once");
+    assert_eq!(triangles, drawn(1), "its three placements are drawn");
+    let (two, triangles) = draw(2);
+    assert_eq!(two.geometry, bytes(1), "the part added alone");
+    assert_eq!(triangles, drawn(2), "every placement of both parts is drawn");
+    let (again, triangles) = draw(2);
+    assert_eq!(again.geometry, 0, "the same parts upload no triangles or edges");
+    assert_eq!(triangles, drawn(2), "and are drawn as before");
+    // A placement lit (hovered or selected) draws its edges again from the model's segment
+    // buffer: the highlight uploads none of them.
+    if with_edges {
+        let lit = crate::gpu::GpuScene { lit_instanced_edges: scene(1).instanced, ..Default::default() };
+        let lit: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(lit)));
+        frames.frame(crate::scale_tests::view_frame(&app, SIZE, (key, &none), (1, &lit)));
+        assert_eq!(frames.highlight_uploads().geometry, 0, "a lit part's edges are the model's");
+    }
 }
 
 /// A body out of the view is left out of its block's draws: two boxes far apart, drawn with
@@ -345,7 +442,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
-        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false });
     let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
     h.frame();
@@ -465,6 +562,56 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
         }
     }
     shapes.iter().map(|s| walk(&s.shape, colour)).sum()
+}
+
+#[test]
+fn projected_and_lost_point_colours_require_the_project_option() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_lost":"#ef1256","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    let source = h.app.session.doc.features.last().unwrap().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for lost in [false, true] {
+        if lost {
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("timeline.suppress", json!({"feature":source,"suppressed":true})).unwrap();
+            h.app.edit_sketch(sketch);
+        }
+        for enhanced in [false, true, false] {
+            h.call("ui.set", json!({"projectLinkTools":enhanced}));
+            h.settle();
+            let projected = egui::Color32::from_rgb(0x12, 0xab, 0x34);
+            let missing = egui::Color32::from_rgb(0xef, 0x12, 0x56);
+            if enhanced {
+                let expected = if lost { missing } else { projected };
+                assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}: projected corners show their reference status");
+            } else {
+                assert_eq!(points_in(&h.shapes, projected), 0, "projected point colours are opt-in");
+                assert_eq!(points_in(&h.shapes, missing), 0, "lost point colours are opt-in");
+                let determined = egui::Color32::from_rgb(0xab, 0x34, 0x12);
+                let free = egui::Color32::from_rgb(0x34, 0x12, 0xab);
+                assert!(points_in(&h.shapes, determined) + points_in(&h.shapes, free) >= 4, "lost={lost}: main's point colours remain visible");
+            }
+        }
+    }
 }
 
 #[test]
@@ -712,6 +859,38 @@ fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
     assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
 }
 
+/// A sketch that failed for a lost projection marks where the lost face was on the model: the
+/// point the face was picked at, with the point under it in the sketch's plane (#5048). Shown
+/// or open for editing it is marked once; used by another feature, or hidden, it isn't. The mark
+/// follows its component when the component moves.
+#[test]
+fn a_lost_projection_marks_where_its_face_was_on_the_model() {
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, outline, part) = part_lost(true);
+    assert!(super::lost_sources(&h.app).is_empty(), "used by Peg, not shown");
+    h.app.session.visibility.shown_sketches.push(outline);
+    let marked = |h: &crate::scenario::Harness| super::lost_sources(&h.app);
+    let check = |sources: &[super::LostSource], at: Vec3| {
+        let [source] = sources else { panic!("{sources:?}") };
+        assert!(source.at.dist(at) < 1e-6, "picked on the block's front face: {source:?}");
+        // Guide is 30 off XZ: the foot is straight across from the pick, in the sketch's plane.
+        let across = source.foot - source.at;
+        assert!(across.x.abs() < 1e-6 && across.z.abs() < 1e-6 && (across.len() - 30.0).abs() < 1e-6, "{source:?}");
+    };
+    // Only Block's face lost its name: Block2's projection is still found.
+    check(&marked(&h), Vec3::new(20.0, 0.0, 5.0));
+    h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 0, 50]})).unwrap();
+    h.frames(2);
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert!(marked(&h).is_empty(), "hidden");
+    h.app.session.visibility.hidden_sketches.retain(|s| *s != outline);
+    h.app.run("sketch.edit", json!({"sketch": "Outline"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+}
+
 /// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,
 /// Outline2, ...) on a plane `offset` off XZ, each projecting the block's front face beside a
 /// circle; then the block's front side drawn again, so each fails for its projection. Returns
@@ -798,6 +977,40 @@ fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
     }
     assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "still drawn");
     assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
+}
+
+/// A camera move asks which sketches failed many times a frame. Only a sketch that lost a
+/// projection is looked up among the model's sketches: looking up every feature's took most of
+/// each frame in a design of thousands of features.
+#[test]
+fn a_camera_move_looks_up_only_the_sketches_that_lost_a_projection() {
+    let orbit = |h: &mut crate::scenario::Harness| {
+        let before = super::failed_sketches_asked(&h.app);
+        for _ in 0..3 {
+            h.app.cam.yaw += 0.1;
+            h.frame();
+        }
+        super::failed_sketches_asked(&h.app) - before
+    };
+    let mut h = crate::scenario::Harness::new();
+    for i in 0..4 {
+        h.app.run("sketch.create", json!({"plane":"XY","offset":10 * i,"name":format!("Sound{i}")})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.frames(3);
+    assert!(h.app.session.model.results.len() >= 4);
+    assert_eq!(orbit(&mut h), 0, "no sketch lost a projection: none is looked up");
+
+    // One that did, among sound ones: it alone is looked up, as often as it is asked for.
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let asked = orbit(&mut h);
+    let once = super::failed_sketches_asked(&h.app);
+    let (shown, _) = super::failed_sketches(&h.app);
+    assert_eq!(shown.iter().map(|ss| ss.feature).collect::<Vec<_>>(), sketches, "still found");
+    assert_eq!(super::failed_sketches_asked(&h.app) - once, 1, "one answer looks up one sketch");
+    assert!(asked > 0);
+    assert!(h.app.session.model.results.len() > 1, "there are others it could have looked up");
 }
 
 /// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn

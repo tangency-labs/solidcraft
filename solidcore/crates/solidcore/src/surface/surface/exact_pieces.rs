@@ -716,30 +716,14 @@ pub(crate) fn surface_uses_approximate_net(s: &Surface) -> bool {
 /// Returns the exact rational B-spline representation of `s` when `s`'s point and
 /// derivative evaluations equal that NURBS net's everywhere on its natural domain (`eps = 0`),
 /// or `None` when `s` has no exact NURBS representation (`ProceduralBlend`,
-/// `ProceduralSweep`, power-basis `BSplineSurfaceForm::Polynomial`, `WR-713` asymmetric
-/// unbounded inside-out `Cone`, `OffsetSurface`, `CurveBounded`, `Step`, `SrfInVolume`).
+/// `ProceduralSweep`, power-basis `BSplineSurfaceForm::Polynomial`, `OffsetSurface`,
+/// `CurveBounded`, `Step`, `SrfInVolume`).
 pub(crate) fn exact_nurbs_surface<'a>(
     k: &Kernel,
     s: &'a Surface,
 ) -> Result<Option<Cow<'a, BSplineSurface>>> {
     if s.procedural_sweep().is_some() || matches!(s.kind(), SurfaceKind::ProceduralBlend(_)) {
         return Ok(None);
-    }
-    if let SurfaceKind::Cone(c) = s.kind_with_nurb(k)? {
-        if !c.rev.is_bounded()? && c.inside_out && !k.fixes.cone_unbounded_parameterized_as_nurb {
-            let step_ivl = c.rev.anal_uv_domain.v_interval();
-            let nurb_dom = c.rev.base().natural_uv_domain();
-            let nurb_ivl = if c.rev.swap_uv {
-                nurb_dom.u_interval()
-            } else {
-                nurb_dom.v_interval()
-            };
-            if nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
-                || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits()
-            {
-                return Ok(None);
-            }
-        }
     }
     Ok(as_b_spline(k, s)?.filter(|b| b.form() != BSplineSurfaceForm::Polynomial))
 }
@@ -791,13 +775,15 @@ pub(crate) fn exact_nurbs_curve_data(
         if !(w.is_finite() && w > 0.0 && cp.x.is_finite() && cp.y.is_finite() && z.is_finite()) {
             return Err(bad());
         }
-        let (ux, vy) = if rational {
+        // Division by one is exact. Preserve a coordinate on a periodic seam when
+        // a record stores a polynomial trim with explicit unit weights.
+        let (ux, vy) = if w == 1.0 {
+            (Ivl::from(cp.x), Ivl::from(cp.y))
+        } else {
             (
                 Ivl::from(cp.x) / Ivl::from(w),
                 Ivl::from(cp.y) / Ivl::from(w),
             )
-        } else {
-            (Ivl::from(cp.x), Ivl::from(cp.y))
         };
         if !(ux.lo.is_finite() && ux.hi.is_finite() && vy.lo.is_finite() && vy.hi.is_finite()) {
             return Err(bad());
@@ -1654,9 +1640,9 @@ fn eval_plane_part(
 ) -> LiftPart {
     let (ux, vy) = (ev.w0.x, ev.w0.y);
     let (umx, umy) = (ev.wm0.x, ev.wm0.y);
-    let in_dom = ivl_inside(ux, step_dom.min().x, step_dom.max().x)
-        && ivl_inside(vy, step_dom.min().y, step_dom.max().y);
-    if oob || in_dom {
+    let in_u = ivl_inside(ux, step_dom.min().x, step_dom.max().x);
+    let in_v = ivl_inside(vy, step_dom.min().y, step_dom.max().y);
+    if oob || (in_u && in_v) {
         let s_m_0 = v_add(origin, v_add(v_scale(su, umx), v_scale(sv, umy)));
         let g_m = v_sub(s_m_0, ev.cm0);
         let dg_m = v_sub(v_add(v_scale(su, ev.wm1.x), v_scale(sv, ev.wm1.y)), ev.cm1);
@@ -1673,11 +1659,15 @@ fn eval_plane_part(
         let g_m = v_sub(s_m_0, ev.cm0);
         let su_eff = if ux.hi <= step_dom.min().x || ux.lo >= step_dom.max().x {
             VZ
+        } else if in_u {
+            su
         } else {
             v_hull(su, VZ)
         };
         let sv_eff = if vy.hi <= step_dom.min().y || vy.lo >= step_dom.max().y {
             VZ
+        } else if in_v {
+            sv
         } else {
             v_hull(sv, VZ)
         };
@@ -2050,6 +2040,25 @@ pub(crate) fn certified_lift(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_unit_weight_ruling_stays_on_the_exact_periodic_seam() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        let net = NlCurve::new(
+            vec![
+                CPoint::new(1.0, 0.0, NOZ, 1.0),
+                CPoint::new(1.0, 2.0, NOZ, 1.0),
+            ],
+            1,
+            vec![0.0, 0.0, 2.0, 2.0],
+        )
+        .unwrap();
+        let curve = BSplineCurve::from_nurb(net, 2, false);
+        let (_, _, _, min, max) = exact_nurbs_curve_data(&curve, true).unwrap();
+        assert_eq!((min.x, max.x), (1.0, 1.0));
+    }
 
     /// Of a piece and its UV curves, only the last trimmed has a knot a rounding past the
     /// interval's end, which its trim snaps the end onto. The three are trimmed to the one
@@ -2547,6 +2556,40 @@ mod tests {
     }
 
     #[test]
+    fn a_clamped_plane_keeps_the_derivative_along_its_boundary() {
+        use crate::curve::line::Line;
+        let mut plane = Plane::create_canonical(&Axis2Placement::IDENTITY).unwrap();
+        plane
+            .adjust_step_uv_domain(&Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0))
+            .unwrap();
+        plane.set_out_of_bounds_enabled(false);
+        let plane = Surface::from(plane);
+        let k = Kernel::default();
+        let span = Extent1d::from_raw(0.0, 1.0);
+        let tol = 1e-7;
+        for swap in [false, true] {
+            let point = |along, across| {
+                if swap {
+                    Vec3::new(across, along, 0.0)
+                } else {
+                    Vec3::new(along, across, 0.0)
+                }
+            };
+            let line = |a, b, dim| Curve::from(Line::from_points(a, b, dim));
+            // Only the transverse parameter crosses the boundary. Its clamped
+            // displacement is at most 1e-12 along the entire affine segment.
+            let uv = line(point(0.125, -1e-12), point(0.875, 1e-12), 2);
+            let boundary = line(point(0.125, 0.0), point(0.875, 0.0), 3);
+            assert!(certified_lift(&k, &plane, &uv, &boundary, span, tol).unwrap() <= tol);
+            let offset = line(point(0.125, 2.0 * tol), point(0.875, 2.0 * tol), 3);
+            assert_eq!(
+                certified_lift(&k, &plane, &uv, &offset, span, tol).unwrap_err(),
+                lift_too_far()
+            );
+        }
+    }
+
+    #[test]
     fn a_curve_on_a_surface_that_is_not_analytic_is_refused() {
         let k = Kernel::default();
         let (sphere, plane) = sphere_and_plane(&k);
@@ -2858,30 +2901,12 @@ mod tests {
             Err(SolidError::Unsupported { operation: OP, .. })
         ));
 
-        // `WR-713`: asymmetric unbounded inside-out `Cone` without `cone_unbounded_parameterized_as_nurb`
+        // `WR-713`: an asymmetric unbounded inside-out `Cone` is parameterised as its NURB
         let cone_srf = Surface::from(
             Cone::new_unbounded(&k, Point3::ZERO, Vec3::X, Vec3::Y, 5.0, 30.0, false, true)
                 .unwrap(),
         );
-        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_none());
-        let mut k_fixed = Kernel::default();
-        k_fixed.fixes.cone_unbounded_parameterized_as_nurb = true;
-        let cone_fixed = Surface::from(
-            Cone::new_unbounded(
-                &k_fixed,
-                Point3::ZERO,
-                Vec3::X,
-                Vec3::Y,
-                5.0,
-                30.0,
-                false,
-                true,
-            )
-            .unwrap(),
-        );
-        assert!(exact_nurbs_surface(&k_fixed, &cone_fixed)
-            .unwrap()
-            .is_some());
+        assert!(exact_nurbs_surface(&k, &cone_srf).unwrap().is_some());
 
         // Rational curve homogeneous-to-Cartesian rounding and `LIFT_MAX_DEPTH` cap refusal:
         // with weight `3.0`, adjacent homogeneous coordinates `wx_a` and `wx_b` (`+1` ULP)

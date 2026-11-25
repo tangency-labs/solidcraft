@@ -11,10 +11,41 @@ readme = "README.md"
 keywords = ["cad", "brep", "nurbs", "geometry", "solid-modeling"]
 categories = ["graphics", "mathematics", "science"]
 
+# A few test binaries, one per area, not one per file (#14926): each links the whole kernel.
+autotests = false
+
+# Every file in tests/ not listed below is a module of one area's tests/<area>/main.rs.
+[[test]]
+name = "blend"
+path = "tests/blend/main.rs"
+
+[[test]]
+name = "booleans"
+path = "tests/booleans/main.rs"
+
+[[test]]
+name = "geometry"
+path = "tests/geometry/main.rs"
+
+[[test]]
+name = "offset"
+path = "tests/offset/main.rs"
+
+[[test]]
+name = "sweep"
+path = "tests/sweep/main.rs"
+
+[[test]]
+name = "topology"
+path = "tests/topology/main.rs"
+
+# panic_fuzz installs a process-wide panic hook (`support/panic_fuzz.rs`), so it keeps a
+# process of its own.
+[[test]]
+name = "panic_fuzz"
+path = "tests/panic_fuzz.rs"
+
 [features]
-# Kernels start with the curve cache memo off (`Kernel::memoize_curve_caches`), to
-# run difftest and the tests in both positions. Results never depend on it.
-curve-memo-off = []
 # The profiler (`solidcore::profile`): scopes and counters recorded in `Kernel::profiler`,
 # written as JSON Lines. Off, every scope compiles to nothing. Results never depend on it.
 profile = []

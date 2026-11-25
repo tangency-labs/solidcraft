@@ -29,11 +29,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<EquationCurveResult>)
         .params(concat!(
-            "x: x(t), y: y(t): formulas of t in the design's expression language and parameters (\"r * (cos(t) + t * sin(t))\"); or explicit: true and y: f(x) alone (no x); \
-             start, end: the range of t (or of x): a number or an expression (\"2 * pi\", \"360 deg\" is 2·pi, a length is in the design's unit); \
+            "x: x(t), y: y(t): formulas of t in the design's expression language and parameters (\"r * (cos(t rad) + t * sin(t rad))\"); or explicit: true and y: f(x) alone (no x); \
+             start, end: the range of t (or of x): a number or an expression. An angle result gives its number of radians (\"360 deg\" gives 2 * pi); a length gives its number in the design's unit; \
              tolerance?: mm (default 0.01): how far the curve may stray from the formulas (0.0001 to 10); construction?: bool; \
              variable_unit?: \"number\" (default) or \"range\". \
-             The variable is a plain number: sin(t) reads it in radians; a result without a unit is in the design's length unit. \
+             Plain numbers in sin(), cos() and tan() read degrees (sin(90) is 1); use rad for radians. A result without a unit is in the design's length unit. \
              With variable_unit \"range\" it is a length, so a ^ 2 / (4 * t) is a length when a is one: start and end must both be lengths, or one a length and the other a plain number, which is then in the design's unit. \
              Makes a fit point spline through fixed points, as many as the tolerance needs (up to 500), closed smoothly when it ends where it starts; \
              the points are placed again from the formulas whenever the parameters change. Returns curve, points (how many), closed, deviation (mm)",
@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<EquationEditResult>)
         .params(
             "curve: an equation curve's id; x?, y?, explicit?, start?, end?, tolerance?, variable_unit?: as in sketch.equation_curve, each kept when left out (explicit: true drops x; false needs x). \
-             The points are chosen again for the new formulas; the curve's start point (and the end point of an open curve) keeps its id, so geometry joined there stays joined. Returns curve, points, closed, deviation",
+             Older curves keep their radians convention. The points are chosen again for the new formulas; the curve's start point (and the end point of an open curve) keeps its id, so geometry joined there stays joined. Returns curve, points, closed, deviation",
         ),
 ];
 
@@ -121,6 +121,9 @@ fn equation(p: &Value, cmd: &str, old: Option<&EquationCurve>) -> Result<Equatio
         end: pick("end", old.map(|o| &o.end))?,
         tolerance: tolerance(p, cmd)?.or(old.map(|o| o.tolerance)).unwrap_or(DEFAULT_TOLERANCE),
         variable_unit: variable_unit(p, cmd)?.or(old.map(|o| o.variable_unit)).unwrap_or_default(),
+        // A curve saved before plain numbers read degrees keeps its mark through an edit
+        // (#19630): its formulas were written for radians, and stay where they were.
+        radians_trig: old.is_some_and(|o| o.radians_trig),
     };
     sketch_equation::check(&eq).map_err(|e| bad(cmd, e.to_string()))?;
     Ok(eq)

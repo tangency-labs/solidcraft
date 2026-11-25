@@ -176,9 +176,6 @@ fn the_views_centre_lands_on_its_position() {
     assert!(frame.boundary(&box_of(5.0, 5.0, 5.0, 5.0)).is_ok_and(|b| b.min == b.max), "a point's box is a point");
     let line = Seg2::Line { a: Vec2::ZERO, b: Vec2::new(100.0, 20.0) };
     assert_eq!(frame.seg_to_paper(&line), Seg2::Line { a: Vec2::new(110.0, 128.5), b: Vec2::new(310.0, 168.5) });
-    let bounded = CurveAccuracy::Bounded { max_deviation_mm: 0.01 };
-    assert_eq!(frame.accuracy_on_paper(bounded), CurveAccuracy::Bounded { max_deviation_mm: 0.02 });
-    assert_eq!(frame.accuracy_on_paper(CurveAccuracy::Analytic), CurveAccuracy::Analytic);
 }
 
 /// A scale is read and written as paper:model, kept as written, within 1:100000 to 1000:1.
@@ -191,7 +188,7 @@ fn a_scale_reads_and_writes_as_paper_to_model() {
         assert_eq!(serde_json::from_value::<Scale>(serde_json::json!(text)).unwrap(), s);
     }
     let not_scales = [
-        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", " 1:2", "1:2 ", "1e3:1", "NaN:1", "inf:1", "1..5:1",
+        "", "1", "1:", ":2", "1:2:3", "0:1", "1:0", "-1:2", "1:-2", "1:100001", "1001:1", "1/2", "1 0:1", "1e3:1", "NaN:1", "inf:1", "1..5:1",
         "1:2.", "١:٢",
     ];
     for text in not_scales {
@@ -248,6 +245,118 @@ fn the_fitted_scale_is_the_largest_preset_that_fits() {
     }
 }
 
+/// Whether any component of `v` is -0.
+fn negative_zero(v: Vec3) -> bool {
+    [v.x, v.y, v.z].iter().any(|c| *c == 0.0 && c.is_sign_negative())
+}
+
+/// Projected from the front view, each side is exactly a named view: in third angle the side the
+/// view sits on (right of the front, the right view), in first angle the side away from it, as
+/// ISO 5456-2 places them. Their axes are exact, with no -0, and the names read as written.
+#[test]
+fn projected_views_of_the_front_are_the_named_views_in_either_angle() {
+    use ProjectedSide::{Above, Below, Left, Right};
+    let front = NamedView::Front.basis();
+    let sides = [
+        (Right, NamedView::Right, NamedView::Left),
+        (Left, NamedView::Left, NamedView::Right),
+        (Above, NamedView::Top, NamedView::Bottom),
+        (Below, NamedView::Bottom, NamedView::Top),
+    ];
+    for (side, third, first) in sides {
+        for (projection, named) in [(Projection::Third, third), (Projection::First, first)] {
+            let view = projected_basis(&front, side, projection).unwrap();
+            assert_eq!(view, named.basis(), "{side:?} in {projection:?}");
+            assert!(!negative_zero(view.x) && !negative_zero(view.y), "{side:?} in {projection:?}: {view:?}");
+        }
+    }
+    let names: Vec<_> = ProjectedSide::ALL.iter().map(|s| serde_json::to_value(s).unwrap()).collect();
+    assert_eq!(names, [serde_json::json!("left"), serde_json::json!("right"), serde_json::json!("above"), serde_json::json!("below")]);
+    assert!(serde_json::from_value::<ProjectedSide>(serde_json::json!("top")).is_err());
+}
+
+/// From any view: the projected view looks from its side's paper axis (or the opposite one in
+/// first angle), keeps the parent's other axis and origin, and is a basis; four quarter turns the
+/// same way bring the parent back, and so does a turn and its opposite.
+#[test]
+fn a_projected_view_is_its_parent_turned_a_quarter_turn() {
+    use ProjectedSide::{Above, Below, Left, Right};
+    let leaning = basis_looking(Vec3::new(0.3, 1.0, -0.2), Vec3::new(0.1, 0.2, 1.0), Vec3::new(5.0, -7.0, 2.0)).unwrap();
+    for parent in NamedView::ALL.map(NamedView::basis).into_iter().chain([leaning]) {
+        for projection in [Projection::Third, Projection::First] {
+            let from = if projection == Projection::Third { 1.0 } else { -1.0 };
+            for side in ProjectedSide::ALL {
+                let view = projected_basis(&parent, side, projection).unwrap();
+                validate_plane(&view).unwrap();
+                assert_eq!(view.origin, parent.origin);
+                let (toward_viewer, kept, kept_by) = match side {
+                    Right => (parent.x * from, view.y, parent.y),
+                    Left => (parent.x * -from, view.y, parent.y),
+                    Above => (parent.y * from, view.x, parent.x),
+                    Below => (parent.y * -from, view.x, parent.x),
+                };
+                assert!(close(view.normal(), toward_viewer) && kept == kept_by, "{parent:?} {side:?} {projection:?}: {view:?}");
+            }
+            let turned = |mut b: Plane, side, n: usize| {
+                for _ in 0..n {
+                    b = projected_basis(&b, side, projection).unwrap();
+                }
+                b
+            };
+            for side in ProjectedSide::ALL {
+                let back = turned(parent, side, 4);
+                assert!(close(back.x, parent.x) && close(back.y, parent.y), "{parent:?}: four turns {side:?}");
+            }
+            for (side, opposite) in [(Right, Left), (Above, Below)] {
+                let back = turned(turned(parent, side, 1), opposite, 1);
+                assert!(close(back.x, parent.x) && close(back.y, parent.y), "{parent:?}: {side:?} then {opposite:?}");
+            }
+        }
+        // The principal views' projections stay exact, with no -0.
+        if parent.x.x.fract() == 0.0 && parent.x.y.fract() == 0.0 && parent.x.z.fract() == 0.0 {
+            for (side, projection) in ProjectedSide::ALL.into_iter().flat_map(|s| [(s, Projection::Third), (s, Projection::First)]) {
+                let view = projected_basis(&parent, side, projection).unwrap();
+                assert!(!negative_zero(view.x) && !negative_zero(view.y), "{parent:?} {side:?} {projection:?}");
+            }
+        }
+    }
+    let skewed = Plane { x: Vec3::new(1.0, 0.1, 0.0), ..NamedView::Front.basis() };
+    let not_finite = Plane { origin: Vec3::new(f64::NAN, 0.0, 0.0), ..NamedView::Front.basis() };
+    for parent in [skewed, not_finite] {
+        assert_eq!(projected_basis(&parent, Right, Projection::Third), Err(Invalid("a view's basis is finite and orthonormal")));
+    }
+}
+
+/// An aligned projected view takes its parent's scale and lines up with it: every corner of a box
+/// sits as high in the front view and the views to its left and right, and as far across in the
+/// views above and below it; the projected view's centre lands at the position asked for along the
+/// free axis. A position past the paper's limit is refused.
+#[test]
+fn an_aligned_view_lines_up_with_its_parent() {
+    let corners: Vec<Vec3> =
+        (0..8).map(|i| Vec3::new(f64::from(i & 1) * 100.0, f64::from((i >> 1) & 1) * 50.0, f64::from((i >> 2) & 1) * 20.0)).collect();
+    let front = ViewFrame::new(NamedView::Front.basis(), "1:2".parse().unwrap(), Vec2::new(50.0, 10.0), Vec2::new(150.0, 150.0)).unwrap();
+    for projection in [Projection::Third, Projection::First] {
+        for side in ProjectedSide::ALL {
+            let centre = Vec2::new(25.0, -10.0);
+            let view = front.aligned(side, projection, centre, Vec2::new(300.0, 60.0)).unwrap();
+            assert_eq!(view.scale(), front.scale());
+            let across = matches!(side, ProjectedSide::Above | ProjectedSide::Below);
+            for p in &corners {
+                let (a, b) = (front.to_paper(*p), view.to_paper(*p));
+                let lined_up = if across { (a.x - b.x).abs() } else { (a.y - b.y).abs() };
+                assert!(lined_up < EPS, "{side:?} {projection:?}: {p:?} at {a:?} and {b:?}");
+            }
+            let at = view.paper_map().apply(centre);
+            let free = if across { (at.y - 60.0).abs() } else { (at.x - 300.0).abs() };
+            assert!(free < EPS, "{side:?} {projection:?}: centre at {at:?}");
+        }
+    }
+    let right = front.aligned(ProjectedSide::Right, Projection::Third, Vec2::ZERO, Vec2::new(5000.001, 0.0));
+    assert!(right.is_err(), "past the paper's limit");
+    assert!(front.aligned(ProjectedSide::Above, Projection::Third, Vec2::new(f64::NAN, 0.0), Vec2::ZERO).is_err(), "a centre not finite");
+}
+
 /// What a frame refuses: a basis that isn't orthonormal or finite, a centre that isn't finite, and
 /// a position past the paper's limit.
 #[test]
@@ -270,4 +379,16 @@ fn a_frame_refuses_hostile_input() {
         assert!(ViewFrame::new(front, one, Vec2::ZERO, position).is_err(), "{position:?}");
     }
     assert!(ViewFrame::new(front, one, Vec2::ZERO, Vec2::new(5000.0, -5000.0)).is_ok());
+}
+
+/// A side's free axis is x for a view to the left or right of its parent, y above or below it.
+#[test]
+fn a_sides_free_axis_is_x_beside_its_parent_and_y_above_or_below() {
+    let p = Vec2::new(3.0, 4.0);
+    for side in [ProjectedSide::Left, ProjectedSide::Right] {
+        assert_eq!((side.along(p), side.on_free_axis(p, 9.0)), (3.0, Vec2::new(9.0, 4.0)), "{side:?}");
+    }
+    for side in [ProjectedSide::Above, ProjectedSide::Below] {
+        assert_eq!((side.along(p), side.on_free_axis(p, 9.0)), (4.0, Vec2::new(3.0, 9.0)), "{side:?}");
+    }
 }

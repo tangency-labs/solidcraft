@@ -12,9 +12,9 @@
 //!
 //! The fork runs its imprint end fits too (WR-452/453/498: the port's end trim and end
 //! extension, always on).
-//! With them and `boolean_vertex_by_best_crossing` the join is sound (the fork's
-//! `sound()`: the level-2 check clean) and its volume lies between the ribbed slab's and
-//! the sum of the two (the fork's bound). Without the best crossing, test 61 fails.
+//! With them and the best crossing (WR-410, always on since its flag was retired) the join
+//! is sound (the fork's `sound()`: the level-2 check clean) and its volume lies between the
+//! ribbed slab's and the sum of the two (the fork's bound).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -132,16 +132,14 @@ fn grazing_join(fixes: &UpstreamFixes) -> (usize, f64, f64, f64, f64) {
     )
 }
 
-/// WR-410's best crossing as `best` says (the imprint end fits are always on).
-fn fixes(best: bool) -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.boolean_vertex_by_best_crossing = best;
-    f
+/// The default fixes (WR-410's best crossing and the imprint end fits are always on).
+fn fixes() -> UpstreamFixes {
+    UpstreamFixes::default()
 }
 
 #[test]
 fn fork_c9db18e_grazing_join_is_sound_with_the_best_crossing() {
-    let (failures, v, ribbed, pad, gap) = grazing_join(&fixes(true));
+    let (failures, v, ribbed, pad, gap) = grazing_join(&fixes());
     assert_eq!(failures, 0, "the check");
     assert!(
         v > ribbed && v < ribbed + pad,
@@ -151,14 +149,6 @@ fn fork_c9db18e_grazing_join_is_sound_with_the_best_crossing() {
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }
 
-/// Placed by the first crossing, an edge ends 9.3e-5 from its vertex: test 61 fails.
-#[test]
-fn fork_c9db18e_grazing_join_fails_the_check_by_the_first_crossing() {
-    let (failures, _, _, _, gap) = grazing_join(&fixes(false));
-    assert!(failures > 0);
-    assert!(gap > 5e-5, "{gap}");
-}
-
 /// WR-453 (tangency-labs/smlib a8caccd, the imprint end extension) on the same join: with
 /// the best crossing and the interval trim (WR-452), every edge ends within the body
 /// tolerance of its vertex and the join is sound (the fork's thread test's measure: no
@@ -166,7 +156,7 @@ fn fork_c9db18e_grazing_join_fails_the_check_by_the_first_crossing() {
 /// intersection edge stopped 9.3e-5 short of its vertex and the check failed.
 #[test]
 fn fork_a8caccd_grazing_join_edges_reach_their_vertices_with_the_extension() {
-    let (failures, _, _, _, gap) = grazing_join(&fixes(true));
+    let (failures, _, _, _, gap) = grazing_join(&fixes());
     assert_eq!(failures, 0, "the check");
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }

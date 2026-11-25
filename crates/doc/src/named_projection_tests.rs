@@ -5,6 +5,167 @@ use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+#[test]
+fn tilted_spline_projection_keeps_one_exact_curve() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_sketch::{CurveKind, LinkGeom, Nurbs};
+
+    let from = Plane::XY.offset(9.);
+    let to = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for (control, periodic, rational) in [(false, false, false), (false, true, false), (true, false, false), (true, false, true)] {
+        let mut sketch = Sketch::default();
+        let mut points: Vec<Vec2> = [[0., 0.], [5., 18.], [25., -5.], [40., 9.], [50., 1.]].into_iter().map(|[x, y]| Vec2::new(x, y)).collect();
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let nurbs = rational.then(|| Nurbs { knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.], weights: vec![1., 0.8, 1.4, 0.9, 1.] });
+        let fit_spans = (!control).then(|| solidcraft_sketch::fit_beziers_mode(&points, periodic).unwrap());
+        let chords: Vec<_> = points.windows(2).map(|p| p[0].dist(p[1]).max(1e-9)).collect();
+        let total: f64 = chords.iter().sum();
+        let expected: Vec<Vec2> = (0..=128)
+            .map(|i| {
+                let t = f64::from(i) / 128.;
+                if let Some(spans) = &fit_spans {
+                    // Compact knots follow source chord parameter, while the open sketch's
+                    // public t advances uniformly per span. Compare the same geometric point.
+                    let mut u = t * total;
+                    let mut span = 0;
+                    while span + 1 < spans.len() && u > chords[span] {
+                        u -= chords[span];
+                        span += 1;
+                    }
+                    let [p0, p1, p2, p3] = spans[span];
+                    Seg2::Cubic { p0, p1, p2, p3 }.point_at((u / chords[span]).clamp(0., 1.))
+                } else {
+                    solidcraft_sketch::spline_point_mode(&points, control, 3, false, nurbs.as_ref(), t)
+                }
+            })
+            .map(|p| to.to_local(from.to_world(p)))
+            .collect();
+        sketch.add_curve(CurveKind::Spline { pts, control, degree: 3, periodic, nurbs, handles: Vec::new() }, Some("source")).unwrap();
+        let report = solidcraft_sketch::solve(&mut sketch);
+        let mut state = ModelState::default();
+        state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+            feature: 1,
+            name: "Source".into(),
+            plane: from,
+            sketch,
+            report,
+            profiles: Vec::new(),
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        }));
+        let resolved = crate::project::resolve(
+            &Document::default(),
+            &BTreeMap::new(),
+            &state,
+            &to,
+            LinkKind::Project,
+            &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+        )
+        .unwrap();
+        assert!(matches!(resolved.geom.as_slice(), [LinkGeom::Spline { .. }]), "projected spline must stay one spline: {:?}", resolved.geom);
+        let mut projected = Sketch::default();
+        let link = projected.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+        let ci = projected.link_curves(&link)[0];
+        assert!(projected.reverse_spline(ci).is_err(), "linked curves follow their source");
+        projected.break_link(&link).unwrap();
+        for reversed in [false, true, false] {
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+            let CurveKind::Spline { pts, control: projected_control, degree, periodic, nurbs, .. } = &projected.curves[ci].kind else {
+                panic!("projection is not a spline")
+            };
+            let points: Vec<Vec2> = pts.iter().map(|p| projected.point(*p).unwrap()).collect();
+            for (i, expected) in expected.iter().enumerate() {
+                let t = i as f64 / 128.;
+                let actual = solidcraft_sketch::spline_point_mode(
+                    &points,
+                    *projected_control,
+                    *degree,
+                    *periodic,
+                    nurbs.as_ref(),
+                    if reversed { 1. - t } else { t },
+                );
+                assert!(
+                    actual.dist(*expected) < 1e-8,
+                    "control={control}, periodic={periodic}, rational={rational}, reversed={reversed}, t={t}, actual={actual:?}, expected={expected:?}"
+                );
+            }
+            if reversed {
+                projected.reverse_spline(ci).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn projecting_a_fit_spline_keeps_edited_tangent_handles_on_parallel_and_tilted_planes() {
+    use solidcraft_sketch::{CurveKind, LinkGeom};
+
+    let from = Plane::XY.offset(9.);
+    let tilted = Plane::new(Vec3::new(-2., 3., 1.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+    for periodic in [false, true] {
+        let mut sketch = Sketch::default();
+        let mut points = vec![Vec2::new(0., 0.), Vec2::new(8., 13.), Vec2::new(20., -2.)];
+        if periodic {
+            points.push(points[0]);
+        }
+        let pts = points.iter().map(|p| sketch.add_point(*p, None).unwrap()).collect();
+        let curve = sketch
+            .add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, Some("source"))
+            .unwrap();
+        sketch.add_spline_handles(curve).unwrap();
+        let CurveKind::Spline { handles, .. } = &sketch.curves[curve].kind else { panic!("not a spline") };
+        let handle = handles[1];
+        sketch.points[handle].pos += Vec2::new(3., -2.);
+        for reversed in [false, true] {
+            let mut source = sketch.clone();
+            if reversed {
+                source.reverse_spline(curve).unwrap();
+            }
+            let report = solidcraft_sketch::solve(&mut source);
+            let CurveKind::Spline { pts, handles, .. } = &source.curves[curve].kind else { panic!("not a spline") };
+            let points: Vec<_> = pts.iter().map(|p| source.point(*p).unwrap()).collect();
+            let handles: Vec<_> = handles.iter().map(|p| source.point(*p).unwrap()).collect();
+            let expected = solidcraft_sketch::fit_beziers_with_handles(&points, &handles, periodic).unwrap();
+            let mut state = ModelState::default();
+            state.sketches.push(Arc::new(crate::eval::SolvedSketch {
+                feature: 1,
+                name: "Source".into(),
+                plane: from,
+                sketch: source,
+                report,
+                profiles: Vec::new(),
+                profiles_3d: Vec::new(),
+                ends: Default::default(),
+            }));
+            for to in [Plane::XY, tilted] {
+                let resolved = crate::project::resolve(
+                    &Document::default(),
+                    &BTreeMap::new(),
+                    &state,
+                    &to,
+                    LinkKind::Project,
+                    &LinkSource::SketchCurve { sketch: 1, curve: "source".into() },
+                )
+                .unwrap();
+                assert_eq!(resolved.geom.len(), expected.len(), "one exact curve per handled span");
+                for (actual, span) in resolved.geom.iter().zip(&expected) {
+                    let LinkGeom::Spline { pts, control: true, degree: 3, .. } = actual else { panic!("not an exact cubic: {actual:?}") };
+                    assert_eq!(pts.len(), 4);
+                    for (actual, point) in pts.iter().zip(span) {
+                        let expected = to.to_local(from.to_world(*point));
+                        assert!(actual.dist(expected) < 1e-10, "periodic={periodic}, reversed={reversed}: {actual:?} != {expected:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn named_box(name: &str, width: f64, height: f64) -> ModelBody {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(width, width, height)).unwrap();
     let mut names = vec!["unrelated".to_string(); body.faces(0.01).unwrap().len()];
@@ -89,6 +250,7 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         curves: curves.iter().map(|c| c.to_string()).collect(),
         points: points.iter().map(|p| p.to_string()).collect(),
         name: "shared:top".into(),
+        from: Vec::new(),
     };
     assert_eq!(lost(&["l1", "l2", "l3", "l4", "a1", "a2"], &["p1"]).label(), "projected face of Source (curves l1, l2, l3, l4, …)");
     assert_eq!(lost(&["l1", "l2", "l3", "l4"], &[]).label(), "projected face of Source (curves l1, l2, l3, l4)");
@@ -117,6 +279,51 @@ fn a_lost_projection_is_labelled_by_its_kind_and_its_curves_or_points() {
         let text = error.in_feature("Outline").to_string();
         assert_eq!(crate::lost_projection_parts(&text).map(|t| (t.feature, t.count)), Some(("Outline", 1)), "{text}");
     }
+}
+
+/// A lost projection names the features that made its face, edge or vertex, in timeline order and
+/// each once, so the user knows which edit to look at (#5048); a feature no longer in the design
+/// is left out, and the message still reads back.
+#[test]
+fn a_lost_projection_names_the_features_that_made_it() {
+    let lost = |curves: &[&str], points: &[&str], from: &[&str]| crate::LostProjection {
+        link: "j1".into(),
+        what: "projected vertex of Body1".into(),
+        curves: curves.iter().map(|c| c.to_string()).collect(),
+        points: points.iter().map(|p| p.to_string()).collect(),
+        name: String::new(),
+        from: from.iter().map(|f| f.to_string()).collect(),
+    };
+    let made = ["Extrude5", "Mirror2", "Revolve2"];
+    assert_eq!(lost(&[], &["p1"], &made).label(), "projected vertex of Body1 (point p1; made by Extrude5, Mirror2, Revolve2)");
+    assert_eq!(lost(&["l1", "l2"], &[], &made[..1]).label(), "projected vertex of Body1 (curves l1, l2; made by Extrude5)");
+    assert_eq!(lost(&[], &[], &made[..1]).label(), "projected vertex of Body1 (made by Extrude5)");
+
+    let mut doc = Document::default();
+    let ids: Vec<u64> = made
+        .iter()
+        .map(|name| {
+            doc.add_feature(crate::FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::default() }, Some(name))
+                .unwrap()
+        })
+        .collect();
+    let [a, b, c] = ids[..] else { panic!("{ids:?}") };
+    let mut initial = ModelState::default();
+    initial.bodies.push(named_box("Source", 20., 10.));
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(1., 1., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    // Text order b, c, a, a again and a feature that is gone: timeline order, each once.
+    sketch.links[0].face_name = Some(format!("F{b}:blend(F{c}:side:l1|F{a}:top)@F{a}.2#[F999:top]"));
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &ModelState::default(), &plane, &mut sketch).unwrap_err();
+    let crate::DocError::LostProjections { links, .. } = &error else { panic!("{error}") };
+    assert_eq!(links[0].from, made);
+    let text = error.in_feature("Outline").to_string();
+    let listed = "projected face of Source (curves l1, l2, l3, l4; made by Extrude5, Mirror2, Revolve2)";
+    assert_eq!(text, format!("Outline: {listed} is lost; delete the projection or project it again"));
+    assert_eq!(crate::lost_projection_parts(&text), Some(crate::LostProjectionsText { feature: "Outline", count: 1, listed, more: 0 }));
 }
 
 #[test]
@@ -152,6 +359,25 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);
     assert!(matches!(&sketch.links[0].source,LinkSource::Face{body,..} if body=="Source"));
+}
+
+/// A view edge belongs to a drawing view's sketch. A model sketch holding one (a hand-edited
+/// design) loses that link with the reason and keeps its last geometry.
+#[test]
+fn a_model_sketch_loses_a_view_edge_link_and_keeps_its_line() {
+    let doc = Document::default();
+    let mut state = ModelState::default();
+    state.bodies.push(named_box("Body1", 20., 10.));
+    let source = LinkSource::ViewEdge { body: "Body1".into(), origin_feature: 1, name: "F1:e#1".into(), path: Vec::new() };
+    let refused = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap_err();
+    assert!(matches!(&refused, crate::DocError::Invalid(why) if why == "a view edge is projected only in its drawing view's sketch"), "{refused}");
+    let mut sketch = Sketch::default();
+    sketch.add_link(LinkKind::Project, source, &[LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(20., 0.))]).unwrap();
+    let saved = sketch.clone();
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.iter().any(|w| w.contains("a view edge is projected only in its drawing view's sketch")), "{warnings:?}");
+    assert!(sketch.links[0].lost);
+    assert_eq!((&sketch.points, &sketch.curves), (&saved.points, &saved.curves));
 }
 
 #[test]
@@ -246,9 +472,9 @@ fn numbered_round_face_projection_recovers_the_whole_face() {
     assert!(result.error.is_none(), "{result:?}");
     let projected = &state.sketch(3).expect("the saved projection should rebuild").sketch;
     assert_eq!(projected.links[0].face_name.as_deref(), Some("F2:side:c1#1"));
-    assert_eq!(projected.link_curves("j1").len(), 2);
+    // The round wall seen across its axis: its two rims and its two silhouettes (#21295).
+    assert_eq!(projected.link_curves("j1").len(), 4);
 
-    // The edge-on projection of the round wall can retain its saved geometry with a warning.
     // The numbered reference must evaluate the same way as the whole face's existing name.
     let mut exact_doc = doc.clone();
     exact_doc.sketch_mut(3).unwrap().links[0].face_name = Some("F2:side:c1".into());
@@ -454,6 +680,171 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
 }
 
+/// #19455: a chamfer saved by 0.44 on the top edge of a joined wall, between two patterned
+/// spheres, stored the edge with the spheres' faces in its qualifiers (`F2:face:6`, `F3:face:7`).
+/// A sphere's face is named by its index, and such a face no longer tells its neighbours apart, so
+/// that piece of the wall is named without a qualifier now. The saved pick still lies on that one
+/// edge, so the chamfer finds it and builds as a chamfer picked there today does.
+#[test]
+fn an_edge_saved_with_faces_named_by_index_in_its_qualifiers_is_found_at_its_pick() {
+    const SAVED: &str = "F5:side:l1#[F2:face:6,F3:face:7]|F5:top#[F2:face:6,F3:face:7]";
+    let pick = Vec3::new(20., 8., 8.);
+    let design = |spheres: bool, chamfer: Option<&str>| {
+        let mut features = serde_json::json!([
+            {"id": 1, "name": "Base", "type": "box", "body_names": ["Body1"], "corner": [0, 0, 0], "length": "40", "width": "20", "height": "5", "operation": "new_body"},
+            {"id": 2, "name": "Ball", "type": "sphere", "center": [10, 10, 5], "radius": "4", "operation": "join"},
+            {"id": 3, "name": "Pat", "type": "pattern", "features": [2], "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "20"}},
+            {
+                "id": 4, "name": "W", "type": "sketch",
+                "plane": {"type": "offset", "base": {"name": "XY", "type": "origin"}, "distance": "5"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [0., 8.]},
+                        {"fixed": false, "id": "p2", "pos": [40., 8.]},
+                        {"fixed": false, "id": "p3", "pos": [40., 12.]},
+                        {"fixed": false, "id": "p4", "pos": [0., 12.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"k": 0, "l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 5, "name": "Wall", "type": "extrude", "sketch": 4, "operation": "join", "profiles": {"type": "all"},
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "3"}
+            }
+        ]);
+        if let Some(list) = features.as_array_mut().filter(|_| !spheres) {
+            list.retain(|f| f["id"] != 2 && f["id"] != 3);
+        }
+        if let (Some(name), Some(list)) = (chamfer, features.as_array_mut()) {
+            list.push(serde_json::json!({
+                "id": 6, "name": "Ch", "type": "chamfer", "distance": "0.5", "edges": [[pick.x, pick.y, pick.z]],
+                "edge_names": [name], "edge_refs": [{"dir": [1., 0., 0.], "min": [0., 0., 0.], "max": [40., 20., 9.]}]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(features).unwrap(), ..Document::default() };
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let wall = design(true, None);
+    assert!(wall.result(5).unwrap().error.is_none(), "{:?}", wall.result(5));
+    let state = wall.state();
+    let before = state.body("Body1").unwrap();
+    // The wall's top edge between the spheres, as 0.44 named it: the pick lies on it.
+    let hit = crate::name_lookup::locate_edge(before, SAVED, pick).unwrap_or_else(|e| panic!("{SAVED}: {e}"));
+    assert!(hit.on_point, "the edge under the saved pick");
+    assert_eq!(hit.point, pick);
+    let reach = (before.body.size() * 2e-3).max(1e-3);
+    let through = solidcraft_kernel::edge_distance(&before.body, hit.edge, pick).unwrap();
+    assert!(through.is_some_and(|d| d <= reach), "the found edge runs through the pick: {through:?}");
+    // The spheres' faces are named by index and not verified, so they tell no piece apart: the
+    // piece between them is the wall's side and top without a qualifier.
+    let names = crate::naming::edge_names(before);
+    assert_eq!(names.get(hit.edge).map(String::as_str), Some("F5:side:l1|F5:top"), "{names:?}");
+    // The same name at a point on no edge (the middle of the wall's side) finds nothing.
+    assert!(crate::name_lookup::locate_edge(before, SAVED, Vec3::new(20., 8., 6.5)).is_err());
+    // Without the spheres the side is whole, beside no face named by its index: the piece the name
+    // told apart is gone, and the name finds nothing (#11731).
+    let plain = design(false, None);
+    let state_plain = plain.state();
+    let whole = state_plain.body("Body1").unwrap();
+    assert!(crate::name_lookup::locate_edge(whole, SAVED, pick).is_err(), "{:?}", crate::naming::edge_names(whole));
+
+    let saved = design(true, Some(SAVED));
+    assert!(saved.result(6).unwrap().error.is_none(), "{:?}", saved.result(6));
+    // A chamfer on one open edge whose ends meet an untouched face (a sphere's) adds its face,
+    // replaces the edge with two plus one across each end, and splits each end's vertex in two.
+    let state = saved.state();
+    let after = state.body("Body1").unwrap();
+    let (rb, ra) = (before.body.record(), after.body.record());
+    assert_eq!(
+        (ra.faces.len(), ra.edges.len(), ra.vertices.len()),
+        (rb.faces.len() + 1, rb.edges.len() + 3, rb.vertices.len() + 2),
+        "faces, edges and vertices"
+    );
+    // The chamfer is the one a pick there makes today, with no saved name.
+    let picked = design(true, Some(""));
+    assert!(picked.result(6).unwrap().error.is_none(), "{:?}", picked.result(6));
+    let state_picked = picked.state();
+    let today = state_picked.body("Body1").unwrap();
+    assert_eq!(crate::naming::face_names(after), crate::naming::face_names(today));
+}
+
+#[test]
+fn a_face_saved_with_a_neighbour_since_named_by_index_is_found_at_its_pick() {
+    // #20027: a sweep along a plate's top edges round a rounded corner. History names the faces
+    // past the bend by index (#18481); 0.44 named them from geometry, and the bend's top as the
+    // piece of the sweep's top between its two sides. A hole saved there by 0.44 keeps that name.
+    const SAVED: &str = "F4:side:l3#[F4:side:l2,F4:side:l4]";
+    let pick = Vec3::new(99.1, 58.75, 14.);
+    let design = |hole: bool| {
+        let mut features = serde_json::json!([
+            {"id": 1, "name": "plate", "type": "box", "body_names": ["plate"], "corner": [0, 0, 0], "length": "100", "width": "60", "height": "10", "operation": "new_body"},
+            {
+                "id": 2, "name": "corner", "type": "fillet", "radius": "3", "tangent_chain": false, "edges": [[100., 60., 5.]],
+                "edge_names": ["F1:+x|F1:+y"], "edge_refs": [{"dir": [0., 0., 1.], "min": [0., 0., 0.], "max": [100., 60., 10.]}]
+            },
+            {
+                "id": 3, "name": "profile", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [58., 10.]},
+                        {"fixed": false, "id": "p2", "pos": [60., 10.]},
+                        {"fixed": false, "id": "p3", "pos": [60., 14.]},
+                        {"fixed": false, "id": "p4", "pos": [58., 14.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4}
+                }
+            },
+            {
+                "id": 4, "name": "sweep", "type": "sweep", "body_names": ["swept"], "operation": "new_body", "sketch": 3, "profiles": {"type": "all"},
+                "path": [], "path_sketch": 0, "path_body": "plate", "path_edges": [[50., 60., 10.], [99.12132, 59.12132, 10.], [100., 30., 10.]]
+            }
+        ]);
+        if let Some(list) = features.as_array_mut().filter(|_| hole) {
+            list.push(serde_json::json!({
+                "id": 5, "name": "pin-hole", "type": "hole", "depth": "1", "diameter": "0.5", "direction": [0., 0., -1.],
+                "face_names": [SAVED], "hole": {"type": "simple"}, "position": [pick.x, pick.y, pick.z]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(features).unwrap(), ..Document::default() };
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let swept = design(false);
+    assert!(swept.result(4).unwrap().error.is_none(), "{:?}", swept.result(4));
+    let state = swept.state();
+    let body = state.body("swept").unwrap();
+    let names = crate::naming::names(body);
+    let hit = crate::name_lookup::locate_face(&state, SAVED, pick).unwrap_or_else(|| panic!("{SAVED}: {:?}", names.faces));
+    assert!(hit.on_point, "the face under the saved pick");
+    assert_eq!(names.faces.get(hit.face).map(String::as_str), Some("F4:side:l3"), "{:?}", names.faces);
+    // The same name at a point on another piece of the sweep's top (the first leg's) finds nothing.
+    assert!(crate::name_lookup::locate_face(&state, SAVED, Vec3::new(50., 59., 14.)).is_none(), "{:?}", names.faces);
+
+    let saved = design(true);
+    assert!(saved.result(5).unwrap().error.is_none(), "{:?}", saved.result(5));
+}
+
 /// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
 /// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
 /// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went
@@ -642,6 +1033,33 @@ fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
     assert!(lost_one(&error, numbered), "{error}");
 }
 
+/// #21739: a 360° revolve saved by 0.45 had its turned seam side faces named after the wrong
+/// profile line (e.g. `l7` instead of `l2`), qualified by adjacent faces (`F2:side:l7#[F2:side:l4,F2:side:l3]|F2:side:l3`).
+/// In 0.48, each side face is named cleanly after its true profile line (`l2`), but the stored 0.45
+/// edge reference must still resolve to the edge under the saved pick on open.
+#[test]
+fn a_revolve_edge_saved_before_seam_profile_naming_migration_is_found_at_its_pick() {
+    let doc = ring();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Ring").expect("revolve ring body");
+    let at = Vec3::new(0., -20., 5.);
+
+    // The edge between l2 and l3 on the ring at z = 5, as saved by 0.45 when turned seam named
+    // side faces with neighbour qualifiers or shifted curve stems:
+    let saved_qualified = "F2:side:l7#[F2:side:l4,F2:side:l3]|F2:side:l3";
+    let hit = crate::name_lookup::locate_edge(body, saved_qualified, at).unwrap_or_else(|e| panic!("{saved_qualified}: {e}"));
+    assert!(hit.on_point, "resolves on pick point");
+    assert_eq!(hit.point, at);
+
+    let names = crate::naming::edge_names(body);
+    assert_eq!(names.get(hit.edge).map(String::as_str), Some("F2:side:l2|F2:side:l3"));
+
+    // A pick elsewhere on another edge fails asking to reselect:
+    assert!(crate::name_lookup::locate_edge(body, saved_qualified, Vec3::new(0., -10., 0.)).is_err());
+}
+
 /// A drafted face's edge is a circle seen at a slant: an ellipse. The sketch takes it as the
 /// ellipse it is, not as the point set a spline of its own would be (#15061).
 #[test]
@@ -666,6 +1084,10 @@ fn a_drafted_face_projects_its_edge_as_one_ellipse() {
     let source = LinkSource::Face { body: "Drafted".into(), at: Vec3::new(0.0, 0.0, 30.0) };
     let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &initial, &plane, LinkKind::Project, &source).unwrap();
     // The edge comes to the sketch as one ellipse, not as the point set of a spline.
+    let [LinkGeom::Ellipse { c, major, minor }] = resolved.geom.as_slice() else { panic!("{:?}", resolved.geom) };
+    assert!(c.len() < 1e-10);
+    assert!((major.dist(*c) - 20.0 / angle.cos()).abs() < 1e-10);
+    assert!((minor - 20.0).abs() < 1e-10);
     assert!(
         resolved.geom.iter().any(|g| matches!(g, LinkGeom::Ellipse { .. })),
         "a drafted face's edge is an ellipse, not a point set: {:?}",
@@ -848,6 +1270,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
         transform: PART_FRAME,
         grounded: false,
         expressed_moves: Vec::new(),
+        bom_type: None,
     });
     let mid = doc
         .add_feature(
@@ -855,6 +1278,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
                 plane: PlaneRef::Midplane {
                     a: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
                     b: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                    old_frame: false,
                 },
             },
             Some("Mid"),
@@ -893,3 +1317,143 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
 
 /// Where the part of the test above stands: turned half about X and lifted 100 mm.
 const PART_FRAME: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 100.0, 0.0, 1.0]];
+
+/// A deleted member of a face projection is kept by its edge family's name. One saved before
+/// nested names were written in parentheses (#5857) names the same family as today's name, so it
+/// stays deleted in a design opened after that change.
+#[test]
+fn a_deleted_member_saved_in_the_older_name_form_names_the_same_family() {
+    let old = crate::project::omit_name("F5:blend:F2:+x|F2:+z");
+    let now = crate::project::omit_name("F5:blend(F2:+x|F2:+z)");
+    assert_eq!(old, now);
+    assert_eq!(crate::project::omit_name("F2:+x|F3:+z"), "F2:+x|F3:+z", "a name with nothing nested is kept as it is");
+}
+
+#[test]
+fn a_pick_named_by_position_past_the_depth_limit_survives_deleting_unrelated_features() {
+    // #20956: 400 unrelated boxes put the naming depth past its limit, so the box made after them
+    // names its faces by position (`Cleat:face:k`) and a chamfer picked on it stores that name.
+    // Deleting the first boxes brings the depth back under the limit: the box is named from its
+    // history again, and the stored name must still find the edge picked.
+    let pick = Vec3::new(25., 100., 20.);
+    let design = |first: usize, chamfer: Option<&str>| {
+        let mut features: Vec<serde_json::Value> = (first..400)
+            .map(|i| {
+                serde_json::json!({
+                    "id": i + 1, "name": format!("B{i}"), "type": "box", "body_names": [format!("B{i}")], "corner": [20 * i, 0, 0],
+                    "length": "10", "width": "10", "height": "10", "operation": "new_body"
+                })
+            })
+            .collect();
+        features.push(serde_json::json!({
+            "id": 401, "name": "Cleat", "type": "box", "body_names": ["Cleat"], "corner": [0, 100, 0],
+            "length": "50", "width": "20", "height": "20", "operation": "new_body"
+        }));
+        if let Some(name) = chamfer {
+            features.push(serde_json::json!({
+                "id": 402, "name": "Bevel", "type": "chamfer", "distance": "5", "body": "Cleat", "edges": [[pick.x, pick.y, pick.z]],
+                "edge_names": [name], "edge_refs": [{"dir": [1., 0., 0.], "min": [0., 100., 0.], "max": [50., 120., 20.]}]
+            }));
+        }
+        let doc = Document { features: serde_json::from_value(serde_json::Value::Array(features)).unwrap(), ..Document::default() };
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let past = design(0, None);
+    let state = past.state();
+    let cleat = state.body("Cleat").unwrap();
+    let edge = crate::naming::edge_names(cleat)
+        .into_iter()
+        .enumerate()
+        .find(|(i, _)| solidcraft_kernel::edge_distance(&cleat.body, *i, pick).ok().flatten().is_some_and(|d| d < 1e-6))
+        .map(|(_, n)| n)
+        .unwrap();
+    assert!(edge.starts_with("Cleat:face:"), "past the limit the box is named by position: {edge}");
+    // Its top face, saved by position too.
+    let top = Vec3::new(25., 110., 20.);
+    let face = crate::naming::face_names(cleat)
+        .iter()
+        .find(|n| crate::name_lookup::locate_face(&state, n, top).is_some_and(|hit| hit.on_point))
+        .cloned()
+        .unwrap();
+    assert!(face.starts_with("Cleat:face:"), "{face}");
+
+    let under = design(10, None);
+    let state = under.state();
+    let cleat = state.body("Cleat").unwrap();
+    assert!(crate::naming::face_names(cleat).iter().all(|n| n.starts_with("F401:")), "{:?}", crate::naming::face_names(cleat));
+
+    // The chamfer saved past the limit builds under it, on the edge picked.
+    let model = design(10, Some(&edge));
+    let result = model.result(402).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert_eq!(model.state().body("Cleat").unwrap().body.face_count(), 7, "one chamfer face added");
+    // The same name at a point on no edge between those faces still finds nothing.
+    assert!(crate::name_lookup::locate_projected_edge(cleat, &edge, Vec3::new(25., 110., 20.)).is_err());
+    // A face saved by position is found by its number where the saved point lies on it.
+    let hit = crate::name_lookup::locate_face(&state, &face, top).unwrap();
+    assert_eq!(state.bodies[hit.body].name, "Cleat");
+    assert_eq!(crate::naming::face_names(cleat)[hit.face], "F401:+z");
+    assert!(crate::name_lookup::locate_face(&state, &face, Vec3::new(25., 100., 10.)).is_none(), "a point on another face finds nothing");
+}
+
+#[test]
+fn model_plane_resolution_places_both_cached_and_uncached_construction_planes() {
+    let mut doc = Document::new("model plane placement");
+    doc.components.push(crate::Component { id: 7, name: "Owner".into(), ..Default::default() });
+    let mut transform = crate::IDENTITY;
+    transform[3][2] = 10.0;
+    doc.occurrences.push(crate::Occurrence {
+        id: 20,
+        component: 7,
+        parent: 0,
+        name: "Owner".into(),
+        transform,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    });
+    let built = Plane::new(Vec3::new(0.0, 0.0, 5.0), Vec3::X, Vec3::Y).unwrap();
+    let id = doc.add_feature(crate::FeatureKind::ConstructionPlane { plane: PlaneRef::Custom { plane: built } }, Some("Shelf")).unwrap();
+    doc.feature_mut(id).unwrap().component = 7;
+    let values = doc.param_values().0;
+    let mut state = ModelState::default();
+    for cached in [false, true] {
+        if cached {
+            state.construct.push(crate::construct::Construct {
+                feature: id,
+                name: "Shelf".into(),
+                geom: crate::construct::ConstructGeom::Plane(built),
+                bodies: Vec::new(),
+            });
+        }
+        let mut target = solidcraft_sketch::ModelPlane {
+            source: LinkSource::Plane { name: "Shelf".into() },
+            face_name: None,
+            resolved: None,
+            resolved_face: None,
+        };
+        crate::project::resolve_model_plane(&doc, &values, &state, &mut target, Some(&(0, crate::IDENTITY))).unwrap();
+        assert_eq!(target.resolved.unwrap().origin, Vec3::new(0.0, 0.0, 15.0));
+    }
+}
+
+#[test]
+fn a_planar_pick_checks_face_trims_before_testing_plane_ambiguity() {
+    use solidcore_record::{Loop2, Region2, Seg2};
+    // An L prism has an X=20 side only for Y>=10. Its supporting plane also
+    // crosses the top's interior at (20,5,10), which belongs to the top alone.
+    let points = [(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (20.0, 10.0), (20.0, 20.0), (0.0, 20.0), (0.0, 0.0)];
+    let outer = Loop2 { segs: points.windows(2).map(|w| Seg2::Line { a: Vec2::new(w[0].0, w[0].1), b: Vec2::new(w[1].0, w[1].1) }).collect() };
+    let body = solidcraft_kernel::extrude_planar_regions(&Plane::XY, &[Region2 { outer, holes: Vec::new() }], 0.0, 10.0).unwrap();
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("L".into(), body, 1));
+    let pick = Vec3::new(20.0, 5.0, 10.0);
+    let (body, name, plane) = crate::project::pick_planar_face(&state, Some("L"), pick).unwrap();
+    assert_eq!(body, "L");
+    assert!((plane.origin.z - 10.0).abs() < 1e-9 && plane.normal().z.abs() > 1.0 - 1e-9);
+    let (index, _) = crate::naming::face_on_body(&state.bodies[0], &name, pick).unwrap();
+    assert!(solidcraft_kernel::services::query::Query::new(state.bodies[0].body.record()).face_contains(index, pick, 1e-6));
+    assert!(crate::project::pick_planar_face(&state, Some("L"), Vec3::new(20.0, 15.0, 10.0)).unwrap_err().contains("different planes meet"));
+}

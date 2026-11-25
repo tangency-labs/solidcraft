@@ -247,6 +247,12 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// one still within 3.2e-16 relative of its 70-digit reference (`was` is left as it was); the
 /// three that move away from theirs stay within their volume sum's rounding bound
 /// (`transposed_pins_lie_within_their_sums_rounding_of_the_references`).
+/// Closing a plane's straight edges in one piece where their strips' correspondence does
+/// not bend (the strip integrand a polynomial the Kronrod rule integrates exactly on any
+/// piece, so only the sum's rounding changes) moves the r 8 cylinder boss and cone boss
+/// back by their last bit, onto main's figures from before WR-729 (the cone boss onto its
+/// 70-digit reference's nearest double), and the prism boss and r 1.9 cylinder boss by
+/// their last bit.
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -385,7 +391,13 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     let column = column_under_footprint();
-    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.16549340515, 9);
+    let v = assert_pinned(
+        cylinder_boss,
+        8.0,
+        23528.165527389272,
+        23528.165493405155,
+        9,
+    );
     assert_near_closed_form(v, featured_rounded(true, 8.0) + column);
     let v = assert_pinned(
         cylinder_hole,
@@ -399,7 +411,7 @@ fn cylinders_keep_their_pinned_volumes() {
         cylinder_boss,
         1.9,
         24031.843347866372,
-        24031.843347866372,
+        24031.843347866376,
         9,
     );
     assert_near_closed_form(v, featured_rounded(true, 1.9));
@@ -418,7 +430,7 @@ fn cylinders_keep_their_pinned_volumes() {
 fn prisms_keep_their_pinned_volumes() {
     // the boss's walls carried down to the round, the pocket's floor at z 15
     let under = round_over_prism();
-    let v = assert_pinned(prism_boss, 8.0, 23549.89626015013, 23549.89626015013, 12);
+    let v = assert_pinned(prism_boss, 8.0, 23549.89626015013, 23549.896260150133, 12);
     assert_near_closed_form(v, rounded_r8() + 4.0 * (25.0 * 4.0 - under));
     let v = assert_pinned(
         prism_pocket,
@@ -453,7 +465,7 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
     let pins: [(Feature, f64, f64, &str, f64, usize); 3] = [
         (
             cylinder_boss,
-            23528.16549340515,
+            23528.165493405155,
             23528.165493405155,
             "23528.1654934051575356764322355",
             23528.16549340516,
@@ -461,7 +473,7 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
         ),
         (
             cone_boss,
-            23501.98555462524,
+            23501.985554625244,
             23501.985554625244,
             "23501.9855546252425920225768740",
             23501.985554625244,
@@ -502,13 +514,41 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
 fn cones_keep_their_pinned_volumes() {
     // the boss's footprint (radius 2) swept down to the round, as keep features continues a
     // boss's walls along the top's normal
-    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.98555462524, 11);
+    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625244, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 5.0) + column_under_footprint(),
     );
     let v = assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.54082790698, 9);
     assert_near_closed_form(v, rounded_r8() - cone_pit_void());
+}
+
+/// The round beside the cone pit is a B-spline face whose trims cross three of its surface's v
+/// knot lines, where the trims' images have derivatives that are not smooth. The face's own
+/// trim pieces and its tolerant edges' gap-closure strips both integrate along those
+/// trims, and both end each piece at the crossings. So the volume at the default accuracy 1e-7
+/// equals the volume at 1e-12, to within the rounding bound of the volume's sum (as in
+/// `transposed_pins_lie_within_their_sums_rounding_of_the_references`).
+///
+/// A face whose pieces end at the crossings, with strips that run across them, is 1.7e-10 off
+/// at 1e-7. That is eight times the bound (MEASURED).
+#[test]
+fn cone_pit_volume_at_the_default_accuracy_is_converged() {
+    let (k, mut b) = rounded_body(cone_pit, 8.0).unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let default = brep_volume(&k, &mut b, 1e-7, &attrs).unwrap();
+    let tight = brep_volume(&k, &mut b, 1e-12, &attrs).unwrap();
+    let n = b.face_list().len();
+    let bound = gamma(u32::try_from(n - 1).unwrap()) * tight.abs();
+    assert!(
+        (default - tight).abs() <= bound,
+        "volume {default:.17} at 1e-7, {tight:.17} at 1e-12: {:e} apart, bound {bound:e}",
+        (default - tight).abs()
+    );
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -548,7 +588,6 @@ fn rounded_rim_with_boss(boss: fn(&mut Kernel) -> Result<Brep>) -> (f64, f64) {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let feature = boss(&mut k).unwrap();
     let mut b = boolean_union(&mut k, block, feature).unwrap();
@@ -603,7 +642,6 @@ fn a_leaning_boss_on_a_rim_round_is_refused() {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let boss = create_cone(&mut k, Point3::new(17.0, 0.0, 10.0), 2.0, 1.0, 4.0).unwrap();
     let mut b = boolean_union(&mut k, block, boss).unwrap();

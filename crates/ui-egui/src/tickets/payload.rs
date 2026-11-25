@@ -55,6 +55,10 @@ pub struct Failing {
     pub origin: Option<String>,
     /// The kernel's error code or type name, when there is one.
     pub code: Option<String>,
+    /// The stable code of the kernel call the failure was made from (`repro.failing.code`), by
+    /// which the ticket server groups identical failures: present only when it was made from one.
+    #[serde(default)]
+    pub failure_code: Option<solidcraft_engine::kernel::ErrorCode>,
 }
 
 /// What the dialog collected, shown to the user before anything is sent.
@@ -142,6 +146,9 @@ pub fn failing_json(f: &Failing) -> Value {
     }
     if let Some(c) = &f.code {
         v["error_code"] = json!(c);
+    }
+    if let Some(c) = &f.failure_code {
+        v["code"] = json!({"call": c.call, "kind": c.kind, "operation": c.operation});
     }
     v
 }

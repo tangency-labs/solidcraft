@@ -20,6 +20,8 @@
 //! again that 0.30.1 saved as a numbered piece (`F2:side#2`) or under a later index
 //! (`F4:bore:side:1`): see [`locate_thread_face_on_body`] (#16602).
 
+use std::sync::Arc;
+
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -53,6 +55,63 @@ pub struct EdgeHit {
     pub verified: bool,
     /// Whether the reference's point still lies on the edge.
     pub on_point: bool,
+}
+
+/// A body's edge names and face names, worked out once for every edge name looked up on it.
+pub(crate) struct BodyEdges {
+    pub(crate) mesh: Arc<Mesh>,
+    names: Vec<String>,
+    faces: Arc<Names>,
+}
+
+/// The edges of a body a stored edge name matches, before a picked point decides between them.
+pub(crate) enum EdgeMatch {
+    /// The edge with that name, or the one edge between the faces it names.
+    Edge(usize),
+    /// Pieces of it: the faces it names meet along several edges now, or only a piece of one of
+    /// them is left.
+    Pieces(Vec<usize>),
+}
+
+impl BodyEdges {
+    pub(crate) fn new(b: &ModelBody) -> BodyEdges {
+        BodyEdges { mesh: b.mesh(), names: edge_names(b), faces: naming::names(b) }
+    }
+
+    /// Whether edge `i`'s name follows exact history: the faces it separates do, and it isn't one
+    /// of several edges between them, numbered by where they lie.
+    /// Edge `i`'s persistent name.
+    pub(crate) fn name(&self, i: usize) -> Option<&str> {
+        self.names.get(i).map(String::as_str)
+    }
+
+    pub(crate) fn verified(&self, i: usize) -> bool {
+        self.mesh.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| self.faces.verified(*f as usize)))
+            && self.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+    }
+
+    /// What the stored edge name `name` matches: the edge with that name; else the one edge
+    /// between the faces it names (followed through splits and merges of those faces); else the
+    /// pieces of it. `None` when nothing does.
+    pub(crate) fn matching(&self, name: &str) -> Option<EdgeMatch> {
+        if let Some(i) = self.names.iter().position(|n| n == name) {
+            return Some(EdgeMatch::Edge(i));
+        }
+        // By the faces it separates: the best way any edge matches.
+        let wanted = strip_edge_number(name);
+        let mut best: Option<(Match, Vec<usize>)> = None;
+        for (i, fs) in self.mesh.edge_faces.iter().enumerate() {
+            let [fa, fb] = fs.as_slice() else { continue };
+            let Some(level) = edge_match(&self.faces, *fa as usize, *fb as usize, wanted) else { continue };
+            keep_best(&mut best, level, i);
+        }
+        let (level, cands) = best?;
+        let one = match cands.as_slice() {
+            [i] if level >= Match::Piece => Some(*i),
+            _ => None,
+        };
+        Some(one.map_or(EdgeMatch::Pieces(cands), EdgeMatch::Edge))
+    }
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
@@ -120,11 +179,146 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
 /// point lies on it, and its name is exact. A name that ends with the number of the edge a blend
-/// replaced is found at its point too (see [`recover_blend_numbered_edge`]). Other edge references
+/// replaced is found at its point too (see [`recover_blend_numbered_edge`]), as are the unreliable
+/// ordinals once assigned by Align (see [`recover_align_projected_edge`]). Other edge references
 /// still require the stored name as picked.
 pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near)
-        .or_else(|miss| recover_numbered_projected_edge(b, name, near).or_else(|| recover_blend_numbered_edge(b, name, near)).ok_or(miss))
+    locate_projected_edge_from(b, &b.name, name, near)
+}
+
+/// As [`locate_projected_edge`], retaining the saved source body's name when Project searches
+/// surviving bodies after a join. Align ordinals alone never identify which aligned body was picked.
+pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| {
+        recover_numbered_projected_edge(b, name, near)
+            .or_else(|| recover_blend_numbered_edge(b, name, near))
+            .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
+            .or_else(|| recover_positional_edge(b, name, near))
+            .ok_or(miss)
+    })
+}
+
+/// The number of face `name` names on body `b` by position (`<body>:face:<k>`): a body past the
+/// naming depth limit names its faces so (see `naming::names`). `None` for any other name.
+fn positional_face(b: &ModelBody, name: &str) -> Option<usize> {
+    let k = name.strip_prefix(b.name.as_str())?.strip_prefix(":face:")?;
+    if k.is_empty() || !k.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    k.parse().ok().filter(|k| *k < b.body.face_count())
+}
+
+/// An edge saved by position (`Cleat:face:0|Cleat:face:2`) on a body that is named from its
+/// history now (#20956). The naming depth counts every feature before, so deleting earlier
+/// features, even ones that never touched the body, can bring a body named past the limit back
+/// under it. The numbers are the faces' places in the kernel's order, which is all such a name
+/// ever said: the one exact edge between those two faces that the saved point lies on.
+fn recover_positional_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let parts = split_top_level_bars(strip_edge_number(name));
+    let [fa, fb] = parts.as_slice() else { return None };
+    let (fa, fb) = (positional_face(b, fa)?, positional_face(b, fb)?);
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        let (p, q) = (p.face as usize, q.face as usize);
+        ((p, q) == (fa, fb) || (q, p) == (fa, fb)) && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
+}
+
+/// A face saved by position (`Cleat:face:3`) on a body named from its history now: face 3 of
+/// that body, when the saved point lies on it (see [`recover_positional_edge`]).
+fn recover_positional_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if !p.is_finite() {
+        return None;
+    }
+    let (body, b, face) =
+        st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).find_map(|(i, b)| Some((i, b, positional_face(b, name)?)))?;
+    let (_, point) = on_face(b, face, p)?;
+    Some(FaceHit { body, face, point, verified: false, on_point: true })
+}
+
+/// Align used to discard its transform's history and give faces it could not find at the
+/// unmoved position names such as `F3:face:0`. rc.4 and 0.45.0 could enumerate those faces
+/// differently (#20288). Neither numbering is a persistent identity: recover a saved Project
+/// link only on its saved body or its descendant through proven non-copy rigid transforms and
+/// joins, at one unique exact edge through its saved point. No mesh or nearest-edge substitution
+/// decides this, and another body moved by the same Align gets no fallback.
+fn recover_align_projected_edge(b: &ModelBody, saved_body: &str, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, Role};
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    if read.tie.is_some()
+        || read.faces.len() != 2
+        || read.faces.first() == read.faces.get(1)
+        || !read.faces.iter().any(|face| matches!(&face.base, Base::Made { role: Role::Index(_), .. }))
+    {
+        return None;
+    }
+    let record = b.body.record();
+    let mut on = record.edges.iter().enumerate().filter(|(i, edge)| {
+        let tolerance = record.tolerance.max(edge.tolerance);
+        tolerance.is_finite() && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= tolerance)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    let found = record.edges.get(edge)?;
+    if found.uses.len() != 2 {
+        return None;
+    }
+    let mut ancestor = b;
+    let mut ancestor_edge = edge;
+    let mut from_saved_body = b.name == saved_body;
+    let mut align = None;
+    // Bound the walk even for an unusually long or damaged naming chain.
+    for _ in 0..400 {
+        let origin = ancestor.names.origin.as_ref()?;
+        if let FeatureKind::Align { bodies, .. } = &origin.feature.kind
+            && bodies.iter().any(|body| *body == ancestor.name)
+            && read.faces.iter().any(|face| matches!(&face.base, Base::Made { feature, role: Role::Index(_) } if feature.0 == origin.feature.id))
+        {
+            if !from_saved_body {
+                return None;
+            }
+            align = Some((origin.feature.id, ancestor.body.face_count()));
+            break;
+        }
+        (ancestor, ancestor_edge) = naming::inherited_edge_predecessor(ancestor, ancestor_edge)?;
+        from_saved_body |= ancestor.name == saved_body;
+    }
+    let (align, face_count) = align?;
+    let mut numbered = false;
+    for face in &read.faces {
+        if let Base::Made { feature, role: Role::Index(index) } = &face.base
+            && feature.0 == align
+        {
+            if !face.suffixes.is_empty() || (*index as usize) >= face_count {
+                return None;
+            }
+            numbered = true;
+        }
+    }
+    if !numbered {
+        return None;
+    }
+    let faces = naming::names(b);
+    // An ordinary face name, where Align happened to retain one by overlap, must still
+    // name an incident face. Only this Align's unreliable ordinals are read at the point.
+    let incident = |edge: &solidcore_record::brep::Edge| {
+        read.faces.iter().all(|face| match &face.base {
+            Base::Made { feature, role: Role::Index(_) } if feature.0 == align => true,
+            _ => edge.uses.iter().any(|u| crate::history_names::matches(&faces, u.face as usize, &face.to_string()).is_some_and(exactly)),
+        })
+    };
+    if !incident(found) {
+        return None;
+    }
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
@@ -195,6 +389,83 @@ fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Opt
     // Each face it separates is whole: no other piece of it is left to be the one picked. The
     // edge is verified by that name, so the faces it separates are the `whole` stems.
     whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
+}
+
+/// The pieces of a saved whole closed edge that a later feature split by putting a vertex on it
+/// (#21997: a whole-turn revolve join's turned seam does): the saved name then answers to the
+/// numbered edges between its faces (`…~1`, `…~2`). Every such piece is returned when they join
+/// end to end, through the vertices they share in the B-rep, into the one closed curve the saved
+/// edge was, every edge between the name's faces belongs to that curve, and the reference's
+/// point lies on one of them, measured on its exact curve: the pieces together are that edge, as
+/// a pick made today stores one name per piece of it. Pieces that do not close again (a later
+/// feature took part of the curve), a point on none of them, or another edge between the same
+/// faces outside that curve (a second intersection, split or whole), and the name asks to be
+/// picked again.
+pub(crate) fn recover_split_closed_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<Vec<EdgeHit>> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // A numbered name (`~k`) already names one of several edges: [`resuffixed_edge`] reads those.
+    if strip_edge_number(name).len() != name.len() {
+        return None;
+    }
+    let faces = naming::names(b);
+    let record = b.body.record();
+    // The B-rep's edges between the name's faces, each face answering exactly (see [`exactly`]).
+    let mut cands: Vec<usize> = Vec::new();
+    for (i, e) in record.edges.iter().enumerate() {
+        let [p, q] = e.uses.as_slice() else { continue };
+        if edge_match(&faces, p.face as usize, q.face as usize, name).is_some_and(exactly) {
+            cands.push(i);
+        }
+    }
+    let reach = pick_reach(b);
+    let on_curve = |i: usize| solidcraft_kernel::edge_distance(&b.body, i, near).ok().flatten().is_some_and(|d| d <= reach);
+    // The piece the reference's point lies on, on its exact curve.
+    let start = cands.iter().copied().find(|&i| on_curve(i))?;
+    // The pieces that join with it through the vertices they share in the B-rep.
+    let mut pieces = vec![start];
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for &i in &cands {
+            if pieces.contains(&i) {
+                continue;
+            }
+            let shares = pieces
+                .iter()
+                .any(|&j| record.edges.get(j).zip(record.edges.get(i)).is_some_and(|(a, e)| a.vertices.iter().any(|v| e.vertices.contains(v))));
+            if shares {
+                pieces.push(i);
+                grew = true;
+            }
+        }
+    }
+    // The one closed curve the saved edge was: more than one piece, every vertex of it the end
+    // of exactly two of them, and no edge between the same faces outside it: another such curve
+    // makes the name ambiguous, and it asks to be picked again.
+    if pieces.len() < 2 {
+        return None;
+    }
+    let mut ends: Vec<u32> = pieces.iter().filter_map(|&i| record.edges.get(i)).flat_map(|e| e.vertices).collect();
+    ends.sort_unstable();
+    if !ends.chunk_by(|a, b| a == b).all(|group| group.len() == 2) {
+        return None;
+    }
+    if cands.iter().any(|i| !pieces.contains(i)) {
+        return None;
+    }
+    // The reference's own point names one piece only: at a vertex two pieces share it, and every
+    // piece then takes its own middle, so the blend receives each piece as its own pick.
+    let on: Vec<bool> = pieces.iter().map(|&i| on_curve(i)).collect();
+    let named_by_pick = on.iter().filter(|on| **on).count() == 1;
+    let mut hits = Vec::new();
+    for (&i, on_curve_it) in pieces.iter().zip(&on) {
+        let on_point = *on_curve_it && named_by_pick;
+        let point = if on_point { near } else { solidcraft_kernel::edge_middle(&b.body, i).ok().flatten()? };
+        hits.push(EdgeHit { edge: i, point, verified: false, on_point });
+    }
+    Some(hits)
 }
 
 /// Where a stored vertex name was found.
@@ -426,7 +697,8 @@ fn resuffixed_vertex(
             let resuffixed = level == Match::Piece && qualified(x) && faces.faces.get(f).is_some_and(|n| !crate::history_names::descends(n, x));
             return Some(resuffixed);
         }
-        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+        (level == Match::Stem && qualified(x) && (faces.faces.get(f).is_some_and(|n| qualified(n)) || unique_resuffixed_on_body(faces, x) == Some(f)))
+            .then_some(true)
     };
     let mut on = incident.iter().enumerate().filter_map(|(v, fs)| {
         let pt = record.vertices.get(v).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
@@ -523,7 +795,7 @@ fn exactly(level: Match) -> bool {
 }
 
 /// How far from an edge a picked point may lie and still be on it.
-fn pick_reach(b: &ModelBody) -> f64 {
+pub(crate) fn pick_reach(b: &ModelBody) -> f64 {
     (b.body.size() * 2e-3).max(1e-3)
 }
 
@@ -567,6 +839,24 @@ fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
 /// swapped for another), and the reference asks again. A face whose feature made nothing on the
 /// body was removed with it, and so is the name. The point must be the
 /// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
+/// Whether feature `fid` that made/modified body `b` is a revolve feature.
+fn feature_is_revolve(b: &ModelBody, fid: u64) -> bool {
+    let mut origin = b.names.origin.as_deref();
+    while let Some(o) = origin {
+        if o.feature.id == fid {
+            return matches!(o.feature.kind, FeatureKind::Revolve { .. } | FeatureKind::SurfaceRevolve { .. });
+        }
+        origin = o
+            .before
+            .bodies
+            .iter()
+            .find(|prev| prev.name == b.name)
+            .and_then(|prev| prev.names.origin.as_deref())
+            .or_else(|| o.before.bodies.iter().find_map(|prev| prev.names.origin.as_deref()));
+    }
+    false
+}
+
 fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     let count = faces.faces.len();
     let found = |x: &str| {
@@ -574,29 +864,41 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
         hits.next().filter(|_| hits.next().is_none())
     };
     let lost = |y: &str| {
-        crate::persistent_name::made_by(y)
-            .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
-            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
+        let id = crate::persistent_name::made_by(y)?;
+        let has_feature = faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(id));
+        if !has_feature {
+            return None;
+        }
+        let is_revolve = feature_is_revolve(b, id);
+        let lost_face = if is_revolve {
+            (0..count).all(|f| !crate::history_names::matches(faces, f, y).is_some_and(exactly))
+        } else {
+            (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none())
+        };
+        lost_face.then_some(id)
     };
     // Every way the name splits into two face names (a face name may hold `|` itself); they must
     // agree on the face still found.
-    let mut kept: Vec<(usize, u64)> = Vec::new();
+    let mut kept: Vec<(usize, u64, &str)> = Vec::new();
     for (i, _) in wanted.match_indices('|') {
         let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
         for (x, y) in [(x, y), (y, x)] {
-            if let Some(hit) = found(x).filter(|f| kept.iter().all(|(k, _)| k != f)).zip(lost(y)) {
-                kept.push(hit);
+            if let Some((hit_f, hit_id)) = found(x).filter(|f| kept.iter().all(|(k, _, _)| k != f)).zip(lost(y)) {
+                kept.push((hit_f, hit_id, y));
             }
         }
     }
-    let &[(face, lost_by)] = kept.as_slice() else { return None };
+    let &[(face, lost_by, lost_name)] = kept.as_slice() else { return None };
     let edge = edge_through(b, m, near)?;
     let uses = &b.body.record().edges.get(edge)?.uses;
-    // The edge's other face is not one of the lost face's feature: where that feature made the
-    // face at the pick, its face was replaced there (a sketch line swapped for another), not renamed.
     let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
     let bounds_face = uses.iter().any(|u| u.face as usize == face);
-    let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
+    let other = uses.iter().find(|u| u.face as usize != face).map(|u| u.face as usize);
+    let same_feature = other.and_then(made_by) == Some(lost_by);
+    let is_revolve = feature_is_revolve(b, lost_by);
+    let side_migration =
+        same_feature && is_revolve && (qualified(lost_name) || other.and_then(|f| faces.faces.get(f)).is_some_and(|n| n.contains(":side:")));
+    let replaced = same_feature && !side_migration;
     (bounds_face && !replaced).then_some(edge)
 }
 
@@ -606,7 +908,9 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 /// another extrude's footprint names the walls it joins differently, and can leave two faces of
 /// that stem). The candidates are the edges between faces answering to the name's two faces: each
 /// exactly (see [`exactly`]) or, for a face named with its qualifier, by its stem where that face
-/// too is named with a qualifier (another one: a face whole again is not it), at least one
+/// too is named with a qualifier (another one: a face whole again is not it) or where the name's
+/// qualifier lists only faces named by their index and the face borders such a face that is not
+/// verified (those tell no piece apart now, so the piece has no qualifier), at least one
 /// side of them by a qualifier that is not that face's own (a piece of the named face split since
 /// is not a renamed face: the edge split with it and the name asks again). Of those, the one edge
 /// whose exact curve the reference's point `near` lies on (within the pick reach, as
@@ -615,6 +919,15 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
 fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     if b.body.is_mesh() || !near.is_finite() {
         return None;
+    }
+    let beside_index = beside_index_named(b, faces);
+    let mut resuffixed_cache: std::collections::HashMap<&str, Option<usize>> = std::collections::HashMap::new();
+    for (k, _) in wanted.match_indices('|') {
+        for part in [wanted.get(..k), wanted.get(k + 1..)].into_iter().flatten() {
+            if qualified(part) {
+                resuffixed_cache.entry(part).or_insert_with(|| unique_resuffixed_on_body(faces, part));
+            }
+        }
     }
     // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
     let side = |f: usize, x: &str| -> Option<bool> {
@@ -625,7 +938,14 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         }
         // By its stem only where the face is still named after its neighbours, others than the name's:
         // a face whole again is not one the name told apart by a face it never touches (#11731).
-        (level == Match::Stem && qualified(x) && faces.faces.get(f).is_some_and(|n| qualified(n))).then_some(true)
+        // A name told apart only by faces named by their index may name a piece that has no
+        // qualifier now, where the face still borders such an unverified face: those no longer
+        // tell pieces apart (#19455).
+        let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
+        (level == Match::Stem
+            && qualified(x)
+            && (faces.faces.get(f).is_some_and(|n| qualified(n) || unqualified_piece()) || resuffixed_cache.get(x).copied().flatten() == Some(f)))
+        .then_some(true)
     };
     let mut cands: Vec<usize> = Vec::new();
     for (i, fs) in m.edge_faces.iter().enumerate() {
@@ -660,6 +980,56 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
 /// Whether face name `x` names its face with the faces around it (`F2:top#[F4:side:l1]`).
 fn qualified(x: &str) -> bool {
     crate::piece_names::piece_parts(x).is_some_and(|(_, around)| !around.is_empty())
+}
+
+/// Whether face name `x` is told apart only by faces named by their index
+/// (`F5:side:l1#[F2:face:6,F3:face:7]`, a sphere's faces). Names saved before unverified faces
+/// named by their index stopped telling pieces apart hold them; the piece they named can be named
+/// without them now.
+fn told_apart_by_index_only(x: &str) -> bool {
+    crate::piece_names::piece_parts(x)
+        .is_some_and(|(_, around)| !around.is_empty() && around.iter().all(|a| crate::history_names::named_by_index(strip_piece(a))))
+}
+
+/// For each face of body `b` (named by `faces`), whether it borders a face named only by its index
+/// and not verified (a sphere's, or a sweep's past a bend): such a neighbour tells no piece apart
+/// (#18481), so a piece it bounds may be named without the qualifier a design saved before held.
+/// Read from the B-rep's edges and the faces each edge's uses lie on.
+fn beside_index_named(b: &ModelBody, faces: &Names) -> Vec<bool> {
+    let mut beside = vec![false; faces.faces.len()];
+    let by_index = |g: usize| !faces.verified(g) && faces.faces.get(g).is_some_and(|n| crate::history_names::named_by_index(strip_piece(n)));
+    for edge in &b.body.record().edges {
+        for p in &edge.uses {
+            if edge.uses.iter().any(|q| q.face != p.face && by_index(q.face as usize))
+                && let Some(slot) = beside.get_mut(p.face as usize)
+            {
+                *slot = true;
+            }
+        }
+    }
+    beside
+}
+
+/// The one face among `faces` (each answering to the stored name `name` as a piece, on body `b`)
+/// that is the piece the name told apart, when that piece lost its qualifier: a design saved before
+/// faces named by their index stopped telling pieces apart (#18481) named the piece after neighbours
+/// that still bound it, and the piece is now named by its bare stem because the faces that told it
+/// apart from its siblings are named by their index. Such a sibling still answers to the name too
+/// (it is a piece of the same stem bounded by the same faces). The piece is the face named by the
+/// name's bare stem that borders an unverified face named by its index and that the reference's
+/// point `p` lies on (exactly, within the pick reach); none or several, and the name finds nothing
+/// (#20027).
+fn unqualified_piece(b: &ModelBody, names: &Names, faces: &[usize], name: &str, p: Vec3) -> Option<(usize, Vec3)> {
+    let (stem, around) = crate::piece_names::piece_parts(name)?;
+    if around.is_empty() || !p.is_finite() {
+        return None;
+    }
+    let beside = beside_index_named(b, names);
+    let mut on = faces.iter().filter_map(|&f| {
+        let bare = names.faces.get(f).is_some_and(|own| own == stem);
+        (bare && beside.get(f).copied().unwrap_or(false)).then(|| on_face(b, f, p)).flatten()
+    });
+    on.next().filter(|_| on.next().is_none())
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
@@ -761,30 +1131,15 @@ impl FaceHit {
 
 impl FaceHit {
     /// Where the line through `p` along `dir` meets the face found (the hit nearest `p`, on
-    /// either side of it), `None` when the line misses the face or runs along it. A place on
-    /// a face follows the face this way, along its own axis, instead of sliding sideways to
-    /// [`point`](Self::point), the face's nearest point.
-    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
-        let b = st.bodies.get(self.body)?;
-        let d = dir.normalized()?;
-        let m = b.mesh();
-        let slack = (b.body.size() * 1e-9).max(1e-9);
-        let mut best: Option<f64> = None;
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            if *f as usize != self.face {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            // A hair's width around each triangle, so a place on the seam of two is on the face.
-            let centre = (a + bb + c) * (1.0 / 3.0);
-            let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
-            if let Some(hit) = naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
-                && best.is_none_or(|old| hit.abs() < old.abs())
-            {
-                best = Some(hit);
-            }
-        }
-        best.map(|t| p + d * t)
+    /// either side of it), `None` when the line misses the face or runs along it, or the body
+    /// is gone; `Err` when the kernel fails to meet them. A place on a face follows the face
+    /// this way, along its own axis, instead of sliding sideways to [`point`](Self::point), the
+    /// face's nearest point. Decided on the face's exact surface and trim
+    /// ([`solidcraft_kernel::Body::face_line_hit`]), never its display mesh: from a facet of a
+    /// curved face a hole would start inside the surface (#20741).
+    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> solidcraft_kernel::Result<Option<Vec3>> {
+        let Some(b) = st.bodies.get(self.body) else { return Ok(None) };
+        b.body.face_line_hit(self.face, p, dir)
     }
 
     /// A point that picks the face found again by itself: [`point`](Self::point) when the
@@ -792,18 +1147,24 @@ impl FaceHit {
     /// nearest `p` that keeps clear of every edge of it. The nearest point of a face the
     /// reference's point no longer lies on is on the face's boundary (a parameter moved the face
     /// away from the pick), where a pick by point finds the face beside it as well (#2531).
+    /// The chosen interior point is projected onto the exact trimmed face when that finds it (a
+    /// curved face's triangle lies off its surface by the display deviation); when the exact
+    /// query finds nothing the unprojected point is returned, as it always was.
     pub fn pick_point(&self, st: &ModelState, p: Vec3) -> Vec3 {
         let Some(b) = st.bodies.get(self.body) else { return self.point };
         let m = b.mesh();
         // Clear of the edges by a few pick tolerances, or by half the face's roomiest triangle
         // on a face narrower than that.
-        let Some(margin) = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5)) else {
-            return self.point;
+        let margin = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5));
+        let point = match margin {
+            Some(margin) if self.on_point && edge_clearance(&m, self.face, self.point) >= margin => self.point,
+            Some(margin) => inside_nearest(&m, self.face, p, margin).unwrap_or(self.point),
+            None => self.point,
         };
-        if self.on_point && edge_clearance(&m, self.face, self.point) >= margin {
-            return self.point;
+        match solidcraft_kernel::point_closest(point, &b.body, solidcraft_kernel::Members::Faces(&[self.face])) {
+            Ok(Some(nearest)) => nearest.to,
+            _ => point,
         }
-        inside_nearest(&m, self.face, p, margin).unwrap_or(self.point)
     }
 }
 
@@ -893,20 +1254,65 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
 }
 
 fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {
-    if crate::sheet::split_sheet_face_name(name).is_some() {
-        return sheet_locate(st, name, p).ok();
-    }
-    if legacy_name(name).is_some() {
+    // A `sheet:<body>:<panel>:<side>` name a design saved before keeps finds no face: no sheet
+    // names a face so now (see [`crate::sheet::sheet_face_name`]).
+    if crate::sheet::split_sheet_face_name(name).is_some() || legacy_name(name).is_some() {
         return None;
     }
     // Every body's names are read below: work out the ones not known yet on all cores first
     // (each body's names are its own, whichever thread works them out).
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
-    match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
+    match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, Some(p)) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)),
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round)
+            .or_else(|| replaced_side_line(st, name, p))
+            .or_else(|| numbered_sheet_face(st, name, p))
+            .or_else(|| recover_positional_face(st, name, p)),
         Err(Miss::Several) => None,
     }
+}
+
+/// The `F2` of a face named by its number among the faces feature `F2` made (`F2:face:1`): `None`
+/// for any other name.
+fn numbered_face_name(name: &str) -> Option<&str> {
+    let (stem, k) = name.split_once(":face:")?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    (stem.strip_prefix('F').is_some_and(digits) && digits(k)).then_some(stem)
+}
+
+/// A face of a sheet saved by its number among the faces its feature made (`F2:face:1`), as builds
+/// before the sheet was made from surfaces (#6748) named every face of a sheet feature. A sheet
+/// feature names its faces after what made each now (`F2:top`, `F2:side:l1`,
+/// `F3:far:F2:side:l1`), and numbers none, so the stored name names nothing. The stored point
+/// still lies on the face it was: that face, when it is the one face of a sheet body that the same
+/// feature made and the point lies on. A point on no face of that feature, or on two, finds
+/// nothing, as before; so does a name of a feature that still numbers a face of the body.
+fn numbered_sheet_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    let stem = numbered_face_name(name)?;
+    if !p.is_finite() {
+        return None;
+    }
+    let made = |own: &str| own.split_once(':').is_some_and(|(s, _)| s == stem);
+    let sheet = |b: &ModelBody| st.surface_sheets.iter().any(|s| s.body == b.name);
+    let mut found: Option<FaceHit> = None;
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && sheet(b) && b.body.face_count() <= MAX_PROJECTION_RECOVERY_FACES)
+    {
+        let names = naming::names(b);
+        if names.faces.iter().any(|own| numbered_face_name(own) == Some(stem)) {
+            continue;
+        }
+        for (face, own) in names.faces.iter().enumerate() {
+            if !made(own.as_str()) {
+                continue;
+            }
+            let Some((_, point)) = on_face(b, face, p) else { continue };
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body: bi, face, point, verified: names.verified(face), on_point: true });
+        }
+    }
+    found
 }
 
 /// The `F2` and the number of a side face named after a sketch line (`F2:side:l1`): `None` for any
@@ -974,11 +1380,14 @@ pub(crate) fn face_body<'a>(st: &'a ModelState, name: &str) -> Option<&'a ModelB
     }
     let solids = || st.bodies.iter().filter(|b| !b.body.is_mesh());
     naming::warm_names(solids());
-    let mut holders = solids().filter(|b| {
-        let names = naming::names(b);
-        (0..names.faces.len()).any(|face| crate::history_names::matches(&names, face, name).is_some_and(exactly))
-    });
-    match (holders.next(), holders.next()) {
+    let mut exact = solids().filter(|b| body_has_exact_face_named(b, name));
+    match (exact.next(), exact.next()) {
+        (Some(b), None) => return Some(b),
+        (Some(_), Some(_)) => return None,
+        (None, _) => {}
+    }
+    let mut fallback = solids().filter(|b| unique_resuffixed_on_body(&naming::names(b), name).is_some());
+    match (fallback.next(), fallback.next()) {
         (Some(b), None) => Some(b),
         _ => None,
     }
@@ -1011,7 +1420,7 @@ fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: 
     if let Some(i) = body.and_then(|n| st.bodies.iter().position(|b| b.name == n))
         && let Some(b) = st.bodies.get(i).filter(|b| !b.body.is_mesh())
     {
-        match locate_in(std::iter::once((i, b)), name, p) {
+        match locate_in(std::iter::once((i, b)), name, Some(p)) {
             Ok(hit) => return Some(hit),
             Err(Miss::Several) => return None,
             Err(Miss::Gone) => {}
@@ -1020,41 +1429,116 @@ fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: 
     locate_face_with(st, name, p, round)
 }
 
-/// [`locate_face`] for a sheet face's readable name (`sheet:<body>:<panel>:<side>`, see
-/// [`crate::sheet::body_sheet_face_names`]): the face of that body the sheet names so. The sheet
-/// itself says which face it is, so the name holds however the faces of the body are numbered.
-fn sheet_locate(st: &ModelState, name: &str, p: Vec3) -> Result<FaceHit, Miss> {
-    let (body, _) = crate::sheet::split_sheet_face_name(name).ok_or(Miss::Gone)?;
-    let (bi, b) = st.bodies.iter().enumerate().find(|(_, b)| b.name == body && !b.body.is_mesh()).ok_or(Miss::Gone)?;
-    let names = crate::sheet::body_sheet_face_names(st, b);
-    let faces: Vec<usize> = names.iter().enumerate().filter(|(_, n)| n.as_deref() == Some(name)).map(|(i, _)| i).collect();
-    let face = match faces.as_slice() {
-        [face] => *face,
-        [] => return Err(Miss::Gone),
-        _ => return Err(Miss::Several),
+/// The one face of `names` that a neighbour-qualified piece name `name` still identifies after an
+/// adjacent edit changed some of the faces around it: no face matches `name` exactly or as a full
+/// piece, no other face of the same stem touches any face in `name`'s qualifier, and at least half
+/// of the qualifier's faces still bound this one.
+pub(crate) fn unique_resuffixed_on_body(names: &Names, name: &str) -> Option<usize> {
+    if legacy_name(name).is_some() || !name.contains("#[") {
+        return None;
+    }
+    let mut found: Option<(usize, usize, usize)> = None;
+    for face in 0..names.faces.len() {
+        match crate::history_names::matches(names, face, name) {
+            Some(level) if exactly(level) => return None,
+            Some(Match::Stem) => {
+                let (matched, total) = crate::history_names::piece_overlap(names, face, name)?;
+                if matched > 0 {
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some((face, matched, total));
+                }
+            }
+            _ => {}
+        }
+    }
+    let (face, matched, total) = found?;
+    (matched.saturating_mul(2) >= total).then_some(face)
+}
+
+/// The one face among `candidates` (each matching `name` by stem only, when no face matched
+/// exactly or with its full qualifier) that a neighbour-qualified piece name still identifies
+/// after an adjacent cut changed some of its neighbouring faces:
+/// - when at most one face per body retains any neighbour from the stored qualifier, and at least
+///   half of the qualifier's neighbours still bound it, that face is taken (even if it moved; when
+///   copies on distinct bodies tie, the saved pick `pick` decides);
+/// - otherwise, with a saved pick `pick`, the unique candidate whose exact surface contains `pick`
+///   is taken — among those that still share a neighbour from the stored qualifier, or (when none
+///   do, e.g. its sole qualifying neighbour was replaced) among faces that are still qualified
+///   pieces, never a face that became whole again with zero surviving neighbours (#11731).
+fn resuffixed_face<'a>(
+    candidates: &[(usize, &'a ModelBody, usize)],
+    name: &str,
+    pick: Option<Vec3>,
+    found: impl Fn((usize, &'a ModelBody, usize)) -> Option<FaceHit>,
+) -> Option<FaceHit> {
+    if candidates.is_empty() || !name.contains("#[") {
+        return None;
+    }
+    let mut scored: Vec<(usize, &ModelBody, usize, usize, usize)> = Vec::with_capacity(candidates.len());
+    for &(bi, b, face) in candidates {
+        let names = naming::names(b);
+        let (matched, total) = crate::history_names::piece_overlap(&names, face, name)?;
+        scored.push((bi, b, face, matched, total));
+    }
+    let overlap: Vec<(usize, &ModelBody, usize, usize, usize)> = scored.iter().copied().filter(|&(_, _, _, m, _)| m > 0).collect();
+    // If multiple faces on the same body still claim neighbours from the stored qualifier, the
+    // piece was split (or became ambiguous): never pick one side silently.
+    let mut seen_bodies = std::collections::BTreeSet::new();
+    if overlap.iter().any(|&(bi, ..)| !seen_bodies.insert(bi)) {
+        return None;
+    }
+    let majority: Vec<_> = overlap.iter().copied().filter(|&(_, _, _, m, total)| m.saturating_mul(2) >= total).collect();
+    if majority.len() == overlap.len() && !majority.is_empty() {
+        if let &[(bi, b, face, ..)] = majority.as_slice() {
+            return found((bi, b, face));
+        }
+        let p = pick.filter(|p| p.is_finite())?;
+        let mut on = majority.into_iter().filter(|(_, b, ..)| !b.body.is_mesh()).filter_map(|(bi, b, face, ..)| {
+            let (_, point) = on_face(b, face, p)?;
+            Some(FaceHit { body: bi, face, point, verified: naming::names(b).verified(face), on_point: true })
+        });
+        return on.next().filter(|_| on.next().is_none());
+    }
+    let p = pick.filter(|p| p.is_finite())?;
+    let eligible: Vec<_> = if !overlap.is_empty() {
+        overlap
+    } else {
+        scored.into_iter().filter(|&(_, b, face, ..)| naming::names(b).faces.get(face).is_some_and(|n| qualified(n))).collect()
     };
-    let (distance, point) = nearest_on_face(&b.mesh(), face, p).ok_or(Miss::Gone)?;
-    Ok(FaceHit { body: bi, face, point, verified: true, on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
+    let mut on = eligible.into_iter().filter(|(_, b, ..)| !b.body.is_mesh()).filter_map(|(bi, b, face, matched, _)| {
+        let (_, point) = on_face(b, face, p)?;
+        let verified = matched > 0 && naming::names(b).verified(face);
+        Some(FaceHit { body: bi, face, point, verified, on_point: true })
+    });
+    on.next().filter(|_| on.next().is_none())
 }
 
 /// [`locate_face`] among `bodies` (with their indices): the one face the name finds there.
-fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &str, p: Vec3) -> Result<FaceHit, Miss> {
+fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &str, pick: Option<Vec3>) -> Result<FaceHit, Miss> {
     if legacy_name(name).is_some() {
         return Err(Miss::Gone);
     }
+    let p = pick.unwrap_or(Vec3::ZERO);
     let mut best: Option<(Match, Vec<(usize, &ModelBody, usize)>)> = None;
+    let mut stem: Vec<(usize, &ModelBody, usize)> = Vec::new();
     for (bi, b) in bodies {
         let names = naming::names(b);
         for face in 0..names.faces.len() {
-            if let Some(level) = crate::history_names::matches(&names, face, name).filter(|level| exactly(*level)) {
-                keep_best(&mut best, level, (bi, b, face));
+            match crate::history_names::matches(&names, face, name) {
+                Some(level) if exactly(level) => keep_best(&mut best, level, (bi, b, face)),
+                Some(Match::Stem) if best.is_none() => stem.push((bi, b, face)),
+                _ => {}
             }
         }
     }
-    let (level, faces) = best.ok_or(Miss::Gone)?;
     let found = |(body, b, face): (usize, &ModelBody, usize)| {
         let (distance, point) = nearest_on_face(&b.mesh(), face, p)?;
         Some(FaceHit { body, face, point, verified: naming::names(b).verified(face), on_point: distance <= (b.body.size() * 1e-3).max(1e-3) })
+    };
+    let Some((level, faces)) = best else {
+        return resuffixed_face(&stem, name, pick, found).ok_or(Miss::Gone);
     };
     if let [one] = faces.as_slice() {
         return found(*one).ok_or(Miss::Gone);
@@ -1063,7 +1547,20 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
     // one the reference's point lies on. Pieces of one face are never told apart by a point.
     let mut bodies: Vec<usize> = faces.iter().map(|(bi, _, _)| *bi).collect();
     bodies.dedup();
-    if level != Match::Exact || bodies.len() < faces.len() {
+    if level == Match::Piece
+        && let [only] = bodies.as_slice()
+        && let Some((_, b, _)) = faces.first()
+        && let Some(p) = pick
+    {
+        // Pieces of one face on one body: the piece a design saved before #18481 told apart by
+        // neighbours whose qualifier it lost since (#20027).
+        let names = naming::names(b);
+        let pieces: Vec<usize> = faces.iter().map(|(_, _, f)| *f).collect();
+        return unqualified_piece(b, &names, &pieces, name, p)
+            .map(|(face, point)| FaceHit { body: *only, face, point, verified: names.verified(face), on_point: true })
+            .ok_or(Miss::Several);
+    }
+    if level != Match::Exact || bodies.len() < faces.len() || pick.is_none() {
         return Err(Miss::Several);
     }
     let mut on = faces.into_iter().filter_map(found).filter(|hit| hit.on_point);
@@ -1076,13 +1573,30 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
 /// Whether face `index` of a body is exactly the face a stored name names (see [`exactly`]). A
 /// name saved before format 14 names no face.
 pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
-    legacy_name(name).is_none() && crate::history_names::matches(&naming::names(b), index, name).is_some_and(exactly)
+    if legacy_name(name).is_some() {
+        return false;
+    }
+    let names = naming::names(b);
+    match crate::history_names::matches(&names, index, name) {
+        Some(level) if exactly(level) => true,
+        Some(Match::Stem) => unique_resuffixed_on_body(&names, name) == Some(index),
+        _ => false,
+    }
+}
+
+/// Whether some face of a body matches the stored name directly (without neighbour-overlap
+/// fallback).
+fn body_has_exact_face_named(b: &ModelBody, name: &str) -> bool {
+    let names = naming::names(b);
+    (0..names.faces.len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
 }
 
 /// Whether some face of a body is exactly the face a stored name names (see [`face_has_name`]).
 pub(crate) fn body_has_face_named(b: &ModelBody, name: &str) -> bool {
-    let names = naming::names(b);
-    legacy_name(name).is_none() && (0..face_names(b).len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
+    if legacy_name(name).is_some() {
+        return false;
+    }
+    body_has_exact_face_named(b, name) || unique_resuffixed_on_body(&naming::names(b), name).is_some()
 }
 
 /// The faces of a body that are the stored name's face or pieces of it (by stem). A name saved
@@ -1099,7 +1613,7 @@ pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
 
 /// [`locate_face`] on one body.
 pub(crate) fn locate_on(body: &ModelBody, name: &str, p: Vec3) -> Option<FaceHit> {
-    locate_in(std::iter::once((0, body)), name, p).ok()
+    locate_in(std::iter::once((0, body)), name, Some(p)).ok()
 }
 
 /// Find a saved manual Project face in its body. Older designs can name a numbered piece of
@@ -1110,7 +1624,7 @@ pub(crate) fn locate_projected_face(body: &ModelBody, name: &str, p: Vec3) -> Op
     if body.body.is_mesh() {
         return None;
     }
-    match locate_in(std::iter::once((0, body)), name, p) {
+    match locate_in(std::iter::once((0, body)), name, Some(p)) {
         Ok(hit) => Some((hit.face, hit.point)),
         Err(Miss::Gone) => recover_numbered_projected_face(body, name, p),
         Err(Miss::Several) => None,
@@ -1240,10 +1754,8 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
         if body.is_some_and(|n| n != sheet_body) {
             return Err(format!("`{name}` is a face of `{sheet_body}`"));
         }
-        return sheet_locate(st, name, Vec3::ZERO).map_err(|miss| match miss {
-            Miss::Gone => format!("no face is named `{name}` (`model.faces` lists the names)"),
-            Miss::Several => format!("`{name}` names more than one face (pieces of a split face): give the name of one piece"),
-        });
+        // No sheet names a face so now (see [`crate::sheet::sheet_face_name`]).
+        return Err(format!("no face is named `{name}` (`model.faces` lists the names)"));
     }
     let bodies: Vec<(usize, &ModelBody)> =
         st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && body.is_none_or(|n| b.name == n)).collect();
@@ -1251,7 +1763,7 @@ pub fn locate_one(st: &ModelState, body: Option<&str>, name: &str) -> Result<Fac
     if bodies.len() > 1 && legacy_name(name).is_none() {
         naming::warm_names(bodies.iter().map(|(_, b)| *b));
     }
-    locate_in(bodies.into_iter(), name, Vec3::ZERO).map_err(|miss| match miss {
+    locate_in(bodies.into_iter(), name, None).map_err(|miss| match miss {
         Miss::Gone => format!("no face is named `{name}` (`model.faces` lists the names)"),
         Miss::Several => {
             format!("`{name}` names more than one face (pieces of a split face, or faces of several bodies): give `body`, or the name of one piece")

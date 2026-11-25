@@ -1,8 +1,11 @@
-use solidcraft_engine::panels::*;
+use solidcraft_panel_layout::*;
 
-use super::{ContentServices, ContentSlot, FramePanelContent, PanelContext, PanelController, PanelHost, PanelPresentation, PanelRuntime};
-use crate::ui_kit::{self, BackingTooltipExt as _, Container, HostChrome, Surface};
+use super::drag_paint::WindowCard;
+use super::host::{ContentSlot, FramePanelContent, Motion, PanelContext, PanelHost, PanelPresentation};
+use super::runtime::{ContentServices, PanelController, PanelRuntime};
+use super::workspace::{EmptyPanelHost, egui_rect, logical_rect};
 use solidcraft_theme::Tokens;
+use solidcraft_ui_kit::{self as ui_kit, BackingTooltipExt as _, Container, HostChrome, Surface};
 
 pub(super) enum WindowAction {
     Activate(InstanceId),
@@ -24,10 +27,10 @@ pub(super) fn paint(
         return Ok(Some(WindowAction::Redock));
     }
     if ui.input(|input| input.viewport().visible() == Some(false)) {
-        runtime.mount_native(host, &ResolvedLayout::default(), &mut super::workspace::EmptyPanelHost, services)?;
+        runtime.mount_native(host, &ResolvedLayout::default(), &mut EmptyPanelHost, services)?;
         return Ok(None);
     }
-    let outer = super::workspace::logical_rect(ui.max_rect());
+    let outer = logical_rect(ui.max_rect());
     let panel = Container::new(ui.ctx(), Surface::Viewport).central();
     let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(solidcraft_theme::Tokens::get().dialog_body);
     let mut action = None;
@@ -35,7 +38,7 @@ pub(super) fn paint(
         ui.add_enabled_ui(enabled, |ui| {
             let availability = section.tabs.iter().map(|id| (id.clone(), runtime.layout().availability(id))).collect();
             let Some(active) = presented_tab(section, &availability) else {
-                return runtime.mount_native(host, &ResolvedLayout::default(), &mut super::workspace::EmptyPanelHost, services);
+                return runtime.mount_native(host, &ResolvedLayout::default(), &mut EmptyPanelHost, services);
             };
             let presentation = runtime.instance_presentation(active)?;
             let layout = runtime.layout();
@@ -57,7 +60,7 @@ pub(super) fn paint(
                     if section.collapsed {
                         let (id, bounds) = ui.allocate_space(size);
                         let label = solidcraft_ui_text::tr("ui.panel_host.expand");
-                        let response = ui_kit::panel_host_disclosure(ui, id, bounds, label, true, true, environment.motion == super::Motion::Reduced);
+                        let response = ui_kit::panel_host_disclosure(ui, id, bounds, label, true, true, environment.motion == Motion::Reduced);
                         if response.clicked() {
                             action = Some(WindowAction::Expand(section.id.clone()));
                         }
@@ -100,14 +103,14 @@ pub(super) fn paint(
             let body = ui.available_rect_before_wrap();
             let (min, max) = tab_bounds(runtime.layout().layout(), runtime.layout().registry(), section)?;
             if !outer.size.within(min, max) || !body.is_positive() {
-                return runtime.mount_native(host, &ResolvedLayout::default(), &mut super::workspace::EmptyPanelHost, services);
+                return runtime.mount_native(host, &ResolvedLayout::default(), &mut EmptyPanelHost, services);
             }
             let geometry = ResolvedPanel {
                 instance: active.clone(),
                 section: section.id.clone(),
                 zone: Zone::Window,
                 outer,
-                body: (!section.collapsed).then(|| super::workspace::logical_rect(body)),
+                body: (!section.collapsed).then(|| logical_rect(body)),
                 painted: vec![outer],
                 input: Vec::new(),
             };
@@ -117,6 +120,26 @@ pub(super) fn paint(
     })
     .inner?;
     Ok(action)
+}
+
+/// A panel window's height besides its body: the row of its actions, when the
+/// panel has any. The system draws the title bar outside the window's content.
+pub(super) fn window_chrome(ctx: &egui::Context, actions: bool) -> f32 {
+    if actions { Tokens::get().form_close_size + ctx.global_style().spacing.item_spacing.y } else { 0.0 }
+}
+
+/// The window a drag shows before the panel opens in it: the panel's body as
+/// painted this frame, where its content will be, under the window's `chrome`.
+pub(super) fn paint_drop(ui: &mut egui::Ui, card: Option<&WindowCard>, chrome: f32) {
+    let panel = Container::new(ui.ctx(), Surface::Viewport).central();
+    let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(Tokens::get().dialog_body);
+    Container::show_central(ui, panel, frame, |ui| {
+        if let Some(card) = card {
+            let mut body = ui.max_rect();
+            body.min.y = (body.min.y + chrome).min(body.max.y);
+            card.paint(ui, body);
+        }
+    });
 }
 
 struct NativeContent<'a> {
@@ -134,7 +157,7 @@ impl PanelHost for NativeContent<'_> {
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
         if let Some(body) = geometry.body {
-            let rect = super::workspace::egui_rect(body);
+            let rect = egui_rect(body);
             let mut ui = self.ui.new_child(egui::UiBuilder::new().id_salt(&geometry.instance).max_rect(rect));
             ui.set_clip_rect(ui.clip_rect().intersect(rect));
             self.content.render(ContentSlot::Body, &mut ui, context, controller, services)?;

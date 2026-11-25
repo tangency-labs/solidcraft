@@ -21,21 +21,27 @@ fn tube() -> Body {
     extrude(&Plane::XY, &[region], 0.0, 25.0).unwrap().remove(0)
 }
 
-/// The plate, 12 thick: between the outer tangent lines of the 52.5 circle round the origin and
-/// the tube's outer circle, the big circle's far arc and the tube circle's near arc (on the
-/// tube's wall), less a 40.5 hole round the origin.
-fn plate() -> Body {
+/// The outline between the outer tangent lines of the 52.5 circle round the origin and the
+/// tube's outer circle: the tangent line p2 p3, an arc of the big circle from angle theta
+/// sweeping `big_sweep(theta)`, the tangent line p6 p5 and the tube circle's near arc.
+fn tangent_outline(big_sweep: fn(f64) -> f64) -> Loop2 {
     let theta = (-(R_BIG - R_BOSS) / BOSS.x.abs()).acos();
     let at = |c: Vec2, r: f64, a: f64| c + Vec2::new(a.cos(), a.sin()) * r;
     let (p2, p3) = (at(BOSS, R_BOSS, theta), at(Vec2::ZERO, R_BIG, theta));
     let (p5, p6) = (at(BOSS, R_BOSS, -theta), at(Vec2::ZERO, R_BIG, -theta));
     let segs = vec![
         Seg2::Line { a: p2, b: p3 },
-        Seg2::Arc { center: Vec2::ZERO, radius: R_BIG, start: theta, sweep: -2.0 * theta },
+        Seg2::Arc { center: Vec2::ZERO, radius: R_BIG, start: theta, sweep: big_sweep(theta) },
         Seg2::Line { a: p6, b: p5 },
         Seg2::Arc { center: BOSS, radius: R_BOSS, start: -theta, sweep: 2.0 * theta },
     ];
-    let region = Region2 { outer: Loop2 { segs }, holes: vec![circle(Vec2::ZERO, 40.5)] };
+    Loop2 { segs }
+}
+
+/// The plate, 12 thick: the tangent outline closed by the big circle's far arc and the tube
+/// circle's near arc (on the tube's wall), less a 40.5 hole round the origin.
+fn plate() -> Body {
+    let region = Region2 { outer: tangent_outline(|theta| -2.0 * theta), holes: vec![circle(Vec2::ZERO, 40.5)] };
     extrude(&Plane::XY, &[region], 0.0, 12.0).unwrap().remove(0)
 }
 
@@ -59,17 +65,8 @@ fn ring() -> Body {
 /// outer circle and the tube's, bounded by the ring circle's near arc and the tube circle's near
 /// arc, each on that body's wall, the straight sides tangent to both walls.
 fn web() -> Body {
-    let theta = (-(R_BIG - R_BOSS) / BOSS.x.abs()).acos();
-    let at = |c: Vec2, r: f64, a: f64| c + Vec2::new(a.cos(), a.sin()) * r;
-    let (p2, p3) = (at(BOSS, R_BOSS, theta), at(Vec2::ZERO, R_BIG, theta));
-    let (p5, p6) = (at(BOSS, R_BOSS, -theta), at(Vec2::ZERO, R_BIG, -theta));
-    let segs = vec![
-        Seg2::Line { a: p2, b: p3 },
-        Seg2::Arc { center: Vec2::ZERO, radius: R_BIG, start: theta, sweep: TAU - 2.0 * theta },
-        Seg2::Line { a: p6, b: p5 },
-        Seg2::Arc { center: BOSS, radius: R_BOSS, start: -theta, sweep: 2.0 * theta },
-    ];
-    extrude(&Plane::XY, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], 0.0, 12.0).unwrap().remove(0)
+    let region = Region2 { outer: tangent_outline(|theta| TAU - 2.0 * theta), holes: vec![] };
+    extrude(&Plane::XY, &[region], 0.0, 12.0).unwrap().remove(0)
 }
 
 /// The reporter's join: the web joined to the tube, then to the ring.

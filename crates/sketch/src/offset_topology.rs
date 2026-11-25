@@ -625,6 +625,7 @@ impl Sketch {
                     fixed: false,
                     infinite: false,
                     spline_handle_of: None,
+                    spline_control_polygon_of: None,
                 });
                 outputs.push(output);
             }
@@ -780,6 +781,7 @@ impl Sketch {
                         fixed: role.flags.fixed,
                         infinite: role.flags.infinite,
                         spline_handle_of: None,
+                        spline_control_polygon_of: None,
                     });
                 }
                 outputs.push(role.output.clone());
@@ -795,9 +797,14 @@ impl Sketch {
 
     /// Caller materializes current driving values before freezing the association.
     pub fn break_offset_topology(&mut self, output: &str) -> Result<Option<Vec<String>>> {
-        let Some(index) =
-            self.offsets.iter().position(|r| r.topology.as_ref().is_some_and(|t| t.id == output || t.roles.iter().any(|role| role.output == output)))
-        else {
+        let Some(index) = self.offsets.iter().position(|r| {
+            r.topology.as_ref().is_some_and(|t| {
+                t.id == output
+                    || t.roles.iter().any(|role| role.output == output)
+                    || r.sources.iter().any(|(source, _)| source == output)
+                    || r.outputs.iter().any(|out| out == output)
+            })
+        }) else {
             return Ok(None);
         };
         let mut candidate = self.clone();

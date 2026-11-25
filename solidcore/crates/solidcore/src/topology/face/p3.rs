@@ -154,6 +154,7 @@ use crate::topology::vertexuse as vu1;
 use crate::topology::{
     Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId,
 };
+use std::collections::BTreeMap;
 
 pub use crate::topology::topology_traverser::has_lamina_edge;
 
@@ -298,10 +299,18 @@ fn intersection_curve_reach(
     curve: &Curve,
     interval: &Extent1d,
     tolerance: f64,
+    seams: [Option<bool>; 2],
 ) -> Result<SourceReach> {
+    // (#18705) the faces' seams as found once for the face pair; a face whose edges
+    // could not be read is scanned here, failing as before
     let mut seam = false;
-    for (b, f) in faces {
+    for ((b, f), known) in faces.into_iter().zip(seams) {
+        if let Some(known) = known {
+            seam = seam || known;
+            continue;
+        }
         for e in face_edges(b, f)? {
+            k.work_counters.add_seam_test();
             seam = seam || edge::face_on_both_sides(b, e, f)?;
         }
     }
@@ -2574,12 +2583,69 @@ pub fn face_intersect_breps(
     )
 }
 
-/// [`face_intersect_breps`] keeping the trimmed surface caches the surface
-/// intersection makes on the lent B-reps in `face_caches` (this face's B-rep's, then
-/// the other face's; the second is unused with [`FaceBreps::One`]) for the next call
-/// on the same unchanged B-reps, as upstream keeps each face's cache on its surface.
-/// The caches must have been made on the B-rep they are given with, and the B-rep
-/// must not have changed since.
+/// What [`face_intersect_breps_cached`] learns of one B-rep's faces and keeps for its next
+/// call on the same unchanged B-rep.
+#[derive(Default)]
+pub struct FaceIntersectCaches {
+    /// The trimmed surface caches the surface intersection makes on the faces
+    /// (`smsurf_GetSurfaceCache`; upstream keeps them on the surfaces).
+    surfaces: FaceCaches,
+    /// Not upstream: whether each face has a seam edge ([`qf2::face_has_seam`]), so that
+    /// a face is scanned once for all the faces it meets, not once for each (#18705).
+    seams: BTreeMap<FaceId, Option<bool>>,
+}
+
+impl core::fmt::Debug for FaceIntersectCaches {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FaceIntersectCaches")
+            .field("surfaces", &self.surfaces.len())
+            .field("seams", &self.seams)
+            .finish()
+    }
+}
+
+impl FaceIntersectCaches {
+    /// No caches.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Drops every cache: the B-rep they were made on may have changed.
+    pub fn clear(&mut self) {
+        self.surfaces.clear();
+        self.seams.clear();
+    }
+
+    /// Whether face `f` of `b` has a seam edge, kept for the next ask.
+    fn face_has_seam(&mut self, k: &Kernel, b: &Brep, f: FaceId) -> Option<bool> {
+        *self
+            .seams
+            .entry(f)
+            .or_insert_with(|| qf2::face_has_seam(k, b, f))
+    }
+}
+
+/// Whether face `f` of `b` has a seam edge: from `caches` when they hold it, and kept
+/// there when they are given.
+fn cached_face_has_seam(
+    k: &Kernel,
+    caches: Option<&mut FaceIntersectCaches>,
+    b: &Brep,
+    f: FaceId,
+) -> Option<bool> {
+    match caches {
+        Some(c) => c.face_has_seam(k, b, f),
+        None => qf2::face_has_seam(k, b, f),
+    }
+}
+
+/// [`face_intersect_breps`] keeping what it learns of the lent B-reps' faces in
+/// `face_caches` (this face's B-rep's, then the other face's; the second is unused with
+/// [`FaceBreps::One`]) for the next call on the same unchanged B-reps: the trimmed
+/// surface caches the surface intersection makes, as upstream keeps each face's cache on
+/// its surface, and whether each face has a seam edge. The caches must have been made on
+/// the B-rep they are given with, and the B-rep must not have changed since.
 ///
 /// # Errors
 ///
@@ -2594,7 +2660,7 @@ pub fn face_intersect_breps_cached(
     approx_tol_3d: f64,
     crv_ang_tol_deg: f64,
     options: &FaceIntersectOptions,
-    mut face_caches: [Option<&mut FaceCaches>; 2],
+    mut face_caches: [Option<&mut FaceIntersectCaches>; 2],
 ) -> Result<FaceIntersection> {
     let (this_brep, mut other_brep) = match breps {
         FaceBreps::One(b) => (b, None),
@@ -2683,6 +2749,18 @@ pub fn face_intersect_breps_cached(
     // (not upstream) the curves are the faces' own edge curves, known to their tolerance;
     // an intersection curve is known as far as the two surfaces' angle fixes it
     let curves_are_edges = have_curves;
+    let [this_native_support, other_native_support] = if curves_are_edges {
+        [None, None]
+    } else {
+        [
+            crate::surface::implicit::AnalyticSupport::of(surface_of(b, f)?),
+            crate::surface::implicit::AnalyticSupport::of(surface_of(ob, other)?),
+        ]
+    };
+    // (not upstream, #18705) whether each face has a seam edge, read once from the kept
+    // caches (scanned once for each face while its B-rep is unchanged) and again only
+    // after an edit of the B-reps
+    let mut seams: Option<[Option<bool>; 2]> = None;
     if !have_curves {
         // the surfaces reach their faces' caches through the B-reps
         // (smsurf_GetSurfaceCache); exact evaluation copies, as the caches are made
@@ -2703,8 +2781,10 @@ pub fn face_intersect_breps_cached(
         let (domain, other_domain) = (face2::uv_domain(b, f)?, face2::uv_domain(ob, other)?);
         let r = {
             let [this_caches, other_caches] = &mut face_caches;
-            let taken = |slot: &mut Option<&mut FaceCaches>| {
-                slot.as_deref_mut().map(core::mem::take).unwrap_or_default()
+            let taken = |slot: &mut Option<&mut FaceIntersectCaches>| {
+                slot.as_deref_mut()
+                    .map(|c| core::mem::take(&mut c.surfaces))
+                    .unwrap_or_default()
             };
             let mut services = vec![BrepFaceServices::with_caches(this_brep, taken(this_caches))];
             if let Some(ob) = other_brep.as_deref_mut() {
@@ -2729,7 +2809,7 @@ pub fn face_intersect_breps_cached(
             // hand the caches back for the next call
             for (service, slot) in sided.0.into_iter().zip(face_caches.iter_mut()) {
                 if let Some(slot) = slot.as_deref_mut() {
-                    *slot = service.into_caches();
+                    slot.surfaces = service.into_caches();
                 }
             }
             r?
@@ -2835,7 +2915,32 @@ pub fn face_intersect_breps_cached(
         let ivl = curve.natural_interval();
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
+        if seams.is_none() {
+            // the other face's caches are its own B-rep's, or this one's for one B-rep
+            let [this_caches, other_caches] = &mut face_caches;
+            let this_seam = cached_face_has_seam(k, this_caches.as_deref_mut(), this_brep, f);
+            let other_seam = match other_brep.as_deref() {
+                Some(ob) => cached_face_has_seam(k, other_caches.as_deref_mut(), ob, other),
+                None => cached_face_has_seam(k, this_caches.as_deref_mut(), this_brep, other),
+            };
+            seams = Some([this_seam, other_seam]);
+        }
+        let face_seams = seams.unwrap_or([None, None]);
         if !curves_are_edges {
+            if let Some(support) = other_native_support {
+                cc1.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(f), false),
+                    support,
+                    other_zone_tol,
+                );
+            }
+            if let Some(support) = this_native_support {
+                cc2.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(other), other_side),
+                    support,
+                    this_zone_tol,
+                );
+            }
             let reach = intersection_curve_reach(
                 k,
                 [
@@ -2845,6 +2950,7 @@ pub fn face_intersect_breps_cached(
                 curve,
                 &ivl,
                 xsect_tol3d(k, zone_tol),
+                face_seams,
             )?;
             cc1.set_source_reach(reach);
             cc2.set_source_reach(reach);
@@ -2862,9 +2968,38 @@ pub fn face_intersect_breps_cached(
             uv2: &uv_curves2,
             edited: false,
         };
-        qf2::curve_on_classify_mut(k, f, &mut objects, true, &mut cc1, false, false, true)?;
+        // (WR-647) each classification names the other face, whose surface with the
+        // classifying face's neighbours across an edge decides a tangency on that edge
+        cc1.set_tangency_partner(Some(IntersectObject::Topology(
+            EntityRef::Face(other),
+            other_side,
+        )));
+        cc2.set_tangency_partner(Some(IntersectObject::Topology(EntityRef::Face(f), false)));
+        qf2::curve_on_classify_mut_with_seams(
+            k,
+            f,
+            &mut objects,
+            true,
+            &mut cc1,
+            false,
+            false,
+            true,
+            face_seams[0],
+        )?;
         objects.side = other_side;
-        qf2::curve_on_classify_mut(k, other, &mut objects, true, &mut cc2, false, false, true)?;
+        qf2::curve_on_classify_mut_with_seams(
+            k,
+            other,
+            &mut objects,
+            true,
+            &mut cc2,
+            false,
+            false,
+            true,
+            face_seams[1],
+        )?;
+        cc1.set_tangency_partner(None);
+        cc2.set_tangency_partner(None);
 
         let extract = ExtractOptions {
             uv_curves1: true,
@@ -2890,6 +3025,7 @@ pub fn face_intersect_breps_cached(
                 for slot in face_caches.iter_mut().flatten() {
                     slot.clear();
                 }
+                seams = None;
             }
             ex?
         };

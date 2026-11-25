@@ -24,6 +24,5 @@ pub mod p8;
 pub mod p9;
 
 pub use p1::StepSurface;
-pub use p2::{
-    CacheTreeState, Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType,
-};
+pub use p2::{Surface, SurfaceIntersection, SurfaceKind, TrimCacheSlot, TsectCurveType};
+pub(crate) use p6::SurfaceContinuities;

@@ -5,9 +5,9 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_file`].
 
-use solidcore_ops::import_geometry::{scale_point, scale_value};
 use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::dxf::import::{scale_point, scale_value};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
@@ -31,6 +31,10 @@ impl ParsedDxf {
         }
         if text.starts_with("AutoCAD Binary DXF") {
             return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
+        }
+        // A DWG renamed or picked as a drawing would otherwise read as "no ENTITIES section".
+        if crate::is_dwg(text.as_bytes()) {
+            return Err(IoError::Invalid("this is a DWG file, not a DXF: save the drawing as ASCII DXF and insert that".into()));
         }
         Ok(parse_pairs(text))
     }
@@ -745,12 +749,12 @@ fn layered_ellipse(entity: &Ent, k: f64) -> Result<DxfShape> {
     let ratio = layered_required(entity, 40)?;
     let t0 = layered_required(entity, 41)?;
     let t1 = layered_required(entity, 42)?;
-    match solidcore_ops::import_geometry::ellipse_support(c, major, ratio) {
-        solidcore_ops::import_geometry::EllipseSupport::Valid => {}
-        solidcore_ops::import_geometry::EllipseSupport::InvalidMajor => {
+    match solidcraft_kernel::services::dxf::import::ellipse_support(c, major, ratio) {
+        solidcraft_kernel::services::dxf::import::EllipseSupport::Valid => {}
+        solidcraft_kernel::services::dxf::import::EllipseSupport::InvalidMajor => {
             return Err(IoError::Invalid("invalid or degenerate layered DXF ellipse support".into()));
         }
-        solidcore_ops::import_geometry::EllipseSupport::CollapsedMinor => {
+        solidcraft_kernel::services::dxf::import::EllipseSupport::CollapsedMinor => {
             return Err(IoError::Invalid("DXF ellipse minor axis collapses in the represented units".into()));
         }
     }
@@ -1466,6 +1470,7 @@ impl Affine {
     fn copy_work(&self, g: &Geom2) -> usize {
         match g {
             Geom2::Spline { pts, .. } => pts.len(),
+            Geom2::Nurbs { pts, knots, weights, .. } => pts.len() + knots.len() + weights.len(),
             Geom2::Text { text, .. } => text.len(),
             Geom2::Arc { .. } | Geom2::Ellipse { .. } if self.uniform().is_none() => 33,
             _ => 0,
@@ -1525,6 +1530,14 @@ impl Affine {
                     *point = self.p(*point);
                 }
                 Geom2::Spline { pts: copied, control: *control, degree: *degree }
+            }
+            // An affine map moves a spline exactly by its control points; knots and weights stay.
+            Geom2::Nurbs { pts, degree, knots, weights } => {
+                let mut copied = source_import::copy_points(pts, work)?;
+                for point in &mut copied {
+                    *point = self.p(*point);
+                }
+                Geom2::Nurbs { pts: copied, degree: *degree, knots: knots.clone(), weights: weights.clone() }
             }
             Geom2::Conic { a, apex, b, rho } => Geom2::Conic { a: self.p(*a), apex: self.p(*apex), b: self.p(*b), rho: *rho },
             Geom2::Text { text, at, height, angle } => {
@@ -1610,7 +1623,7 @@ pub fn write_dxf_entities(entities: &[(&str, Geom2)], insunits: i32) -> String {
                 w(1, &text.replace('\n', " "));
             }
             // Free-form curves are written by the caller as polylines (lines).
-            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Conic { .. } => {}
+            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs { .. } | Geom2::Conic { .. } => {}
         }
     }
     w(0, "ENDSEC");
@@ -1809,6 +1822,16 @@ mod tests {
         let selfref = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nA\n0\nINSERT\n2\nA\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nA\n0\nENDSEC\n0\nEOF\n";
         assert_eq!(read_dxf(selfref).unwrap().len(), 16);
         assert!(read_dxf("AutoCAD Binary DXF\r\n").is_err());
+    }
+
+    /// A DWG handed to Insert DXF says it is a DWG, not that it lacks an ENTITIES section (#19131).
+    #[test]
+    fn dwg_says_it_is_a_dwg() {
+        let dwg = "AC1018\0\0\0\0\0\u{fffd}\u{fffd}";
+        for e in [read_dxf(dwg).unwrap_err(), read_dxf_file(dwg).unwrap_err()] {
+            let e = e.to_string();
+            assert!(e.contains("DWG") && e.contains("ASCII DXF"), "{e}");
+        }
     }
 
     /// Bounds on the geometry that comes out do not see a block that emits none: six

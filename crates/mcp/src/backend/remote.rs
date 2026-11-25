@@ -37,6 +37,8 @@ pub struct Remote {
     /// Whether the connected app checks a request's `param_check` itself (#9184), asked once per
     /// connection (the connection's serial number beside it); `None` until asked.
     app_checks: Option<(u64, bool)>,
+    /// Whether this connection advertises `plugin.tools`; never probe the command itself.
+    plugin_tools: Option<(u64, bool)>,
     /// The level the app said it checked the last reply at (`param_check` beside `ok`).
     echoed: Option<ParamCheck>,
 }
@@ -67,6 +69,7 @@ impl Remote {
             conn: Connection::new(solidcraft_engine::control_auth::APP, addr, token).with_progress(note),
             param_check: ParamCheck::Off,
             app_checks: None,
+            plugin_tools: None,
             echoed: None,
         }
     }
@@ -114,7 +117,10 @@ impl Remote {
             method: method.to_string(),
             what: control_pending::describe(method, &params),
             effect: control_pending::effect(method, &params),
-            once: method == "engine.batch",
+            // A lost close/new reply must not close another tab or open a second one.
+            once: method == "engine.batch"
+                || method == "app.quit"
+                || (method == "ui.documents" && params.get("action").and_then(Value::as_str).is_some()),
             params: Self::scoped(params),
         };
         let reply = self.conn.exchange(request, retry_busy)?;
@@ -261,6 +267,22 @@ impl Remote {
 }
 
 impl Backend for Remote {
+    fn supports_plugin_tools(&mut self) -> bool {
+        if let Some((serial, supported)) = self.plugin_tools
+            && self.conn.is_connected()
+            && serial == self.conn.serial()
+        {
+            return supported;
+        }
+        let reply = self.conn.ask("control.capabilities", Self::scoped(json!({}))).ok();
+        let supported = match reply.as_ref().map(outcome) {
+            Some(Ok(c)) => Some(c["plugin_tools"] == true),
+            Some(Err(e)) if e.starts_with("unknown method") => Some(false),
+            _ => None,
+        };
+        self.plugin_tools = if self.conn.is_connected() { supported.map(|s| (self.conn.serial(), s)) } else { None };
+        supported.unwrap_or(false)
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         match method {
             "control.pending" => Ok(self.conn.pending()),
@@ -315,6 +337,9 @@ impl Backend for Remote {
 pub struct Auto {
     headless: Option<Headless>,
     remote: Option<Remote>,
+    /// True once the headless session has created or started its own design/layout work, even if a
+    /// subsequent `file.new` clears `doc.features` again (#21377).
+    had_work: bool,
     /// The port of the running app, when there is one.
     discover: Box<dyn FnMut() -> Option<u16>>,
     token: Option<String>,
@@ -322,16 +347,28 @@ pub struct Auto {
 
 impl Auto {
     pub fn new(headless: Headless, discover: Box<dyn FnMut() -> Option<u16>>, token: Option<&str>) -> Self {
-        Auto { headless: Some(headless), remote: None, discover, token: token.map(str::to_owned) }
+        let had_work = Self::headless_has_work(&headless);
+        Auto { headless: Some(headless), remote: None, had_work, discover, token: token.map(str::to_owned) }
+    }
+
+    fn headless_has_work(h: &Headless) -> bool {
+        !h.session.doc.features.is_empty()
+            || !h.session.doc.params.is_empty()
+            || !h.session.doc.components.is_empty()
+            || h.session.path.is_some()
+            || !h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
     }
 
     /// Switch to the app when the session is still empty and one is running.
     fn look_for_app(&mut self) {
-        let empty = self.headless.as_ref().is_some_and(|h| {
-            h.session.doc.features.is_empty()
-                && h.panels.as_ref().is_ok_and(|panels| panels.service.inspect().revision == 0 && panels.catalogue.state().user_count() == 0)
-        });
-        if !empty {
+        if self.had_work {
+            return;
+        }
+        if self.headless.as_ref().is_some_and(Self::headless_has_work) {
+            self.had_work = true;
+            return;
+        }
+        if self.headless.is_none() {
             return;
         }
         if let Some(port) = (self.discover)() {
@@ -344,13 +381,40 @@ impl Auto {
 }
 
 impl Backend for Auto {
+    fn batch_backend(&mut self) -> Option<&mut dyn Backend> {
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match (&mut self.remote, &mut self.headless) {
+            (Some(remote), _) => Some(remote),
+            (None, Some(headless)) => Some(headless),
+            (None, None) => None,
+        }
+    }
+    fn supports_plugin_tools(&mut self) -> bool {
+        if self.remote.is_none() {
+            self.look_for_app();
+        }
+        match (&mut self.remote, &mut self.headless) {
+            (Some(r), _) => r.supports_plugin_tools(),
+            (None, Some(h)) => h.supports_plugin_tools(),
+            (None, None) => false,
+        }
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         if self.remote.is_none() {
             self.look_for_app();
         }
         match (&mut self.remote, &mut self.headless) {
             (Some(r), _) => r.call(method, params),
-            (None, Some(h)) => h.call(method, params),
+            (None, Some(h)) => {
+                let before_token = h.session.design_token();
+                let out = h.call(method, params);
+                if Self::headless_has_work(h) || h.session.design_token() != before_token {
+                    self.had_work = true;
+                }
+                out
+            }
             (None, None) => Err("no session".into()),
         }
     }

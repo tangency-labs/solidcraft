@@ -70,25 +70,48 @@ impl Pass {
     }
 }
 
+/// The light of a view looking along `-view_dir`: a key light above and beside the eye, a fill
+/// from the eye and a highlight. Its directions are worked out once, not for every pixel.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Light {
+    view_dir: Vec3,
+    key: Vec3,
+    half: Vec3,
+}
+
+impl Light {
+    pub(crate) fn new(view_dir: Vec3) -> Self {
+        let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
+        let half = (key + view_dir).normalized().unwrap_or(view_dir);
+        Self { view_dir, key, half }
+    }
+
+    pub(crate) fn shade(&self, n: Vec3, base: [f64; 3]) -> [f64; 3] {
+        let n = if n.dot(self.view_dir) < 0.0 { -n } else { n };
+        let diff = n.dot(self.key).max(0.0);
+        let fill = n.dot(self.view_dir).max(0.0);
+        let spec = n.dot(self.half).max(0.0).powi(40) * 0.25;
+        let k = 0.42 + 0.38 * diff + 0.25 * fill;
+        [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
+    }
+}
+
 /// The CPU rasterizer's shading of colour `base` (linear 0..1) on a surface with normal `n` seen
 /// along `view_dir`: the light every picture without a GPU is lit by.
 pub fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
-    let n = if n.dot(view_dir) < 0.0 { -n } else { n };
-    let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
-    let diff = n.dot(key).max(0.0);
-    let fill = n.dot(view_dir).max(0.0);
-    let h = (key + view_dir).normalized().unwrap_or(view_dir);
-    let spec = n.dot(h).max(0.0).powi(40) * 0.25;
-    let k = 0.42 + 0.38 * diff + 0.25 * fill;
-    [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
+    Light::new(view_dir).shade(n, base)
 }
 
 /// Render a scene with the camera into an RGBA canvas of `w × h` pixels.
 pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    render_over(scene, cam, w, h, scene.background.unwrap_or((Rgb(236, 240, 245), Rgb(205, 212, 222))))
+}
+
+/// [`render`] over the `(top, bottom)` gradient instead of the scene's own background.
+fn render_over(scene: &Scene, cam: &Camera, w: usize, h: usize, (top, bot): (Rgb, Rgb)) -> Canvas {
     let (w, h) = (w.clamp(1, MAX_DIM), h.clamp(1, MAX_DIM));
     let (sw, sh) = (w * SS, h * SS);
     let mut c = Canvas::new(sw, sh);
-    let (top, bot) = scene.background.unwrap_or((Rgb(236, 240, 245), Rgb(205, 212, 222)));
     for y in 0..sh {
         let t = y as f64 / sh.max(1) as f64;
         let (a, b) = (top.f(), bot.f());
@@ -106,6 +129,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         Some([(q[0] / q[3] + 1.0) * 0.5 * sw as f64, (1.0 - q[1] / q[3]) * 0.5 * sh as f64, q[2] / q[3]])
     };
     let view_dir = cam.back();
+    let light = Light::new(view_dir);
     // Where the section cap is the visible surface: the depth of the section plane on that
     // pixel's view ray. Written into the depth buffer once the solids are drawn, so the cut face
     // hides edges inside the body (holes, far corners) instead of showing them like a pane of
@@ -159,7 +183,15 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         tinted.map(|v| v * shade)
     };
     for pass in [Pass::Solid, Pass::GlassFar, Pass::GlassNear] {
-        for sm in scene.meshes.iter().filter(|m| m.glass() == pass.glass()) {
+        // The closed solid bodies before the open ones, so the count is whole when an open body
+        // asks it whether the cut there lies inside a body (as the viewport's `Cut::rest` reads
+        // its stencil after `Cut::count`). Without a section, and for the glass (it blends), the
+        // scene's order stays: it settles ties between coplanar faces.
+        let mut meshes: Vec<&crate::SceneMesh> = scene.meshes.iter().filter(|m| m.glass() == pass.glass()).collect();
+        if !pass.glass() && !scene.clip.is_empty() {
+            meshes.sort_by_key(|m| !m.closed);
+        }
+        for sm in meshes {
             let alpha = sm.alpha();
             let m = &sm.mesh;
             let body = sm.color.f();
@@ -241,6 +273,12 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         if hid {
                             continue;
                         }
+                        // Where the cut lies inside a body, the cap hides all the section keeps
+                        // on that view ray: an open body there (a sheet inside a cut solid) is
+                        // not drawn, from either side (#4258).
+                        if !sm.closed && !pass.glass() && count.get(i).is_some_and(|n| *n > 0) {
+                            continue;
+                        }
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and
                             // leaves the depth buffer alone, so bodies inside it stay visible
@@ -255,7 +293,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             }
                             let n = (ns[0] * p0 + ns[1] * p1 + ns[2] * p2).normalized().unwrap_or(Vec3::Z);
                             // A see-through body has no cut face: the interior already shows.
-                            let cut = !pass.glass() && !scene.clip.is_empty() && inside;
+                            // Nor has an open one: its back face is its other side, lit as it
+                            // is without a section (the viewport's `fs_solid_open`).
+                            let cut = !pass.glass() && sm.closed && !scene.clip.is_empty() && inside;
                             let exit = if cut { cut_at(at) } else { None };
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
                                 *d = exit.and_then(|(cz, _)| cz).map_or(f32::INFINITY, |c| c.min(z));
@@ -264,7 +304,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 c.put(x, y, cap_color(x, y, base, exit.map_or(0, |(_, k)| k), (tint, turned)), 1.0);
                                 continue;
                             }
-                            let mut col = shade(n, view_dir, base);
+                            let mut col = light.shade(n, base);
                             let ndv = n.dot(view_dir).abs();
                             if curved && ndv < 0.14 {
                                 let a = 1.0 - ndv / 0.14;
@@ -474,13 +514,9 @@ pub fn render_png(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Option<Vec
 
 /// Render on a transparent background: the scene drawn over black and over white, and the
 /// alpha recovered from the difference (exact for the anti-aliased edges).
-pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
-    let keep = scene.background;
-    scene.background = Some((Rgb(0, 0, 0), Rgb(0, 0, 0)));
-    let black = render(scene, cam, w, h);
-    scene.background = Some((Rgb(255, 255, 255), Rgb(255, 255, 255)));
-    let mut out = render(scene, cam, w, h);
-    scene.background = keep;
+pub fn render_transparent(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    let black = render_over(scene, cam, w, h, (Rgb(0, 0, 0), Rgb(0, 0, 0)));
+    let mut out = render_over(scene, cam, w, h, (Rgb(255, 255, 255), Rgb(255, 255, 255)));
     unblend(&mut out.rgba, &black.rgba);
     out
 }
@@ -497,6 +533,23 @@ pub fn unblend(over_white: &mut [u8], over_black: &[u8]) {
         }
         o[3] = a.round().clamp(0.0, 255.0) as u8;
     }
+}
+
+/// A picture as the GPU draws it: [`render`], or for a scene with no backdrop
+/// ([`Scene::transparent`]) [`render_transparent`] with its colours premultiplied by their alpha,
+/// as a GPU picture drawn over transparent black comes back.
+pub fn render_picture(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
+    if !scene.transparent {
+        return render(scene, cam, w, h);
+    }
+    let mut canvas = render_transparent(scene, cam, w, h);
+    for px in canvas.rgba.as_chunks_mut::<4>().0 {
+        let a = u32::from(px[3]);
+        for v in &mut px[..3] {
+            *v = ((u32::from(*v) * a + 127) / 255) as u8;
+        }
+    }
+    canvas
 }
 
 #[cfg(test)]
@@ -558,6 +611,19 @@ mod tests {
         assert!(render_png(&scene, &cam, 16, 16).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
         // Hostile sizes are clamped.
         assert_eq!(render(&scene, &cam, 0, usize::MAX).w, 1);
+        // With no backdrop: clear around the triangle, opaque on it.
+        let t = render_transparent(&scene, &cam, 64, 64);
+        assert_eq!(t.rgba[3], 0, "a corner is clear");
+        assert_eq!(t.rgba[i + 3], 255, "the centre is opaque");
+        assert!(t.rgba[i] > t.rgba[i + 1] + 50, "and red: {:?}", &t.rgba[i..i + 4]);
+        // As a picture: the same, premultiplied (clear pixels are all zero); with a backdrop, `render`.
+        let mut clear = scene;
+        clear.transparent = true;
+        let p = render_picture(&clear, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a clear corner is transparent black");
+        assert_eq!(&p.rgba[i..i + 4], &t.rgba[i..i + 4], "an opaque pixel is unchanged");
+        clear.transparent = false;
+        assert_eq!(render_picture(&clear, &cam, 64, 64).rgba, render(&clear, &cam, 64, 64).rgba);
     }
 
     /// A square panel facing the front camera (which looks along +Y), 20 × 20 about the origin
@@ -944,6 +1010,49 @@ mod tests {
                     let c = render(&Scene { meshes, radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
                     let differ = c.rgba.chunks(4).zip(want.rgba.chunks(4)).filter(|(a, b)| a != b).count();
                     assert_eq!(differ, 0, "fov {fov}, flipped {flip}, block {with_block}: the hidden sheet changes {differ} pixels");
+                }
+            }
+        }
+    }
+
+    /// #4258: a sheet inside a cut solid is hidden by the cap from either side, as the cap is
+    /// opaque; it used to paint the cap in its own colour where its back faced the eye. A kept
+    /// sheet alone is lit from either side, never hatched: it has no inside to cut.
+    #[test]
+    fn a_sheet_inside_a_cut_solid_hides_under_the_cap() {
+        let sheet = |flip: bool| {
+            let mut m = Mesh::default();
+            m.positions.extend([Vec3::new(-15.0, 0.0, 5.0), Vec3::new(15.0, 0.0, 5.0), Vec3::new(15.0, 0.0, 15.0), Vec3::new(-15.0, 0.0, 15.0)]);
+            m.normals.extend([if flip { Vec3::Y } else { -Vec3::Y }; 4]);
+            m.triangles.extend(if flip { [[0, 2, 1], [0, 3, 2]] } else { [[0, 1, 2], [0, 2, 3]] });
+            m.tri_face.extend([0u32; 2]);
+            SceneMesh::sheet(Arc::new(m), Rgb(40, 200, 60))
+        };
+        let solid = || SceneMesh::solid(Arc::new(block(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0))), Rgb(150, 160, 175));
+        let clip = vec![(Vec3::X, 0.0)];
+        let green = |c: &Canvas| c.rgba.chunks(4).filter(|p| p[1] > p[0].saturating_add(40) && p[1] > p[2].saturating_add(40)).count();
+        let hatched = |c: &Canvas| c.rgba.chunks(4).filter(|p| warm([p[0], p[1], p[2]])).count();
+        for fov in [0.0f64, 0.5] {
+            // From both sides of the sheet, looking at the cut face.
+            for from in [Vec3::new(1.0, 0.5, 0.7), Vec3::new(1.0, -0.5, 0.7)] {
+                let mut cam = Camera { distance: if fov > 0.0 { 60.0 / (fov * 0.5).tan() } else { 120.0 }, fov, ..Default::default() };
+                cam = cam.looking_from(from);
+                let want = render(&Scene { meshes: vec![solid()], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                // The sheet's kept half, 15 x 10 mm facing Y, as the picture shows it: 355 pixels
+                // orthographic, 227 in perspective (measured at the target, within a tenth).
+                let px_per_mm = 120.0 / cam.half_height();
+                let kept = 15.0 * 10.0 * cam.back().y.abs() * px_per_mm * px_per_mm;
+                for flip in [false, true] {
+                    let scene = Scene { meshes: vec![sheet(flip), solid()], radius: 40.0, clip: clip.clone(), ..Default::default() };
+                    let c = render(&scene, &cam, 240, 240);
+                    let differ = c.rgba.chunks(4).zip(want.rgba.chunks(4)).filter(|(a, b)| a != b).count();
+                    assert_eq!(differ, 0, "fov {fov}, from {from:?}, flipped {flip}: the sheet shows through the cap in {differ} pixels");
+                    let alone = render(&Scene { meshes: vec![sheet(flip)], radius: 40.0, clip: clip.clone(), ..Default::default() }, &cam, 240, 240);
+                    let (lit, cap) = (green(&alone), hatched(&alone));
+                    assert!(
+                        (lit as f64 - kept).abs() < 0.1 * kept && cap == 0,
+                        "fov {fov}, from {from:?}, flipped {flip}: the kept sheet alone: {lit} of {kept:.0} lit, {cap} hatched pixels"
+                    );
                 }
             }
         }
