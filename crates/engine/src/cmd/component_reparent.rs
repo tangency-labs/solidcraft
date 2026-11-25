@@ -57,13 +57,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let uncaptured = s.uncaptured_moves().into_owned();
     for ancestor in from_path.iter().chain(&to_path) {
         let Some(pending) = uncaptured.get(ancestor).copied() else { continue };
-        scratch.pending_moves.remove(ancestor);
+        scratch.clear_pending_move(*ancestor);
         if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor) {
+            let prev = x.transform;
             x.transform = pending;
+            x.adjust_base_for_direct_move(&prev, &pending);
         }
     }
-    scratch.pending_moves.remove(&id);
+    scratch.clear_pending_move(id);
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+        let prev = x.transform;
+        if let Some(pending) = uncaptured.get(&id) {
+            x.adjust_base_for_direct_move(&prev, pending);
+        }
+        if let Some(base) = x.base_transform {
+            let reframed = solidcraft_doc::mat_mul(&inverse, &solidcraft_doc::mat_mul(&from_frame, &base));
+            x.base_transform = solidcraft_doc::is_placement(&reframed).then_some(reframed);
+        }
         x.parent = to;
         x.transform = transform;
         // A move typed in world axes takes them into the new parent's frame.
