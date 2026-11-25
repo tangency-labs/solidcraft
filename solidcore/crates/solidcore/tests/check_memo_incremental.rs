@@ -223,11 +223,20 @@ fn move_vertex(b: &mut Brep, v: solidcore::topology::VertexId, dx: f64) {
     .unwrap();
 }
 
-/// A plate checked clean, then the same plate with one vertex moved off its edges and
-/// faces: the moved vertex's neighbourhoods have other digests and are tested again, so
-/// the check reports what the full check reports.
+/// A plate checked clean, then the same plate with one corner moved off its faces: the
+/// moved vertex's neighbourhoods have other digests and are tested again, so the check
+/// reports what the full check reports. The corner moves along x off the face it bounds
+/// there, by ten times the gap the check allows a vertex (its tolerance, floored by the
+/// body's intersection tolerance), and by 0.5.
 #[test]
 fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
+    let allowed = {
+        let b = plate(2);
+        let v = b.vertex_list()[0];
+        let floor =
+            solidcore::topology::vertex::corner::xsect_tol_3d_of_brep(&Kernel::default(), &b);
+        floor.max(b.vertex(v).unwrap().tolerance)
+    };
     let moved = |dx: f64| {
         move || {
             let mut b = plate(2);
@@ -238,7 +247,7 @@ fn a_moved_vertex_is_tested_again_after_its_shape_was_clean() {
     };
     let mut k = Kernel::default();
     assert!(on(&mut k, &|| plate(2)).is_empty());
-    for dx in [1e-3, 0.5] {
+    for dx in [10.0 * allowed, 0.5] {
         let make = moved(dx);
         let want = full(&make);
         assert!(!want.is_empty(), "moved {dx}: valid");
