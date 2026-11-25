@@ -6934,10 +6934,10 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 };
                                 if inside && !sample_off_face(k, self.target, *face_a, p)? {
                                     // Not the fork's (#21749): past a corner, where other
-                                    // blended edges meet edge `b` at this end, the band runs on
-                                    // only as far as the corner's mitre: the sample is in it
-                                    // where it also lies in the band of the edge that meets `b`
-                                    // there on this face, run on past the corner
+                                    // blended edges meet edge `b` at this end, the blends take
+                                    // off only what neither side of the face keeps: the sample
+                                    // is in the band where it also lies on the edge's side of
+                                    // the rail of the edge that meets `b` there on this face
                                     // (`inside_corner_wedge`).
                                     if let Some((_, others)) =
                                         corners_b.iter().find(|(q, _)| (e - *q).length() <= tol)
@@ -7153,15 +7153,18 @@ struct CornerWedge<'a> {
 
 /// Whether a sample past a band's edge's end at a corner (#21749), already inside that band's
 /// run-on ([`inside_band_past_run_end`]), lies in the material the corner takes off. Past a
-/// corner the blends of the edges that meet there on the face run on past it until they meet
-/// at their mitre, and take off only what lies in both their bands: the wedge between their
-/// rails up to where the rails cross. So the sample is inside where it also lies in the run-on
-/// of the band of another edge at the corner that has a rail on `face`, past the same end
-/// (`end`); where no edge at the corner has a rail on `face` (a blended side edge, whose
-/// blend rolls on other faces), the end is judged as a free one: inside.
+/// corner where two edges meet on the face, each of the face's two sides keeps what lies
+/// beyond its blend's rail; the blends run on past the corner to their mitre and take off what
+/// neither side keeps. So the sample is inside where it also lies on the edge's side of the
+/// rail of another edge at the corner with a rail on `face`, that rail run on past the corner:
+/// further than `tol` from it in the direction of that band's section at `end`, however far
+/// (past that edge's line too). Where no edge at the corner has a rail on `face` (a blended
+/// side edge, whose blend rolls on other faces), or only a closed one, the end is judged as a
+/// free one: inside.
 ///
 /// # Errors
-/// Those of the drops onto the rails and their evaluation.
+/// Those of the drops onto the rails and their evaluation; a drop that finds no point on a
+/// rail, which a bounded curve always has, is a defect ([`band_defect`]).
 fn inside_corner_wedge(
     k: &Kernel,
     wedge: &CornerWedge<'_>,
@@ -7173,45 +7176,45 @@ fn inside_corner_wedge(
     use crate::geom::global_solver::SolverOperation;
     let mut on_face = false;
     for &c in wedge.others {
-        let Some((_, rail, kept)) = wedge
-            .rails
-            .get(c)
-            .and_then(|own| own.iter().find(|(f, _, _)| *f == wedge.face))
-        else {
-            continue;
-        };
         let Some((_, _, [c0, c1])) = wedge.edge_curves.get(c) else {
             continue;
         };
-        on_face = true;
-        let other_end = if (end - *c0).length() <= (end - *c1).length() {
-            *c1
-        } else {
-            *c0
-        };
-        let ivl = rail.natural_interval();
-        let on_rail = rail.drop_point(
-            k,
-            &ivl,
-            sample,
-            None,
-            crate::math::BIG_DOUBLE,
-            None,
-            SolverOperation::Minimize,
-        )?;
-        if !on_rail.success {
+        // a closed edge has no end at the corner to run on past
+        if (*c0 - *c1).length() <= tol {
             continue;
         }
-        let r = rail.evaluate_point(k, on_rail.parameter)?;
-        let at = PastRunEnd {
-            end,
-            other_end,
-            sample,
-            on_rail: (on_rail.parameter, r),
-            kept: [kept.min(), kept.max()],
+        let Some(own) = wedge.rails.get(c) else {
+            continue;
         };
-        if inside_band_past_run_end(k, rail, &ivl, at, tol, apart)? {
-            return Ok(true);
+        for (_, rail, _) in own.iter().filter(|(f, _, _)| *f == wedge.face) {
+            let ivl = rail.natural_interval();
+            let drop = |q| {
+                rail.drop_point(
+                    k,
+                    &ivl,
+                    q,
+                    None,
+                    crate::math::BIG_DOUBLE,
+                    None,
+                    SolverOperation::Minimize,
+                )
+            };
+            let across = drop(end)?;
+            let on_rail = drop(sample)?;
+            if !across.success || !on_rail.success {
+                return Err(band_defect("a bounded curve always has a closest point"));
+            }
+            let section = end - rail.evaluate_point(k, across.parameter)?;
+            let width = section.length();
+            // a rail on the corner itself takes no band there
+            if width <= 2.0 * apart {
+                continue;
+            }
+            on_face = true;
+            let r = rail.evaluate_point(k, on_rail.parameter)?;
+            if (sample - r).dot(section * (1.0 / width)) > tol {
+                return Ok(true);
+            }
         }
     }
     Ok(!on_face)
