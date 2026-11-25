@@ -280,7 +280,7 @@ pub const VIEW_COMPASS: Page = Page {
     what: "The axes in the corner of the 3D view: click a tip to look along that axis, Home to return, drag to orbit. It draws the camera's axes as given and returns what was chosen.",
     usage: r#"
 let action = ui_kit::view_compass::show(ui, &ui_kit::view_compass::Compass {
-    clip, centre, axes: camera_axes, hover: ui.ctx().pointer_hover_pos(), orbiting: false, snap_hint: true, home_label: "Home".into(),
+    clip, centre, axes: camera_axes, hover: ui.ctx().pointer_hover_pos(), orbiting: false, snap_hint: true, home_label: "Home".into(), turn_around_label: None,
 });
 "#,
     dos: &["Pass the pointer only when it may act on the compass."],
@@ -297,6 +297,7 @@ let action = ui_kit::view_compass::show(ui, &ui_kit::view_compass::Compass {
             orbiting: false,
             snap_hint: true,
             home_label: "Home".into(),
+            turn_around_label: None,
         };
         if let Some(action) = view_compass::show(ui, &compass) {
             d.said(format!("{action:?}"));

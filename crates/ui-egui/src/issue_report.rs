@@ -105,6 +105,8 @@ impl Drop for CadInput {
 #[derive(Default)]
 pub struct ReportState {
     pub draft: Option<Draft>,
+    /// Only typed answers, kept in memory until restored, discarded or the app exits.
+    earlier: Option<Answers>,
     pending: Option<Pending>,
     /// A screenshot waiting for the preview being computed (#7171).
     waiting: Option<Waiting>,
@@ -137,6 +139,8 @@ pub struct Draft {
     pub(crate) description: String,
     steps: String,
     expected: String,
+    opened_with: Answers,
+    restore_allowed: bool,
     image: Option<Arc<ColorImage>>,
     texture: Option<TextureHandle>,
     /// What the technical details are built from, to rebuild them on Retake (#7350).
@@ -171,6 +175,8 @@ pub struct Draft {
 impl Draft {
     fn new(title: String, body: String, source_signature: u64) -> Self {
         Self {
+            opened_with: Answers { title: title.clone(), ..Default::default() },
+            restore_allowed: false,
             title,
             title_prefix: String::new(),
             body,
@@ -194,6 +200,10 @@ impl Draft {
             github: false,
             agent: None,
         }
+    }
+
+    fn can_restore_answers(&self) -> bool {
+        self.restore_allowed && [&self.title, &self.description, &self.steps, &self.expected].iter().all(|s| s.trim().is_empty())
     }
 
     fn report_title(&self) -> String {
@@ -222,6 +232,40 @@ impl Draft {
             report.push_str(marker);
         }
         report
+    }
+}
+
+#[derive(Default)]
+struct Answers {
+    title: String,
+    description: String,
+    steps: String,
+    expected: String,
+}
+
+impl Answers {
+    fn edited(draft: &Draft) -> Option<Self> {
+        let keep = |text: &str, initial: &str, max| {
+            if text.trim().is_empty() || text == initial { String::new() } else { limited_chars(text, max) }
+        };
+        let initial = &draft.opened_with;
+        let answers = Self {
+            title: keep(&draft.title, &initial.title, 160),
+            description: keep(&draft.description, &initial.description, MAX_ANSWER),
+            steps: keep(&draft.steps, &initial.steps, MAX_ANSWER),
+            expected: keep(&draft.expected, &initial.expected, MAX_ANSWER),
+        };
+        [&answers.title, &answers.description, &answers.steps, &answers.expected].iter().any(|s| !s.is_empty()).then_some(answers)
+    }
+
+    fn restore(self, draft: &mut Draft) {
+        draft.title = self.title;
+        draft.description = self.description;
+        draft.steps = self.steps;
+        draft.expected = self.expected;
+        draft.focus_requested = false;
+        draft.missing_description = false;
+        draft.opened_github = false;
     }
 }
 
@@ -360,7 +404,7 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     if let Some(d) = dialog {
         let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
     }
-    let _ = write!(&mut h, "{:?}", app.session.selection);
+    let _ = write!(&mut h, "{:?}{}", app.session.selection, app.session.all_bodies_selected());
     h.0.finish()
 }
 
@@ -487,6 +531,10 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
             }
         }
     }
+    if app.session.all_bodies_selected() {
+        let count = app.session.selected_count().unwrap_or(0);
+        let _ = writeln!(&mut context, "\nSelect All: every shown body ({count}) is selected.");
+    }
     context.push_str("\nSelected items (including occurrence paths):\n");
     context.push_str(&block(&debug(&app.session.selection.iter().take(32).collect::<Vec<_>>(), 3000)));
     for item in app.session.selection.iter().take(8) {
@@ -531,6 +579,7 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
     let mut title = if error.is_some() { format!("{label}: operation failed") } else { String::new() };
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, source_signature(app, dialog));
+    draft.restore_allowed = dialog.is_none() && error.is_none();
     draft.title_prefix = format!("{label}: ");
     // More than the details show of it, so a rebuild shows the same.
     draft.origin = Origin::View { error: error.map(|e| limited(e, 8000)) };
@@ -614,11 +663,15 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     draft.origin = Origin::Crash;
     draft.description =
         limited(&format!("{what}{}.", command.map(|c| format!(" while running `{}`", limited(c, 160))).unwrap_or_default()), MAX_ANSWER);
+    draft.opened_with.description.clone_from(&draft.description);
     draft
 }
 
 /// Open a reviewed draft for a crash report (no screenshot: the view shows nothing of it).
 pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json::Value) {
+    if keep_open_draft(app, true) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
@@ -671,12 +724,25 @@ pub fn draft_url(title: &str, body: &str) -> (String, bool) {
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
+    if keep_open_draft(app, dialog.is_some() || error.is_some()) {
+        return;
+    }
     if app.issue_report.draft.is_none() {
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
     cancel_capture(app);
     app.issue_report.draft = Some(window_draft(app, ctx, dialog, error));
     capture(app, ctx, dialog);
+}
+
+/// Reopening must not replace the reviewed context or the typing waiting for its screenshot.
+fn keep_open_draft(app: &mut SolveApp, new_context: bool) -> bool {
+    let state = &mut app.issue_report;
+    let Some(draft) = state.draft.as_mut() else { return false };
+    if new_context {
+        draft.note = solidcraft_ui_text::tr("ui.report_finish_current").to_string();
+    }
+    true
 }
 
 /// [`draft_for`] and the window it is shown in.
@@ -977,6 +1043,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             self::retake(app, ctx, dialog.as_ref());
         }
     } else {
+        if let Some(answers) = Answers::edited(&draft) {
+            app.issue_report.earlier = Some(answers);
+        }
         cancel_capture(app);
         // Pointer release may have happened during review; never finalize it against
         // the report's last cursor position when CAD interaction resumes.
@@ -1039,6 +1108,163 @@ mod tests {
         let pos = crate::scenario::handle_at("dialog:ok");
         assert!(pos.is_some(), "the report primary action is drawn");
         pos.map_or_else(Vec::new, |pos| click_commands_at(h, [f64::from(pos.x), f64::from(pos.y)]))
+    }
+
+    #[test]
+    fn issue_report_reopening_keeps_unfinished_answers_and_reviewed_context() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut draft = draft_for(&h.app, None, None);
+        draft.title = "Edited summary".into();
+        draft.description = "The report loses my notes".into();
+        draft.steps = "Open the report twice".into();
+        draft.expected = "Keep the notes".into();
+        draft.body = "Reviewed and redacted diagnostics".into();
+        let image = Arc::new(ColorImage::filled([8, 8], egui::Color32::GREEN));
+        draft.image = Some(image.clone());
+        let before = (draft.report_title(), draft.report_body());
+        h.app.issue_report.draft = Some(draft);
+        h.frames(4);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, None);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!((draft.report_title(), draft.report_body()), before);
+        assert!(Arc::ptr_eq(draft.image.as_ref().unwrap(), &image));
+        assert!(!pending(&h.app), "reopening must not replace the reviewed screenshot");
+    }
+
+    #[test]
+    fn issue_report_both_close_controls_offer_to_restore_answers() {
+        for (close, [width, height]) in [("dialog:cancel", [1280, 720]), ("dialog:close", [640, 480])] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+            let draft = h.app.issue_report.draft.as_mut().unwrap();
+            draft.title = "Saved summary".into();
+            draft.steps = "Open, close and reopen the report".into();
+            draft.expected = "Offer my answers again".into();
+            draft.body = "Old diagnostics".into();
+            draft.image = Some(Arc::new(ColorImage::filled([8, 8], egui::Color32::GREEN)));
+            h.frames(8);
+            h.step(&json!({"text":"Keep this description after closing"})).unwrap();
+            h.step(&json!({"click":{"handle":close}})).unwrap();
+            assert!(h.app.issue_report.draft.is_none(), "closing releases CAD input");
+            let ctx = h.ctx.clone();
+            begin(&mut h.app, &ctx, None, None);
+            cancel_capture(&mut h.app);
+            let fresh_body = h.app.issue_report.draft.as_ref().unwrap().body.clone();
+            h.frames(8);
+            assert!(h.widget("Restore answers").is_some(), "{close}: closed answers must remain available");
+            let [x, y] = h.widget("Restore answers").unwrap();
+            assert!((0.0..f64::from(width)).contains(&x) && (0.0..f64::from(height)).contains(&y), "the recovery offer is visible");
+            h.step(&json!({"widget":"Restore answers"})).unwrap();
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.description, "Keep this description after closing");
+            assert_eq!(draft.title, "Saved summary");
+            assert_eq!(draft.steps, "Open, close and reopen the report");
+            assert_eq!(draft.expected, "Offer my answers again");
+            assert_eq!(draft.body, fresh_body, "restoring answers keeps the new diagnostics");
+            assert!(draft.image.is_none(), "the old screenshot does not belong to the new report");
+            assert!(h.app.issue_report.earlier.is_none(), "restoring consumes the saved answers");
+        }
+    }
+
+    #[test]
+    fn issue_report_reopening_preserves_capture_and_held_typing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        let ctx = h.ctx.clone();
+        retake(&mut h.app, &ctx, None);
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        let body = h.app.issue_report.draft.as_ref().unwrap().body.clone();
+        let mut input = egui::RawInput { events: vec![egui::Event::Text("Typed during capture".into())], ..Default::default() };
+        hold_input(&mut h.app, &mut input);
+        begin(&mut h.app, &ctx, None, None);
+        begin(&mut h.app, &ctx, None, Some("A different error"));
+        begin_crash(&mut h.app, &ctx, &json!({"message":"A different crash"}));
+        assert_eq!(h.app.issue_report.pending.as_ref().unwrap().token, token);
+        assert_eq!(h.app.issue_report.held.len(), 1);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().body, body);
+        cancel_capture(&mut h.app);
+        h.frames(8);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "Typed during capture");
+    }
+
+    #[test]
+    fn issue_report_recovery_never_overwrites_new_or_contextual_answers_and_can_be_discarded() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        combine(&mut h.app);
+        let mut started = draft_for(&h.app, None, None);
+        started.description = "A different report".into();
+        for draft in [
+            started,
+            draft_for(&h.app, None, Some("New error")),
+            draft_for(&h.app, h.app.dialog.as_ref(), None),
+            crash_draft(&json!({"message":"New crash"})),
+        ] {
+            h.app.issue_report.earlier = Some(Answers { description: "Saved answer".into(), ..Default::default() });
+            let before = draft.report_body();
+            h.app.issue_report.draft = Some(draft);
+            h.frames(8);
+            assert!(h.widget("Restore answers").is_none());
+            assert_eq!(h.app.issue_report.draft.as_ref().unwrap().report_body(), before);
+            assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "Saved answer");
+        }
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.step(&json!({"widget":"Discard answers"})).unwrap();
+        assert!(h.app.issue_report.earlier.is_none());
+        assert!(h.widget("Restore answers").is_none());
+        assert!(h.app.issue_report.draft.as_ref().unwrap().description.is_empty());
+    }
+
+    #[test]
+    fn issue_report_closing_empty_or_prefilled_drafts_keeps_earlier_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.earlier = Some(Answers { description: "Saved answer".into(), ..Default::default() });
+        for draft in [
+            draft_for(&h.app, None, None),
+            draft_for(&h.app, None, Some("Generated error summary")),
+            crash_draft(&json!({"message":"Generated crash summary"})),
+        ] {
+            h.app.issue_report.draft = Some(draft);
+            h.frames(8);
+            h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
+            assert!(h.app.issue_report.draft.is_none());
+            assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "Saved answer");
+        }
+        let mut crash = crash_draft(&json!({"message":"Generated crash summary"}));
+        crash.steps = "My typed reproduction".into();
+        let answers = Answers::edited(&crash).unwrap();
+        assert_eq!(answers.steps, "My typed reproduction");
+        assert!(answers.title.is_empty() && answers.description.is_empty());
+    }
+
+    #[test]
+    fn issue_report_browser_handoff_does_not_prove_submission_or_discard_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.step(&json!({"text":"First report"})).unwrap();
+        open_commands(&mut h);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, None);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "First report");
+        assert!(!pending(&h.app));
+        h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
+        assert_eq!(h.app.issue_report.earlier.as_ref().unwrap().description, "First report");
+        begin(&mut h.app, &ctx, None, None);
+        cancel_capture(&mut h.app);
+        h.frames(8);
+        h.step(&json!({"widget":"Restore answers"})).unwrap();
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().description, "First report");
+        assert!(!h.app.issue_report.draft.as_ref().unwrap().opened_github);
     }
 
     #[test]
@@ -1433,7 +1659,7 @@ mod tests {
         let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
         let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
         assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
-        assert!(app.session.selection.is_empty());
+        assert!(!app.session.has_selection());
         let at = crate::now_ms() - 125_000.0;
         for i in 0..12 {
             app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);
@@ -1635,7 +1861,7 @@ mod tests {
         assert!(h.widget("Opens your browser and copies the report text for you to paste into GitHub.").is_some());
         assert!(h.widget("Reports are public. A GitHub account is required.").is_some());
         let commands = open_commands(&mut h);
-        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)), "commands: {commands:?}");
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text.starts_with(&reviewed) && text.contains("drag the PNG file") && text.contains(".png"))), "commands: {commands:?}");
         assert!(
             commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL) && !url.url.contains("&body=")))
         );
@@ -1758,6 +1984,81 @@ mod tests {
                 let why = std::fs::write(&path, b"").unwrap_err();
                 assert_eq!(note, format!("Could not save screenshot: {why}"));
             }
+        }
+    }
+
+    #[test]
+    fn issue_report_short_screenshot_handoff_copies_the_image_and_explains_pasting() {
+        for (os, shortcut) in [(egui::os::OperatingSystem::Nix, "Ctrl+V"), (egui::os::OperatingSystem::Mac, "Cmd+V")] {
+            let mut h = crate::scenario::Harness::new();
+            h.ctx.set_os(os);
+            h.app.home.open = false;
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            let image = Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]));
+            draft.image = Some(image.clone());
+            let reviewed = draft.report_body();
+            h.app.issue_report.draft = Some(draft);
+            h.frames(16);
+            let commands = open_commands(&mut h);
+            assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(copied) if copied == image.as_ref())));
+            assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(_))));
+            let url = commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::OpenUrl(url) => Some(&url.url),
+                    _ => None,
+                })
+                .unwrap();
+            let body = query(url).into_iter().find(|(key, _)| key == "body").unwrap().1;
+            assert!(body.contains("## Visual context\nThe screenshot is NOT attached yet. Click in this box and press"));
+            assert!(body.contains(shortcut));
+            assert!(!body.contains("Attach the reviewed screenshot"));
+            let draft = h.app.issue_report.draft.as_ref().unwrap();
+            assert_eq!(draft.report_body(), reviewed, "reviewed diagnostics remain editable and unchanged");
+            assert!(draft.note.contains("NOT attached yet") && draft.note.contains(shortcut));
+            assert!(draft.opened_github);
+        }
+    }
+
+    #[test]
+    fn issue_report_long_screenshot_handoff_saves_png_and_preserves_text_on_save_failure() {
+        let h = crate::scenario::Harness::new();
+        for (path, saved) in [(h.dir.join("report.png"), true), (h.dir.join("missing/report.png"), false)] {
+            let mut draft = draft_for(&h.app, None, None);
+            draft.description = "The preview disappeared.".into();
+            draft.steps = "Select a face and start Extrude.".into();
+            draft.body.push_str(&"Reviewed diagnostic context. ".repeat(300));
+            draft.image = Some(Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+            let reviewed = draft.report_body();
+            assert!(draft_url(&draft.report_title(), &reviewed).1);
+            let path = path.to_str().unwrap();
+            let output = h.ctx.run_ui(Default::default(), |_| form::open_github(&mut draft, &h.ctx, path));
+            assert!(!output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyImage(_))));
+            let text = output
+                .platform_output
+                .commands
+                .iter()
+                .find_map(|c| match c {
+                    egui::OutputCommand::CopyText(text) => Some(text),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if !url.url.contains("&body="))));
+            if saved {
+                let png = image::load_from_memory_with_format(&std::fs::read(path).unwrap(), image::ImageFormat::Png).unwrap();
+                assert_eq!(png.into_rgba8().dimensions(), (4, 3));
+                assert!(text.contains("report.png") && text.contains("drag the PNG file"));
+                assert!(!text.contains(h.dir.to_str().unwrap()), "the public issue text never names the folder");
+                assert!(text.contains("NOT attached yet"));
+                assert!(draft.note.contains(path) && draft.note.contains("drag"));
+            } else {
+                assert_eq!(text, &reviewed);
+                assert!(text.contains("Attach the reviewed screenshot or a short example showing the problem."));
+                assert!(draft.note.starts_with("Could not save screenshot:"));
+            }
+            assert_eq!(draft.report_body(), reviewed);
+            assert!(draft.opened_github);
         }
     }
 
@@ -2053,6 +2354,7 @@ mod tests {
         assert!(draft.image.is_some(), "{}", draft.note);
         assert!(!draft.body.contains("still being computed"));
         // A selection changed while it waits: the report's context no longer matches the view.
+        app.issue_report = ReportState::default();
         app.preview.busy = true;
         begin(&mut app, &ctx, None, None);
         app.session.selection = vec![Sel::Feature { id: 1 }];
@@ -2273,6 +2575,7 @@ mod tests {
         assert!(!pending(&app));
         assert_eq!(app.issue_report.draft.as_ref().unwrap().image.as_ref().unwrap().size, [4, 3]);
         assert_eq!(app.shots.pending.len(), 1, "report cannot consume the control request");
+        app.issue_report = ReportState::default();
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         app.cam.distance *= 2.0;
@@ -2360,11 +2663,13 @@ mod tests {
         tick(&mut app, &ctx);
         assert!(!pending(&app));
         assert!(app.issue_report.draft.as_ref().unwrap().note.contains("changed"));
+        app.issue_report = ReportState::default();
         let dialog = app.dialog.clone();
         begin(&mut app, &ctx, dialog.as_ref(), None);
         app.issue_report.pending.as_mut().unwrap().deadline = -1.0;
         tick(&mut app, &ctx);
         assert!(app.issue_report.draft.as_ref().unwrap().note.contains("No app frame"));
+        app.issue_report = ReportState::default();
         let dialog = app.dialog.clone();
         begin(&mut app, &ctx, dialog.as_ref(), None);
         let token = app.issue_report.pending.as_ref().unwrap().token;

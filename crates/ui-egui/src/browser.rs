@@ -1265,6 +1265,11 @@ pub(crate) struct Actions {
 }
 
 impl Actions {
+    /// The menu a row asked for, taken so it is opened once.
+    pub(crate) fn take_menu(&mut self) -> Option<(Pos2, Target)> {
+        self.menu.take()
+    }
+
     fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
         self.drop = Some((source, action));
     }
@@ -1344,9 +1349,10 @@ impl Lit {
                     continue;
                 }
                 Sel::Feature { id } => Thing::Sketch(*id),
-                Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
-                    Thing::Sketch(*sketch)
-                }
+                Sel::Profile { sketch, .. }
+                | Sel::ExternalSketchCurve { sketch, .. }
+                | Sel::ExternalSketchPoint { sketch, .. }
+                | Sel::PlacedSketchPoint { sketch, .. } => Thing::Sketch(*sketch),
                 Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
                     match app.session.active_sketch {
                         Some(id) => Thing::Sketch(id),
@@ -1364,6 +1370,7 @@ impl Lit {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
                 Hit::SketchPoint { sketch, .. }
+                | Hit::PlacedSketchPoint { sketch, .. }
                 | Hit::SketchPoint3d { sketch, .. }
                 | Hit::SketchMidpoint { sketch, .. }
                 | Hit::SketchCurve { sketch, .. }
@@ -1492,6 +1499,11 @@ impl Actions {
 /// Existing Browser content without placement, title or collapse chrome.
 pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
+    // The rows above a hovered or selected body are marked from its placement's path: a large
+    // assembly names its placements beside the window, so the first hover never waits for them.
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let render = crate::render_workspace::active(app);
     if render {
         // Render has its own search, and its tree never filters by this one.
@@ -1547,9 +1559,16 @@ fn prepare_model(app: &mut SolveApp) {
 /// Walk the placements once for this model, so [`placed_body_path`] can answer without `&mut`
 /// (the Parts and Components selection modes pick while the view draws).
 pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_body_paths_with(app, None);
+}
+
+/// [`prepare_body_paths`] with the window to wake when a large design's names land: naming a
+/// 100-printer assembly's placements took 14 s, so a large design names them on a worker.
+pub(crate) fn prepare_body_paths_with(app: &mut SolveApp, ctx: Option<&egui::Context>) {
     prepare_model(app);
     if let Some(model) = app.tree.model.as_mut() {
-        model.body_path(&app.session, "");
+        model.start_body_paths(&app.session, ctx);
+        model.poll_body_paths();
     }
 }
 
@@ -1682,6 +1701,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
 /// Existing semantic rows, reusable by either presentation without a panel host.
 pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: crate::semantic_content::ContentRequest) -> Actions {
     crate::semantic_content::ensure_session(app, ui.ctx());
+    if follows_view(app) {
+        prepare_body_paths_with(app, Some(ui.ctx()));
+    }
     let mut acts = Actions { session: Some(app.session.uid), lit: Lit::of(app), ..Default::default() };
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
@@ -2916,7 +2938,9 @@ impl Entry {
             key: f.id.to_string(),
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
-            patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
+            // A sketch's patterns and projections fold under it.
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
+                .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -3654,7 +3678,9 @@ fn entry_row(
         acts.menu = Some((p, t));
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
-        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), !visible || parent_hidden);
+        let dim = !visible || parent_hidden;
+        crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
+        crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
     }
     if built_open && built_key.is_some() {
         features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);

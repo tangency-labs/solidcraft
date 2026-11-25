@@ -15,10 +15,16 @@
 //! and the inner 6. Upstream's parametric G2 test compares raw second derivatives, whose
 //! lengths follow the parameter speed (it jumps by up to 1.3e-5 relative at these knots),
 //! called hundreds of the knots G1 and split the skins into 342 and 274 faces. On the 7
-//! and 6 faces the difference needs the nearest-point half of
-//! `simple_coincidence_crossing_is_point` (WR-647, on in SolidCraft; its crossing half is
-//! always on); without it it fails
-//! in `topology/brep/p6.rs` as the pinned C++ does.
+//! and 6 faces the difference once needed the nearest-point half of the retired
+//! `simple_coincidence_crossing_is_point` (WR-647), and failed without it in
+//! `topology/brep/p6.rs` as the pinned C++ does. That failure was a classification fault,
+//! not the flag's to fix (WR-647 part B): a cap
+//! curve's run along a skin edge over [0, 1.18] of its 10.54 (a range within the
+//! tolerance) was combined into the whole interval it ended inside, so the classification
+//! said the curve ran along the edge over all of it, where it leaves the edge by up to
+//! 4.9e-5 at tolerance 2e-5. The run now labels only its own extent
+//! (`CurveClassification::insert_curve_interval`), and the difference is the same solid
+//! without the flag.
 //!
 //! Provenance of `tests/data/issue_948_min7.txt` (third-party data): source
 //! <https://github.com/NVIDIA-Omniverse/usd-brep/issues/32>, the inline `min7.txt` block,
@@ -110,7 +116,6 @@ fn difference_volume() -> f64 {
     use solidcore::topology::brep::p1::shells;
     let data = sections(MIN7);
     let mut k = Kernel::default();
-    k.fixes.simple_coincidence_crossing_is_point = true;
     let mut outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     assert!(is_manifold_solid(&outer).unwrap());

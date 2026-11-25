@@ -1,0 +1,19 @@
+{
+  "id": "frost",
+  "name": "Frost",
+  "version": "1.0.0",
+  "description": "Frosted glass behind see-through panels, tinted towards the theme's text colour, with a light rim.",
+  "capabilities": ["shaders@0.2"],
+  "shaders": [
+    {
+      "id": "frost",
+      "name": "Frost",
+      "kind": "panel",
+      "source": "frost.wgsl",
+      "blur": 16,
+      "settings": [
+        {"id": "tint", "name": "Tint", "min": 0, "max": 1, "default": 0.2}
+      ]
+    }
+  ]
+}
