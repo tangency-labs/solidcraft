@@ -1038,14 +1038,16 @@ pub(super) struct WallsInput<'a> {
     pub tol: f64,
 }
 
-/// The walls of the profile, read from its segments (the first loop of
-/// `sm_CreateCurvatureKeepingWalls`).
-fn read_walls(
+/// One profile segment `pc`, run along `sense`, as its wall reads it: an arc of a circle
+/// among the inputs (counterclockwise about its axis, its angles from `x`), or a line;
+/// `Err` with its start point when it is neither (`sm_DraftInput` found none).
+fn read_wall(
     k: &Kernel,
     input: &WallsInput<'_>,
-) -> Result<core::result::Result<Vec<Wall>, CornerRefusal>> {
+    pc: &Curve,
+    sense: bool,
+) -> Result<core::result::Result<Wall, Point3>> {
     let WallsInput {
-        composite,
         inputs,
         normal: n,
         offset,
@@ -1058,59 +1060,70 @@ fn read_walls(
     } else {
         -1.0
     };
-    let canon = composite.canonical();
+    let mut w = Wall::default();
+    let ivl = pc.natural_interval();
+    w.start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
+    w.end = pc.evaluate_point(k, if sense { ivl.max() } else { ivl.min() })?;
+    let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
+    let v1 = at(&v, 1)?;
+    let t = if sense { v1 } else { -v1 };
+    let found = draft_input(k, pc, inputs, tol)?;
+    match found.map(Curve::kind) {
+        Some(CurveKind::Ellipse(circle)) if found.is_some_and(|c| c.is_kind_of(CIRCLE_TYPE)) => {
+            let frame = circle.position();
+            w.arc = true;
+            w.center = frame.origin();
+            w.radius = circle.radius();
+            w.x = frame.x_axis().unitize()?;
+            let kk = w.x.cross(frame.y_axis()).unitize()?;
+            // counterclockwise about the axis it is run along
+            w.axis = if kk.cross(w.start - w.center).dot(t) >= 0.0 {
+                kk
+            } else {
+                -kk
+            };
+            w.y = w.axis.cross(w.x);
+            w.shrink = side * n.dot(w.axis) * offset;
+            w.start_ang = angle(&w, w.start, 0.0);
+            w.end_ang = angle(&w, w.end, w.start_ang);
+            if w.end_ang <= w.start_ang + EFF_ZERO_SQRT {
+                w.end_ang += 2.0 * PI;
+            }
+        }
+        Some(_) => {
+            w.arc = false;
+            w.dir = (w.end - w.start).unitize()?;
+            w.offset = side * offset * n.cross(w.dir);
+        }
+        None => return Ok(Err(w.start)),
+    }
+    Ok(Ok(w))
+}
+
+/// The walls of the profile, read from its segments (the first loop of
+/// `sm_CreateCurvatureKeepingWalls`).
+fn read_walls(
+    k: &Kernel,
+    input: &WallsInput<'_>,
+) -> Result<core::result::Result<Vec<Wall>, CornerRefusal>> {
+    let canon = input.composite.canonical();
     let mut walls = Vec::new();
     for (pc, &sense) in canon.curves.iter().zip(&canon.senses) {
-        let mut w = Wall::default();
-        let ivl = pc.natural_interval();
-        w.start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
-        w.end = pc.evaluate_point(k, if sense { ivl.max() } else { ivl.min() })?;
-        let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
-        let v1 = at(&v, 1)?;
-        let t = if sense { v1 } else { -v1 };
-        let found = draft_input(k, pc, inputs, tol)?;
-        match found.map(Curve::kind) {
-            Some(CurveKind::Ellipse(circle))
-                if found.is_some_and(|c| c.is_kind_of(CIRCLE_TYPE)) =>
-            {
-                let frame = circle.position();
-                w.arc = true;
-                w.center = frame.origin();
-                w.radius = circle.radius();
-                w.x = frame.x_axis().unitize()?;
-                let kk = w.x.cross(frame.y_axis()).unitize()?;
-                // counterclockwise about the axis it is run along
-                w.axis = if kk.cross(w.start - w.center).dot(t) >= 0.0 {
-                    kk
-                } else {
-                    -kk
-                };
-                w.y = w.axis.cross(w.x);
-                w.shrink = side * n.dot(w.axis) * offset;
-                w.start_ang = angle(&w, w.start, 0.0);
-                w.end_ang = angle(&w, w.end, w.start_ang);
-                if w.end_ang <= w.start_ang + EFF_ZERO_SQRT {
-                    w.end_ang += 2.0 * PI;
-                }
-                if w.radius - w.shrink <= tol {
-                    let corner = pc.evaluate_point(k, ivl.mid())?;
-                    return Ok(Err(CornerRefusal {
-                        reason: TaperCornerRefusal::WallCloses,
-                        corner,
-                    }));
-                }
-            }
-            Some(_) => {
-                w.arc = false;
-                w.dir = (w.end - w.start).unitize()?;
-                w.offset = side * offset * n.cross(w.dir);
-            }
-            None => {
+        let w = match read_wall(k, input, pc, sense)? {
+            Ok(w) => w,
+            Err(start) => {
                 return Ok(Err(CornerRefusal {
                     reason: TaperCornerRefusal::NotExact,
-                    corner: w.start,
+                    corner: start,
                 }));
             }
+        };
+        if w.arc && w.radius - w.shrink <= input.tol {
+            let corner = pc.evaluate_point(k, pc.natural_interval().mid())?;
+            return Ok(Err(CornerRefusal {
+                reason: TaperCornerRefusal::WallCloses,
+                corner,
+            }));
         }
         walls.push(w);
     }
@@ -2238,14 +2251,17 @@ pub(super) fn curvature_keeping_walls(
 /// The wall of a profile that is one circle, drafted inward so far that it closes before the
 /// far end (#22149, a drill point; not in the fork, which ran the circle's offset past its
 /// centre and built no closed solid). Its section at a fraction `f` of the height is the
-/// circle of radius `r - f shrink` (as [`read_walls`] reads an arc's wall), gone at
-/// `f = r / shrink`, the apex on the axis; nothing of the profile is left above it, so the
-/// wall is the cone from the circle to the apex ([`draft_cone`] to that height, its far
-/// radius 0), built into `target`, and there is no far end to cap. A circle whose far radius
-/// is within `tol` of 0 closes at the far end: the same cone, to the full height. `false`,
-/// nothing built, for any other profile or draft: a profile not one segment that is a
-/// circle among the inputs, a height not along the circle's axis (a draft leaning off the
-/// profile's plane), or a circle still open at the far end.
+/// circle of radius `r - f shrink` ([`read_wall`]), gone at `f = r / shrink`, the apex on the
+/// axis; nothing of the profile is left above it, so the wall is the cone from the circle to
+/// the apex ([`draft_cone`] to that height, its far radius 0), built into `target`, and there
+/// is no far end to cap. A far radius within `tol` of 0 closes at the far end: the same cone,
+/// to the full height (the closing [`read_walls`] refuses for an arc between corners).
+/// `false`, nothing built, for any other profile or draft: not one segment that is a whole
+/// circle among the inputs (its ends within `tol` and its angle over a half turn, so not an
+/// open arc), a circle still open at the far end, a shrink or apex height that is not finite
+/// or an apex within `tol` of the profile (every test is written to accept, so NaN is not
+/// accepted), or a height not along the circle's axis (a draft leaning off the profile's
+/// plane).
 pub(super) fn circle_closing_at_apex(
     a: &mut impl PrimitiveCreationAccess,
     kernel_brep: BrepId,
@@ -2253,6 +2269,7 @@ pub(super) fn circle_closing_at_apex(
     input: &WallsInput<'_>,
 ) -> Result<bool> {
     let k = a.kernel(kernel_brep)?;
+    let tol = input.tol;
     let canon = input.composite.canonical();
     let (Some(pc), Some(&sense), 1) = (
         canon.curves.first(),
@@ -2261,53 +2278,23 @@ pub(super) fn circle_closing_at_apex(
     ) else {
         return Ok(false);
     };
-    let tol = input.tol;
-    let Some(found) = draft_input(k, pc, input.inputs, tol)? else {
+    let Ok(mut w) = read_wall(k, input, pc, sense)? else {
         return Ok(false);
     };
-    let CurveKind::Ellipse(circle) = found.kind() else {
-        return Ok(false);
-    };
-    if !found.is_kind_of(CIRCLE_TYPE) {
-        return Ok(false);
-    }
-    let side = if input.side == OffsetDirection::LeftHandSide {
-        1.0
-    } else {
-        -1.0
-    };
-    // the wall as `read_walls` reads an arc's: counterclockwise about its axis, over the
-    // whole turn from `x`
-    let ivl = pc.natural_interval();
-    let start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
-    let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
-    let v1 = at(&v, 1)?;
-    let t = if sense { v1 } else { -v1 };
-    let frame = circle.position();
-    let mut w = Wall {
-        arc: true,
-        center: frame.origin(),
-        radius: circle.radius(),
-        x: frame.x_axis().unitize()?,
-        ..Wall::default()
-    };
-    let kk = w.x.cross(frame.y_axis()).unitize()?;
-    w.axis = if kk.cross(start - w.center).dot(t) >= 0.0 {
-        kk
-    } else {
-        -kk
-    };
-    w.y = w.axis.cross(w.x);
-    w.shrink = side * input.normal.dot(w.axis) * input.offset;
-    // still open at the far end (or not shrinking): the ordinary draft
-    if !(w.radius > tol && w.radius - w.shrink <= tol) {
+    let whole = w.arc && w.start.distance(w.end) <= tol && w.end_ang - w.start_ang > PI;
+    if !(whole && w.radius > tol && w.shrink.is_finite() && w.radius - w.shrink <= tol) {
         return Ok(false);
     }
     // the apex: where the radius reaches 0, at the far end at most
     let f = (w.radius / w.shrink).min(1.0);
-    let h = f * input.height * input.normal;
+    let apex = f * input.height;
+    if !(apex.is_finite() && apex.abs() > tol) {
+        return Ok(false);
+    }
+    let h = apex * input.normal;
     w.shrink = w.radius;
-    (w.lo, w.hi) = (0.0, 2.0 * PI);
+    // the whole turn from the profile's start, the cone's seam through it
+    (w.lo, w.hi) = (w.start_ang, w.start_ang + 2.0 * PI);
     let Some(cone) = draft_cone(k, &w, h)? else {
         return Ok(false);
     };
