@@ -48,7 +48,7 @@ use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
 pub use solidcore_record::curve_query::{
-    Crossing, CubicPiece, CubicStanding, CurvePoint, PlanePart, PlaneSection,
+    Crossing, CubicPiece, CubicStanding, CurvePoint, CurveRayPoint, PlanePart, PlaneSection,
 };
 
 impl crate::session::Answer for solidcore::curve::hermite_curve::CubicStanding {}
