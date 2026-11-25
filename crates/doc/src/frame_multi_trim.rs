@@ -99,10 +99,11 @@ pub fn box_corners(regions: &[Region2]) -> Vec<Vec2> {
                         add(Vec2::new(center.x - r, center.y - r));
                         add(Vec2::new(center.x + r, center.y + r));
                     }
-                    _ => {
-                        add(g.start());
-                        add(g.end());
-                    }
+                    // A Bézier piece lies inside its control points' hull, so their box bounds it.
+                    Seg2::Line { a, b } => [a, b].into_iter().for_each(&mut add),
+                    Seg2::Cubic { p0, p1, p2, p3 } => [p0, p1, p2, p3].into_iter().for_each(&mut add),
+                    Seg2::Conic { a, apex, b, .. } => [a, apex, b].into_iter().for_each(&mut add),
+                    Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).copied().for_each(&mut add),
                 }
             }
             if lo.x > hi.x { Vec::new() } else { vec![lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)] }

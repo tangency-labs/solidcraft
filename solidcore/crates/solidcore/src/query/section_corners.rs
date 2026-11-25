@@ -1,5 +1,5 @@
-//! How a section's outline turns at its corners, and how far a set of points reaches past a
-//! member's end: the measures a frame member's fit is decided on (an open section such as an
+//! How a section's outline turns at its corners, and how far a member's end runs on through
+//! the box round another's section: the measures a frame member's fit is decided on (an open section such as an
 //! angle or a channel, an inside corner's fillet, the far side of the members an end fits
 //! against). The caller compares them with its tolerances.
 //!
@@ -8,7 +8,7 @@
 //! | Rust                     | Upstream |
 //! |--------------------------|----------|
 //! | [`measure_corner_turns`] | (none)   |
-//! | [`reach_along`]          | (none)   |
+//! | [`exit_through_box`]     | (none)   |
 //!
 //! Deviations: no upstream counterpart.
 
@@ -64,13 +64,31 @@ pub fn measure_corner_turns(outline: &Loop2) -> CornerTurns {
     }
 }
 
-/// How far past `end` along `toward` the furthest of `points` lies: the largest
-/// `(p − end) · t` for `t` the unit vector along `toward`. `None` for no points.
+/// How far along `toward` from `end` its line leaves the box `rect` bounds: the box's sides
+/// run through the rectangle's edges, square to its plane, without end (a member's
+/// section swept along the member). The exit of the slab between each pair of opposite
+/// sides, `(side − end) · n / (t · n)` for `t` the unit vector along `toward`, at the nearer
+/// of the two slabs; a slab the line runs along (`t · n` within `PARALLEL` of 0) never
+/// stops it. `None` where the line runs along both, or `rect` is degenerate.
 ///
 /// # Errors
 ///
 /// [`crate::error::SolidError::InvalidInput`] for a zero or non-finite `toward`.
-pub fn reach_along(end: Point3, toward: Vec3, points: &[Point3]) -> Result<Option<f64>> {
+pub fn exit_through_box(end: Point3, toward: Vec3, rect: &[Point3; 4]) -> Result<Option<f64>> {
+    const PARALLEL: f64 = 1e-9;
     let t = toward.unitize()?;
-    Ok(points.iter().map(|p| (*p - end).dot(t)).reduce(f64::max))
+    let [a, b, _, d] = *rect;
+    let mut exit: Option<f64> = None;
+    for (near, far) in [(a, b), (a, d)] {
+        let Ok(n) = (far - near).unitize() else {
+            return Ok(None);
+        };
+        let tn = t.dot(n);
+        if tn.abs() <= PARALLEL {
+            continue;
+        }
+        let out = ((near - end).dot(n) / tn).max((far - end).dot(n) / tn);
+        exit = Some(exit.map_or(out, |e| e.min(out)));
+    }
+    Ok(exit)
 }

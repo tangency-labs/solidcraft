@@ -1135,12 +1135,13 @@ fn a_tee_on_an_open_section_reaches_across_its_open_side_to_the_far_face() {
         (json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}), [-19.0, -22.0]),
         (json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}), [-17.5, -17.5]),
     ];
-    for (profile, lowest) in sections {
-        for (coped, want) in [false, true].into_iter().zip(lowest) {
+    // v square to h, and at 45° to it: its line leaves the box round h's section 1 / sin 45° further along v.
+    for ((profile, lowest), top) in sections.iter().flat_map(|s| [(s, 200), (s, 300)]) {
+        for (coped, want) in [false, true].into_iter().zip(*lowest) {
             let mut s = Session::default();
             run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
             run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
-            run(&mut s, "sketch.line", json!({"points": [[200, 0], [200, 100]], "ids": ["v"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [top, 100]], "ids": ["v"]}));
             run(&mut s, "sketch.finish", json!({}));
             let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped, "names": {"h": "H", "v": "V"}});
             run(&mut s, "frame.member", p);
@@ -1148,7 +1149,7 @@ fn a_tee_on_an_open_section_reaches_across_its_open_side_to_the_far_face() {
             let o = overlap_all(&mut s);
             assert!(
                 (v.2[1] - want).abs() < 1e-3 && o < 1e-3,
-                "{} coped {coped}: v from y = {}, not {want}; overlap {o} mm³",
+                "{} to x {top} coped {coped}: v from y = {}, not {want}; overlap {o} mm³",
                 profile["kind"],
                 v.2[1]
             );

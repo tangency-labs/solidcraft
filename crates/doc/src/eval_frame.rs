@@ -1442,7 +1442,7 @@ fn along(plane: Plane, regions: &[Region2], d: Vec3) -> (Plane, Cow<'_, [Region2
 }
 
 /// How far past its line's end fitted end `f` is built: on an open section (an angle, a channel), out to the far side of
-/// the members it fits against (the rectangle round each one's section, where the end's line meets theirs), so the fit
+/// the members it fits against (where the end's line leaves the box round each one's section, at any angle), so the fit
 /// leaves the end reaching across their open side to the face beyond, not stopping at their lines. A tube's or a bar's
 /// fit fills its whole side, so their ends (and their faces' names) stay as they were: built to the line's end.
 fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dyn Fn(usize, Vec3) -> Plane, f: &Fit) -> f64 {
@@ -1460,8 +1460,12 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let (_, c, d) = segments.get(t)?;
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
-            let world: Vec<Vec3> = corners.iter().map(|&q| plane.to_world(q)).collect();
-            solidcraft_kernel::services::section_corners::reach_along(end, toward, &world)
+            let exits = corners
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter_map(|r| solidcraft_kernel::services::section_corners::exit_through_box(end, toward, r.map(|q| plane.to_world(q))));
+            exits.reduce(f64::max)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.
