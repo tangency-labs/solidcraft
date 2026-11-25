@@ -4485,6 +4485,37 @@ pub struct Visibility {
     /// once the folder is shown.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_folders: Vec<String>,
+    /// What Isolate changed, as it was before the first Isolate, for Unisolate. Never saved with
+    /// the design: it lives in the session and its undo steps only.
+    #[serde(skip)]
+    pub before_isolate: Option<BeforeIsolate>,
+}
+
+/// The parts of [`Visibility`] an Isolate changes, kept so that Unisolate can put them back and
+/// leave everything changed since (locks, sketches, dimensions) as it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BeforeIsolate {
+    pub hidden_bodies: Vec<String>,
+    pub hidden_occurrences: Vec<Vec<u64>>,
+    pub hidden_folders: Vec<String>,
+    /// The bodies on screen when the first Isolate began (world names). Those hidden now are
+    /// what Isolate hid, which the view may show see-through or as edges.
+    pub shown_bodies: std::collections::BTreeSet<String>,
+}
+
+impl Visibility {
+    /// Keeps what an Isolate is about to change, unless an earlier Isolate is still in effect:
+    /// Unisolate goes back to before the first one.
+    pub fn remember_before_isolate(&mut self) {
+        if self.before_isolate.is_none() {
+            self.before_isolate = Some(BeforeIsolate {
+                hidden_bodies: self.hidden_bodies.clone(),
+                hidden_occurrences: self.hidden_occurrences.clone(),
+                hidden_folders: self.hidden_folders.clone(),
+                shown_bodies: Default::default(),
+            });
+        }
+    }
 }
 
 impl Visibility {

@@ -287,6 +287,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.layout"
             | "view.navigate"
             | "view.ambient_occlusion"
+            | "view.isolate_others"
             | "view.perspective"
             | "view.angle_readout"
             | "view.graphics_preset"

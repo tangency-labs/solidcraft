@@ -4052,6 +4052,11 @@ fn prepare_preferences(
     {
         return Err("`dimension_input` must be view or window".into());
     }
+    if let Some(v) = p.get("isolate_others")
+        && !matches!(v.as_str(), Some("hidden" | "transparent" | "wireframe"))
+    {
+        return Err("`isolate_others` must be hidden, transparent or wireframe".into());
+    }
     if let Some(value) = p.get("graphics_backend")
         && !value.as_str().is_some_and(|id| GRAPHICS_BACKENDS.contains(&id) || id == app.preferences.graphics_backend)
     {
