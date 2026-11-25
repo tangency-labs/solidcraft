@@ -1021,9 +1021,10 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
 
 /// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
 /// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool)> {
+fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
+    let mut notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
     // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
     let checked = |regions: &[Region2]| {
         solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
@@ -1054,7 +1055,7 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool)> {
             crate::MAX_STEP_BYTES >> 20
         )));
     }
-    Ok((step, holes_lost))
+    Ok((step, holes_lost, notes))
 }
 
 /// The import's steps on one scale of a thousand units: starting, the board parsed, its
@@ -1082,7 +1083,8 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
         match board_solid(&board, thickness) {
-            Ok((step, holes_lost)) => {
+            Ok((step, holes_lost, notes)) => {
+                warnings.extend(notes);
                 if holes_lost {
                     warnings.push("the board's drilled holes could not be cut: the board is built without them".into());
                 }
@@ -1563,6 +1565,12 @@ fn clean_loop(points: &[[f64; 2]]) -> Option<Loop2> {
 /// Classify closed contours by containment (even depth is solid, odd is a cutout) and cut the
 /// given drills from the region that holds them.
 fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<Region2> {
+    regions_from_loops_noted(loops, drills, &mut Vec::new())
+}
+
+/// [`regions_from_loops`], also noting in `notes` each drill at the board's edge that could not be
+/// cut as a notch (it is then kept as a hole).
+fn regions_from_loops_noted(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>, notes: &mut Vec<String>) -> Vec<Region2> {
     let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
     let samples: Vec<Vec2> = loops.iter().map(loop_sample).collect();
     let mut parents: Vec<Option<usize>> = vec![None; loops.len()];
@@ -1619,10 +1627,14 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
                 // outline, not a hole inside it.
                 let reach = size[0].max(size[1]) * 0.5 + 1e-6;
                 if distance_to_loop(&region.outer, center).is_some_and(|d| d < reach) {
-                    if let Some(notched) = notch_loop(&region.outer, &hole) {
+                    if let Some(notched) = notch_loop(&region.outer, &hole, center) {
                         region.outer = notched;
+                        continue;
                     }
-                    continue;
+                    notes.push(format!(
+                        "the drill at ({:.3}, {:.3}) mm reaches the board's edge but could not be cut as a half-hole: it is kept as a hole",
+                        center.x, -center.y
+                    ));
                 }
                 region.holes.push(hole.reversed());
             }
@@ -1667,21 +1679,40 @@ fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop
 }
 
 /// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
-fn notch_loop(outer: &Loop2, drill: &Loop2) -> Option<Loop2> {
+///
+/// A drill centred on an edge puts polygon vertices exactly on that edge (a circle's vertices at a
+/// quarter turn from its start do, on a vertical or horizontal edge, whenever the arithmetic
+/// lands them exactly there), and the boolean refuses such touching input. So when a cut fails,
+/// the drill polygon is turned a little about its centre, which moves every vertex off the edge,
+/// and tried again: the notch differs by a fraction of a degree.
+fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
     use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
     let mut a = loop_to_pline(outer)?;
-    let mut b = loop_to_pline(drill)?;
     if a.area() < 0.0 {
         a.invert_direction_mut();
     }
-    if b.area() < 0.0 {
-        b.invert_direction_mut();
+    let points = drill.polyline(CURVE_TOLERANCE);
+    for turn in [0.0_f64, 0.0137, -0.0291, 0.0713, -0.1237] {
+        let (sin, cos) = turn.sin_cos();
+        let mut b = cavalier_contours::polyline::Polyline::<f64>::new_closed();
+        for p in &points {
+            let (dx, dy) = (p.x - center.x, p.y - center.y);
+            b.add(center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos, 0.0);
+        }
+        if b.vertex_count() < 3 {
+            return None;
+        }
+        if b.area() < 0.0 {
+            b.invert_direction_mut();
+        }
+        let result = a.boolean(&b, BooleanOp::Not);
+        if result.pos_plines.len() == 1 && result.neg_plines.is_empty() {
+            if let Some(notched) = result.pos_plines.first().and_then(|r| pline_to_loop(&r.pline)) {
+                return Some(notched);
+            }
+        }
     }
-    let result = a.boolean(&b, BooleanOp::Not);
-    if result.pos_plines.len() != 1 || !result.neg_plines.is_empty() {
-        return None;
-    }
-    pline_to_loop(&result.pos_plines.first()?.pline)
+    None
 }
 
 /// A slot (stadium) of `width` × `height` about `center`, its width turned to point along `angle`
