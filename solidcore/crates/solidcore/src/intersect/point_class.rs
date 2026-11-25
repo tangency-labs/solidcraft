@@ -91,10 +91,11 @@
 //!   vertex to its `m_vSSSPoint` and leaves its edges ending where they did, up to tens of
 //!   units off a vertex of tolerance `1e-7`, which `AssertValid`'s edge-end test refuses.
 //!   [`PointClassification::merge_into_brep`] moves each such end (one outside the vertex's
-//!   ball) to the vertex (`vertex::carry_far_edge_ends`). First the edge is re-trimmed: its
-//!   curve kept exactly and only the far end's parameter moved to where the curve passes the
-//!   point, so a line or conic through the point (an intersection edge of exact surfaces)
-//!   keeps its class. Only a wire edge (no face uses it) may instead have its curve edited:
+//!   ball) to the vertex (`vertex::carry_far_edge_ends`). When the curve passes the point
+//!   inside its natural interval (one traversal; a bounded line is not extended), the edge
+//!   is re-trimmed: its curve kept exactly and only the far end's parameter moved there, so
+//!   a line or conic through the point (an intersection edge of exact surfaces) keeps its
+//!   class. Otherwise only a wire edge (no face uses it) may have its curve edited:
 //!   a line becomes the line to its kept end, a B-spline or conic a B-spline with that end's
 //!   control point moved (both ends knots it passes through). An edge a face uses is never
 //!   edited that way, so a face's conic never becomes a spline. The change is notified,

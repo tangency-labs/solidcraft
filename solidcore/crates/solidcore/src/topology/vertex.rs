@@ -1529,6 +1529,36 @@ fn point_on_curve(k: &Kernel, curve: &Curve, target: Point3, tol: f64) -> Option
     on.then_some(t)
 }
 
+/// Not upstream (#21511): the parameter of `t`'s point that the far end of an edge takes.
+/// On a closed curve the seam point has two parameters, the natural interval's two ends,
+/// and the closest-point solve returns one of them; an edge's far end takes the start when
+/// its start is far and the end when its end is far. The other natural end stands for the
+/// same point only when its own certified distance to `target` is within half `tol`, as
+/// [`point_on_curve`] requires of `t`; otherwise `t` is kept. One point, its two names: no
+/// second construction.
+fn seam_parameter(
+    k: &Kernel,
+    curve: &Curve,
+    far: [bool; 2],
+    t: f64,
+    target: Point3,
+    tol: f64,
+) -> f64 {
+    let natural = curve.natural_interval();
+    let twin = if far[1] && t == natural.min() {
+        natural.max()
+    } else if far[0] && t == natural.max() {
+        natural.min()
+    } else {
+        return t;
+    };
+    if certified_end_distance(k, curve, twin, target).is_some_and(|d| d <= 0.5 * tol) {
+        twin
+    } else {
+        t
+    }
+}
+
 /// Not upstream (#21511): `interval` with its end flagged in `far` (start, end) moved to
 /// `t`, the curve itself kept: the exact edit when the surf/surf/surf point lies on the
 /// edge's curve at `t` ([`point_on_curve`]); the edge then ends at the point on its own,
@@ -1691,6 +1721,7 @@ pub(crate) fn carry_far_edge_ends(
         let retrim = (far[0] != far[1])
             .then(|| point_on_curve(k, &curve, at, tol))
             .flatten()
+            .map(|t| seam_parameter(k, &curve, far, t, at, tol))
             .and_then(|t| retrimmed_interval(&curve, &interval, far, t));
         if let Some(iv) = retrim {
             // 1. the point on the curve within the edge's traversal: the curve kept, its far
@@ -3180,6 +3211,55 @@ mod tests {
             rec.interval
         );
         assert_eq!(rec.interval.max(), iv.max());
+    }
+
+    /// #21511: a surf/surf/surf point at a closed curve's seam has two parameters. A wire
+    /// edge on a full unit circle from 90° to 300° whose end vertex moves to the 0°/360°
+    /// point is re-trimmed to 90°..360° and stays a circle; the closest-point solve names
+    /// the seam 0°, which would make the interval decreasing, and the arc became a B-spline.
+    #[test]
+    fn issue_21511_point_at_a_circle_seam_keeps_the_circle() {
+        let k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let frame = crate::geom::axis2_placement::Axis2Placement::default();
+        let c = Curve::from(
+            crate::curve::ellipse::Ellipse::create_canonical(&k, &frame, 1.0, 1.0, None, None)
+                .unwrap(),
+        );
+        let nat = c.natural_interval();
+        let at = |deg: f64| nat.min() + (nat.max() - nat.min()) * (deg / 360.0);
+        let iv = Extent1d::from_min_max(at(90.0), at(300.0));
+        let seam = c.evaluate_point(&k, nat.max()).unwrap();
+        assert!(
+            seam.distance(Point3::new(1.0, 0.0, 0.0)) < 1e-12,
+            "{seam:?}"
+        );
+        {
+            let rec = b.edge_mut(e[1]).unwrap();
+            rec.curve = Some(c);
+            rec.interval = iv;
+        }
+        b.vertex_mut(v[2]).unwrap().point = seam;
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        carry_far_edge_ends(&k, &mut b, v[2], &mut env).unwrap();
+        let (ok, far) = ends_on_vertices(&k, &b, &[v[2]]);
+        assert!(ok, "{far:?}");
+        let rec = b.edge(e[1]).unwrap();
+        let c1 = rec.curve.as_ref().unwrap();
+        assert!(
+            matches!(c1.kind(), CurveKind::Ellipse(_)),
+            "{:?}",
+            c1.kind()
+        );
+        assert_eq!(rec.interval.min(), iv.min());
+        assert_eq!(rec.interval.max(), nat.max());
     }
 
     /// #21511: an end exactly the vertex tolerance off (`d == tol`) is outside the ball by
