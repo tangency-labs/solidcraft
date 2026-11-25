@@ -691,7 +691,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
             if let Some(icon) = group.icon {
                 let icon_rect = Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0));
-                crate::icons::paint_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
+                crate::tint::button(&painter, br, t.radius_sm, t.toolbar, group.enabled);
+                crate::tint::icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
             }
             dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
             if fresp.backing_on_hover_text(group.tip).clicked() && group.enabled {
@@ -747,7 +748,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
+            crate::tint::button(&painter, whole, t.radius_sm, t.toolbar, b.enabled);
+            crate::tint::icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -829,12 +831,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     paint_reveal(&painter, cell, &accent, r.strength, true);
                     solidcraft_ui_registry::publish_rect(h.reveal, cell);
                 }
-                crate::icons::paint_icon(
-                    &painter,
-                    Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
-                    c.icon,
-                    if c.enabled { 1.0 } else { 0.35 },
-                );
+                crate::tint::button(&painter, cell, t.radius_sm, fill, c.enabled);
+                crate::tint::icon(&painter, Rect::from_center_size(cell.center(), vec2(15.0, 15.0)), c.icon, if c.enabled { 1.0 } else { 0.35 });
                 for prefix in h.cell {
                     solidcraft_ui_registry::publish_target(&handle(prefix, c.id), cell);
                 }
@@ -1271,8 +1269,8 @@ pub fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
 /// The note under a menu (how pinning works), translated.
 pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     let t = Tokens::get();
-    ui.separator();
-    ui.add_space(4.0);
+    crate::Menu::separator(ui);
+    ui.add_space(2.0);
     ui.add(egui::Label::new(egui::RichText::new(message).size(t.font_small).color(t.text_dim)).wrap());
     ui.add_space(4.0);
 }
@@ -1714,7 +1712,7 @@ pub fn grid(ui: &mut egui::Ui, entries: &[(Option<&str>, MenuEntry)], loose: &[&
         // A line between groups side by side, as between the ribbon's groups.
         for x in &layout.separators {
             let x = origin.x + x;
-            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], Stroke::new(1.0, t.border));
+            ui.painter().line_segment([pos2(x, origin.y + 4.0), pos2(x, origin.y + layout.size.y - 4.0)], crate::Menu::separator_stroke(&t));
         }
         for (index, (entry, (rect, _))) in plain.iter().zip(&layout.cells).enumerate() {
             let rect = rect.translate(origin.to_vec2());
@@ -1775,12 +1773,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         painter.add(neutral);
         None
     };
-    crate::icons::paint_icon(
-        &painter,
-        Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)),
-        entry.icon,
-        if entry.enabled { 1.0 } else { 0.4 },
-    );
+    crate::tint::icon(&painter, Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)), entry.icon, if entry.enabled { 1.0 } else { 0.4 });
     // A pinned entry always shows its pin, clear of the icon's own artwork; any other shows one
     // to pin it once it can be clicked.
     if entry.pinned || armed {

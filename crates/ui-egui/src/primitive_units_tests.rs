@@ -1122,3 +1122,15 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
         assert!(!crate::snap_wake::wanted(&h.app), "{cmd}");
     }
 }
+
+#[test]
+fn coil_start_angle_steps_by_ten_degrees() {
+    let mut h = design("mm");
+    h.app.start("solid.coil");
+    h.frames(3);
+    let extra = |h: &Harness| h.app.dialog.as_ref().unwrap().extra["start_angle"].clone();
+    h.step(&json!({"click":{"handle":"dialog:Start angle up"}})).unwrap();
+    assert_eq!(extra(&h), json!("10 deg"));
+    h.step(&json!({"click":{"handle":"dialog:Start angle down"}})).unwrap();
+    assert_eq!(extra(&h), json!("0 deg"));
+}

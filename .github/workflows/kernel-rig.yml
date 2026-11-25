@@ -49,6 +49,12 @@ on:
   # CI (ci.yml) calls this on pull requests and merge groups, so the rig is part of the required
   # `ci` check; the release gate (release-gate.yml) calls it too.
   workflow_call:
+    inputs:
+      # CI on a batch branch (Tickets' merge batches, ci.yml) passes where the batch leaves main:
+      # the run then grades the areas that diff reaches, as for a merge group.
+      batch_base:
+        type: string
+        default: ""
   workflow_dispatch:
 
 permissions:
@@ -82,8 +88,8 @@ jobs:
           # A pull request's diff needs its base's history: the commits and trees, not every file
           # version. A full clone of every blob took over the 5-minute timeout on a 2-vCPU runner and
           # cancelled the merge queue's rig selection (Select the rig areas) again and again.
-          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '0' || '1' }}
-          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'blob:none' || '' }}
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.batch_base != '') && '0' || '1' }}
+          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.batch_base != '') && 'blob:none' || '' }}
       - name: Selection self-test
         run: python3 -I scripts/ci/test_kernel_rig_plan.py
       - id: plan
@@ -93,6 +99,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          BATCH_BASE: ${{ inputs.batch_base }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
           # Pull requests and merge groups run the areas their diff reaches (a change that touches no
           # kernel path runs none); pushes to main, the release gate and a run by hand run every area.
@@ -103,6 +111,13 @@ jobs:
             git fetch --no-tags --filter=blob:none origin "+$GROUP_BASE_REF:refs/remotes/origin/rig-base"
             BASE_SHA=$(git merge-base refs/remotes/origin/rig-base "$HEAD_SHA")
             echo "Merge group: diffing $BASE_SHA ($GROUP_BASE_REF tip) ... $HEAD_SHA"
+          fi
+          # A batch branch (ci.yml passes its base): the batch's diff from main, as for a merge group.
+          if [ -n "$BATCH_BASE" ]; then
+            EVENT_NAME=merge_group
+            BASE_SHA=$BATCH_BASE
+            HEAD_SHA=$PUSH_SHA
+            echo "Batch branch: diffing $BASE_SHA ... $HEAD_SHA"
           fi
           if [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = merge_group ]; then
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/rig-paths"

@@ -12,7 +12,6 @@ workspace = true
 serde = { workspace = true }
 solidcore = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 thiserror = { workspace = true }
 

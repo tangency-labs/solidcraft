@@ -5481,8 +5481,9 @@ pub fn section_hatch(app: &SolveApp) -> bool {
     }
 }
 
-/// Visible geometry belonging to a timeline feature. Body creators retain their whole-body
-/// feedback; modifiers use persistent face names, which survive later edits and placement.
+/// Visible geometry belonging to a timeline feature. Features light their constituent faces
+/// using persistent face names, which survive later edits and placement, leaving subsequent
+/// features unhighlighted.
 /// Do not expand these faces into surface patches: neighbouring faces can belong to another
 /// feature even when they share a surface.
 fn feature_geometry(app: &SolveApp, id: u64) -> Vec<Sel> {
@@ -5501,16 +5502,34 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
         if shown_only && (!app.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name)) {
             continue;
         }
-        if b.feature == id {
-            out.push(Sel::Body { name: b.name.clone() });
-            continue;
-        }
         let names = solidcraft_engine::doc::naming::face_names(b);
         let m = b.mesh();
-        for (index, _) in names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)) {
-            if let Some(point) = first_triangle_point(&m, index) {
-                out.push(Sel::Face { body: b.name.clone(), index, point });
+        let target_indices: std::collections::HashSet<usize> =
+            names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)).map(|(i, _)| i).collect();
+        let mut found_face = false;
+        if !target_indices.is_empty() {
+            let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                let fi = *f as usize;
+                if target_indices.contains(&fi)
+                    && !face_points.contains_key(&fi)
+                    && let Some([a, b, c]) = m.tri(t)
+                {
+                    face_points.insert(fi, (a + b + c) / 3.0);
+                    if face_points.len() == target_indices.len() {
+                        break;
+                    }
+                }
             }
+            for index in 0..names.len() {
+                if let Some(&point) = face_points.get(&index) {
+                    out.push(Sel::Face { body: b.name.clone(), index, point });
+                    found_face = true;
+                }
+            }
+        }
+        if !found_face && b.feature == id {
+            out.push(Sel::Body { name: b.name.clone() });
         }
     }
     if out.is_empty() {
@@ -10652,7 +10671,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
+    // The markers are drawn straight onto the view: its side's colours (#4146). The sketch status
+    // shows in the sketch panel and the status bar, not over the view.
     let v = Tokens::view();
     for selected in &app.session.selection {
         if let Sel::SketchMidpoint { id } = selected
@@ -10664,23 +10684,6 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
-    // Sketch status, unless the status bar shows it (#7243). In the free corner of the view, not under the floating ribbon.
-    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive() && !crate::status_bar::shown(app)) {
-        let status = if !ss.report.shown_ok() {
-            solidcraft_ui_text::tr("sketch.status_conflict").to_string()
-        } else if !crate::sketch_palette::has_geometry(sk) {
-            solidcraft_ui_text::tr("ui.no_geometry_yet").to_string()
-        } else if ss.report.shown_dof() == 0 {
-            solidcraft_ui_text::tr("sketch.status_fully_constrained").to_string()
-        } else if ss.report.shown_dof() == 1 {
-            solidcraft_ui_text::tr("ui.1_degree_of_freedom").to_string()
-        } else {
-            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.shown_dof().to_string())])
-        };
-        let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };
-        painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
-    }
 }
 
 /// The curves and points of a sketch that its failing constraints hold (the solve's `failing`:
@@ -13323,8 +13326,8 @@ mod tests {
             assert_eq!(build_highlight(&h.app).merged().tris.len(), triangles * 3 * crate::gpu::TRI_SIZE);
             let bounds = selection_bounds(&h.app).unwrap();
             assert!(bounds.max.x <= 2.01 && bounds.max.y <= 2.01 && bounds.max.z > 19.99, "{bounds:?}");
-            // Creator features retain whole-body feedback, while hidden bodies stay hidden.
-            assert_eq!(feature_geometry(&h.app, base), vec![Sel::Body { name: body.clone() }]);
+            // Creator features light their own constituent faces, while hidden bodies stay hidden.
+            assert!(feature_geometry(&h.app, base).iter().all(|s| matches!(s, Sel::Face { body: b, .. } if b == body)));
             h.app.session.visibility.hidden_bodies.push(body.clone());
             assert!(feature_geometry(&h.app, id).is_empty());
             assert!(selection_bounds(&h.app).is_none());
@@ -21330,5 +21333,23 @@ mod feature_highlight_tests {
         let copy = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.y > 40.0));
         let turned = parts.iter().any(|p| matches!(p, Sel::Face { point, .. } if point.x < 0.0));
         assert!(copy && turned, "{parts:?}");
+    }
+
+    /// #14718: hovering or selecting an initial creator feature lights only its constituent faces,
+    /// leaving subsequent features (e.g. joined boss, fillets) unlit.
+    #[test]
+    fn a_base_creator_feature_lights_only_its_constituent_faces_leaving_subsequent_features_unlit() {
+        let mut s = solidcraft_engine::Session::default();
+        let base = s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "name": "Base"})).unwrap()["feature"].as_u64().unwrap();
+        let fillet = s.execute("solid.fillet", &json!({"edges": [[0, 0, 5]], "radius": 2, "name": "Round"})).unwrap()["feature"].as_u64().unwrap();
+        let app = SolveApp::new(s, crate::Services::default());
+        let base_parts = feature_parts(&app, base, true);
+        let fillet_parts = feature_parts(&app, fillet, true);
+        assert!(!base_parts.is_empty(), "base feature lights constituent faces");
+        assert!(base_parts.iter().all(|p| matches!(p, Sel::Face { .. })), "base lights faces rather than whole body: {base_parts:?}");
+        // The fillet face belongs to fillet_parts, not base_parts
+        for f in &fillet_parts {
+            assert!(!base_parts.contains(f), "base does not light subsequent fillet face: {f:?}");
+        }
     }
 }
