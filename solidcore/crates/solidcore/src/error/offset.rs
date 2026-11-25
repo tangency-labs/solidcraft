@@ -2158,7 +2158,6 @@ mod tests {
                 ErrorKind::Unsupported,
                 false,
                 false,
-                false,
             ),
             (
                 O::ExtendedEdgeUntrimmed,
