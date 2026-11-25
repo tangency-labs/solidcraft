@@ -7912,6 +7912,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p.remove("section_size");
                 }
             }
+            if *cmd == "solid.coil" {
+                // Sized by height: the command gets the height and the one other of the pair (#20674).
+                let by = d.extra.get("size_by").and_then(Value::as_str);
+                match by {
+                    Some("height_pitch") => {
+                        p.remove("revolutions");
+                    }
+                    Some("height_revolutions") => {
+                        p.remove("pitch");
+                    }
+                    _ => {}
+                }
+                if by.is_some()
+                    && let Some(height) = d.extra.get("coil_height").and_then(Value::as_str)
+                {
+                    p.insert("height".into(), json!(height));
+                }
+            }
             if let Some((point, normal)) = *at {
                 match *cmd {
                     "solid.box" => {
@@ -8067,6 +8085,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
+            // The coil's size choice and height are put in the parameters by the command's own rows.
+            if k == "size_by" || k == "coil_height" {
+                continue;
+            }
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split { .. }) && k == "split_tool_mode" {
                 continue;

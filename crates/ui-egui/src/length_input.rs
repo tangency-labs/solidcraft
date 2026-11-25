@@ -307,7 +307,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
 /// direction vectors are already in model coordinates and must not be converted.
 pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut convert: impl FnMut(&str) -> String) {
     use serde_json::{Value, json};
-    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2"] {
+    for key in ["radius2", "start_offset", "to_offset", "distance2", "thickness", "thickness2", "coil_height"] {
         if let Some(value) = extra.get_mut(key) {
             let text = value.as_str().map(str::to_string).or_else(|| value.as_number().map(ToString::to_string));
             if let Some(text) = text {

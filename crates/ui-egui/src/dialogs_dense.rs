@@ -992,6 +992,54 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
     }
 }
 
+/// Which two of a coil's revolutions, height and pitch the dialog takes: 0 revolutions and pitch
+/// (the default, kept out of the parameters), 1 height and pitch, 2 height and revolutions (#20674).
+fn coil_size_by(extra: &serde_json::Map<String, Value>) -> usize {
+    match extra.get("size_by").and_then(Value::as_str) {
+        Some("height_pitch") => 1,
+        Some("height_revolutions") => 2,
+        _ => 0,
+    }
+}
+
+/// The "Size by" choice of the Coil dialog. Choosing a height gives it a starting value.
+fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, default_height: &str) -> bool {
+    const KEYS: &[&str] = &["", "height_pitch", "height_revolutions"];
+    let current = coil_size_by(extra);
+    let mut selected = current;
+    choice_row(
+        ui,
+        "ui.coil_size_by",
+        "coil_size_by",
+        &mut selected,
+        &["ui.coil_by_revolutions_pitch", "ui.coil_by_height_pitch", "ui.coil_by_height_revolutions"],
+    );
+    if selected != current {
+        match KEYS.get(selected) {
+            Some(key) if !key.is_empty() => {
+                extra.insert("size_by".into(), json!(key));
+                extra.entry("coil_height").or_insert_with(|| json!(default_height));
+            }
+            _ => {
+                extra.remove("size_by");
+            }
+        }
+    }
+    false
+}
+
+/// The coil's Height row, its text kept with the dialog's other options.
+fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
+    let before = height.clone();
+    // The helix's own height, centre line to centre line; the coil's section reaches past it.
+    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
+    if height != before {
+        extra.insert("coil_height".into(), json!(height));
+    }
+    enter
+}
+
 /// The coil's axis, section, where the section sits on the diameter, the way it turns and where
 /// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
 /// A sketch profile is the section, so the section rows are hidden then.
@@ -1418,8 +1466,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
+            let coil_by = if *cmd == "solid.coil" { coil_size_by(&d.extra) } else { 0 };
+            if *cmd == "solid.coil" {
+                enter |= coil_size_row(ui, &mut d.extra, &length_default(&app.session, "20"));
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
+                    continue;
+                }
+                // Sized by height: the Height row takes the slot of the field it replaces.
+                if (coil_by == 1 && *k == "revolutions") || (coil_by == 2 && *k == "pitch") {
+                    enter |= coil_height_row(ui, &mut d.extra);
                     continue;
                 }
                 // Revolutions steps by whole turns like the other counts (#7481).

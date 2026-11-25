@@ -1316,6 +1316,68 @@ fn the_point_input_of_the_box_sphere_and_torus_takes_snap_points() {
     }
 }
 
+/// #20674: the Coil dialog sizes the coil by revolutions and pitch (as before), height and pitch,
+/// or height and revolutions; the command gets exactly the chosen pair.
+#[test]
+fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        cmds.into_iter().find(|(id, _)| id == "solid.coil").map(|(_, p)| p).unwrap()
+    };
+    let shows = |h: &Harness, label: &str| {
+        let label = solidcraft_ui_text::tr(label);
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label))
+    };
+    // Untouched: today's pair.
+    let keys = |p: &serde_json::Value| {
+        let mut keys: Vec<_> = p.as_object().unwrap().keys().filter(|k| matches!(k.as_str(), "height" | "pitch" | "revolutions")).cloned().collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.coil_path_height"));
+    // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "pitch"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
+    assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
+    // Back to the default pair: no height is sent.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
+    ok(&mut h);
+    let by_height = volume(&mut h.app.session);
+    // 20 high at pitch 8 is 2.5 turns.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 2.5, "pitch": 8, "section_size": 3, "operation": "new"})).unwrap();
+    let expected = volume(&mut reference.app.session);
+    assert!((by_height - expected).abs() <= expected * 1e-6, "{by_height} vs {expected}");
+    // Height and revolutions.
+    let mut h = design("mm");
+    h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
+    h.frames(3);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
+    let p = sent(&h);
+    assert_eq!(keys(&p), ["height", "revolutions"]);
+    assert!(shows(&h, "ui.coil_path_height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
+    ok(&mut h);
+    // 20 high in 4 turns is a pitch of 5.
+    let mut reference = design("mm");
+    reference.app.run("solid.coil", json!({"diameter": 40, "revolutions": 4, "pitch": 5, "section_size": 3, "operation": "new"})).unwrap();
+    let (got, expected) = (volume(&mut h.app.session), volume(&mut reference.app.session));
+    assert!((got - expected).abs() <= expected * 1e-6, "{got} vs {expected}");
+}
+
 /// Combine's offset and rounding radius are lengths in the design's unit, as every other
 /// length field: in an inch design they are converted when the dialog applies (a bare 0.1 is
 /// 0.1 in, not 0.1 mm). Left empty, the radius stays empty, so the command leaves it out.
