@@ -6,12 +6,12 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::{Drawing, FillPaint, ResolvedSketchFill};
 use solidcraft_doc::ids;
 use solidcraft_geom::paper::{GridItem, Group, Item, MAX_RECORDS, ObjectKind, Piece, Scene};
-use solidcraft_kernel::services::hatch::{Mark, generate};
+use solidcraft_kernel::services::profile::Mark;
 
 use crate::Result;
 
 fn dot_item(at: Vec2, width: f64) -> std::result::Result<Item, String> {
-    let region = solidcraft_kernel::services::hatch::dot_region(at, width)
+    let region = solidcraft_kernel::services::profile::dot_region(at, width)
         .ok_or_else(|| "pen width cannot represent a finite positive filled disk at the dot centre".to_string())?;
     let item = Item::Fill { region };
     let scene = Scene::new(Vec2::new(1.0, 1.0), vec![Group { object: 1, kind: ObjectKind::Fill, items: vec![item.clone()] }]);
@@ -67,7 +67,7 @@ pub fn paper_group(drawing: &Drawing, resolved: &ResolvedSketchFill) -> Result<G
         FillPaint::Solid => group.items.push(Item::Fill { region: resolved.region.clone() }),
         FillPaint::Hatch { pattern, pen_width_mm } => {
             let pattern = drawing.hatch_pattern(*pattern).ok_or_else(|| error("pattern snapshot does not exist".into()))?;
-            let marks = generate(&pattern.pattern, &resolved.region).map_err(|e| error(e.to_string()))?;
+            let marks = pattern.pattern.marks(&resolved.region).map_err(|e| error(e.to_string()))?;
             // Count the complete result before growing paper item storage. D6's
             // 40,000-mark cap does not by itself bound four-record filled dots.
             let records = marks.iter().try_fold(1usize, |count, mark| {

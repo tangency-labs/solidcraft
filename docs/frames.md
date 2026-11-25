@@ -236,7 +236,9 @@ own choice.
 
 **Fits.** A tube that ends against the side of another (a T-junction), or one of three or more tubes
 ending at a point, is cut to fit the tube it meets, only near its end: flat on a box tube, with the
-radii squared, and a fishmouth on a round tube.
+radii squared, and a fishmouth on a round tube. On an open section (an angle, a channel) the end
+reaches across the open side to the face beyond, the far leg or the web, and an inside corner's
+fillet is kept, not squared.
 
 **Tubes in no sketch plane.** Point-to-point tubes (`pairs`) and 3D-sketch lines are laid after every
 group, chained among themselves: where two of them end together they are mitred (or joined as an
