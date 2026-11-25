@@ -182,11 +182,23 @@ pub struct PanelFeatures {
     pub popout: bool,
     pub tabbable: bool,
     pub multi_instance: bool,
+    /// Collapsed while floating, the header shows where the expanded panel's bottom edge is,
+    /// instead of where its top edge is. Expanding grows it upward again.
+    #[serde(default)]
+    pub collapse_keeps_bottom: bool,
 }
 
 impl Default for PanelFeatures {
     fn default() -> Self {
-        Self { collapsible: true, closable: true, hot_closable: false, popout: true, tabbable: true, multi_instance: false }
+        Self {
+            collapsible: true,
+            closable: true,
+            hot_closable: false,
+            popout: true,
+            tabbable: true,
+            multi_instance: false,
+            collapse_keeps_bottom: false,
+        }
     }
 }
 
@@ -1046,13 +1058,19 @@ pub fn normalize_column_widths(layout: &mut Layout, registry: &PanelRegistry) ->
 
 /// One row thickness must satisfy all Bottom cards, including inactive tabs.
 pub fn bottom_height_bounds(layout: &Layout, registry: &PanelRegistry) -> PanelResult<(f32, f32)> {
+    bottom_height_bounds_of(layout, registry, |_| true)
+}
+
+/// The row bounds of the Bottom cards `shown` keeps: a card with no tab available here (a
+/// workspace's own strip outside that workspace) does not bound the row the others show in.
+pub fn bottom_height_bounds_of(layout: &Layout, registry: &PanelRegistry, shown: impl Fn(&Section) -> bool) -> PanelResult<(f32, f32)> {
     if layout.sections.len() > MAX_SECTIONS || layout.instances.len() > MAX_INSTANCES || layout.sections.iter().any(|s| s.tabs.len() > MAX_TABS) {
         return Err(error(Rule::CollectionLimit, "Bottom bounds collection cap"));
     }
     let mut min: f32 = 0.0;
     let mut max = MAX_LOGICAL;
     let mut found = false;
-    for section in layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom) {
+    for section in layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom && shown(s)) {
         found = true;
         let (lower, upper) = tab_bounds(layout, registry, section)?;
         min = min.max(lower.height);

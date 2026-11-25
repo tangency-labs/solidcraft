@@ -270,6 +270,38 @@ fn ui_capability_requires_provider_exports() {
     assert!(check_component(&panel_manifest(), &component("call $box"), RuntimeOptions::default()).is_err());
 }
 
+#[test]
+fn panel_plugin_supports_dialog_hooks() {
+    let (package, version) = API.split_once('@').unwrap();
+    let dialog_export = format!(
+        "(export \"{package}/ui-provider@{version}\" (instance $provider))\n\
+         (instance $dialog (export \"json\" (type $json)) (export \"plugin-error\" (type $plugin-error)) (export \"update-fields\" (func $execute)))\n\
+         (export \"{package}/dialog-provider@{version}\" (instance $dialog))"
+    );
+    let target = format!("(export \"{package}/ui-provider@{version}\" (instance $provider))");
+    let component = wat::parse_str(
+        include_str!("../ui_fixture.wat")
+            .replace("__PACKAGE__", package)
+            .replace("__VERSION__", version)
+            .replace("__COMMAND__", "document.inspect")
+            .replace("__COMMAND_LEN__", "16")
+            .replace("__ARGS__", "{}")
+            .replace("__ARGS_LEN__", "2")
+            .replace(&target, &dialog_export),
+    )
+    .unwrap();
+    let mut manifest = panel_manifest();
+    manifest.capabilities.push("dialog@0.1".into());
+    manifest.runtime.as_mut().unwrap().commands.insert("document.inspect".into());
+    manifest.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    check_component(&manifest, &component, RuntimeOptions::default()).unwrap();
+    let (mut app, result) = crate::dialog_fields(App::default(), &manifest, &component, "make", &json!({}), craft_plugin::HostLimits::default());
+    assert_eq!(result.unwrap(), "{\"bodies\":1,\"name\":\"Bracket\"}");
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 1, 0));
+    app.panel_data.merge_frame();
+    assert_eq!(app.panel_data.get("/jobs/0/state"), Some(&craft_plugin::ui::UiValue::Text("ready".into())));
+}
+
 fn form_component() -> Vec<u8> {
     form_component_with_dialog(false)
 }
@@ -342,16 +374,28 @@ fn dialog_hook_cannot_open_forms_even_when_the_command_can() {
 #[test]
 fn form_import_accepts_patch_capability_versions() {
     let bytes = form_component();
+    for capability in ["forms@0.1", "forms@0.1.0"] {
+        let mut m = manifest();
+        m.capabilities.push(capability.into());
+        let mut app = App { interactive: true, ..Default::default() };
+        assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+        assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    }
+}
+
+#[test]
+fn form_import_refuses_missing_or_unsupported_capabilities() {
+    let bytes = form_component();
     let mut m = manifest();
-    m.capabilities.push("forms@0.1.0".into());
     let mut app = App { interactive: true, ..Default::default() };
-    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
-    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
-    let _ = m.capabilities.pop();
     assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
     m.capabilities.push("forms@0.2".into());
     assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
-    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+    assert!(
+        matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::UnsupportedCapability { .. })),
+        "an unsupported forms version is refused"
+    );
+    assert!(app.forms.is_empty(), "refused capabilities cannot open forms");
 }
 
 #[test]
@@ -1213,6 +1257,7 @@ fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
     );
     assert!(!root.join("e").exists(), "no folder made for a refused path");
     state.discard_writes();
+    drop(state);
     std::fs::remove_dir_all(root).unwrap();
 }
 

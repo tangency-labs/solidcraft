@@ -738,6 +738,41 @@ fn peek_never_rewrites_saved_collapse_or_sizes_and_focus_restores_content() {
     assert!(service.interaction().focused.is_none());
 }
 
+/// A floating panel that keeps its bottom edge shows its collapsed header where its expanded
+/// bottom edge is; other panels show it where their top edge is. Expanding restores the panel.
+#[test]
+fn collapsed_floating_header_sits_at_the_bottom_edge_only_when_the_panel_asks() {
+    for keeps_bottom in [false, true] {
+        let mut spec = synthetic_registry().unwrap().get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+        spec.features.collapse_keeps_bottom = keeps_bottom;
+        let mut registry = PanelRegistry::default();
+        registry.register(spec).unwrap();
+        let mut service = LayoutService::new(registry, Layout::empty(WorkspaceId::new("fixture").unwrap()), HostCapabilities::default()).unwrap();
+        open(&mut service, "one", "first");
+        service
+            .dispatch(transaction(vec![Mutation::Move {
+                instance: id("one"),
+                destination: Destination::NewSection {
+                    section: section("first"),
+                    index: 0,
+                    location: SectionLocation::Floating { origin: Point { x: 100.0, y: 200.0 } },
+                    size: size(400.0, 300.0),
+                },
+            }]))
+            .unwrap();
+        let expanded = resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels[0].outer;
+        assert_eq!(expanded.origin, Point { x: 100.0, y: 200.0 });
+        service.dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: true }])).unwrap();
+        let header = resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels[0].outer;
+        assert_eq!(header.size.height, 24.0);
+        let bottom = expanded.origin.y + expanded.size.height;
+        let expected = if keeps_bottom { bottom - 24.0 } else { expanded.origin.y };
+        assert_eq!(header.origin, Point { x: 100.0, y: expected }, "keeps_bottom {keeps_bottom}");
+        service.dispatch(transaction(vec![Mutation::Collapse { section: section("first"), collapsed: false }])).unwrap();
+        assert_eq!(resolve_geometry(&service, rect(1000.0, 800.0), Direction::Ltr, 48.0).unwrap().panels[0].outer, expanded);
+    }
+}
+
 #[test]
 fn overflow_is_transient_and_never_squeezes_or_rewrites_desired_dimensions() {
     let mut service = fixture_service(false).unwrap();
@@ -2771,6 +2806,26 @@ fn a_catalogue_snapshot_round_trips_through_plain_json_byte_for_byte() {
         assert!(commands::snapshot_from_value(&broken).is_err(), "{broken}");
     }
     assert!(commands::snapshot_value(b"not a snapshot").is_err());
+}
+
+/// A record saved by a build without some kinds keeps those panels in quarantine. Once a newer
+/// build shows them live again, editing them must not collide with their dormant identities.
+#[test]
+fn live_panels_still_quarantined_in_the_saved_record_can_move() {
+    let absent = future_registry(&[]);
+    let grown = future_registry(&["a", "b", "c"]);
+    let fallback = persistence_fallback();
+    let dormant = decode(&serde_json::to_vec(&future_group()).unwrap(), &absent, &fallback).unwrap().envelope;
+    assert_eq!(dormant.quarantine.len(), 3);
+    let mut live = dormant.clone();
+    restore_quarantine(&mut live, &grown).unwrap();
+    assert!(live.quarantine.is_empty());
+    let service = LayoutService::new(grown.clone(), live.layout.clone(), HostCapabilities::default()).unwrap();
+    let mut catalogue = fixture_command_catalogue(&grown).unwrap();
+    catalogue.remember(&dormant, None, &grown).unwrap();
+    let mut backend = commands::InMemoryPanelBackend::new(service, catalogue);
+    backend.execute("panel.move", &serde_json::json!({"target":command_target("c"),"destination":command_destination("moved",1,"right")})).unwrap();
+    assert_eq!(backend.service.layout().containing(&id("c")).unwrap().id, section("moved"));
 }
 
 #[test]
@@ -7230,6 +7285,13 @@ fn bottom_height_refuses_disjoint_registered_card_intervals_atomically() {
     }
     assert_eq!(bottom_height_bounds(service.layout(), service.registry()).unwrap_err().rule, Rule::IncompatibleTabs);
     reject(&mut service, vec![Mutation::SetBottomHeight { section: section("low"), height: 180.0 }], Rule::IncompatibleTabs);
+
+    // A card with no tab available here (another workspace's strip) doesn't bound the row and
+    // keeps its own height.
+    service.set_availability([(id("high"), Availability::Unavailable { reason: "other workspace".into() })].into()).unwrap();
+    service.dispatch(transaction(vec![Mutation::SetBottomHeight { section: section("low"), height: 150.0 }])).unwrap();
+    let height = |name: &str| service.layout().section(&section(name)).unwrap().size.height;
+    assert_eq!((height("low"), height("high")), (150.0, 450.0));
 }
 
 #[test]

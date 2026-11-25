@@ -975,9 +975,25 @@ fn record_section_projections(envelope: &mut LayoutEnvelope) {
     }
 }
 
+/// Whether a saved record still holds in quarantine (saved by a build without its kind) a panel
+/// the live layout shows again. Its dormant identity would refuse every later edit of that
+/// panel, so callers restore the quarantine before staging against the record.
+pub fn holds_live_quarantine(envelope: &LayoutEnvelope, live: &Layout, registry: &PanelRegistry) -> bool {
+    envelope.quarantine.iter().any(|item| live.instance(&item.instance).is_ok() && registry.get(&item.kind).is_ok())
+}
+
 /// Stage live edits without losing dormant order, projected activation or opaque
 /// fields. The caller publishes only after its guarded layout dispatch succeeds.
 pub fn with_live_layout(envelope: &LayoutEnvelope, mut layout: Layout, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+    let restored;
+    let envelope = if holds_live_quarantine(envelope, &layout, registry) {
+        let mut copy = envelope.clone();
+        restore_quarantine(&mut copy, registry)?;
+        restored = copy;
+        &restored
+    } else {
+        envelope
+    };
     encode(envelope, registry)?;
     validate(&layout, registry)?;
     let full = preparation_context(envelope)?;

@@ -44,7 +44,10 @@ use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
 };
-use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_corner::separate_ends::{
+    plan as separate_end_plan, SectionKind, SeparateEndPlan,
+};
+use solidcore::blend::blend_corner::{BlendCornerEvent, TurnChoice};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
@@ -212,6 +215,12 @@ pub enum Turn {
     /// section revolved about the side edge, tangent to both rounds: between planes at a
     /// straight side edge, a torus. For [`Blend::Round`] only.
     Swept,
+    /// Each turn is [`Turn::Swept`] where the kernel builds it (the rolling ball can pass the
+    /// side edge: it and the rounds differ in convexity, and the rounds are constant, of one
+    /// radius, at a straight side edge square to them) and [`Turn::Mitre`] where it does not.
+    /// Decided per corner before anything is built, so it is never refused where the mitre
+    /// would have been made. Chamfers, which have no swept turn, are mitred.
+    Auto,
 }
 
 /// How chamfers close a corner where every edge at a vertex is chamfered between planes (the
@@ -637,7 +646,7 @@ fn blend_failure(
     call: SessionCall,
 ) -> (Error, Option<EdgeId>) {
     if let SolidError::BlendRefused { refusal, .. } = &e {
-        if let Some(error) = refused(s, refusal) {
+        if let Some(error) = refused(s.target(), refusal) {
             return (crate::session::noted(&e, error), None);
         }
     }
@@ -679,8 +688,7 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
 /// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
 /// its entities by their indices in the session's body; `None` for an entity that body does
 /// not hold, and for a setback too short ([`session_refusal`]'s).
-fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal) -> Option<Error> {
-    let b = s.target();
+fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
     let edge = |e: EdgeId| b.edge_list().iter().position(|&x| x == e);
     let vertex = |v: VertexId| b.vertex_list().iter().position(|&x| x == v);
     Some(match *refusal {
@@ -801,7 +809,12 @@ fn chamfer_sized(
 
 /// `e` ([`Error::TooLarge`]) with the point at the middle of `edge`, the edge its size was
 /// found for. An edge or point that cannot be read leaves the size without a point.
-fn sized_on(k: &Kernel, b: &Brep, edge: Option<EdgeId>, e: Error) -> solidcore::Result<Error> {
+pub(crate) fn sized_on(
+    k: &Kernel,
+    b: &Brep,
+    edge: Option<EdgeId>,
+    e: Error,
+) -> solidcore::Result<Error> {
     let Error::TooLarge {
         size,
         kind,
@@ -1001,7 +1014,12 @@ fn pass(
     let done = {
         let mut s = FilletSession::new(k, b)?;
         // read as the corners are made
-        s.set_swept_turns(p.turn == Turn::Swept);
+        s.set_turns(match p.turn {
+            Turn::Mitre => TurnChoice::Mitre,
+            Turn::Swept => TurnChoice::Swept,
+            Turn::Auto if p.section.chamfer() => TurnChoice::Mitre,
+            Turn::Auto => TurnChoice::Auto,
+        });
         // the corner type the caller chose, always asked: a type refused where it does not
         // exist, with its fit (the kernel picks a type itself only where none is asked)
         s.set_chamfer_corner(match p.chamfer_corner {
@@ -1215,6 +1233,71 @@ fn untagged(b: &mut Brep) -> solidcore::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Apply the kernel's separate-End plan with the ordinary ops blend passes.
+fn separated_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    kind: Blend,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let section = if kind == Blend::Chamfer {
+        SectionKind::Chamfer
+    } else {
+        SectionKind::Round
+    };
+    let groups = match separate_end_plan(k, b, picked, sizes, section) {
+        Ok(SeparateEndPlan::NotApplicable) => return Ok(None),
+        Ok(SeparateEndPlan::Limited { size, edge }) => {
+            let kind = if section == SectionKind::Chamfer {
+                FitKind::Distance
+            } else {
+                FitKind::Radius
+            };
+            return Ok(Some(Err(Error::TooLarge {
+                size,
+                kind,
+                at: edge_point(k, b, edge)?,
+                face: None,
+                why: Some(RoomReason::RailLeavesFace),
+            })));
+        }
+        Ok(SeparateEndPlan::Ends(groups)) => groups,
+        Err(e) => {
+            let error = match &e {
+                SolidError::BlendRefused { refusal, .. } => refused(b, refusal),
+                _ => failure(&e),
+            };
+            return match error {
+                Some(error) => Ok(Some(Err(crate::session::noted(&e, error)))),
+                None => Err(e),
+            };
+        }
+    };
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = if kind == Blend::Chamfer {
+            sizes
+                .iter()
+                .map(|&d| ChamferSize::Distances([d, d]))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let section = if kind == Blend::Chamfer {
+            Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            }
+        } else {
+            Section::Round(sizes)
+        };
+        pass_or_refuse(k, b, together(edges, section, Turn::Mitre, &[], contract))
+            .map(|result| result.map(|_| ()))
+    };
+    groups.build(k, b, picked, sizes, pass_group).map(Some)
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
@@ -1797,6 +1880,24 @@ fn blend_on_body(
     let contract = options.contract;
     let expect = Expect::under(k, b, Proof::default(), contract)?;
     let mut dropped = vec![false; edges.len()];
+    if picked.len() > 1
+        && back.is_empty()
+        && corners == Corners::Filled
+        && turn == Turn::Mitre
+        && options.chamfer_corner == ChamferCorner::Mitre
+        && matches!(kind, Blend::Chamfer | Blend::Round)
+    {
+        if let Some(made) = separated_end_passes(k, b, &picked, each, kind, contract)? {
+            if let Err(e) = made {
+                return Ok(Err(e));
+            }
+            return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                dropped,
+                holes: Vec::new(),
+                made: Vec::new(),
+            }));
+        }
+    }
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
         Blend::Curvature => |s| Section::Curvature(s),
@@ -1862,7 +1963,7 @@ fn blend_on_body(
     // a round that may be the Roll-over's concave chain asked on its own (#10876), of one edge
     // too (#19476: the foot of a cylinder that stands through a face)
     let asked_alone = kind == Blend::Round
-        && turn == Turn::Mitre
+        && turn != Turn::Swept
         && back.is_empty()
         && corners == Corners::Filled;
     let may_be_chain = asked_alone && has_end_arc(k, b, &picked)?;
@@ -1876,7 +1977,7 @@ fn blend_on_body(
     // refuses them; a round asked of the event's concave chain on its own (B1 rounded by an
     // earlier feature: [`is_concave_chain`], the ledge's edges once B1 is rounded, never a
     // pocket floor's) is the event's second pass where the first call refuses it
-    let step = if may_go_first && kind == Blend::Round && turn == Turn::Mitre {
+    let step = if may_go_first && kind == Blend::Round && turn != Turn::Swept {
         RollOverStep::Classify
     } else {
         RollOverStep::No

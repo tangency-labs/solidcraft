@@ -52,6 +52,7 @@ use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
+use solidcraft_doc::drawing::measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{
@@ -64,7 +65,6 @@ use solidcraft_doc::drawing_view::{
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
 use solidcraft_geom::hlr::Visibility;
@@ -487,11 +487,11 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
         Ok(match m {
             MeasureParam::Linear { along, from, to } => {
                 let direction = if *along == AlongParam::X { LinearDirection::Horizontal } else { LinearDirection::Vertical };
-                let reading = drawing_measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
                 length("linear", reading, LabelKind::Length)
             }
             MeasureParam::Aligned { from, to } => {
-                let reading = drawing_measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
                 length("aligned", reading, LabelKind::Length)
             }
             MeasureParam::Angle { edge: [a, b], from } => {
@@ -500,7 +500,7 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
                     AngleFromParam::View(ViewLineParam::Vertical) => AngleFrom::Vertical,
                     AngleFromParam::Line([c, d]) => AngleFrom::Edge(c.0, d.0),
                 };
-                let reading = drawing_measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
+                let reading = measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
                 MeasurementResult { value_mm: None, paper_mm: None, value_rad: Some(reading.value), ..length("angle", reading, LabelKind::Angle) }
             }
             MeasureParam::Radius { edge } => {
@@ -1089,10 +1089,11 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     let drawn = match sessions.of(view) {
         Ok(posed) => {
             // As the solver places them, after motion links: a screw's travel follows its turn.
-            let placed = solidcraft_doc::joints::joint_values(&posed.doc.assembly);
+            let active = posed.doc.active_assembly();
+            let placed = solidcraft_doc::joints::joint_values(&active.assembly);
             joints
                 .iter()
-                .filter_map(|joint| posed.doc.assembly.joints.iter().find(|driven| driven.id == *joint))
+                .filter_map(|joint| active.assembly.joints.iter().find(|driven| driven.id == *joint))
                 .map(|driven| DrawnJointResult {
                     joint: driven.id,
                     name: driven.name.clone(),

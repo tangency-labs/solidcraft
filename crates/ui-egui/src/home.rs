@@ -60,6 +60,9 @@ pub struct HomeState {
     /// the recent list from its stored designs (the web build, see `sync_recents`) does not add
     /// them back. Opening or saving a design clears it from here.
     pub forgotten: std::collections::BTreeSet<String>,
+    /// The Start page's recovery banner was closed (×): hidden until the next launch, while
+    /// Recover still lists the designs.
+    pub recovery_banner_hidden: bool,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
     library_stamps: HashMap<String, crate::library::FileStamp>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
@@ -797,6 +800,10 @@ enum FileAction {
     Link(&'static str),
     /// Recover (true) or discard the recoverable design at this index.
     Recovery(usize, bool),
+    /// Ask, then discard every recoverable design (the banner's Discard all).
+    DiscardAllRecovery,
+    /// Close the recovery banner until the next launch; the designs stay recoverable.
+    HideRecoveryBanner,
     /// The recent design at this index in `HomeState::recent`.
     OpenRecent(usize),
     ForgetRecent(usize),
@@ -828,6 +835,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
         && app.import_options.is_none()
+        // The recovery banner's Discard all asks on this page too: Escape cancels that question.
+        && !app.recovery_discard_all
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -975,7 +984,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
 }
 
 fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
-    let banner = app.recoverable.first().map(|entry| {
+    let banner = app.recoverable.first().filter(|_| !app.home.recovery_banner_hidden).map(|entry| {
         let filename = entry
             .path
             .as_deref()
@@ -989,7 +998,13 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             filename,
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
             recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
-            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
+            // One design is discarded at once; several ask first (#9299).
+            discard: Some(if single {
+                (app.tr_label("Discard").into(), FileAction::Recovery(0, false))
+            } else {
+                (app.tr("recovery.discard_all").into(), FileAction::DiscardAllRecovery)
+            }),
+            close: Some((app.tr("home.recovery_hide").into(), FileAction::HideRecoveryBanner)),
         }
     });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
@@ -1280,6 +1295,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 crate::recovery_ui::apply(app, entry, recover);
             }
         }
+        FileAction::DiscardAllRecovery => app.recovery_discard_all = true,
+        FileAction::HideRecoveryBanner => app.home.recovery_banner_hidden = true,
         FileAction::OpenRecent(index) => {
             if let Some(path) = app.home.recent.get(index).cloned() {
                 open_recent(app, &path);
@@ -1828,6 +1845,33 @@ mod tests {
         assert!(h.app.home.samples.is_empty(), "no sample model was built");
     }
 
+    #[test]
+    fn opening_a_sample_from_home_restores_the_assistant_contents() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.start("ui.assistant");
+        h.frames(3);
+        assert!(h.app.agent_chat.panel_rect.is_some());
+        h.app.disable_panel_runtime().unwrap();
+        let saved = std::mem::take(&mut h.app.panel_layout_preferences);
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.disable_panel_runtime().unwrap();
+        h.app.panel_layout_preferences = saved;
+        h.app.preferences.ai_features = true;
+        h.app.home.open = true;
+        h.frames(2);
+        assert!(!h.app.agent_chat.open);
+
+        // Deliver a ready sample during Home's paint, after the panel services' frame tick.
+        h.app.home.samples.insert(0, Session::default());
+        h.app.home.wanted = Some(0);
+        h.frames(3);
+        assert!(!h.app.home.open);
+        assert!(h.app.agent_chat.panel_rect.is_some(), "the restored Assistant must draw its contents in the new document");
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn selecting_a_sample_does_not_wait_for_a_running_cold_recent() {
@@ -2072,6 +2116,42 @@ mod tests {
         assert_eq!(h.app.recoverable.len(), 1);
         assert!(h.app.status.as_ref().is_some_and(|(message, _, error)| *error && message.contains("save or discard")));
         assert!(crate::scenario::rect_of("dialog:report:home_status").is_some(), "the refusal is visible on File");
+    }
+
+    /// Several recovered designs: the banner offers Discard all (asking first) and a close (×)
+    /// that hides it for this launch while Recover still lists the designs.
+    #[test]
+    fn file_view_recovery_banner_discards_all_after_asking_and_closes_without_discarding() {
+        let entry =
+            |id: &str, name: &str| solidcraft_engine::recovery::Entry { id: id.into(), name: name.into(), path: None, saved_at: 0, features: 3 };
+        let mut h = crate::scenario::Harness::new();
+        h.app.recoverable = vec![entry("a", "Bracket"), entry("b", "Housing")];
+        h.app.home.show(0);
+        h.frames(3);
+        assert!(crate::scenario::handle_at("home:recovery:discard").is_some(), "several designs: Discard all");
+        assert!(crate::scenario::handle_at("home:recovery:close").is_some(), "the banner can be closed");
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all, "Discard all asks first");
+        assert!(h.widget("Discard 2 autosaves?").is_some(), "its confirmation opens over File view");
+        assert_eq!(h.app.recoverable.len(), 2, "nothing is discarded before the answer");
+        h.step(&serde_json::json!({"widget": "Cancel"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all);
+        assert_eq!(h.app.recoverable.len(), 2, "Cancel keeps every design");
+        // Escape answers the question, and does not close File view behind it.
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all);
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all, "Escape cancels Discard all");
+        assert!(h.app.home.open, "Escape leaves File view open");
+        assert_eq!(h.app.recoverable.len(), 2);
+        click_file(&mut h, "home:recovery:close");
+        assert!(h.app.home.recovery_banner_hidden);
+        assert!(crate::scenario::handle_at("home:recovery:recover").is_none(), "the banner is gone");
+        assert_eq!(h.app.recoverable.len(), 2, "closing discards nothing");
+        click_file(&mut h, "home:recover");
+        assert!(crate::scenario::handle_at("home:recovery:0:recover").is_some(), "Recover still lists them");
     }
 
     #[test]

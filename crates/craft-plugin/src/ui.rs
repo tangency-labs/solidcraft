@@ -19,6 +19,7 @@ pub const WORKSPACE_HOOK_DEADLINE_MS: u64 = 1_000;
 pub const MAX_WORKSPACES: usize = 2;
 pub const MAX_WORKSPACE_RIBBON_TABS: usize = 6;
 pub const MAX_WORKSPACE_RIBBON_ENTRIES: usize = 60;
+pub const MAX_TABLE_ROW_INDENT: usize = 8;
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

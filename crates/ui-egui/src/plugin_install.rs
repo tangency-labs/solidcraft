@@ -97,7 +97,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
 
 fn browse_folder(app: &mut SolveApp, name: String) {
     let generation = app.plugin_install.generation;
-    app.pick_folder(move |app, path| {
+    app.pick_folder("", move |app, path| {
         if app.plugin_install.generation == generation
             && let Some(path) = path
             && let Some(ask) = app.plugin_install.ask.as_mut()
@@ -187,6 +187,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         0 => {}
         1 => lines.push(tr("plugin_install.command_one").to_string()),
         n => lines.push(format("plugin_install.commands", &[("count", &n.to_string())])),
+    }
+    // Backgrounds for the 3D view (shaders@0.1), drawn only when picked in Preferences.
+    let shaders = list(plugin.get("shaders"));
+    if !shaders.is_empty() {
+        lines.push(format("plugin_install.shaders", &[("names", &shaders.join(", "))]));
     }
     lines
 }
@@ -421,7 +426,7 @@ mod tests {
             lines,
             [
                 "Change application settings and use application diagnostics.",
-                "Open, recover or switch designs.",
+                "Open, recover or switch designs, and see where the open design is saved.",
                 "Read or write files within the approved folders.",
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
@@ -596,7 +601,7 @@ mod tests {
         let chosen = h.dir.join("Chosen exports");
         std::fs::create_dir(&chosen).unwrap();
         let answer = chosen.to_string_lossy().into_owned();
-        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
         review_folder_package(&mut h, "0.1.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
@@ -605,7 +610,7 @@ mod tests {
         assert!(ask.grants.folders[0].folder.as_os_str().is_empty());
         assert_eq!(ask.grants.folders[1].folder, chosen);
         assert!(h.app.session.plugin_state.grants.is_empty(), "Browse does not approve anything");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
@@ -626,7 +631,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
         let response = answer.clone();
-        h.app.services.pick_folder = Some(Box::new(move || {
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| {
             let response = response.clone();
             Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
         }));
@@ -708,7 +713,7 @@ mod tests {
         assert!(!crate::plugins::valid_grants(&ask.grants));
         // The screenshot shows a folder a person would pick; the install below uses the test's own folder.
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = std::path::PathBuf::from("/home/maker/Documents/Gear exports");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         capture_confirm(&mut h.app);
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = h.dir.clone();
         let ask = h.app.plugin_install.ask.take().unwrap();
