@@ -19,10 +19,9 @@
 //! T joints, whose toe on the through part is no edge, are refused ([`GrooveRefusal::TJoint`]);
 //! their toe and the seam mark come in a later PR (brett19 on #18500).
 
-use std::f64::consts::FRAC_PI_2;
-
 use solidcore_record::{Plane, Vec3};
-use solidcraft_kernel::services::{ExactBody as Body, Order, affine, sweep};
+use solidcraft_kernel::services::measure::{Straight, straight_direction};
+use solidcraft_kernel::services::{ExactBody as Body, Order, affine};
 
 /// Which of the two parts of a joint something is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,10 +54,21 @@ pub enum GrooveRefusal {
     /// A part's outer face `face` is not a plane.
     #[error("the {part:?} part's outer face {face} is not a plane")]
     OuterFaceNotPlane { part: JointPart, face: usize },
-    /// Face `face` of a part (a groove face or its outer face) is not proved straight along the
-    /// joint's direction within the zone tolerance ([`Body::face_straying`]).
+    /// Face `face` of a part (a groove face or its outer face) strays across the joint's direction
+    /// by more than the zone tolerance ([`Body::face_straying`]): it does not run straight along
+    /// the joint.
     #[error("face {face} of the {part:?} part is not straight along the joint")]
     GrooveFaceNotStraight { part: JointPart, face: usize },
+    /// Face `face` of a part (a groove face or its outer face) is a surface whose straightness
+    /// along the joint ops cannot prove (no bound from [`Body::face_straying`]): it may be
+    /// straight, but it is not taken unproved.
+    #[error("face {face} of the {part:?} part cannot be proved straight along the joint")]
+    GrooveFaceNotProved { part: JointPart, face: usize },
+    /// The faces give no direction for the joint: no two of their planes are proved apart and none
+    /// is a cylinder (a groove of other curved faces between plates whose outer faces are
+    /// parallel).
+    #[error("the faces give no direction for the joint")]
+    DirectionUndetermined,
     /// An ops call failed.
     #[error(transparent)]
     Ops(#[from] solidcraft_kernel::services::Error),
@@ -79,14 +89,30 @@ pub struct GroovePick<'a> {
     pub outer: usize,
 }
 
-/// A part's groove faces in order from the toe.
+/// A part's groove faces in order from the toe. Only [`chain`] makes one, so [`joint_frame`] can
+/// trust it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chain {
     /// The groove faces (record indices), the one beside the outer face first, each next one
     /// sharing an edge with the one before.
-    pub faces: Vec<usize>,
+    faces: Vec<usize>,
     /// The toe: the edges (record indices) the first face shares with the outer face.
-    pub toe: Vec<usize>,
+    toe: Vec<usize>,
+}
+
+impl Chain {
+    /// The groove faces (record indices), the one beside the outer face first, each next one
+    /// sharing an edge with the one before.
+    #[must_use]
+    pub fn faces(&self) -> &[usize] {
+        &self.faces
+    }
+
+    /// The toe: the edges (record indices) the first face shares with the outer face.
+    #[must_use]
+    pub fn toe(&self) -> &[usize] {
+        &self.toe
+    }
 }
 
 /// The picked groove faces of `pick` as one chain from the toe, read from the part's topology
@@ -148,88 +174,72 @@ pub fn chain(pick: &GroovePick<'_>, part: JointPart) -> Result<Chain> {
 /// The joint's frame, from both picks and their chains: a plane whose normal is the joint's
 /// direction `d`, along which every groove and outer face of both parts runs straight.
 ///
-/// `d` is square to the two plane normals, among those faces, furthest from parallel (the
-/// smallest `|n · m|`; the faces taken left part first, each part's groove faces from the toe,
-/// then its outer face, and a tie keeps the first pair, so the order of the picks changes
-/// nothing). Every one of those faces is then proved straight along `d`: it strays across it by
-/// no more than the zone tolerance ([`Body::face_straying`]).
+/// `d` is the direction those faces are proved straight along ([`straight_direction`], ops): the
+/// cross product of the two plane normals furthest from parallel when two are proved apart, else
+/// a cylinder's axis (a round groove between coplanar plates), each face then proved straight
+/// along it within the zone tolerance. Which faces give it depends on their normals only, so the
+/// order of the picks and of the parts changes nothing but `d`'s sign.
 ///
 /// The frame (brett19 on #18500): `y` is the left outer face's outward normal with its part along
-/// `d` taken out, `x = y × d`, and `d` takes the sign that makes `x` point from the left outer
-/// face's centroid towards its toe, out of the left part; so swapping the parts reverses `d`. The
-/// origin is the middle of the left toe's first edge. Every vector is an ops call
-/// ([`affine::orthonormal_axes`], [`affine::rotation`], [`affine::distance_along`]).
+/// `d` taken out, `x = y × d` ([`affine::frame_axes`], an exact cross product), and `d` takes the
+/// sign that makes `x` point out of the left part at its toe: against the direction into the left
+/// outer face from its toe edge ([`Body::edge_inward`], read from the face's loop, so an outer face
+/// that is not convex is read as a convex one is). Swapping the parts reverses `d`. The origin is
+/// the middle of the left toe's first edge.
 ///
 /// # Errors
-/// [`GrooveRefusal::OuterFaceNotPlane`]; [`GrooveRefusal::ArrowFaceNotAtToe`] when a part's
-/// first groove face is a plane parallel to its outer face (they meet at no angle) or a chain has
-/// no toe edge; [`GrooveRefusal::GrooveFaceNotStraight`]; [`GrooveRefusal::Invalid`] for a chain
-/// with no face. The errors of the ops calls otherwise.
+/// [`GrooveRefusal::OuterFaceNotPlane`]; [`GrooveRefusal::ArrowFaceNotAtToe`] for a chain with no
+/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::GrooveFaceNotStraight`];
+/// [`GrooveRefusal::GrooveFaceNotProved`]; [`GrooveRefusal::Invalid`] for a chain with no face.
+/// The errors of the ops calls otherwise.
 pub fn joint_frame(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<Plane> {
-    let zone = sweep::zone_tolerance()?;
     let parts = [JointPart::Left, JointPart::Right];
     let mut outer = [[0.0; 3]; 2];
     // every face of the joint: left part first, groove faces from the toe, then the outer face
-    let mut faces: Vec<(JointPart, &GroovePick<'_>, usize)> = Vec::new();
+    let mut faces: Vec<(JointPart, usize)> = Vec::new();
+    let mut reads: Vec<(&Body, &Order, usize)> = Vec::new();
     for (((pick, chain), part), out) in picks.into_iter().zip(chains).zip(parts).zip(&mut outer) {
         let Some(n) = pick.part.face_plane_normal(pick.order, pick.outer)? else {
             return Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer });
         };
         *out = n.value;
-        let no_toe = GrooveRefusal::ArrowFaceNotAtToe { part, face: pick.outer };
-        let Some(&first) = chain.faces.first() else {
+        if chain.faces.is_empty() {
             return Err(GrooveRefusal::Invalid("a chain with no groove face"));
-        };
-        // a first groove face parallel to the outer face meets it at no angle: there is no toe
-        let inside = pick.part.face_centroid(pick.order, pick.outer, 1e-8)?.centroid;
-        if chain.toe.is_empty() || pick.part.face_square_level(pick.order, first, n.value, inside)?.is_some() {
-            return Err(no_toe);
         }
-        faces.extend(chain.faces.iter().chain([&pick.outer]).map(|&f| (part, pick, f)));
-    }
-
-    // the direction: square to the two plane normals furthest from parallel
-    let mut normals = Vec::new();
-    for &(_, pick, f) in &faces {
-        if let Some(n) = pick.part.face_plane_normal(pick.order, f)? {
-            normals.push(n.value);
+        if chain.toe.is_empty() {
+            return Err(GrooveRefusal::ArrowFaceNotAtToe { part, face: pick.outer });
+        }
+        for &f in chain.faces.iter().chain([&pick.outer]) {
+            faces.push((part, f));
+            reads.push((pick.part, pick.order, f));
         }
     }
-    let mut best: Option<(f64, [f64; 3], [f64; 3])> = None;
-    for (i, &n) in normals.iter().enumerate() {
-        for &m in normals.iter().skip(i + 1) {
-            let c = affine::distance_along([0.0; 3], n, m).abs();
-            if best.is_none_or(|(b, ..)| c < b) {
-                best = Some((c, n, m));
-            }
+    let at = |i: usize| faces.get(i).copied().ok_or(GrooveRefusal::Invalid("a face index ops does not have"));
+    let d = match straight_direction(&reads)? {
+        Straight::Along { direction, .. } => direction,
+        Straight::Undetermined => return Err(GrooveRefusal::DirectionUndetermined),
+        Straight::NotStraight { face } => {
+            let (part, face) = at(face)?;
+            return Err(GrooveRefusal::GrooveFaceNotStraight { part, face });
         }
-    }
-    // the two outer faces are planes, so a pair is always there
-    let Some((_, n, m)) = best else {
-        return Err(GrooveRefusal::Invalid("fewer than two plane faces"));
+        Straight::Unproved { face } => {
+            let (part, face) = at(face)?;
+            return Err(GrooveRefusal::GrooveFaceNotProved { part, face });
+        }
     };
-    // d = n × m', m' the unit part of m square to n: m' turned a quarter about n
-    let [n, m] = affine::orthonormal_axes(n, m)?;
-    let d = affine::apply_point(&affine::rotation([0.0; 3], n, FRAC_PI_2)?, m);
-    for &(part, pick, f) in &faces {
-        if !pick.part.face_straying(pick.order, f, d)?.is_some_and(|e| e <= zone) {
-            return Err(GrooveRefusal::GrooveFaceNotStraight { part, face: f });
-        }
-    }
 
-    // the frame, from the left part: y the outer normal square to d, x = y × d (d turned a quarter
-    // about y), its sign towards the toe
+    // the frame, from the left part: y its outer normal square to d, x = y × d, d signed so x
+    // points out of the left part at its toe
     let [left, _] = picks;
-    let [_, y] = affine::orthonormal_axes(d, outer[0])?;
-    let mut x = affine::apply_point(&affine::rotation([0.0; 3], y, FRAC_PI_2)?, d);
     let Some(&toe_edge) = chains[0].toe.first() else {
         return Err(GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: left.outer });
     };
-    let toe = left.part.edge_middle(left.order, toe_edge)?;
-    let inside = left.part.face_centroid(left.order, left.outer, 1e-8)?.centroid;
-    if affine::distance_along(inside, x, toe) < 0.0 {
+    let [mut x, y] = affine::frame_axes(d, outer[0])?;
+    let inward = left.part.edge_inward(left.order, toe_edge, left.outer)?;
+    if affine::distance_along([0.0; 3], x, inward) > 0.0 {
         x = x.map(|v| -v);
     }
+    let toe = left.part.edge_middle(left.order, toe_edge)?;
     let v = |[a, b, c]: [f64; 3]| Vec3::new(a, b, c);
     Ok(Plane { origin: v(toe), x: v(x), y: v(y) })
 }

@@ -1,13 +1,17 @@
 //! Groove welds: each part's groove faces read as one chain from the toe on a Y groove and an I
 //! groove, the same chain whatever the order of the picks, the parts only read, and every typed
 //! refusal of picks that are not one chain from the toe; the joint's frame on both grooves, the
-//! same whatever the order of the picks, mirrored when the parts swap, and a plate not straight
-//! along the joint refused. Ported from the second groove PR's first slice (solidcore
+//! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
+//! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
+//! parts only read, and a plate not straight along the joint or an outer face that is no plane
+//! refused. Ported from the second groove PR's first slice (solidcore
 //! `weld::groove::joint`, never pushed) onto ops reads (#18500).
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use std::f64::consts::FRAC_PI_2;
+
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel::services::prism::extrude_planar_regions;
-use solidcraft_kernel::services::{ExactBody as Body, Order};
+use solidcraft_kernel::services::{ExactBody as Body, Order, session, sweep};
 
 use super::*;
 
@@ -18,9 +22,23 @@ fn plate(corners: &[(f64, f64)]) -> (Body, Order) {
 
 /// The polygon `corners` in `plane`, swept 120 along its normal, and its order.
 fn swept(plane: &Plane, corners: &[(f64, f64)]) -> (Body, Order) {
+    swept_by(plane, corners, 120.0)
+}
+
+/// The polygon `corners` in `plane`, swept `length` along its normal, and its order.
+fn swept_by(plane: &Plane, corners: &[(f64, f64)], length: f64) -> (Body, Order) {
     let pts: Vec<Vec2> = corners.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
-    let region = Region2 { outer: Loop2::polygon(&pts), holes: Vec::new() };
-    let body = extrude_planar_regions(plane, &[region], 0.0, 120.0).unwrap();
+    swept_loop(plane, Loop2::polygon(&pts), length)
+}
+
+/// The region inside `outline` in `plane`, swept `length` along its normal, and its order. The
+/// kernel runs with the app's fixes, as it does once the app has made a body: with them an arc
+/// swept square to its plane is a cylinder (`linear_sweep_arc_is_cylinder`), without them an
+/// extrusion, which gives no direction.
+fn swept_loop(plane: &Plane, outline: Loop2, length: f64) -> (Body, Order) {
+    session::set_fixes(solidcraft_kernel::smlib_trace::fixes()).unwrap();
+    let region = Region2 { outer: outline, holes: Vec::new() };
+    let body = extrude_planar_regions(plane, &[region], 0.0, length).unwrap();
     let (_, order) = body.to_record().unwrap();
     (body, order)
 }
@@ -130,8 +148,22 @@ fn joint(parts: &[(Body, Order); 2], faces: [&[usize]; 2]) -> Result<Plane> {
     joint_frame([&picks[0], &picks[1]], [&chains[0], &chains[1]])
 }
 
+/// How far a frame's unit axes may be off what the test expects: two frames whose axes differ by
+/// less than the zone tolerance over the plates' 120 mm place every point of the joint within the
+/// zone tolerance ([`sweep::zone_tolerance`], the kernel's own bound for two points being the
+/// same) of each other, which is all the weld reads them for.
+fn axes() -> f64 {
+    sweep::zone_tolerance().unwrap() / 120.0
+}
+
+/// How far a point may be off: the zone tolerance.
+fn points() -> f64 {
+    sweep::zone_tolerance().unwrap()
+}
+
 fn near(a: Vec3, b: [f64; 3]) -> bool {
-    (a.x - b[0]).abs() < 1e-12 && (a.y - b[1]).abs() < 1e-12 && (a.z - b[2]).abs() < 1e-12
+    let tol = axes();
+    (a.x - b[0]).abs() < tol && (a.y - b[1]).abs() < tol && (a.z - b[2]).abs() < tol
 }
 
 /// The plane's normal, x × y: the joint's direction.
@@ -149,8 +181,13 @@ fn a_y_groove_runs_along_z_its_frame_towards_the_toe() {
     assert!(near(Vec3::new(normal(&frame)[0], normal(&frame)[1], normal(&frame)[2]), [0.0, 0.0, 1.0]));
     // the origin: the middle of the left toe line
     let top = 0.5 + 7.0 * 30.0_f64.to_radians().tan();
-    let o = frame.origin;
-    assert!((o.x + top).abs() < 1e-9 && o.y.abs() < 1e-9 && (o.z - 60.0).abs() < 1e-9, "{o:?}");
+    let (o, tol) = (frame.origin, points());
+    assert!((o.x + top).abs() < tol && o.y.abs() < tol && (o.z - 60.0).abs() < tol, "{o:?}");
+    // the same frame again, and the parts only read
+    let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    assert_eq!(joint(&parts, [&faces[0], &faces[1]]).unwrap(), frame);
+    let after: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    assert_eq!(after, before);
 }
 
 #[test]
@@ -189,4 +226,130 @@ fn a_plate_not_straight_along_the_joint_is_refused() {
     assert_eq!((lf.len(), rf.len()), (1, 1));
     let got = joint(&[left, right], [&lf, &rf]).unwrap_err();
     assert!(matches!(got, GrooveRefusal::GrooveFaceNotStraight { .. }), "{got:?}");
+}
+
+/// The pick of `faces` on `plate`, its outer face the one facing `up`.
+fn pick_up<'a>(plate: &'a (Body, Order), faces: &'a [usize], up: [f64; 3]) -> GroovePick<'a> {
+    GroovePick { part: &plate.0, order: &plate.1, faces, outer: facing(plate, up)[0] }
+}
+
+/// The joint's frame of two picks.
+fn frame_of(picks: [GroovePick<'_>; 2]) -> Result<Plane> {
+    let chains = [chain(&picks[0], JointPart::Left)?, chain(&picks[1], JointPart::Right)?];
+    joint_frame([&picks[0], &picks[1]], [&chains[0], &chains[1]])
+}
+
+/// brett19's probe on #22033: the left plate's top runs past its toe (x = -1, z 0..120) on a tab
+/// out to x = 200 (z 120..240), so the top face's centroid lies at x about 66, beyond the toe. The
+/// frame is still signed from the toe: x out of the left part, +x, and the joint runs +z.
+#[test]
+fn an_outer_face_that_is_not_convex_still_signs_the_frame_from_its_toe() {
+    let above = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let left = swept_by(&above, &[(-40.0, 0.0), (-1.0, 0.0), (-1.0, 120.0), (200.0, 120.0), (200.0, 240.0), (-40.0, 240.0)], 8.0);
+    let right = swept_by(&above, &[(1.0, 0.0), (40.0, 0.0), (40.0, 110.0), (1.0, 110.0)], 8.0);
+    let lf: Vec<usize> = facing(&left, [1.0, 0.0, 0.0])
+        .into_iter()
+        .filter(|&f| (left.0.face_centroid(&left.1, f, 1e-8).unwrap().centroid[0] + 1.0).abs() < 1e-6)
+        .collect();
+    let rf = facing(&right, [-1.0, 0.0, 0.0]);
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    let top = facing(&left, UP)[0];
+    assert!(left.0.face_centroid(&left.1, top, 1e-8).unwrap().centroid[0] > 60.0);
+    let frame = joint(&[left, right], [&lf, &rf]).unwrap();
+    assert!(near(frame.x, [1.0, 0.0, 0.0]) && near(frame.y, [0.0, 1.0, 0.0]), "{frame:?}");
+    let n = normal(&frame);
+    assert!(near(Vec3::new(n[0], n[1], n[2]), [0.0, 0.0, 1.0]), "{frame:?}");
+}
+
+fn line(a: (f64, f64), b: (f64, f64)) -> Seg2 {
+    Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) }
+}
+
+fn arc(center: (f64, f64), radius: f64, start: f64, sweep: f64) -> Seg2 {
+    Seg2::Arc { center: Vec2::new(center.0, center.1), radius, start, sweep }
+}
+
+/// A round groove on 8 mm plates: each plate's wall a quarter circle of radius 8 from its toe on
+/// the surface (x = -9 and 9) down to the root (x = -1 and 1). The only planes among the picked
+/// faces are the two outer faces, which are parallel, so the walls' axis gives the direction.
+fn round_groove() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+    let left = swept_loop(
+        &Plane::XY,
+        Loop2 {
+            segs: vec![
+                line((-40.0, 0.0), (-40.0, -8.0)),
+                line((-40.0, -8.0), (-1.0, -8.0)),
+                arc((-1.0, 0.0), 8.0, -FRAC_PI_2, -FRAC_PI_2),
+                line((-9.0, 0.0), (-40.0, 0.0)),
+            ],
+        },
+        120.0,
+    );
+    let right = swept_loop(
+        &Plane::XY,
+        Loop2 {
+            segs: vec![
+                line((1.0, -8.0), (40.0, -8.0)),
+                line((40.0, -8.0), (40.0, 0.0)),
+                line((40.0, 0.0), (9.0, 0.0)),
+                arc((1.0, 0.0), 8.0, 0.0, -FRAC_PI_2),
+            ],
+        },
+        120.0,
+    );
+    let wall = |(b, o): &(Body, Order)| -> Vec<usize> { (0..o.faces.len()).filter(|&f| b.face_plane_normal(o, f).unwrap().is_none()).collect() };
+    let (lf, rf) = (wall(&left), wall(&right));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    ([left, right], [lf, rf])
+}
+
+#[test]
+fn a_round_groove_runs_along_its_walls_axis() {
+    let (parts, faces) = round_groove();
+    let frame = joint(&parts, [&faces[0], &faces[1]]).unwrap();
+    assert!(near(frame.x, [1.0, 0.0, 0.0]) && near(frame.y, [0.0, 1.0, 0.0]), "{frame:?}");
+    let n = normal(&frame);
+    assert!(near(Vec3::new(n[0], n[1], n[2]), [0.0, 0.0, 1.0]), "{frame:?}");
+    let (o, tol) = (frame.origin, points());
+    assert!((o.x + 9.0).abs() < tol && o.y.abs() < tol && (o.z - 60.0).abs() < tol, "{o:?}");
+}
+
+#[test]
+fn an_outer_face_that_is_no_plane_is_refused() {
+    let (parts, faces) = round_groove();
+    let [left, right] = &parts;
+    // the left plate's round wall as its outer face, its top as the groove face
+    let top = facing(left, UP);
+    let picks = [GroovePick { part: &left.0, order: &left.1, faces: &top, outer: faces[0][0] }, pick(right, &faces[1])];
+    assert_eq!(frame_of(picks).unwrap_err(), GrooveRefusal::OuterFaceNotPlane { part: JointPart::Left, face: faces[0][0] });
+}
+
+/// The Y groove of [`y_groove`] laid in a plane off the world axes (x along (2, 1, 2) / 3, y along
+/// (-1, 2, 0) / sqrt 5, through (3, -2, 7)): the frame is that plane's, and swapping the parts
+/// mirrors x and the normal, within [`axes`].
+#[test]
+fn a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance() {
+    let r5 = 5.0_f64.sqrt();
+    let (ex, ey) = ([2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0], [-1.0 / r5, 2.0 / r5, 0.0]);
+    let plane = Plane { origin: Vec3::new(3.0, -2.0, 7.0), x: Vec3::new(ex[0], ex[1], ex[2]), y: Vec3::new(ey[0], ey[1], ey[2]) };
+    let world = |a: f64, b: f64| -> [f64; 3] {
+        let l = a.hypot(b);
+        [(a * ex[0] + b * ey[0]) / l, (a * ex[1] + b * ey[1]) / l, (a * ex[2] + b * ey[2]) / l]
+    };
+    let t = 30.0_f64.to_radians().tan();
+    let top = 0.5 + 7.0 * t;
+    let left = swept(&plane, &[(-40.0, 0.0), (-40.0, -8.0), (-0.5, -8.0), (-0.5, -7.0), (-top, 0.0)]);
+    let right = swept(&plane, &[(top, 0.0), (0.5, -7.0), (0.5, -8.0), (40.0, -8.0), (40.0, 0.0)]);
+    let lf = [facing(&left, world(1.0, t)), facing(&left, world(1.0, 0.0))].concat();
+    let rf = [facing(&right, world(-1.0, t)), facing(&right, world(-1.0, 0.0))].concat();
+    assert_eq!((lf.len(), rf.len()), (2, 2), "{lf:?} {rf:?}");
+    let ez = [ex[1] * ey[2] - ex[2] * ey[1], ex[2] * ey[0] - ex[0] * ey[2], ex[0] * ey[1] - ex[1] * ey[0]];
+    let frame = frame_of([pick_up(&left, &lf, ey), pick_up(&right, &rf, ey)]).unwrap();
+    assert!(near(frame.x, ex) && near(frame.y, ey), "{frame:?}");
+    let n = normal(&frame);
+    assert!(near(Vec3::new(n[0], n[1], n[2]), ez), "{frame:?}");
+    let swapped = frame_of([pick_up(&right, &rf, ey), pick_up(&left, &lf, ey)]).unwrap();
+    assert!(near(swapped.x, ex.map(|v| -v)) && near(swapped.y, ey), "{swapped:?}");
+    let m = normal(&swapped);
+    assert!(near(Vec3::new(m[0], m[1], m[2]), ez.map(|v| -v)), "{swapped:?}");
 }
