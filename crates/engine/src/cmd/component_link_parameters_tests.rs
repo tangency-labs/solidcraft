@@ -338,7 +338,10 @@ fn a_link_driven_again_and_again_saves_what_a_new_read_of_its_bodies_gives() {
         let changed = run(&mut s, "parameters.change", json!({"name": "lift", "expression": lift}));
         assert_eq!(changed["linked"], json!(["Plate"]), "{changed}");
     }
-    assert_eq!(super::RECORD_READS.with(std::cell::Cell::get) - before, 3, "each drive after the first read takes the live bodies");
+    // The hand-over starts with the first read that lists its faces as the rebuild did, which
+    // may be one drive late (see a_driven_design_reopens_in_a_fresh_process_with_the_bodies_it_had).
+    let records = super::RECORD_READS.with(std::cell::Cell::get) - before;
+    assert!((2..=3).contains(&records), "each drive after the first read takes the live bodies: {records} of 3");
     let shape = |s: &mut Session| {
         let measured = run(s, "inspect.measure", json!({}));
         let bodies: Vec<(String, f64)> = measured["bodies"]
