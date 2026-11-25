@@ -173,6 +173,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
         visibility,
         point_clouds,
         // Display only: a plane's drawn size shapes nothing.
@@ -214,6 +215,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *saved_sections == b.saved_sections
         && *visibility == b.visibility
         && *point_clouds == b.point_clouds
 }

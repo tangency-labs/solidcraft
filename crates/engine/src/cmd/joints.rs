@@ -200,6 +200,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.list", "List Joints", crate::checked!("joint.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListJointsResult>)
         .params(
@@ -1225,7 +1226,12 @@ pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f6
         _ => None,
     }
     .ok_or_else(|| bad(cmd, format!("a joint value {}", crate::params::expr_problem(Some(v)))))?;
-    s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))
+    let x = s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))?;
+    // An expression gets the bound a number has, or the design would save and not open again.
+    if x.abs() >= solidcraft_doc::format::MAX_REAL {
+        return Err(bad(cmd, "values must be within ±1e9"));
+    }
+    Ok(x)
 }
 
 /// Lateral offsets are evaluated once and stored as finite distances, like the dialog's X/Y.

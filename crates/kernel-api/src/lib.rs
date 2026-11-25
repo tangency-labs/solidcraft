@@ -23,9 +23,11 @@ use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
 pub mod cell_grid;
+pub mod exchange;
 pub mod modelling;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
+pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
@@ -71,6 +73,8 @@ pub enum OpKind {
     OffsetFaces,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
+    /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
+    Exchange,
 }
 
 impl OpKind {
@@ -89,6 +93,7 @@ impl OpKind {
         OpKind::Thicken,
         OpKind::OffsetFaces,
         OpKind::CellGrid,
+        OpKind::Exchange,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -107,6 +112,7 @@ impl OpKind {
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
+            OpKind::Exchange => "exchange",
         }
     }
 

@@ -22,5 +22,8 @@
   },
   "zh": {
     "ui.rename_design_tab": "重命名"
+  },
+  "fr": {
+    "ui.rename_design_tab": "Renommer"
   }
 }

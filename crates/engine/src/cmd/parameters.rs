@@ -53,6 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.list", "List Parameters", crate::checked!("parameters.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ParamListResult>)

@@ -449,6 +449,145 @@ fn line3d_spline3d_point3d_need_a_3d_sketch() {
     }
 }
 
+/// Is `sketch` a 3D sketch on the XY origin plane?
+fn rests_on_xy_with_3d_on(s: &Session, sketch: u64) -> bool {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    s.doc
+        .feature(sketch)
+        .is_some_and(|f| matches!(&f.kind, FeatureKind::Sketch { plane: PlaneRef::Origin { name }, sketch } if name == "XY" && sketch.view.three_d))
+}
+
+#[test]
+fn create3d_starts_a_3d_sketch_with_no_plane_in_one_undo_step() {
+    let mut s = Session::default();
+    let empty = s.doc.to_json();
+    let undo = s.undo.len();
+    let made = run(&mut s, "sketch.create3d", json!({"name": "Rail"}));
+    let sketch = made["sketch"].as_u64().unwrap();
+    assert_eq!(made["name"], "Rail", "{made}");
+    assert_eq!(s.active_sketch, Some(sketch), "the new sketch is the one being edited");
+    assert_eq!(s.undo.len(), undo + 1, "the sketch and its 3D option are one undo step");
+    assert!(rests_on_xy_with_3d_on(&s, sketch));
+    // The 3D tools are offered at once: no plane to pick, no option to turn on.
+    for id in ["sketch.line3d", "sketch.spline3d", "sketch.arc3d", "sketch.point3d"] {
+        let info = crate::cmd::find_command(id).unwrap().info(&s);
+        assert!(info.enabled, "{id} not offered in a new 3D sketch: {:?}", info.disabled_reason);
+    }
+    let created = s.doc.to_json();
+
+    // Line, Fit Point Spline and Point all leave the plane.
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 30], [20, 10, 30]]}));
+    let rise = line["curves"][0].as_str().unwrap().to_string();
+    let run_out = line["curves"][1].as_str().unwrap().to_string();
+    let spline =
+        run(&mut s, "sketch.spline3d", json!({"points": [[40, 0, 0], [50, 5, 15], [60, 10, 30]]}))["curves"][0].as_str().unwrap().to_string();
+    let point = run(&mut s, "sketch.point3d", json!({"point": [5, 6, 7]}))["point"].as_str().unwrap().to_string();
+    near(fit(&s, &rise, 1), Vec3::new(0.0, 0.0, 30.0));
+    near(fit(&s, &run_out, 1), Vec3::new(20.0, 10.0, 30.0));
+    near(fit(&s, &spline, 1), Vec3::new(50.0, 5.0, 15.0));
+    near(fit(&s, &point, 0), Vec3::new(5.0, 6.0, 7.0));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curves.is_empty(), "nothing was flattened onto the plane");
+    assert_eq!(sk.wires.len(), 4, "two lines, a spline and a point");
+    let drawn = s.doc.to_json();
+
+    // Undo takes the drawing back step by step, then the sketch itself; redo brings it all back.
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.to_json(), created);
+    assert!(rests_on_xy_with_3d_on(&s, sketch), "the 3D option belongs to the step that made the sketch");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), empty);
+    for _ in 0..4 {
+        run(&mut s, "edit.redo", json!({}));
+    }
+    assert_eq!(s.doc.to_json(), drawn);
+    assert!(rests_on_xy_with_3d_on(&s, sketch));
+}
+
+#[test]
+fn create3d_paths_carry_a_pipe_and_a_sweep_and_reopen() {
+    let mut s = Session::default();
+    let path = run(&mut s, "sketch.create3d", json!({"name": "Path"}))["sketch"].as_u64().unwrap();
+    // 10 mm straight up from (17, 32, 45): no point of it is on the sketch's own plane.
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[17, 32, 45], [17, 32, 55]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch": path, "path": [wire], "diameter": 6}));
+    let profile = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 45, "name": "Profile"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [17, 32], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": profile, "path_sketch": path, "path": [wire], "operation": "new"}));
+    let check = |s: &Session| {
+        let world = s.world_state().unwrap();
+        let n = world.bodies.len();
+        assert!(n >= 2, "a pipe and a sweep: {n} bodies");
+        // A cylinder along the 10 mm line: the pipe of radius 3, then the swept circle of radius 2.
+        for (body, radius) in world.bodies[n - 2..].iter().zip([3.0_f64, 2.0]) {
+            let measure = solidcraft_kernel::measure(&body.body).unwrap();
+            let expected = std::f64::consts::PI * radius * radius * 10.0;
+            assert!((measure.volume - expected).abs() < 0.05, "radius {radius}: {} != {expected}", measure.volume);
+            near(measure.centroid, Vec3::new(17.0, 32.0, 50.0));
+        }
+    };
+    check(&s);
+    // Saved and read back: still a 3D sketch with the same curve, and the same solids.
+    let saved = s.doc.to_json();
+    let restored = solidcraft_doc::format::read(&saved).unwrap();
+    assert!(restored.sketch(path).unwrap().view.three_d);
+    assert_eq!(restored.sketch(path).unwrap().wires, s.doc.sketch(path).unwrap().wires);
+    let mut reopened = Session { doc: restored.into(), ..Default::default() };
+    reopened.refresh();
+    check(&reopened);
+    assert!(rests_on_xy_with_3d_on(&reopened, path));
+}
+
+#[test]
+fn create3d_finishes_the_open_sketch_and_belongs_to_the_active_component() {
+    // `second_frame` leaves a sketch open in a component placed by (x,y,z) -> (20-y,30+x,40+z).
+    let (mut s, component, _, _) = second_frame();
+    let open = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line3d", json!({"points": [[17, 32, 45], [17, 32, 55]]}));
+    let made = run(&mut s, "sketch.create3d", json!({}));
+    let sketch = made["sketch"].as_u64().unwrap();
+    assert_ne!(sketch, open);
+    assert_eq!(s.active_sketch, Some(sketch), "starting a 3D sketch finishes the sketch that was open");
+    assert_eq!(s.doc.sketch(open).unwrap().wires.len(), 1, "and keeps what was drawn in it");
+    assert_eq!(s.doc.feature(sketch).unwrap().component, component);
+    assert!(rests_on_xy_with_3d_on(&s, sketch), "the XY origin plane is the active component's own");
+    // World points come to rest in the component's own coordinates, as in any of its sketches.
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[17, 32, 45], [17, 32, 55]]}))["curves"][0].as_str().unwrap().to_string();
+    near(fit(&s, &wire, 0), Vec3::new(2.0, 3.0, 5.0));
+    near(fit(&s, &wire, 1), Vec3::new(2.0, 3.0, 15.0));
+}
+
+#[test]
+fn create3d_reads_no_plane_and_hostile_inputs_change_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20}));
+    let before = s.doc.to_json();
+    // A view that is no view id, or names no open view, is refused and nothing is made.
+    for p in [json!({"view": "front"}), json!({"view": -1}), json!({"view": 0}), json!({"view": 123456})] {
+        assert!(s.execute("sketch.create3d", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+        assert_eq!(s.active_sketch, None, "{p}");
+    }
+    // A plane has no meaning here. With the parameter check off the key is not read: the sketch
+    // does not go onto the box's top face. In strict the call is refused.
+    let stray = json!({"plane": {"face": [10, 10, 20]}, "project_edges": true, "offset": 5, "name": 7});
+    let sketch = run(&mut s, "sketch.create3d", stray.clone())["sketch"].as_u64().unwrap();
+    assert!(rests_on_xy_with_3d_on(&s, sketch));
+    assert!(s.doc.sketch(sketch).unwrap().links.is_empty(), "no face edges were projected");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    s.param_check = crate::schema::ParamCheck::Strict;
+    let refused = s.execute("sketch.create3d", &stray).unwrap_err().to_string();
+    assert!(refused.contains("unknown key"), "{refused}");
+    let refused = s.execute("sketch.create3d", &json!({"plane": "XZ"})).unwrap_err().to_string();
+    assert!(refused.contains("unknown key `plane`"), "{refused}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 #[test]
 fn wire_frame_copies_keep_component_and_legacy_coordinates() {
     let (mut s, _, first, second) = second_frame();

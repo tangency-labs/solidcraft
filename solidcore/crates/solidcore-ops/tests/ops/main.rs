@@ -133,6 +133,8 @@ mod profile_hook;
 mod proof_reuse;
 #[path = "../railed.rs"]
 mod railed;
+#[path = "../rebuild_within.rs"]
+mod rebuild_within;
 #[path = "../round_ending_at_a_slight_bend.rs"]
 mod round_ending_at_a_slight_bend;
 #[path = "../round_on_noisy_cylinders.rs"]
