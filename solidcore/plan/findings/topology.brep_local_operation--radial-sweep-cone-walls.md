@@ -67,9 +67,15 @@ tolerance at both ends and the new one nowhere past the old by more than it;
 an end closed by an annular cap where the new radius is below the old by more
 than the tolerance, at the hinge otherwise. `radial_sweep` draws both circles
 of a cap in the old support's frame on its end plane (the inner one of the new
-cone's radius at that plane), so `fixed_rim_plane` still proves the cap on the
-end plane exactly, and the stitch joins the drafted face's own rim to it within
-the body's tolerance, which is the tolerance the stitch already runs at. This
+cone's radius at that plane), both about one centre, the end point
+`origin + h z` rounded once, so `fixed_rim_plane` proves exactly that the cap is
+square to the axis and on the plane through that centre; the stitch joins the
+drafted face's own rim to it within the body's tolerance, which is the
+tolerance the stitch already runs at. The check used to compare the cap with the
+exact end point instead, which is in general not a double (an origin at
+z = 0.3 and a height of 0.7 give 0.3 + 0.7, which rounds): such a draft was
+refused as `RadialRimsOffEndPlane` with no fallback
+(`a_cylinder_whose_top_rounds_contracts_with_a_cap_on_its_rims_plane`). This
 replaces the cylinder step's exact frame and interval equality and the
 expansion-arithmetic signs of the radii.
 

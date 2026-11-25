@@ -49,7 +49,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::expansion as exact;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
-use crate::math::{Vec3, EFF_ZERO};
+use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW};
@@ -370,25 +370,32 @@ fn complete_cylinder_boundary(
     Ok(true)
 }
 
-/// A perpendicular rim plane through the exact axial endpoint, before rounding a
-/// point or a cross product: the tool's own cap support, built from the defining
-/// circles, must be exactly the cylinder's end plane.
-fn fixed_rim_plane(p: &Axis2Placement, cylinder: &crate::surface::cone::Cone, h: f64) -> bool {
+/// A rim plane square to the cylinder's axis through the rims' own centre `centre`, proved
+/// on the stored numbers before rounding a point or a cross product: the tool's cap support,
+/// built from the defining circles, must be exactly the plane they were drawn on.
+///
+/// `centre` is the end point `origin + h z` of the cylinder's axis as the rims were built,
+/// rounded once. The exact sum is in general not a double (an origin at z = 0.3 and an end
+/// height 0.7 give 0.3 + 0.7, which rounds), so no stored centre or plane lies exactly on it;
+/// the check proves the cap is on the plane of the very point both rims are drawn about, one
+/// value for both, not on an exact end plane no stored plane can be on.
+fn fixed_rim_plane(
+    p: &Axis2Placement,
+    cylinder: &crate::surface::cone::Cone,
+    centre: Point3,
+) -> bool {
     let (x, y) = (p.x_axis(), p.y_axis());
     let frame = cylinder.rev.position;
-    let axis = frame.z_axis();
     let prove = || {
         if !exact::is_zero(&exact::det3(frame.x_axis(), frame.y_axis(), x)?)
             || !exact::is_zero(&exact::det3(frame.x_axis(), frame.y_axis(), y)?)
         {
             return Some(false);
         }
-        let height = exact::scale(&exact::det3(x, y, axis)?, h)?;
-        let origin = exact::sub(
-            &exact::det3(x, y, frame.origin())?,
+        Some(exact::is_zero(&exact::sub(
+            &exact::det3(x, y, centre)?,
             &exact::det3(x, y, p.origin())?,
-        );
-        Some(exact::is_zero(&exact::add(&origin, &height)))
+        )))
     };
     prove() == Some(true)
 }
@@ -437,14 +444,13 @@ fn radial_sweep(
         }
         // Define the rims from the supports themselves. An iso curve's sampled
         // radius is not a defining radius and must not become the cap's support.
+        // Both rims are drawn about one centre, the end point rounded once, and the cap is
+        // proved to lie on the plane through that same point (`fixed_rim_plane`).
         let frame = cylinder.rev.position;
+        let centre = frame.origin() + height * frame.z_axis();
         let rim = |radius: f64| -> Result<_> {
             let mut circle = crate::curve::ellipse::Ellipse::empty_circle();
-            circle.position = Axis2Placement::from_stored(
-                frame.origin() + height * frame.z_axis(),
-                frame.x_axis(),
-                frame.y_axis(),
-            );
+            circle.position = Axis2Placement::from_stored(centre, frame.x_axis(), frame.y_axis());
             circle.anal_domain = cylinder.rev.anal_uv_domain.u_interval();
             circle.radius_x = radius;
             circle.radius_y = circle.radius_x;
@@ -482,7 +488,7 @@ fn radial_sweep(
                 TopologyFailure::RadialCapWithoutPlane,
             ));
         };
-        if !fixed_rim_plane(support.position(), cylinder, height) {
+        if !fixed_rim_plane(support.position(), cylinder, centre) {
             return Err(SolidError::topology(
                 OP,
                 TopologyFailure::RadialRimsOffEndPlane,
@@ -2228,6 +2234,44 @@ mod tests {
                 validation::check_brep(&mut k, &mut tool, validation::CheckLevel::Level2).unwrap();
             assert!(report.lines().is_empty(), "{:?}", report.lines());
         }
+    }
+
+    /// A cylinder of radius 1 standing on z = 0.3 to the height 0.7, drafted 1 in 10 about
+    /// its bottom: its top rim's centre 0.3 + 0.7 is not a double and rounds. The removal is
+    /// still the cylinder less the frustum of radii 1 and 0.93, closed by an annular cap on
+    /// the plane through the rims' one rounded centre, not refused as off its end plane.
+    #[test]
+    fn a_cylinder_whose_top_rounds_contracts_with_a_cap_on_its_rims_plane() {
+        use crate::offset::draft::{draft_surface, Draft};
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let origin = Point3::new(0.1, 0.2, 0.3);
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, origin, 1.0, 0.7).unwrap();
+        let f = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, 0.1_f64.atan()).unwrap();
+        let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
+        assert_eq!(
+            contract_complete_cone(&mut k, &mut b, &[f], &[cone]).unwrap(),
+            Some(())
+        );
+        let (volume, manifold) = volume_and_manifold(&k, &mut b);
+        let expected = core::f64::consts::PI * 0.7 * (1.0 + 0.93 + 0.93 * 0.93) / 3.0;
+        assert!(
+            manifold && (volume - expected).abs() <= 1e-9 * expected,
+            "{volume} vs {expected}"
+        );
     }
 
     #[test]

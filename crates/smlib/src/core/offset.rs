@@ -26,14 +26,13 @@ use solidcore::SolidError;
 use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::Shape;
-use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::offset::draft::{Draft, DraftRefusal, draft_surface};
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::query::api_queries::{face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
-use solidcore::surface::cone::Cone;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::face::p2 as face_p2;
@@ -329,35 +328,14 @@ fn cannot_draft(why: &'static str) -> Error {
     Error::Refused(solidcore_ops::Error::Unsupported(why))
 }
 
-/// solidcore's refusal to draft the cone or cylinder `cyl` about the plane through `origin` with
-/// unit normal `normal`, in the words the app's draft has used: an axis in the neutral plane is
-/// one parallel to it, and a cone that would close because the neutral plane is at or past its
-/// apex says so; the rest as solidcore-ops words them.
-fn cone_refused(cyl: &Cone, r: DraftRefusal, origin: Point3, normal: Vec3) -> Error {
+/// solidcore's refusal to draft a cone or cylinder, in the words the app's draft has used: an axis
+/// in the neutral plane is one parallel to it; the rest as solidcore-ops words them (a neutral
+/// plane at or past a cone's apex among them, which the kernel tells apart).
+fn cone_refused(r: DraftRefusal) -> Error {
     match r {
         DraftRefusal::AxisInNeutralPlane => cannot_draft("a drafted cone or cylinder's axis is parallel to the neutral plane"),
-        DraftRefusal::ConeCloses if !(radius_on_plane(cyl, origin, normal) > 0.0) => {
-            cannot_draft("the neutral plane is at or past a drafted cone's apex")
-        }
         r => Error::Refused(solidcore_ops::offset::draft_refused(r)),
     }
-}
-
-/// The radius of the cone or cylinder `cyl` where its axis meets the plane through `origin` with
-/// unit normal `normal`; NaN when its frame is degenerate or its axis is parallel to the plane.
-fn radius_on_plane(cyl: &Cone, origin: Point3, normal: Vec3) -> f64 {
-    let frame = cyl.canonical().origin;
-    let z = frame.x_axis().cross(frame.y_axis());
-    let len = z.length();
-    if !(len > 0.0 && len.is_finite()) {
-        return f64::NAN;
-    }
-    let z = z * (1.0 / len);
-    let toward = z.dot(normal);
-    if toward.abs() < 1e-12 {
-        return f64::NAN;
-    }
-    cyl.radius((origin - frame.origin()).dot(normal) / toward)
 }
 
 /// The capi's `Before` mark on what `SmBrep::LocalOperation` is to move: above the history's tag.
@@ -434,13 +412,13 @@ pub(crate) fn draft(
             // A cylinder or cone about the pull drafted becomes the cone solidcore's draft gives
             // (`draft_surface`: its generators turned about its circle on the neutral plane),
             // carrying its draft definition, so that the local operation knows it for a draft.
-            if let SurfaceKind::Cone(cyl) = surf.kind_with_nurb(k)? {
+            if let SurfaceKind::Cone(_) = surf.kind_with_nurb(k)? {
                 let Ok(the_draft) = Draft::new(p3(neutral_origin), normal, along, angle) else {
                     return Ok(Err(Error::Argument));
                 };
                 match answer(draft_surface(k, &w, f, &the_draft))? {
                     Some(Ok(cone)) => surfaces.push(cone),
-                    Some(Err(r)) => return Ok(Err(cone_refused(cyl, r, p3(neutral_origin), normal))),
+                    Some(Err(r)) => return Ok(Err(cone_refused(r))),
                     None => return Ok(Err(Error::Unsupported)),
                 }
                 continue;

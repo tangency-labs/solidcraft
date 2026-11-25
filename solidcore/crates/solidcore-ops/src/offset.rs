@@ -665,6 +665,9 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
         DraftRefusal::SenseNotProved => {
             "whether a drafted cone or cylinder faces away from its axis is not proved"
         }
+        DraftRefusal::NeutralPlanePastApex => {
+            "the neutral plane is at or past a drafted cone's apex"
+        }
         DraftRefusal::ConeCloses => "a drafted cone would close within the face",
     })
 }
