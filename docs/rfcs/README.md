@@ -11,3 +11,4 @@ A Draft is discussed in the pull request that adds it. Once accepted, the work i
 | [0003](0003-solidcore-consolidation.md) | solidcore consolidation: one implementation per job | Draft |
 | [0015](0015-plugin-ui-workspaces.md) | Plugin panels, workspaces and viewport content | Draft |
 | [0016](0016-failure-signatures.md) | Failure signatures and reproducible reports | Draft |
+| [0017](0017-marketplace.md) | Marketplace: finding and installing plugins, part generators and content packs | Draft |
