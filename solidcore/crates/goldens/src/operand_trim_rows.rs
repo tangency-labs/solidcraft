@@ -1180,7 +1180,9 @@ mod local_operation {
 
     include!("operand_trim_rows/local_operation.rs");
 
-    /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
+    /// Every `topology.brep_local_operation` row the copy moves (64: `gen0030` is not
+    /// listed, because main and this branch both refuse its edit and put its input back, so
+    /// it no longer moves, tangency-labs/solidcraft#21301): certified as the
     /// module docs say; none farther, and looser only the listed
     /// [`super::RAISED_TO_A_LOOSE_BOUND`] tolerances (counted). The rows were recorded before the kept-trim cover
     /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
@@ -1228,7 +1230,7 @@ mod local_operation {
              proved bound, #19784) {looser}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 65);
+        assert_eq!(ROWS.len(), 64);
         assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
     }
 

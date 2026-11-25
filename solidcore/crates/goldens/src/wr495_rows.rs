@@ -9,7 +9,7 @@
 //! with the integration over the new edges.
 //!
 //! The rows are [`FILLET`] (2 in `blend.fillet_executive_p3`), [`OFFSET`] (109 in
-//! `offset.offset_executive_p2`) and [`LOCAL`] (56 in `topology.brep_local_operation`). Main's
+//! `offset.offset_executive_p2`) and [`LOCAL`] (55 in `topology.brep_local_operation`). Main's
 //! facts of each row were measured on main with the same measures (written by the ignored
 //! [`main_facts`] generator):
 //! - [`crate::soundness`]: the kernel's soundness check, the manifold test, the volume's
