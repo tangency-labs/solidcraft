@@ -39,7 +39,6 @@ crates/doc/src/document.rs:AlignFrame::resolve normalized
 crates/doc/src/document.rs:Document::resolve_plane_in cross,dot,normalized
 crates/doc/src/document.rs:MeshData::eq triangles
 crates/doc/src/document.rs:MeshData::generate_crease_normals triangles
-crates/doc/src/document.rs:unit_direction normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::basis cross,dot
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::first_way normalized
 crates/doc/src/drawing/cutting_line.rs:CuttingLine::planes cross,normalized

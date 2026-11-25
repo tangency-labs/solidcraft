@@ -3511,13 +3511,10 @@ pub fn literal_dir(d: &DirExpr) -> Option<Vec3> {
 }
 
 /// `v` as a unit direction, however short it is: scaled by its largest component first, so
-/// only a vector that is exactly zero (or not finite) has none (#18822).
+/// only a vector that is exactly zero (or not finite) has none (#18822). The kernel makes it
+/// unit (`solidcore_ops::unit_direction`).
 pub fn unit_direction(v: Vec3) -> Option<Vec3> {
-    let m = v.x.abs().max(v.y.abs()).max(v.z.abs());
-    if !(m.is_finite() && m > 0.0) {
-        return None;
-    }
-    Vec3::new(v.x / m, v.y / m, v.z / m).normalized()
+    solidcraft_kernel::services::unit_direction([v.x, v.y, v.z]).map(Vec3::from)
 }
 
 fn z_axis_expr() -> DirExpr {
