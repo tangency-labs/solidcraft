@@ -589,7 +589,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -782,8 +782,39 @@ fn rust_err(e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
 }
 
+/// The replayed model of a `point_classify` case whose point is on a UV trim (`at.mode`
+/// `trim`): the Rust B-rep with its edits applied, the face, and the edge use whose trim
+/// `point_of` evaluates (#18325's certificates, `tests/issue_18325_moved_rows.rs`). `None`
+/// for another op or point mode, or a model that does not build.
+///
+/// # Errors
+///
+/// A [`HarnessError`] for inputs that do not parse or a model the harness cannot read.
+pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    let OpIn::PointClassify { face, at, .. } = &i.op else {
+        return Ok(None);
+    };
+    if at.mode != "trim" {
+        return Ok(None);
+    }
+    let mut k = crate::runner_kernel();
+    let Ok(m) = rust_model(&mut k, &i)? else {
+        return Ok(None);
+    };
+    let f = face_of(&m, *face)?;
+    let eus = face_edgeuses(&m.brep, f)?;
+    let Some(eu) = usize::try_from(sel(at.sel, eus.len()))
+        .ok()
+        .and_then(|i| eus.get(i).copied())
+    else {
+        return Ok(None);
+    };
+    Ok(Some((m.brep, f, eu)))
+}
+
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     if let OpIn::ProtoVertex {
         approx,
         capture,
@@ -910,6 +941,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     trace.extend(cache_state(b, f).map_err(|e| harness(e.to_string()))?);
                 }
             }
+            #[cfg(test)]
+            crate::certify::written(b);
             Ok(if traced {
                 Output::new().values("cached_pc", trace)
             } else {

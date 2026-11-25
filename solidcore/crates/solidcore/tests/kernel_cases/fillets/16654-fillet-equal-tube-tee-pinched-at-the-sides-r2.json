@@ -1,0 +1,398 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 80.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                -40.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 15.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -15.0,
+                  -39.99999999999999,
+                  0.0
+                ],
+                [
+                  12.26802289736966,
+                  -31.36891581609739,
+                  8.631084183902608
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  -15.0,
+                  -39.99999999999999,
+                  0.0
+                ],
+                [
+                  12.26802289736966,
+                  -48.63108418390261,
+                  8.631084183902608
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  12.26802289736966,
+                  -31.36891581609739,
+                  8.631084183902608
+                ],
+                [
+                  14.999999999999996,
+                  -40.00000000000001,
+                  0.0
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  12.26802289736966,
+                  -48.63108418390261,
+                  8.631084183902608
+                ],
+                [
+                  14.999999999999996,
+                  -40.00000000000001,
+                  0.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              -5.953756817132706,
+              -26.272795502979793,
+              13.727204497020203
+            ],
+            [
+              -5.953027341698075,
+              -53.72627636282504,
+              13.72627636282503
+            ],
+            [
+              14.316415486329122,
+              -35.575123739263184,
+              4.424876260736816
+            ],
+            [
+              14.321341922909857,
+              -44.42343742825588,
+              4.423437428255886
+            ]
+          ],
+          "tolerance": 5.008980186063032
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16654-fillet-equal-tube-tee-pinched-at-the-sides-r2",
+  "expected": {
+    "bbox": {
+      "max": [
+        15,
+        0,
+        40
+      ],
+      "min": [
+        -15,
+        -80,
+        -15
+      ]
+    },
+    "body_count": 1,
+    "method": "Tube 1: R15 along y from 0 to -80, V1 = pi 225 80 = 56548.67. Tube 2: R15 up z from z = 0 at y = -40, height 40, V2 = pi 225 40 = 28274.33; its part inside tube 1 is the upper half of the two cylinders' Steinmetz solid, 16 r^3 / 3 / 2 = 9000. Union V0 = 75823.0. The joint is two half ellipses (planes z = +-(y + 40)), each of length pi(3(a+b) - sqrt((3a+b)(a+3b)))/2 = 57.3 for a = 15, b = 15 sqrt 2, L = 114.6. A concave round adds material: more than V0. Its cross section adds at most r^2 (1 - pi/4) = 0.858 where the faces meet square (the joint's top) and less where they open out towards the tangent sides; doubled for the faces' curvature, at most 2 L 0.858 = 196.8: V in [75823, 76020]. The round is inside the union's box: bbox (-15, -80, -15)..(15, 0, 40).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#16654"
+    ],
+    "volume_mm3": [
+      75823.0,
+      76020.0
+    ],
+    "what": "an R2 round on the whole joint of a tee of two R15 tubes (one along y, one up z through its middle), whose faces touch tangentially at the joint's two side points (x = +-15, z = 0), where the round shrinks to nothing"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 16,
+      "faces": 9,
+      "vertices": 9
+    }
+  },
+  "records": "16654-fillet-equal-tube-tee-pinched-at-the-sides-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Tee",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11600.400421861157,
+      "body_count": 1,
+      "edges": 16,
+      "faces": 9,
+      "vertices": 9,
+      "volume_mm3": 75855.19890697699
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16654"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "an R2 round on the whole joint of a tee of two R15 tubes (one along y, one up z through its middle), whose faces touch tangentially at the joint's two side points (x = +-15, z = 0), where the round shrinks to nothing",
+  "why_not": []
+}

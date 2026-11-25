@@ -484,6 +484,160 @@ fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
     assert!(err.to_string().contains("reaches past the To face"), "{err}");
 }
 
+/// #20389: a Cut To Object up to a round from the far side of the part ends at the round, not
+/// where the tool first meets the round's cylinder extended (its back, inside the part, where
+/// there is no round), with a To offset and with none (the profile overhangs the round, 1 below
+/// the plate). A 40 by 30 by 5 plate with its corner at (40, 30) rounded R10, and a cut from the
+/// plane x = -10 along +x over y in [22, 28] and z in [-1, 4]: in the plate, z in [0, 4], it
+/// takes x from 0 to the round's offset cylinder x = 30 + sqrt(r^2 - (y - 20)^2), r = 10 + the
+/// offset, so 4 times 6 * 30 plus the integral of sqrt(r^2 - u^2) over u in [2, 8]. Ending at
+/// the cylinder's back, x = 30 - sqrt(...), it took 4 times 6 * 30 less that integral. The same
+/// profile over z in [1, 4] lies wholly over the round: 3 times as much, with an offset and with
+/// none (with none it ended at the plate's side x = 0, on the review of #20536).
+#[test]
+fn cut_to_a_round_from_the_far_side_ends_at_the_round() {
+    // The profile from z = -1 overhangs the round below the plate; from z = 1 it lies wholly
+    // over it, and the cut is 3 deep in z instead of 4.
+    for (bottom, depth, to_offset) in [(-1, 4.0, -1.57f64), (-1, 4.0, 0.0), (1, 3.0, -1.57), (1, 3.0, 0.0)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "body_name": "Plate"}));
+        run(&mut s, "solid.fillet", json!({"body": "Plate", "edges": [[40, 30, 2.5]], "radius": 10}));
+        let before = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0);
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [-10, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [22, bottom], "p1": [28, 4]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let d = 10.0 / 2f64.sqrt();
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [30.0 + d, 20.0 + d, 2.5], "to_offset": to_offset, "operation": "cut"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "z from {bottom}, offset {to_offset}: {:?}", s.model.results);
+        let removed = before - body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0);
+        let r = 10.0 + to_offset;
+        let primitive = |u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        let want = depth * (180.0 + primitive(8.0) - primitive(2.0));
+        assert!((removed - want).abs() < want * 1e-3, "z from {bottom}, offset {to_offset}: removed {removed}, want {want}");
+    }
+}
+
+/// #20389: a New Body To Object up to a round from the far side of the part is one body, not
+/// the piece up to the back of the round's cylinder and the piece beyond it, apart at a seam on
+/// that cylinder. The plate and profile of `cut_to_a_round_from_the_far_side_ends_at_the_round`,
+/// no offset: the body runs from x = -10 to the round, x = 30 + sqrt(100 - (y - 20)^2), over y in
+/// [22, 28] and z in [-1, 4], so it holds 5 times 6 * 40 plus the integral of sqrt(100 - u^2)
+/// over u in [2, 8].
+#[test]
+fn a_new_body_to_a_round_from_the_far_side_is_one_body() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"body": "Plate", "edges": [[40, 30, 2.5]], "radius": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-10, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [22, -1], "p1": [28, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let d = 10.0 / 2f64.sqrt();
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [30.0 + d, 20.0 + d, 2.5], "operation": "new_body", "body_name": "Post"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert_eq!(s.model.state().bodies.len(), 2, "the plate and one post");
+    let primitive = |u: f64| u / 2.0 * (100.0 - u * u).sqrt() + 50.0 * (u / 10.0).asin();
+    let want = 5.0 * (240.0 + primitive(8.0) - primitive(2.0));
+    let got = body(&mut s, "Post")["volume_mm3"].as_f64().unwrap_or(0.0);
+    assert!((got - want).abs() < want * 1e-3, "post {got}, want {want}");
+}
+
+/// A profile that reaches past the edges of a curved To face, where the face's surface extended
+/// still lies across it, ends at that extended surface with no To offset as it does with one: a
+/// 40 by 30 by 5 plate with its corner at (40, 30) rounded R10, and a Join from the plane x = 60
+/// back along -x to the round, over y in [22, 28] and z in [-1, 4], 1 below the plate. It was
+/// refused ("the profile reaches past the To face") while a To offset of 0.5 built. The post runs
+/// from x = 60 to the round's cylinder x = 30 + sqrt(100 - (y - 20)^2) over all 5 of its height
+/// (below the plate, to the cylinder extended), so it adds 5 times 6 * 30 less the integral of
+/// sqrt(100 - u^2) over u in [2, 8].
+#[test]
+fn join_to_a_round_the_profile_overhangs_ends_at_its_extended_surface() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"body": "Plate", "edges": [[40, 30, 2.5]], "radius": 10}));
+    let before = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0);
+    // The sketch's x runs along -y, so its normal is -x.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [60, 0, 0], "x_dir": [0, -1, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-28, -1], "p1": [-22, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let d = 10.0 / 2f64.sqrt();
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [30.0 + d, 20.0 + d, 2.5], "operation": "join"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let added = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0) - before;
+    let primitive = |u: f64| u / 2.0 * (100.0 - u * u).sqrt() + 50.0 * (u / 10.0).asin();
+    let want = 5.0 * (180.0 - (primitive(8.0) - primitive(2.0)));
+    assert!((added - want).abs() < want * 1e-3, "added {added}, want {want}");
+}
+
+/// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
+/// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
+/// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the
+/// sliver between them. The seams of the two cylinders end a few hundredths of a millimetre from
+/// the crescents' tips, so each crescent has one very short projected edge; read as a straight
+/// line, it put a flat side 1e-5 mm off the cylinder under the tool, and SMLib's check refused
+/// the split (profile 1) or the join (profile 0).
+///
+/// Before the join the body has 8 faces, 18 edges and 12 vertices. The join takes the crescent's
+/// face away (one face fewer) and its three edges: its arc of the end circle and the ellipse where
+/// the end plane meets the first cylinder, one of them in two pieces where a seam ends on it.
+/// The tilted cylinder's wall runs on down to the first cylinder and meets it in two ellipse arcs
+/// that cross where the two walls touch, (±15, -75, 0) on the crescent's side: a new vertex
+/// there. One seam, the tilted cylinder's (profile 0) or the first cylinder's (profile 1), now
+/// ends on those arcs and splits one of them: three new edges. So 7 faces, 18 edges, 13 vertices,
+/// one shell.
+///
+/// The sliver's volume is the integral over the crescent of the distance from the end face, along
+/// the tilted axis, to the first cylinder's wall. In the end face's frame (u along x, v square to
+/// it in the face, c = 5 sqrt(3) / 2 the height of the face's centre above the first axis) the
+/// crescent is u^2 + v^2 <= 225 with u^2 + (c + v / 2)^2 >= 225, v from (c - sqrt 75) / 1.5 to
+/// (c + sqrt 75) / 1.5, and the distance is (c + v / 2 - sqrt(225 - u^2)) / (sqrt(3) / 2). The
+/// integral over u is closed form, the one over v by quadrature: 8.3467156 mm³.
+#[test]
+fn join_up_to_a_cylinder_from_a_face_it_cuts_adds_the_sliver_between() {
+    let topology = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Body1").unwrap().body;
+        (state.bodies.len(), b.face_count(), b.edge_count(), b.vertex_count(), b.record().shells.len())
+    };
+    // Whether the body has a vertex where the walls touch on the side x of sign `x`.
+    let touch = |s: &Session, x: f64| {
+        let state = s.model.state();
+        let b = &state.body("Body1").unwrap().body;
+        b.record().vertices.iter().any(|v| [v.point[0] - 15. * x, v.point[1] + 75., v.point[2]].iter().all(|d| d.abs() < 1e-6))
+    };
+    // Profile 0 is the crescent on +x, profile 1 the one on -x.
+    for (profile, x) in [(0, 1.), (1, -1.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 40, "base": [0, -100, 0], "axis": "Y", "operation": "new"}));
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 15, "height": 35, "base": [0, -77.5, 4.330127018922193], "axis": [0, -0.5, 0.8660254037844386], "operation": "join"}),
+        );
+        run(&mut s, "sketch.create", json!({"plane": {"face": [-14.5, -77.5, 4.330127018922193]}, "project_edges": true, "name": "S"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let volume = |s: &Session| s.model.state().body("Body1").and_then(|b| b.body.volume_at(1e-4)).unwrap_or(f64::NAN);
+        let before = volume(&s);
+        assert_eq!(topology(&s), (1, 8, 18, 12, 1), "profile {profile}: before the join");
+        assert!(!touch(&s, 1.) && !touch(&s, -1.), "profile {profile}: no vertex where the walls touch yet");
+        let to = [-14.931150677683434, -78.64377441378278, -0.7504228399786044];
+        let r = s.execute("solid.extrude", &json!({"to": to, "direction": "positive", "operation": "join", "profiles": [profile]}));
+        assert!(r.is_ok() && s.model.results.iter().all(|r| r.error.is_none()), "profile {profile}: {r:?} {:?}", s.model.results);
+        assert_eq!(topology(&s), (1, 7, 18, 13, 1), "profile {profile}: bodies, faces, edges, vertices, shells");
+        assert!(touch(&s, x) && !touch(&s, -x), "profile {profile}: the new vertex is where the walls touch on its side");
+        let (added, want) = (volume(&s) - before, 8.346_715_6);
+        assert!((added - want).abs() < want * 1e-5, "profile {profile}: added {added}, want {want}");
+    }
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {

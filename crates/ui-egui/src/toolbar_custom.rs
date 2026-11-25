@@ -6,12 +6,12 @@
 //! on a hovered drop-down row pins or unpins; the toolbar's own menu (the plus after the tabs,
 //! or right-click its empty space or a tab) shows or hides each tab, and has Customize Toolbar…
 //! (a window listing every command of the tab with a check box) and Reset Toolbar; Reset Toolbar
-//! restores the tab. The buttons are kept with the preferences and exported or imported with the
-//! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
+//! restores the tab. The window also has Reset All Tabs, which asks first and then runs
+//! `view.toolbar_reset_all`. The buttons are kept with the preferences and exported or imported
+//! with the keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 //!
-//! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
-//! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
-//! empty, and so not drawn, until a command is added.
+//! The quick-access command inventory (#10223) is kept here too. The application bar's saved
+//! item list owns their order, zones and visibility. The inventory is empty until a command is added.
 
 use std::collections::BTreeMap;
 
@@ -31,10 +31,36 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
-    /// The quick-access bar's commands, in order (#10223). Empty by default: no bar.
+    /// `"<workspace>/<tab>/<panel>"` → the order of the panel's drop-down, as the user dragged
+    /// it (#5080; only menus the user changed).
+    pub menus: BTreeMap<String, Vec<String>>,
+    /// Pinned commands in enrolment order (#10223); `app_bar` owns their drawing order.
     pub quick_access: Vec<String>,
+    /// One saved list for every movable application-bar control.
+    pub app_bar: ui_kit::app_bar_items::Layout,
+    /// Newer versions' toolbar keys survive importing and saving on this version.
+    pub extra: BTreeMap<String, Value>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
+    /// The application-bar editor is open (not kept).
+    pub app_bar_customizing: bool,
+    /// The window asks whether to reset every tab (#11471; not kept).
+    pub confirm_reset_all: bool,
+}
+
+/// Lists of command ids by panel key, as saved: at most 500 lists of 100 ids.
+fn id_lists(v: &Value) -> BTreeMap<String, Vec<String>> {
+    v.as_object()
+        .map(|o| {
+            o.iter()
+                .take(500)
+                .filter_map(|(k, v)| {
+                    let ids: Vec<String> = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
+                    Some((k.clone(), ids))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Most commands the quick-access bar holds.
@@ -51,37 +77,35 @@ impl ToolbarCustom {
     }
 
     pub fn prefs(&self) -> Value {
-        json!({"version": 3, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access})
+        let mut value = json!({"version": 4, "panels": self.panels, "gallery_buttons": self.gallery_buttons, "quick_access": self.quick_access, "app_bar": self.app_bar.to_value()});
+        // Saved only once a menu was reordered, so other settings stay as they were.
+        if !self.menus.is_empty() {
+            value["menus"] = json!(self.menus);
+        }
+        if let Some(object) = value.as_object_mut() {
+            for (key, value) in &self.extra {
+                object.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        value
     }
     pub fn load(&mut self, v: &Value) {
         let version = v.get("version").and_then(Value::as_u64).unwrap_or(0);
         let current = version >= 2;
-        let panels = if current { v.get("panels").unwrap_or(&Value::Null) } else { v };
-        self.panels = panels
+        self.extra = v
             .as_object()
-            .map(|o| {
-                o.iter()
-                    .take(500)
-                    .filter_map(|(k, v)| {
-                        let ids: Vec<String> = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
-                        Some((k.clone(), ids))
-                    })
-                    .collect()
+            .into_iter()
+            .flatten()
+            .filter(|(key, value)| {
+                !matches!(key.as_str(), "version" | "panels" | "gallery_buttons" | "quick_access" | "app_bar" | "menus")
+                    && (current || !value.is_array())
             })
-            .unwrap_or_default();
-        self.gallery_buttons = v
-            .get("gallery_buttons")
-            .and_then(Value::as_object)
-            .map(|o| {
-                o.iter()
-                    .take(500)
-                    .filter_map(|(k, v)| {
-                        let ids = v.as_array()?.iter().take(100).filter_map(|x| x.as_str().map(str::to_string)).collect();
-                        Some((k.clone(), ids))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let panels = if current { v.get("panels").unwrap_or(&Value::Null) } else { v };
+        self.panels = id_lists(panels);
+        self.gallery_buttons = id_lists(v.get("gallery_buttons").unwrap_or(&Value::Null));
+        self.menus = if current { id_lists(v.get("menus").unwrap_or(&Value::Null)) } else { BTreeMap::new() };
         // Saved ids are kept as they are, each once; one this version lacks is not drawn.
         self.quick_access.clear();
         for id in v.get("quick_access").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).take(100) {
@@ -95,6 +119,19 @@ impl ToolbarCustom {
         if version < 3 {
             self.migrate_render_tabs();
         }
+        let defaults = ui_kit::app_bar_items::Layout::default_for(self.quick_access.iter().map(String::as_str));
+        self.app_bar = v.get("app_bar").map_or_else(|| defaults.clone(), |v| ui_kit::app_bar_items::Layout::from_value(v, &defaults));
+    }
+
+    /// Shared apply path for imports and the future editor. Legacy hide settings are checked
+    /// independently when drawing, so applying or resetting a layout never changes them.
+    pub fn apply_app_bar(&mut self, mut layout: ui_kit::app_bar_items::Layout) {
+        layout.sanitize(&ui_kit::app_bar_items::Layout::default_for(self.quick_access.iter().map(String::as_str)));
+        self.app_bar = layout;
+    }
+
+    pub fn reset_app_bar(&mut self) {
+        self.app_bar = ui_kit::app_bar_items::Layout::default_for(self.quick_access.iter().map(String::as_str));
     }
     /// Split the former six-section Render ribbon without losing personal pins or removals.
     fn migrate_render_tabs(&mut self) {
@@ -205,6 +242,25 @@ fn key(tab: &str, panel: &str) -> String {
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
+    if tab == "DRAWING LAYOUT" && panel == "VIEWS" {
+        let flat_pattern = "drawing.view.flat_pattern";
+        let sheet_metal = crate::workspace::sheet_body(app).is_some();
+        if let Some(ids) = app.toolbar_custom.panels.get(&key(tab, panel)) {
+            return ids
+                .iter()
+                .filter(|id| id.as_str() != "drawing.view.projected.planned" && (id.as_str() != flat_pattern || sheet_metal))
+                .filter_map(|id| solidcraft_engine::find_command(id))
+                .collect();
+        }
+        let mut shown: Vec<_> = cmds.iter().take(promoted).copied().collect();
+        if sheet_metal
+            && let Some(flat) = cmds.iter().find(|command| command.id == flat_pattern)
+            && let Some(break_view) = shown.iter_mut().find(|command| command.id == "drawing.view.break")
+        {
+            *break_view = *flat;
+        }
+        return shown;
+    }
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
         None => cmds.iter().take(promoted).copied().collect(),
@@ -224,14 +280,28 @@ pub fn panel_lists(tab: &str) -> PanelLists {
     lists.entry(tab.to_string()).or_insert_with(|| panel_lists_of(tab)).clone()
 }
 
+/// The Surface layout is selectable without invalidating the other tabs' cached lists.
+pub(crate) fn panel_lists_for(app: &SolveApp, tab: &str) -> PanelLists {
+    if tab == "SURFACE" && app.preferences.legacy_surface_toolbar {
+        static LEGACY: std::sync::LazyLock<PanelLists> = std::sync::LazyLock::new(|| panel_lists_of_layout("SURFACE", true));
+        return LEGACY.clone();
+    }
+    panel_lists(tab)
+}
+
 /// [`panel_lists`] worked out from the registry.
 fn panel_lists_of(tab: &str) -> PanelLists {
+    panel_lists_of_layout(tab, false)
+}
+
+fn panel_lists_of_layout(tab: &str, legacy_surface: bool) -> PanelLists {
     let specs = command_specs();
     crate::toolbar::panels(tab)
         .iter()
+        .map(|panel| if legacy_surface && *panel == "MESH" { "CONVERT" } else { *panel })
         .filter_map(|panel| {
-            let (cmds, n) = crate::workspace::layout(tab, panel, &specs)?;
-            (!cmds.is_empty() || *panel == "SELECT").then_some((*panel, cmds, n))
+            let (cmds, n) = crate::workspace::layout_for(tab, panel, &specs, legacy_surface)?;
+            (!cmds.is_empty() || panel == "SELECT").then_some((panel, cmds, n))
         })
         .collect()
 }
@@ -242,7 +312,7 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
     if let Some(v) = app.toolbar_custom.panels.get(&k) {
         return v.clone();
     }
-    let lists = panel_lists(tab);
+    let lists = panel_lists_for(app, tab);
     let ids: Vec<String> =
         lists.iter().find(|(p, ..)| *p == panel).map(|(_, cmds, n)| cmds.iter().take(*n).map(|c| c.id.to_string()).collect()).unwrap_or_default();
     ids
@@ -250,12 +320,12 @@ fn own(app: &mut SolveApp, tab: &str, panel: &str) -> Vec<String> {
 
 /// Where a command is a button on a tab now: its panel.
 pub fn pinned_on(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
-    panel_lists(tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
+    panel_lists_for(app, tab).into_iter().find(|(panel, cmds, n)| buttons(app, tab, panel, cmds, *n).iter().any(|c| c.id == id)).map(|(p, ..)| p)
 }
 
 /// The panel a command belongs to on a tab (its drop-down), or the tab's first panel.
-fn home_panel(tab: &str, id: &str) -> Option<&'static str> {
-    let lists = panel_lists(tab);
+fn home_panel(app: &SolveApp, tab: &str, id: &str) -> Option<&'static str> {
+    let lists = panel_lists_for(app, tab);
     lists.iter().find(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)).or(lists.first()).map(|(p, ..)| *p)
 }
 
@@ -273,7 +343,7 @@ pub fn pin(app: &mut SolveApp, tab: &str, id: &str) -> Result<(), String> {
     if pinned_on(app, tab, id).is_some() || fixed(tab, "", id) {
         return Ok(());
     }
-    let panel = home_panel(tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
+    let panel = home_panel(app, tab, id).ok_or_else(|| format!("the {tab} tab has no panels"))?;
     let mut ids = own(app, tab, panel);
     ids.push(id.to_string());
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
@@ -343,30 +413,106 @@ pub fn quick_add(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Err(solidcraft_ui_text::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
     }
     list.push(spec.id.to_string());
+    let layout = app.toolbar_custom.app_bar.clone();
+    app.toolbar_custom.apply_app_bar(layout);
     Ok(())
 }
 
 /// Take a command off the quick-access bar.
 pub fn quick_remove(app: &mut SolveApp, id: &str) {
     app.toolbar_custom.quick_access.retain(|q| q != id);
+    app.toolbar_custom.app_bar.items.retain(|p| p.id != format!("quick:{id}"));
 }
 
-/// Move a quick-access button before another one (`before`: None puts it at the end).
-pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
-    let list = &mut app.toolbar_custom.quick_access;
-    if !list.iter().any(|q| q == id) || before == Some(id) {
-        return;
-    }
-    list.retain(|q| q != id);
-    let at = before.and_then(|b| list.iter().position(|q| q == b)).unwrap_or(list.len());
-    list.insert(at, id.to_string());
-}
-
-/// Reset Toolbar: a tab's panels back to their defaults.
+/// Reset Toolbar: a tab's panels, and the order of their drop-downs, back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
     app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
     app.toolbar_custom.gallery_buttons.remove(&format!("{WORKSPACE}/{tab}"));
+    app.toolbar_custom.menus.retain(|k, _| !k.starts_with(&prefix));
+}
+
+/// A drop-down's commands (as `workspace::grouped_commands` lists them) in the user's order
+/// (#5080). Within each group, the commands the saved order names take its order among the
+/// places they hold; any other (a command added since) keeps its place. The group's heading
+/// stays on its first command.
+pub fn order_grouped<'a>(
+    app: &SolveApp,
+    tab: &str,
+    panel: &str,
+    grouped: Vec<(Option<&'static str>, &'a CommandSpec)>,
+) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
+    let Some(saved) = app.toolbar_custom.menus.get(&key(tab, panel)) else { return grouped };
+    let groups = crate::workspace::groups(tab, panel);
+    let group_of = |id: &str| groups.iter().position(|g| g.ids.contains(&id));
+    let rank = |id: &str| saved.iter().position(|s| s == id);
+    let mut out = grouped;
+    let mut start = 0;
+    while start < out.len() {
+        let group = out.get(start).map(|(_, c)| group_of(c.id)).unwrap_or_default();
+        let end = (start..out.len()).find(|i| out.get(*i).is_some_and(|(_, c)| group_of(c.id) != group)).unwrap_or(out.len());
+        let heading = out.get(start).and_then(|(h, _)| *h);
+        let Some(run) = out.get_mut(start..end) else { break };
+        let slots: Vec<usize> = (0..run.len()).filter(|i| run.get(*i).is_some_and(|(_, c)| rank(c.id).is_some())).collect();
+        let mut named: Vec<_> = slots.iter().filter_map(|i| run.get(*i).map(|(_, c)| *c)).collect();
+        named.sort_by_key(|c| rank(c.id));
+        for (slot, c) in slots.iter().zip(named) {
+            if let Some(entry) = run.get_mut(*slot) {
+                entry.1 = c;
+            }
+        }
+        for (i, entry) in run.iter_mut().enumerate() {
+            entry.0 = if i == 0 { heading } else { None };
+        }
+        start = end;
+    }
+    out
+}
+
+/// Which group of `panel`'s drop-down command `id` is in (past the last for one in none).
+pub fn group_index(tab: &str, panel: &str, id: &str) -> usize {
+    let groups = crate::workspace::groups(tab, panel);
+    groups.iter().position(|g| g.ids.contains(&id)).unwrap_or(groups.len())
+}
+
+/// Move a command in its panel's drop-down before `before` (None: to the end), within its own
+/// group: a place in another group moves it to the nearest end of its own (#5080).
+/// Whether `id` is one of `panel`'s own commands, which [`move_in_menu`] can reorder. A command
+/// pinned there from another panel is shown in its drop-down but keeps its place (#5080).
+pub fn movable_in_menu(tab: &str, panel: &str, id: &str) -> bool {
+    panel_lists(tab).iter().any(|(p, cmds, _)| *p == panel && cmds.iter().any(|c| c.id == id))
+}
+
+pub fn move_in_menu(app: &mut SolveApp, tab: &str, panel: &str, id: &str, before: Option<&str>) {
+    let lists = panel_lists(tab);
+    let Some((_, cmds, _)) = lists.iter().find(|(p, ..)| *p == panel) else { return };
+    let order: Vec<&str> = order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect();
+    if !order.contains(&id) || before == Some(id) {
+        return;
+    }
+    let groups = crate::workspace::groups(tab, panel);
+    let group_of = |x: &str| groups.iter().position(|g| g.ids.contains(&x)).unwrap_or(groups.len());
+    let own = group_of(id);
+    let mut ids: Vec<&str> = order.into_iter().filter(|x| *x != id).collect();
+    let first = ids.iter().position(|x| group_of(x) == own);
+    let after_last = ids.iter().rposition(|x| group_of(x) == own).map(|i| i + 1);
+    let end_of_group = after_last.or(first).unwrap_or_else(|| ids.iter().position(|x| group_of(x) > own).unwrap_or(ids.len()));
+    let at = match before.and_then(|b| ids.iter().position(|x| *x == b).map(|i| (i, group_of(b)))) {
+        Some((i, g)) if g == own => i,
+        Some((_, g)) if g < own => first.unwrap_or(end_of_group),
+        _ => end_of_group,
+    };
+    ids.insert(at.min(ids.len()), id);
+    app.toolbar_custom.menus.insert(key(tab, panel), ids.into_iter().map(str::to_string).collect());
+}
+
+/// Every tab's buttons back to their defaults (`view.toolbar_reset_all`). Only the Design
+/// workspace has a customisable toolbar, so this is the whole workspace. Hidden tabs stay hidden.
+pub fn reset_all(app: &mut SolveApp) {
+    let prefix = format!("{WORKSPACE}/");
+    app.toolbar_custom.panels.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.gallery_buttons.retain(|k, _| !k.starts_with(&prefix));
+    app.toolbar_custom.menus.retain(|k, _| !k.starts_with(&prefix));
 }
 
 /// The menu of a command (toolbar button, drop-down row, S box row).
@@ -380,13 +526,16 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     } else {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
-    v.push(Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "star").with(json!({ "command": id })));
+    v.push(
+        Item::action("ui.shortcutPin", if fav { "Unpin from Shortcuts" } else { "Pin to Shortcuts" }, "status_pin").with(json!({ "command": id })),
+    );
     // The application bar's quick-access buttons (#10223).
     v.push(if app.toolbar_custom.quick_access.iter().any(|q| q == id) {
         Item::action("ui.quickAccessRemove", "Remove from Quick Access", "close").with(json!({ "command": id }))
     } else {
         Item::action("ui.quickAccessAdd", "Add to Quick Access", "plus").with(json!({ "command": id }))
     });
+    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "settings").with(json!({ "command": id })));
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
@@ -443,13 +592,16 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
             }
         }
         "ui.quickAccessRemove" => quick_remove(app, id),
+        "ui.appBarReset" => app.toolbar_custom.reset_app_bar(),
+        "ui.shortcutKey" => crate::keymap::open_for(app, id),
         _ => {}
     }
 }
 
 /// Shortcut keys, S box favourites, toolbar and navigation bar as one file (Keyboard Shortcuts › Export).
 pub fn export(app: &SolveApp) -> Value {
-    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(), "navigation_bar": app.preferences.navigation_bar })
+    json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs(),
+        "navigation_bar": app.preferences.navigation_bar, "preview_reselect_modifier": app.preferences.preview_reselect_modifier })
 }
 
 /// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
@@ -466,8 +618,16 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
             serde_json::from_value::<crate::navigation_bar::NavigationBar>(value.clone()).map_err(|e| e.to_string())
         })
         .transpose()?;
+    let preview_modifier = v
+        .get("preview_reselect_modifier")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| format!("preview modifier: {error}"))?;
     if let Some(bar) = navigation_bar {
         app.preferences.navigation_bar = bar;
+    }
+    if let Some(binding) = preview_modifier {
+        app.preferences.preview_reselect_modifier = binding;
     }
     if let Some(s) = v.get("shortcuts") {
         app.keymap.load(s);
@@ -495,6 +655,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     let tab = app.ui.tab.clone();
     let mut changes: Vec<(&'static str, bool)> = Vec::new();
     let mut reset_tab = false;
+    let mut ask_all = false;
     let t = solidcraft_theme::Tokens::get();
     // This long card grows as sections open. A top-left pivot keeps its controls at their
     // published positions instead of shifting them after egui measures the taller content.
@@ -504,40 +665,49 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", solidcraft_ui_text::tr_label("Customize Toolbar"))
             .placed(egui::Align2::LEFT_TOP, origin)
             .cards(2.0)
-            .actions("", "Close", None)
-            .show(ctx, true, |ui| {
-                ui_kit::text(
-                    ui,
-                    &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
-                    ui_kit::Text::Note("customize"),
-                );
-                egui::ScrollArea::vertical()
-                    .max_height(
-                        (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
-                            .min(solidcraft_theme::Tokens::get().control_height * 20.0),
-                    )
-                    .show(ui, |ui| {
-                        for (panel, cmds, n) in panel_lists(&tab) {
-                            if cmds.is_empty() {
-                                continue;
-                            }
-                            ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
-                                let shown = buttons(app, &tab, panel, &cmds, n);
-                                for c in &cmds {
-                                    let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
-                                    crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
-                                    if r.changed() {
-                                        changes.push((c.id, on));
-                                    }
+            .actions("", "ui.close", None)
+            .show_with_left(
+                ctx,
+                true,
+                |ui| {
+                    ui_kit::text(
+                        ui,
+                        &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
+                        ui_kit::Text::Note("customize"),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(
+                            (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
+                                .min(solidcraft_theme::Tokens::get().control_height * 20.0),
+                        )
+                        .show(ui, |ui| {
+                            for (panel, cmds, n) in panel_lists_for(app, &tab) {
+                                if cmds.is_empty() {
+                                    continue;
                                 }
-                            });
-                        }
-                    });
-                let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("customize:reset", reset.rect);
-                reset_tab |= reset.clicked();
-            });
+                                ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
+                                    let shown = buttons(app, &tab, panel, &cmds, n);
+                                    for c in &cmds {
+                                        let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
+                                        let r = ui_kit::checkbox_icon(ui, app.tr_command(c.id, c.label), row_icon(app, c), &mut on);
+                                        crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                        if r.changed() {
+                                            changes.push((c.id, on));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                },
+                |ui| {
+                    let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset", reset.rect);
+                    reset_tab |= reset.clicked();
+                    let reset_all = ui_kit::button(ui, app.tr("toolbar.reset_all_tabs"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("customize:reset_all", reset_all.rect);
+                    ask_all |= reset_all.clicked();
+                },
+            );
     for (id, on) in changes {
         if on {
             if let Err(e) = pin(app, &tab, id) {
@@ -550,7 +720,37 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if reset_tab {
         reset(app, &tab);
     }
+    app.toolbar_custom.confirm_reset_all |= ask_all;
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+    if !app.toolbar_custom.customizing {
+        app.toolbar_custom.confirm_reset_all = false;
+    }
+    confirm_reset_all(app, ctx);
+}
+
+/// Asks before Reset All Tabs; Reset runs `view.toolbar_reset_all`, Cancel keeps every button.
+fn confirm_reset_all(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.toolbar_custom.confirm_reset_all {
+        return;
+    }
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_toolbar_reset_confirm"), "restore", solidcraft_ui_text::tr_label("Reset Toolbar"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(app.tr("toolbar.reset"), "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, app.tr("toolbar.reset_all_tabs_confirm"), ui_kit::Text::Report("reset", false));
+            });
+    match action {
+        ui_kit::Action::Ok => {
+            app.toolbar_custom.confirm_reset_all = false;
+            if let Err(e) = app.run("view.toolbar_reset_all", json!({})) {
+                app.set_status(e, true);
+            }
+        }
+        ui_kit::Action::Cancel => app.toolbar_custom.confirm_reset_all = false,
+        _ if closed => app.toolbar_custom.confirm_reset_all = false,
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -580,6 +780,91 @@ mod row_icon_tests {
 #[cfg(test)]
 mod migration_tests {
     use super::*;
+
+    #[test]
+    fn app_bar_context_menu_rows_edit_the_saved_list() {
+        use crate::context_menu::{Target, items, run_item};
+        use ui_kit::app_bar_items::Zone;
+        let mut h = crate::scenario::Harness::new();
+        let target = Target::AppBar { id: Some("save".into()) };
+        let rows = items(&h.app, &target);
+        assert_eq!(rows.iter().filter(|r| !r.is_sep()).count(), 6);
+        for (action, zone) in [("end", Zone::End), ("start", Zone::Start)] {
+            let row = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some(action)).unwrap();
+            run_item(&mut h.app, row, egui::Pos2::ZERO);
+            assert_eq!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().zone, zone);
+        }
+        let hide = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some("hide")).unwrap();
+        run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
+        for id in ["logo", "tabs", "more", "captions", "managed", "offered"] {
+            let rows = items(&h.app, &Target::AppBar { id: Some(id.into()) });
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "ui.appBarCustomize");
+        }
+        let empty = items(&h.app, &Target::AppBar { id: None });
+        let file_rows = items(&h.app, &Target::AppBar { id: Some("file".into()) });
+        assert!(!file_rows[0].enabled, "File can move but Hide is disabled");
+        run_item(&mut h.app, &file_rows[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "file").unwrap().shown);
+        assert_eq!(empty.len(), 2);
+        run_item(&mut h.app, empty.iter().find(|r| r.id == "ui.appBarReset").unwrap(), egui::Pos2::ZERO);
+        assert_eq!(h.app.toolbar_custom.app_bar, ui_kit::app_bar_items::Layout::default());
+        run_item(&mut h.app, &empty[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+    }
+
+    #[test]
+    fn app_bar_migrates_old_quick_access_and_preserves_future_toolbar_keys() {
+        let mut legacy = ToolbarCustom::default();
+        legacy.load(&json!({"DESIGN/future/panel":["future.command"],"future_setting":{"keep":true}}));
+        assert_eq!(legacy.prefs()["future_setting"], json!({"keep":true}));
+        for quick in [json!([]), json!(["solid.box", "future.command", "solid.box"])] {
+            let mut custom = ToolbarCustom::default();
+            custom.load(&json!({"version":3,"quick_access":quick,"future_setting":{"keep":true},"panels":{"OTHER/future/panel":["future.command"]}}));
+            assert_eq!(custom.app_bar, ui_kit::app_bar_items::Layout::default_for(custom.quick_access.iter().map(String::as_str)));
+            let value = custom.prefs();
+            assert_eq!(value["version"], 4);
+            assert_eq!(value["future_setting"], json!({"keep":true}));
+            let mut loaded = ToolbarCustom::default();
+            loaded.load(&value);
+            assert_eq!(custom, loaded);
+        }
+    }
+
+    #[test]
+    fn app_bar_apply_export_import_and_reset_share_the_saved_list() {
+        let mut h = crate::scenario::Harness::new();
+        quick_add(&mut h.app, "solid.box").unwrap();
+        let mut layout = h.app.toolbar_custom.app_bar.clone();
+        layout.items.reverse();
+        layout.items[0].shown = false;
+        layout.items.push(ui_kit::app_bar_items::Placement { id: "future:item".into(), zone: ui_kit::app_bar_items::Zone::End, shown: false });
+        h.app.toolbar_custom.apply_app_bar(layout.clone());
+        let exported = export(&h.app);
+        h.app.toolbar_custom.reset_app_bar();
+        import(&mut h.app, &exported).unwrap();
+        assert_eq!(h.app.toolbar_custom.app_bar, layout);
+        run(&mut h.app, "ui.appBarReset", &json!({}));
+        assert_eq!(h.app.toolbar_custom.app_bar, ui_kit::app_bar_items::Layout::default_for(["solid.box"]));
+        assert_eq!(h.app.toolbar_custom.quick_access, ["solid.box"]);
+        assert!(h.app.dialog.is_none());
+    }
+
+    #[test]
+    fn quick_access_add_remove_and_reorder_keep_placements_in_step() {
+        let mut h = crate::scenario::Harness::new();
+        quick_add(&mut h.app, "solid.box").unwrap();
+        quick_add(&mut h.app, "solid.fillet").unwrap();
+        quick_add(&mut h.app, "solid.box").unwrap();
+        let defaults = ui_kit::app_bar_items::Layout::default_for(h.app.toolbar_custom.quick_access.iter().map(String::as_str));
+        h.app.toolbar_custom.app_bar.move_before("quick:solid.fillet", ui_kit::app_bar_items::Zone::Start, Some("quick:solid.box"), &defaults);
+        let quick: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter_map(|p| p.id.strip_prefix("quick:")).collect();
+        assert_eq!(quick, ["solid.fillet", "solid.box"]);
+        quick_remove(&mut h.app, "solid.fillet");
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().any(|p| p.id == "quick:solid.fillet"));
+        assert_eq!(h.app.toolbar_custom.quick_access, ["solid.box"]);
+    }
 
     /// Each tab's panel lists are worked out once and come back the same as worked out anew,
     /// for every tab the ribbon has (and an unknown one).
@@ -628,5 +913,188 @@ mod migration_tests {
         assert!(!custom.panels["DESIGN/MODEL/CREATE"].contains(&"solid.extrude".into()));
         assert!(!custom.panels["DESIGN/MANAGE/RULES"].contains(&"plastic.manage_rules".into()));
         assert_eq!(custom.panels["DESIGN/SKETCH/CONSTRAIN"], vec!["sketch.dimension"]);
+    }
+}
+
+#[cfg(test)]
+mod menu_order_tests {
+    use super::*;
+
+    /// A tab panel's drop-down ids as the menu shows them.
+    fn menu(app: &SolveApp, tab: &str, panel: &str) -> Vec<&'static str> {
+        let lists = panel_lists(tab);
+        let cmds = &lists.iter().find(|(p, ..)| *p == panel).unwrap().1;
+        order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect()
+    }
+
+    /// #5080: a command moves before another one of its menu; the order is saved with the
+    /// toolbar (only once a menu changed), comes back on load and goes with Reset Toolbar.
+    #[test]
+    fn a_menu_command_moves_and_the_order_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        let before = menu(&h.app, "MODEL", "CREATE");
+        assert!(!h.app.toolbar_custom.prefs().as_object().unwrap().contains_key("menus"), "nothing saved while no menu changed");
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.sphere", Some("solid.extrude"));
+        let after = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(after.first(), Some(&"solid.sphere"));
+        assert_eq!(after.len(), before.len());
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.extrude", None);
+        assert_eq!(menu(&h.app, "MODEL", "CREATE").last(), Some(&"solid.extrude"), "None: to the end");
+        let mut reloaded = ToolbarCustom::default();
+        reloaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(reloaded, h.app.toolbar_custom);
+        reset(&mut h.app, "MODEL");
+        assert_eq!(menu(&h.app, "MODEL", "CREATE"), before, "Reset Toolbar restores the order");
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.sphere", Some("solid.extrude"));
+        reset_all(&mut h.app);
+        assert_eq!(menu(&h.app, "MODEL", "CREATE"), before, "Reset All Tabs restores the order");
+    }
+
+    /// In a menu with group headings (MODEL MODIFY), a command stays in its group: a place in
+    /// a later group puts it at its group's end, an earlier one at its start; headings stay on
+    /// each group's first command.
+    #[test]
+    fn a_menu_command_stays_in_its_group() {
+        let mut h = crate::scenario::Harness::new();
+        move_in_menu(&mut h.app, "MODEL", "MODIFY", "solid.fillet", Some("solid.shell"));
+        let ids = menu(&h.app, "MODEL", "MODIFY");
+        assert_eq!(ids.get(..2), Some(&["solid.chamfer", "solid.fillet"][..]), "{ids:?}");
+        move_in_menu(&mut h.app, "MODEL", "MODIFY", "solid.scale", Some("solid.chamfer"));
+        let ids = menu(&h.app, "MODEL", "MODIFY");
+        let shell = ids.iter().position(|id| *id == "solid.shell").unwrap();
+        assert_eq!(ids.get(shell - 1), Some(&"solid.scale"), "to the start of its own group: {ids:?}");
+        let lists = panel_lists("MODEL");
+        let cmds = &lists.iter().find(|(p, ..)| *p == "MODIFY").unwrap().1;
+        let grouped = order_grouped(&h.app, "MODEL", "MODIFY", crate::workspace::grouped_commands("MODEL", "MODIFY", cmds));
+        let headings: Vec<_> = grouped.iter().filter_map(|(h, c)| h.map(|h| (h, c.id))).collect();
+        assert_eq!(headings.first(), Some(&("Edges", "solid.chamfer")));
+        assert!(headings.contains(&("Bodies", "solid.scale")), "{headings:?}");
+    }
+
+    /// A command the saved order doesn't name (added in a later version) keeps its built-in
+    /// place; an unknown saved id is ignored.
+    #[test]
+    fn a_command_the_saved_order_lacks_keeps_its_place() {
+        let mut h = crate::scenario::Harness::new();
+        let built_in = menu(&h.app, "MODEL", "CREATE");
+        let mut saved: Vec<String> = built_in.iter().filter(|id| **id != "solid.loft").rev().map(|id| id.to_string()).collect();
+        saved.push("no.such.command".into());
+        h.app.toolbar_custom.menus.insert(key("MODEL", "CREATE"), saved);
+        let ids = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(ids.iter().position(|id| *id == "solid.loft"), built_in.iter().position(|id| *id == "solid.loft"));
+        assert_eq!(ids.len(), built_in.len());
+    }
+}
+
+#[cfg(test)]
+mod reset_tests {
+    use super::*;
+    use crate::scenario::{Harness, handle_at, rect_of};
+
+    /// A real click at `at`, then frames for the window to answer it.
+    fn click(h: &mut Harness, at: egui::Pos2) {
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+    }
+
+    /// The customised panels, as `"<workspace>/<tab>/<panel>"` keys.
+    fn design_keys(h: &Harness) -> Vec<String> {
+        h.app.toolbar_custom.panels.keys().cloned().collect()
+    }
+
+    /// Customised buttons on the Model tab and on the Inspect tab.
+    fn customised() -> Harness {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1800, "height": 1000}));
+        h.app.ui.tab = "MODEL".into();
+        pin(&mut h.app, "MODEL", "solid.sweep").unwrap();
+        h.app.toolbar_custom.panels.insert(format!("{WORKSPACE}/INSPECT/MEASURE"), vec![]);
+        assert!(design_keys(&h).iter().any(|k| k.starts_with("DESIGN/MODEL/")), "{:?}", design_keys(&h));
+        h
+    }
+
+    #[test]
+    fn reset_buttons_share_the_footer_with_close_at_both_window_sizes() {
+        for (width, height) in [(1280, 720), (1920, 1080)] {
+            let mut h = Harness::new();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            h.app.toolbar_custom.customizing = true;
+            h.frames(3);
+
+            let reset = rect_of("customize:reset").unwrap();
+            let reset_all = rect_of("customize:reset_all").unwrap();
+            let close = rect_of("dialog:cancel").unwrap();
+            let footer = rect_of("dialog:footer").unwrap();
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+
+            assert!(viewport.contains_rect(footer), "{width}×{height}: {footer:?}");
+            assert!([reset, reset_all, close].into_iter().all(|button| footer.contains_rect(button)));
+            assert!(reset.right() < reset_all.left() && reset_all.right() < close.left());
+            assert!((reset.center().y - close.center().y).abs() <= 1.0);
+            assert!((reset_all.center().y - close.center().y).abs() <= 1.0);
+
+            click(&mut h, close.center());
+            assert!(!h.app.toolbar_custom.customizing);
+        }
+    }
+
+    /// Reset Toolbar still resets this tab at once (#11471 keeps it); Reset All Tabs asks first,
+    /// Cancel keeps every button and the window, and Reset puts every tab back.
+    #[test]
+    fn reset_toolbar_resets_this_tab_and_reset_all_tabs_asks_first() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "nothing is reset before the answer");
+        click(&mut h, handle_at("dialog:Cancel").unwrap());
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert_eq!(design_keys(&h), customized, "Cancel keeps every button");
+        assert!(h.app.toolbar_custom.customizing, "Cancel answers the question, not the window");
+
+        click(&mut h, rect_of("customize:reset").unwrap().center());
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "Reset Toolbar asks nothing");
+        assert_eq!(design_keys(&h), vec![format!("{WORKSPACE}/INSPECT/MEASURE")], "only the Model tab is reset");
+
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        click(&mut h, handle_at("dialog:Reset").unwrap());
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+    }
+
+    /// Escape while Reset All Tabs asks answers the question without resetting, and reopening the
+    /// window shows no leftover question.
+    #[test]
+    fn escape_drops_the_reset_all_question() {
+        let mut h = customised();
+        let customized = design_keys(&h);
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        click(&mut h, rect_of("customize:reset_all").unwrap().center());
+        assert!(h.app.toolbar_custom.confirm_reset_all);
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(2);
+        assert!(!h.app.toolbar_custom.confirm_reset_all, "the question is gone");
+        assert_eq!(design_keys(&h), customized, "nothing is reset");
+        h.app.toolbar_custom.customizing = true;
+        h.frames(3);
+        assert!(!h.app.toolbar_custom.confirm_reset_all);
+        assert!(handle_at("dialog:Reset").is_none(), "no leftover question when the window opens again");
+    }
+
+    /// Agents and scripts reach Reset All Tabs as a command through `engine.execute`, with no
+    /// dialog; command search does not offer it to people, who use the window's button.
+    #[test]
+    fn engine_execute_resets_every_tab_without_a_dialog() {
+        let mut h = customised();
+        let reply = h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {}}));
+        assert_eq!(reply["result"], json!({}), "{reply}");
+        assert!(design_keys(&h).is_empty(), "every tab is reset");
+        assert!(!h.app.toolbar_custom.confirm_reset_all && !h.app.toolbar_custom.customizing, "nothing asks or opens");
+        assert!(h.call("engine.execute", json!({"command": "view.toolbar_reset_all", "params": {"tab": "MODEL"}}))["error"].is_string());
+        assert!(crate::workspace::AGENT_ONLY.contains(&"view.toolbar_reset_all"));
     }
 }

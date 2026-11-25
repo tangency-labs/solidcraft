@@ -103,6 +103,7 @@ fn current(source: &Session, session: &Session) -> bool {
         && Arc::ptr_eq(&source.model.state(), &session.model.state())
         && !session.model.is_stale()
         && source.active_sketch == session.active_sketch
+        && source.sketching_view == session.sketching_view
         && source.feature_edit_sketch == session.feature_edit_sketch
         && source.active_component == session.active_component
         && source.active_occurrence_path == session.active_occurrence_path

@@ -12,7 +12,7 @@ use solidcraft_theme::Tokens;
 /// What the current canvas lets the camera do: a flat sheet page or a finished render cannot
 /// orbit or pick, the Render workspace has its own caps, and the model has the full set.
 pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
-    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
+    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) || crate::drawing_workspace::active(app) {
         NavCaps { orbit: false, pick: false }
     } else if crate::render_workspace::active(app) {
         NavCaps::RENDER
@@ -21,23 +21,54 @@ pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
     }
 }
 
+const SHEET_ZOOM: &str = "sheet_zoom";
+const SELECTION_MODE: &str = "selection_mode";
+
+/// The page picks by a rule of its own, not the selection mode: an open sketch picks its own
+/// geometry, and Render picks through its own filter.
+fn own_pick(app: &SolveApp) -> bool {
+    app.session.active_sketch.is_some() || crate::render_workspace::active(app)
+}
+
+/// Whether the bar shows `slot` on a page with `caps`: the selection mode only where a click
+/// picks by it (not where the page picks by a rule of its own, `own_pick`).
+pub(crate) fn shows(slot: &Slot, caps: NavCaps, own_pick: bool) -> bool {
+    caps.shows(slot) && !(own_pick && slot.id == SELECTION_MODE)
+}
+
+fn live_preferences(app: &SolveApp) -> std::borrow::Cow<'_, NavigationBar> {
+    let prefs = &app.preferences.navigation_bar;
+    if !crate::drawing_workspace::active(app)
+        || crate::drawing_sheet_page::active_sheet(app).is_none()
+        || prefs.slots.iter().any(|id| id == SHEET_ZOOM)
+    {
+        return std::borrow::Cow::Borrowed(prefs);
+    }
+    let mut prefs = prefs.clone();
+    let position = prefs.slots.iter().position(|id| id == "fit").unwrap_or(prefs.slots.len());
+    prefs.slots.insert(position.min(navigation_bar::MAX_SLOTS - 1), SHEET_ZOOM.into());
+    std::borrow::Cow::Owned(prefs)
+}
+
 pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> BarLayout {
     let t = Tokens::get();
+    let prefs = live_preferences(app);
+    let zoom = format!("{} %", crate::drawing_sheet_page::zoom_percent(app, ctx));
     let label_width = |slot: &Slot| {
-        ctx.fonts_mut(|fonts| {
-            fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
-        })
+        let label = if slot.id == SHEET_ZOOM { &zoom } else { slot_text(app, slot) };
+        ctx.fonts_mut(|fonts| fonts.layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x)
     };
-    let caps = canvas_caps(app);
-    let shown = |slot: &Slot| caps.shows(slot);
-    let mut bar = measure(content, &app.preferences.navigation_bar, shown, label_width);
+    let (caps, own_pick) = (canvas_caps(app), own_pick(app));
+    let has_sheet = crate::drawing_workspace::active(app) && crate::drawing_sheet_page::active_sheet(app).is_some();
+    let shown = |slot: &Slot| shows(slot, caps, own_pick) && (slot.id != SHEET_ZOOM || has_sheet);
+    let mut bar = measure(content, &prefs, shown, label_width);
     let Some(_) = app.universal_panel_frame() else {
         return bar;
     };
     if !bar.rect.is_positive() {
         return bar;
     }
-    let Ok(region) = crate::shell::host_usable(app) else {
+    let Ok(region) = crate::viewport::control_region(app, content) else {
         bar.rect = Rect::NOTHING;
         bar.slots.clear();
         bar.more = Rect::NOTHING;
@@ -63,7 +94,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
             .map(|bounds| (bounds.size.width - 2.0 * t.space_4).max(0.0))
             .max_by(f32::total_cmp)
             .unwrap_or(0.0);
-        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, shown, label_width);
+        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &prefs, shown, label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -73,7 +104,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
         // free piece is tall enough. Validate that measured footprint directly.
         let metrics = ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size);
         let width = metrics.button + 2.0 * (ui_kit::NAV_BORDER + ui_kit::NAV_PADDING + ui_kit::NAV_EDGE);
-        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, shown, label_width);
+        bar = measure(Rect::from_min_size(content.min, vec2(width, content.height())), &prefs, shown, label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -111,13 +142,21 @@ fn selected(app: &SolveApp, id: &str) -> bool {
 
 /// A sketch is always drawn orthographic, so the projection controls stay inert until it ends (#2144).
 fn projection_locked(app: &SolveApp) -> bool {
-    app.session.active_sketch.is_some()
+    crate::sketch_view::active_sketch(app).is_some()
 }
 
 /// #6143 will replace this single compatibility path with a registered command.
 fn toggle_projection(app: &mut SolveApp) {
     if !projection_locked(app) {
-        app.ui.perspective = !app.ui.perspective;
+        set_projection(app, !app.perspective_view());
+    }
+}
+
+fn set_projection(app: &mut SolveApp, perspective: bool) {
+    if !projection_locked(app) {
+        app.ui.auto_ortho_faces = false;
+        app.ui.perspective = perspective;
+        crate::render_workspace::apply_camera_projection(app);
     }
 }
 
@@ -138,12 +177,12 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
     }
 }
 
-/// The slot's hover text: a hidden slot's reason, the current style, the sketch's lock, or its name.
+/// The slot's hover text: a hidden slot's reason, the setting a menu holds, the sketch's lock, or its name.
 fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
     if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
-    } else if slot.id == "visual_style" {
-        solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
+    } else if let Some(value) = current_value(app, slot) {
+        solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", value)])
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key {
@@ -155,8 +194,9 @@ fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
 
 /// Slot `slot`, at `index` of the stored list, as the bar component draws it.
 fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize, rect: Rect, editing: Option<(NavCaps, bool)>) -> SlotView<'static> {
+    // The editor's Render preview picks through Render's own filter, as Render does.
     let hidden = editing
-        .filter(|(caps, _)| !slot.available(caps.orbit, caps.pick))
+        .filter(|(caps, render)| !shows(slot, *caps, *render))
         .map(|(_, render)| if render { "navbar.custom.hidden_render" } else { "navbar.custom.hidden_design" });
     let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     let value = slot.kind == NavigationKind::Menu && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue;
@@ -164,7 +204,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         index,
         id: slot.id,
         kind: slot.kind,
-        icon: slot.current_icon(app.ui.visual_style),
+        icon: slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
         text: slot_text(app, slot).to_owned(),
         name: app.tr(slot.label).to_owned(),
         tip: tip(app, slot, hidden, key.is_some()),
@@ -176,6 +216,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         rect,
         // The View menu's slot, by the name older scenarios use.
         alias: (slot.id == "display").then_some("nav:view"),
+        dot: slot.id == SELECTION_MODE && editing.is_none() && crate::selection_mode::filters_off(app) > 0,
     }
 }
 
@@ -185,6 +226,10 @@ fn slot_views(app: &SolveApp, bar: &BarLayout, editing: Option<(NavCaps, bool)>)
     let mut cursor = 0;
     let mut views = Vec::new();
     for (slot, rect) in &bar.slots {
+        if slot.id == SHEET_ZOOM && editing.is_none() && !app.preferences.navigation_bar.slots.iter().any(|id| id == SHEET_ZOOM) {
+            views.push(slot_view(app, bar, slot, usize::MAX, *rect, editing));
+            continue;
+        }
         let Some((index, _)) = app.preferences.navigation_bar.slots.iter().enumerate().skip(cursor).find(|(_, id)| id.as_str() == slot.id) else {
             continue;
         };
@@ -211,7 +256,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         || app.viewport.modifier_nav.is_some()
         || app.viewport.spin;
     let prefs = &app.preferences.navigation_bar;
-    let bar = Bar {
+    let mut bar = Bar {
         rect: measured.rect,
         size: prefs.size,
         edge: prefs.edge,
@@ -221,7 +266,16 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         overflow: measured
             .overflow
             .iter()
-            .filter_map(|slot| Some(slot_view(app, &measured, slot, prefs.slots.iter().position(|id| id == slot.id)?, Rect::NOTHING, None)))
+            .filter_map(|slot| {
+                Some(slot_view(
+                    app,
+                    &measured,
+                    slot,
+                    prefs.slots.iter().position(|id| id == slot.id).or((slot.id == SHEET_ZOOM).then_some(usize::MAX))?,
+                    Rect::NOTHING,
+                    None,
+                ))
+            })
             .collect(),
         more: measured.more,
         labels: BarLabels {
@@ -232,16 +286,21 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             remove: app.tr("navbar.custom.remove_bar").to_owned(),
         },
     };
-    let action = nav_bar::show(ui, &bar, |id| menu(app, id));
+    let zoom = crate::drawing_sheet_page::zoom_percent(app, ui.ctx());
+    for slot in bar.slots.iter_mut().chain(&mut bar.overflow).filter(|slot| slot.id == SHEET_ZOOM) {
+        slot.text = format!("{zoom} %");
+        slot.name = format!("{} ({zoom} %)", slot.name);
+    }
+    let action = nav_bar::show(ui, &bar, |id| menu(app, id, zoom));
     if let Some(action) = action {
-        run(app, action);
+        run(app, ui.ctx(), action);
         // Rows of a menu that stays open show the new state on the next frame, without new input.
         ui.ctx().request_repaint();
     }
 }
 
 /// Run what the bar returned.
-fn run(app: &mut SolveApp, action: NavAction) {
+fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
     match action {
         NavAction::Slot(id) => {
             if let Some(slot) = navigation_bar::find(&id) {
@@ -264,7 +323,27 @@ fn run(app: &mut SolveApp, action: NavAction) {
         NavAction::Item { menu, item } if menu == "visual_style" => {
             let _ = app.run("view.visual_style", json!({"style":item}));
         }
+        NavAction::Item { menu, item } if menu == SELECTION_MODE => match item.as_str() {
+            "filters_reset" => crate::selection_mode::reset_filters(app),
+            "shape:0" | "shape:1" => app.ui.lasso_select = item == "shape:1",
+            _ => match item.strip_prefix("filter:") {
+                Some(filter) => crate::selection_mode::toggle_filter(app, filter),
+                None => {
+                    let _ = app.run("select.mode", json!({"mode":item}));
+                }
+            },
+        },
+        NavAction::Item { menu, item } if menu == SHEET_ZOOM => match item.as_str() {
+            "actual" => crate::drawing_sheet_page::actual_size(app, ctx),
+            "fit" => crate::drawing_sheet_page::fit(app),
+            _ => {}
+        },
         NavAction::Item { item, .. } => display_pick(app, &item),
+        NavAction::Percent { menu, tenths } => {
+            if menu == SHEET_ZOOM {
+                crate::drawing_sheet_page::set_zoom(app, ctx, f64::from(tenths) / 1000.0);
+            }
+        }
     }
 }
 
@@ -277,11 +356,19 @@ pub(crate) fn current_style(app: &SolveApp) -> &str {
     })
 }
 
+/// The setting a menu slot holds, for its button and tooltip; `None` for slots without one.
+fn current_value<'a>(app: &'a SolveApp, slot: &Slot) -> Option<&'a str> {
+    match slot.id {
+        "visual_style" => Some(current_style(app)),
+        "selection_mode" => Some(app.tr(crate::selection_mode::label_id(app.ui.pick_mode))),
+        _ => None,
+    }
+}
+
 pub(crate) fn slot_text<'a>(app: &'a SolveApp, slot: &Slot) -> &'a str {
-    if slot.id == "visual_style" && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue {
-        current_style(app)
-    } else {
-        app.tr(slot.label)
+    match current_value(app, slot) {
+        Some(value) if app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue => value,
+        _ => app.tr(slot.label),
     }
 }
 
@@ -304,12 +391,72 @@ pub(crate) fn paint_row(
 }
 
 /// The rows of the menu slot `id` opens (none for an unknown one, which closes it).
-fn menu(app: &SolveApp, id: &str) -> Menu {
+fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
     match id {
+        SHEET_ZOOM => Menu {
+            entries: vec![
+                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: app.tr("ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
+                MenuEntry::Row(MenuRow::new("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
+                MenuEntry::Row(MenuRow::new("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit")),
+            ],
+            close_on_pick: true,
+        },
+        SELECTION_MODE => selection_menu(app),
         "visual_style" => style_menu(app),
         "display" => display_menu(app),
         _ => Menu::default(),
     }
+}
+
+/// "What a click picks": the five modes that pick from the model, then sketch geometry. A pick
+/// runs `select.mode` and closes the menu.
+fn selection_menu(app: &SolveApp) -> Menu {
+    use solidcraft_engine::PickMode;
+    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.selection.heading").to_owned())];
+    for (mode, icon) in crate::navigation_slots::selection_mode_icons() {
+        if mode == PickMode::Sketch {
+            entries.push(MenuEntry::Separator);
+        }
+        let id = crate::selection_mode::id(mode);
+        let mut row = MenuRow::new(&id, app.tr(crate::selection_mode::label_id(mode)), icon, format!("nav:selection:{id}"));
+        row.selected = app.ui.pick_mode == mode;
+        entries.push(MenuEntry::Row(row));
+    }
+    entries.extend([MenuEntry::Separator, MenuEntry::Row(pick_filters_row(app))]);
+    Menu { entries, close_on_pick: true }
+}
+
+/// The detailed pick, one row deep: which kinds of object a click can take, and the drag shape.
+/// Its flyout stays open, as several filters are often changed in one visit.
+fn pick_filters_row(app: &SolveApp) -> MenuRow {
+    let off = crate::selection_mode::filters_off(app);
+    let filter = |id: &str, label: &str, indent: bool| {
+        let mut row = MenuRow::new(format!("filter:{id}"), label, "", format!("nav:filter:{id}"));
+        row.check = Some(!app.ui.pick_off.iter().any(|x| x == id));
+        row.indent = indent;
+        MenuEntry::Row(row)
+    };
+    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.filters_solid").to_owned())];
+    entries.extend(crate::selection_mode::SOLID_FILTERS.iter().map(|(id, label)| filter(id, solidcraft_ui_text::tr_label(label), false)));
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.filters_sketch").to_owned())]);
+    entries.extend(crate::selection_mode::SKETCH_FILTERS.iter().map(|(id, key, indent)| filter(id, app.tr(key), *indent)));
+    entries.extend([
+        MenuEntry::Separator,
+        MenuEntry::Heading(app.tr("navbar.filters_shape").to_owned()),
+        MenuEntry::Segments {
+            id: "shape".into(),
+            options: vec![app.tr("navbar.shape_rectangle").to_owned(), app.tr("navbar.shape_lasso").to_owned()],
+            selected: usize::from(app.ui.lasso_select),
+            targets: vec!["nav:shape:rectangle".into(), "nav:shape:lasso".into()],
+        },
+        MenuEntry::Separator,
+        MenuEntry::Row(MenuRow::new("filters_reset", app.tr("navbar.filters_reset"), "reset", "nav:filter:reset")),
+    ]);
+    let mut row = MenuRow::new("pick_filters", app.tr("navbar.pick_filters"), "filter", "nav:selection:pick_filters");
+    row.detail = (off > 0).then(|| solidcraft_ui_text::format("navbar.filters_off", &[("count", &off.to_string())]));
+    row.submenu = entries;
+    row.keep_open = true;
+    row
 }
 
 /// Visual style: the four styles, then Translucent (later); a pick closes the menu.
@@ -349,7 +496,7 @@ fn display_menu(app: &SolveApp) -> Menu {
     preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
     preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id))
+        .map(|(id, label)| MenuEntry::Row(row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id)))
         .collect();
     entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.show").to_owned())]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
@@ -357,7 +504,7 @@ fn display_menu(app: &SolveApp) -> Menu {
         entries.push(MenuEntry::Row(row(
             slot.id,
             app.tr(slot.label),
-            slot.current_icon(app.ui.visual_style),
+            slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
             &format!("view:{id}"),
             selected(app, slot.id),
         )));
@@ -371,6 +518,14 @@ fn display_menu(app: &SolveApp) -> Menu {
     );
     axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
     entries.push(MenuEntry::Row(axes));
+    // The scale bar in the view's bottom left corner (#375).
+    let mut scale_bar = row("scale_bar", app.tr("view.scale_bar"), "measure", "view:scale_bar_toggle", app.preferences.scale_bar);
+    scale_bar.tip = Some(app.tr("view.scale_bar_help").to_owned());
+    entries.push(MenuEntry::Row(scale_bar));
+    // The Browser tree panel closes from its own host menu, which left no way back (#16058).
+    let mut browser = row("browser_tree", app.tr("cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
+    browser.tip = Some(app.tr("help.view.browser").to_owned());
+    entries.push(MenuEntry::Row(browser));
     entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
@@ -378,7 +533,7 @@ fn display_menu(app: &SolveApp) -> Menu {
             app.tr(key),
             "perspective",
             if perspective { "view:projection" } else { "view:orthographic" },
-            app.ui.perspective == perspective,
+            !app.ui.auto_ortho_faces && app.ui.perspective == perspective,
         );
         item.enabled = !projection_locked(app);
         item.tip = projection_locked(app).then(|| app.tr("nav.perspective.sketch").to_owned());
@@ -409,9 +564,7 @@ fn display_pick(app: &mut SolveApp, item: &str) {
             let _ = app.run("view.graphics_preset", json!({"preset":item}));
         }
         "navbar.orthographic" | "navbar.perspective" => {
-            if app.ui.perspective != (item == "navbar.perspective") {
-                toggle_projection(app);
-            }
+            set_projection(app, item == "navbar.perspective");
         }
         "auto_ortho_faces" => app.ui.auto_ortho_faces = !app.ui.auto_ortho_faces,
         "tool_cursor" => app.ui.tool_cursor = !app.ui.tool_cursor,
@@ -420,6 +573,12 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         }
         "origin_axes_across_view" => {
             let _ = app.run("view.origin_axes_across_view", json!({"enabled": !app.preferences.origin_axes_across_view}));
+        }
+        "scale_bar" => {
+            let _ = app.run("view.scale_bar", json!({"enabled": !app.preferences.scale_bar}));
+        }
+        "browser_tree" => {
+            let _ = app.run("view.browser", json!({}));
         }
         "agent_cursor" => app.ui.agent_cursor.show = !app.ui.agent_cursor.show,
         "agent_chat" => {
@@ -444,7 +603,10 @@ mod tests {
     fn default_slots_and_canvas_availability_preserve_navigation() {
         crate::navigation_slots::install();
         let bar = NavigationBar::default();
-        assert_eq!(bar.slots, ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]);
+        assert_eq!(
+            bar.slots,
+            ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "selection_mode", "visual_style", "display"]
+        );
         let flat = NavCaps { orbit: false, pick: false };
         for caps in [NavCaps::MODEL, NavCaps::RENDER, flat] {
             let shown: Vec<_> = CATALOGUE.iter().filter(|slot| slot.available(caps.orbit, caps.pick)).map(|slot| slot.id).collect();
@@ -454,11 +616,50 @@ mod tests {
             for id in ["pan", "zoom", "fit", "home", "display", "grid", "ground_shadow", "ambient_occlusion"] {
                 assert!(shown.contains(&id), "{caps:?}: {id}");
             }
+            // The selection mode only where a click picks from the model, by no rule of the page's own.
+            let selection = find("selection_mode").unwrap();
+            assert_eq!(shows(selection, caps, false), caps.pick, "{caps:?}");
+            assert!(!shows(selection, caps, true), "{caps:?}: an open sketch or Render");
         }
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         let caps = canvas_caps(&app);
         assert!(find("visual_style").unwrap().available(caps.orbit, caps.pick), "the previous bar kept style available in a sketch");
+        assert!(!shows(find("selection_mode").unwrap(), caps, own_pick(&app)), "a sketch picks its own geometry");
+    }
+
+    /// The bar editor's Render preview dims the selection mode and says why, as Render's own bar
+    /// leaves it out; the model's preview shows it.
+    #[test]
+    fn the_editors_render_preview_dims_the_selection_mode() {
+        crate::navigation_slots::install();
+        let app = crate::SolveApp::new(Default::default(), Default::default());
+        let content = Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 200.0));
+        let bar = measure(content, &app.preferences.navigation_bar, |slot| NavCaps::MODEL.shows(slot), |_| 0.0);
+        for render in [false, true] {
+            let caps = if render { NavCaps::RENDER } else { NavCaps::MODEL };
+            let view = slot_views(&app, &bar, Some((caps, render))).into_iter().find(|view| view.id == "selection_mode").unwrap();
+            assert_eq!(view.hidden, render);
+            assert_eq!(view.tip, if render { app.tr("navbar.custom.hidden_render") } else { "Selection mode · Faces & edges" }, "{render}");
+        }
+    }
+
+    #[test]
+    fn projection_lock_belongs_only_to_the_sketching_view() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let owner = app.session.sketching_view.unwrap();
+        let sketch = app.session.active_sketch;
+        let other = app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+        app.docs.views.activate(owner);
+        assert!(projection_locked(&app));
+        app.viewport.compass_view = Some(other);
+        assert!(!projection_locked(&app), "another view keeps its own projection control");
+        set_projection(&mut app, true);
+        assert!(app.ui.perspective);
+        assert_eq!(app.session.active_sketch, sketch);
+        app.viewport.compass_view = Some(owner);
+        assert!(projection_locked(&app), "the owning card retains sketch projection");
     }
 
     #[test]
@@ -485,19 +686,16 @@ mod tests {
                 let mut opaque = live.clone();
                 opaque.fill = preview.fill;
                 assert_eq!(&opaque, preview, "only the board's opaque editing surface differs");
-            } else if let (egui::Shape::Mesh(live), egui::Shape::Mesh(preview)) = (&live.shape, &preview.shape)
-                && live != preview
-            {
-                let first = live.vertices.first().unwrap().pos;
-                assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == NavigationKind::Menu && rect.contains(first)));
-                let delta = preview.vertices.first().unwrap().pos - first;
+            } else if live.shape != preview.shape {
+                // A menu's artwork and value text (the selection mode shows its value by default).
+                let (from, to) = (live.shape.visual_bounding_rect(), preview.shape.visual_bounding_rect());
+                assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == NavigationKind::Menu && rect.contains(from.center())));
+                let delta = to.min - from.min;
                 assert_eq!(delta.y, 0.0);
                 assert_eq!(delta.x.abs(), crate::ui_kit::NAV_BORDER, "editing menus include their CSS transparent border");
-                let mut shifted = live.as_ref().clone();
-                for vertex in &mut shifted.vertices {
-                    vertex.pos += delta;
-                }
-                assert_eq!(&shifted, preview.as_ref(), "menu padding changes no artwork, colour, UVs or other geometry");
+                let mut shifted = live.shape.clone();
+                shifted.translate(delta);
+                assert_eq!(shifted, preview.shape, "menu padding changes no artwork, text, colour, UVs or other geometry");
             } else {
                 assert_eq!(live, preview, "slot painting is identical in both callers");
             }

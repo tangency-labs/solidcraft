@@ -44,7 +44,7 @@ use super::topology_proto_topology_p1::script::{
     keeps_contract, pool as pk, proto_op as p, proto_op_p2 as q,
 };
 use super::topology_proto_topology_p1::{
-    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, line, opv, pcv, rp, rust,
+    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, opv, pcv, rp, rust,
     script_input, status, CurveIn, Fail, ObjIn, ProtoRun, Rd, Script, H,
 };
 use crate::case::{CaseContext, CaseSource};
@@ -69,6 +69,8 @@ fn res<T>(r: solidcore::Result<T>, status_out: &mut f64, skip: &mut bool) -> Res
             if let Some(o) = Output::unported(&e) {
                 return Err(Fail::Deferred(Box::new(o)));
             }
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
             if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
                 *skip = true;
             } else {
@@ -159,10 +161,14 @@ fn has_dup<T: PartialEq>(v: &[T]) -> bool {
 fn pe_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, pe: ProtoEdgeId) -> Result<bool, Fail> {
     match r.mgr.proto_edge_evaluate_mid(k, &r.pool, pe, false, true) {
         Ok(_) => Ok(true),
-        Err(e) => match Output::unported(&e) {
-            Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => Ok(false),
-        },
+        Err(e) => {
+            if let Some(o) = Output::unported(&e) {
+                return Err(Fail::Deferred(Box::new(o)));
+            }
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
+            Ok(false)
+        }
     }
 }
 
@@ -173,10 +179,14 @@ fn ed_tangent_ok(k: &solidcore::kernel::Kernel, r: &ProtoRun, ed: solidcore::top
     };
     match d.evaluate_mid(k, &r.pool, false, true) {
         Ok(_) => Ok(true),
-        Err(e) => match Output::unported(&e) {
-            Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => Ok(false),
-        },
+        Err(e) => {
+            if let Some(o) = Output::unported(&e) {
+                return Err(Fail::Deferred(Box::new(o)));
+            }
+            #[cfg(test)]
+            super::topology_proto_topology_p1::witness::error(&e);
+            Ok(false)
+        }
     }
 }
 
@@ -590,7 +600,7 @@ pub(super) fn run_op(
                 *skip = true;
                 return Ok(());
             };
-            let _ = res(r.mgr.remove_edge_definition(&r.k, d, flag), st, skip)?;
+            let _ = res(r.mgr.remove_edge_definition(d, flag), st, skip)?;
         }
         q::MGR_UPDATE_EDGES => {
             let Some((w, old, edges, vd)) = update_edges_args(r, rd).filter(|_| !*skip) else {
@@ -1536,14 +1546,25 @@ fn edge_cases() -> Vec<(String, Value)> {
         .collect()
 }
 
-/// The pool of the edge cases at `scale` (see [`edge_cases`]).
+/// The pool of the edge cases at `scale` (see [`edge_cases`]): the unit pool scaled by `s`.
+/// The lines carry `s` as their scale over the unit domain (`Line::bounded` unitises the
+/// direction), so parameter `t` on curves 3 and 4 is at `pt(t)` at every scale (#18001).
 fn edge_objects(s: f64) -> Vec<ObjIn> {
+    let line_x = |p: [f64; 3]| {
+        ObjIn::Curve(CurveIn::Line(super::topology_proto_topology_p1::LineIn {
+            p,
+            v: [1.0, 0.0, 0.0],
+            domain: [0.0, 2.0],
+            scale: s,
+            inside_out: false,
+        }))
+    };
     vec![
         ObjIn::Region,
         ObjIn::Region,
         ObjIn::Loop,
-        ObjIn::Curve(line([0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
-        ObjIn::Curve(line([0.0, 1e-9 * s, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
+        line_x([0.0, 0.0, 0.0]),
+        line_x([0.0, 1e-9 * s, 0.0]),
         ObjIn::Curve(CurveIn::Conic(super::topology_proto_topology_p1::ConicIn {
             center: [0.0, 0.0, 0.0],
             x: [1.0, 0.0, 0.0],
@@ -1615,6 +1636,8 @@ impl UnitDiff for Runner {
 mod tests {
     use std::collections::BTreeMap;
 
+    use solidcore::error::topology::TopologyFailure;
+    use solidcore::error::Reason;
     use solidcore::topology::proto_topology::p2::ProtoBrep;
 
     use super::super::topology_proto_topology_p1::{proto_state_before, rust_run, SKIP};
@@ -1744,6 +1767,65 @@ mod tests {
         }
     }
 
+    /// The huge and tiny edge cases are scaled copies of the unit case (#18001): every curve
+    /// of their pool puts each parameter the cases use at `s` times the unit curve's point
+    /// there, so a definition at parameter `t` on a line sits at the position `pt(t)` it is
+    /// built with. The bound is a few rounding steps of the coordinate.
+    #[test]
+    fn edge_pool_is_the_unit_pool_scaled() {
+        let k = solidcore::kernel::Kernel::default();
+        for s in [1e4, 1e-4] {
+            for (i, (unit, scaled)) in edge_objects(1.0).iter().zip(&edge_objects(s)).enumerate() {
+                let (ObjIn::Curve(unit), ObjIn::Curve(scaled)) = (unit, scaled) else {
+                    continue;
+                };
+                let (unit, scaled) = (build_curve(unit).unwrap(), build_curve(scaled).unwrap());
+                for t in [0.0, 1e-9, 0.2, 0.5, 1.0, 1.5, 2.0, 10.0, 360.0] {
+                    let u = unit.evaluate_point(&k, t).unwrap();
+                    let c = scaled.evaluate_point(&k, t).unwrap();
+                    for (u, c) in [(u.x, c.x), (u.y, c.y), (u.z, c.z)] {
+                        let want = s * u;
+                        assert!(
+                            (c - want).abs() <= 4.0 * f64::EPSILON * want.abs().max(s),
+                            "s = {s}, curve {i}, t = {t}: {c} where the unit curve scaled gives {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every huge and tiny edge record is its unit record scaled (#18001): each value is the
+    /// unit value (codes, statuses, counts, parameters) or `s` times it (positions,
+    /// tolerances, gaps), compared as the goldens compare floats (`1e-9` relative). With
+    /// unscaled lines, `edge_vertex_defs_huge` classified a definition at 5000.25 where the
+    /// unit case has 0.75.
+    #[test]
+    fn edge_records_are_the_unit_records_scaled() {
+        let cases: BTreeMap<String, Value> = edge_cases().into_iter().collect();
+        let record = |name: &str| -> Vec<f64> {
+            let s: Script = serde_json::from_value(cases[name].clone()).unwrap();
+            let Ok(out) = rust_run(&s) else {
+                panic!("{name} does not run")
+            };
+            out
+        };
+        let near = |a: f64, b: f64| a == b || (a - b).abs() <= 1e-9 * a.abs().max(b.abs());
+        for name in cases.keys() {
+            let Some(base) = name.strip_suffix("_unit") else {
+                continue;
+            };
+            let unit = record(name);
+            for (sc, s) in [("huge", 1e4), ("tiny", 1e-4)] {
+                let scaled = record(&format!("{base}_{sc}"));
+                assert_eq!(unit.len(), scaled.len(), "{base}_{sc}");
+                for (i, (u, c)) in unit.iter().zip(&scaled).enumerate() {
+                    assert!(near(*u, *c) || near(s * u, *c), "{base}_{sc} value {i}: {c}, unit {u}");
+                }
+            }
+        }
+    }
+
     /// The arguments of the `MGR_UPDATE_EDGES` op `op`, decoded by the runner's own
     /// [`update_edges_args`] against the state `r` it starts from.
     fn op_update_edges_args(r: &ProtoRun, op: &[f64]) -> UpdateEdgesArgs {
@@ -1760,12 +1842,15 @@ mod tests {
     /// midpoint, whose vertices are not its ends, and the imprint later finds no vertex for
     /// them (`SM_ERR_NULL_POINTER`).
     ///
-    /// Five rows end at their first `UpdateEdges` op whose definition crosses the split:
+    /// Five rows fail at their first `UpdateEdges` op whose definition crosses the split:
     /// the split's new vertex definition has no position, because these scripts classify
     /// the definition against bare stand-ins (regions and loops without geometry), so
-    /// `CreateVertexDefinition` refuses with [`SolidError::InvalidInput`] where upstream
-    /// would read an uninitialised position. The op is replayed on the state it starts
-    /// from, so the refusal is pinned to that exact call and message.
+    /// neither classification has parameters and `sm_FindPositionFromPCs` fails, its
+    /// status ignored upstream, which then reads an uninitialised position. Since #18927
+    /// that failure is passed on (`SM_ERR`, the run going on), where main refused the
+    /// unset position afterwards in `CreateVertexDefinition` with
+    /// [`SolidError::InvalidInput`] and the record ended. The op is replayed on the state
+    /// it starts from, so the failure is pinned to that exact call and reason.
     #[test]
     fn wr533_update_edges_rows() {
         let ctx = CaseContext {
@@ -1795,13 +1880,13 @@ mod tests {
             let Ok(out) = rust_run(&s) else {
                 panic!("{name}: the script does not run")
             };
-            // the op the record ends at (skipped)
+            // the first op that fails: main's record ended there (the op skipped)
             let (mut at, mut index) = (0, 0);
-            while out[at + 1] != SKIP {
+            while out[at + 1] == 0.0 {
                 at += 3 + out[at + 2] as usize;
                 index += 1;
             }
-            assert_eq!(at + 2, out.len(), "{name}: the record ends at the skipped op");
+            assert_eq!(out[at + 1], 1001.0, "{name}: the op fails with SM_ERR");
             assert_eq!(ops[index][0] as i64, q::MGR_UPDATE_EDGES, "{name}");
             let Ok(Some(mut r)) = proto_state_before(&s, index) else {
                 panic!("no state before op {index}")
@@ -1840,11 +1925,11 @@ mod tests {
                 .mgr
                 .update_edges(&r.k, &mut r.pool, w, old, &edges, vd)
                 .unwrap_err();
-            assert!(
-                matches!(e, SolidError::InvalidInput { .. })
-                    && e.to_string().contains("position and gap are uninitialised"),
-                "{name}: {e}"
-            );
+            let SolidError::Failed(f) = &e else {
+                panic!("{name}: {e}")
+            };
+            assert_eq!(f.operation, "topology::proto_topology::p1::find_position_from_pcs", "{name}: {e}");
+            assert_eq!(f.reason, Reason::Topology(TopologyFailure::ClassificationParametersUnset), "{name}: {e}");
         }
     }
 }

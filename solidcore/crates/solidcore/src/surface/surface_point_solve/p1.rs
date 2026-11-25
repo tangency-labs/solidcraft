@@ -51,8 +51,10 @@
 //!   [`BoundsCheck`], `(bool, SurfParamType)` from the boundary test, the new grid
 //!   point of the stride check. Upstream's in/out best indices of
 //!   `FindPolygonTriangleGuess` (kept when no net point qualifies) are passed in.
-//!   The constructor keeps the unused `cpdOptTargetDistance` and
-//!   `eSolutionRequested` (`NotUsed` upstream).
+//!   The constructor keeps the target distance (`cpdOptTargetDistance`, `NotUsed`
+//!   upstream, "cbi: do this"): the global solve bounds a minimum by it as the tree
+//!   solve does (#20438; a maximise goes to the tree solve). `eSolutionRequested` stays unused (`NotUsed`
+//!   upstream): the solve finds one candidate (#20438).
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status the outputs
 //!   keep their previous values (initially undefined, [`Vec3::UNDEF`]), and an
 //!   `SmSurfaceEval` accessor reads the values it holds; [`SolidError::Unported`]
@@ -67,10 +69,15 @@
 //!   output first, so the guess is always `0`. The port passes `0` explicitly.
 //! - **Control points.** An index past the control net (upstream reads past the
 //!   array) returns [`SolidError::InvalidInput`].
+//! - **Cell seeds.** [`SurfPtGlobalSolver::with_seed_net`] lets a trimmed blend's
+//!   tight-box search read its cell's control net for guesses (#18809). The
+//!   original surface still answers the objective, local solves and solution seam
+//!   and closure tests.
 //! - Debug-only drawing and `SM_ASSERT`s are compiled out of the release build and
 //!   omitted. `Dump` has no counterpart.
 
 use crate::curve::curve::Curve;
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
@@ -87,6 +94,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::math::CPoint;
 use crate::surface::surface::p2::SurfaceEval;
+use crate::surface::surface::p7::chained;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_CPTS: &str = "surface::surface_point_solve::p1::control_point";
@@ -124,6 +132,8 @@ pub struct SurfacePointSolver<'s> {
     tight_tol: f64,
     /// `m_dLooseTol`.
     loose_tol: f64,
+    /// `cpdOptTargetDistance` (`NotUsed` upstream; bounds the answer, #20438).
+    target_distance: Option<f64>,
 }
 
 impl<'s> SurfacePointSolver<'s> {
@@ -146,7 +156,7 @@ impl<'s> SurfacePointSolver<'s> {
         solver_op: SolverOperation,
         test_point: Point3,
         distance_tolerance: f64,
-        _opt_target_distance: Option<f64>,
+        opt_target_distance: Option<f64>,
         _solution_requested: SolutionRequested,
     ) -> Result<Self> {
         // We need an SmBSplineSurface for some operations.
@@ -162,6 +172,7 @@ impl<'s> SurfacePointSolver<'s> {
             // Tight tolerance: tight, but it should be achievable.
             tight_tol: EFF_ZERO * (1.0 + test_point.max_dimension()),
             loose_tol: distance_tolerance,
+            target_distance: opt_target_distance,
         };
 
         if solver_op == SolverOperation::Signed3dDirectedMaximize {
@@ -232,6 +243,12 @@ impl<'s> SurfacePointSolver<'s> {
     #[must_use]
     pub const fn loose_tol(&self) -> f64 {
         self.loose_tol
+    }
+
+    /// The target distance the answer is bounded by (`cpdOptTargetDistance`).
+    #[must_use]
+    pub const fn target_distance(&self) -> Option<f64> {
+        self.target_distance
     }
 
     /// The direction of the directed operation, zero otherwise (`m_sDirVec`).
@@ -465,6 +482,9 @@ pub struct SurfPtGlobalSolver<'s> {
     closed_in_u: Option<bool>,
     /// `m_bClosedInV` (`None` = `UNSURE`).
     closed_in_v: Option<bool>,
+    /// Not upstream (#20438): the last [`Self::solve`] dropped its answer, a minimum
+    /// beyond the target distance.
+    dropped_beyond_target: bool,
 }
 
 /// The result of [`SurfPtGlobalSolver::find_polygon_triangle_guess`].
@@ -487,6 +507,16 @@ pub struct PolygonTriangleGuess {
 }
 
 impl<'s> SurfPtGlobalSolver<'s> {
+    /// Use `net` only for control-polygon guesses in this solve. Its parameters must
+    /// be the surface's parameters over the solve domain. The objective, derivatives,
+    /// local solves and solution seam and closure tests still use the original
+    /// surface (#18809).
+    #[must_use]
+    pub(crate) fn with_seed_net(mut self, net: &'s BSplineSurface) -> Self {
+        self.base.b_spline = Some(net);
+        self
+    }
+
     /// A global solver (`SmSurfPtGlobalSolver(...)`); the closure is computed on
     /// first use.
     ///
@@ -516,7 +546,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
             )?,
             closed_in_u: None,
             closed_in_v: None,
+            dropped_beyond_target: false,
         })
+    }
+
+    /// Whether the last [`Self::solve`] dropped its answer because it was a minimum
+    /// farther than the target distance by more than the tolerance (#20438). The
+    /// solve's one candidate need not be the nearest point (#20483), so a caller that
+    /// must honour the target asks the tree solve instead
+    /// ([`Surface::global_point_solve_1`]).
+    #[must_use]
+    pub const fn dropped_beyond_target(&self) -> bool {
+        self.dropped_beyond_target
+    }
+
+    /// Records whether the solve dropped a minimum beyond the target distance.
+    pub(super) fn set_dropped_beyond_target(&mut self, dropped: bool) {
+        self.dropped_beyond_target = dropped;
     }
 
     /// Whether the surface is closed over the domain in `which_dir` (`SM_SP_U` or
@@ -617,18 +663,18 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_TRI,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
 
         let (best_idx_u, best_idx_v) = best_idx;
         let mut best_idx_u = best_idx_u;
         let mut best_idx_v = best_idx_v;
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_TRI, "the B-spline surface has no control points")
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_TRI, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
         let mut best_dist = BIG_DOUBLE;
         let mut this_local_u = -1.0;
@@ -759,23 +805,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // This requires an SmBSplineSurface.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LEG,
-                "the surface is not a B-spline surface",
+                SurfaceFailure::SolverSurfaceNotBSpline,
             ));
         };
 
         // Also, this won't help in this case:
         if b.solver_op == SolverOperation::Signed3dDirectedMaximize {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_LEG,
-                "a signed directed maximize gets no leg refinement",
+                SurfaceFailure::UnsupportedSolverOperation,
             ));
         }
 
-        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
-            SolidError::surface_failed(OP_LEG, "the B-spline surface has no control points")
-        })?;
+        let (num_u, num_v, cpts) = bspl
+            .control_points()
+            .map_err(|e| chained(OP_LEG, SurfaceFailure::NoControlPoints, e))?;
         let rational = bspl.is_rational();
 
         let best_pt = control_point(&cpts, num_v, best_idx_u, best_idx_v, rational)?;
@@ -2140,6 +2186,20 @@ mod tests {
         let uv = g.refine_guess_polygon_leg(0, 0).unwrap();
         assert!((uv.x - 0.25).abs() < 1e-12 && (uv.y - 0.5).abs() < 1e-12);
         assert!(g.refine_guess_polygon_leg(5, 0).is_err());
+
+        // A different seed net may change a guess's distance, but never the
+        // objective's surface: the target remains 2 above z = 0, not z = 1.
+        let seed = BSplineSurface::create_bilinear_surface(
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(0.0, 1.0, 1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let g = g.with_seed_net(&seed);
+        let guess = g.find_polygon_triangle_guess((1, 1)).unwrap();
+        assert!((guess.best_dist - 1.0).abs() < 1e-12);
+        assert!((g.calc_func_val(&k, Point2::new(0.25, 0.75)).unwrap() - 2.0).abs() < 1e-12);
     }
 
     #[test]
