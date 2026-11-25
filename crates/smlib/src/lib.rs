@@ -138,6 +138,13 @@ pub enum Error {
     RefusedWithDiagnostic { refusal: solidcore_ops::Error, diagnostic: String },
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
+    /// A classification that needs one nearest point on a face's surface found `found` of them
+    /// (the kernel's `compute_point_parameters`, its `IntersectFailure::NotOneFoot`): the
+    /// point's place on the face is undecided, the operation refuses. Status `SM_ERR`.
+    NotOneFoot {
+        /// How many nearest points the wider solve found.
+        found: usize,
+    },
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
     /// is missing, and the solidcore issue that ports it.
     Unported(&'static str),
@@ -159,6 +166,7 @@ impl std::fmt::Display for Error {
             Error::Argument => write!(f, "invalid argument for SMLib"),
             Error::Empty => write!(f, "SMLib returned an empty body"),
             Error::NotSolid => write!(f, "SMLib's result is not a closed solid"),
+            Error::NotOneFoot { found } => write!(f, "a classification found {found} nearest points on the face's surface, where one is needed"),
             Error::NoMatch { point } => write!(f, "selection point {} is not near any edge or face", point + 1),
             Error::Ambiguous { point } => write!(f, "selection point {} is equally near to two edges or faces", point + 1),
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),

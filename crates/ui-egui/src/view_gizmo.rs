@@ -834,7 +834,7 @@ mod tests {
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.selection.is_empty(), "a right-click on the navigator selects nothing");
+        assert!(!h.app.session.has_selection(), "a right-click on the navigator selects nothing");
     }
 
     /// The navigator's menu sets the camera as it is now as the design's Home view, and Home goes

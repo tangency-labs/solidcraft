@@ -111,6 +111,7 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             let schema = json!({"type":"object","properties":{key:property}});
             let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
             assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input_field(key, &schema["properties"][key], &value[key]).is_ok(), selection, "{key}/{alternative}");
             if selection {
                 assert_eq!(prepare_input(&schema, &value).unwrap(), value);
             }
@@ -119,6 +120,21 @@ fn selection_alternatives_preserve_strict_schema_parity() {
             assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
         }
     }
+}
+
+#[test]
+fn filtered_selection_options_keep_the_enclosing_annotation() {
+    let schema = json!({"type":"object","properties":{
+        "enabled":{"type":"boolean"},
+        "picks":{"x-solidcraft-selection":{"version":1,"accept":["body"]},"oneOf":[{
+            "type":"array","items":{"type":"object"},"x-solidcraft-when":{"field":"enabled","eq":true}
+        }]}
+    }});
+    assert!(check_input(&schema, &json!({"enabled":true,"picks":[{"type":"body","name":"Box"}]})).is_ok());
+    assert!(matches!(
+        check_input(&schema, &json!({"enabled":false,"picks":[{"type":"body","name":"Box"}]})),
+        Err(HostError::InvalidInput { field, .. }) if field == "params.picks"
+    ));
 }
 
 #[test]
@@ -421,6 +437,36 @@ fn hostile_manifest_fields_return_errors() {
     }
     assert!(matches!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample"), Err(HostError::LimitExceeded { .. })));
     assert!(parse_manifest(br#"{}"#, "sample").is_err());
+}
+
+/// A refused entry list says which entry is wrong and why: a bad name (an underscore, which
+/// command ids allow but entry names don't), a repeated name, or too many or no entries.
+#[test]
+fn a_refused_entry_list_names_the_entry_and_the_rule() {
+    let refusal = |entries: Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = entries;
+        match parse(&value) {
+            Err(HostError::InvalidManifest { field, reason }) => (field, reason),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    };
+    let (field, reason) = refusal(json!(["make", "op_add"]));
+    assert_eq!(field, "runtime.entries");
+    assert!(reason.contains("\"op_add\"") && reason.contains("dashes") && reason.contains("no underscores"), "{reason}");
+    let (_, reason) = refusal(json!(["make", "make"]));
+    assert!(reason.contains("\"make\" is declared more than once"), "{reason}");
+    let (_, reason) = refusal(json!([]));
+    assert!(reason.contains("declares 0 entries"), "{reason}");
+    let many: Vec<String> = (0..33).map(|i| format!("e{i}")).collect();
+    let (_, reason) = refusal(json!(many));
+    assert!(reason.contains("declares 33 entries"), "{reason}");
+    // A hostile name is quoted and cut short, never echoed raw.
+    let (_, reason) = refusal(json!([format!("bad\nname{}", "x".repeat(500))]));
+    assert!(reason.contains("\\n") && !reason.contains('\n') && reason.len() < 400, "{reason}");
+    // A cut name says it was cut and how long it is: its first 64 characters may be valid alone.
+    let (_, reason) = refusal(json!([format!("{}_", "a".repeat(64))]));
+    assert!(reason.contains(&format!("\"{}\"… (65 characters)", "a".repeat(64))), "{reason}");
 }
 
 #[test]
@@ -753,6 +799,7 @@ fn panel_wit_preserves_the_reviewed_interfaces() {
         assert!(WIT.contains(signature), "{signature}");
     }
     assert!(WIT.contains("world panel-plugin"));
+    assert!(WIT.contains("world panel-dialog-plugin"));
     assert_eq!(serde_json::to_value(ui::ColorRole::Series1).unwrap(), "series-1");
 }
 
@@ -1356,4 +1403,63 @@ fn schema_composition_does_not_implicitly_close_object_constraints() {
         schema[keyword][0]["additionalProperties"] = json!(false);
         assert!(check_input(&schema, &json!({"a":1})).is_err());
     }
+}
+
+#[test]
+fn updates_name_a_github_repository() {
+    let mut value = manifest();
+    value["updates"] = json!({"github": "maker-1/gear_tools.sc"});
+    assert_eq!(parse(&value).unwrap().updates, Some(Updates { github: "maker-1/gear_tools.sc".into() }));
+    for bad in ["maker", "maker/", "/gears", "-maker/gears", "maker/gears/x", "maker/..", "maker/gears?tab=1", "https://github.com/maker/gears"] {
+        value["updates"] = json!({"github": bad});
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "updates.github"), "{bad}");
+    }
+    value["updates"] = json!({"github": "maker/gears", "url": "https://example.com/feed"});
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    assert!(parse(&manifest()).unwrap().updates.is_none());
+}
+
+#[test]
+fn theme_manifests_are_checked() {
+    let themed =
+        |themes: Value, capabilities: Value| json!({"id":"sample","name":"Sample","version":"1","capabilities":capabilities,"themes":themes});
+    let good = json!([{"id":"solid-glass","source":"solid-glass.json"},{"id":"night","source":"night.json"}]);
+    let plugin = parse(&themed(good.clone(), json!(["themes@0.1"]))).unwrap();
+    assert_eq!(plugin.themes.len(), 2);
+    assert_eq!(plugin.themes.first().map(|theme| theme.source.as_str()), Some("solid-glass.json"));
+
+    assert!(matches!(parse(&themed(good.clone(), json!([]))), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    assert!(matches!(parse(&themed(good.clone(), json!(["themes@0.2"]))), Err(HostError::UnsupportedCapability { .. })));
+    assert!(parse(&themed(json!([{"id":"a","source":"a.json"},{"id":"a","source":"b.json"}]), json!(["themes@0.1"]))).is_err());
+    for source in ["../x.json", "x.wgsl", "Big.json", "dir/x.json", "x.JSON", "-x.json"] {
+        assert!(parse(&themed(json!([{"id":"a","source":source}]), json!(["themes@0.1"]))).is_err(), "{source}");
+    }
+    let many: Vec<Value> = (0..9).map(|i| json!({"id": format!("t{i}"), "source": format!("t{i}.json")})).collect();
+    assert!(parse(&themed(json!(many), json!(["themes@0.1"]))).is_err());
+    assert!(matches!(parse(&themed(json!([]), json!(["themes@0.1"]))), Err(HostError::InvalidManifest { field, .. }) if field == "themes"));
+}
+
+#[test]
+fn theme_files_must_be_theme_json() {
+    let good = br#"{"format":"solidcraft-theme/1","name":"Night","base":"dark"}"#;
+    assert!(theme::check_file("night", good).is_ok());
+    assert!(theme::check_file("night", br#"{"format":"solidcraft-theme/2","name":"Night"}"#).is_err());
+    assert!(theme::check_file("night", br#"{"format":"solidcraft-theme/1"}"#).is_err());
+    assert!(theme::check_file("night", br#"["solidcraft-theme/1"]"#).is_err());
+    assert!(theme::check_file("night", b"not json").is_err());
+    let big = format!(r#"{{"format":"solidcraft-theme/1","name":"N","pad":"{}"}}"#, "x".repeat(theme::MAX_THEME_BYTES));
+    assert!(matches!(theme::check_file("night", big.as_bytes()), Err(HostError::LimitExceeded { .. })));
+}
+
+#[test]
+fn a_manifest_without_themes_reads_and_writes_as_before() {
+    let legacy = manifest();
+    let parsed = parse(&legacy).unwrap();
+    assert!(parsed.themes.is_empty());
+    assert_eq!(parsed.capabilities, ["commands@0.1"]);
+    let written = serde_json::to_value(&parsed).unwrap();
+    assert!(written.get("themes").is_none());
+    assert_eq!(written["capabilities"], json!(["commands@0.1"]));
+    assert_eq!(written["runtime"]["module"], "plugin.wasm");
+    assert!(parse(&json!({"id":"sample","name":"Sample","version":"1","themes":[{"id":"a","source":"a.json"}]})).is_err());
 }
