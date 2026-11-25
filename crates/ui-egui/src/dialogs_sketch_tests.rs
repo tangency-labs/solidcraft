@@ -380,11 +380,12 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
 
 /// Project takes a point of another sketch (#13246): a point on XY, a sketch on a plane above
 /// it, and a click on the point in the Project dialog picks it, where it used to do nothing.
+/// The point sits where the Project panel does not cover it.
 #[test]
 fn project_dialog_takes_a_point_of_another_sketch_13246() {
     let mut h = Harness::new();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-    h.app.run("sketch.point", json!({"point":[30,20],"id":"pt"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[30,-20],"id":"pt"})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let first = h.app.session.doc.features.last().unwrap().id;
     h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap();
@@ -396,7 +397,7 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
     // The sketch's own point is not something Project takes.
     h.step(&json!({"click":{"world":[-30,10,20]}})).unwrap();
     assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
-    h.step(&json!({"click":{"world":[30,20,0]}})).unwrap();
+    h.step(&json!({"click":{"world":[30,-20,0]}})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::ExternalSketchPoint { sketch: first, id: "pt".into() }], "the point is picked");
     let cmds = apply_commands(&h.app, d).unwrap();
@@ -413,7 +414,7 @@ fn project_dialog_takes_a_point_of_another_sketch_13246() {
     let state = h.app.session.world_state().unwrap();
     let sk = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(
-        sk.sketch.points.iter().any(|p| p.id != "origin" && (p.pos.x - 30.0).abs() < 1e-6 && (p.pos.y - 20.0).abs() < 1e-6),
+        sk.sketch.points.iter().any(|p| p.id != "origin" && (p.pos.x - 30.0).abs() < 1e-6 && (p.pos.y + 20.0).abs() < 1e-6),
         "the point is projected"
     );
 }
@@ -1222,7 +1223,10 @@ fn project_dialog_has_construction_option_to_project_as_construction() {
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(
         apply_commands(&h.app, d).unwrap(),
-        vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":true,"construction":true}))]
+        vec![(
+            "sketch.project".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Plate"}],"projection_link":true,"construction":true})
+        )]
     );
 
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
@@ -1291,7 +1295,10 @@ fn intersect_dialog_has_construction_option() {
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(
         apply_commands(&h.app, d).unwrap(),
-        vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":true,"construction":true}))]
+        vec![(
+            "sketch.intersect".into(),
+            json!({"strict_occurrence_references":false,"refs":[{"body":"Post"}],"projection_link":true,"construction":true})
+        )]
     );
 
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
