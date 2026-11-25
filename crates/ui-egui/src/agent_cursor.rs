@@ -507,7 +507,10 @@ pub fn step(app: &mut SolveApp, ctx: &egui::Context) {
 fn command_label(job: &Job) -> String {
     match &job.ahead {
         Some(a) => a.label.clone(),
-        None => job.params.get("command").or(job.params.get("id")).and_then(Value::as_str).unwrap_or(&job.method).chars().take(128).collect(),
+        None => crate::agent_label::name(job.params.get("command").or(job.params.get("id")).and_then(Value::as_str).unwrap_or(&job.method))
+            .chars()
+            .take(128)
+            .collect(),
     }
 }
 

@@ -20,11 +20,20 @@
 //! they miss.)
 
 use egui::{Event, Modifiers, NUM_POINTER_BUTTONS, PointerButton, Pos2};
+use solidcraft_ui_egui::context_menu::BrowserMenu;
 
 /// egui's buttons by their bit in the browser's `buttons` bitmask: bit 0 primary, 1 secondary,
-/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order.
-const BUTTONS: [PointerButton; NUM_POINTER_BUTTONS] =
+/// 2 auxiliary (middle), 3 back, 4 forward. egui numbers its buttons in the same order. The
+/// bitmask has no bit for a further button (6 and up), so eframe's own press and release events
+/// are all egui hears of one.
+const BUTTONS: [PointerButton; 5] =
     [PointerButton::Primary, PointerButton::Secondary, PointerButton::Middle, PointerButton::Extra1, PointerButton::Extra2];
+
+/// The browser's `buttons` bitmask bit for the secondary (right) button.
+const SECONDARY: u16 = 1 << (PointerButton::Secondary as usize);
+
+/// The browser's `buttons` bitmask bit for the primary (left) button.
+const PRIMARY: u16 = 1 << (PointerButton::Primary as usize);
 
 /// What the browser last said about the mouse buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +43,9 @@ pub struct Observed {
     /// The buttons went down on the canvas, so a press egui missed may be added. A drag that
     /// started elsewhere on the page and came over the canvas must not become a press in the app.
     pub on_canvas: bool,
+    /// The pointer was cancelled or the window lost the focus since the last frame: every button
+    /// egui holds is let go, the further ones (6 and up) too, which the bitmask has no bit for.
+    pub lost: bool,
 }
 
 /// What happened to the pointer, as the page's listeners see it.
@@ -50,6 +62,30 @@ pub enum Happened {
     /// focus to another, heard on its way down to that element, and the buttons are held as
     /// they were (#16209).
     Blur { of_window: bool },
+}
+
+/// What the browser did with the last right-click (#20011, #21229).
+///
+/// On macOS and Linux, `contextmenu` arrives during the press before `pointerup`. On Windows,
+/// browsers emit `pointerdown` -> `pointerup` -> `mouseup` -> `contextmenu`, while eframe runs
+/// `logic()` synchronously inside `pointerup`. Assuming `Taken` on `pointerdown` would therefore
+/// block every Windows right-click (and every press-and-hold radial menu). Instead, a right
+/// release without an earlier `contextmenu` enters [`RightMenu::AwaitingContextMenu`] and confirms
+/// after the release turn whether the browser swallowed `contextmenu`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum RightMenu {
+    #[default]
+    Idle,
+    Pressed {
+        id: u64,
+    },
+    Offered {
+        id: u64,
+    },
+    AwaitingContextMenu {
+        id: u64,
+    },
+    Taken,
 }
 
 /// The listeners' state: the latest observation, waiting for the next frame.
@@ -70,6 +106,18 @@ pub struct Tracker {
     /// Touches the browser names a stylus's (`touchType: "stylus"`, an Apple Pencil in Safari),
     /// noted from `touchstart` before eframe turns the touch into egui's, for the next frame.
     stylus: Vec<egui::TouchId>,
+    /// Whether the secondary (right) mouse button is currently held according to pointer events.
+    secondary_down: bool,
+    /// Monotonic identifier for each secondary press, to ignore stale post-release timers.
+    right_click_id: u64,
+    /// State of the current or most recent right-click against `contextmenu` (#20011, #21229).
+    right_menu: RightMenu,
+    /// Pending confirmation timer id created when a secondary press ended without `contextmenu`.
+    pending_menu_check: Option<u64>,
+    /// Shift was held during the current or most recent right-click. Only then may a missing
+    /// `contextmenu` mean the browser took the click (Firefox's Shift+right-click, #20011): a
+    /// plain right-click whose `contextmenu` comes late is still the page's (#21302).
+    right_shift: bool,
 }
 
 /// The most stylus touches waiting for a frame.
@@ -130,18 +178,60 @@ impl Tracker {
             .filter(|pos| pos.distance(at) <= solidcraft_ui_egui::pencil::PEN_RELEASE_SLOP)
     }
 
+    /// Finish an active secondary press when the button is released or the pointer is lost.
+    fn finish_secondary_press(&mut self) {
+        match self.right_menu {
+            RightMenu::Pressed { id } => {
+                self.right_menu = RightMenu::AwaitingContextMenu { id };
+                self.pending_menu_check = Some(id);
+            }
+            RightMenu::Offered { .. } => {
+                self.right_menu = RightMenu::Idle;
+            }
+            RightMenu::Idle | RightMenu::AwaitingContextMenu { .. } | RightMenu::Taken => {}
+        }
+    }
+
     /// Note what happened. Returns true when the held buttons changed, so a frame should run.
     pub fn note(&mut self, happened: Happened) -> bool {
         let before = self.pending.map(|o| o.buttons);
         let buttons = match happened {
             Happened::Pointer { buttons, down_on_canvas } => {
                 self.on_canvas |= down_on_canvas;
+                let secondary = buttons & SECONDARY != 0;
+                let primary = buttons & PRIMARY != 0;
+                if down_on_canvas && primary && !secondary {
+                    // A left press starts over: any earlier browser menu is gone by then, and
+                    // an unconfirmed right-click check is no longer relevant (#20011, #21229).
+                    self.right_menu = RightMenu::Idle;
+                    self.pending_menu_check = None;
+                }
+                if secondary && !self.secondary_down && self.on_canvas {
+                    // A right-click starts on the canvas: keep menus allowed until a post-release
+                    // check confirms the browser swallowed `contextmenu` (#21229).
+                    self.right_click_id = self.right_click_id.wrapping_add(1);
+                    self.right_menu = RightMenu::Pressed { id: self.right_click_id };
+                    self.pending_menu_check = None;
+                    self.right_shift = false;
+                } else if !secondary && self.secondary_down {
+                    self.finish_secondary_press();
+                }
+                self.secondary_down = secondary;
                 buttons
             }
-            Happened::Lost | Happened::Blur { of_window: true } => 0,
+            Happened::Lost | Happened::Blur { of_window: true } => {
+                // `lostpointercapture` arrives right after `pointerup` while awaiting Windows's
+                // `contextmenu`: only finish a press if the secondary button was still down.
+                if self.secondary_down {
+                    self.secondary_down = false;
+                    self.finish_secondary_press();
+                }
+                0
+            }
             Happened::Blur { of_window: false } => return false,
         };
-        let observed = Observed { buttons, on_canvas: self.on_canvas };
+        let lost = matches!(happened, Happened::Lost | Happened::Blur { of_window: true }) || self.pending.is_some_and(|o| o.lost);
+        let observed = Observed { buttons, on_canvas: self.on_canvas, lost };
         if buttons == 0 {
             self.on_canvas = false;
         }
@@ -152,6 +242,65 @@ impl Tracker {
     /// The observation for this frame, once.
     pub fn take(&mut self) -> Option<Observed> {
         self.pending.take()
+    }
+
+    /// What the browser did with the last right-click (#20011, #21229): `Taken` when confirmation
+    /// elapsed without `contextmenu`.
+    pub fn menu(&self) -> BrowserMenu {
+        if self.right_menu == RightMenu::Taken { BrowserMenu::Taken } else { BrowserMenu::Offered }
+    }
+
+    /// Read and consume a confirmed `Taken` state so it is delivered to the UI once (#21229).
+    pub fn take_menu(&mut self) -> BrowserMenu {
+        let menu = self.menu();
+        if self.right_menu == RightMenu::Taken {
+            self.right_menu = RightMenu::Idle;
+        }
+        menu
+    }
+
+    /// The browser offered the page its context menu event: the click is the page's, and the app
+    /// may keep or open its own menu (#20011, #21229).
+    pub fn note_menu(&mut self) {
+        self.pending_menu_check = None;
+        self.right_menu = match self.right_menu {
+            RightMenu::Pressed { id } | RightMenu::Offered { id } => RightMenu::Offered { id },
+            RightMenu::Idle | RightMenu::AwaitingContextMenu { .. } | RightMenu::Taken => RightMenu::Idle,
+        };
+    }
+
+    /// A right-click release that still needs post-release `contextmenu` confirmation, once.
+    pub fn take_pending_menu_check(&mut self) -> Option<u64> {
+        self.pending_menu_check.take()
+    }
+
+    /// Whether the right-click identified by `id` is still awaiting `contextmenu`.
+    pub fn awaiting_menu(&self, id: u64) -> bool {
+        self.right_menu == RightMenu::AwaitingContextMenu { id }
+    }
+
+    /// Note whether Shift is held, from a pointer event of the current right-click (#21302).
+    pub fn note_shift(&mut self, shift: bool) {
+        if matches!(self.right_menu, RightMenu::Pressed { .. } | RightMenu::AwaitingContextMenu { .. }) {
+            self.right_shift |= shift;
+        }
+    }
+
+    /// Mark right-click `id` as taken by the browser if it is still awaiting `contextmenu` and
+    /// was made with Shift held, the click Firefox takes for itself (#20011). Without Shift the
+    /// browser takes no click, so a `contextmenu` that is only late (a slow frame on a large
+    /// design) leaves the click the page's and its menu open (#21302).
+    pub fn confirm_menu_missing(&mut self, id: u64) -> bool {
+        if !self.awaiting_menu(id) {
+            return false;
+        }
+        if self.right_shift {
+            self.right_menu = RightMenu::Taken;
+            true
+        } else {
+            self.right_menu = RightMenu::Idle;
+            false
+        }
     }
 }
 
@@ -172,6 +321,14 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
         }
     }
     let mut out = Vec::new();
+    if observed.lost {
+        // A further button egui holds is let go too: no release of it will come.
+        for button in PointerButton::ALL.into_iter().skip(BUTTONS.len()) {
+            if down[button as usize] {
+                out.push(Event::PointerButton { pos, button, pressed: false, modifiers });
+            }
+        }
+    }
     for (bit, button) in BUTTONS.into_iter().enumerate() {
         let held = observed.buttons & (1 << bit) != 0;
         let pressed = match (down[bit], held) {
@@ -187,7 +344,7 @@ pub fn corrections(down: [bool; NUM_POINTER_BUTTONS], events: &[Event], observed
 #[cfg(target_arch = "wasm32")]
 /// egui's buttons held at the end of the last frame.
 pub fn egui_down(ctx: &egui::Context) -> [bool; NUM_POINTER_BUTTONS] {
-    ctx.input(|i| BUTTONS.map(|b| i.pointer.button_down(b)))
+    ctx.input(|i| PointerButton::ALL.map(|b| i.pointer.button_down(b)))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -226,6 +383,28 @@ mod web {
 
     use super::{Happened, Tracker};
 
+    /// Wait past `pointerup`'s synchronous frame and the immediate `contextmenu` turn, then wait
+    /// `CONTEXTMENU_CONFIRM_MS` before concluding the browser swallowed `contextmenu` (#21229).
+    const CONTEXTMENU_CONFIRM_MS: i32 = 50;
+
+    fn schedule_menu_confirm(window: &web_sys::Window, tracker: Rc<RefCell<Tracker>>, ctx: egui::Context, id: u64) {
+        let confirm_window = window.clone();
+        let on_tick = Closure::once_into_js(move || {
+            let awaiting = tracker.borrow().awaiting_menu(id);
+            if !awaiting {
+                return;
+            }
+            let check = Closure::once_into_js(move || {
+                let missing = tracker.borrow_mut().confirm_menu_missing(id);
+                if missing {
+                    ctx.request_repaint();
+                }
+            });
+            let _ = confirm_window.set_timeout_with_callback_and_timeout_and_arguments_0(check.unchecked_ref(), CONTEXTMENU_CONFIRM_MS);
+        });
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(on_tick.unchecked_ref(), 0);
+    }
+
     /// Listen on the window in the capture phase, so each observation is noted before eframe's
     /// own listeners (on the canvas and the document) run a frame from the same event.
     pub fn install(window: &web_sys::Window, canvas: &web_sys::HtmlCanvasElement, ctx: &egui::Context) -> Rc<RefCell<Tracker>> {
@@ -237,7 +416,7 @@ mod web {
             on.forget();
         };
         for name in ["pointerdown", "pointermove", "pointerup"] {
-            let (tracker, canvas, ctx) = (tracker.clone(), canvas.clone(), ctx.clone());
+            let (tracker, canvas, ctx, win) = (tracker.clone(), canvas.clone(), ctx.clone(), window.clone());
             listen(
                 name,
                 Box::new(move |e: web_sys::Event| {
@@ -265,13 +444,33 @@ mod web {
                         // The release then comes here wherever it happens, even outside the window.
                         let _ = canvas.set_pointer_capture(e.pointer_id());
                     }
-                    let mut tracker = tracker.borrow_mut();
-                    if source == "pen" && web_sys::MouseEvent::button(e) == 0 && name != "pointermove" {
-                        tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, at());
-                    }
-                    if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
+                    let (changed, confirm) = {
+                        let mut tracker = tracker.borrow_mut();
+                        if source == "pen" && web_sys::MouseEvent::button(e) == 0 && name != "pointermove" {
+                            tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, at());
+                        }
+                        let changed = tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas });
+                        tracker.note_shift(e.shift_key());
+                        (changed, tracker.take_pending_menu_check())
+                    };
+                    if changed {
                         ctx.request_repaint();
                     }
+                    if let Some(id) = confirm {
+                        schedule_menu_confirm(&win, tracker.clone(), ctx.clone(), id);
+                    }
+                }),
+            );
+        }
+        // The browser's context menu event: the browser offers the page its menu, and the page may
+        // stop it. Firefox takes a Shift+right-click for itself and never offers it (#20011), so
+        // the app knows the browser's menu is the one that opened.
+        {
+            let tracker = tracker.clone();
+            listen(
+                "contextmenu",
+                Box::new(move |_e: web_sys::Event| {
+                    tracker.borrow_mut().note_menu();
                 }),
             );
         }
@@ -294,12 +493,18 @@ mod web {
             );
         }
         let lost = {
-            let (tracker, ctx) = (tracker.clone(), ctx.clone());
+            let (tracker, ctx, win) = (tracker.clone(), ctx.clone(), window.clone());
             move |id| {
-                let mut tracker = tracker.borrow_mut();
-                tracker.cancel_pen(id);
-                if tracker.note(Happened::Lost) {
+                let (changed, confirm) = {
+                    let mut tracker = tracker.borrow_mut();
+                    tracker.cancel_pen(id);
+                    (tracker.note(Happened::Lost), tracker.take_pending_menu_check())
+                };
+                if changed {
                     ctx.request_repaint();
+                }
+                if let Some(id) = confirm {
+                    schedule_menu_confirm(&win, tracker.clone(), ctx.clone(), id);
                 }
             }
         };
@@ -310,18 +515,24 @@ mod web {
         // `blur` doesn't bubble, but a capture listener on the window hears every element's on
         // its way down, not only the window's own.
         {
-            let (tracker, ctx) = (tracker.clone(), ctx.clone());
+            let (tracker, ctx, win) = (tracker.clone(), ctx.clone(), window.clone());
             listen(
                 "blur",
                 Box::new(move |e: web_sys::Event| {
                     let of_window = e.target().is_some_and(|t| t.dyn_ref::<web_sys::Window>().is_some());
-                    let mut tracker = tracker.borrow_mut();
-                    // A pen tip held while the window loses the focus is never heard lifted.
-                    if of_window {
-                        tracker.cancel_pen(None);
-                    }
-                    if tracker.note(Happened::Blur { of_window }) {
+                    let (changed, confirm) = {
+                        let mut tracker = tracker.borrow_mut();
+                        // A pen tip held while the window loses the focus is never heard lifted.
+                        if of_window {
+                            tracker.cancel_pen(None);
+                        }
+                        (tracker.note(Happened::Blur { of_window }), tracker.take_pending_menu_check())
+                    };
+                    if changed {
                         ctx.request_repaint();
+                    }
+                    if let Some(id) = confirm {
+                        schedule_menu_confirm(&win, tracker.clone(), ctx.clone(), id);
                     }
                 }),
             );
@@ -554,6 +765,22 @@ mod tests {
         assert_eq!(down, NONE);
     }
 
+    /// A further button (6 and up) has no bit in the browser's bitmask: moves that report none
+    /// held leave it held, and a cancelled pointer lets go of it with the rest.
+    #[test]
+    fn a_further_button_is_held_until_released_or_lost() {
+        let mut t = Tracker::default();
+        let (down, fixes) = frame(&mut t, NONE, &[press(PointerButton::Extra3, true)], pointer(0, true));
+        assert!(fixes.is_empty(), "{fixes:?}");
+        assert_eq!(down, held(&[PointerButton::Extra3]));
+        let (down, fixes) = frame(&mut t, down, &[Event::PointerMoved(Pos2::new(30.0, 40.0))], pointer(0, false));
+        assert!(fixes.is_empty(), "a move with no bit for it keeps it held: {fixes:?}");
+        let (down, _) = frame(&mut t, down, &[press(PointerButton::Primary, true)], pointer(0b01, true));
+        let (down, fixes) = frame(&mut t, down, &[], Happened::Lost);
+        assert_eq!(fixes, vec![press(PointerButton::Extra3, false), press(PointerButton::Primary, false)]);
+        assert_eq!(down, NONE);
+    }
+
     /// A drag that started elsewhere on the page and came over the canvas isn't a press in the app.
     #[test]
     fn a_drag_from_outside_the_canvas_presses_nothing() {
@@ -578,7 +805,7 @@ mod tests {
         assert!(fixes.is_empty() && down == NONE, "{fixes:?}");
         assert_eq!(t.take(), None, "an observation is used once");
         let touch_held = held(&[PointerButton::Primary]);
-        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false }, P, Modifiers::NONE).is_empty());
+        assert!(corrections(touch_held, &[], Observed { buttons: 1, on_canvas: false, lost: false }, P, Modifiers::NONE).is_empty());
     }
 
     /// The tracker asks for a frame only when the held buttons change.
@@ -590,5 +817,172 @@ mod tests {
         assert!(t.note(pointer(0b10, true)));
         assert!(!t.note(pointer(0b10, false)));
         assert!(t.note(Happened::Lost));
+    }
+
+    /// #20011, #21229: On Windows, `contextmenu` arrives after `pointerup`, so a right press
+    /// keeps menus allowed until a post-release check confirms the browser swallowed `contextmenu`.
+    #[test]
+    fn a_right_click_the_browser_took_is_reported_as_taken() {
+        let mut t = Tracker::default();
+        assert_eq!(t.menu(), BrowserMenu::Offered, "no click yet: the page may open its menu");
+        t.note(pointer(0b10, true));
+        t.note_shift(true);
+        assert_eq!(t.menu(), BrowserMenu::Offered, "menus stay allowed during press for radial holds and Windows release");
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().expect("release without contextmenu schedules a post-release check");
+        assert_eq!(t.menu(), BrowserMenu::Offered, "still offered at pointerup frame");
+        assert!(t.awaiting_menu(id));
+        assert!(t.confirm_menu_missing(id));
+        assert_eq!(t.take_menu(), BrowserMenu::Taken);
+        assert_eq!(t.take_menu(), BrowserMenu::Offered, "Taken is consumed once");
+    }
+
+    /// A held right-drag stays Offered while moving, and a subsequent right-click starts over.
+    #[test]
+    fn a_move_keeps_the_browser_having_taken_the_click() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note_shift(true);
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        t.note(pointer(0b10, false));
+        assert_eq!(t.menu(), BrowserMenu::Offered, "moving while held keeps menus allowed");
+        assert_eq!(t.take_pending_menu_check(), None);
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().expect("release without contextmenu schedules confirmation");
+        assert!(t.confirm_menu_missing(id));
+        assert_eq!(t.take_menu(), BrowserMenu::Taken);
+        // The next right-click starts fresh.
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// #20011, #21229: a left press on the canvas cancels any pending check and clears `Taken`.
+    #[test]
+    fn a_left_click_starts_over() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().unwrap();
+        assert!(t.awaiting_menu(id));
+        t.note(pointer(0b01, true));
+        assert!(!t.awaiting_menu(id), "a left press cancels pending right-click confirmation");
+        assert!(!t.confirm_menu_missing(id));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+
+        // Even once `Taken` is latched, a left press clears it.
+        t.note(pointer(0, false));
+        t.note(pointer(0b10, true));
+        t.note_shift(true);
+        t.note(pointer(0, false));
+        let id2 = t.take_pending_menu_check().unwrap();
+        assert!(t.confirm_menu_missing(id2));
+        assert_eq!(t.menu(), BrowserMenu::Taken);
+        t.note(pointer(0b01, true));
+        assert_eq!(t.menu(), BrowserMenu::Offered, "the browser's menu is gone by then");
+    }
+
+    /// #21229: Windows fires `pointerdown` -> `pointerup` -> `lostpointercapture` -> `contextmenu`.
+    /// SolidCraft must keep menus allowed at `pointerup`, survive `lostpointercapture`, and cancel
+    /// the pending check once `contextmenu` arrives.
+    #[test]
+    fn windows_right_click_order_keeps_solidcraft_menu_open() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        t.note(pointer(0, false));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        let id = t.take_pending_menu_check().expect("release schedules confirmation");
+        t.note(Happened::Lost);
+        assert!(t.awaiting_menu(id), "lostpointercapture after release must not drop pending check");
+        t.note_menu();
+        assert!(!t.awaiting_menu(id));
+        assert!(!t.confirm_menu_missing(id));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// macOS/Linux fire `contextmenu` during the press before `pointerup`: no timer is scheduled.
+    #[test]
+    fn macos_linux_right_click_order_skips_timer_on_release() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note_menu();
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        t.note(pointer(0, false));
+        assert_eq!(t.take_pending_menu_check(), None);
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// When Windows Firefox suppresses `contextmenu` on Shift+right-click, `lostpointercapture`
+    /// still leaves the pending check active until confirmation marks `Taken` once.
+    #[test]
+    fn missing_contextmenu_after_release_marks_taken_once() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note(pointer(0, false));
+        t.note_shift(true);
+        let id = t.take_pending_menu_check().unwrap();
+        t.note(Happened::Lost);
+        assert!(t.confirm_menu_missing(id));
+        assert_eq!(t.take_menu(), BrowserMenu::Taken);
+        assert_eq!(t.take_menu(), BrowserMenu::Offered);
+    }
+
+    /// #21302: a right-click without Shift is never one the browser took. On a large design a
+    /// slow frame can hold `contextmenu` past the confirmation, and the Browser panel's menu
+    /// then said the browser took the click; the click stays the page's, its menu open.
+    #[test]
+    fn a_late_contextmenu_without_shift_leaves_the_click_the_pages() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note_shift(false);
+        t.note(pointer(0, false));
+        t.note_shift(false);
+        let id = t.take_pending_menu_check().expect("release schedules confirmation");
+        assert!(!t.confirm_menu_missing(id), "no Shift: the browser took nothing");
+        assert_eq!(t.take_menu(), BrowserMenu::Offered);
+        // Shift from an earlier right-click does not carry over to the next one.
+        t.note(pointer(0b10, true));
+        t.note_shift(true);
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().unwrap();
+        assert!(t.confirm_menu_missing(id));
+        assert_eq!(t.take_menu(), BrowserMenu::Taken);
+        t.note(pointer(0b10, true));
+        t.note(pointer(0, false));
+        let id = t.take_pending_menu_check().unwrap();
+        assert!(!t.confirm_menu_missing(id), "this click had no Shift");
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// A stale confirmation id from an earlier right-click cannot mark a newer click as taken.
+    #[test]
+    fn repeated_right_clicks_and_stale_confirmation_id() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        t.note(pointer(0, false));
+        let id1 = t.take_pending_menu_check().unwrap();
+
+        t.note(pointer(0b10, true));
+        assert!(!t.confirm_menu_missing(id1), "stale timer id must not affect click 2");
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+
+        t.note(pointer(0, false));
+        let id2 = t.take_pending_menu_check().unwrap();
+        assert_ne!(id1, id2);
+        t.note_menu();
+        assert!(!t.confirm_menu_missing(id2));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+    }
+
+    /// Holding the right button for radial press-and-hold stays Offered while moving.
+    #[test]
+    fn hold_without_release_keeps_menu_offered_while_moving() {
+        let mut t = Tracker::default();
+        t.note(pointer(0b10, true));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        assert_eq!(t.take_pending_menu_check(), None);
+        t.note(pointer(0b10, false));
+        assert_eq!(t.menu(), BrowserMenu::Offered);
+        assert_eq!(t.take_pending_menu_check(), None);
     }
 }

@@ -31,8 +31,9 @@ pub const FORMAT: &str = "solidcraft-profile/1";
 pub const MAX_PROFILES: usize = 32;
 /// Most bytes read from a profile file.
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
-/// Most bytes in one checked profile document.
-const MAX_PROFILE_BYTES: usize = 1024 * 1024;
+/// Most bytes in one checked profile document: room for the largest view navigator body, whose
+/// lists are plain numbers ([`crate::view_gizmo`]), about 2 MB written out, and the rest.
+pub(crate) const MAX_PROFILE_BYTES: usize = 3 * 1024 * 1024;
 const MAX_SHORTCUTS: usize = 2000;
 const MAX_FAVOURITES: usize = 64;
 /// Most imported themes one profile carries (the one it uses).
@@ -46,13 +47,14 @@ const MAX_ID: usize = 200;
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_eye_left",
+    "browser_scroll_wheel",
     "center_arc_follows_cursor",
     "color_vision",
+    "command_search_centred",
     "design_reopen_views",
     "design_reuse_views",
     "design_sub_tab_render",
     "design_sub_tab_sheets",
-    "design_sub_tab_sketches",
     "design_views_as_tabs",
     "dialog_buttons",
     "direct_interaction",
@@ -70,7 +72,6 @@ const PROFILE_KEYS: &[&str] = &[
     "keep_work_on_tab_switch",
     "language",
     "layout",
-    "library_thumbnail_size",
     "line_drag_draws_one",
     "line_hover_tangent_arc",
     "live_panel_drag_preview",
@@ -83,10 +84,12 @@ const PROFILE_KEYS: &[&str] = &[
     "mouse_gestures",
     "nav",
     "nav_bridge_enabled",
+    "nav_button_map",
     "nav_bridge_port",
     "navigation_bar",
     "navigator_fit",
     "navigator_style",
+    "navigator_turn_around",
     "orbit_around",
     "orbit_reverse",
     "origin_plane_names",
@@ -110,7 +113,6 @@ const PROFILE_KEYS: &[&str] = &[
     "shortcut_again_ends_tool",
     "shortcut_cycles_modes",
     "show_design_view_switcher",
-    "show_document_browser",
     "show_selected_hidden_edges",
     "sketch_align_points",
     "sketch_auto_dimensions",
