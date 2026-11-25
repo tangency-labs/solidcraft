@@ -101,7 +101,13 @@
 //!   to `topology.edgeuse_p3`, whose own stubs propagate).
 //! - **Loops.** The trimmed-face search (WR-588) takes its cells from an explicit
 //!   stack, not recursion, bounded at `FACE_EXTREME_MAX_DEPTH` (16 halvings) and
-//!   `FACE_EXTREME_MAX_CELLS` (4096 cells); a cell past either counts with its greatest value.
+//!   `FACE_EXTREME_MAX_CELLS` (4096 cells); a cell past either counts with its own bound.
+//!   Not the fork's (#21660): on a surface open both ways the search starts from the box of
+//!   the face's UV trims, not the surface's whole domain; a cell no trim box meets whose
+//!   middle is outside the face is set aside; a surface without a subpatch (an offset) is
+//!   bounded and tested for monotony over a cell by the enclosure of its definition; and a
+//!   cell at the limits counts with a bound, never with the solver's value at a point off
+//!   the face.
 //!   Not the fork's (#14452): each cell of a B-spline face open both ways is solved on its
 //!   exact subpatch over the cell, not on the whole surface (a solve's control-net guesses
 //!   read every control point of the surface it is given), and a cell whose subpatch's
@@ -1289,8 +1295,8 @@ fn loose_top(
         + (lo.z * dir.z).max(hi.z * dir.z))
 }
 
-/// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits unsolved or
-/// with control points (#13753):
+/// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits (#13753; any
+/// cell there, #21660):
 /// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
 /// subpatch's rounding ([`sub_patch_rounding`]) and, for a procedural blend, by its net's
 /// certified distance from its definition; without a subpatch, or when that rounding
@@ -1470,7 +1476,7 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
 /// otherwise the cell is divided ([`cell_division`]: at the knots inside it, a way within
 /// one span left whole while the other has a knot inside, else at its middles; WR-651).
 /// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
-/// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
+/// with its own bound (its enclosure's, else [`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
 /// first, as the fork's.
 ///
 /// Not the fork's (#13753): a solve's greatest is a value the surface takes, a lower
@@ -1483,6 +1489,13 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
 /// its control values are level is not halved. A procedural blend's cell is also skipped
 /// before solving when its net hull, extraction rounding and certificate bound it below
 /// `best` (#18809). Retained blend cells and other faces keep the fork's rules.
+///
+/// Not the fork's (#21660): on a surface open both ways the cells start from the box of
+/// the face's trims ([`trims_domain`]), and a cell those trims do not meet whose middle is
+/// outside the face is set aside ([`cell_outside_face`]). A surface without a subpatch (an
+/// offset) is bounded over a cell by the enclosure of its definition ([`net_cell`]): 1. on
+/// that bound before solving, 4. on its first partials, a cell without a solution divided
+/// as a subpatch's, and the bound counted at the limits.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -3835,6 +3848,72 @@ mod tests {
         ] {
             assert!((got - want).abs() <= 1e-9, "box {lo:?} {hi:?}, want {want_min:?} {want_max:?}");
         }
+    }
+
+    /// #21660: a cell at the search's limits counts with its own bound, not with the
+    /// solver's value. Along `(x + y) / sqrt 2` the offset face rises to its radius 1.5 at
+    /// 45 degrees; a solve that finds only 1.2 there (a value the surface takes, which bounds
+    /// nothing) and limits of no division leave the first cell at the limits, which then
+    /// counts with the enclosure of its definition: at least the face's 1.5.
+    #[test]
+    fn a_cell_at_the_limits_counts_with_its_bound_not_the_solvers_value() {
+        let (k, b, f) = offset_cylinder_face();
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut short = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            Ok(CellDirectedMax {
+                top: 1.2,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let dir = Vec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2;
+        let got = face_directed_max_with(
+            &k,
+            &mut lb,
+            f,
+            &surface,
+            &domain,
+            1e-6,
+            dir,
+            0.0,
+            SearchLimits {
+                max_depth: 0,
+                max_cells: 0,
+            },
+            &mut short,
+        )
+        .unwrap();
+        assert!(got.is_finite() && got >= 1.5, "got {got}");
+    }
+
+    /// #21660: a cell no trim curve's box meets is wholly outside the face when its middle
+    /// is; one inside the face, or one a trim crosses, is not.
+    #[test]
+    fn a_cell_the_trims_do_not_meet_is_outside_when_its_middle_is() {
+        let (k, b, f) = offset_cylinder_face();
+        let trims = crate::query::contact::trim_boxes(&k, &b, f).unwrap().unwrap();
+        let u_lo = trims.iter().map(|t| t[0]).fold(f64::INFINITY, f64::min);
+        let u_hi = trims.iter().map(|t| t[1]).fold(f64::NEG_INFINITY, f64::max);
+        let domain = b.face(f).unwrap().uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut outside = |cell: Extent2d| {
+            cell_outside_face(&k, &mut lb, f, &trims, &cell, 1e-6).unwrap()
+        };
+        // below the trims in u (angles under 20 degrees), the whole height
+        let (d0, d1) = (domain.min(), domain.max());
+        assert!(u_lo > d0.x);
+        assert!(outside(Extent2d::from_bounds(d0.x, d0.y, 0.5 * (d0.x + u_lo), d1.y)));
+        // the middle of the face, clear of its trims
+        let (um, vm) = (0.5 * (u_lo + u_hi), 0.5);
+        let h = 0.01 * (u_hi - u_lo);
+        assert!(!outside(Extent2d::from_bounds(um - h, vm - 0.01, um + h, vm + 0.01)));
+        // the whole domain, which the trims cross
+        assert!(!outside(domain));
     }
 
     /// An analytic face (the quarter-cylinder side of a partial cylinder of radius 5 and
