@@ -522,7 +522,7 @@ pub fn iso_within(
                     .map(Hom::exact)
             };
             // The iso-line's control points: each column's point at t0, de Boor along o.
-            let mut line = Vec::with_capacity(nd);
+            let mut line = Vec::new();
             let (mut ex, mut ew) = (0.0f64, 0.0f64);
             for j in 0..nd {
                 let h = de_boor(po, ko, no, |i| net(j, i), t0).map_err(|e| off_message(e, uv))?;

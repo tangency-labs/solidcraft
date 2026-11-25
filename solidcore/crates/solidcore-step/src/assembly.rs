@@ -2667,7 +2667,9 @@ pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs
                 continue;
             }
             for k in 0..n {
-                let (before, after) = ((k + n - 1) % n, (k + 1) % n);
+                let (Some(before), Some(after)) = ((k + n - 1).checked_rem(n), (k + 1).checked_rem(n)) else {
+                    continue;
+                };
                 let (Some(Some((start, end))), Some(Some((_, prev_end))), Some(Some((next_start, _)))) =
                     (ends.get(k), ends.get(before), ends.get(after))
                 else {
