@@ -1048,6 +1048,42 @@ fn a_sliver_wider_than_its_tolerance_or_losing_the_larger_tolerance_is_not_colla
     assert_eq!(outcomes, ["collapsed", "would grow"]);
 }
 
+/// #21915: the sliver collapse never swallows a cancellation. A counting token first counts
+/// the polls of collapsing the squeezed riser, `whole`; a token cancelled at each poll in turn
+/// then stops the collapse with `Cancelled`, the zero-area test's polls among them, instead of
+/// reporting the riser refused as `NotZeroArea` (or any other answer).
+#[test]
+fn the_sliver_collapse_stops_on_a_cancel_at_any_poll() {
+    use solidcore::heal::tolerance_defects::{collapse_coincident_two_edge_faces, Healed};
+    use solidcore::kernel::CancelToken;
+    use solidcore::topology::brep::p3::edit_brep;
+    let collapse = |token: CancelToken| {
+        let mut k = solidcore::Kernel::default();
+        let (mut b, ..) = squeezed_riser(&mut k);
+        k.set_cancel_token(token);
+        edit_brep(&mut k, &mut b, |k, b, scope| {
+            let mut healed = Healed::default();
+            collapse_coincident_two_edge_faces(k, b, scope.env, &mut healed)?;
+            Ok(healed)
+        })
+    };
+    let probe = CancelToken::after_polls(u64::MAX);
+    let healed = collapse(probe.clone()).unwrap();
+    assert_eq!(healed.collapsed.len(), 1, "{healed:?}");
+    let whole = probe.polls().unwrap();
+    assert!(whole >= 2, "the collapse polls {whole} times");
+    let answered: Vec<_> = (1..=whole)
+        .filter_map(|n| match collapse(CancelToken::after_polls(n)) {
+            Err(e) if e.is_cancelled() => None,
+            other => Some((n, format!("{other:?}"))),
+        })
+        .collect();
+    assert!(
+        answered.is_empty(),
+        "of {whole} polls, a cancel at these did not stop the collapse: {answered:?}"
+    );
+}
+
 /// The squeeze's clusters are found under the kernel's token: a cancelled heal stops there too,
 /// before the squeeze's own edge limit is checked; not cancelled, the hair step's riser ends
 /// squeeze to their targets.
