@@ -12,7 +12,21 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SplitBodyParams>(),
-        &["body", "body_name", "body_names", "line", "name", "participants", "plane", "sketch", "tool", "tool_faces", "tool_plane", "tool_sheet"],
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "line",
+            "name",
+            "participants",
+            "plane",
+            "sketch",
+            "tool",
+            "tool_bodies",
+            "tool_faces",
+            "tool_plane",
+            "tool_sheet",
+        ],
     );
     assert_keys(
         input_schema_for::<SplitFaceParams>(),
@@ -128,6 +142,14 @@ fn the_check_takes_what_the_schema_allows() {
         ),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}}), true),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_plane": true}), true),
+        (
+            "solid.split_body",
+            &body,
+            json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": ["U", "V"]}),
+            true,
+        ),
+        ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": "U"}), false),
+        ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": [0, 0, 0]}, "tool_sheet": "body", "tool_bodies": [1]}), false),
         ("solid.split_body", &body, json!({"body": "B", "tool_plane": "yes"}), false),
         ("solid.split_body", &body, json!({"body": "B", "tool": {"body": "T", "point": {"x": 0, "y": 0, "z": 0}, "side": 1}}), true),
         ("solid.split_body", &body, json!({"body": "B", "sketch": 4, "line": "cut", "participants": ["*"]}), true),
@@ -328,4 +350,89 @@ fn split_body_by_faces_refuses_what_does_not_cut_through() {
         assert!(e.contains(says), "{p}: {e}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+/// A 10 mm cube from (0, 0, 5), and three flat surface bodies, each a sketch line on XY extruded
+/// 20 mm up, so each crosses the whole cube: `AtX3` the plane x = 3 (the point [3, 2, 10] is on
+/// it), `AtX8` the plane x = 8, and `AtY6` the plane y = 6. `Away`, the plane x = 50, misses the
+/// cube.
+fn flat_sheets() -> Session {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("solid.box", json!({"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    for (name, a, b) in [("AtX3", [3, -5], [3, 15]), ("AtX8", [8, -5], [8, 15]), ("AtY6", [-5, 6], [15, 6]), ("Away", [50, -5], [50, 15])] {
+        run("sketch.create", json!({"plane": "XY", "name": name}));
+        let curves = run("sketch.line", json!({"points": [a, b]}))["created"]["curves"].clone();
+        run("sketch.finish", json!({}));
+        run("surface.extrude", json!({"sketch": name, "curves": curves, "distance": 20, "body_name": name}));
+    }
+    s
+}
+
+/// #13303: Split Body with the whole surface body cuts with several surface bodies at once, each
+/// as it is. `AtX3` and `AtX8` cut the cube into slabs 3, 5 and 2 mm thick: 300, 500 and
+/// 200 mm³. `AtX8` crosses only the piece past x = 3 and leaves the other. `AtX3` and `AtY6`
+/// cross: `AtY6` cuts both pieces `AtX3` leaves, into 3 · 6 · 10 = 180, 7 · 6 · 10 = 420,
+/// 3 · 4 · 10 = 120 and 7 · 4 · 10 = 280 mm³. The other bodies are saved, and a reopened design
+/// builds the same parts.
+#[test]
+fn split_body_cuts_with_several_whole_surface_bodies() {
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    for (others, want) in [(json!(["AtX8"]), vec![200.0, 300.0, 500.0]), (json!(["AtY6"]), vec![120.0, 180.0, 280.0, 420.0])] {
+        let mut s = flat_sheets();
+        let p = json!({"body": "Cube", "tool": {"body": "AtX3", "point": [3, 2, 10]}, "tool_sheet": "body", "tool_bodies": others});
+        let id = s.execute("solid.split_body", &p).unwrap_or_else(|e| panic!("{p}: {e}"))["feature"].as_u64().unwrap();
+        assert!(near(&cube_parts(&s), &want), "{p}: {:?}", cube_parts(&s));
+        let saved = s.doc.to_json();
+        assert!(saved.contains("\"tool_bodies\""), "{saved}");
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!(reopened.model.result(id).unwrap().error.is_none(), "{p}");
+        assert!(near(&cube_parts(&reopened), &want), "{p}: {:?}", cube_parts(&reopened));
+    }
+}
+
+/// #13303: what Split Body with several surface bodies refuses, each leaving the design as it
+/// was: other bodies without `tool_sheet` "body" or with a plane, a body the design lacks, a solid, the tool's
+/// body again, one body twice, and a body that cuts no piece.
+#[test]
+fn split_body_by_several_surface_bodies_refuses_what_cannot_cut() {
+    let mut s = flat_sheets();
+    s.execute("solid.box", &json!({"corner": [30, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Block"})).unwrap();
+    let tool = json!({"body": "AtX3", "point": [3, 2, 10]});
+    for (p, says) in [
+        (json!({"body": "Cube", "tool": tool, "tool_bodies": ["AtX8"]}), "needs `tool_sheet` \"body\""),
+        (json!({"body": "Cube", "plane": "XY", "tool_bodies": ["AtX8"]}), "needs a face `tool`"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Nope"]}), "no body `Nope`"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Block"]}), "not a surface body"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["AtX3"]}), "a splitting tool twice"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["AtX8", "AtX8"]}), "a splitting tool twice"),
+        (json!({"body": "Cube", "tool": tool, "tool_sheet": "body", "tool_bodies": ["Away"]}), "`Away` does not cut `Cube` through"),
+    ] {
+        let before = s.doc.to_json();
+        let e = s.execute("solid.split_body", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+/// #13303 review: another surface body from a further placement of a component cuts where that
+/// placement puts it, not at the component's first. `Slice`, the plane x = 1, is in `Part`, and a
+/// copy of `Part` 6 mm along x puts `Slice (Part:2)` at x = 7. With `AtX3` it cuts the cube into
+/// slabs 3, 4 and 3 mm thick: 300, 400 and 300 mm³. The first placement would leave 100, 200
+/// and 700.
+#[test]
+fn split_body_cuts_with_a_surface_body_where_its_placement_puts_it() {
+    let near = |v: &[f64], want: &[f64]| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    let mut s = flat_sheets();
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    run("component.create", json!({"name": "Part", "grounded": false}));
+    run("sketch.create", json!({"plane": "XY", "name": "SliceSketch"}));
+    let curves = run("sketch.line", json!({"points": [[1, -5], [1, 15]]}))["created"]["curves"].clone();
+    run("sketch.finish", json!({}));
+    run("surface.extrude", json!({"sketch": "SliceSketch", "curves": curves, "distance": 20, "body_name": "Slice"}));
+    run("component.activate", json!({"component": "root"}));
+    run("occurrence.copy", json!({"component": "Part", "translate": [6, 0, 0]}));
+    let p = json!({"body": "Cube", "tool": {"body": "AtX3", "point": [3, 2, 10]}, "tool_sheet": "body", "tool_bodies": ["Slice (Part:2)"]});
+    run("solid.split_body", p.clone());
+    assert!(near(&cube_parts(&s), &[300.0, 300.0, 400.0]), "{p}: {:?}", cube_parts(&s));
 }

@@ -871,8 +871,9 @@ at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
 
 Declarative conditions run first, then the validated patch, then the same input check used by
 programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
-write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
-memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+write grants, in a fresh sandbox. It reads the design with the read commands (`component.list`
+maps bodies to components) and the plugin's own data with `storage.get {}`. Its independent
+budgets are at most 10,000,000 fuel, 16 MiB memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
 The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
@@ -1446,7 +1447,14 @@ values always take precedence. Automated imports therefore do not depend on earl
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again.
+  without compiling again. Return `unsupported(reason)` for a
+  deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
+  Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
+  background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
+  alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
+  their error responses carry the readable text, not a stable importer refusal kind. Control
+  responses use `ok` and `error`; MCP tool responses use `isError` and text content.
 - **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
   code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
   (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
@@ -1510,9 +1518,9 @@ are listed in `runtime.commands`:
 ## Errors
 
 Every plugin failure starts with the plugin's name, and an importer's or exporter's with the file's name too.
-Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
-text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
-and MCP give the English.
+Rust engine callers get the structured error (`kind` and its fields) as well as the text; script
+and MCP responses flatten importer errors to text as described above. The text comes from the
+message catalog (`plugin_error.*`) in the window's language; the command line and MCP give the English.
 
 | What happened | What the user reads |
 |---|---|
