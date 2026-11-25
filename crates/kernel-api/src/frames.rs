@@ -158,7 +158,14 @@ pub trait Frames: Backend {
     /// Where the ends (start, end) of `member`, now as `ends`, are cut after trimming it to
     /// `targets`, `gap` short of each: none for an end no target moves. `end` chooses which end
     /// each target moves.
-    fn trim_member(&self, member: &MemberData, ends: &[Option<Plane>; 2], end: End, targets: &[TrimTarget<'_>], gap: f64) -> Result<[Option<Cut>; 2], TrimRefusal>;
+    fn trim_member(
+        &self,
+        member: &MemberData,
+        ends: &[Option<Plane>; 2],
+        end: End,
+        targets: &[TrimTarget<'_>],
+        gap: f64,
+    ) -> Result<[Option<Cut>; 2], TrimRefusal>;
 
     /// The plane a gusset support's faces share: `candidate` when it is the first, else `first`
     /// when `candidate` lies on it (within `tolerance`, for a body of `size`).
@@ -168,7 +175,12 @@ pub trait Frames: Backend {
     fn gusset_support(&self, frames: &SupportFrames, faces: &[Vec<Vec<Seg2>>]) -> Result<SupportData, GussetFailure<Self::Error>>;
     /// The gusset plate between `supports` with `dimensions` on `placement`'s side of the joint,
     /// both contact strips proved to sit on their supports' material.
-    fn gusset_prepare(&self, supports: [&SupportData; 2], dimensions: Dimensions, placement: Placement) -> Result<Prepared, GussetFailure<Self::Error>>;
+    fn gusset_prepare(
+        &self,
+        supports: [&SupportData; 2],
+        dimensions: Dimensions,
+        placement: Placement,
+    ) -> Result<Prepared, GussetFailure<Self::Error>>;
     /// A saved support pick `at` put back on `plane`, for an edit dialog.
     fn gusset_support_pick(&self, plane: &Plane, at: Vec3) -> Vec3;
 }

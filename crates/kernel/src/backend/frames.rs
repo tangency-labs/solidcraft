@@ -131,7 +131,14 @@ impl Frames for Solidcore {
         trim::extent(&member(m)?, ends).map_err(member_refusal)
     }
 
-    fn trim_member(&self, m: &MemberData, ends: &[Option<Plane>; 2], end: End, targets: &[TrimTarget<'_>], gap: f64) -> Result<[Option<Cut>; 2], TrimRefusal> {
+    fn trim_member(
+        &self,
+        m: &MemberData,
+        ends: &[Option<Plane>; 2],
+        end: End,
+        targets: &[TrimTarget<'_>],
+        gap: f64,
+    ) -> Result<[Option<Cut>; 2], TrimRefusal> {
         let refused = |target: Option<usize>| move |why| TrimRefusal::Member { target, why };
         let trimmed = member(m).map_err(refused(None))?;
         // The target members rebuilt first, each refusal naming its target as the trim's would.
@@ -166,7 +173,12 @@ impl Frames for Solidcore {
         gusset::support(frames, faces).map(|s| s.data()).map_err(gusset_failure)
     }
 
-    fn gusset_prepare(&self, [a, b]: [&SupportData; 2], dimensions: Dimensions, placement: Placement) -> Result<Prepared, GussetFailure<KernelError>> {
+    fn gusset_prepare(
+        &self,
+        [a, b]: [&SupportData; 2],
+        dimensions: Dimensions,
+        placement: Placement,
+    ) -> Result<Prepared, GussetFailure<KernelError>> {
         let a = gusset::Support::from_data(a).map_err(gusset_failure)?;
         let b = gusset::Support::from_data(b).map_err(gusset_failure)?;
         gusset::prepare([&a, &b], dimensions, placement).map_err(gusset_failure)

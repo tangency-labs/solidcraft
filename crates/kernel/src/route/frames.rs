@@ -105,7 +105,13 @@ pub fn member_extent(member: &MemberData, ends: &[Option<Plane>; 2]) -> Result<E
 }
 
 /// Where the ends of `member` are cut after trimming it to `targets`.
-pub fn trim_member(member: &MemberData, ends: &[Option<Plane>; 2], end: End, targets: &[TrimTarget<'_>], gap: f64) -> Result<[Option<Cut>; 2], TrimRefusal> {
+pub fn trim_member(
+    member: &MemberData,
+    ends: &[Option<Plane>; 2],
+    end: End,
+    targets: &[TrimTarget<'_>],
+    gap: f64,
+) -> Result<[Option<Cut>; 2], TrimRefusal> {
     match which(OpKind::Frames) {
         Which::Solidcore => Solidcore.trim_member(member, ends, end, targets, gap),
     }

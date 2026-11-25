@@ -74,7 +74,8 @@ fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Resu
     let mut faces = Vec::new();
     for index in indices {
         let face_plane = body.body.planar_face(index).ok_or_else(|| invalid("gusset support face must be planar"))?;
-        let face_plane = solidcraft_kernel::gusset_support_plane(source.as_ref(), &face_plane, body.body.size(), tolerance).map_err(geometry_error)?;
+        let face_plane =
+            solidcraft_kernel::gusset_support_plane(source.as_ref(), &face_plane, body.body.size(), tolerance).map_err(geometry_error)?;
         source = Some(face_plane);
         let face = record.faces.get(index).ok_or_else(|| invalid("gusset support face disappeared"))?;
         if face.loops.len() > MAX_LOOPS {

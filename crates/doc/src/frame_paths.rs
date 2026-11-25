@@ -5,9 +5,9 @@ use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
+use solidcore_record::frame::{PieceData, Segment};
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcore_record::frame::{PieceData, Segment};
 use solidcraft_kernel::{PathFailure, PathRefusal};
 use solidcraft_sketch::CurveKind;
 
@@ -274,7 +274,8 @@ fn curve_piece(ss: &SolvedSketch, id: &str) -> Result<Piece> {
     let sk = &ss.sketch;
     let geometry = if let Some(w) = sk.wire_index(id).and_then(|i| sk.wires.get(i)) {
         if let Some(arc) = w.arc {
-            kernel::stock_spatial_arc(arc.start, arc.end, arc.center, arc.normal, arc.radius).map_err(|e| DocError::Invalid(format!("arc `{id}`: {e}")))?
+            kernel::stock_spatial_arc(arc.start, arc.end, arc.center, arc.normal, arc.radius)
+                .map_err(|e| DocError::Invalid(format!("arc `{id}`: {e}")))?
         } else if let Some(line) = wire_line(w)? {
             line
         } else {
