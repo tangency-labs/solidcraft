@@ -1,5 +1,5 @@
 //! Exact orthographic hidden lines for placed portable B-rep bodies, and the silhouettes of their
-//! curved faces: solidcore's (`solidcore_ops::hlr`), under their old path. See
+//! curved faces: solidcore's (`solidcore_ops::hlr`), through the kernel adapter. See
 //! `docs/drawing-hlr.md` for the contract and its measured limits. The kernel starts no threads;
 //! the application's [`hidden_lines`] runs its work on [`Threads`].
 
@@ -44,4 +44,15 @@ pub fn hidden_lines(
     cancel: &(dyn Fn() -> bool + Sync),
 ) -> Result<Drawing, HlrError> {
     hidden_lines_on(defs, scene, view, opts, cancel, &Threads)
+}
+
+#[cfg(test)]
+mod tests {
+    /// A drawing's hidden lines (solidcore's) take as many items as a section: one aggregate limit.
+    #[test]
+    fn hidden_lines_share_the_section_item_limit() {
+        use solidcraft_geom::section::MAX_ITEMS;
+        assert_eq!(super::MAX_ITEMS, MAX_ITEMS);
+        assert_eq!(super::Options::default().max_tracks, MAX_ITEMS);
+    }
 }

@@ -1,0 +1,1 @@
+decides whether a point is inside a body on the display mesh only where the exact faces leave it open: a point the kernel finds on the boundary or cannot place
