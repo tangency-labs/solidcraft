@@ -402,7 +402,7 @@ mod tests {
             lines,
             [
                 "Change application settings and use application diagnostics.",
-                "Open, recover or switch designs.",
+                "Open, recover or switch designs, and see where the open design is saved.",
                 "Read or write files within the approved folders.",
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",

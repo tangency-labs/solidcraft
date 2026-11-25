@@ -2071,6 +2071,51 @@ fn generated(rng: &mut Rng) -> Inputs {
 mod tests {
     use super::*;
 
+    /// tangency-labs/solidcraft#18634: the `review_box_translated_*_null` rows' 1e-3 box
+    /// at (1e6, 1e6, 1e6) was refused by its constructor (status 1001), as main's
+    /// position-scaled degeneracy floor refused sides up to about 1e-9 times the
+    /// coordinate. It now builds a 6/12/8 box, and each case's result is the one the same
+    /// box gets at the origin (the fixture's valid-box controls: built, status 1007 for
+    /// a null selection), with the moved box's coordinates translated by (1e6, 1e6, 1e6).
+    #[test]
+    fn far_review_boxes_answer_as_at_the_origin() {
+        let shift = 1e6;
+        for name in ["review_box_translated_source_null", "review_box_translated_foreign_null"] {
+            let far = crate::case::regression_case(&Runner, name);
+            let mut near = far.clone();
+            let mut moved = Vec::new();
+            for role in ["source", "foreign"] {
+                if near.inputs[role]["origin"] == serde_json::json!([shift, shift, shift]) {
+                    near.inputs[role]["origin"] = serde_json::json!([0.0, 0.0, 0.0]);
+                    moved.push(role);
+                }
+            }
+            assert!(!moved.is_empty(), "{name}");
+            let (f, n) = (Runner.run_rust(&far).unwrap(), Runner.run_rust(&near).unwrap());
+            assert_eq!(f.rejected, None, "{name}");
+            assert_eq!(f.ints["status"], [1007], "{name}");
+            assert_eq!((&f.ints, &f.error, &f.rejected), (&n.ints, &n.error, &n.rejected), "{name}");
+            assert_eq!(f.values.keys().collect::<Vec<_>>(), n.values.keys().collect::<Vec<_>>());
+            for (key, fv) in &f.values {
+                let nv = &n.values[key];
+                let translated = key.ends_with(".geometry")
+                    && moved.iter().any(|role| key.starts_with(&format!("{role}.")));
+                if !translated {
+                    assert_eq!(fv, nv, "{name} {key}");
+                    continue;
+                }
+                // [tolerance, box min xyz, box max xyz]: the tolerance is kept and every
+                // coordinate is the origin box's moved by `shift`: `EPS/2 |a|` is under one
+                // ulp of the far value, so this asserts `a` is the rounded sum itself
+                assert_eq!(fv.len(), 7, "{name} {key}");
+                assert_eq!(fv[0], nv[0], "{name} {key}");
+                for (a, b) in fv[1..].iter().zip(&nv[1..]) {
+                    assert!((a - (b + shift)).abs() <= f64::EPSILON / 2.0 * a.abs(), "{name} {key}: {a} {b}");
+                }
+            }
+        }
+    }
+
     /// The Rust result bodies of the cases named in `$SC_SOUNDNESS_CASES`, measured on their own
     /// ([`crate::soundness::probe`]).
     #[test]
@@ -2729,11 +2774,12 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
-            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
-            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
-            // rejected, status 1001
-            let refused = !case.name.ends_with("_selected")
-                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            // #15350: a box too small for its tolerance (1e-6 at the origin) is refused by
+            // `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor rejected,
+            // status 1001. #18634: the 1e-3 box at (1e6, 1e6, 1e6) now builds and answers as
+            // at the origin (see `far_review_boxes_answer_as_at_the_origin`), so the
+            // `_translated_` null rows take the null-selection branch below (status 1007).
+            let refused = !case.name.ends_with("_selected") && case.name.contains("_tiny_");
             if refused {
                 assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
                 assert_eq!(rust.ints["status"], [1001], "{}", case.name);
