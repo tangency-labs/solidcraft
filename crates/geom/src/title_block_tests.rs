@@ -96,7 +96,9 @@ fn the_compact_block_is_the_old_built_in_block() {
         ("date_of_issue", [-62.0, 14.0, -30.0, 24.0], "Date of issue", Some(vec![field(Source::Revision, "date")]), 3.5, HAlign::Left),
         ("sheet", [-30.0, 14.0, 0.0, 24.0], "Sheet", Some(sheet), 3.5, HAlign::Centre),
         ("material", [-180.0, 24.0, -100.0, 34.0], "Material", Some(vec![field(Source::Component, "material")]), 3.5, HAlign::Left),
-        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", Some(vec![field(Source::Component, "properties.finish")]), 3.5, HAlign::Left),
+        // The part's `finish` key, which shows a free property of that name when the part has no finish
+        // of its own, so a design from before shows the same text (#20114).
+        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", Some(vec![field(Source::Component, "finish")]), 3.5, HAlign::Left),
         ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", Some(vec![field(Source::Component, "mass")]), 3.5, HAlign::Centre),
         ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", Some(vec![field(Source::Drawing, "organization")]), 3.5, HAlign::Left),
         ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", Some(Vec::new()), 2.5, HAlign::Left),
