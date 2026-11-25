@@ -1,0 +1,267 @@
+[
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.create",
+      "params": {
+        "name": "PartA",
+        "grounded": false
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 10,
+        "width": 10,
+        "height": 10,
+        "body_name": "BoxA"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.activate",
+      "params": {
+        "component": "root"
+      }
+    }
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "PartA:1",
+        "translate": [50, 0, 0],
+        "capture": false
+      }
+    }
+  },
+  {
+    "expect": {
+      "features": 1,
+      "bbox": {
+        "body": "BoxA",
+        "min": [50, 0, 0],
+        "max": [60, 10, 10]
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "component.revert_position",
+      "params": {}
+    }
+  },
+  {
+    "expect": {
+      "features": 1,
+      "errors": 0,
+      "bbox": {
+        "body": "BoxA",
+        "min": [0, 0, 0],
+        "max": [10, 10, 10]
+      },
+      "query": {
+        "command": "component.list",
+        "path": ["pending_moves"],
+        "value": []
+      }
+    }
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "PartA:1",
+        "translate": [40, 0, 0],
+        "capture": false
+      }
+    }
+  },
+  {
+    "start": "sketch.create"
+  },
+  {
+    "expect": {
+      "shown": "Capture Position",
+      "tool": null
+    }
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "ui.capture",
+    "params": {
+      "action": "cancel"
+    }
+  },
+  {
+    "expect": {
+      "not_shown": "Capture Position",
+      "tool": null,
+      "features": 1,
+      "bbox": {
+        "body": "BoxA",
+        "min": [40, 0, 0],
+        "max": [50, 10, 10]
+      }
+    }
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "start": "sketch.create"
+  },
+  {
+    "expect": {
+      "shown": "Capture Position"
+    }
+  },
+  {
+    "call": "ui.capture",
+    "params": {
+      "action": "revert"
+    }
+  },
+  {
+    "expect": {
+      "dialog": "Sketch",
+      "tool": null,
+      "features": 1,
+      "bbox": {
+        "body": "BoxA",
+        "min": [0, 0, 0],
+        "max": [10, 10, 10]
+      }
+    }
+  },
+  {
+    "key": "Escape"
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "PartA:1",
+        "translate": [35, 0, 0],
+        "capture": false
+      }
+    }
+  },
+  {
+    "start": "sketch.create"
+  },
+  {
+    "expect": {
+      "shown": "Capture Position"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Capture Position"
+    }
+  },
+  {
+    "expect": {
+      "dialog": "Sketch",
+      "tool": null,
+      "features": 2,
+      "errors": 0,
+      "shown_handles": ["timeline:CapturePosition1"],
+      "bbox": {
+        "body": "BoxA",
+        "min": [35, 0, 0],
+        "max": [45, 10, 10]
+      }
+    }
+  },
+  {
+    "key": "Escape"
+  },
+  {
+    "note": "Revert Position (command and UI) and the Capture Position prompt (Cancel, Revert, and Capture) with pending occurrence moves."
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "occurrence.move",
+      "params": {
+        "occurrence": "PartA:1",
+        "translate": [20, 0, 0],
+        "capture": false
+      }
+    }
+  },
+  {
+    "start": "sketch.create"
+  },
+  {
+    "expect": {
+      "shown": "Capture Position"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Cancel"
+    }
+  },
+  {
+    "expect": {
+      "not_shown": "Capture Position",
+      "dialog": null,
+      "bbox": {
+        "body": "BoxA",
+        "min": [55, 0, 0],
+        "max": [65, 10, 10]
+      }
+    }
+  },
+  {
+    "start": "sketch.create"
+  },
+  {
+    "expect": {
+      "shown": "Capture Position"
+    }
+  },
+  {
+    "click": {
+      "handle": "dialog:Revert"
+    }
+  },
+  {
+    "expect": {
+      "dialog": "Sketch",
+      "bbox": {
+        "body": "BoxA",
+        "min": [35, 0, 0],
+        "max": [45, 10, 10]
+      }
+    }
+  },
+  {
+    "key": "Escape"
+  }
+]

@@ -4497,7 +4497,7 @@ pub(crate) mod tests {
         }
         s.execute("component.activate", &json!({"component": "root"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         h.frames(2);
         let before = h.app.cam;
         // Reading during an animated view change leaves it running (no frames run between).
@@ -4599,7 +4599,7 @@ pub(crate) mod tests {
         s.execute("joint.create", &json!({"type": "revolute", "a": at("A", 25), "b": at("B", 25), "flip": true, "name": "Hinge"})).unwrap();
         s.execute("joint.create", &json!({"type": "slider", "a": at("B", 55), "b": at("C", 55), "flip": true, "name": "Rail"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let before = h.app.session.doc.clone();
         let drive = |h: &crate::scenario::Harness| match h.app.dialog.as_ref().map(|d| &d.kind) {
             Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Drive { joint, values, .. })) => {
@@ -4634,7 +4634,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = SolveApp::new(s, Services::default());
+        *h.app = SolveApp::new(s, Services::default());
         let r = h.call("ui.start", json!({"command": "solid.fillet"}));
         let d = &r["result"]["dialog"];
         assert_eq!((&d["command"], &d["title"], &d["editing"]), (&json!("solid.fillet"), &json!("FILLET"), &Value::Null), "{r}");

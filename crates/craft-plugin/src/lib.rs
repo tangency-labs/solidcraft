@@ -324,6 +324,33 @@ pub struct CommandSchema {
     pub group: Option<String>,
 }
 
+/// The severity level of a message logged by a plugin guest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A named folder resolved by the app after user approval, never a guest-supplied root.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -434,6 +461,12 @@ pub trait PluginHost {
         Ok(())
     }
     fn log(&mut self, message: &str);
+    /// Receive a log message with its severity level from a plugin guest.
+    /// By default delegates to [`PluginHost::log`].
+    fn log_level(&mut self, level: LogLevel, message: &str) {
+        let _ = level;
+        self.log(message);
+    }
     fn progress(&mut self, fraction: f32, message: &str);
     /// Writes the running plugin's file `name` in the open design from its bytes, as they are
     /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
@@ -844,6 +877,9 @@ pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Explicit ribbon menus. Entries not named here keep their individual buttons.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ribbon_groups: Vec<RibbonGroup>,
     /// Opt-in notifications, under capability `design@0.1`. Missing for existing packages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub listeners: Vec<Listener>,
@@ -863,6 +899,23 @@ pub struct RuntimeManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<ui::Declarations>,
 }
+
+/// A plugin's opt-in ribbon button and the entries its menu lists, in order.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RibbonGroup {
+    pub label: String,
+    /// A package-relative SVG path, checked and loaded by the host like an entry icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub entries: Vec<String>,
+}
+
+/// The package-relative SVG paths a host may read for plugin icons.
+pub fn valid_icon_path(path: &str) -> bool {
+    images::valid_path(path)
+}
+
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`, optionally with storage).
     /// A runtime's entries are all commands, all importers or all exporters.
@@ -929,6 +982,7 @@ impl RuntimeManifest {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
             }
         }
+        self.validate_ribbon_groups()?;
         if self.listeners.len() > 16 {
             return Err(invalid("runtime.listeners", "at most 16 distinct listeners"));
         }
@@ -985,6 +1039,41 @@ impl RuntimeManifest {
         }
         Ok(())
     }
+
+    fn validate_ribbon_groups(&self) -> Result<()> {
+        if self.ribbon_groups.len() > 32 {
+            return Err(invalid("runtime.ribbon_groups", "requires at most 32 ribbon groups"));
+        }
+        let mut labels = BTreeSet::new();
+        let mut grouped = BTreeSet::new();
+        for (index, group) in self.ribbon_groups.iter().enumerate() {
+            let field = format!("runtime.ribbon_groups.{index}");
+            if !plain(&group.label, 80) {
+                return Err(invalid(format!("{field}.label"), "requires 1..80 printable characters"));
+            }
+            if !labels.insert(group.label.trim()) {
+                return Err(invalid(format!("{field}.label"), format!("ribbon group `{}` is listed twice", group.label.trim())));
+            }
+            if group.icon.as_deref().is_some_and(|icon| !valid_icon_path(icon)) {
+                return Err(invalid(format!("{field}.icon"), "must be a relative .svg path inside the package, at most 128 characters"));
+            }
+            if group.entries.is_empty() || group.entries.len() > 32 {
+                return Err(invalid(format!("{field}.entries"), "requires 1..32 distinct entry names"));
+            }
+            for name in &group.entries {
+                if !self.entries.iter().any(|entry| entry.name == *name) {
+                    return Err(invalid(format!("{field}.entries"), format!("unknown entry `{name}`; name an entry from runtime.entries")));
+                }
+                if !grouped.insert(name) {
+                    return Err(invalid(
+                        format!("{field}.entries"),
+                        format!("entry `{name}` is listed twice; an entry belongs to at most one ribbon group"),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A format slot (importer or exporter) claims 1..32 distinct lowercase extensions; an importer
@@ -1020,7 +1109,14 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
-            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            let is_alnum = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+            let valid = |e: &String| {
+                let bytes = e.as_bytes();
+                (1..=16).contains(&bytes.len())
+                    && bytes.first().copied().is_some_and(is_alnum)
+                    && bytes.last().copied().is_some_and(is_alnum)
+                    && bytes.iter().all(|&c| is_alnum(c) || c == b'_')
+            };
             if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
             {
                 return Err(invalid(
