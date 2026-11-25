@@ -490,6 +490,13 @@ fn feature_row(
         None => crate::timeline::feature_status(app, id),
     };
     let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
+    // A sketch row shows its solve state as its Sketches folder row does (#22185): the icon in
+    // the state's colour and the state in the tooltip. Read from the solves the model holds.
+    let sketch_state = (is_sketch && app.preferences.sketch_state_icons)
+        .then(|| app.session.model.state().sketch(id).map(crate::sketch_state::SketchState::of))
+        .flatten();
+    let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
+    let ink = sketch_state.and_then(|state| state.ink(&Tokens::get()));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -500,6 +507,8 @@ fn feature_row(
             fold,
             eye,
             icon,
+            icon_ink: ink,
+            tip: state_tip.as_deref(),
             label: &label,
             name: true,
             rename: true,
