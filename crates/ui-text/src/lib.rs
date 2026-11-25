@@ -181,18 +181,23 @@ fn normalize_legacy_id(tag: &str) -> Cow<'_, str> {
 /// resolves through [`system_language`] wherever a catalog is needed.
 pub const SYSTEM: &str = "system";
 
+/// Catalogs that are only used when chosen in the preferences, never from the system's language:
+/// Serbian in Latin script, so a system set to `sr-Latn-RS` keeps the Cyrillic `sr` it always had.
+const CHOSEN_BY_HAND: &[&str] = &["sr-Latn"];
+
 /// Match the system's preferred locale tags against the catalogs: the exact tag first
 /// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
 /// then English. Legacy `iw` tags resolve as Hebrew (`he`), and a Chinese tag goes by its script
 /// or region instead ([`chinese_catalog`]). Tags come in the system's order of preference; the
 /// first one that matches wins.
+/// A catalog in [`CHOSEN_BY_HAND`] is never picked from the system's tags.
 pub fn match_system_tags(tags: &[String]) -> &'static str {
     for tag in tags {
         let tag = normalize_legacy_id(tag.trim()).replace('_', "-");
         if let Some(catalog) = chinese_catalog(&tag) {
             return catalog;
         }
-        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+        if let Some(catalog) = locales().iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag) && !CHOSEN_BY_HAND.contains(&catalog.id)) {
             return catalog.id;
         }
         let base = tag.split('-').next().unwrap_or(&tag);

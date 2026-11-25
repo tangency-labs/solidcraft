@@ -40,6 +40,7 @@ mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
 mod drawing;
+mod drawing_auto_mark;
 mod drawing_balloon;
 mod drawing_break;
 mod drawing_centre_line;
@@ -203,6 +204,9 @@ pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+mod pulleys;
+#[cfg(test)]
+mod pulleys_tests;
 mod script;
 mod section;
 mod selection;
@@ -667,6 +671,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(panels::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
+    v.extend(pulleys::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
@@ -702,6 +707,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
     v.extend(drawing_break::COMMANDS.iter());
+    v.extend(drawing_auto_mark::COMMANDS.iter());
     v.extend(drawing_centre_line::COMMANDS.iter());
     v.extend(drawing_centre_mark::COMMANDS.iter());
     v.extend(drawing_check::COMMANDS.iter());
