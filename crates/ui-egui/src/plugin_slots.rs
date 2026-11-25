@@ -560,6 +560,7 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
             updates: None,

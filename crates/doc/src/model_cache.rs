@@ -251,7 +251,15 @@ impl Writer {
             return *i;
         }
         let names = crate::naming::names(b);
-        let info: Vec<Json> = names.info.iter().map(|i| json!([i.aliases, i.bounds, i.verified, i.synonyms])).collect();
+        // A Split Face piece's former name follows (only then, so other records read as before).
+        let info: Vec<Json> = names
+            .info
+            .iter()
+            .map(|i| match &i.former {
+                Some(former) => json!([i.aliases, i.bounds, i.verified, i.synonyms, former]),
+                None => json!([i.aliases, i.bounds, i.verified, i.synonyms]),
+            })
+            .collect();
         self.names.push(json!({"faces": *names.faces, "info": info}));
         self.names_index.insert(id, self.names.len() - 1);
         self.names.len() - 1
@@ -543,6 +551,11 @@ impl PendingChecks {
     }
 }
 
+/// A face's [`FaceInfo`] as the model cache keeps it: its aliases, bounds, whether exact, its
+/// synonyms and, for a Split Face piece, the name it had before (absent in records without one).
+#[derive(serde::Deserialize)]
+struct SavedFaceInfo(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>, #[serde(default)] Option<String>);
+
 impl SavedModel {
     /// The states the records hold, every record checked.
     fn states(&self) -> Result<Vec<Arc<ModelState>>> {
@@ -558,12 +571,14 @@ impl SavedModel {
         let mut names = Vec::new();
         for n in list("names")? {
             let faces: Vec<String> = serde_json::from_value(parse(n.get("faces"))?).map_err(|_| bad("saved model: names"))?;
-            let info: Vec<(Vec<String>, std::collections::BTreeSet<String>, bool, Vec<String>)> =
-                serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
+            let info: Vec<SavedFaceInfo> = serde_json::from_value(parse(n.get("info"))?).map_err(|_| bad("saved model: names"))?;
             if info.len() != faces.len() {
                 return Err(bad("saved model: names"));
             }
-            let info = info.into_iter().map(|(aliases, bounds, verified, synonyms)| FaceInfo { aliases, synonyms, bounds, verified }).collect();
+            let info = info
+                .into_iter()
+                .map(|SavedFaceInfo(aliases, bounds, verified, synonyms, former)| FaceInfo { aliases, synonyms, bounds, verified, former })
+                .collect();
             names.push(Arc::new(Names { faces: Arc::new(faces), info }));
         }
         let mut sketches = Vec::new();
