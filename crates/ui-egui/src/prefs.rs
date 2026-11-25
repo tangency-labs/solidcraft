@@ -5274,6 +5274,7 @@ mod tests {
     fn layout_page_checkboxes_keep_their_labels_at_every_width() {
         let checks = [
             ("workspace_follows_view", "prefs.workspace_follows_view"),
+            ("show_window_controls", "prefs.show_window_controls"),
             ("history_play_button", "prefs.layout_page.play_history"),
             ("history_group_joints", "prefs.history_group_joints"),
             ("history_bar_groups", "prefs.history_bar_groups"),
