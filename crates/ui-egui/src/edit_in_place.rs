@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{Mat, apply_point, mat_inverse, mat_mul};
-use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::{Aabb3, MeshGeom};
 
 use crate::SolveApp;
 use crate::gpu::{GpuScene, INSTANCE_SIZE, InstanceLook, InstancedMesh, SharedTris};
