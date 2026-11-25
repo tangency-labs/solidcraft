@@ -766,6 +766,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let profile = crate::timeline::naming_profile_sketch(app, profile, sketch.map(|s| s.0));
     let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
         // Off without a reason for a feature that has no profile sketch: selecting one feature
@@ -937,7 +938,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
-        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some());
+        v.push(crate::timeline::naming_profile_sketch(app, profile, sketch));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
