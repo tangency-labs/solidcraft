@@ -2753,6 +2753,157 @@ mod tests {
         asked.continuities(&k).unwrap();
         same(&lift(&k, &asked));
     }
+    /// A biquadratic dome over `[0, 1]²`: the corners and edge midpoints at height 0,
+    /// the middle control point at height 1, not periodic in either direction.
+    fn dome() -> Surface {
+        let row = |x: f64, z: f64| {
+            vec![
+                Vec3::new(x, 0.0, 0.0),
+                Vec3::new(x, 1.0, z),
+                Vec3::new(x, 2.0, 0.0),
+            ]
+        };
+        let rows = [row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)];
+        bspline_surface(2, 2, &[&rows[0], &rows[1], &rows[2]])
+    }
+
+    /// The dome's polynomial at `(u, v)`, which its evaluation continues past `[0, 1]²` when
+    /// out-of-bounds evaluation is enabled: `(2u, 2v, 4 c(u) c(v))` with `c(t) = t (1 - t)`
+    /// (the middle control point at height 1, every other at height 0).
+    fn dome_point(u: f64, v: f64) -> Point3 {
+        Point3::new(2.0 * u, 2.0 * v, 4.0 * u * (1.0 - u) * v * (1.0 - v))
+    }
+
+    /// `LiftCurve` of a UV segment off its surface's domain is the same whatever the speed
+    /// of its parameterisation (#20239): the segment from `(1.2, 0.2)` to `(1.8, 0.9)`,
+    /// parameterised with its derivative scaled by `f` in `1e-3` and `1` (and run the
+    /// other way), keeps `u > 1`, beside the dome's domain `[0, 1]²`, on the dome
+    /// with out-of-bounds evaluation enabled, which continues the dome's polynomial
+    /// ([`dome_point`]) there. Every lift is within the tolerance, its ends are the
+    /// polynomial's points and its samples lie on the polynomial. Before the fix the
+    /// continuity domain depended on `f` (the end knot was compared with the derivative's
+    /// component), and a slow segment's collapsed to the edge `u = 1`
+    /// (`NoContinuousDomain`). A segment just past the edge (by `2e-6`, rounding of a
+    /// trim) and one inside are lifted in the same way. (At `f = 1e3` the continuity
+    /// domain is the same too, as `domain_with_continuity_off_the_domain_is_the_span_next_to_the_point`
+    /// checks, but `ApproximateCurve` accepts a span of the 1e-3-long interval at
+    /// `2.7e-3` from the curve, as it does on main: a separate dependence on the
+    /// parameter's scale, tangency-labs/solidcraft#21657.)
+    #[test]
+    fn lift_curve_off_the_domain_is_the_same_whatever_the_speed() {
+        let k = Kernel::default();
+        let mut s = dome();
+        let SurfaceKind::BSpline(b) = s.kind_mut() else {
+            unreachable!()
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let tol = 1e-6;
+        let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+        // the segment from `a` to `b`, its derivative `(b - a) f`
+        let line = |a: (f64, f64), b: (f64, f64), f: f64| {
+            let to = (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f);
+            (
+                Curve::from(crate::curve::line::Line::from_points(
+                    Point3::new(a.0, a.1, 0.0),
+                    Point3::new(to.0, to.1, 0.0),
+                    2,
+                )),
+                Extent1d::from_min_max(0.0, 1.0 / f),
+            )
+        };
+        let lift = |a: (f64, f64), b: (f64, f64), f: f64| {
+            let (uv, ivl) = line(a, b, f);
+            let lifted = s
+                .lift_curve(&k, &dom, &uv, &ivl, tol, false)
+                .unwrap_or_else(|e| panic!("{a:?} -> {b:?}, f = {f:e}: {e:?}"));
+            assert!(lifted.max_approx_dev <= tol, "{:e}", lifted.max_approx_dev);
+            let ivl = lifted.curve.natural_interval();
+            let ends = [
+                lifted.curve.evaluate_point(&k, ivl.min()).unwrap(),
+                lifted.curve.evaluate_point(&k, ivl.max()).unwrap(),
+            ];
+            for (p, q) in ends
+                .iter()
+                .zip([dome_point(a.0, a.1), dome_point(b.0, b.1)])
+            {
+                assert!(p.distance(q) <= tol, "{p:?} {q:?}");
+            }
+            for i in 0..=16 {
+                let p = lifted
+                    .curve
+                    .evaluate_point(&k, ivl.evaluate(f64::from(i) / 16.0))
+                    .unwrap();
+                let on = dome_point(p.x / 2.0, p.y / 2.0);
+                assert!((p.z - on.z).abs() <= 4.0 * tol, "{p:?} {on:?}");
+            }
+        };
+        let (a, b) = ((1.2, 0.2), (1.8, 0.9));
+        for f in [1e-3, 1.0] {
+            lift(a, b, f);
+            lift(b, a, f);
+        }
+        lift((1.0 + 2e-6, 0.2), (1.0 + 3e-6, 0.8), 1.0);
+        lift((0.1, 0.2), (0.8, 0.7), 1.0);
+    }
+
+    /// A lift off the domain follows the surface's own evaluation there (#20239 review):
+    /// on the planar patch `S(u, v) = (u, v, 0)` over `[0, 1]²` the segment from `(3, 0)`
+    /// to `(4, 1)` lifts, with the patch's clamped evaluation, onto its edge `u = 1`
+    /// (`x = 1`); with out-of-bounds evaluation enabled, onto the plane, `x` from 3 to 4;
+    /// and on an analytic plane past its domain's sentinel, onto the plane. None is
+    /// refused.
+    #[test]
+    fn lift_curve_off_the_domain_follows_the_surface_s_evaluation() {
+        let k = Kernel::default();
+        let row = |x: f64| vec![Vec3::new(x, 0.0, 0.0), Vec3::new(x, 1.0, 0.0)];
+        let (r0, r1) = (row(0.0), row(1.0));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let tol = 1e-6;
+        let at = |u0: f64, u1: f64| {
+            Curve::from(crate::curve::line::Line::from_points(
+                Point3::new(u0, 0.0, 0.0),
+                Point3::new(u1, 1.0, 0.0),
+                2,
+            ))
+        };
+        let xs = |lifted: &LiftedCurve| {
+            let ivl = lifted.curve.natural_interval();
+            [ivl.min(), ivl.max()].map(|t| {
+                let p = lifted.curve.evaluate_point(&k, t).unwrap();
+                assert!(p.z.abs() <= tol, "{p:?}");
+                p.x
+            })
+        };
+        let clamped = bspline_surface(1, 1, &[&r0, &r1]);
+        let dom = clamped.natural_uv_domain_with_nurb(&k).unwrap();
+        let lifted = clamped
+            .lift_curve(&k, &dom, &at(3.0, 4.0), &interval, tol, false)
+            .unwrap();
+        for x in xs(&lifted) {
+            assert!((x - 1.0).abs() <= tol, "{x}");
+        }
+        let mut open = bspline_surface(1, 1, &[&r0, &r1]);
+        let SurfaceKind::BSpline(b) = open.kind_mut() else {
+            unreachable!()
+        };
+        *b.out_of_bounds_enabled_mut() = true;
+        let lifted = open
+            .lift_curve(&k, &dom, &at(3.0, 4.0), &interval, tol, false)
+            .unwrap();
+        assert!(lifted.max_approx_dev <= tol, "{:e}", lifted.max_approx_dev);
+        let [x0, x1] = xs(&lifted);
+        assert!(
+            (x0 - 3.0).abs() <= tol && (x1 - 4.0).abs() <= tol,
+            "{x0} {x1}"
+        );
+        let flat = plane(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+        let pdom = flat.natural_uv_domain_with_nurb(&k).unwrap();
+        let far = pdom.max().x;
+        assert!(flat
+            .lift_curve(&k, &pdom, &at(far + 1.0, far + 2.0), &interval, tol, false)
+            .is_ok());
+    }
+
     /// `LiftCurve` with the continuity checks skipped, during a Boolean operation, on a
     /// curve-bounded surface over the roof (and one nested in another) is the lift on the
     /// bare roof: the segment's continuity domain is the basis's (#20054). With the
