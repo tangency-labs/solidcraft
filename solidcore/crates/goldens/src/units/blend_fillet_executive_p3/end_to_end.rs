@@ -3772,7 +3772,7 @@ mod wr459_sphere_rows {
     use solidcore::math::EFF_ZERO;
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-    use solidcore::topology::{vertex, FaceId};
+    use solidcore::topology::{vertex, FaceId, VertexId};
 
     /// A Level 2 failure: its label and its reporter's key (the object space in the high
     /// 32 bits, the arena index in the low).
@@ -3979,8 +3979,9 @@ mod wr459_sphere_rows {
     /// point within its edge's tolerance of the circle); the result keeps at least one
     /// edge between its two sphere patches, and every point sampled on every such edge
     /// lies on that circle within the edge's tolerance and inside the span of one of the
-    /// target's arcs (by angle, the round shortening an arc at its end); and every target
-    /// arc keeps an edge that starts at one of the arc's own end points, bit for bit.
+    /// target's arcs (by angle, the round shortening an arc at its end); and the edges kept
+    /// on every target arc form one chain from one of the arc's own end points (bit for
+    /// bit) to its other end point (bit for bit) or to a vertex of the round.
     /// Compared by geometry, not by arena ids, so a boundary split into more edges over
     /// the same span passes too.
     fn shares_the_target_boundary(name: &str, target: &Brep, body: &Brep) {
@@ -4027,7 +4028,7 @@ mod wr459_sphere_rows {
         };
         // each result edge lies on the circle and inside one target arc
         let mut on_arc = vec![Vec::new(); arcs.len()];
-        for (e, iv, tol, ends) in &seams {
+        for (e, iv, tol, _) in &seams {
             let points = sample(body, *e, iv);
             for &p in &points {
                 let d = off_circle(p);
@@ -4035,14 +4036,42 @@ mod wr459_sphere_rows {
             }
             let arc = arcs.iter().position(|a| points.iter().all(|&p| within(p, *tol, a)));
             let arc = arc.unwrap_or_else(|| panic!("{name}: edge {e:?} leaves the target's arcs"));
-            on_arc[arc].push(*ends);
+            on_arc[arc].push(*e);
         }
-        // and every target arc keeps an edge that starts at one of its own ends, bit for bit
-        // (the round only shortens an arc at its other end)
+        // the round's vertices
+        let mut round_vertices = Vec::new();
+        for f in p1::faces(body, None).unwrap() {
+            if body.face(f).unwrap().surface.as_ref().unwrap().procedural_blend().is_some() {
+                round_vertices.extend(solidcore::topology::face::p4::vertices(body, f, None, false, None).unwrap());
+            }
+        }
+        // and the edges kept on every target arc run as one chain, with no gap or overlap,
+        // from one of the arc's own ends (bit for bit) to its other end (bit for bit) or to
+        // a vertex of the round: the round only shortens an arc at its other end, and never
+        // further than the round reaches
         for ((e, _, _, [s, t]), kept) in arcs.iter().zip(&on_arc) {
+            let ends: Vec<[VertexId; 2]> = kept
+                .iter()
+                .map(|&k| {
+                    let (a, b) = edge::start_end_vertices(body, k).unwrap();
+                    [a.unwrap(), b.unwrap()]
+                })
+                .collect();
+            let point = |v: VertexId| vertex::point(body, v).unwrap();
+            let start = ends.iter().flatten().copied().find(|&v| point(v) == *s || point(v) == *t);
+            let start = start.unwrap_or_else(|| panic!("{name}: the target's arc {e:?} keeps no edge from its own ends"));
+            let other = if point(start) == *s { *t } else { *s };
+            let mut used = vec![false; ends.len()];
+            let mut at = start;
+            while let Some(i) = (0..ends.len()).find(|&i| !used[i] && ends[i].contains(&at)) {
+                used[i] = true;
+                at = if ends[i][0] == at { ends[i][1] } else { ends[i][0] };
+            }
+            assert!(used.iter().all(|&u| u), "{name}: the edges kept on the target's arc {e:?} are not one chain");
             assert!(
-                kept.iter().flatten().any(|p| p == s || p == t),
-                "{name}: the target's arc {e:?} keeps no edge from its own ends"
+                point(at) == other || round_vertices.contains(&at),
+                "{name}: the edges kept on the target's arc {e:?} end at {:?}, neither the arc's other end nor the round",
+                point(at)
             );
         }
     }
