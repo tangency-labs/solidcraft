@@ -31,14 +31,16 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("canvas.to_sketch", "Ca
     .params(concat!(
         "canvas?: id or name (default: the last canvas); name?: the new sketch's name. Traces the canvas image (dark drawing on a light background, ",
         "or the reverse) into a new sketch on the canvas plane, lying exactly on the image: lines, splines and holes. ",
-        "at?: [x, y] a point on the canvas plane (mm); given, only the region joined to that point whose colour is within tolerance of the colour ",
-        "there is traced; tolerance?: colour difference 0-100 (default 20), with at"
+        "at?: [x, y] a point on the canvas plane (mm), or a list of such points; given, only the region joined to each point whose colour is within ",
+        "tolerance of the colour there is traced, the regions of all the points together as one sketch; tolerance?: colour difference 0-100 (default 20), with at"
     ))];
 
 const WORK_RES: u32 = 512;
 /// The colour tolerance (percent) when `at` is given without one.
 const DEFAULT_TOLERANCE: f64 = 20.0;
 const MAX_LOOPS: usize = 2000;
+/// The most points `at` takes in one call.
+const MAX_REGIONS: usize = 64;
 /// The largest image traced, in pixels (decoded as RGBA: 160 MB).
 const MAX_PIXELS: u64 = 40_000_000;
 
@@ -115,13 +117,19 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         Vec2::new(center.x + u * cos - v * sin, center.y + u * sin + v * cos)
     };
     let (ink, threshold) = match region {
-        Some((at, tolerance)) => {
-            let (px, py) = inv(at).ok_or_else(|| bad(cmd, "`at` is not on the canvas plane's image"))?;
-            let (x, y) = (px.floor(), py.floor());
-            if !(x >= 0.0 && y >= 0.0 && x < wf && y < hf) {
-                return Err(bad(cmd, "`at` is outside the canvas image"));
+        Some((points, tolerance)) => {
+            // The regions of all the points, together: a pixel is in when any region has it.
+            let mut mask = vec![0.0; w * h];
+            for at in points {
+                let (px, py) = inv(at).ok_or_else(|| bad(cmd, "`at` is not on the canvas plane's image"))?;
+                let (x, y) = (px.floor(), py.floor());
+                if !(x >= 0.0 && y >= 0.0 && x < wf && y < hf) {
+                    return Err(bad(cmd, "`at` is outside the canvas image"));
+                }
+                for (m, f) in mask.iter_mut().zip(flood(&rgb, w, h, (x as usize, y as usize), tolerance)) {
+                    *m = f64::max(*m, f);
+                }
             }
-            let mask = flood(&rgb, w, h, (x as usize, y as usize), tolerance);
             let count = mask.iter().filter(|v| **v > 0.5).count();
             if count == w * h {
                 return Err(bad(cmd, "that region is the whole picture; lower the tolerance or pick a spot inside the shape"));
@@ -204,16 +212,29 @@ struct Loaded {
     rgb: Vec<[f64; 3]>,
 }
 
-/// `at` and `tolerance` as given: `None` without `at`; refused when either cannot be read.
-fn region_params(p: &Value, cmd: &str) -> Result<Option<(Vec2, f64)>> {
+/// `at` (a point, or a list of points) and `tolerance` as given: `None` without `at`; refused
+/// when either cannot be read.
+fn region_params(p: &Value, cmd: &str) -> Result<Option<(Vec<Vec2>, f64)>> {
     let tolerance = match p.get("tolerance") {
         None | Some(Value::Null) => DEFAULT_TOLERANCE,
         Some(v) => v.as_f64().filter(|t| (0.0..=100.0).contains(t)).ok_or_else(|| bad(cmd, "`tolerance` must be a number from 0 to 100"))?,
     };
-    match p.get("at") {
-        None | Some(Value::Null) => Ok(None),
-        Some(v) => crate::params::vec2(v).map(|at| Some((at, tolerance))).ok_or_else(|| bad(cmd, "`at` must be a point [x, y] of numbers")),
-    }
+    let not_points = || bad(cmd, "`at` must be a point [x, y] of numbers, or a list of such points");
+    let points = match p.get("at") {
+        None | Some(Value::Null) => return Ok(None),
+        // A point is [x, y] of numbers (or {x, y}); a list is [[x, y], ...].
+        Some(v) => match crate::params::vec2(v) {
+            Some(one) => vec![one],
+            None => {
+                let list = v.as_array().ok_or_else(not_points)?;
+                if list.is_empty() || list.len() > MAX_REGIONS {
+                    return Err(bad(cmd, format!("`at` takes 1 to {MAX_REGIONS} points")));
+                }
+                list.iter().map(|q| crate::params::vec2(q).ok_or_else(not_points)).collect::<Result<Vec<_>>>()?
+            }
+        },
+    };
+    Ok(Some((points, tolerance)))
 }
 
 /// 1.0 for the pixels joined (4-way) to `seed` whose colour is within `tolerance` percent of the
@@ -819,6 +840,43 @@ mod tests {
     }
 
     #[test]
+    fn several_picked_regions_are_traced_into_one_sketch() {
+        let mut s = placed();
+        // The disc and the square, two separate regions: both outlines, in one sketch.
+        let r = s.execute("canvas.to_sketch", &json!({"at": [at(75.0, 50.0), at(150.0, 50.0)]})).unwrap();
+        assert_eq!((r["outlines"].as_u64(), r["holes"].as_u64()), (Some(2), Some(0)), "{r}");
+        let (disc, square) = (std::f64::consts::PI * 15.0f64.powi(2), 900.0);
+        let a = areas(&s, &r);
+        assert_eq!(a.len(), 2, "{a:?}");
+        assert!((a[0] - square).abs() < square * 0.05 && (a[1] - disc).abs() < disc * 0.05, "{a:?}");
+        // The same point twice, or a point in each shade of the disc, is still one region.
+        let r = s.execute("canvas.to_sketch", &json!({"at": [at(75.0, 50.0), at(75.0, 50.0), at(50.0, 50.0)], "tolerance": 0})).unwrap();
+        assert_eq!((r["outlines"].as_u64(), r["holes"].as_u64()), (Some(1), Some(0)), "{r}");
+    }
+
+    #[test]
+    fn touching_picked_regions_make_one_outline() {
+        let mut s = placed();
+        // At tolerance 0 the bright ring and the darker centre are two regions that touch:
+        // together one solid disc, with no hole between them.
+        let r = s.execute("canvas.to_sketch", &json!({"at": [at(75.0, 50.0), at(50.0, 50.0)], "tolerance": 0})).unwrap();
+        assert_eq!((r["outlines"].as_u64(), r["holes"].as_u64()), (Some(1), Some(0)), "{r}");
+        let disc = std::f64::consts::PI * 15.0f64.powi(2);
+        let a = areas(&s, &r);
+        assert!(a.len() == 1 && (a[0] - disc).abs() < disc * 0.05, "{a:?}");
+    }
+
+    #[test]
+    fn one_point_in_a_list_or_alone_reads_the_same() {
+        let mut s = placed();
+        let alone = s.execute("canvas.to_sketch", &json!({"at": at(150.0, 50.0)})).unwrap();
+        let listed = s.execute("canvas.to_sketch", &json!({"at": [at(150.0, 50.0)]})).unwrap();
+        let object = s.execute("canvas.to_sketch", &json!({"at": {"x": at(150.0, 50.0)[0], "y": at(150.0, 50.0)[1]}})).unwrap();
+        assert_eq!(areas(&s, &alone), areas(&s, &listed));
+        assert_eq!(areas(&s, &alone), areas(&s, &object));
+    }
+
+    #[test]
     fn tolerance_decides_whether_a_darker_shade_joins() {
         let mut s = placed();
         // Tolerance 0: only the bright ring, with the darker centre a hole.
@@ -840,6 +898,9 @@ mod tests {
     fn a_pick_that_selects_nothing_useful_is_refused() {
         let mut s = placed();
         let e = s.execute("canvas.to_sketch", &json!({"at": [1000, 1000]})).unwrap_err().to_string();
+        assert!(e.contains("outside the canvas image"), "{e}");
+        // One bad point among good ones refuses the call.
+        let e = s.execute("canvas.to_sketch", &json!({"at": [at(75.0, 50.0), [1000, 1000]]})).unwrap_err().to_string();
         assert!(e.contains("outside the canvas image"), "{e}");
         let e = s.execute("canvas.to_sketch", &json!({"at": at(75.0, 50.0), "tolerance": 100})).unwrap_err().to_string();
         assert!(e.contains("whole picture"), "{e}");
@@ -865,6 +926,11 @@ mod tests {
             json!({"at": "here"}),
             json!({"at": [1]}),
             json!({"at": {"x": 1}}),
+            json!({"at": []}),
+            json!({"at": [[1, 2], "x"]}),
+            json!({"at": [[1, 2], [3]]}),
+            json!({"at": [[[1, 2]]]}),
+            json!({"at": vec![[1, 2]; 65]}),
             json!({"at": at(75.0, 50.0), "tolerance": -1}),
             json!({"at": at(75.0, 50.0), "tolerance": 101}),
             json!({"at": at(75.0, 50.0), "tolerance": "high"}),

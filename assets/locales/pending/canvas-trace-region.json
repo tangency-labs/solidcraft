@@ -2,64 +2,64 @@
   "en": {
     "ui.trace_region_item": "Trace Region...",
     "browser.trace_title": "Trace Region: {name}",
-    "browser.trace_click": "Click the shape in the image to trace, then set the tolerance.",
-    "browser.trace_picked": "Shape picked. Change the tolerance if needed, then press Trace (or click another spot).",
+    "browser.trace_click": "Click the shape in the image to trace (Ctrl+click adds another), then set the tolerance.",
+    "browser.trace_picked": "Shapes picked: {count}. Ctrl+click adds another, a plain click starts over. Change the tolerance if needed, then press Trace.",
     "browser.trace_tolerance": "Tolerance",
     "ui.trace": "Trace"
   },
   "de": {
     "ui.trace_region_item": "Bereich nachzeichnen...",
     "browser.trace_title": "Bereich nachzeichnen: {name}",
-    "browser.trace_click": "Klicken Sie im Bild auf die Form, die nachgezeichnet werden soll, und stellen Sie dann die Toleranz ein.",
-    "browser.trace_picked": "Form gewählt. Passen Sie bei Bedarf die Toleranz an und klicken Sie auf Nachzeichnen (oder klicken Sie eine andere Stelle an).",
+    "browser.trace_click": "Klicken Sie im Bild auf die Form, die nachgezeichnet werden soll (Strg+Klick fügt eine weitere hinzu), und stellen Sie dann die Toleranz ein.",
+    "browser.trace_picked": "Gewählte Formen: {count}. Strg+Klick fügt eine weitere hinzu, ein einfacher Klick beginnt neu. Passen Sie bei Bedarf die Toleranz an und klicken Sie auf Nachzeichnen.",
     "browser.trace_tolerance": "Toleranz",
     "ui.trace": "Nachzeichnen"
   },
   "ar": {
     "ui.trace_region_item": "تتبّع منطقة...",
     "browser.trace_title": "تتبّع منطقة: {name}",
-    "browser.trace_click": "انقر على الشكل المراد تتبّعه في الصورة، ثم اضبط التسامح.",
-    "browser.trace_picked": "تم اختيار الشكل. عدّل التسامح عند الحاجة ثم اضغط تتبّع (أو انقر موضعًا آخر).",
+    "browser.trace_click": "انقر على الشكل المراد تتبّعه في الصورة (Ctrl+نقر يضيف شكلًا آخر)، ثم اضبط التسامح.",
+    "browser.trace_picked": "تم اختيار {count} شكل. Ctrl+نقر يضيف شكلًا آخر، ونقرة عادية تبدأ من جديد. عدّل التسامح عند الحاجة ثم اضغط تتبّع.",
     "browser.trace_tolerance": "التسامح",
     "ui.trace": "تتبّع"
   },
   "he": {
     "ui.trace_region_item": "עקוב אחר אזור...",
     "browser.trace_title": "עקיבה אחר אזור: {name}",
-    "browser.trace_click": "לחצו על הצורה בתמונה שרוצים לעקוב אחריה, ואז קבעו את הסובלנות.",
-    "browser.trace_picked": "הצורה נבחרה. שנו את הסובלנות לפי הצורך ולחצו על עקוב (או לחצו על מקום אחר).",
+    "browser.trace_click": "לחצו על הצורה בתמונה שרוצים לעקוב אחריה (Ctrl+לחיצה מוסיף עוד אחת), ואז קבעו את הסובלנות.",
+    "browser.trace_picked": "נבחרו {count} צורות. Ctrl+לחיצה מוסיף עוד אחת, ולחיצה רגילה מתחילה מחדש. שנו את הסובלנות לפי הצורך ולחצו על עקוב.",
     "browser.trace_tolerance": "סובלנות",
     "ui.trace": "עקוב"
   },
   "ja": {
     "ui.trace_region_item": "領域をトレース...",
     "browser.trace_title": "領域をトレース: {name}",
-    "browser.trace_click": "画像内でトレースする図形をクリックし、許容差を設定します。",
-    "browser.trace_picked": "図形を選択しました。必要なら許容差を変更し、[トレース] を押してください(別の場所をクリックしても構いません)。",
+    "browser.trace_click": "画像内でトレースする図形をクリックし(Ctrl+クリックでもう1つ追加)、許容差を設定します。",
+    "browser.trace_picked": "{count} 個の図形を選択しました。Ctrl+クリックでさらに追加、通常のクリックで選び直します。必要なら許容差を変更し、[トレース] を押してください。",
     "browser.trace_tolerance": "許容差",
     "ui.trace": "トレース"
   },
   "ko": {
     "ui.trace_region_item": "영역 트레이스...",
     "browser.trace_title": "영역 트레이스: {name}",
-    "browser.trace_click": "이미지에서 트레이스할 모양을 클릭한 다음 허용 오차를 설정하세요.",
-    "browser.trace_picked": "모양을 선택했습니다. 필요하면 허용 오차를 바꾸고 트레이스를 누르세요(다른 곳을 클릭해도 됩니다).",
+    "browser.trace_click": "이미지에서 트레이스할 모양을 클릭한 다음(Ctrl+클릭으로 하나 더 추가) 허용 오차를 설정하세요.",
+    "browser.trace_picked": "모양 {count}개를 선택했습니다. Ctrl+클릭은 하나 더 추가하고, 일반 클릭은 새로 시작합니다. 필요하면 허용 오차를 바꾸고 트레이스를 누르세요.",
     "browser.trace_tolerance": "허용 오차",
     "ui.trace": "트레이스"
   },
   "vi": {
     "ui.trace_region_item": "Dò theo vùng...",
     "browser.trace_title": "Dò theo vùng: {name}",
-    "browser.trace_click": "Nhấp vào hình cần dò trong ảnh, rồi đặt dung sai.",
-    "browser.trace_picked": "Đã chọn hình. Đổi dung sai nếu cần, rồi bấm Dò theo (hoặc nhấp vào chỗ khác).",
+    "browser.trace_click": "Nhấp vào hình cần dò trong ảnh (Ctrl+nhấp để thêm hình khác), rồi đặt dung sai.",
+    "browser.trace_picked": "Đã chọn {count} hình. Ctrl+nhấp để thêm hình khác, nhấp thường để chọn lại từ đầu. Đổi dung sai nếu cần, rồi bấm Dò theo.",
     "browser.trace_tolerance": "Dung sai",
     "ui.trace": "Dò theo"
   },
   "zh": {
     "ui.trace_region_item": "追踪区域...",
     "browser.trace_title": "追踪区域:{name}",
-    "browser.trace_click": "在图像中单击要追踪的形状,然后设置容差。",
-    "browser.trace_picked": "已选定形状。如有需要请调整容差,然后按“追踪”(也可以单击其他位置)。",
+    "browser.trace_click": "在图像中单击要追踪的形状(按住 Ctrl 单击可再添加一个),然后设置容差。",
+    "browser.trace_picked": "已选定 {count} 个形状。按住 Ctrl 单击可再添加,直接单击则重新选择。如有需要请调整容差,然后按“追踪”。",
     "browser.trace_tolerance": "容差",
     "ui.trace": "追踪"
   }

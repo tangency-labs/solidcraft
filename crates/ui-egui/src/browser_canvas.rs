@@ -52,7 +52,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if m.trace {
-                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("trace_hint"));
+                ui_kit::text(ui, hint_text(&m), ui_kit::Text::Note("trace_hint"));
                 ui_kit::row(ui, solidcraft_ui_text::tr("browser.trace_tolerance"), |ui| {
                     ui_kit::slider(ui, &mut m.tolerance, 0.0..=100.0, Default::default())
                 });
@@ -161,7 +161,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             app.tree.canvas_panel = Some(m);
             return;
         }
-        match app.run("canvas.to_sketch", json!({ "canvas": c.id, "at": m.a, "tolerance": m.tolerance })) {
+        match app.run("canvas.to_sketch", json!({ "canvas": c.id, "at": m.points, "tolerance": m.tolerance })) {
             Ok(_) => app.tree.canvas_panel = None,
             Err(e) => {
                 app.set_status(e, true);
@@ -184,6 +184,14 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
 
+/// The card's hint as shown: the message of `hint`, with the number of shapes picked in Trace Region.
+pub(crate) fn hint_text(panel: &crate::browser::CanvasPanel) -> String {
+    if panel.trace && panel.picked_both {
+        return solidcraft_ui_text::format(hint(panel), &[("count", &panel.points.len().to_string())]);
+    }
+    solidcraft_ui_text::tr(hint(panel)).to_string()
+}
+
 /// The message id of the card's hint (and the status line) for what the user does next.
 pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
     if panel.trace {
@@ -199,7 +207,7 @@ pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
 }
 
 /// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
-pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
+pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2, add: bool) -> bool {
     let Some(mut panel) = app.tree.canvas_panel.clone() else {
         return false;
     };
@@ -237,6 +245,11 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     }
     let point = [local.x, local.y];
     if panel.trace {
+        // Ctrl+click adds one more region; a plain click picks that one alone.
+        if !add || !panel.picked_both {
+            panel.points.clear();
+        }
+        panel.points.push(point);
         panel.a = point;
         panel.picked_both = true;
     } else if panel.next == 0 {
@@ -248,7 +261,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         panel.next = 0;
         panel.picked_both = true;
     }
-    app.set_status(solidcraft_ui_text::tr(hint(&panel)), false);
+    app.set_status(hint_text(&panel), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
@@ -280,24 +293,28 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
             painter.line_segment([a, b], Stroke::new(1.5, t.accent));
         }
     }
+    if panel.trace {
+        // A ring on every region picked, the last one the accent.
+        for (i, point) in panel.points.iter().enumerate() {
+            let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
+                continue;
+            };
+            let last = i + 1 == panel.points.len();
+            let stroke = Stroke::new(if last { 2.0 } else { 1.5 }, if last { t.accent } else { t.sel_edge });
+            painter.circle_stroke(screen, 7.0, stroke);
+            painter.circle_filled(screen, 2.5, if last { t.accent } else { t.sel_vertex });
+        }
+        return;
+    }
     for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
         let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
             continue;
         };
-        if panel.trace && (i == 1 || !panel.picked_both) {
-            continue;
-        }
         let active = panel.next as usize == i;
         let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
         painter.circle_stroke(screen, 7.0, stroke);
         painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
-        let label = if panel.trace {
-            ""
-        } else if i == 0 {
-            "A"
-        } else {
-            "B"
-        };
+        let label = if i == 0 { "A" } else { "B" };
         painter.text(
             screen + vec2(10.0, -10.0),
             egui::Align2::LEFT_BOTTOM,
@@ -344,6 +361,9 @@ mod tests {
         assert_eq!(super::hint(&panel), "browser.trace_click");
         panel.picked_both = true;
         assert_eq!(super::hint(&panel), "browser.trace_picked");
+        // Several regions picked (Ctrl+click): the hint counts them, Trace sends them all.
+        panel.points = vec![[1.0, 2.0], [3.0, 4.0]];
+        assert!(super::hint_text(&panel).contains("2"), "{}", super::hint_text(&panel));
     }
 
     #[test]
