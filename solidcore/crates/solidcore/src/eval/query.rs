@@ -386,6 +386,41 @@ impl Query {
         out
     }
 
+    /// The faces that face against the curves `samples` lie on, ascending. A sample is a point on
+    /// a curve and the curve's direction there; a face through it is meant to face along that
+    /// direction crossed with `normal`, as an extruded sheet's walls face (out of a region whose
+    /// outer loop runs counter-clockwise about `normal`). Each face `p` lies on ([`Query::faces_at`]
+    /// within `accept` mm) is judged there by its normal out of the material, the judgements of a
+    /// face are summed, and a face whose sum is below zero faces against them. A face no sample
+    /// lies on, a sample whose direction is along `normal` and a face with no normal there say
+    /// nothing.
+    #[must_use]
+    pub fn faces_against(&self, normal: Vec3, samples: &[(Vec3, Vec3)], accept: f64) -> Vec<usize> {
+        let mut votes = vec![0.0f64; self.record.faces.len()];
+        for (p, d) in samples {
+            let Some(want) = d.cross(normal).normalized() else {
+                continue;
+            };
+            for (_, f) in self.faces_at(*p, accept) {
+                let Some(n) = self
+                    .face_uv(f, *p, accept)
+                    .and_then(|uv| self.face_normal(f, uv))
+                else {
+                    continue;
+                };
+                if let Some(v) = votes.get_mut(f) {
+                    *v += n.dot(want);
+                }
+            }
+        }
+        votes
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| **v < 0.0)
+            .map(|(f, _)| f)
+            .collect()
+    }
+
     /// Where the ray from `o` along `d` meets the faces ahead of `o` (further than `accept`):
     /// each meeting's distance along `d` (a unit vector), face and point, nearest first. Faces on
     /// planes, cylinders, cones and spheres (a ball patch's sphere too) are met exactly. A face on

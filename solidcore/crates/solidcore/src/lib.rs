@@ -53,8 +53,6 @@ pub mod develop;
 pub mod eval;
 pub mod face_pattern;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
