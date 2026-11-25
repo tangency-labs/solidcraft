@@ -537,6 +537,19 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
 
+### named selection
+
+A selection kept in the design under a name, so its items can be selected again in one click and
+then hidden, coloured or moved together. It can hold components, bodies, faces, edges and features
+from anywhere in the design. It does not change how the Browser lists them, as a group does.
+
+- **In SolidCraft:** `named_selection.save`, `named_selection.apply`, `named_selection.update`,
+  `named_selection.rename`, `named_selection.delete`, `named_selection.list`; the Named Selections
+  folder in the Browser; the `named_selections` design-file key.
+- **Don't use:** group (that only changes how items are listed), set on its own.
+- **Elsewhere:** saved selection, selection set.
+- **For translators:** a saved choice of items, not the act of selecting.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model

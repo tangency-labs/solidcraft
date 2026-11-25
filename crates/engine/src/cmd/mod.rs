@@ -196,6 +196,7 @@ mod metadata;
 mod model_selection;
 pub(crate) mod motion;
 mod motion_simulate;
+mod named_selection;
 mod notes;
 mod parts;
 mod plugin;
@@ -680,6 +681,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(selection::COMMANDS.iter());
+    v.extend(named_selection::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());

@@ -1132,3 +1132,48 @@ fn construction_features_keep_their_labels_and_styling() {
     // The design's own origin keeps its bare name: not a placement's item, feature or not.
     assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
 }
+
+/// #18716: several components selected are kept with Save Named Selection from their menu; the
+/// Browser lists the selection in a Named Selections folder, and its Select picks all of them
+/// again after the selection has changed. Update replaces what it holds.
+#[test]
+fn save_selection_lists_a_named_selection_whose_select_picks_the_components_again() {
+    use crate::scenario::handle_at;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let mut placed = Vec::new();
+    for name in ["LED1", "LED2", "USB"] {
+        placed.push(h.app.run("component.create", json!({"name": name})).unwrap()["occurrence"].as_u64().unwrap());
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+    }
+    h.settle();
+    assert!(handle_at("row:Named Selections").is_none(), "no folder while the design has none");
+    let target = Target::Occurrence { path: vec![placed[0]] };
+    let save = |h: &Harness| context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "named_selection.save");
+    assert!(save(&h).is_none(), "nothing selected, nothing to save");
+    let all: Vec<Sel> = placed.iter().map(|o| Sel::Occurrence { path: vec![*o] }).collect();
+    h.app.session.selection = all.clone();
+    let item = save(&h).expect("Save Named Selection is offered");
+    for folder in [Target::Analysis, Target::NamedViews] {
+        let offered = context_menu::items(&h.app, &folder).iter().any(|i| i.id == "named_selection.save");
+        assert!(!offered, "not on a folder's menu");
+    }
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    let name = h.app.session.doc.named_selections.first().map(|x| x.name.clone()).expect("the selection is kept");
+    assert_eq!(name, "Selection1 – 3 components");
+    h.settle();
+    assert!(handle_at("row:Named Selections").is_some(), "the folder shows");
+    assert!(handle_at(&format!("row:{name}")).is_some(), "the named selection is listed");
+    // Select picks all three again.
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![placed[1]] }];
+    let menu = context_menu::items(&h.app, &Target::NamedSelection { name: name.clone() });
+    let select = menu.iter().find(|i| i.id == "named_selection.apply").unwrap();
+    context_menu::run_item(&mut h.app, select, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.selection, all);
+    // Update keeps what is selected now.
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![placed[2]] }];
+    let menu = context_menu::items(&h.app, &Target::NamedSelection { name: name.clone() });
+    let update = menu.iter().find(|i| i.id == "named_selection.update").unwrap();
+    context_menu::run_item(&mut h.app, update, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.doc.named_selections[0].items.len(), 1);
+}

@@ -1954,6 +1954,7 @@ fn component_rows_inner(
     if id == 0 && !crate::render_workspace::active(app) && !searching {
         doc_settings(app, rows, d);
         named_view_rows(app, rows, d, acts);
+        named_selection_rows(app, rows, d, acts);
         origin_rows(app, rows, d, acts);
         canvas_rows(app, rows, d, acts);
         point_clouds::rows(app, rows, d, acts);
@@ -2485,6 +2486,94 @@ fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: 
             acts.menu = Some((p, Target::NamedView { name }));
         }
     }
+}
+
+/// The Named Selections folder (#18716): each selection kept in the design, with buttons that
+/// select its items again and that replace them with the current selection. Drawn only while
+/// the design has one, so designs without any look as they did.
+fn named_selection_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions) {
+    if app.session.doc.named_selections.is_empty() {
+        return;
+    }
+    let key = "namedselections";
+    let open = is_open(app, key, true);
+    let r = node_row(
+        rows,
+        Spec { key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label: solidcraft_ui_text::tr("ui.named_selections"), ..Default::default() },
+    );
+    if r.fold || r.clicked {
+        toggle(app, key, true);
+    }
+    if !open {
+        return;
+    }
+    let select = solidcraft_ui_text::tr("ui.named_selection_select");
+    let update = solidcraft_ui_text::tr("ui.named_selection_update");
+    let names: Vec<String> = app.session.doc.named_selections.iter().map(|x| x.name.clone()).collect();
+    for (i, name) in names.into_iter().enumerate() {
+        let row_key = format!("namedselection:{i}");
+        let (select_target, update_target) = (format!("{row_key}:select"), format!("{row_key}:update"));
+        let actions = [
+            crate::ui_kit::TreeAction { icon: "select", hover_only: false, label: select, reason: None, target: &select_target },
+            crate::ui_kit::TreeAction { icon: "refresh", hover_only: false, label: update, reason: None, target: &update_target },
+        ];
+        let r = node_row(
+            rows,
+            Spec { key: &row_key, ..Default::default() },
+            Row { depth: depth + 1, icon: "select", label: &name, name: true, rename: true, actions: &actions, ..Default::default() },
+        );
+        if r.actions.contains(&select_target) || (r.double && !r.slow_rename) {
+            apply_named_selection(app, &name);
+        } else if r.actions.contains(&update_target) {
+            let _ = app.run("named_selection.update", json!({ "selection": name }));
+        } else if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Selection(name.clone()), r.name_at());
+        }
+        inline_rename(app, rows.ui(), r.name_at(), &name);
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::NamedSelection { name }));
+        }
+    }
+}
+
+/// Select a named selection's items again (#18716).
+pub fn apply_named_selection(app: &mut SolveApp, name: &str) {
+    let _ = app.run("named_selection.apply", json!({ "selection": name }));
+}
+
+/// Whether the menu of `target` offers Save Named Selection: the menu is the view's or a model
+/// item's, and something of the model is selected (not sketch geometry or a drawing's items).
+pub fn selection_savable(app: &SolveApp, target: &Target) -> bool {
+    // Only on the menu of the view or of a model item, not on folders, tools or the app bar.
+    matches!(
+        target,
+        Target::Viewport
+            | Target::Body { .. }
+            | Target::Sketch { .. }
+            | Target::Feature { .. }
+            | Target::Component { .. }
+            | Target::Occurrence { .. }
+            | Target::Group { .. }
+    ) && app
+        .session
+        .selection
+        .iter()
+        .any(|s| matches!(s, Sel::Occurrence { .. } | Sel::Body { .. } | Sel::Face { .. } | Sel::Edge { .. } | Sel::Feature { .. }))
+}
+
+/// The menu of a named selection.
+pub fn named_selection_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let something = selection_savable(app, &Target::Viewport);
+    vec![
+        Item::action("named_selection.apply", solidcraft_ui_text::tr("ui.named_selection_select"), "select").with(json!({ "selection": name })),
+        Item::action("named_selection.update", solidcraft_ui_text::tr("ui.named_selection_update"), "refresh")
+            .with(json!({ "selection": name }))
+            .on_if(something),
+        Item::sep(),
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "selection": name })),
+        Item::action("named_selection.delete", "Delete", "delete").with(json!({ "selection": name })),
+    ]
 }
 
 /// Turn the camera to a named view (a saved one or a standard one), animated.

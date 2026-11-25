@@ -119,6 +119,7 @@ pub mod motion_animation;
 pub mod motion_play;
 pub mod motion_simulate;
 pub mod motion_trace;
+pub mod named_selection;
 pub mod new_design;
 pub mod notes;
 pub mod panels;

@@ -4496,6 +4496,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Named selections: saved selections to select again in one click (#18716).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_selections: Vec<NamedSelection>,
     /// Construction planes dragged to a size of their own, by feature id: `[x0, y0, x1, y1]` in the
     /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -4628,6 +4631,21 @@ pub struct NamedView {
     pub roll: f64,
     #[serde(default)]
     pub up: solidcraft_viewport::UpAxis,
+}
+
+/// A named selection (#18716): what was selected, kept under a name to select again in one
+/// click. Each item is a selection entry as `select.set` takes it (`{"type": "occurrence",
+/// "path": […]}`, `{"type": "body", "name": …}`, `{"type": "feature", "id": …}`…); an item
+/// that no longer exists is skipped when the selection is applied.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedSelection {
+    pub name: String,
+    #[serde(default)]
+    pub items: Vec<serde_json::Value>,
+    /// The name was made by SolidCraft ("Selection3 – 4 faces"), so it follows an update; a
+    /// name the user typed or renamed to stays, whatever it looks like.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub generated: bool,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -4852,6 +4870,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            named_selections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
@@ -4917,6 +4936,25 @@ impl Document {
         };
         for g in self.browser_groups.iter_mut().filter(|g| g.folder == "bodies") {
             g.items.iter_mut().for_each(rename);
+        }
+        // Saved selections keep pointing at the renamed body (its faces and edges too), so a
+        // body given the old name later is not selected in its place (#18716). No body has the
+        // new name yet, so an item saved under it names a body that is gone (a pattern copy a
+        // lower count removed, say): it stays gone rather than selecting this body, which may
+        // have been made by the same feature.
+        for item in self.named_selections.iter_mut().flat_map(|x| x.items.iter_mut()) {
+            let key = match item.get("type").and_then(serde_json::Value::as_str) {
+                Some("body") => "name",
+                Some("face" | "edge") => "body",
+                _ => continue,
+            };
+            let Some(o) = item.as_object_mut() else { continue };
+            let named = o.get(key).and_then(serde_json::Value::as_str).map(str::to_string);
+            if named.as_deref() == Some(old) {
+                o.insert(key.into(), serde_json::Value::from(new));
+            } else if named.as_deref() == Some(new) {
+                o.insert("gone".into(), serde_json::Value::Bool(true));
+            }
         }
         for (_, v) in self.browser_order.iter_mut().filter(|(k, _)| k.ends_with("/bodies")) {
             v.iter_mut().for_each(rename);

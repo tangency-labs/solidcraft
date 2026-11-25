@@ -172,6 +172,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        // What is selected again never feeds geometry (#18716).
+        named_selections: _,
         visibility,
         point_clouds,
         // Display only: a plane's drawn size shapes nothing.

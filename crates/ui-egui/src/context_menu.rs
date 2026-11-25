@@ -130,6 +130,10 @@ pub enum Target {
     NamedView {
         name: String,
     },
+    /// One named selection in the Named Selections folder (#18716).
+    NamedSelection {
+        name: String,
+    },
     /// A canvas (reference image).
     Canvas {
         id: u64,
@@ -305,6 +309,8 @@ pub enum RenameWhat {
     TimelineGroup(u64),
     Canvas(u64),
     View(String),
+    /// A named selection, by name (#18716).
+    Selection(String),
     Joint(u64),
 }
 
@@ -640,6 +646,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             })
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
+        Target::NamedSelection { name } => crate::browser::named_selection_items(app, name),
         Target::InsertDesign => insert_design_items(app),
         Target::ReplaceSketchFile { sketch, path, sketches } => sketches
             .iter()
@@ -741,6 +748,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     if let Some(p) = crate::browser::selection_group(app, target) {
         v.push(Item::sep());
         v.push(act("ui.groupSelected", "Group Selected", "folder").with(p));
+    }
+    // Anything of the model selected: it can be kept as a named selection (#18716).
+    if crate::browser::selection_savable(app, target) {
+        v.push(Item::sep());
+        v.push(cmd(app, "named_selection.save", solidcraft_ui_text::tr("cmd.named_selection_save")).with(json!({})));
     }
     each_item(&mut v, &mut |item: &mut Item| {
         if item.id != "ui.appearance" {
@@ -2294,6 +2306,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::Canvas(c)
             } else if let Some(v) = p.get("view").and_then(Value::as_str) {
                 RenameWhat::View(v.to_string())
+            } else if let Some(v) = p.get("selection").and_then(Value::as_str) {
+                RenameWhat::Selection(v.to_string())
             } else if let Some(j) = id_of(&p, "joint") {
                 RenameWhat::Joint(j)
             } else {
@@ -3032,6 +3046,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::TimelineGroup(g) => doc.timeline_groups.iter().find(|group| group.id == *g).map(|group| group.name.clone()).unwrap_or_default(),
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::View(v) => v.clone(),
+        RenameWhat::Selection(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None, session: app.session.uid });
@@ -3069,6 +3084,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) -> Result<(), String
         RenameWhat::TimelineGroup(g) => app.run("timeline.rename_group", json!({ "group": g, "name": name })).map(|_| ()),
         RenameWhat::Canvas(c) => app.run("canvas.edit", json!({ "canvas": c, "name": name })).map(|_| ()),
         RenameWhat::View(v) => app.run("view.rename", json!({ "view": v, "name": name })).map(|_| ()),
+        RenameWhat::Selection(v) => app.run("named_selection.rename", json!({ "selection": v, "name": name })).map(|_| ()),
         RenameWhat::Joint(j) => app.run("joint.edit", json!({ "joint": j, "name": name })).map(|_| ()),
     };
     // The command's own status line explains a refusal; the caller decides whether to keep the
@@ -3371,6 +3387,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::NamedView { name } => {
             doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)
         }
+        Target::NamedSelection { name } => doc.named_selections.iter().any(|x| x.name == *name),
         Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
         // Shown or hidden, the browser lists it, in the Analysis folder while it has any plane.

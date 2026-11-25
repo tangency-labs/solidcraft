@@ -1877,7 +1877,7 @@ fn sets_path(set: &Value, path: &str) -> bool {
 /// Complete a partial script pick without changing the stored selection type or reinterpreting
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
-fn selection_item(s: &Session, value: Value) -> Result<Sel> {
+pub(super) fn selection_item(s: &Session, value: Value) -> Result<Sel> {
     let (face, PartialPick { body, index, point }) = match read_item(value).map_err(|e| bad("select.set", e))? {
         SelectItem::Exact(sel) => return Ok(sel),
         SelectItem::Pick { face, pick } => (face, pick),
@@ -1935,7 +1935,7 @@ pub(crate) fn listed_bodies(shown: impl Iterator<Item = Sel>) -> Option<Vec<Sel>
     (listed.len() <= MAX_SELECTION).then_some(listed)
 }
 
-fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
     if items.len() > MAX_SELECTION {
         return Err(bad("select.set", "too many items"));

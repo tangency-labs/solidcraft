@@ -1,0 +1,90 @@
+{
+  "en": {
+    "cmd.named_selection_apply": "Select Named Selection",
+    "cmd.named_selection_delete": "Delete Named Selection",
+    "cmd.named_selection_list": "List Named Selections",
+    "cmd.named_selection_rename": "Rename Named Selection",
+    "cmd.named_selection_save": "Save Named Selection",
+    "cmd.named_selection_update": "Update Named Selection",
+    "ui.named_selection_select": "Select",
+    "ui.named_selection_update": "Update with Selection",
+    "ui.named_selections": "Named Selections"
+  },
+  "ar": {
+    "cmd.named_selection_apply": "تحديد التحديد المسمّى",
+    "cmd.named_selection_delete": "حذف التحديد المسمّى",
+    "cmd.named_selection_list": "سرد التحديدات المسمّاة",
+    "cmd.named_selection_rename": "إعادة تسمية التحديد المسمّى",
+    "cmd.named_selection_save": "حفظ تحديد مسمّى",
+    "cmd.named_selection_update": "تحديث التحديد المسمّى",
+    "ui.named_selection_select": "تحديد",
+    "ui.named_selection_update": "تحديث بالتحديد الحالي",
+    "ui.named_selections": "التحديدات المسمّاة"
+  },
+  "de": {
+    "cmd.named_selection_apply": "Benannte Auswahl auswählen",
+    "cmd.named_selection_delete": "Benannte Auswahl löschen",
+    "cmd.named_selection_list": "Benannte Auswahlen auflisten",
+    "cmd.named_selection_rename": "Benannte Auswahl umbenennen",
+    "cmd.named_selection_save": "Benannte Auswahl speichern",
+    "cmd.named_selection_update": "Benannte Auswahl aktualisieren",
+    "ui.named_selection_select": "Auswählen",
+    "ui.named_selection_update": "Mit Auswahl aktualisieren",
+    "ui.named_selections": "Benannte Auswahlen"
+  },
+  "he": {
+    "cmd.named_selection_apply": "בחירת בחירה בעלת שם",
+    "cmd.named_selection_delete": "מחיקת בחירה בעלת שם",
+    "cmd.named_selection_list": "רשימת בחירות בעלות שם",
+    "cmd.named_selection_rename": "שינוי שם של בחירה בעלת שם",
+    "cmd.named_selection_save": "שמירת בחירה בעלת שם",
+    "cmd.named_selection_update": "עדכון בחירה בעלת שם",
+    "ui.named_selection_select": "בחירה",
+    "ui.named_selection_update": "עדכון לפי הבחירה הנוכחית",
+    "ui.named_selections": "בחירות בעלות שם"
+  },
+  "ja": {
+    "cmd.named_selection_apply": "名前付き選択を選択",
+    "cmd.named_selection_delete": "名前付き選択を削除",
+    "cmd.named_selection_list": "名前付き選択の一覧",
+    "cmd.named_selection_rename": "名前付き選択の名前を変更",
+    "cmd.named_selection_save": "名前付き選択として保存",
+    "cmd.named_selection_update": "名前付き選択を更新",
+    "ui.named_selection_select": "選択",
+    "ui.named_selection_update": "現在の選択で更新",
+    "ui.named_selections": "名前付き選択"
+  },
+  "ko": {
+    "cmd.named_selection_apply": "이름 있는 선택 선택",
+    "cmd.named_selection_delete": "이름 있는 선택 삭제",
+    "cmd.named_selection_list": "이름 있는 선택 목록",
+    "cmd.named_selection_rename": "이름 있는 선택 이름 바꾸기",
+    "cmd.named_selection_save": "이름 있는 선택으로 저장",
+    "cmd.named_selection_update": "이름 있는 선택 업데이트",
+    "ui.named_selection_select": "선택",
+    "ui.named_selection_update": "현재 선택으로 업데이트",
+    "ui.named_selections": "이름 있는 선택"
+  },
+  "vi": {
+    "cmd.named_selection_apply": "Chọn vùng chọn đã đặt tên",
+    "cmd.named_selection_delete": "Xóa vùng chọn đã đặt tên",
+    "cmd.named_selection_list": "Liệt kê vùng chọn đã đặt tên",
+    "cmd.named_selection_rename": "Đổi tên vùng chọn đã đặt tên",
+    "cmd.named_selection_save": "Lưu vùng chọn đã đặt tên",
+    "cmd.named_selection_update": "Cập nhật vùng chọn đã đặt tên",
+    "ui.named_selection_select": "Chọn",
+    "ui.named_selection_update": "Cập nhật bằng vùng chọn hiện tại",
+    "ui.named_selections": "Vùng chọn đã đặt tên"
+  },
+  "zh": {
+    "cmd.named_selection_apply": "选择命名选择",
+    "cmd.named_selection_delete": "删除命名选择",
+    "cmd.named_selection_list": "列出命名选择",
+    "cmd.named_selection_rename": "重命名命名选择",
+    "cmd.named_selection_save": "保存为命名选择",
+    "cmd.named_selection_update": "更新命名选择",
+    "ui.named_selection_select": "选择",
+    "ui.named_selection_update": "用当前选择更新",
+    "ui.named_selections": "命名选择"
+  }
+}
