@@ -36,6 +36,17 @@ test('parseDefaults', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes - faster zoom').status, 'malformed');
 });
 
+test('parseDefaults reads a "Changes a default" heading with the value on the next line', () => {
+  assert.equal(pc.parseDefaults('## Changes a default\nno — fixes a refused batch\n\n## Validation').status, 'no');
+  assert.equal(pc.parseDefaults('### Changes a default:\r\n\r\nNo.').status, 'no');
+  const r = pc.parseDefaults('## Changes a default\nyes — M opens Sketch Move, old behaviour kept behind preference shortcuts');
+  assert.equal(r.status, 'yes');
+  assert.equal(r.preference, 'shortcuts');
+  assert.equal(pc.parseDefaults('## Changes a default\nyes — fixes three behaviours:\n1. more').status, 'malformed');
+  assert.equal(pc.parseDefaults('## Changes a default\n').status, 'malformed');
+  assert.equal(pc.parseDefaults('## Changes a default in the sketch\nno').status, 'missing');
+});
+
 test('parseDefaults takes a note after the separator', () => {
   for (const sep of [',', '—', '–', '-', ':', ';']) {
     assert.equal(pc.parseDefaults(`Changes a default: no${sep} only a corrected label`).status, 'no', sep);
