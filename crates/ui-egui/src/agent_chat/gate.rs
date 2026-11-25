@@ -142,7 +142,7 @@ fn reads_only(id: &str) -> bool {
     // The engine finds a command ignoring case, so the plugin readers are matched the same way.
     id.eq_ignore_ascii_case("plugin.inspect")
         || id.eq_ignore_ascii_case("plugin.check")
-        || (id.starts_with("inspect.") && id != "inspect.section")
+        || (id.starts_with("inspect.") && !id.starts_with("inspect.section"))
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")

@@ -1176,6 +1176,26 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             separate_end(sk, ci, end)?;
             return Ok(ids_of(sk, &[ci]));
         }
+        let points = match &points {
+            Some(list) => {
+                let mut rest = Vec::new();
+                let mut separated = false;
+                for q in list {
+                    match break_shared_end(sk, ci, *q) {
+                        Some(end) => {
+                            separate_end(sk, ci, end)?;
+                            separated = true;
+                        }
+                        None => rest.push(*q),
+                    }
+                }
+                if separated && rest.is_empty() {
+                    return Ok(ids_of(sk, &[ci]));
+                }
+                Some(rest)
+            }
+            None => None,
+        };
         loosen_along(sk, ci);
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
