@@ -244,6 +244,7 @@ mod render_ui;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
+mod sheet_check;
 pub(crate) use sheet::DxfCurves;
 pub(crate) use sheet::DxfText;
 pub(crate) use sheet::FlangeType;
@@ -655,6 +656,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(plugin_storage::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
+    v.extend(sheet_check::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());

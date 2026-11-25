@@ -1449,7 +1449,7 @@ fn surfaces_of(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::Surf
 }
 
 /// The sheet metal body `body`, else the last one.
-fn surfaces_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<solidcraft_doc::SurfaceSheet> {
+pub(super) fn surfaces_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<solidcraft_doc::SurfaceSheet> {
     let st = s.model.state();
     match body {
         Some(b) => st.surface_sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
@@ -1473,12 +1473,17 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
     "side": side, "depth_mm": p.z1-p.z0, "z0_mm": p.z0, "z1_mm": p.z1})
 }
 
+/// The bounding box of a sheet's flat: the size of its outlines together (mm).
+pub(super) fn flat_size(sk: &solidcraft_doc::SurfaceSheet) -> Vec2 {
+    sk.regions.iter().map(|r| r.outer.polyline(1e-3)).fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size()
+}
+
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
 /// and the largest stretch any panel's flat leaves.
 fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     let sk = &sk.shown();
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
-    let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
+    let size = flat_size(sk);
     let pt = |v: &Vec2| json!([v.x, v.y]);
     let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
     let holes: Vec<Value> = sk.regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();

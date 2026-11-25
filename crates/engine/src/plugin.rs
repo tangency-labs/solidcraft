@@ -299,6 +299,7 @@ const FILE_COMMANDS: &[&str] = &[
     "pointcloud.insert",
     "pointcloud.reload",
     "render.export",
+    "sheet.check_shop",
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sketch.export_dxf",

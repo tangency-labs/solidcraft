@@ -155,6 +155,7 @@ pub mod select;
 pub mod selection;
 pub mod settings;
 pub mod sheet;
+pub mod sheet_check;
 pub mod silhouette;
 pub mod sketch;
 pub mod sketch_3d;

@@ -1623,3 +1623,115 @@ fn the_flat_pattern_lists_each_hardware_hole() {
     run(&mut s, "solid.box", json!({"corner": [60, 20, -5], "length": 20, "width": 20, "height": 20, "operation": "cut"}));
     assert_eq!(flat(&mut s)["hardware"].as_array().map(Vec::len), Some(2), "the stud's hole is gone");
 }
+
+/// `sheet.check_shop` (#20113): the reply's findings of rule `id`.
+fn shop_findings(reply: &Value, id: &str) -> Vec<Value> {
+    reply["findings"].as_array().cloned().unwrap_or_default().into_iter().filter(|f| f["rule"] == id).collect()
+}
+
+/// A clean 2 mm plate with a 6 mm hole passes the generic profile: needs of max(0.5 T, 1) = 1 mm
+/// for the hole and 2 T = 4 mm to an edge are met (the hole is 30 mm from the nearest edge); the
+/// reply names the shop and the sheet, lists what was and was not looked at, and changes nothing.
+#[test]
+fn a_clean_plate_passes_the_generic_shop_check() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
+    let before = s.doc.to_json();
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    assert_eq!(s.doc.to_json(), before, "read-only");
+    assert_eq!((reply["shop"]["id"].as_str(), reply["shop"]["name"].as_str()), (Some("generic"), Some("Generic")));
+    assert_eq!(reply["thickness"].as_f64(), Some(T));
+    assert_eq!(reply["findings"].as_array().map(Vec::len), Some(0), "{reply}");
+    let checked: Vec<&str> = reply["checked"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert!(checked.contains(&"hole.min_diameter") && checked.contains(&"hole.to_edge") && checked.contains(&"file.one_body"), "{checked:?}");
+    let not_checked: Vec<&str> = reply["not_checked"].as_array().unwrap().iter().filter_map(|n| n["rule"].as_str()).collect();
+    assert!(not_checked.contains(&"flange.min") && not_checked.contains(&"stock.thickness"), "{not_checked:?}");
+}
+
+/// A 0.6 mm hole in 2 mm sheet is under the generic laser minimum of max(0.5 * 2, 1) = 1 mm.
+#[test]
+fn a_hole_under_the_shops_minimum_is_a_finding_with_the_limit() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 0.6}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    let f = shop_findings(&reply, "hole.min_diameter");
+    assert_eq!(f.len(), 1, "{reply}");
+    assert!((f[0]["value"].as_f64().unwrap_or(f64::NAN) - 0.6).abs() < 1e-6 && f[0]["limit"].as_f64() == Some(1.0), "{}", f[0]);
+    assert_eq!(f[0]["severity"], "error");
+    assert!(f[0]["message"].as_str().unwrap_or("").contains("\u{d8}0.6 mm") && f[0]["at"].is_array(), "{}", f[0]);
+    assert!(f[0]["sources"].as_array().is_some_and(|u| !u.is_empty()));
+}
+
+/// JLCCNC stocks 0.5 to 6 mm: a 7 mm sheet is not stock.
+#[test]
+fn a_sheet_outside_the_shops_stock_is_a_finding() {
+    let mut s = session();
+    rule(&mut s, "Thick", 7.0, 0.44, 7.0, 0.5);
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 7, "body_name": "Plate"}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, 7]}));
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "jlccnc"}));
+    let f = shop_findings(&reply, "stock.thickness");
+    assert_eq!(f.len(), 1, "{reply}");
+    assert_eq!((f[0]["value"].as_f64(), f[0]["severity"].as_str()), (Some(7.0), Some("error")));
+    assert!(f[0]["message"].as_str().unwrap_or("").contains("7 mm thick"));
+    // The same sheet is fine for a shop that stocks it.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "sendcutsend"}));
+    assert_eq!(shop_findings(&reply, "stock.thickness").len(), 1, "SendCutSend: 7 mm is no listed size either");
+}
+
+/// A hole near a bend, measured as the flat has it: the generic limit is the strictest of
+/// 2 T = 4 and 2 T + R = 6 mm (R = 2), a warning as the shops' pages differ; the hole is in the
+/// bend's zone or its distance to the zone's edge is what the finding says.
+#[test]
+fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [50, 5, T], "diameter": 6}));
+    run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
+    let zone = flat(&mut s)["bend_zones"][0].clone();
+    let [y0, y1] = [zone[2].as_f64().unwrap_or(f64::NAN), zone[3].as_f64().unwrap_or(f64::NAN)];
+    let circles = flat_circles(&mut s);
+    assert_eq!(circles.len(), 2, "{circles:?}");
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    let f = shop_findings(&reply, "hole.to_bend");
+    for (_, c) in &circles {
+        // The distance to a zone spanning the plate's width, by hand.
+        let d = if (y0..=y1).contains(&c[1]) { 0.0 } else { (c[1] - y0).abs().min((c[1] - y1).abs()) };
+        let found = f
+            .iter()
+            .find(|x| x["at"][0].as_f64().is_some_and(|x| (x - c[0]).abs() < 1e-6) && x["at"][1].as_f64().is_some_and(|y| (y - c[1]).abs() < 1e-6));
+        assert_eq!(found.is_some(), d + 1e-9 < 6.0, "hole at {c:?}, zone y {y0}..{y1}: {f:?}");
+        if let Some(found) = found {
+            assert_eq!((found["limit"].as_f64(), found["severity"].as_str()), (Some(6.0), Some("warning")));
+            assert!((found["value"].as_f64().unwrap_or(f64::NAN) - d).abs() < 1e-6, "{found}");
+        }
+    }
+}
+
+/// A profile as an object, a built-in id in any case, and what is refused.
+#[test]
+fn the_shop_is_a_built_in_id_or_a_profile_object_and_a_bad_one_is_refused() {
+    let mut s = plate();
+    run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
+    let profile = json!({"name": "Mine", "rules": [{"id": "hole.min_diameter", "limits": [{"value": 10.0,
+        "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "ten millimetres"}]}]}]});
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": profile}));
+    assert_eq!(reply["shop"]["id"], "custom");
+    let f = shop_findings(&reply, "hole.min_diameter");
+    assert_eq!((f.len(), f[0]["limit"].as_f64()), (1, Some(10.0)), "{reply}");
+    assert_eq!(run(&mut s, "sheet.check_shop", json!({"shop": "PCBWay"}))["shop"]["name"], "PCBWay");
+    let before = s.doc.to_json();
+    let refused = |s: &mut Session, p: Value| s.execute("sheet.check_shop", &p).expect_err(&format!("{p} was accepted")).to_string();
+    assert!(refused(&mut s, json!({"shop": "acme"})).contains("is not a shop profile"));
+    assert!(refused(&mut s, json!({"shop": {"name": "Bad", "rules": []}})).contains("`shop`"));
+    assert!(
+        refused(&mut s, json!({"shop": {"name": "Bad", "rules": [{"id": "hole.min_diameter", "limits": [{"value": 0, "sources": []}]}]}}))
+            .contains("`shop`")
+    );
+    assert!(refused(&mut s, json!({"shop": "/nonexistent/shop.json"})).contains("/nonexistent/shop.json"));
+    assert!(refused(&mut s, json!({})).contains("shop"));
+    assert!(refused(&mut s, json!({"shop": "generic", "body": "Nothing"})).contains("is not a sheet metal body"));
+    assert_eq!(s.doc.to_json(), before);
+    let mut empty = session();
+    assert!(refused(&mut empty, json!({"shop": "generic"})).contains("there is no sheet metal body"));
+}

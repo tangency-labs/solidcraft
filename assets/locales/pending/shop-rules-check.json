@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "cmd.sheet_check_shop": "فحص قواعد الورشة"
+  },
+  "de": {
+    "cmd.sheet_check_shop": "Gegen Fertigungsregeln prüfen"
+  },
+  "en": {
+    "cmd.sheet_check_shop": "Check Against Shop Rules"
+  },
+  "he": {
+    "cmd.sheet_check_shop": "בדיקה מול כללי הסדנה"
+  },
+  "ja": {
+    "cmd.sheet_check_shop": "工場ルールで検査"
+  },
+  "ko": {
+    "cmd.sheet_check_shop": "제작업체 규칙 검사"
+  },
+  "vi": {
+    "cmd.sheet_check_shop": "Kiểm tra theo quy tắc xưởng"
+  },
+  "zh": {
+    "cmd.sheet_check_shop": "按工厂规则检查"
+  }
+}
