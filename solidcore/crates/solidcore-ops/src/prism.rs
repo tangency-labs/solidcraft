@@ -32,7 +32,7 @@ pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
 pub use solidcore::prism::flange::FlangeReach;
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
-pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
+pub use solidcore::prism::profile::ProfileRefusal;
 
 use crate::body::Contract;
 use crate::body::{finish, Body, Expect};

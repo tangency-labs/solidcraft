@@ -115,7 +115,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "name? (the feature's and the component's); ",
             "up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); ",
             "names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); ",
-            "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); ",
+            "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt; with features, the file's sketches then come in beside the solids as editable sketches → features_added, history: \"sketches\"); ",
             "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
@@ -202,7 +202,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|mjcf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; mjcf: the whole assembly as a MuJoCo model, as file.export_mjcf, named by format (a `.xml` path alone is not MJCF); sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON, URDF and MJCF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -285,6 +285,16 @@ pub static COMMANDS: &[CommandSpec] = &[
             "quality?: standard|fine|finest → {path, format, name, files, bodies, decals, warnings}: a Gazebo model folder with model.config, model.sdf, an STL per body and each shown decal's image on a textured COLLADA quad, the image also the visual's PBR albedo map; ",
             "docs/sdf.md",
         )),
+    CommandSpec::new("file.export_mjcf", "Export MJCF", crate::checked!("file.export_mjcf", export_mjcf_cmd))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_MJCF_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::MjcfExportResult>)
+        .params(concat!(
+            "path → {path, format, files, bodies, joints, equalities, warnings}: ",
+            "the whole assembly as a MuJoCo model, at its current joint values, with STL meshes written next to it; ",
+            "docs/mjcf.md",
+        )),
     CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -312,7 +322,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies?: [names] (default: the selected bodies); ",
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
-            "format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk)",
+            "format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written); ",
+            "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
+            "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
     CommandSpec::new("file.open_in_easyprint", "Open with EasyPrint", easyprint::open_in_easyprint)
         .icon("mesh_export")
@@ -413,6 +425,7 @@ const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::Exp
 const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 const EXPORT_SDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportSdfParams> = crate::schema::TypedContract::new();
+const EXPORT_MJCF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMjcfParams> = crate::schema::TypedContract::new();
 const SAVE_MESH_CONTRACT: crate::schema::TypedContract<crate::schema::save_mesh::SaveMeshParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
@@ -665,8 +678,42 @@ fn add_step_bytes(
     }
     let mut sf = solidcraft_io::step_import_feature_read(bytes, path, options.names, options.reader)
         .map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let freecad_history = not_rebuilt.is_some();
     sf.warnings.splice(0..0, not_rebuilt);
-    add_read_step(s, path, name, options, sf, bytes, profiled)
+    let mut reply = add_read_step(s, path, name, options, sf, bytes, profiled)?;
+    if freecad_history {
+        add_freecad_sketches(s, path, bytes, &mut reply);
+    }
+    Ok(reply)
+}
+
+/// A FreeCAD file whose history was not rebuilt: its sketches come in beside its solids, in the
+/// import's component, as the rebuild makes them (editable, on their planes, with the
+/// constraints that keep their geometry) → `history: "sketches"` and their ids in
+/// `features_added`. What cannot come in is a warning; if adding them fails, the design keeps
+/// the solids alone.
+fn add_freecad_sketches(s: &mut Session, path: &str, bytes: &[u8], reply: &mut Value) {
+    let Some(component) = reply["component"].as_u64() else { return };
+    let warnings = match solidcraft_io::native_cad_sketches(bytes, path) {
+        Err(why) => vec![format!("the file's sketches were not imported: {why}")],
+        Ok(design) => {
+            let before = DesignSnapshot::of(s);
+            match import::add_design_in(s, &design, component) {
+                Ok(ids) => {
+                    reply["history"] = json!("sketches");
+                    reply["features_added"] = json!(ids);
+                    design.warnings
+                }
+                Err(e) => {
+                    before.restore(s);
+                    vec![format!("the file's sketches were not imported: {e}")]
+                }
+            }
+        }
+    };
+    if let Some(list) = reply["warnings"].as_array_mut() {
+        list.extend(warnings.into_iter().map(Value::from));
+    }
 }
 
 fn add_read_step(
@@ -3172,6 +3219,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return export_urdf(s, cmd, path, p);
     }
+    if format == Format::Mjcf {
+        if !string_list(cmd, p, "bodies")?.is_empty() {
+            return Err(bad(cmd, "mjcf exports the whole assembly; omit bodies"));
+        }
+        return export_mjcf(s, path);
+    }
     if format == Format::Sdf {
         return export_sdf(s, cmd, path, p);
     }
@@ -3303,6 +3356,11 @@ fn export_obj_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 fn export_urdf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_urdf";
     export_urdf(s, cmd, path_arg(p, cmd)?, p)
+}
+
+fn export_mjcf_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.export_mjcf";
+    export_mjcf(s, path_arg(p, cmd)?)
 }
 
 fn export_urdf_options_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3673,6 +3731,26 @@ fn jointed_document(s: &Session) -> (std::borrow::Cow<'_, solidcraft_doc::Docume
     (std::borrow::Cow::Owned(doc), held)
 }
 
+/// An MJCF export's files: `meshes` in the folder of `path`, then `main` at `path`. Every path is
+/// checked before anything is written; the written paths, in order.
+fn write_package(path: &str, meshes: &[(String, Vec<u8>)], main: &[u8]) -> Result<Vec<String>> {
+    let dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new(""));
+    let mut targets: Vec<(String, &[u8])> = meshes.iter().map(|(n, b)| (dir.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
+    targets.push((path.to_string(), main));
+    for (t, _) in &targets {
+        solidcraft_io::vfs::check(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
+    }
+    let mut written: Vec<String> = Vec::new();
+    for (t, bytes) in &targets {
+        if let Err(e) = solidcraft_io::vfs::write(t, bytes) {
+            let before = if written.is_empty() { "none".to_string() } else { written.join(", ") };
+            return Err(EngineError::Other(format!("{t}: {e} (this file may be incomplete; written before it: {before})")));
+        }
+        written.push(t.clone());
+    }
+    Ok(written)
+}
+
 /// The warning for occurrence `name`, moved without the move captured, written where its joints
 /// place it ([`jointed_document`]).
 fn held_warning(name: &str) -> String {
@@ -3808,6 +3886,21 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     )
 }
 
+/// The assembly as an MJCF and its meshes next to it (docs/mjcf.md): the design as the URDF export
+/// takes it ([`jointed_document`]), the meshes first and the `.xml` last.
+fn export_mjcf(s: &Session, path: &str) -> Result<Value> {
+    let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    let st = s.model.state();
+    let (doc, held) = jointed_document(s);
+    let mut pkg = solidcraft_io::mjcf(&doc, &doc.painted(&st), &stem)?;
+    pkg.warnings.extend(held.iter().map(|n| held_warning(n)));
+    let written = write_package(path, &pkg.meshes, pkg.xml.as_bytes())?;
+    Ok(json!({
+        "path": path, "format": "Mjcf", "files": written, "bodies": pkg.bodies, "joints": pkg.joints,
+        "equalities": pkg.equalities, "warnings": pkg.warnings,
+    }))
+}
+
 fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.save_mesh";
     let path = path_arg(p, cmd)?;
@@ -3849,6 +3942,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality,
                 dest: send::Dest::Path(path),
+                copy: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
             },
@@ -3885,6 +3979,17 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
+        // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
+        // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
+        let copy = match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
+            None => None,
+            Some(dir) if dir.len() < 4096 => {
+                // It may not exist yet: its nearest folder that does is checked.
+                solidcraft_io::vfs::check_new(dir).map_err(|e| EngineError::Other(e.to_string()))?;
+                Some(send::Copy { dir: dir.into(), overwrite: bool_(p, "copy_overwrite").unwrap_or(false) })
+            }
+            Some(_) => return Err(bad(cmd, "`copy_to` is too long")),
+        };
         send::send(
             s,
             send::Send {
@@ -3896,6 +4001,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality: Default::default(),
                 dest: send::Dest::Folder,
+                copy,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,
             },
@@ -3980,6 +4086,10 @@ fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "sdf_tests.rs"]
 mod sdf_tests;
+
+#[cfg(test)]
+#[path = "mjcf_tests.rs"]
+mod mjcf_tests;
 
 #[cfg(test)]
 #[path = "urdf_tests.rs"]

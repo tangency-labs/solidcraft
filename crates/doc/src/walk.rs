@@ -46,6 +46,7 @@ impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
+impl Walk for crate::frame::UpAxis {}
 impl Walk for crate::frame::CornerType {}
 impl Walk for crate::frame::Side {}
 impl Walk for crate::frame::TrimEnd {}
@@ -81,6 +82,7 @@ impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
 impl Walk for crate::document::FoldSide {}
+impl Walk for crate::document::OffsetEdges {}
 impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}

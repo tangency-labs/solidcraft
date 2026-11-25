@@ -240,6 +240,40 @@ pub const ARABIC: Candidates = &[
     ),
 ];
 
+/// Lao: Noto Sans Lao when installed, then system Lao faces (Leelawadee UI on Windows
+/// also covers Lao). The interface uses a candidate only if it draws Lao.
+pub const LAO: Candidates = &[
+    // Windows
+    (
+        "Noto Sans Lao",
+        &[
+            "C:\\Windows\\Fonts\\NotoSansLao-Regular.ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao[wdth,wght].ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao-VariableFont_wdth,wght.ttf",
+        ],
+    ),
+    ("Noto Sans Lao UI", &["C:\\Windows\\Fonts\\NotoSansLaoUI-Regular.ttf"]),
+    ("Lao UI", &["C:\\Windows\\Fonts\\LaoUI.ttf"]),
+    ("Leelawadee UI", &["C:\\Windows\\Fonts\\LeelawUI.ttf"]),
+    ("Leelawadee", &["C:\\Windows\\Fonts\\leelawad.ttf"]),
+    // macOS
+    ("Noto Sans Lao", &["/Library/Fonts/NotoSansLao-Regular.ttf"]),
+    ("Lao Sangam MN", &["/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf", "/System/Library/Fonts/Lao Sangam MN.ttf"]),
+    ("Lao MN", &["/System/Library/Fonts/Supplemental/Lao MN.ttc", "/System/Library/Fonts/Lao MN.ttc"]),
+    // Linux
+    (
+        "Noto Sans Lao",
+        &[
+            "/usr/share/fonts/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansLao[wdth,wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansLao-Regular.ttf",
+        ],
+    ),
+    ("Phetsarath OT", &["/usr/share/fonts/truetype/phetsarath/Phetsarath_OT.ttf", "/usr/share/fonts/opentype/phetsarath/Phetsarath_OT.otf"]),
+];
+
 /// Largest character map read: a full CJK font's is about a megabyte.
 const MAX_CMAP: u32 = 8 << 20;
 /// Answers kept; past it the table starts again.

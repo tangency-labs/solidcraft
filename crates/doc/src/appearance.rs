@@ -460,7 +460,8 @@ impl Document {
                 let target = crate::config::ConfigFaceTarget {
                     body: f.body.clone(),
                     origin_feature,
-                    name: crate::naming::strip_piece(name).into(),
+                    // A Split Face piece by its own name is that piece; any other name, the face.
+                    name: if crate::history_names::names_split_piece(name) { name.clone() } else { crate::naming::strip_piece(name).into() },
                     point: f.point,
                     certificate: f.certificate.clone(),
                 };
@@ -471,9 +472,14 @@ impl Document {
                 }
                 continue;
             }
-            // By name (every piece of a split face), else by the point.
+            // By name (every piece of a split face; a Split Face piece by its own name, that piece
+            // alone), else by the point.
             if let Some(n) = &f.name {
-                let hits = crate::naming::faces_with_stem(b, n);
+                let hits = if crate::history_names::names_split_piece(n) {
+                    (0..b.body.face_count()).filter(|i| crate::name_lookup::face_has_name(b, *i, n)).collect()
+                } else {
+                    crate::naming::faces_with_stem(b, n)
+                };
                 if !hits.is_empty() {
                     for i in hits {
                         out.retain(|(j, _)| *j != i);
