@@ -164,8 +164,8 @@ pub fn paint_slots(
         let response = ui
             .push_id(slot.index, |ui| {
                 ui.scope(|ui| {
-                    // A strong slot stays at full strength while the rest of the bar fades.
-                    if editing.is_none() && crate::navigation_bar::strong(slot.id) {
+                    // A strong slot that is on stays at full strength while the rest of the bar fades.
+                    if editing.is_none() && slot.selected && crate::navigation_bar::strong(slot.id) {
                         ui.set_opacity(1.0);
                     }
                     if slot.hidden {

@@ -1,68 +1,112 @@
 {
   "en": {
     "cmd.browser_isolate": "Isolate",
-    "cmd.browser_unisolate": "Unisolate",
-    "navbar.description.unisolate": "Appears while Isolate is in effect and brings back what it hid.",
-    "navbar.unisolate": "Unisolate"
+    "cmd.browser_unisolate": "Exit Isolation",
+    "navbar.description.isolate": "Hides everything except the selected bodies or components. While an Isolate is in effect it is on, and a click brings back what it hid.",
+    "navbar.isolate": "Isolate",
+    "navbar.unisolate": "Exit Isolation",
+    "ui.exit_isolation": "Exit Isolation",
+    "ui.isolation": "Isolation",
+    "ui.viewport_status_hidden": "{count} hidden"
   },
   "ar": {
     "cmd.browser_isolate": "عزل",
-    "cmd.browser_unisolate": "إلغاء العزل",
-    "navbar.description.unisolate": "يظهر ما دام العزل ساريًا، ويعيد ما أخفاه.",
-    "navbar.unisolate": "إلغاء العزل"
+    "cmd.browser_unisolate": "الخروج من العزل",
+    "navbar.description.isolate": "يخفي كل شيء عدا الأجسام أو المكوّنات المحددة. وما دام العزل ساريًا يكون مفعّلًا، وتعيد نقرة واحدة ما أخفاه.",
+    "navbar.isolate": "عزل",
+    "navbar.unisolate": "الخروج من العزل",
+    "ui.exit_isolation": "الخروج من العزل",
+    "ui.isolation": "العزل",
+    "ui.viewport_status_hidden": "{count} مخفية"
   },
   "de": {
     "cmd.browser_isolate": "Isolieren",
-    "cmd.browser_unisolate": "Isolierung aufheben",
-    "navbar.description.unisolate": "Erscheint, solange Isolieren wirkt, und holt zurück, was es ausgeblendet hat.",
-    "navbar.unisolate": "Isolierung aufheben"
+    "cmd.browser_unisolate": "Isolierung beenden",
+    "navbar.description.isolate": "Blendet alles außer den ausgewählten Körpern oder Komponenten aus. Solange Isolieren wirkt, ist es aktiv, und ein Klick holt zurück, was ausgeblendet wurde.",
+    "navbar.isolate": "Isolieren",
+    "navbar.unisolate": "Isolierung beenden",
+    "ui.exit_isolation": "Isolierung beenden",
+    "ui.isolation": "Isolierung",
+    "ui.viewport_status_hidden": "{count} ausgeblendet"
   },
   "es": {
     "cmd.browser_isolate": "Aislar",
-    "cmd.browser_unisolate": "Dejar de aislar",
-    "navbar.description.unisolate": "Aparece mientras Aislar está activo y devuelve lo que ocultó.",
-    "navbar.unisolate": "Dejar de aislar"
+    "cmd.browser_unisolate": "Salir del aislamiento",
+    "navbar.description.isolate": "Oculta todo excepto los cuerpos o componentes seleccionados. Mientras Aislar está activo queda encendido, y un clic devuelve lo que ocultó.",
+    "navbar.isolate": "Aislar",
+    "navbar.unisolate": "Salir del aislamiento",
+    "ui.exit_isolation": "Salir del aislamiento",
+    "ui.isolation": "Aislamiento",
+    "ui.viewport_status_hidden": "{count} ocultos"
   },
   "fr": {
     "cmd.browser_isolate": "Isoler",
-    "cmd.browser_unisolate": "Annuler l'isolement",
-    "navbar.description.unisolate": "Apparaît tant qu'Isoler est actif et fait revenir ce qu'il a masqué.",
-    "navbar.unisolate": "Annuler l'isolement"
+    "cmd.browser_unisolate": "Quitter l'isolement",
+    "navbar.description.isolate": "Masque tout sauf les corps ou composants sélectionnés. Tant qu'Isoler est actif, il reste allumé, et un clic fait revenir ce qu'il a masqué.",
+    "navbar.isolate": "Isoler",
+    "navbar.unisolate": "Quitter l'isolement",
+    "ui.exit_isolation": "Quitter l'isolement",
+    "ui.isolation": "Isolement",
+    "ui.viewport_status_hidden": "{count} masqués"
   },
   "he": {
     "cmd.browser_isolate": "בידוד",
-    "cmd.browser_unisolate": "ביטול בידוד",
-    "navbar.description.unisolate": "מופיע כל עוד הבידוד בתוקף, ומחזיר את מה שהוסתר.",
-    "navbar.unisolate": "ביטול בידוד"
+    "cmd.browser_unisolate": "יציאה מבידוד",
+    "navbar.description.isolate": "מסתיר הכול מלבד הגופים או הרכיבים שנבחרו. כל עוד הבידוד בתוקף הוא פעיל, ולחיצה מחזירה את מה שהוסתר.",
+    "navbar.isolate": "בידוד",
+    "navbar.unisolate": "יציאה מבידוד",
+    "ui.exit_isolation": "יציאה מבידוד",
+    "ui.isolation": "בידוד",
+    "ui.viewport_status_hidden": "{count} מוסתרים"
   },
   "ja": {
     "cmd.browser_isolate": "分離表示",
-    "cmd.browser_unisolate": "分離表示を解除",
-    "navbar.description.unisolate": "分離表示の間だけ現れ、非表示にしたものを元に戻します。",
-    "navbar.unisolate": "分離表示を解除"
+    "cmd.browser_unisolate": "分離表示を終了",
+    "navbar.description.isolate": "選択したボディまたはコンポーネント以外をすべて非表示にします。分離表示の間はオンになり、クリックすると非表示にしたものを元に戻します。",
+    "navbar.isolate": "分離表示",
+    "navbar.unisolate": "分離表示を終了",
+    "ui.exit_isolation": "分離表示を終了",
+    "ui.isolation": "分離表示",
+    "ui.viewport_status_hidden": "{count} 件非表示"
   },
   "ko": {
     "cmd.browser_isolate": "분리 표시",
-    "cmd.browser_unisolate": "분리 표시 해제",
-    "navbar.description.unisolate": "분리 표시 중에만 나타나며, 숨긴 항목을 다시 되돌립니다.",
-    "navbar.unisolate": "분리 표시 해제"
+    "cmd.browser_unisolate": "분리 표시 종료",
+    "navbar.description.isolate": "선택한 바디나 컴포넌트를 제외한 모든 것을 숨깁니다. 분리 표시 중에는 켜져 있으며, 클릭하면 숨긴 항목을 되돌립니다.",
+    "navbar.isolate": "분리 표시",
+    "navbar.unisolate": "분리 표시 종료",
+    "ui.exit_isolation": "분리 표시 종료",
+    "ui.isolation": "분리 표시",
+    "ui.viewport_status_hidden": "{count}개 숨김"
   },
   "nl": {
     "cmd.browser_isolate": "Isoleren",
-    "cmd.browser_unisolate": "Isolatie opheffen",
-    "navbar.description.unisolate": "Verschijnt zolang Isoleren actief is en brengt terug wat het verborg.",
-    "navbar.unisolate": "Isolatie opheffen"
+    "cmd.browser_unisolate": "Isolatie beëindigen",
+    "navbar.description.isolate": "Verbergt alles behalve de geselecteerde lichamen of componenten. Zolang Isoleren actief is staat het aan, en een klik brengt terug wat het verborg.",
+    "navbar.isolate": "Isoleren",
+    "navbar.unisolate": "Isolatie beëindigen",
+    "ui.exit_isolation": "Isolatie beëindigen",
+    "ui.isolation": "Isolatie",
+    "ui.viewport_status_hidden": "{count} verborgen"
   },
   "vi": {
     "cmd.browser_isolate": "Cô lập đối tượng",
-    "cmd.browser_unisolate": "Hủy cô lập đối tượng",
-    "navbar.description.unisolate": "Xuất hiện khi Cô lập đối tượng đang có hiệu lực và đưa trở lại những gì đã bị ẩn.",
-    "navbar.unisolate": "Hủy cô lập đối tượng"
+    "cmd.browser_unisolate": "Thoát cô lập đối tượng",
+    "navbar.description.isolate": "Ẩn mọi thứ trừ các thân hoặc thành phần đã chọn. Khi Cô lập đối tượng đang có hiệu lực, nút được bật và một cú nhấp sẽ đưa trở lại những gì đã ẩn.",
+    "navbar.isolate": "Cô lập đối tượng",
+    "navbar.unisolate": "Thoát cô lập đối tượng",
+    "ui.exit_isolation": "Thoát cô lập đối tượng",
+    "ui.isolation": "Cô lập đối tượng",
+    "ui.viewport_status_hidden": "{count} đã ẩn"
   },
   "zh": {
     "cmd.browser_isolate": "隔离",
-    "cmd.browser_unisolate": "取消隔离",
-    "navbar.description.unisolate": "隔离期间出现，恢复隔离时隐藏的内容。",
-    "navbar.unisolate": "取消隔离"
+    "cmd.browser_unisolate": "退出隔离",
+    "navbar.description.isolate": "隐藏除所选实体或组件以外的所有内容。隔离期间保持开启，单击即可恢复隔离时隐藏的内容。",
+    "navbar.isolate": "隔离",
+    "navbar.unisolate": "退出隔离",
+    "ui.exit_isolation": "退出隔离",
+    "ui.isolation": "隔离",
+    "ui.viewport_status_hidden": "已隐藏 {count} 个"
   }
 }

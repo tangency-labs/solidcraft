@@ -30,12 +30,14 @@ browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
 browser.find                      the browser tree: search by name; crates/engine/src/browser_find_tests.rs
 browser.group                     the browser tree: order, groups and folding
+browser.isolate                   visibility only: crates/engine/src/cmd/browser.rs tests
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
 browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
 browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
+browser.unisolate                 visibility only: crates/engine/src/cmd/browser.rs tests
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)

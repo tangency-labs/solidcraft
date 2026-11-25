@@ -382,10 +382,10 @@ fn isolating(app: &SolveApp) -> bool {
     app.session.visibility.before_isolate.is_some()
 }
 
-/// The one Unisolate entry every menu shares: it puts back what the Isolates hid (#8120), and
+/// The one Exit Isolation entry every menu shares: it puts back what the Isolates hid (#8120), and
 /// shows `browser.unisolate`'s key (#3504).
 fn unisolate_item(app: &SolveApp) -> Item {
-    act("ui.unisolate", "Unisolate", "body").key(&crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default())
+    act("ui.unisolate", "Exit Isolation", "body").key(&crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default())
 }
 
 /// `browser.isolate`'s key, for the menus' Isolate entries (#3504).
@@ -415,8 +415,8 @@ fn add_unisolate(app: &SolveApp, v: &mut Vec<Item>) {
     }
 }
 
-/// Returns an isolation menu item for a component. When its bodies are the only ones left on
-/// screen the item toggles to "Unisolate" and restores the previous state.
+/// Returns an isolation menu item for a component. While an Isolate is in effect, the menu adds
+/// Exit Isolation after it.
 pub fn isolate_component_item(app: &SolveApp, id: u64, bodies: &[String]) -> Option<Item> {
     if bodies.is_empty() || id == 0 {
         return None;
@@ -1018,7 +1018,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
         // The same Unisolate as the toggled Isolate entry on the item menus (#8120).
         let key = crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default();
-        v.push(act("ui.unisolate", "Unisolate", "eye").key(&key).on(can_unisolate || isolating(app)));
+        v.push(act("ui.unisolate", "Exit Isolation", "eye").key(&key).on(can_unisolate || isolating(app)));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));

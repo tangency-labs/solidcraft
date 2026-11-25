@@ -55,7 +55,7 @@ pub(crate) fn primary(effect: &StatusItem) -> &'static str {
         StatusSetting::Curvature { .. } => "radius",
         StatusSetting::Section { .. } => "offset",
         StatusSetting::Continuity { .. } => "record",
-        StatusSetting::Environment => "",
+        StatusSetting::Environment | StatusSetting::Isolate { .. } => "",
     }
 }
 
@@ -90,7 +90,7 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
             }
         }
         StatusSetting::Continuity { .. } => continuity_description(app, &mut details),
-        StatusSetting::Environment => {}
+        StatusSetting::Environment | StatusSetting::Isolate { .. } => {}
     }
     if effect.command != "inspect.continuity"
         && effect.has_key
@@ -209,7 +209,7 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 "angle_tolerance_deg":if id=="angle"{scalar(value)?}else{row.angle_tolerance_deg},
                 "curvature_tolerance_per_mm":if id=="curvature"{scalar(value)?*scale}else{row.curvature_tolerance_per_mm}}))
         }
-        StatusSetting::Environment => None,
+        StatusSetting::Environment | StatusSetting::Isolate { .. } => None,
     }
 }
 fn scalar(value: &DetailValue) -> Option<f64> {

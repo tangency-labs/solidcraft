@@ -39,10 +39,9 @@ pub struct Catalogue {
     pub value_menus: &'static [&'static str],
     /// Menu slots that show only their icon, whatever the stored options say.
     pub icon_menus: &'static [&'static str],
-    /// Toggles whose on state takes the primary action's fill rather than the selection's, and that
-    /// stay at full strength while the bar fades, show only their icon even on a bar of labels, and
-    /// never fold into More while there is room: ways out of a mode that leaves part of the model out
-    /// of view.
+    /// Toggles whose on state takes the primary action's fill rather than the selection's and stays
+    /// at full strength while the bar fades, that show only their icon even on a bar of labels, and
+    /// that never fold into More while there is room: modes that leave part of the model out of view.
     pub strong: &'static [&'static str],
 }
 

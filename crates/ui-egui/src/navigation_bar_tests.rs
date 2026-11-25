@@ -59,7 +59,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
         assert!(ids.insert(slot.id), "duplicate catalogue id {}", slot.id);
         match slot.command {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
-            None => assert!(["projection", "display", "sheet_zoom", "separator", "unisolate"].contains(&slot.id)),
+            None => assert!(["projection", "display", "sheet_zoom", "separator", "isolate"].contains(&slot.id)),
         }
         if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);
@@ -113,25 +113,25 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     assert!(!bar.labels && bar.overflow.is_empty(), "text disappears before slots fold");
 }
 
-/// #8120: in a narrow view the slots before Unisolate fold into More and Unisolate stays on the
-/// bar; with no room even for it, it folds like the rest.
+/// #8120: in a narrow view the slots before Isolate fold into More and Isolate stays on the bar;
+/// with no room even for it, it folds like the rest.
 #[test]
-fn a_narrow_bar_folds_other_slots_before_unisolate() {
+fn a_narrow_bar_folds_other_slots_before_isolate() {
     crate::navigation_slots::install();
     let mut prefs = NavigationBar::default();
-    prefs.slots.push("unisolate".into());
+    prefs.slots.push("isolate".into());
     let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(250.0, 720.0));
     let bar = measure(narrow, &prefs, |_| true, |_| 50.0);
     assert!(!bar.overflow.is_empty(), "the view is too narrow for every slot");
-    assert_eq!(bar.slots.last().map(|(slot, _)| slot.id), Some("unisolate"), "Unisolate stays, last on the row");
-    assert!(!bar.overflow.iter().any(|slot| slot.id == "unisolate"));
+    assert_eq!(bar.slots.last().map(|(slot, _)| slot.id), Some("isolate"), "Isolate stays, last on the row");
+    assert!(!bar.overflow.iter().any(|slot| slot.id == "isolate"));
     assert!(narrow.contains_rect(bar.rect));
     let order: Vec<_> =
-        bar.slots.iter().map(|(slot, _)| slot.id).filter(|id| *id != "unisolate").chain(bar.overflow.iter().map(|slot| slot.id)).collect();
+        bar.slots.iter().map(|(slot, _)| slot.id).filter(|id| *id != "isolate").chain(bar.overflow.iter().map(|slot| slot.id)).collect();
     assert_eq!(order, NavigationBar::default().slots, "the others keep their order across the row and More");
     let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(90.0, 720.0));
     let bar = measure(tiny, &prefs, |_| true, |_| 50.0);
-    assert!(bar.slots.is_empty() && bar.overflow.last().is_some_and(|slot| slot.id == "unisolate"), "no room: everything folds");
+    assert!(bar.slots.is_empty() && bar.overflow.last().is_some_and(|slot| slot.id == "isolate"), "no room: everything folds");
 }
 
 #[test]

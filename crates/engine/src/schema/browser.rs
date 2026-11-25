@@ -963,8 +963,18 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
-/// `browser.toggle_planes`, `browser.toggle_reference`, `browser.isolate` and
-/// `browser.unisolate` take no parameters: an empty object.
+/// `browser.isolate`: no parameters isolates the selection; `clear: true` ends the Isolate in
+/// effect instead, as the viewport's status pill does (#8120).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserIsolateParams {
+    /// End the Isolate in effect, as `browser.unisolate` does.
+    #[serde(default)]
+    pub clear: Option<bool>,
+}
+
+/// `browser.toggle_planes`, `browser.toggle_reference` and `browser.unisolate` take no
+/// parameters: an empty object.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct BrowserToggleParams {}

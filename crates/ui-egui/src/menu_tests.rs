@@ -410,9 +410,9 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Unisolate" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Unisolate");
+    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Unisolate");
     assert!(after.iter().any(|i| i.label == "Isolate"), "Isolate stays, to narrow the isolation");
-    act(&mut app, &t, "Unisolate");
+    act(&mut app, &t, "Exit Isolation");
     assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");
 
     let made = app.run("component.from_bodies", json!({"bodies": [kept.clone()]})).unwrap();
@@ -422,8 +422,8 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     let ct = Target::Component { id: component };
     act(&mut app, &ct, "Isolate");
     assert!(app.session.visibility.hidden_bodies.contains(&other));
-    assert!(context_menu::items(&app, &ct).iter().any(|i| i.label == "Unisolate"));
-    act(&mut app, &ct, "Unisolate");
+    assert!(context_menu::items(&app, &ct).iter().any(|i| i.label == "Exit Isolation"));
+    act(&mut app, &ct, "Exit Isolation");
     assert!(app.session.visibility.hidden_bodies.is_empty());
 }
 
@@ -1423,7 +1423,7 @@ fn menus_follow_fusion_order() {
     assert!(["XY", "XZ", "YZ"].iter().all(|p| app.session.visibility.hidden_origin.iter().any(|h| h == p)));
     app.run("select.clear", json!({})).unwrap();
     let empty = context_menu::items(&app, &Target::Viewport);
-    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
+    order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Exit Isolation", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
 }

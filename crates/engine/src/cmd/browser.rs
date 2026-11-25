@@ -40,6 +40,7 @@ const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
 const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
+const ISOLATE_CONTRACT: TypedContract<crate::schema::browser::BrowserIsolateParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
 const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
@@ -149,13 +150,14 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("browser.isolate", "Isolate", crate::checked!("browser.isolate", isolate_selection))
         .icon("body")
         .key("Ctrl+I")
-        .contract(&TOGGLE_CONTRACT)
+        .contract(&ISOLATE_CONTRACT)
         .output(output_schema_for::<BrowserVisibilityResult>)
         .params(
-        "(no parameters) hides everything except the selection: the selected components' placements, or else the selected bodies \
-         and the bodies of the selected faces, edges and vertices. As browser.visibility with isolate:true; nothing selected is an error",
+        "clear?: bool. Without it, hides everything except the selection: the selected components' placements, or else the selected \
+         bodies and the bodies of the selected faces, edges and vertices, as browser.visibility with isolate:true; nothing selected is \
+         an error. clear:true ends the Isolate in effect instead, as browser.unisolate (the viewport status pill's close)",
     ),
-    CommandSpec::new("browser.unisolate", "Unisolate", crate::checked!("browser.unisolate", unisolate_all))
+    CommandSpec::new("browser.unisolate", "Exit Isolation", crate::checked!("browser.unisolate", unisolate_all))
         .icon("unisolate")
         .key("Ctrl+Shift+I")
         .contract(&TOGGLE_CONTRACT)
@@ -697,7 +699,10 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
 /// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
 /// `browser.isolate`: Isolate on the selection, for its key (#3504): placements when components
 /// are selected, else the bodies the selection names.
-fn isolate_selection(s: &mut Session, _p: &Value) -> Result<Value> {
+fn isolate_selection(s: &mut Session, p: &Value) -> Result<Value> {
+    if bool_(p, "clear").unwrap_or(false) {
+        return unisolate_all(s, &json!({}));
+    }
     let paths: Vec<Vec<u64>> =
         s.selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
     if !paths.is_empty() {
@@ -2278,6 +2283,13 @@ mod tests {
         s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
         run(&mut s, "browser.isolate", json!({}));
         assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
+        // #8120: the Isolate is a viewport status, ended by its own command, as Zebra is.
+        let status = s.status_items().into_iter().find(|item| item.id == crate::status_items::StatusId::Isolate).expect("an Isolate status");
+        assert_eq!(status.setting, crate::status_items::StatusSetting::Isolate { hidden: 2 });
+        assert_eq!((status.clear.command.as_str(), status.clear.params.clear), ("browser.isolate", true));
+        run(&mut s, &status.clear.command, json!({"clear": true}));
+        assert!(s.status_items().iter().all(|item| item.id != crate::status_items::StatusId::Isolate), "ended");
+        run(&mut s, "browser.isolate", json!({}));
         run(&mut s, "browser.unisolate", json!({}));
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
         // With nothing isolated, Ctrl+Shift+I leaves what the user hid alone.

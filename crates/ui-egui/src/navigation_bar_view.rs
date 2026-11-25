@@ -23,12 +23,22 @@ pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
 
 const SHEET_ZOOM: &str = "sheet_zoom";
 const SELECTION_MODE: &str = "selection_mode";
-const UNISOLATE: &str = "unisolate";
+const ISOLATE: &str = "isolate";
 
-/// An Isolate is in effect, so the bar offers Unisolate (#8120), as the menus' Isolate entries
-/// turn into it.
+/// An Isolate is in effect, so the Isolate slot is on and a click brings the rest back (#8120).
 fn isolating(app: &SolveApp) -> bool {
     app.session.visibility.before_isolate.is_some()
+}
+
+/// Something is selected that Isolate keeps: a placement, or a body or one of its faces, edges
+/// or vertices.
+fn can_isolate(app: &SolveApp) -> bool {
+    use solidcraft_engine::Sel;
+    app.session.selection.iter().any(|item| match item {
+        Sel::Occurrence { .. } | Sel::Body { .. } => true,
+        Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => !body.is_empty(),
+        _ => false,
+    })
 }
 
 /// The page picks by a rule of its own, not the selection mode: an open sketch picks its own
@@ -43,30 +53,17 @@ pub(crate) fn shows(slot: &Slot, caps: NavCaps, own_pick: bool) -> bool {
     caps.shows(slot) && !(own_pick && slot.id == SELECTION_MODE)
 }
 
-/// A slot the bar adds while it applies, whether or not the user's bar holds it: the sheet zoom
-/// on a drawing's sheet, and Unisolate while an Isolate is in effect.
-fn added(id: &str) -> bool {
-    id == SHEET_ZOOM || id == UNISOLATE
-}
-
 fn live_preferences(app: &SolveApp) -> std::borrow::Cow<'_, NavigationBar> {
     let prefs = &app.preferences.navigation_bar;
-    let holds = |id: &str| prefs.slots.iter().any(|slot| slot == id);
-    let sheet_zoom = crate::drawing_workspace::active(app) && crate::drawing_sheet_page::active_sheet(app).is_some() && !holds(SHEET_ZOOM);
-    let unisolate = isolating(app) && !holds(UNISOLATE);
-    if !sheet_zoom && !unisolate {
+    if !crate::drawing_workspace::active(app)
+        || crate::drawing_sheet_page::active_sheet(app).is_none()
+        || prefs.slots.iter().any(|id| id == SHEET_ZOOM)
+    {
         return std::borrow::Cow::Borrowed(prefs);
     }
     let mut prefs = prefs.clone();
-    if sheet_zoom {
-        let position = prefs.slots.iter().position(|id| id == "fit").unwrap_or(prefs.slots.len());
-        prefs.slots.insert(position.min(navigation_bar::MAX_SLOTS - 1), SHEET_ZOOM.into());
-    }
-    if unisolate {
-        // Last, so the user's own slots keep their places.
-        let at = prefs.slots.len().min(navigation_bar::MAX_SLOTS - 1);
-        prefs.slots.insert(at, UNISOLATE.into());
-    }
+    let position = prefs.slots.iter().position(|id| id == "fit").unwrap_or(prefs.slots.len());
+    prefs.slots.insert(position.min(navigation_bar::MAX_SLOTS - 1), SHEET_ZOOM.into());
     std::borrow::Cow::Owned(prefs)
 }
 
@@ -80,8 +77,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
     };
     let (caps, own_pick) = (canvas_caps(app), own_pick(app));
     let has_sheet = crate::drawing_workspace::active(app) && crate::drawing_sheet_page::active_sheet(app).is_some();
-    let isolating = isolating(app);
-    let shown = |slot: &Slot| shows(slot, caps, own_pick) && (slot.id != SHEET_ZOOM || has_sheet) && (slot.id != UNISOLATE || isolating);
+    let shown = |slot: &Slot| shows(slot, caps, own_pick) && (slot.id != SHEET_ZOOM || has_sheet);
     let mut bar = measure(content, &prefs, shown, label_width);
     let Some(_) = app.universal_panel_frame() else {
         return bar;
@@ -157,8 +153,8 @@ fn selected(app: &SolveApp, id: &str) -> bool {
         "grid" => app.ui.show_grid,
         "ground_shadow" => app.ui.ground_shadow,
         "ambient_occlusion" => app.preferences.ambient_occlusion,
-        // On while it is shown, so it takes the strong fill (`Catalogue::strong`).
-        UNISOLATE => isolating(app),
+        // On while an Isolate is in effect, in the strong fill (`Catalogue::strong`).
+        ISOLATE => isolating(app),
         _ => false,
     }
 }
@@ -187,9 +183,12 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
     match slot.id {
         "look_at" => crate::viewport::look_at_selection(app),
         "projection" => toggle_projection(app),
-        // The same command as the menus' Unisolate: one undo step.
-        UNISOLATE => {
-            let _ = app.run("browser.visibility", json!({"visible": true, "unisolate": true}));
+        // The keys' commands: Unisolate while isolating, else Isolate on the selection.
+        ISOLATE => {
+            let command = if isolating(app) { "browser.unisolate" } else { "browser.isolate" };
+            if let Err(error) = app.run(command, json!({})) {
+                app.set_status(error, true);
+            }
         }
         _ => {
             if let Some(command) = slot.command {
@@ -210,6 +209,8 @@ fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
         app.tr(hidden).to_owned()
     } else if let Some(value) = current_value(app, slot) {
         solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", value)])
+    } else if slot.id == ISOLATE && isolating(app) {
+        app.tr("navbar.unisolate").to_owned()
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key {
@@ -231,13 +232,15 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         index,
         id: slot.id,
         kind: slot.kind,
-        icon: slot.current_icon(crate::navigation_slots::value(&app.ui, slot)),
+        // While isolating, the icon of what a click does: all four circles filled.
+        icon: if slot.id == ISOLATE && isolating(app) { "unisolate" } else { slot.current_icon(crate::navigation_slots::value(&app.ui, slot)) },
         text: slot_text(app, slot).to_owned(),
         name: app.tr(slot.label).to_owned(),
         tip: tip(app, slot, hidden, key.is_some()),
         key,
         selected: editing.is_none() && selected(app, slot.id),
-        enabled: editing.is_some() || !(slot.id == "projection" && projection_locked(app)),
+        enabled: editing.is_some()
+            || !(slot.id == "projection" && projection_locked(app)) && !(slot.id == ISOLATE && !isolating(app) && !can_isolate(app)),
         hidden: hidden.is_some(),
         // A strong slot is its icon alone, labels or not (`Catalogue::strong`).
         show_text: if slot.kind == NavigationKind::Menu { bar.values && value } else { bar.labels && !navigation_bar::strong(slot.id) },
@@ -254,7 +257,7 @@ fn slot_views(app: &SolveApp, bar: &BarLayout, editing: Option<(NavCaps, bool)>)
     let mut cursor = 0;
     let mut views = Vec::new();
     for (slot, rect) in &bar.slots {
-        if added(slot.id) && editing.is_none() && !app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
+        if slot.id == SHEET_ZOOM && editing.is_none() && !app.preferences.navigation_bar.slots.iter().any(|id| id == SHEET_ZOOM) {
             views.push(slot_view(app, bar, slot, usize::MAX, *rect, editing));
             continue;
         }
@@ -299,7 +302,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                     app,
                     &measured,
                     slot,
-                    prefs.slots.iter().position(|id| id == slot.id).or(added(slot.id).then_some(usize::MAX))?,
+                    prefs.slots.iter().position(|id| id == slot.id).or((slot.id == SHEET_ZOOM).then_some(usize::MAX))?,
                     Rect::NOTHING,
                     None,
                 ))
@@ -794,36 +797,45 @@ mod tests {
         assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(in_more));
     }
 
-    /// #8120: while an Isolate is in effect the bar ends with Unisolate, its icon alone in the
-    /// primary fill, whatever the user's bar holds; a click brings the rest back and takes it away.
+    /// #8120: Isolate is a slot the user adds, never on a new bar and never added by itself. On
+    /// the bar it is greyed out with nothing selected, isolates the selection, then shows on in the
+    /// strong fill with Unisolate's icon (alone, labels or not), and a second click brings the
+    /// rest back.
     #[test]
-    fn the_bar_offers_unisolate_while_isolating() {
+    fn the_isolate_slot_isolates_and_unisolates() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
         h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
-        h.settle();
-        assert!(solidcraft_ui_registry::handle_at("nav:slot:unisolate").is_none(), "nothing is isolated");
         let kept = h.app.session.model.state().bodies[0].name.clone();
-        h.app.run("browser.visibility", json!({"items": [kept], "visible": true, "isolate": true})).unwrap();
+        h.app.run("browser.visibility", json!({"items": [kept.clone()], "visible": true, "isolate": true})).unwrap();
         h.settle();
-        assert!(live_preferences(&h.app).slots.last().is_some_and(|id| id == UNISOLATE), "last on the bar");
-        assert!(!h.app.preferences.navigation_bar.slots.iter().any(|id| id == UNISOLATE), "not stored in the user's bar");
-        assert!(solidcraft_ui_registry::handle_at("nav:slot:unisolate").is_some(), "on the bar");
-        let slot = find(UNISOLATE).expect("the Unisolate slot");
-        let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
-        let view = slot_view(&h.app, &bar, slot, usize::MAX, Rect::NOTHING, None);
-        assert!(view.selected && view.icon == "unisolate" && !view.show_text, "on, icon only");
+        assert!(!h.app.preferences.navigation_bar.slots.iter().any(|id| id == ISOLATE), "not on a new bar");
+        assert!(solidcraft_ui_registry::handle_at("nav:slot:isolate").is_none(), "never added by itself");
+        h.app.run("browser.unisolate", json!({})).unwrap();
+        h.app.preferences.navigation_bar.slots.push(ISOLATE.into());
+        h.app.run("select.set", json!({"items": []})).unwrap();
+        h.settle();
+        let slot = find(ISOLATE).expect("the Isolate slot");
+        let view = |h: &crate::scenario::Harness| {
+            let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
+            slot_view(&h.app, &bar, slot, 0, Rect::NOTHING, None)
+        };
+        let idle = view(&h);
+        assert!(!idle.enabled && !idle.selected && idle.icon == ISOLATE, "greyed out with nothing selected");
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": kept}]})).unwrap();
+        h.settle();
+        assert!(view(&h).enabled);
+        activate(&mut h.app, slot);
+        h.settle();
+        assert_eq!(h.app.session.visibility.hidden_bodies.len(), 1, "the other body is hidden");
         h.app.preferences.navigation_bar.labels = crate::navigation_bar::Labels::Labels;
-        let bar = measured(&h.app, &h.ctx, Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0)));
-        assert!(bar.labels && !slot_view(&h.app, &bar, slot, usize::MAX, Rect::NOTHING, None).show_text, "icon only on a bar of labels too");
-        let (_, rect) = bar.slots.iter().find(|(s, _)| s.id == UNISOLATE).expect("on the bar");
-        assert_eq!(rect.width(), crate::ui_kit::NavigationMetrics::for_size(h.app.preferences.navigation_bar.size).button, "a plain button's width");
-        h.app.preferences.navigation_bar.labels = crate::navigation_bar::Labels::Icons;
-        assert!(navigation_bar::strong(UNISOLATE) && !navigation_bar::strong("grid"), "only Unisolate takes the primary fill");
-        h.step(&json!({"click":{"handle":"nav:slot:unisolate"}})).unwrap();
+        let on = view(&h);
+        assert!(on.enabled && on.selected && on.icon == "unisolate" && !on.show_text, "on, Unisolate's icon alone");
+        assert!(navigation_bar::strong(ISOLATE) && !navigation_bar::strong("grid"), "only Isolate takes the strong fill");
+        activate(&mut h.app, slot);
         h.settle();
         assert!(h.app.session.visibility.hidden_bodies.is_empty(), "every body is back");
-        assert!(solidcraft_ui_registry::handle_at("nav:slot:unisolate").is_none(), "and the slot is gone");
+        assert!(!view(&h).selected);
     }
 
     #[test]

@@ -3068,3 +3068,31 @@ fn a_long_note_wraps_inside_its_box() {
     let drawn = Rect::from_min_size(painted.pos, painted.galley.size());
     assert!(note.text_rect.expand(0.5).contains_rect(drawn), "painted text {drawn:?} inside box {:?}", note.text_rect);
 }
+
+/// #8120: while isolating, with no Isolate slot on the navigation bar, a status pill names the
+/// Isolation and how much it hid; its close exits the isolation, and Escape never does.
+#[test]
+fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]})).unwrap();
+    let kept = h.app.session.model.state().bodies[0].name.clone();
+    h.app.run("browser.visibility", json!({"items": [kept], "visible": true, "isolate": true})).unwrap();
+    h.settle();
+    let isolate = |h: &Harness| h.app.session.status_items().into_iter().find(|e| e.id == solidcraft_engine::status_items::StatusId::Isolate);
+    let effect = isolate(&h).expect("an Isolate status");
+    let item = crate::viewport_status::presentation(&h.app, &effect).expect("a pill, the bar having no Isolate slot");
+    assert_eq!((item.name.as_str(), item.setting.as_str()), ("Isolation", "1 hidden"));
+    let close = format!("viewport_status:{}:close", item.id);
+    assert!(solidcraft_ui_registry::handle_at(&close).is_some(), "drawn with its close");
+    h.app.preferences.escape_closes_analyses = true;
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.session.visibility.before_isolate.is_some(), "Escape never exits isolation");
+    h.app.preferences.navigation_bar.slots.push("isolate".into());
+    assert!(crate::viewport_status::presentation(&h.app, &effect).is_none(), "the bar's Isolate slot shows it instead");
+    h.app.preferences.navigation_bar.slots.pop();
+    h.settle();
+    h.step(&json!({"click": {"handle": close}})).unwrap();
+    assert!(h.app.session.visibility.before_isolate.is_none() && h.app.session.visibility.hidden_bodies.is_empty(), "isolation exited");
+    assert!(isolate(&h).is_none());
+}

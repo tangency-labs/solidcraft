@@ -314,7 +314,7 @@ fn fixture() -> (Harness, u64, u64, u64) {
 
 #[test]
 fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
-    for label in ["Show All", "Unisolate"] {
+    for label in ["Show All", "Exit Isolation"] {
         let (mut h, _, first, second) = fixture();
         h.app.session.selection.clear();
         let menu_item =
@@ -445,9 +445,9 @@ fn occurrence_isolate_offers_unisolate_beside_it() {
             ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I")
         );
     }
-    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Unisolate").expect("Unisolate");
+    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
     context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
-    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Unisolate"), "gone once everything is back");
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
     assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
     assert!(h.app.session.visibility.hidden_occurrences.is_empty());
 }

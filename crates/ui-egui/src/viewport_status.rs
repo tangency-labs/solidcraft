@@ -5,8 +5,17 @@ use crate::{
 };
 use solidcraft_engine::status_items::{StatusId, StatusItem as Effect, StatusSetting};
 
+/// An Isolate is in effect and the navigation bar has no Isolate slot to show it, so a status
+/// pill does (#8120).
+pub(crate) fn isolate_pill(app: &SolveApp) -> bool {
+    app.session.visibility.before_isolate.is_some() && !app.preferences.navigation_bar.slots.iter().any(|id| id == "isolate")
+}
+
 fn allowed(app: &SolveApp) -> Vec<StatusId> {
     let mut ids = Vec::new();
+    if isolate_pill(app) {
+        ids.push(StatusId::Isolate);
+    }
     if app.preferences.viewport_analysis_status {
         ids.extend([StatusId::SurfaceAnalysis, StatusId::Continuity]);
     }
@@ -16,8 +25,14 @@ fn allowed(app: &SolveApp) -> Vec<StatusId> {
     ids
 }
 
+/// The effects Escape may end: an Isolate never ends by Escape.
 fn eligible(app: &SolveApp) -> Vec<StatusId> {
-    app.session.status_items().iter().filter(|effect| presentation(app, effect).is_some()).map(|effect| effect.id).collect()
+    app.session
+        .status_items()
+        .iter()
+        .filter(|effect| effect.id != StatusId::Isolate && presentation(app, effect).is_some())
+        .map(|effect| effect.id)
+        .collect()
 }
 
 pub(crate) fn enabled(app: &SolveApp) -> bool {
@@ -89,11 +104,13 @@ pub(crate) fn presentation(app: &SolveApp, effect: &Effect) -> Option<StatusItem
         StatusSetting::Curvature { radius_mm } => format!("R {}", crate::prefs::show_mm(app, radius_mm, 1)),
         StatusSetting::Continuity { edge_count } => solidcraft_ui_text::format("ui.viewport_status_edges", &[("count", &edge_count.to_string())]),
         StatusSetting::Section { origin_mm, normal, hatch } => section_setting(app, origin_mm, normal, hatch)?,
+        StatusSetting::Isolate { hidden } => solidcraft_ui_text::format("ui.viewport_status_hidden", &[("count", &hidden.to_string())]),
     };
     Some(StatusItem {
         id: identity(effect),
         kind: StatusKind::Mode,
-        name: crate::toolbar::persistent_button_name(app, command),
+        // The pill names the state, "Isolation", rather than the command (#8120).
+        name: if effect.id == StatusId::Isolate { app.tr("ui.isolation").to_owned() } else { crate::toolbar::persistent_button_name(app, command) },
         setting,
         has_key: if app.preferences.viewport_status_details { effect.has_details() } else { effect.has_key },
         editable: if app.preferences.viewport_status_details { effect.has_details() } else { effect.id == StatusId::Section },
@@ -186,7 +203,8 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context, viewport: egui::Rect) {
     reconcile(app, ctx);
-    if !enabled(app) {
+    // The Isolate pill shows with the analysis and section statuses off too; only it then.
+    if !enabled(app) && !isolate_pill(app) {
         app.viewport_status.open_key = None;
         return;
     }
