@@ -265,7 +265,7 @@ fn followed(on: &SurfaceEval, curve: &CurveEval, interval: [f64; 2], seed: &Curv
     // has no other use): on the same sheet and the same turn (a followed end a period away would
     // leave a jump across a seam that the loop has no edge for). The kernel's own end may be the
     // wrong one: it is where the trim starts on another sheet.
-    let far = match meets[usize::from(!backward)] {
+    let far = match meets.get(usize::from(!backward)).copied().flatten() {
         Some(q) => q,
         None => pcurve::eval(seed, far_t)?,
     };
