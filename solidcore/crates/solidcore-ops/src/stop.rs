@@ -501,8 +501,9 @@ mod tests {
                         out.push((sampled, side_along(k, b, eu, along, ON_PAST)?));
                     }
                 }
-                Ok(out)
+                Ok(Some(out))
             })
+            .unwrap()
             .unwrap()
         };
         let folded = answers(&plate([3.1535, 11.0], [0.682, 12.0]));

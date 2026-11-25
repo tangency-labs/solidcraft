@@ -3003,6 +3003,32 @@ fn edge_nurbs(b: &Brep, e: EdgeId) -> Result<Option<NurbsCurve>> {
     Ok(NurbsCurve::of(base).ok())
 }
 
+/// `H = A' W - A W'` over `s` within one knot span of the curve (the span of its middle),
+/// enclosed: `W^2` times the curve's derivative, so the same direction, and a polynomial in the
+/// curve's parameter on the span. `None` where the basis is not enclosed.
+fn curve_h(cn: &NurbsCurve, s: Ivl) -> Option<I3> {
+    let p = cn.p;
+    let k = span(&cn.u, p, cn.n, s.mid());
+    let (n, dn) = basis(&cn.u, k, p, s)?;
+    let zero = Ivl::from(0.0);
+    let (mut a, mut da, mut w, mut dw) = ([zero; 3], [zero; 3], zero, zero);
+    for j in 0..=p {
+        let i = (k + j).checked_sub(p)?;
+        let c = cn.pw.get(4 * i..4 * i + 4)?;
+        let (nj, dj) = (*n.get(j)?, *dn.get(j)?);
+        for ((ax, dax), &cx) in a.iter_mut().zip(da.iter_mut()).zip(c) {
+            *ax = *ax + nj * Ivl::from(cx);
+            *dax = *dax + dj * Ivl::from(cx);
+        }
+        let cw = Ivl::from(*c.get(3)?);
+        w = w + nj * cw;
+        dw = dw + dj * cw;
+    }
+    let [x, y, z] = a;
+    let [dx, dy, dz] = da;
+    Some([dx * w - x * dw, dy * w - y * dw, dz * w - z * dw])
+}
+
 /// Halvings of one piece [`side_along`] makes before leaving it undecided: a piece is then
 /// 2^-24 of one between the knots. A work budget.
 const MAX_SIDE_HALVINGS: u32 = 24;
@@ -3017,10 +3043,10 @@ pub enum SideAlong {
     /// All along the edge, the binormal into the face has at most the part asked along the
     /// direction.
     Within,
-    /// All over a piece of the edge around `at` (its middle, the edge's parameter), the part
-    /// is more.
+    /// The part is more at `at` (the edge's parameter): a point where it is proved, or the
+    /// middle of a piece all over which it is.
     RunsOn {
-        /// The middle of the piece.
+        /// Where it runs on.
         at: f64,
     },
     /// A piece around `at` is not placed on either side, even halved, or the budget ran out.
@@ -3034,17 +3060,24 @@ pub enum SideAlong {
 /// along `along` of the unit binormal into the face (normal to the edge, in the face) is at
 /// most `max_part` all along the edge, proved over the whole edge interval, not at points.
 ///
-/// The binormal is `sigma (F x C')` made unit: `F` the face use's normal along the pcurve,
+/// The binormal is `sigma (F x H)` made unit: `F` the face use's normal along the pcurve,
 /// enclosed over a piece of the edge as [`tangent_all_along`] encloses it (module docs: the net's
-/// homogeneous point and partials over the pcurve's box, in rounded interval arithmetic), `C'`
-/// the edge curve's derivative enclosed from its NURBS form ([`curve_derivs_over`]), and
+/// homogeneous point and partials over the pcurve's box, in rounded interval arithmetic), `H`
+/// the edge curve's derivative times `W^2` enclosed from its NURBS form (`curve_h`), and
 /// `sigma` the sign that turns it into the binormal [`evaluate_binormal`] gives, read once where
 /// the product is proved non-zero (a cosine under `SAME_SURFACE_COS` is refused, as for the
-/// face's normal). On a piece, `P = sigma (F x C') . along / (|F x C'| |along|)` is enclosed: an
+/// face's normal). On a piece on one cell of the face's net, `sigma F . (H x along)` is a
+/// polynomial in the edge's parameter, bounded from its values at the piece's Chebyshev points
+/// as [`tangent_all_along`] bounds `Q` (module docs), and the piece is placed where that bound
+/// is within `max_part` times the floor of `|F x H| |along|` (a point past it runs on: a witness).
+/// Else `P = sigma (F x H) . along / (|F x H| |along|)` is enclosed over the piece: an
 /// upper end within `max_part` places the piece, a lower end past it is a piece all of which runs
 /// on ([`SideAlong::RunsOn`]), and any other piece is halved, at most `MAX_SIDE_HALVINGS` times
-/// and to at most `MAX_SIDE_PIECES` pieces, past which it is [`SideAlong::Undecided`]. A piece
-/// whose product is not proved non-zero is halved the same way.
+/// and to at most `MAX_SIDE_PIECES` pieces, past which it is left undecided and the rest are
+/// still decided: a piece that runs on decides the edge, else one left undecided makes it
+/// [`SideAlong::Undecided`]. A piece whose product is not proved non-zero is halved the same way.
+/// The part's numerator is taken as `F . (H x along)`, the same triple product, so that zeros
+/// of `H x along` stay exact.
 ///
 /// # Errors
 ///
@@ -3087,17 +3120,28 @@ pub fn side_along(
     breaks.extend(cn.u.iter().copied().filter(|&t| t > t0 && t < t1));
     breaks.sort_by(f64::total_cmp);
     breaks.dedup();
-    let product = |u: &Use, s: Ivl| -> Result<Option<I3>> {
+    // `F` and `H = W^2 C'` over `s` (`None` where either is not enclosed)
+    let factors = |u: &Use, s: Ivl| -> Result<Option<(I3, I3)>> {
         let Some(f) = u.f_box(s)? else {
             return Ok(None);
         };
-        let ders = match curve_derivs_over(&cn, s, 1, None) {
-            Ok(d) => d,
-            Err(err) if err.is_unported_or_cancelled() => return Err(err),
-            Err(_) => return Ok(None),
-        };
-        Ok(ders.get(1).map(|c1| cross(f, [c1.x, c1.y, c1.z])))
+        Ok(curve_h(&cn, s).map(|h| (f, h)))
     };
+    // the degree of `F . (H x d)` along a piece on one cell: `F`'s plus `H`'s (`W^2 C'` is
+    // `A' W - A W'`, of degree `2p - 2`, or `p - 1` where the weights are one value)
+    let rational = {
+        let w: Vec<f64> = cn.pw.chunks(4).filter_map(|c| c.get(3).copied()).collect();
+        w.first()
+            .is_some_and(|&first| w.iter().any(|&x| x != first))
+    };
+    let h_degree = if rational {
+        (2 * cn.p).saturating_sub(2)
+    } else {
+        cn.p.saturating_sub(1)
+    };
+    let degree = u.degree.saturating_add(h_degree);
+    let nodes = degree + 1;
+    let lebesgue_n = lebesgue(nodes);
     // the face use's sense, then sigma, each at the first point where it can be read
     let mut sigma = None;
     'read: for (s0, s1) in pieces(&breaks) {
@@ -3105,7 +3149,7 @@ pub fn side_along(
             if u.sign.is_none() && !u.read_sign(k, b, t)? {
                 continue;
             }
-            let Some(g) = product(&u, Ivl::from(t))? else {
+            let Some(g) = factors(&u, Ivl::from(t))?.map(|(f, c1)| cross(f, c1)) else {
                 continue;
             };
             if !norm(g).is_positive() {
@@ -3138,16 +3182,59 @@ pub fn side_along(
         .map(|(a, z)| (a, z, 0))
         .collect();
     let mut count = 0usize;
+    let mut undecided: Option<f64> = None;
     while let Some((a, z, depth)) = stack.pop() {
         if count % POLL_POINTS == 0 {
             k.check_cancelled(OP)?;
         }
         count += 1;
         let at = 0.5 * (a + z);
-        let part = match product(&u, Ivl::new(a, z))? {
-            Some(g) => {
-                let ng = norm(g);
-                ng.is_positive().then(|| sigma * dot(g, d) / (ng * nd))
+        let piece = Ivl::new(a, z);
+        // on one cell, `sigma F . (H x d)` is a polynomial of degree `degree` in `t`: bounded from
+        // its values at the piece's Chebyshev points (module docs, `poly_range`), which are
+        // narrow where it is 0, against the floor of `|F x H| |d|` over the piece
+        if degree <= MAX_DEGREE && u.one_cell(piece)? {
+            let mut values = Vec::with_capacity(nodes);
+            let mut witness = None;
+            for t in chebyshev(a, z, nodes) {
+                let Some((f, h)) = factors(&u, Ivl::from(t))? else {
+                    values.clear();
+                    break;
+                };
+                let n = sigma * dot(f, cross(h, d));
+                let den = norm(cross(f, h)) * nd;
+                if den.is_positive() && (n / den).lo > max_part {
+                    witness = Some(t);
+                    break;
+                }
+                values.push(n);
+            }
+            if let Some(at) = witness {
+                return Ok(SideAlong::RunsOn { at });
+            }
+            let d2 = (degree as f64) * (degree as f64);
+            let eta = node_error(a, z) * d2 * (1.0 + gamma(2));
+            let floor = factors(&u, piece)?.map(|(f, h)| (norm(cross(f, h)) * nd).lo);
+            let placed = match (poly_range(&values, lebesgue_n, eta), floor) {
+                (Some(range), Some(floor)) => {
+                    !values.is_empty()
+                        && floor > 0.0
+                        && range.hi <= (Ivl::from(max_part) * Ivl::from(floor)).lo
+                }
+                _ => false,
+            };
+            if placed {
+                continue;
+            }
+        }
+        // the part as F . (H x d) / (|F x H| |d|), the triple product of (F x H) . d: where d
+        // and H have exact zeros (a direction along an axis, a curve in a coordinate plane) the
+        // zeros of H x d stay exact, where (F x H) . d would carry F's widths into them
+        let part = match factors(&u, piece)? {
+            Some((f, h)) => {
+                let ng = norm(cross(f, h));
+                ng.is_positive()
+                    .then(|| sigma * dot(f, cross(h, d)) / (ng * nd))
             }
             None => None,
         };
@@ -3163,10 +3250,15 @@ pub fn side_along(
                     stack.push((at, z, depth + 1));
                     stack.push((a, at, depth + 1));
                 } else {
-                    return Ok(SideAlong::Undecided { at });
+                    // a piece around a point where the part crosses `max_part` is never placed:
+                    // go on, as another piece may run on all over
+                    undecided.get_or_insert(at);
                 }
             }
         }
+    }
+    if let Some(at) = undecided {
+        return Ok(SideAlong::Undecided { at });
     }
     Ok(SideAlong::Within)
 }
