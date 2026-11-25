@@ -2,9 +2,11 @@
 //! view of a design with a note, reply to it, attach pictures, and close it as done or not done,
 //! with a reason ([review markups](../../../../docs/review-markups.md)).
 //!
-//! The markups are a set of their own beside the design (`solidcraft_io::markups`), never part of
-//! it: no command here changes the document or makes an undo step, and every write is one step
-//! on the set as it stands on the disk, under its lock. They need no window and open no dialog.
+//! The markups are a set of their own beside the design (`solidcraft_io::markups`): every write
+//! is one step on the set as it stands on the disk, under its lock. Only a markup's pictures are
+//! the design's: `markup.image` puts each picture's bytes in the design as an entry of its own
+//! (`Document::markup_images`, saved as a part of the container the way a canvas's image is), one
+//! undo step, and the set names the entry. They need no window and open no dialog.
 //!
 //! A markup on a face keeps the face's lasting name (the name `model.faces` lists) and the point
 //! that was marked. `markup.list` finds each face again by that name with exact geometry, never
@@ -75,9 +77,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("render_image")
         .contract(&IMAGE)
         .output(output_schema_for::<MarkupChanged>)
-        .noundo()
         .doc_only()
-        .params("markup: id or guid; file?: a PNG or JPEG path | data?: Base64 PNG or JPEG (+ name?) | remove?: a picture's file; by?; set? → markup, status, image?"),
+        .params("markup: id or guid; file?: a PNG or JPEG path (+ name?) | remove?: a picture's entry; by?; set? → markup, status, image?"),
     CommandSpec::new("markup.resolve", "Resolve Markup", crate::checked!("markup.resolve", markup_resolve))
         .icon("finish")
         .contract(&CLOSE)
@@ -103,9 +104,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("delete")
         .contract(&DELETE)
         .output(output_schema_for::<MarkupDeleted>)
-        .noundo()
         .doc_only()
-        .params("markup: id or guid; set? → deleted: id (its pictures go too)"),
+        .params("markup: id or guid; set? → deleted: id (its pictures leave the design too)"),
 ];
 
 /// The set a call works on: `set`, or the one beside the design's file.
@@ -650,13 +650,12 @@ pub(crate) fn found(s: &Session, st: &ModelState, anchor: &Anchor) -> Found {
 }
 
 /// One markup as `markup.list` gives it.
-fn row(s: &Session, st: &ModelState, path: &str, m: &Markup) -> Value {
-    let folder = set::folder(path).unwrap_or_default();
+fn row(s: &Session, st: &ModelState, m: &Markup) -> Value {
     let thread: Vec<Value> = m.thread.iter().map(|t| json!({"by": t.by, "at": t.at, "text": t.text, "reviewer": t.by == m.by})).collect();
     let images: Vec<Value> = m
         .images
         .iter()
-        .map(|i| json!({"file": i.file, "name": i.name, "by": i.by, "at": i.at, "bytes": i.bytes, "path": format!("{folder}/{}", i.file)}))
+        .map(|i| json!({"file": i.file, "name": i.name, "by": i.by, "at": i.at, "bytes": i.bytes, "in_design": s.doc.markup_images.contains_key(&i.file)}))
         .collect();
     let mut v = json!({
         "id": m.id,
@@ -691,7 +690,7 @@ fn markup_list(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state()?;
     let count = |w: Status| the_set.markups.iter().filter(|m| m.status == w).count();
     let counts = json!({"open": count(Status::Open), "resolved": count(Status::Resolved), "rejected": count(Status::Rejected)});
-    let markups: Vec<Value> = the_set.markups.iter().filter(|m| status.is_none_or(|w| m.status == w)).map(|m| row(s, &st, &path, m)).collect();
+    let markups: Vec<Value> = the_set.markups.iter().filter(|m| status.is_none_or(|w| m.status == w)).map(|m| row(s, &st, m)).collect();
     Ok(json!({ "set": path, "format": the_set.format, "counts": counts, "markups": markups }))
 }
 
@@ -865,47 +864,48 @@ fn markup_reopen(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn markup_image(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "markup.image";
-    let path = set_path(s, p, CMD)?;
+    set_path(s, p, CMD)?;
     let by = who(p, CMD)?;
-    let given = ["file", "data", "remove"].iter().filter(|k| p.get(**k).is_some_and(|v| !v.is_null())).count();
+    let given = ["file", "remove"].iter().filter(|k| p.get(**k).is_some_and(|v| !v.is_null())).count();
     if given != 1 {
-        return Err(bad(CMD, "give one of `file` (a PNG or JPEG), `data` (one in Base64) or `remove` (a picture's file)"));
+        return Err(bad(CMD, "give one of `file` (a PNG or JPEG) or `remove` (a picture's entry)"));
     }
     if let Some(file) = str_(p, "remove") {
-        let file = file.to_string();
-        let f = file.clone();
+        let f = file.to_string();
         let out = change(s, p, CMD, move |m, _| {
             let i = m.images.iter().position(|i| i.file == f).ok_or_else(|| format!("markup {} has no picture `{f}`", m.id))?;
             m.images.remove(i);
             Ok(json!({ "removed": f }))
         })?;
-        // Off the disk once the set no longer names it.
-        set::remove_image(&path, &file).map_err(|e| bad(CMD, e))?;
+        // Out of the design once the set no longer names it.
+        if s.doc.markup_images.contains_key(file) {
+            s.doc_mut().markup_images.remove(file);
+        }
         return Ok(out);
     }
-    let (bytes, name) = if let Some(file) = p.get("file").filter(|v| !v.is_null()) {
-        let file = file.as_str().filter(|f| !f.trim().is_empty()).ok_or_else(|| bad(CMD, "`file` must be a path"))?;
-        let bytes = solidcraft_io::vfs::read(file, set::MAX_IMAGE).map_err(|e| bad(CMD, format!("{file}: {e}")))?;
-        let name = std::path::Path::new(file).file_name().map_or_else(|| "picture".to_string(), |n| n.to_string_lossy().to_string());
-        (bytes, name)
-    } else {
-        let data = str_(p, "data").ok_or_else(|| bad(CMD, "`data` must be Base64 text"))?;
-        if data.len() > set::MAX_IMAGE / 3 * 4 + 8 {
-            return Err(bad(CMD, format!("a picture is at most {} bytes", set::MAX_IMAGE)));
-        }
-        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| bad(CMD, "`data` is not Base64"))?;
-        (bytes, "picture".to_string())
-    };
+    let file = str_(p, "file").filter(|f| !f.trim().is_empty()).ok_or_else(|| bad(CMD, "`file` must be a path"))?;
+    let bytes = solidcraft_io::vfs::read(file, set::MAX_IMAGE + 1).map_err(|e| bad(CMD, format!("{file}: {e}")))?;
+    if bytes.len() > set::MAX_IMAGE {
+        return Err(bad(CMD, format!("a picture is at most {} bytes", set::MAX_IMAGE)));
+    }
+    let kind = set::image_kind(&bytes).ok_or_else(|| bad(CMD, "a picture must be a PNG or a JPEG"))?;
+    let came = std::path::Path::new(file).file_name().map_or_else(|| "picture".to_string(), |n| n.to_string_lossy().to_string());
     let name = match str_(p, "name") {
         Some(n) if !n.trim().is_empty() && n.chars().count() <= 200 && !n.chars().any(char::is_control) => n.to_string(),
         Some(_) => return Err(bad(CMD, "`name` is 1 to 200 characters, with no control characters")),
-        None => name.chars().filter(|c| !c.is_control()).take(200).collect(),
+        None => came.chars().filter(|c| !c.is_control()).take(200).collect(),
     };
-    // Which markup, before the picture goes on the disk.
-    let current = set::read(&path).map_err(|e| bad(CMD, e))?;
-    which(&current, p).map_err(|e| bad(CMD, e))?;
-    let file = set::put_image(&path, &new_guid(), &bytes).map_err(|e| bad(CMD, e))?;
-    let image = Image { file: file.clone(), name, by, at: now(), bytes: bytes.len() as u64 };
+    let images = &s.doc.markup_images;
+    if images.len() >= solidcraft_doc::markup_image::MAX_FILES {
+        return Err(bad(CMD, format!("a design holds at most {} review pictures", solidcraft_doc::markup_image::MAX_FILES)));
+    }
+    let total: u64 = images.values().map(|b| b.len() as u64).sum();
+    if total.saturating_add(bytes.len() as u64) > solidcraft_doc::markup_image::MAX_TOTAL_BYTES {
+        return Err(bad(CMD, format!("a design's review pictures take at most {} bytes together", solidcraft_doc::markup_image::MAX_TOTAL_BYTES)));
+    }
+    let entry = format!("{}.{kind}", new_guid());
+    let image = Image { file: entry.clone(), name, by, at: now(), bytes: bytes.len() as u64 };
+    // The set names it first: a set that refuses leaves the design as it was.
     let added = change(s, p, CMD, move |m, _| {
         if m.images.len() >= set::MAX_IMAGES {
             return Err(format!("a markup holds at most {} pictures", set::MAX_IMAGES));
@@ -913,12 +913,9 @@ fn markup_image(s: &mut Session, p: &Value) -> Result<Value> {
         let f = image.file.clone();
         m.images.push(image);
         Ok(json!({ "image": f }))
-    });
-    if added.is_err() {
-        // The set refused it: the picture comes off again.
-        let _ = set::remove_image(&path, &file);
-    }
-    added
+    })?;
+    s.doc_mut().markup_images.insert(entry, bytes.into());
+    Ok(added)
 }
 
 fn markup_delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -932,7 +929,9 @@ fn markup_delete(s: &mut Session, p: &Value) -> Result<Value> {
     })
     .map_err(|e| bad(CMD, e))?;
     for f in files {
-        let _ = set::remove_image(&path, &f);
+        if s.doc.markup_images.contains_key(&f) {
+            s.doc_mut().markup_images.remove(&f);
+        }
     }
     Ok(json!({ "deleted": id }))
 }

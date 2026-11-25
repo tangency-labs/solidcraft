@@ -333,8 +333,16 @@ fn a_screenshot_is_cut_to_the_view_and_attached() {
     assert!(h.app.review.shot.is_none());
     let m = &listed(&h)[0];
     assert_eq!(m.images.len(), 1, "{m:?}");
-    let bytes = std::fs::read(&m.images[0].path).unwrap();
+    assert!(m.images[0].in_design);
+    // The bytes are the design's entry, and the file they came through is gone.
+    let bytes = h.app.session.doc.markup_images[&m.images[0].file].as_bytes().to_vec();
     assert_eq!(solidcraft_engine::io::markups::image_kind(&bytes), Some("png"));
+    let temp = solidcraft_engine::io::vfs::temp_dir();
+    let left = std::fs::read_dir(&temp).into_iter().flatten().flatten().any(|e| {
+        e.file_name().to_string_lossy().ends_with(&format!("-{}.png", shot.token))
+            && e.file_name().to_string_lossy().starts_with("solidcraft-review-")
+    });
+    assert!(!left, "the screenshot's passing file is removed");
     // Cut to the view: the window's own bar is left out.
     let view = h.app.viewport.rect.unwrap();
     let picture = image::load_from_memory(&bytes).unwrap();

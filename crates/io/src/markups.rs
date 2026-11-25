@@ -2,10 +2,12 @@
 //! pictures, kept in a set of their own beside the design for a person or an agent to work through
 //! ([review markups](../../../docs/review-markups.md)).
 //!
-//! A set is `<design>.markups.json`, with its pictures and lock in `<design>.markups/`. It is never
-//! part of the design: a markup names a face, an edge, a body, a feature or a component and owns
-//! none of them, so writing a set changes neither the design file nor its undo history, and the
-//! file reads with no app running.
+//! A set is `<design>.markups.json`, with its lock in `<design>.markups/`. Its threads and anchors
+//! are never part of the design: a markup names a face, an edge, a body, a feature or a component
+//! and owns none of them, so writing them changes neither the design file nor its undo history,
+//! and the file reads with no app running. A markup's pictures are the one part the design holds:
+//! their bytes are entries of the design container ([`solidcraft_doc::markup_image`]), as a
+//! canvas's image is, and the set names each by its entry.
 //!
 //! Every change is one step on the set as it stands: [`update`] takes the set's lock, reads the
 //! file, makes the change, checks the whole set ([`Set::check`]) and puts the new file in place
@@ -38,7 +40,7 @@ pub const MAX_MESSAGES: usize = 200;
 /// The most pictures on a markup.
 pub const MAX_IMAGES: usize = 8;
 /// The largest picture, in bytes.
-pub const MAX_IMAGE: usize = 16 << 20;
+pub const MAX_IMAGE: usize = solidcraft_doc::markup_image::MAX_BYTES;
 /// The most a set's pictures take together, in bytes.
 pub const MAX_ALL_IMAGES: u64 = 1 << 30;
 /// The longest name (of a person, a body, a face, an edge, a picture), in characters.
@@ -221,11 +223,12 @@ impl Anchor {
     }
 }
 
-/// A picture on a markup, kept in the set's folder as `file`.
+/// A picture on a markup: its bytes are the design's entry `file`
+/// ([`solidcraft_doc::Document::markup_images`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Image {
-    /// `<guid>.png` or `<guid>.jpg`, in the set's folder.
+    /// `<guid>.png` or `<guid>.jpg`: the entry's name in the design.
     pub file: String,
     /// The name it came with (a file's name, `screenshot`).
     pub name: String,
@@ -398,21 +401,14 @@ pub fn is_guid(s: &str) -> bool {
     s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Whether `s` is a picture's file name: a guid and `.png` or `.jpg`. Nothing else, so a set can
-/// never name a file outside its folder.
+/// Whether `s` is a picture's entry name: a guid and `.png` or `.jpg`.
 pub fn is_image_file(s: &str) -> bool {
-    s.strip_suffix(".png").or_else(|| s.strip_suffix(".jpg")).is_some_and(is_guid)
+    solidcraft_doc::markup_image::valid_name(s)
 }
 
 /// The kind of picture `bytes` hold by their first bytes: `png` or `jpg` (`None`: neither).
 pub fn image_kind(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
-        Some("png")
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some("jpg")
-    } else {
-        None
-    }
+    solidcraft_doc::markup_image::kind(bytes)
 }
 
 fn check_point(p: &[f64; 3]) -> Result<(), String> {
@@ -471,21 +467,13 @@ pub fn beside(design: &str) -> String {
     format!("{design}{SUFFIX}")
 }
 
-/// The folder of the set at `set` (its pictures and lock): the set's path without `.json`.
+/// The folder of the set at `set` (its lock): the set's path without `.json`.
 /// `Err` for a path that is not a set's (`…markups.json`).
 pub fn folder(set: &str) -> Result<String, String> {
     match set.strip_suffix(".json") {
         Some(stem) if set.ends_with(SUFFIX) && !stem.ends_with('/') && !stem.ends_with('\\') => Ok(stem.to_string()),
         _ => Err(format!("a markup set's file name ends with `{SUFFIX}`")),
     }
-}
-
-/// The path of picture `file` of the set at `set`. `Err` for a name that is not a picture's.
-pub fn image_path(set: &str, file: &str) -> Result<String, String> {
-    if !is_image_file(file) {
-        return Err("a picture's file is `<guid>.png` or `<guid>.jpg`".into());
-    }
-    Ok(format!("{}/{file}", folder(set)?))
 }
 
 /// Read a set's text: a set of [`FORMAT`] as it is, checked. A newer format is refused with a
@@ -560,34 +548,6 @@ pub fn update<T>(set: &str, step: impl FnOnce(&mut Set) -> Result<T, String>) ->
     let text = to_text(&s)?;
     crate::safe_write::write_atomic_no_follow(std::path::Path::new(set), text.as_bytes()).map_err(|e| format!("{set}: {e}"))?;
     Ok(out)
-}
-
-/// Put a picture's bytes in the set's folder as `<guid>.png` or `.jpg`, before the set names it,
-/// so the set never names a file a crash could lose. `Err` for bytes that are not a PNG or JPEG
-/// or are too large. Returns the file's name.
-pub fn put_image(set: &str, guid: &str, bytes: &[u8]) -> Result<String, String> {
-    if bytes.len() > MAX_IMAGE {
-        return Err(format!("a picture is at most {MAX_IMAGE} bytes; this one is {}", bytes.len()));
-    }
-    let kind = image_kind(bytes).ok_or("a picture must be a PNG or a JPEG")?;
-    if !is_guid(guid) {
-        return Err("a picture's guid is 32 hexadecimal digits".into());
-    }
-    let file = format!("{guid}.{kind}");
-    make_folder(set)?;
-    let path = image_path(set, &file)?;
-    vfs::check_new(&path).map_err(|e| format!("{path}: {e}"))?;
-    crate::safe_write::write_atomic_no_follow(std::path::Path::new(&path), bytes).map_err(|e| format!("{path}: {e}"))?;
-    Ok(file)
-}
-
-/// Take picture `file` off the disk (nothing when it is gone already).
-pub fn remove_image(set: &str, file: &str) -> Result<(), String> {
-    let path = image_path(set, file)?;
-    if vfs::exists(&path) {
-        vfs::remove(&path).map_err(|e| format!("{path}: {e}"))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

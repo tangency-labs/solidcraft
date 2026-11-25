@@ -90,7 +90,8 @@ pub fn edge_closest_point(body: &Body, edge: usize, at: Vec3) -> Result<Option<V
     if !at.is_finite() {
         return Err(KernelError::Invalid("the point must be finite".into()));
     }
-    let Some((ops, order)) = body.ops_body() else { return Ok(None) };
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
     if edge >= body.record().edges.len() {
         return Ok(None);
     }

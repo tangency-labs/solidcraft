@@ -151,8 +151,9 @@ pub struct MarkupReplyParams {
     pub set: Option<String>,
 }
 
-/// Attach a picture to a markup, or take one off. Give exactly one of `file`, `data` and
-/// `remove`. A picture is a PNG or a JPEG (by its first bytes), at most 16 MiB, at most 8 a markup.
+/// Attach a picture to a markup, or take one off. Give exactly one of `file` and `remove`. A
+/// picture is a PNG or a JPEG (by its first bytes), at most 16 MiB, at most 8 a markup. Its bytes
+/// go in the design, an entry of their own; the set names the entry.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct MarkupImageParams {
@@ -161,13 +162,10 @@ pub struct MarkupImageParams {
     /// A picture file to attach.
     #[serde(default)]
     pub file: Option<String>,
-    /// A picture to attach, in Base64 (a window's screenshot, a client with no disk).
-    #[serde(default)]
-    pub data: Option<String>,
-    /// The name the picture is shown with. Default: the file's name, or `picture`.
+    /// The name the picture is shown with. Default: the file's name.
     #[serde(default)]
     pub name: Option<String>,
-    /// A picture's file (`<guid>.png` or `.jpg`, as `markup.list` gives it) to take off.
+    /// A picture's entry (`<guid>.png` or `.jpg`, as `markup.list` gives it) to take off.
     #[serde(default)]
     pub remove: Option<String>,
     /// Who attaches it. Default: `agent`.
@@ -289,14 +287,14 @@ pub struct MarkupMessage {
 /// A picture on a markup.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MarkupImage {
-    /// `<guid>.png` or `.jpg`, in the set's folder.
+    /// `<guid>.png` or `.jpg`: the picture's entry in the design.
     pub file: String,
     pub name: String,
     pub by: String,
     pub at: u64,
     pub bytes: u64,
-    /// Where the picture's file is.
-    pub path: String,
+    /// Whether the design holds the picture's bytes (not after an undo past `markup.image`).
+    pub in_design: bool,
 }
 
 /// Who closed a markup, why and when (Unix seconds).

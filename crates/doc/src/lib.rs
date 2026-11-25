@@ -63,6 +63,7 @@ pub use inline_params::Defined;
 pub mod joints;
 pub mod json_layout;
 mod lineage;
+pub mod markup_image;
 pub mod metadata;
 pub use metadata::Metadata;
 pub mod motion;

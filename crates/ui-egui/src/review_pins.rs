@@ -109,9 +109,11 @@ impl Seen {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct Picture {
+    /// Its entry in the design.
     pub file: String,
     pub name: String,
-    pub path: String,
+    /// The design holds its bytes (not after an undo past attaching it).
+    pub in_design: bool,
 }
 
 /// How a closed markup ended.
@@ -1357,7 +1359,7 @@ fn pictures(app: &mut SolveApp, ui: &mut egui::Ui, row: &Row, out: &mut Option<D
     ui.horizontal_wrapped(|ui| {
         for (n, p) in row.images.iter().enumerate() {
             let (rect, resp) = ui.allocate_exact_size(THUMB, Sense::click());
-            match thumb(app, ui.ctx(), &p.path) {
+            match thumb(app, ui.ctx(), p) {
                 Some((tex, size)) => {
                     let fit = rect.center() - size / 2.0;
                     egui::Image::new(&tex).paint_at(ui, Rect::from_min_size(fit, size));
@@ -1387,16 +1389,21 @@ fn pictures(app: &mut SolveApp, ui: &mut egui::Ui, row: &Row, out: &mut Option<D
     });
 }
 
-/// A picture's small copy as a texture, made once (at most [`THUMBS`] kept).
-fn thumb(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<(egui::TextureHandle, Vec2)> {
+/// A picture's small copy as a texture, made once from the design's bytes (at most [`THUMBS`]
+/// kept).
+fn thumb(app: &mut SolveApp, ctx: &egui::Context, picture: &Picture) -> Option<(egui::TextureHandle, Vec2)> {
+    if !picture.in_design {
+        return None;
+    }
+    let path = picture.file.as_str();
     if let Some(kept) = app.review.thumbs.get(path) {
         return kept.clone();
     }
     if app.review.thumbs.len() >= THUMBS {
         app.review.thumbs.clear();
     }
-    let made = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::markups::MAX_IMAGE).ok().and_then(|bytes| {
-        let img = image::load_from_memory(&bytes).ok()?;
+    let made = app.session.doc.markup_images.get(path).and_then(|bytes| {
+        let img = image::load_from_memory(bytes).ok()?;
         let small = img.thumbnail((THUMB.x * 2.0) as u32, (THUMB.y * 2.0) as u32).to_rgba8();
         let (w, h) = (small.width() as usize, small.height() as usize);
         let pixels = ColorImage::from_rgba_unmultiplied([w, h], small.as_raw());
@@ -1430,8 +1437,22 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
     app.review.shot = None;
     let cut = crate::issue_report::ticket::crop(&image, Some(shot.view), shot.scale);
     let Some(png) = crate::issue_report::ticket::png(&cut) else { return };
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    write(app, "markup.image", json!({"markup": shot.markup, "data": data, "name": "view.png"}));
+    // The command takes a file: the picture goes through one in the temporary folder (in memory
+    // in the browser), and its bytes end up in the design. The name can't be guessed, and a link
+    // put there first is never followed.
+    let random = {
+        use std::hash::BuildHasher;
+        let seed = (crate::now_ms().to_bits(), token);
+        let a = std::collections::hash_map::RandomState::new().hash_one(seed);
+        let b = std::collections::hash_map::RandomState::new().hash_one((a, seed));
+        format!("{a:016x}{b:016x}")
+    };
+    let path = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-review-{random}-{token}.png"));
+    let file = path.to_string_lossy().to_string();
+    if solidcraft_engine::io::safe_write::write_atomic_no_follow(&path, &png).is_ok() {
+        write(app, "markup.image", json!({"markup": shot.markup, "file": file, "name": "view.png"}));
+        let _ = solidcraft_engine::io::vfs::remove(&file);
+    }
 }
 
 /// Attach image…: a PNG or JPEG from the disk.

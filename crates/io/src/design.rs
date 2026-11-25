@@ -397,6 +397,7 @@ fn write_container(
     if let Some(object) = metadata.as_object_mut() {
         object.remove("drawings");
         object.remove("plugin_data");
+        object.remove("markup_images");
         // The parts the drawings' images are, named where a release that can't read the drawings'
         // records (0.45.0) looks before it keeps a part, so its save keeps them.
         let mut parts: Vec<String> = doc
@@ -433,6 +434,9 @@ fn write_container(
     drawing::write(&mut writer, doc)?;
     for (key, data) in &doc.plugin_data {
         writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), data, true)?;
+    }
+    for (name, data) in &doc.markup_images {
+        writer.part(&format!("{}{name}", solidcraft_doc::markup_image::PREFIX), data, false)?;
     }
     // The signature binds every authoritative part written above (never the optional caches), and
     // is written before them so their budget sees its bytes.
@@ -1312,6 +1316,25 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
     }
 }
 
+/// Review markup pictures: each `markups/<guid>.png` or `.jpg` part, as its bytes. One that does
+/// not read, or is not a picture, is left out; the design opens all the same.
+fn hydrate_markup_images<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    use solidcraft_doc::markup_image::{MAX_BYTES, MAX_FILES, MAX_TOTAL_BYTES, PREFIX, kind, valid_name};
+    let mut total = 0u64;
+    for name in reader.part_names() {
+        let Some(file) = name.strip_prefix(PREFIX).filter(|f| valid_name(f)) else { continue };
+        if doc.markup_images.len() >= MAX_FILES {
+            break;
+        }
+        let Ok(bytes) = reader.limited_part(&name, MAX_BYTES) else { continue };
+        if kind(&bytes).is_none() || total.saturating_add(bytes.len() as u64) > MAX_TOTAL_BYTES {
+            continue;
+        }
+        total = total.saturating_add(bytes.len() as u64);
+        doc.markup_images.insert(file.to_string(), bytes.into());
+    }
+}
+
 /// A `container.json` that says only a format this build writes or wrote.
 fn is_known_container(container: &Value) -> bool {
     *container == json!({"format": VERSION})
@@ -1411,6 +1434,7 @@ fn read_document_within<R: Read + Seek>(reader: &mut PackageReader<R>, record_bo
         hydrate_newer(&mut doc, &metadata, container, reader, &mut records_parts)?;
     }
     hydrate_plugin_data(&mut doc, reader);
+    hydrate_markup_images(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -3657,6 +3681,38 @@ mod tests {
                 assert!(why.contains(&said), "{why}");
             }
         }
+    }
+
+    /// Review markup pictures are parts of their own under `markups/`, as bytes, named by the
+    /// markup set; a design without any has none. A part that is not a picture's name, or not a
+    /// PNG or JPEG, is left out. The design's JSON never holds them, and a plain JSON design can't
+    /// carry them and refuses to save.
+    #[test]
+    fn markup_pictures_are_parts_of_the_container() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("markups/")));
+        let png: Vec<u8> = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A].into_iter().chain(0..=255).collect();
+        let jpg: Vec<u8> = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3].to_vec();
+        let mut with = doc.clone();
+        with.markup_images.insert("0123456789abcdef0123456789abcdef.png".into(), png.as_slice().into());
+        with.markup_images.insert("fedcba9876543210fedcba9876543210.jpg".into(), jpg.as_slice().into());
+        let mut entries = parts(&write_design_container(&with).unwrap());
+        assert_eq!(entries["markups/0123456789abcdef0123456789abcdef.png"], png, "the bytes, not text");
+        assert_eq!(entries["markups/fedcba9876543210fedcba9876543210.jpg"], jpg);
+        let metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        assert!(metadata.get("markup_images").is_none(), "the parts stand beside the design's record");
+        assert_eq!(crate::read_design(&package(&entries)).unwrap().markup_images, with.markup_images);
+
+        entries.insert("markups/x.png".into(), png.clone());
+        entries.insert("markups/00000000000000000000000000000000.png".into(), b"GIF89a".to_vec());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.markup_images, with.markup_images, "only pictures under their own names");
+        assert_eq!(opened.features, doc.features);
+
+        let refused = crate::write_design(&opened).unwrap_err().to_string();
+        assert!(refused.contains("review pictures"), "{refused}");
+        assert!(!opened.to_json().contains("markup_images"), "never written as text");
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin

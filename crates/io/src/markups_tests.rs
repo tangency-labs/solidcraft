@@ -106,14 +106,14 @@ fn a_reply_too_long_says_the_limit_its_length_and_how_far_over() {
 }
 
 #[test]
-fn a_set_path_names_its_folder_and_pictures_never_leave_it() {
+fn a_set_path_names_its_folder_and_pictures_are_entry_names() {
     assert_eq!(beside("/d/part.sc"), "/d/part.sc.markups.json");
     assert_eq!(folder("/d/part.sc.markups.json").unwrap(), "/d/part.sc.markups");
     assert!(folder("/d/part.json").is_err());
     assert!(folder("/d/part.sc").is_err());
-    assert!(image_path("/d/p.markups.json", &format!("{GUID_A}.png")).is_ok());
+    assert!(is_image_file(&format!("{GUID_A}.png")));
     for bad in ["../a.png", "a.png", &format!("{GUID_A}.gif"), &format!("../{GUID_A}.png"), ""] {
-        assert!(image_path("/d/p.markups.json", bad).is_err(), "{bad}");
+        assert!(!is_image_file(bad), "{bad}");
     }
     assert_eq!(image_kind(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0]), Some("png"));
     assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpg"));
@@ -174,18 +174,4 @@ fn a_refused_change_leaves_the_file_as_it_was() {
         .is_err()
     );
     assert_eq!(std::fs::read(&set).unwrap(), before);
-}
-
-#[test]
-fn a_picture_goes_in_the_folder_under_its_guid() {
-    let dir = scratch("picture");
-    let set = dir.join("part.sc.markups.json").to_string_lossy().to_string();
-    let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
-    let file = put_image(&set, GUID_B, &png).unwrap();
-    assert_eq!(file, format!("{GUID_B}.png"));
-    assert_eq!(std::fs::read(image_path(&set, &file).unwrap()).unwrap(), png);
-    assert!(put_image(&set, GUID_A, b"not a picture").is_err());
-    assert!(put_image(&set, "../../x", &png).is_err());
-    remove_image(&set, &file).unwrap();
-    assert!(!std::path::Path::new(&image_path(&set, &file).unwrap()).exists());
 }

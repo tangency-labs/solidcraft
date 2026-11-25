@@ -241,12 +241,13 @@ fn a_picture_is_attached_listed_and_taken_off() {
     let (mut s, dir) = session("pictures");
     let id = run(&mut s, "markup.add", json!({"at": [0.0, 0.0, 0.0], "text": "See the picture."}))["markup"].as_u64().unwrap();
     let png = [0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
-    let data = solidcraft_doc::canvas::base64_encode(&png);
-    let r = run(&mut s, "markup.image", json!({"markup": id, "data": data, "name": "screenshot"}));
+    let shot = dir.join("view.png");
+    std::fs::write(&shot, png).unwrap();
+    let r = run(&mut s, "markup.image", json!({"markup": id, "file": shot.to_string_lossy(), "name": "screenshot"}));
     let file = r["image"].as_str().unwrap().to_string();
-    let path = dir.join("part.sc.markups").join(&file);
-    assert_eq!(std::fs::read(&path).unwrap(), png);
-    // From a file, too.
+    // The bytes are the design's own entry, never a file beside it, never text.
+    assert_eq!(s.doc.markup_images[&file].as_bytes(), png);
+    assert!(!dir.join("part.sc.markups").join(&file).exists());
     let jpg = dir.join("photo.jpg");
     std::fs::write(&jpg, [0xFF, 0xD8, 0xFF, 0xE0, 1, 2]).unwrap();
     run(&mut s, "markup.image", json!({"markup": id, "file": jpg.to_string_lossy()}));
@@ -254,20 +255,43 @@ fn a_picture_is_attached_listed_and_taken_off() {
     assert_eq!(images.len(), 2);
     assert_eq!(images[0]["name"], "screenshot");
     assert_eq!(images[1]["name"], "photo.jpg");
-    assert_eq!(images[0]["path"], path.to_string_lossy().as_ref());
-    // Not a picture, two sources, or nothing.
-    assert!(
-        refusal(&mut s, "markup.image", json!({"markup": id, "data": solidcraft_doc::canvas::base64_encode(b"GIF89a")})).contains("PNG or a JPEG")
-    );
-    assert!(refusal(&mut s, "markup.image", json!({"markup": id, "data": data, "remove": file})).contains("one of"));
+    assert_eq!(images[0]["in_design"], true);
+    // A container saves them as parts, and they open again.
+    let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+    assert_eq!(solidcraft_io::read_design(&saved).unwrap().markup_images, s.doc.markup_images);
+    // Not a picture, Base64 text, two sources, or nothing.
+    let gif = dir.join("x.gif");
+    std::fs::write(&gif, b"GIF89a").unwrap();
+    assert!(refusal(&mut s, "markup.image", json!({"markup": id, "file": gif.to_string_lossy()})).contains("PNG or a JPEG"));
+    // Base64 text is no way in: `data` is not a parameter.
+    refusal(&mut s, "markup.image", json!({"markup": id, "data": solidcraft_doc::canvas::base64_encode(&png)}));
+    assert!(refusal(&mut s, "markup.image", json!({"markup": id, "file": shot.to_string_lossy(), "remove": file})).contains("one of"));
+    assert!(refusal(&mut s, "markup.image", json!({"markup": id})).contains("one of"));
     run(&mut s, "markup.image", json!({"markup": id, "remove": file}));
-    assert!(!path.exists());
+    assert!(!s.doc.markup_images.contains_key(&file));
     assert_eq!(listed(&mut s)[0]["images"].as_array().unwrap().len(), 1);
-    // Deleting the markup takes its pictures off the disk.
-    let left = dir.join("part.sc.markups").join(listed(&mut s)[0]["images"][0]["file"].as_str().unwrap());
-    assert!(left.exists());
+    // Deleting the markup takes its pictures out of the design.
+    let left = listed(&mut s)[0]["images"][0]["file"].as_str().unwrap().to_string();
+    assert!(s.doc.markup_images.contains_key(&left));
     run(&mut s, "markup.delete", json!({"markup": id}));
-    assert!(!left.exists());
+    assert!(s.doc.markup_images.is_empty());
+}
+
+/// Attaching a picture is one undo step on the design, as inserting a canvas is: undo takes its
+/// bytes out again, and the set's record then says the design does not hold it.
+#[test]
+fn attaching_a_picture_is_an_undo_step() {
+    let (mut s, dir) = session("picture-undo");
+    let id = run(&mut s, "markup.add", json!({"at": [0.0, 0.0, 0.0], "text": "Undo me."}))["markup"].as_u64().unwrap();
+    let shot = dir.join("view.png");
+    std::fs::write(&shot, [0x89u8, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1]).unwrap();
+    run(&mut s, "markup.image", json!({"markup": id, "file": shot.to_string_lossy()}));
+    assert_eq!(s.doc.markup_images.len(), 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.markup_images.is_empty());
+    assert_eq!(listed(&mut s)[0]["images"][0]["in_design"], false);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(listed(&mut s)[0]["images"][0]["in_design"], true);
 }
 
 /// The window and an agent, each with its own session on the design, add at once.
@@ -337,25 +361,8 @@ fn hostile_markup_params_never_panic() {
         s.path = start.path.clone();
         s
     };
-    let keys = [
-        "set",
-        "markup",
-        "text",
-        "by",
-        "reason",
-        "status",
-        "face",
-        "edge",
-        "body",
-        "at",
-        "feature",
-        "occurrence",
-        "view",
-        "file",
-        "data",
-        "name",
-        "remove",
-    ];
+    let keys =
+        ["set", "markup", "text", "by", "reason", "status", "face", "edge", "body", "at", "feature", "occurrence", "view", "file", "name", "remove"];
     let commands = [
         "markup.list",
         "markup.add",
