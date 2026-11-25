@@ -26,6 +26,8 @@ pub enum InstallError {
     NotOnePlugin,
     #[error("the .zip has no {0}, which plugin.json names")]
     MissingModule(String),
+    #[error("the .zip has no {0}, which plugin.json names in themes")]
+    MissingTheme(String),
     /// The module is missing and the .zip holds Rust sources: most likely the "Source code"
     /// archive that GitHub lists beside a release, not the plugin's own .zip (#16736).
     #[error(
@@ -152,11 +154,13 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
     if files.len() + folders.len() > super::MAX_FILES {
         return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin folder holds at most 1024 files and folders".into() }));
     }
+    check_themes(&manifest, &files)?;
     // Every file but the plugin's component stays within a command component's budget.
     let component_path = manifest.runtime.as_ref().map(|r| r.module.as_str());
     if files.iter().any(|f| Some(f.path.as_str()) != component_path && f.bytes.len() > craft_plugin::MAX_COMPONENT_BYTES) {
         return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin file other than its component is over 16 MiB".into() }));
     }
+    check_shaders(&manifest, &files)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module = files.iter().find(|f| f.path == runtime.module).ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?;
         if module.bytes.len() > runtime.max_component_bytes() {
@@ -169,6 +173,40 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
     };
     let approval = super::package_hash(text, component);
     Ok(Unpacked { manifest, approval, archive, files })
+}
+
+/// Refuses only a package that could never draw; the app compiles the source again when it draws.
+fn check_shaders(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), InstallError> {
+    let file = |name: &str| files.iter().find(|f| f.path == name);
+    for shader in &manifest.shaders {
+        let source = file(&shader.source).ok_or_else(|| InstallError::MissingModule(shader.source.clone()))?;
+        let text = std::str::from_utf8(&source.bytes).map_err(|_| {
+            InstallError::Manifest(HostError::InvalidManifest {
+                field: format!("shaders.{}", shader.id),
+                reason: format!("{} is not UTF-8 text", shader.source),
+            })
+        })?;
+        craft_plugin::shader::compile(shader, text).map_err(InstallError::Manifest)?;
+        for texture in &shader.textures {
+            // A texture the person chooses may ship no file at all.
+            let Some(name) = &texture.file else { continue };
+            let picture = file(name).ok_or_else(|| InstallError::MissingModule(name.clone()))?;
+            if picture.bytes.len() > craft_plugin::shader::MAX_TEXTURE_BYTES {
+                return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("{name} is over 16 MiB") }));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Each theme's file is in the package and is a theme file (`themes@0.1`); the host reads it again
+/// when it lists the theme.
+fn check_themes(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), InstallError> {
+    for theme in &manifest.themes {
+        let file = files.iter().find(|f| f.path == theme.source).ok_or_else(|| InstallError::MissingTheme(theme.source.clone()))?;
+        craft_plugin::theme::check_file(&theme.id, &file.bytes).map_err(InstallError::Manifest)?;
+    }
+    Ok(())
 }
 
 /// The installed plugin of this id: its name and version, if its folder holds a readable manifest.
