@@ -1445,6 +1445,7 @@ impl Dialog {
                 && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if let Ok(names) = s.occurrence_bodies(path, true) {
+                    let whole = names.clone();
                     for name in names {
                         let body = Sel::Body { name };
                         if !inp.multi {
@@ -1457,6 +1458,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
+                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
                 }
                 continue;
             }
@@ -1548,6 +1550,10 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // As-built opens on Components until they hold two components (#21842).
+        if crate::dialogs_assembly::as_built_wants_components(s, &d) {
+            d.active = 0;
+        }
         // Move/Copy opens on Selection, picked or not: more objects are picked first.
         if matches!(d.kind, Kind::Move { .. }) {
             d.active = 0;

@@ -2113,6 +2113,112 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
+fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corners: &[[f64; 3]]| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        for c in corners {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": c})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        occ
+    };
+    let stand = component(&mut h, "Stand", &[[0.0, 0.0, 0.0], [20.0, 0.0, 0.0]]);
+    let umbrella = component(&mut h, "Umbrella", &[[0.0, 40.0, 0.0]]);
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    (h, stand, umbrella)
+}
+
+fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
+    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    assert_eq!(at["ok"], true, "{at}");
+    let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
+    assert_eq!(clicked["ok"], true, "{clicked}");
+    h.frames(2);
+}
+
+/// The one-component hint As-Built would show now, if any.
+fn as_built_hint(h: &crate::scenario::Harness) -> Option<Vec<String>> {
+    let d = h.app.dialog.as_ref().expect("As-Built is open");
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    joint_problem(&h.app, k, &d.inputs).map(|p| p.1)
+}
+
+/// #21842: a component with two bodies picked by its Browser row, or selected when As-Built
+/// starts, is one component: Components stays active with no hint to split it, and the second
+/// component's row then moves on to Position with the two components as a and b.
+#[test]
+fn as_built_takes_a_two_body_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, stand, umbrella) = stand_and_umbrella();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![stand] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, stand);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "both of Stand's bodies");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        click_row(&mut h, umbrella);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!(c[0].0, "joint.as_built");
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
+    }
+}
+
+/// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
+/// whole-component pick stops hiding it once Components no longer holds that pick or the window
+/// opens again.
+#[test]
+fn as_built_hint_stays_for_bodies_picked_one_by_one() {
+    let (mut h, stand, _) = stand_and_umbrella();
+    let bodies = h.app.session.occurrence_bodies(&[stand], true).unwrap();
+    let pick_bodies = |h: &mut crate::scenario::Harness, names: &[String]| {
+        let mut d = h.app.dialog.take().unwrap();
+        for name in names {
+            d.pick(&h.app.session, Sel::Body { name: name.clone() });
+        }
+        h.app.dialog = Some(d);
+        h.frames(2);
+    };
+    h.app.start("joint.as_built");
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "picked one by one: the hint");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "still one component");
+    // Components cleared, then the same bodies one by one.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    assert_eq!(as_built_hint(&h), None);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    pick_bodies(&mut h, &bodies);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "after a clear");
+    // One body taken out and picked again.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    click_row(&mut h, stand);
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the pick took it out");
+    pick_bodies(&mut h, &bodies[..1]);
+    assert_eq!(as_built_hint(&h), Some(vec![bodies[1].clone(), bodies[0].clone()]), "after a body went out (in pick order)");
+    // A new window: the bodies selected before it opens.
+    h.app.dialog = None;
+    h.app.session.selection = bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    assert_eq!(as_built_hint(&h), Some(bodies.clone()), "a new window");
+}
+
 #[test]
 fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
     for component in [None, Some("Part")] {
