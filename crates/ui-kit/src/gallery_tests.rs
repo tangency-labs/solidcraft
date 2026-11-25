@@ -384,6 +384,10 @@ pub const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
         checkbox_at(ui, rect, "Enabled", &mut sample.checked);
     }),
+    element!("switch_at", |ui, sample| {
+        let (rect, _) = ui.allocate_exact_size(switch_size(), egui::Sense::hover());
+        switch_at(ui, rect, "Enabled", &mut sample.checked);
+    }),
     element!("settings_plugin_card", |ui, sample| {
         settings_plugin_card(
             ui,

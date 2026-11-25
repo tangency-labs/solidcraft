@@ -1793,7 +1793,7 @@ mod tests {
                         assert!(folder.right() <= checkbox.left(), "actions do not overlap");
                         assert!(card.height() > 62.0 && remove.top() > folder.bottom(), "host removal action stays in its own row inside the card");
                         assert_eq!(folder.height(), 24.0);
-                        assert_eq!(checkbox.size(), egui::vec2(16.0, 16.0));
+                        assert_eq!(checkbox.size(), egui::vec2(32.0, 18.0), "on and off is a slide switch, not a check box");
                         let t = solidcraft_theme::Tokens::get();
                         let icon = crate::scenario::rect_of("prefs:plugin:public-one:icon").unwrap();
                         assert_eq!(icon.size(), egui::vec2(36.0, 36.0));
