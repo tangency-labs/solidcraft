@@ -227,6 +227,32 @@ fn a_form_change_keeps_what_still_applies() {
     assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("standard")));
 }
 
+/// Unified offers the shared UNC/UNF sizes by their full designation, including the pitch;
+/// displaying an authored class must keep it in the command and saved dialog.
+#[test]
+fn unified_form_offers_catalogue_sizes_and_keeps_an_authored_class() {
+    let mut h = shaft();
+    choose(&mut h, "Form", "thread.form_unified");
+    assert_eq!(options(&h).form, ThreadForm::Unified);
+    assert_eq!(params(&h)["form"], "unified");
+    assert!(params(&h).get("designation").is_none(), "the Unified face size is automatic");
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { designation, .. } if designation == "5/16-18 UNC"));
+    click(&mut h, &["dialog:Automatic size"]);
+    choose(&mut h, "Size", "#10-32 UNF");
+    assert_eq!(params(&h)["designation"], "#10-32 UNF");
+    type_in(&mut h, "Designation", "5/16-24 UNF-2A");
+    h.frames(2);
+    assert_eq!(params(&h)["designation"], "5/16-24 UNF-2A");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(
+        matches!(dialog.kind, Kind::Thread { designation, options, .. } if designation == "5/16-24 UNF-2A" && options.form == ThreadForm::Unified)
+    );
+}
+
 /// The dialog shows the command's own error text for options it cannot build.
 #[test]
 fn the_command_error_is_what_the_dialog_shows() {

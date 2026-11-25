@@ -215,6 +215,7 @@ fn tap_drill_label(size: &TappedThread) -> String {
 /// refuses it ([`ThreadForm::refused`]).
 const FORMS: &[(&str, ThreadForm)] = &[
     ("ISO metric", ThreadForm::Metric),
+    ("thread.form_unified", ThreadForm::Unified),
     ("Trapezoidal (ISO 2904)", ThreadForm::Trapezoidal),
     ("Acme (ASME B1.5)", ThreadForm::Acme),
     ("Buttress (DIN 513)", ThreadForm::Buttress),
@@ -330,7 +331,7 @@ fn is_buttress(form: ThreadForm) -> bool {
 /// Sizes in inches are listed by designation, and their pitch is part of it (threads per inch):
 /// the inch forms and the pipe threads, whose nominal sizes are pipe sizes.
 fn inch(form: ThreadForm) -> bool {
-    matches!(form, ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
+    matches!(form, ThreadForm::Unified | ThreadForm::Acme | ThreadForm::ButtressAsme) || is_pipe(form)
 }
 
 /// A pipe thread: one start, turning one way.
@@ -522,6 +523,28 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
 /// The Size choice of a form with a size table, and the Pitch choice of the metric ones (an
 /// inch designation names its threads per inch).
 fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggested: &mut Option<String>) {
+    if f == ThreadForm::Unified {
+        let mut labels = f.designations();
+        if !designation.trim().is_empty() && !labels.iter().any(|s| s == designation) {
+            labels.push(designation.clone());
+        }
+        let mut selected = labels.iter().position(|s| s == designation).unwrap_or(labels.len());
+        let before = selected;
+        if selected == labels.len() {
+            labels.push("Select size".into());
+        }
+        form_row(ui, "Size", |ui| {
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            combo(ui, "thread_diameter", &labels, &mut selected);
+        });
+        if selected != before
+            && let Some(label) = labels.get(selected)
+        {
+            *designation = label.clone();
+            *suggested = None;
+        }
+        return;
+    }
     let table = f.sizes();
     let current = parse(f, designation);
     // ISO 7-1 writes the internal taper thread Rc: a size picked for a hole the dialog sized Rc
@@ -1162,7 +1185,7 @@ mod contribution_tests {
     }
 
     #[test]
-    fn expanded_catalogue_rejects_external_taper_holes_and_nonmetric_thread_features() {
+    fn expanded_catalogue_rejects_external_taper_holes_and_mismatched_thread_forms() {
         let (mut app, _) = hole();
         let before = app.session.doc.to_json();
         for name in ["R1/4", "1/4-20 UNF"] {
@@ -1171,7 +1194,7 @@ mod contribution_tests {
         }
         app.run("solid.hole", json!({"position":[10,10,10],"thread":"M8"})).unwrap();
         let before = app.session.doc.to_json();
-        for designation in ["1/4-20 UNC", "G 1/4", "Rp 1/4"] {
+        for designation in ["G 1/4", "Rp 1/4"] {
             for modeled in [false, true] {
                 assert!(app.run("solid.thread", json!({"face":[13.4,10,5],"designation":designation,"modeled":modeled})).is_err());
                 assert_eq!(app.session.doc.to_json(), before);
@@ -1189,7 +1212,7 @@ mod contribution_tests {
         let reopened = Session::new(Document::from_json(&app.session.doc.to_json()).unwrap());
         // The thread is metric (the M8 it was made as): a unified designation is not one of its.
         let error = reopened.model.results.last().unwrap().error.clone().unwrap();
-        assert!(error.contains("unknown metric thread `1/4-20 UNC`"), "{error}");
+        assert!(error.contains("`1/4-20 UNC` is a unified designation, not metric"), "{error}");
     }
 
     #[test]
