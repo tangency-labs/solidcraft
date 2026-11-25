@@ -29,7 +29,6 @@ use solidcore::Kernel;
 /// The fixes SolidCraft's core turns on at this case (`crates/smlib/src/core.rs` `fixes()`),
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
-    "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "offset_extension_from_base",
@@ -39,7 +38,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
-    "brep_ray_classifies_current_trims",
 ];
 
 /// SolidCraft's fixes.

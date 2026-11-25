@@ -247,7 +247,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.uv_trim_corner_end_points_only = true;

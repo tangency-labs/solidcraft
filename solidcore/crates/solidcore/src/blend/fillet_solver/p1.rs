@@ -2084,6 +2084,54 @@ pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Exte
     Ok(out)
 }
 
+/// Not upstream: the name of the point `uv` of `surface` nearest `near`. A surface that
+/// closes on itself in a direction ([`seam_periods`]) names each of its points once per
+/// period there; a solve that continues from `near` across the seam (a trace along an edge
+/// use, a section solved from its parameters) needs the name on `near`'s side of the seam,
+/// not the one the surface's own interval gives. `uv` is moved by whole periods only, so it
+/// stays the same point of the surface. Not along a direction that collapses at `near` (a
+/// sphere's pole): there `near`'s parameter is an arbitrary label, not a side of the seam,
+/// and the name nearest it could lie a quarter period outside the domain; a predicate that
+/// cannot evaluate reads as collapsed, and `uv` keeps its name.
+///
+/// # Errors
+///
+/// Those of [`seam_periods`], and an unported or cancelled singularity test.
+pub(crate) fn period_name_nearest(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    near: Point2,
+) -> Result<Point2> {
+    let sing = match surface.is_singularity(k, near, EFF_ZERO, false) {
+        Ok(sing) => sing,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => crate::surface::surface::p5::Singularity {
+            singular: true,
+            direction: SurfParamType::Neither,
+        },
+    };
+    let collapsed = |dir: SurfParamType| {
+        sing.direction == dir
+            || (sing.singular
+                && matches!(sing.direction, SurfParamType::Neither | SurfParamType::Both))
+    };
+    let mut named = uv;
+    let periods = seam_periods(k, surface)?;
+    for (period, (value, near, dir)) in periods.iter().zip([
+        (&mut named.x, near.x, SurfParamType::U),
+        (&mut named.y, near.y, SurfParamType::V),
+    ]) {
+        if let Some(interval) = period {
+            if !collapsed(dir) {
+                let length = interval.length();
+                *value += length * ((near - *value) / length).round();
+            }
+        }
+    }
+    Ok(named)
+}
+
 /// Not upstream (solidcore-native, #15767): the solve parameters `index` and `index + 1`,
 /// `surface`'s `u` and `v`, over its natural interval and wrapping there, in each direction in
 /// which it closes on itself ([`seam_periods`]); the others as they were. A parameter the solve

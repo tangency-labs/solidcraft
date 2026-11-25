@@ -510,12 +510,21 @@ mod tests {
             centres.extend(at);
         };
         let (mut lines, mut arcs) = (0., 0.);
+        // The outline lines' length with the undecided pieces at their ends (covered, below).
+        let mut whole_lines = 0.;
         for l in &d.lines {
             assert!(
                 matches!(l.source, Source::Silhouette { .. }),
                 "{:?}",
                 l.source
             );
+            for p in &l.pieces {
+                for seg in &p.geometry {
+                    if let Seg2::Line { a, b } = *seg {
+                        whole_lines += dist(a, b);
+                    }
+                }
+            }
             for p in l.pieces.iter().filter(|p| !p.covered) {
                 assert_eq!(p.visibility, Visibility::Visible);
                 assert_eq!(p.accuracy, CurveAccuracy::Analytic);
@@ -574,7 +583,25 @@ mod tests {
         assert_eq!(centres.len(), 6, "arcs about corners {centres:?}");
         let sines = [13f64 / 14., 10. / 14., 5. / 14.].map(f64::sqrt);
         let hexagon = 2. * s * sines.iter().sum::<f64>();
-        assert!(near(lines, hexagon), "lines {lines}, hexagon {hexagon}");
+        // The rounds' outline lines run the hexagon's sides whole: with the pieces at their ends
+        // (MEASURED at size 1000: 1.1e-11 short with rounds built in closed form, exact
+        // cylinders; 4.1e-8 short with the fillet sessions' rounds).
+        assert!(
+            near(whole_lines, hexagon),
+            "lines {whole_lines} with their ends, hexagon {hexagon}"
+        );
+        // Each of the six lines ends on a ball corner tangent to its round, and where a ray
+        // along the view from the line hits that corner's face within its boundary band (twice
+        // its trims' sag plus 1e-7 of its box's diagonal, r sqrt 3: `hlr`'s classify) the
+        // piece is undecided and drawn covered. Near a tangent junction that holds up to about
+        // the band's width along the line (ARGUED: the ray grazes both faces there), so each of
+        // the 12 ends may leave out up to that much (MEASURED: 7e-8 to 3e-7 per end at size
+        // 1000, r 1).
+        let ends = 12. * (2. * chord + 1e-7 * 3f64.sqrt() * r);
+        assert!(
+            lines <= hexagon + 1e-6 && lines >= hexagon - ends - 1e-6,
+            "lines {lines}, hexagon {hexagon}, ends up to {ends}"
+        );
         // A face is closed to its trim's chords: a silhouette runs on to within twice their sag
         // (plus 1e-9 of the face's size, at most 4r) of them, and they lie within one sag of the
         // boundary. The rounds' outlines end exactly, at the ends of their charts; a corner's

@@ -324,3 +324,166 @@ fn issue_2546_chamfers_past_the_rounds_radius_are_refused_naming_it() {
         assert!((fit.size - 5.0).abs() < 1e-12, "d {d}: {}", fit.size);
     }
 }
+
+/// A chamfer whose setbacks hold at every station is a record kind no construction builds
+/// yet: its record is defined (a chamfer of offsets reads and writes as before the kind), and
+/// reading one is refused on every path, never built as offsets (`Unsupported` where the
+/// record is read alone; a body's face reports its own failure kind).
+#[test]
+fn a_chamfer_of_setbacks_is_a_record_kind_refused_when_read() {
+    use solidcore::surface::procedural_blend::convert::{definition_surface, from_record};
+    use solidcore::surface::procedural_blend::record::{
+        ChamferKindRecord, ChamferRecord, ChamferSizeRecord, FaceDefinition, RadiusRecord,
+        SupportRecord,
+    };
+    use solidcore::surface::procedural_blend::{chamfer_record_of_db, chamfer_record_to_db};
+    use solidcore::surface::surface::Surface;
+
+    // a chamfer of offsets is written as before the kind, and old text reads as offsets
+    let offsets = ChamferRecord {
+        size: ChamferSizeRecord::Distances([1.0, 2.0]),
+        wedge: 1.5,
+        kind: ChamferKindRecord::Offsets,
+    };
+    let old = r#"{"size":{"Distances":[1.0,2.0]},"wedge":1.5}"#;
+    assert_eq!(serde_json::to_string(&offsets).unwrap(), old);
+    assert_eq!(serde_json::from_str::<ChamferRecord>(old).unwrap(), offsets);
+    // a chamfer of setbacks names its kind, with a wedge of 0
+    let setbacks = ChamferRecord {
+        size: ChamferSizeRecord::Chord(1.5),
+        wedge: 0.0,
+        kind: ChamferKindRecord::Setbacks,
+    };
+    let text = serde_json::to_string(&setbacks).unwrap();
+    assert_eq!(
+        text,
+        r#"{"size":{"Chord":1.5},"wedge":0.0,"kind":"Setbacks"}"#
+    );
+    assert_eq!(
+        serde_json::from_str::<ChamferRecord>(&text).unwrap(),
+        setbacks
+    );
+    assert_eq!(
+        serde_json::to_string(&RadiusRecord::Edge).unwrap(),
+        r#""Edge""#
+    );
+
+    // the database: codes 0 to 3 as before, 4 and 6 setbacks, 5 reserved
+    for (record, code) in [
+        (offsets, 0),
+        (
+            ChamferRecord {
+                size: ChamferSizeRecord::DistanceAngle {
+                    distance: 1.0,
+                    angle: 0.5,
+                },
+                ..offsets
+            },
+            1,
+        ),
+        (
+            ChamferRecord {
+                size: ChamferSizeRecord::Chord(1.5),
+                ..offsets
+            },
+            2,
+        ),
+        (
+            ChamferRecord {
+                size: ChamferSizeRecord::Distances([1.0, 2.0]),
+                ..setbacks
+            },
+            4,
+        ),
+        (setbacks, 6),
+    ] {
+        let (c, numbers) = chamfer_record_to_db(&record);
+        assert_eq!(c, code, "{record:?}");
+        assert_eq!(chamfer_record_of_db(c, numbers).unwrap(), record);
+    }
+    // code 3, an equal setback in the local wedge, is a record of equal offsets (its radius
+    // names the local wedge)
+    assert_eq!(
+        chamfer_record_of_db(3, [1.0, 0.0, 1.5]).unwrap(),
+        ChamferRecord {
+            size: ChamferSizeRecord::Distances([1.0, 1.0]),
+            ..offsets
+        }
+    );
+    assert!(chamfer_record_of_db(5, [1.0, 0.5, 0.0]).is_err());
+    assert!(
+        chamfer_record_of_db(4, [1.0, 2.0, 1.5]).is_err(),
+        "a setbacks wedge"
+    );
+    assert!(
+        chamfer_record_of_db(6, [1.5, 1.0, 0.0]).is_err(),
+        "a chord's second size"
+    );
+    assert!(chamfer_record_of_db(7, [1.0, 2.0, 0.0]).is_err());
+    assert!(
+        chamfer_record_of_db(4, [1.0, 0.0, 0.0]).is_err(),
+        "a setback of 0"
+    );
+    assert!(
+        chamfer_record_of_db(6, [-1.5, 0.0, 0.0]).is_err(),
+        "a negative chord"
+    );
+
+    // a built chamfer's record, turned into one of setbacks
+    let (k, b, _, r) = chamfered_rim(ChamferSize::Distances([1.0, 1.5]));
+    r.unwrap();
+    let pb = &definitions(&b)[0];
+    let good = to_record(&k, pb).unwrap();
+    let written = serde_json::to_string(&good.definition.chamfer).unwrap();
+    assert!(
+        written.starts_with(r#"{"size":{"Distances":"#) && !written.contains("kind"),
+        "{written}"
+    );
+    let mut bad = good.clone();
+    bad.definition.radius = RadiusRecord::Edge;
+    if let Some(c) = bad.definition.chamfer.as_mut() {
+        c.kind = ChamferKindRecord::Setbacks;
+        c.wedge = 0.0;
+    }
+    bad.validate().unwrap();
+    let unsupported = |r: solidcore::Result<()>| matches!(r, Err(SolidError::Unsupported { .. }));
+    assert!(
+        unsupported(from_record(&k, &bad).map(|_| ())),
+        "from_record"
+    );
+    assert!(unsupported(rebuild(&k, &bad).map(|_| ())), "rebuild");
+    // nested: a round on it
+    let mut outer = good.clone();
+    outer.definition.supports[0] = SupportRecord::Blend(Box::new(bad.clone()));
+    assert!(unsupported(from_record(&k, &outer).map(|_| ())), "nested");
+    // a body record's face definition on its net
+    let face = FaceDefinition::Procedural(Box::new(bad.definition.clone()));
+    let net = Surface::from(pb.clone());
+    assert!(
+        unsupported(definition_surface(&k, &face, &net).map(|_| ())),
+        "a face's definition"
+    );
+    // structurally: the kind and the radius go together, a wedge of 0, no distance and angle
+    let mut half = bad.clone();
+    half.definition.radius = good.definition.radius.clone();
+    assert!(half.validate().is_err(), "setbacks with a ball");
+    let mut half = good.clone();
+    half.definition.radius = RadiusRecord::Edge;
+    assert!(half.validate().is_err(), "the edge with offsets");
+    let mut wedged = bad.clone();
+    if let Some(c) = wedged.definition.chamfer.as_mut() {
+        c.wedge = 1.5;
+    }
+    assert!(wedged.validate().is_err(), "a setbacks wedge");
+    let mut angled = bad;
+    if let Some(c) = angled.definition.chamfer.as_mut() {
+        c.size = ChamferSizeRecord::DistanceAngle {
+            distance: 1.0,
+            angle: 0.5,
+        };
+    }
+    assert!(
+        angled.validate().is_err(),
+        "setbacks by a distance and an angle"
+    );
+}

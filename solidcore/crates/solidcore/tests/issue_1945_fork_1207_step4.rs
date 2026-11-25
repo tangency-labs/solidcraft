@@ -37,7 +37,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_analytic_mate_edges = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

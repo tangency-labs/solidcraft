@@ -54,7 +54,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "linear_sweep_arc_is_cylinder",
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
-    "offset_analytic_mate_edges",
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
