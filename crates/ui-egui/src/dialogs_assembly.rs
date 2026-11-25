@@ -3062,34 +3062,34 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 
 // ---- overlay ----
 
-/// A mesh's front faces in `colour` at `alpha`, shaded by how they face the view.
-fn shaded_mesh(painter: &egui::Painter, proj: &Proj, m: &Mesh, colour: Color32, alpha: u8) {
-    let back = proj.cam.back();
-    let mut em = egui::Mesh::default();
-    for tri in &m.triangles {
-        let Some(ps) = m.tri(tri) else { continue };
-        let Some(n) = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalized() else { continue };
-        let facing = n.dot(back);
-        if facing <= 0.0 {
-            continue;
-        }
-        let k = 0.55 + 0.45 * facing;
-        let shade = |c: u8| (f64::from(c) * k) as u8;
-        let fill = Color32::from_rgba_unmultiplied(shade(colour.r()), shade(colour.g()), shade(colour.b()), alpha);
-        let sp: Vec<Pos2> = ps.iter().filter_map(|p| proj.to_screen(*p)).collect();
-        if sp.len() == 3 {
-            let base = em.vertices.len() as u32;
-            for p in sp {
-                em.colored_vertex(p, fill);
-            }
-            em.add_triangle(base, base + 1, base + 2);
-        }
-    }
-    painter.add(egui::Shape::mesh(em));
-}
-
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+    /// A mesh's front faces in `colour` at `alpha`, shaded by how they face the view.
+    fn shaded_mesh(painter: &egui::Painter, proj: &Proj, m: &Mesh, colour: Color32, alpha: u8) {
+        let back = proj.cam.back();
+        let mut em = egui::Mesh::default();
+        for tri in &m.triangles {
+            let Some(ps) = m.tri(tri) else { continue };
+            let Some(n) = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalized() else { continue };
+            let facing = n.dot(back);
+            if facing <= 0.0 {
+                continue;
+            }
+            let k = 0.55 + 0.45 * facing;
+            let shade = |c: u8| (f64::from(c) * k) as u8;
+            let fill = Color32::from_rgba_unmultiplied(shade(colour.r()), shade(colour.g()), shade(colour.b()), alpha);
+            let sp: Vec<Pos2> = ps.iter().filter_map(|p| proj.to_screen(*p)).collect();
+            if sp.len() == 3 {
+                let base = em.vertices.len() as u32;
+                for p in sp {
+                    em.colored_vertex(p, fill);
+                }
+                em.add_triangle(base, base + 1, base + 2);
+            }
+        }
+        painter.add(egui::Shape::mesh(em));
+    }
+
     let aligning = alignment_side(&d.kind, d.active).is_some();
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS) || aligning;
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
