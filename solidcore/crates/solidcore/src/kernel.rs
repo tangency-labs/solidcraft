@@ -224,9 +224,9 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    split_face_classifications: Cell<u64>,
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
-    split_face_classifications: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -462,6 +462,18 @@ impl WorkCounters {
         self.trim_deviation_bounds.get()
     }
 
+    /// Points a boolean's imprint classifies on the two faces a face was just split into,
+    /// to tell which of them a definition still to be imprinted lies on
+    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
+    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
+    /// of every proto face on the split face, at every split of it, which grew with the
+    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
+    /// fork's.
+    #[must_use]
+    pub fn split_face_classifications(&self) -> u64 {
+        self.split_face_classifications.get()
+    }
+
     /// Intersections of a convex blend's section with a face of the part, run to learn whether
     /// the blend cuts the part or breaks through it
     /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
@@ -476,18 +488,6 @@ impl WorkCounters {
     #[must_use]
     pub fn band_edge_solves(&self) -> u64 {
         self.band_edge_solves.get()
-    }
-
-    /// Points a boolean's imprint classifies on the two faces a face was just split into,
-    /// to tell which of them a definition still to be imprinted lies on
-    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
-    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
-    /// of every proto face on the split face, at every split of it, which grew with the
-    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
-    /// fork's.
-    #[must_use]
-    pub fn split_face_classifications(&self) -> u64 {
-        self.split_face_classifications.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).

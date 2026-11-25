@@ -8,9 +8,9 @@
 use std::f64::consts::FRAC_PI_2;
 
 use super::budget::Limits;
-use super::generate::generate_with_limits;
+use super::generate::clip_with_limits;
 use super::support::{HatchLoop, HatchVec};
-use super::{generate, Family, Mark, Pattern};
+use super::{clip, LineFamily, Mark, MAX_FAMILIES};
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
@@ -19,21 +19,13 @@ use crate::prism::profile::{Loop2, Region2, Seg2};
 // Axis-aligned dyadic fixtures below instead require exact coordinates.
 const ROUNDOFF_MM: f64 = 1e-12;
 
-fn family(origin: [f64; 2], dx: f64, dy: f64, dashes: &[f64]) -> Family {
-    Family {
+fn family(origin: [f64; 2], dx: f64, dy: f64, dashes: &[f64]) -> LineFamily {
+    LineFamily {
         angle: 0.0,
         origin: Vec2::new(origin[0], origin[1]),
         delta_x: dx,
         delta_y: dy,
         dashes: dashes.to_vec(),
-    }
-}
-
-fn pattern(families: Vec<Family>) -> Pattern {
-    Pattern {
-        name: "ORIGINAL_PHASE".into(),
-        description: "Independent analytic output cases".into(),
-        families,
     }
 }
 
@@ -109,9 +101,9 @@ fn assert_marks(marks: &[Mark], lines: &[[f64; 4]], dots: &[[f64; 2]], tolerance
 fn clipped_first_stroke_keeps_the_origin_and_negative_cycles() {
     // Strokes are [2 + 5*j, 5 + 5*j]. A reset at -5.5 also gives total
     // length 9, so only the individual endpoints distinguish the wrong phase.
-    let p = pattern(vec![family([2.0, 0.0], 0.0, 10.0, &[3.0, -2.0])]);
+    let p = [family([2.0, 0.0], 0.0, 10.0, &[3.0, -2.0])];
     let r = region(-5.5, -0.5, 9.5, 0.5);
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[
@@ -128,9 +120,9 @@ fn clipped_first_stroke_keeps_the_origin_and_negative_cycles() {
 #[test]
 fn tangential_delta_changes_phase_once_for_positive_and_negative_members() {
     // k=-1,0,1 have y=-2,0,2 and x origins -1.5,0,1.5.
-    let p = pattern(vec![family([0.0, 0.0], 1.5, 2.0, &[2.0, -3.0])]);
+    let p = [family([0.0, 0.0], 1.5, 2.0, &[2.0, -3.0])];
     let r = region(0.25, -2.5, 8.25, 2.5);
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[
@@ -151,7 +143,7 @@ fn rotated_negative_deltas_keep_global_origin_and_signed_member_phase() {
     // u=(0,1), n=(-1,0), hence B_k=(4+3*k,1-k), k=-1,0,1,2.
     let mut f = family([4.0, 1.0], -1.0, -3.0, &[1.0, -2.0]);
     f.angle = FRAC_PI_2;
-    let marks = generate(&pattern(vec![f]), &region(0.5, -0.5, 10.5, 5.5)).unwrap();
+    let marks = clip(&[f], &region(0.5, -0.5, 10.5, 5.5)).unwrap();
     assert_marks(
         &marks,
         &[
@@ -173,10 +165,10 @@ fn rotated_negative_deltas_keep_global_origin_and_signed_member_phase() {
 
 #[test]
 fn a_hole_splits_a_dash_without_pausing_or_restarting_its_cycle() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[3.0, -2.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[3.0, -2.0])];
     let mut r = region(-0.5, -0.75, 14.5, 0.75);
     r.holes.push(rectangle(2.5, -0.25, 8.5, 0.25).reversed());
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[[0.0, 0.0, 2.5, 0.0], [10.0, 0.0, 13.0, 0.0]],
@@ -188,10 +180,10 @@ fn a_hole_splits_a_dash_without_pausing_or_restarting_its_cycle() {
 #[test]
 fn explicit_dots_keep_negative_cycles_and_phase_across_a_hole() {
     // Every cycle has stroke [4*j,4*j+1] and dot 4*j+2.
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0, 0.0, -2.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0, 0.0, -2.0])];
     let mut r = region(-2.5, -0.75, 10.5, 0.75);
     r.holes.push(rectangle(1.5, -0.25, 5.5, 0.25).reversed());
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[[0.0, 0.0, 1.0, 0.0], [8.0, 0.0, 9.0, 0.0]],
@@ -204,13 +196,13 @@ fn explicit_dots_keep_negative_cycles_and_phase_across_a_hole() {
 fn converted_paper_millimetres_and_common_translation_are_applied_once() {
     // Values are already converted by 12.7 mm per authored length. There is
     // no PAT reader or units argument in this generator-level output oracle.
-    let p = pattern(vec![family(
+    let p = [family(
         [3.175, 1.5875],
         6.35,
         12.7,
         &[3.175, -3.175, 0.0, -6.35],
-    )]);
-    let marks = generate(&p, &region(0.0, 0.0, 25.4, 3.175)).unwrap();
+    )];
+    let marks = clip(&p, &region(0.0, 0.0, 25.4, 3.175)).unwrap();
     assert_marks(
         &marks,
         &[
@@ -221,13 +213,13 @@ fn converted_paper_millimetres_and_common_translation_are_applied_once() {
         ROUNDOFF_MM,
     );
 
-    let translated = pattern(vec![family(
+    let translated = [family(
         [43.175, -5.4125],
         6.35,
         12.7,
         &[3.175, -3.175, 0.0, -6.35],
-    )]);
-    let marks = generate(&translated, &region(40.0, -7.0, 65.4, -3.825)).unwrap();
+    )];
+    let marks = clip(&translated, &region(40.0, -7.0, 65.4, -3.825)).unwrap();
     assert_marks(
         &marks,
         &[
@@ -242,8 +234,8 @@ fn converted_paper_millimetres_and_common_translation_are_applied_once() {
 #[test]
 fn reversing_signed_member_parameterization_preserves_the_same_geometry() {
     let r = region(0.25, -2.5, 8.25, 2.5);
-    let p = pattern(vec![family([0.0, 0.0], -1.5, -2.0, &[2.0, -3.0])]);
-    let marks = generate(&p, &r).unwrap();
+    let p = [family([0.0, 0.0], -1.5, -2.0, &[2.0, -3.0])];
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[
@@ -261,7 +253,7 @@ fn reversing_signed_member_parameterization_preserves_the_same_geometry() {
 
 #[test]
 fn changing_loop_start_and_orientation_does_not_restart_the_pattern() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[3.0, -2.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[3.0, -2.0])];
     let outer = rectangle(-0.5, -0.75, 14.5, 0.75);
     let hole = rectangle(2.5, -0.25, 8.5, 0.25);
     for reverse_outer in [false, true] {
@@ -281,7 +273,7 @@ fn changing_loop_start_and_orientation_does_not_restart_the_pattern() {
                 };
                 r.outer.segs.rotate_left(start);
                 r.holes[0].segs.rotate_left((start + 1) % 4);
-                let marks = generate(&p, &r).unwrap();
+                let marks = clip(&p, &r).unwrap();
                 assert_marks(
                     &marks,
                     &[[0.0, 0.0, 2.5, 0.0], [10.0, 0.0, 13.0, 0.0]],
@@ -295,10 +287,10 @@ fn changing_loop_start_and_orientation_does_not_restart_the_pattern() {
 
 #[test]
 fn continuous_lines_ignore_tangential_phase_and_keep_holes() {
-    let p = pattern(vec![family([7.0, 0.0], 3.5, 2.0, &[])]);
+    let p = [family([7.0, 0.0], 3.5, 2.0, &[])];
     let mut r = region(-1.5, -2.5, 4.5, 2.5);
     r.holes.push(rectangle(0.5, -0.25, 1.5, 0.25).reversed());
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(
         &marks,
         &[
@@ -324,8 +316,8 @@ fn repeated_zero_tokens_are_distinct_even_at_neighboring_cycle_boundaries() {
         [2.0, 0.0],
     ];
     for dashes in [&[0.0, 0.0, -1.0][..], &[0.0, -1.0, 0.0][..]] {
-        let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, dashes)]);
-        let marks = generate_with_limits(
+        let p = [family([0.0, 0.0], 0.0, 10.0, dashes)];
+        let marks = clip_with_limits(
             &p,
             &r,
             Limits {
@@ -335,7 +327,7 @@ fn repeated_zero_tokens_are_distinct_even_at_neighboring_cycle_boundaries() {
         )
         .unwrap();
         assert_marks(&marks, &[], &expected, 0.0);
-        assert!(generate_with_limits(
+        assert!(clip_with_limits(
             &p,
             &r,
             Limits {
@@ -349,30 +341,30 @@ fn repeated_zero_tokens_are_distinct_even_at_neighboring_cycle_boundaries() {
 
 #[test]
 fn dots_on_outer_and_hole_boundaries_are_omitted_but_interior_dots_remain() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[0.0, -1.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[0.0, -1.0])];
     let mut r = region(0.0, -0.75, 6.0, 0.75);
     r.holes.push(rectangle(2.0, -0.25, 4.0, 0.25).reversed());
-    let marks = generate(&p, &r).unwrap();
+    let marks = clip(&p, &r).unwrap();
     assert_marks(&marks, &[], &[[1.0, 0.0], [5.0, 0.0]], 0.0);
 }
 
 #[test]
 fn a_stroke_retains_boundary_endpoints_without_becoming_a_dot() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0])]);
-    let marks = generate(&p, &region(0.0, -0.5, 1.0, 0.5)).unwrap();
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0])];
+    let marks = clip(&p, &region(0.0, -0.5, 1.0, 0.5)).unwrap();
     assert_marks(&marks, &[[0.0, 0.0, 1.0, 0.0]], &[], 0.0);
     // At x=1 and x=2 the adjacent positive strokes have only point contact.
-    let marks = generate(&p, &region(1.0, -0.5, 2.0, 0.5)).unwrap();
+    let marks = clip(&p, &region(1.0, -0.5, 2.0, 0.5)).unwrap();
     assert_marks(&marks, &[], &[], 0.0);
 }
 
 #[test]
 fn independent_families_keep_their_own_origins_and_phase() {
-    let p = pattern(vec![
+    let p = [
         family([0.0, -0.25], 0.0, 10.0, &[1.0, -1.0]),
         family([0.5, 0.25], 0.0, 10.0, &[0.0, -2.0]),
-    ]);
-    let marks = generate(&p, &region(-0.25, -0.5, 3.25, 0.5)).unwrap();
+    ];
+    let marks = clip(&p, &region(-0.25, -0.5, 3.25, 0.5)).unwrap();
     assert_marks(
         &marks,
         &[[0.0, -0.25, 1.0, -0.25], [2.0, -0.25, 3.0, -0.25]],
@@ -383,36 +375,37 @@ fn independent_families_keep_their_own_origins_and_phase() {
 
 #[test]
 fn all_negative_cycles_paint_nothing_instead_of_continuous_lines() {
-    let p = pattern(vec![family([0.0, 0.0], 1.5, -2.0, &[-1.0, -2.0])]);
-    let marks = generate(&p, &region(-4.5, -2.5, 4.5, 2.5)).unwrap();
+    let p = [family([0.0, 0.0], 1.5, -2.0, &[-1.0, -2.0])];
+    let marks = clip(&p, &region(-4.5, -2.5, 4.5, 2.5)).unwrap();
     assert_marks(&marks, &[], &[], 0.0);
 }
 
 #[test]
 fn painting_nothing_does_not_bypass_pattern_or_region_validation() {
     let gap = family([0.0, 0.0], 0.0, 10.0, &[-1.0]);
-    let p = pattern(vec![gap.clone()]);
+    let p = [gap.clone()];
     // Canonical full circles are supported; a different seam remains outside
     // the admitted two-semicircle encoding, even for a gap-only pattern.
     let curved = Region2 {
         outer: Loop2::circle_from(Vec2::ZERO, 1.0, FRAC_PI_2),
         holes: vec![],
     };
-    assert!(generate(&p, &curved).is_err());
-    assert!(generate(&p, &Region2::default()).is_err());
+    assert!(clip(&p, &curved).is_err());
+    assert!(clip(&p, &Region2::default()).is_err());
     let mut open = region(-1.0, -0.5, 1.0, 0.5);
     open.outer.segs.truncate(3);
-    assert!(generate(&p, &open).is_err());
+    assert!(clip(&p, &open).is_err());
 
     let r = region(-1.0, -0.5, 1.0, 0.5);
-    let invalid = Family {
+    let invalid = LineFamily {
         delta_y: 0.0,
         ..gap.clone()
     };
-    assert!(generate(&pattern(vec![gap, invalid]), &r).is_err());
-    let mut invalid_name = p;
-    invalid_name.name.clear();
-    assert!(generate(&invalid_name, &r).is_err());
+    assert!(clip(&[gap, invalid], &r).is_err());
+    assert!(clip(&vec![p[0].clone(); MAX_FAMILIES], &r)
+        .unwrap()
+        .is_empty());
+    assert!(clip(&vec![p[0].clone(); MAX_FAMILIES + 1], &r).is_err());
 }
 
 #[test]
@@ -421,34 +414,29 @@ fn a_later_invalid_family_refuses_the_entire_result() {
     let r = region(-1.0, -0.5, 1.0, 0.5);
     let mut bad = good.clone();
     bad.angle = f64::NAN;
-    assert!(generate(&pattern(vec![good, bad]), &r).is_err());
+    assert!(clip(&[good, bad], &r).is_err());
 }
 
 #[test]
 fn supported_line_input_does_not_silently_accept_an_unsupported_hole() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[])];
     let mut r = region(-2.0, -2.0, 2.0, 2.0);
     r.holes.push(Loop2::circle(Vec2::ZERO, 0.5).reversed());
-    assert!(generate(&p, &r).is_err());
+    assert!(clip(&p, &r).is_err());
 }
 
 #[test]
 fn boundary_runs_are_omitted_without_shifting_the_interior_members() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 1.0, &[])]);
-    let marks = generate(&p, &region(-1.0, 0.0, 1.0, 2.0)).unwrap();
+    let p = [family([0.0, 0.0], 0.0, 1.0, &[])];
+    let marks = clip(&p, &region(-1.0, 0.0, 1.0, 2.0)).unwrap();
     assert_marks(&marks, &[[-1.0, 1.0, 1.0, 1.0]], &[], 0.0);
 }
 
 #[test]
 fn each_work_budget_can_refuse_a_small_otherwise_valid_pattern() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[1.0, -1.0])];
     let r = region(-0.25, -0.5, 1.25, 0.5);
-    assert_marks(
-        &generate(&p, &r).unwrap(),
-        &[[0.0, 0.0, 1.0, 0.0]],
-        &[],
-        0.0,
-    );
+    assert_marks(&clip(&p, &r).unwrap(), &[[0.0, 0.0, 1.0, 0.0]], &[], 0.0);
     for limits in [
         Limits {
             input_pieces: 0,
@@ -475,7 +463,7 @@ fn each_work_budget_can_refuse_a_small_otherwise_valid_pattern() {
             ..Limits::default()
         },
     ] {
-        assert!(generate_with_limits(&p, &r, limits).is_err());
+        assert!(clip_with_limits(&p, &r, limits).is_err());
     }
 }
 
@@ -485,8 +473,8 @@ fn marks_are_counted_across_families_and_split_strokes_without_partial_success()
     let second = family([0.0, 0.25], 0.0, 10.0, &[]);
     let mut r = region(-1.5, -0.5, 2.5, 0.5);
     r.holes.push(rectangle(0.0, -0.375, 1.0, 0.375).reversed());
-    let p = pattern(vec![first, second]);
-    let marks = generate_with_limits(
+    let p = [first, second];
+    let marks = clip_with_limits(
         &p,
         &r,
         Limits {
@@ -506,7 +494,7 @@ fn marks_are_counted_across_families_and_split_strokes_without_partial_success()
         &[],
         0.0,
     );
-    assert!(generate_with_limits(
+    assert!(clip_with_limits(
         &p,
         &r,
         Limits {
@@ -521,11 +509,11 @@ fn marks_are_counted_across_families_and_split_strokes_without_partial_success()
 fn candidate_lines_are_counted_even_without_marks() {
     let r = region(-0.25, -0.5, 0.25, 0.5);
     let f = family([0.0, 0.0], 0.0, 10.0, &[-1.0]);
-    let p = pattern(vec![f.clone(), f]);
-    assert!(generate(&p, &r).unwrap().is_empty());
+    let p = [f.clone(), f];
+    assert!(clip(&p, &r).unwrap().is_empty());
     // Each family has member k=0 in the region; a one-line budget cannot
     // serve both. Conservative exterior candidates also consume this budget.
-    assert!(generate_with_limits(
+    assert!(clip_with_limits(
         &p,
         &r,
         Limits {
@@ -538,10 +526,10 @@ fn candidate_lines_are_counted_even_without_marks() {
 
 #[test]
 fn candidate_lines_and_dash_steps_are_charged_for_a_visible_gap() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[1.0, -3.0])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[1.0, -3.0])];
     let r = region(1.25, -0.5, 3.75, 0.5);
-    assert!(generate(&p, &r).unwrap().is_empty());
-    assert!(generate_with_limits(
+    assert!(clip(&p, &r).unwrap().is_empty());
+    assert!(clip_with_limits(
         &p,
         &r,
         Limits {
@@ -550,7 +538,7 @@ fn candidate_lines_and_dash_steps_are_charged_for_a_visible_gap() {
         }
     )
     .is_err());
-    assert!(generate_with_limits(
+    assert!(clip_with_limits(
         &p,
         &r,
         Limits {
@@ -563,39 +551,34 @@ fn candidate_lines_and_dash_steps_are_charged_for_a_visible_gap() {
 
 #[test]
 fn subnormal_spacing_is_valid_data_but_cannot_expand_without_a_bound() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, f64::from_bits(1), &[])]);
-    assert!(p.validate().is_ok());
-    assert!(generate(&p, &region(-0.5, -0.5, 0.5, 0.5)).is_err());
+    let p = [family([0.0, 0.0], 0.0, f64::from_bits(1), &[])];
+    assert!(p[0].validate().is_ok());
+    assert!(clip(&p, &region(-0.5, -0.5, 0.5, 0.5)).is_err());
 }
 
 #[test]
 fn a_nonzero_dash_step_that_cannot_advance_is_refused() {
-    let p = pattern(vec![family(
-        [0.0, 0.0],
-        0.0,
-        10.0,
-        &[1.0, -f64::from_bits(1)],
-    )]);
-    assert!(p.validate().is_ok());
-    assert!(generate(&p, &region(-0.25, -0.5, 2.25, 0.5)).is_err());
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[1.0, -f64::from_bits(1)])];
+    assert!(p[0].validate().is_ok());
+    assert!(clip(&p, &region(-0.25, -0.5, 2.25, 0.5)).is_err());
 }
 
 #[test]
 fn unresolvable_far_phase_indices_are_not_saturated_into_a_success() {
-    let p = pattern(vec![family(
+    let p = [family(
         [100_000.0, 0.0],
         0.0,
         10.0,
         &[2.0_f64.powi(-40), -2.0_f64.powi(-40)],
-    )]);
+    )];
     let r = region(-2.0_f64.powi(-50), -0.5, 2.0_f64.powi(-50), 0.5);
-    assert!(p.validate().is_ok());
-    assert!(generate(&p, &r).is_err());
+    assert!(p[0].validate().is_ok());
+    assert!(clip(&p, &r).is_err());
 }
 
 #[test]
 fn collapsed_or_nonfinite_line_boundaries_return_an_error() {
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[])];
     for point in [
         Vec2::ZERO,
         Vec2::new(f64::NAN, 0.0),
@@ -607,7 +590,7 @@ fn collapsed_or_nonfinite_line_boundaries_return_an_error() {
             },
             holes: vec![],
         };
-        assert!(generate(&p, &r).is_err());
+        assert!(clip(&p, &r).is_err());
     }
 }
 
@@ -626,11 +609,11 @@ fn a_large_member_phase_cancels_before_its_single_output_rounding() {
     // These dyadic bounds contain only member k and preserve their width
     // exactly. Stored origin, deltas and dashes all satisfy model admission.
     let dy = 2.0_f64.powi(-40);
-    let p = pattern(vec![family([0.0, 0.0], dx as f64, dy, &[1.0, -99.0])]);
+    let p = [family([0.0, 0.0], dx as f64, dy, &[1.0, -99.0])];
     let r = region(-2.0, (k as f64 - 0.25) * dy, 2.0, (k as f64 + 0.25) * dy);
-    assert!(p.validate().is_ok());
+    assert!(p[0].validate().is_ok());
     let y = k as f64 * dy;
-    assert_marks(&generate(&p, &r).unwrap(), &[[-1.0, y, 0.0, y]], &[], 0.0);
+    assert_marks(&clip(&p, &r).unwrap(), &[[-1.0, y, 0.0, y]], &[], 0.0);
 }
 
 #[test]
@@ -641,11 +624,11 @@ fn decimal_dash_cycles_round_complete_endpoints_once() {
     // [-6n,-5n], [-3n,-2n], [0,n], [3n,4n], [6n,7n], all divided by 2^55.
     // In particular -5n/2^55 rounds to -0.5; adding a rounded cycle base
     // to the first dash would instead round that endpoint twice.
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 10.0, &[0.1, -0.2])]);
+    let p = [family([0.0, 0.0], 0.0, 10.0, &[0.1, -0.2])];
     let r = region(-0.75, -0.5, 0.75, 0.5);
-    assert!(p.validate().is_ok());
+    assert!(p[0].validate().is_ok());
     assert_marks(
-        &generate(&p, &r).unwrap(),
+        &clip(&p, &r).unwrap(),
         &[
             [-0.6000000000000001, 0.0, -0.5, 0.0],
             [-0.30000000000000004, 0.0, -0.2, 0.0],
@@ -666,17 +649,12 @@ fn a_large_decimal_cycle_preserves_the_stored_period_residual() {
     // (n-2^50)/D = 2_476_979_795_053_773/D, exactly the stored 0.06875.
     // Repeating the rounded period would wrongly yield [0,0.1].
     let dy = 2.0_f64.powi(-50);
-    let p = pattern(vec![family(
-        [0.0, 0.0],
-        -0.30000000000000004,
-        dy,
-        &[0.1, -0.2],
-    )]);
+    let p = [family([0.0, 0.0], -0.30000000000000004, dy, &[0.1, -0.2])];
     let half_height = 2.0_f64.powi(-52);
     let r = region(-0.0625, 1.0 - half_height, 0.1875, 1.0 + half_height);
-    assert!(p.validate().is_ok());
+    assert!(p[0].validate().is_ok());
     assert_marks(
-        &generate(&p, &r).unwrap(),
+        &clip(&p, &r).unwrap(),
         &[[-0.03125, 1.0, 0.06875, 1.0]],
         &[],
         0.0,
@@ -688,14 +666,9 @@ fn a_nonrepresentable_dot_phase_rounds_only_after_interior_classification() {
     // Stored dx=3_002_399_751_580_331/2^53; member k=3 gives the exact
     // phase 1+2^-53, enclosed by [1,1+2^-52] and rounded nearest-even to 1.
     // That enclosure is strictly inside (0,2), so its single dot is retained.
-    let p = pattern(vec![family(
-        [0.0, 0.0],
-        0.33333333333333337,
-        1.0,
-        &[0.0, -4.0],
-    )]);
+    let p = [family([0.0, 0.0], 0.33333333333333337, 1.0, &[0.0, -4.0])];
     let r = region(0.0, 2.5, 2.0, 3.5);
-    assert_marks(&generate(&p, &r).unwrap(), &[], &[[1.0, 3.0]], 0.0);
+    assert_marks(&clip(&p, &r).unwrap(), &[], &[[1.0, 3.0]], 0.0);
 }
 
 #[test]
@@ -707,13 +680,13 @@ fn a_dot_enclosure_overlapping_a_boundary_refuses_the_entire_result() {
     let ambiguous = family([0.0, 0.0], 0.33333333333333337, 1.0, &[0.0, -4.0]);
     let r = region(1.0, 2.5, 2.0, 3.5);
     assert_marks(
-        &generate(&pattern(vec![first.clone()]), &r).unwrap(),
+        &clip(std::slice::from_ref(&first), &r).unwrap(),
         &[[1.0, 3.0, 2.0, 3.0]],
         &[],
         0.0,
     );
-    assert!(generate(&pattern(vec![ambiguous.clone()]), &r).is_err());
-    assert!(generate(&pattern(vec![first, ambiguous]), &r).is_err());
+    assert!(clip(std::slice::from_ref(&ambiguous), &r).is_err());
+    assert!(clip(&[first, ambiguous], &r).is_err());
 }
 
 fn circular_region(with_hole: bool) -> Region2 {
@@ -750,22 +723,22 @@ fn circle_dots(q: f64, positions: &[f64]) -> Vec<Mark> {
 }
 
 fn circle_output(
-    p: &Pattern,
+    p: &[LineFamily],
     r: &Region2,
     limits: Option<Limits>,
 ) -> Result<Vec<Mark>, super::Invalid> {
-    let pattern_before = p.clone();
+    let pattern_before = p.to_vec();
     let region_before = r.clone();
     let result = match limits {
-        Some(limits) => generate_with_limits(p, r, limits),
-        None => generate(p, r),
+        Some(limits) => clip_with_limits(p, r, limits),
+        None => clip(p, r),
     };
-    assert_eq!(p, &pattern_before);
+    assert_eq!(p, pattern_before.as_slice());
     assert_eq!(r, &region_before);
     result
 }
 
-fn assert_exact_circle_output(p: &Pattern, r: &Region2, expected: &[Mark], total_length: f64) {
+fn assert_exact_circle_output(p: &[LineFamily], r: &Region2, expected: &[Mark], total_length: f64) {
     let marks = circle_output(p, r, None).unwrap();
     // Full equality checks member/span/cycle order and each repeated zero token.
     assert_eq!(marks, expected);
@@ -801,7 +774,7 @@ fn assert_exact_circle_output(p: &Pattern, r: &Region2, expected: &[Mark], total
 #[test]
 fn a_disk_generates_three_ordered_secants_with_total_length_twenty_six() {
     let r = circular_region(false);
-    let p = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[])]);
+    let p = [family([2.0, -1.0], 0.0, 3.0, &[])];
     // x^2 + q^2 = 25 in centered coordinates: q=-3,0,3 gives A=4,5,4.
     let expected = circle_lines(&[[-4.0, 4.0, -3.0], [-5.0, 5.0, 0.0], [-4.0, 4.0, 3.0]]);
     assert_exact_circle_output(&p, &r, &expected, 26.0);
@@ -810,7 +783,7 @@ fn a_disk_generates_three_ordered_secants_with_total_length_twenty_six() {
 #[test]
 fn a_disk_keeps_twenty_three_strict_integer_dots_and_excludes_its_boundary() {
     let r = circular_region(false);
-    let p = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])]);
+    let p = [family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])];
     let mut expected = circle_dots(-3.0, &[-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]);
     expected.extend(circle_dots(
         0.0,
@@ -829,7 +802,7 @@ fn outer_circle_tangencies_and_exterior_members_emit_neither_lines_nor_dots() {
             for dashes in [&[][..], &[0.0, -1.0][..]] {
                 // Only k=0 can meet the circle; q=+/-5 is an isolated contact,
                 // whereas q=+/-6 has no roots. Both must return empty success.
-                let p = pattern(vec![family([2.0, -1.0 + q], 0.0, 32.0, dashes)]);
+                let p = [family([2.0, -1.0 + q], 0.0, 32.0, dashes)];
                 assert_exact_circle_output(&p, &r, &[], 0.0);
             }
         }
@@ -839,7 +812,7 @@ fn outer_circle_tangencies_and_exterior_members_emit_neither_lines_nor_dots() {
 #[test]
 fn an_annulus_keeps_six_ordered_spans_and_splits_both_inner_tangencies() {
     let r = circular_region(true);
-    let p = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[])]);
+    let p = [family([2.0, -1.0], 0.0, 3.0, &[])];
     let expected = circle_lines(&[
         [-4.0, 0.0, -3.0],
         [0.0, 4.0, -3.0],
@@ -854,7 +827,7 @@ fn an_annulus_keeps_six_ordered_spans_and_splits_both_inner_tangencies() {
 #[test]
 fn an_annulus_keeps_fourteen_strict_dots_without_a_dot_at_inner_tangency() {
     let r = circular_region(true);
-    let p = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])]);
+    let p = [family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])];
     let mut expected = circle_dots(-3.0, &[-3.0, -2.0, -1.0, 1.0, 2.0, 3.0]);
     expected.extend(circle_dots(0.0, &[-4.0, 4.0]));
     expected.extend(circle_dots(3.0, &[-3.0, -2.0, -1.0, 1.0, 2.0, 3.0]));
@@ -866,9 +839,9 @@ fn an_annulus_keeps_fourteen_strict_dots_without_a_dot_at_inner_tangency() {
 fn annular_secants_beyond_the_hole_keep_the_middle_line_and_dot() {
     let r = circular_region(true);
     for q in [-4.0, 4.0] {
-        let continuous = pattern(vec![family([2.0, -1.0 + q], 0.0, 32.0, &[])]);
+        let continuous = [family([2.0, -1.0 + q], 0.0, 32.0, &[])];
         assert_exact_circle_output(&continuous, &r, &circle_lines(&[[-3.0, 3.0, q]]), 6.0);
-        let dotted = pattern(vec![family([2.0, -1.0 + q], 0.0, 32.0, &[0.0, -1.0])]);
+        let dotted = [family([2.0, -1.0 + q], 0.0, 32.0, &[0.0, -1.0])];
         assert_exact_circle_output(
             &dotted,
             &r,
@@ -897,13 +870,13 @@ fn phased_annulus_lines() -> Vec<Mark> {
 
 #[test]
 fn signed_annular_dash_phase_preserves_ten_pieces_and_thirteen_and_a_half_length() {
-    let p = pattern(vec![family([2.0, -1.0], 0.5, 3.0, &[2.0, -1.0])]);
+    let p = [family([2.0, -1.0], 0.5, 3.0, &[2.0, -1.0])];
     assert_exact_circle_output(&p, &circular_region(true), &phased_annulus_lines(), 13.5);
 }
 
 #[test]
 fn annular_zero_tokens_keep_thirty_ordered_instances_across_span_windows() {
-    let p = pattern(vec![family([2.0, -1.0], 0.5, 3.0, &[0.0, 0.0, -2.0, 0.0])]);
+    let p = [family([2.0, -1.0], 0.5, 3.0, &[0.0, 0.0, -2.0, 0.0])];
     let mut positions = circle_dots(-3.0, &[-2.5, -0.5, 1.5, 3.5]);
     positions.extend(circle_dots(0.0, &[-4.0, 4.0]));
     positions.extend(circle_dots(3.0, &[-3.5, -1.5, 0.5, 2.5]));
@@ -931,7 +904,7 @@ fn accepted_circle_reversals_cyclic_starts_and_translation_preserve_ordered_phas
                     outer,
                     holes: vec![hole],
                 };
-                let p = pattern(vec![family([center.x, center.y], 0.5, 3.0, &[2.0, -1.0])]);
+                let p = [family([center.x, center.y], 0.5, 3.0, &[2.0, -1.0])];
                 let expected: Vec<_> = phased_annulus_lines()
                     .into_iter()
                     .map(|mark| match mark {
@@ -1049,7 +1022,7 @@ fn near_inner_tangency_keeps_distinct_gaps_contacts_and_strict_dot_counts() {
         };
         for sign in [-1.0, 1.0] {
             let q = sign * (3.0 + f64::from(side) * delta);
-            let continuous = pattern(vec![family([2.0, -1.0 + q], 0.0, 32.0, &[])]);
+            let continuous = [family([2.0, -1.0 + q], 0.0, 32.0, &[])];
             let marks = circle_output(&continuous, &r, None).unwrap();
             assert_circle_line_enclosures(&marks, -1.0 + q, &intervals, length);
             let Mark::Line { a: first, .. } = marks[0] else {
@@ -1100,7 +1073,7 @@ fn near_inner_tangency_keeps_distinct_gaps_contacts_and_strict_dot_counts() {
                 })
             )
             .is_err());
-            let dotted = pattern(vec![family([2.0, -1.0 + q], 0.0, 32.0, &[0.0, -1.0])]);
+            let dotted = [family([2.0, -1.0 + q], 0.0, 32.0, &[0.0, -1.0])];
             assert_exact_circle_output(&dotted, &r, &circle_dots(q, dot_positions), 0.0);
         }
     }
@@ -1108,7 +1081,7 @@ fn near_inner_tangency_keeps_distinct_gaps_contacts_and_strict_dot_counts() {
 
 #[test]
 fn circular_generation_charges_original_pieces_candidates_roots_and_tokens() {
-    let continuous = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[])]);
+    let continuous = [family([2.0, -1.0], 0.0, 3.0, &[])];
     for (r, pieces) in [(circular_region(false), 1), (circular_region(true), 3)] {
         let expected = circle_output(&continuous, &r, None).unwrap();
         assert!(!expected.is_empty());
@@ -1150,7 +1123,7 @@ fn circular_generation_charges_original_pieces_candidates_roots_and_tokens() {
         ] {
             assert!(circle_output(&continuous, &r, Some(limits)).is_err());
         }
-        let dotted = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])]);
+        let dotted = [family([2.0, -1.0], 0.0, 3.0, &[0.0, -1.0])];
         assert!(circle_output(
             &dotted,
             &r,
@@ -1166,7 +1139,7 @@ fn circular_generation_charges_original_pieces_candidates_roots_and_tokens() {
 #[test]
 fn empty_circular_output_still_charges_geometric_and_gap_work() {
     let r = circular_region(true);
-    let gap = pattern(vec![family([2.0, -1.0], 0.0, 3.0, &[-1.0])]);
+    let gap = [family([2.0, -1.0], 0.0, 3.0, &[-1.0])];
     assert_exact_circle_output(&gap, &r, &[], 0.0);
     for limits in [
         Limits {
@@ -1196,7 +1169,7 @@ fn empty_circular_output_still_charges_geometric_and_gap_work() {
     ] {
         assert!(circle_output(&gap, &r, Some(limits)).is_err());
     }
-    let exterior = pattern(vec![family([2.0, 5.0], 0.0, 32.0, &[0.0, -1.0])]);
+    let exterior = [family([2.0, 5.0], 0.0, 32.0, &[0.0, -1.0])];
     assert_exact_circle_output(&exterior, &r, &[], 0.0);
     assert!(circle_output(
         &exterior,
@@ -1234,9 +1207,9 @@ fn decimal_spacing_keeps_every_signed_member_in_a_polygon() {
         .collect();
     assert_eq!(lines.len(), 19);
     for dy in [0.1, -0.1] {
-        let p = pattern(vec![family([0.0, 0.0], 0.0, dy, &[])]);
+        let p = [family([0.0, 0.0], 0.0, dy, &[])];
         let saved = p.clone();
-        assert_marks(&generate(&p, &r).unwrap(), &lines, &[], 0.0);
+        assert_marks(&clip(&p, &r).unwrap(), &lines, &[], 0.0);
         assert_eq!(p, saved);
         assert_eq!(r, before);
     }
@@ -1259,9 +1232,9 @@ fn decimal_spacing_keeps_dot_phase_and_holes_without_partial_output() {
     }
     assert_eq!(dots.len(), 16);
     for (dx, dy) in [(0.5, 0.1), (-0.5, -0.1)] {
-        let p = pattern(vec![family([0.0, 0.0], dx, dy, &[0.0, -1.0])]);
+        let p = [family([0.0, 0.0], dx, dy, &[0.0, -1.0])];
         assert_marks(
-            &generate_with_limits(
+            &clip_with_limits(
                 &p,
                 &r,
                 Limits {
@@ -1274,7 +1247,7 @@ fn decimal_spacing_keeps_dot_phase_and_holes_without_partial_output() {
             &dots,
             0.0,
         );
-        assert!(generate_with_limits(
+        assert!(clip_with_limits(
             &p,
             &r,
             Limits {
@@ -1310,8 +1283,8 @@ fn decimal_spacing_clips_disks_and_annuli_with_the_same_offset_enclosure() {
         }
         assert_eq!(lines.len(), if hole { 28 } else { 23 });
         for dy in [0.1, -0.1] {
-            let p = pattern(vec![family([0.0, 0.0], 0.0, dy, &[])]);
-            assert_marks(&generate(&p, &r).unwrap(), &lines, &[], ROUNDOFF_MM);
+            let p = [family([0.0, 0.0], 0.0, dy, &[])];
+            assert_marks(&clip(&p, &r).unwrap(), &lines, &[], ROUNDOFF_MM);
         }
     }
 }
@@ -1322,9 +1295,9 @@ fn decimal_spacing_contact_uncertainty_is_not_replaced_by_a_rounded_line() {
     // The enclosure endpoints are excluded: member 3 is strictly interior,
     // whereas member 4 is exactly on the upper boundary and must be omitted.
     let r = region(-1.0, 0.3, 1.0, 0.4);
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 0.1, &[])]);
+    let p = [family([0.0, 0.0], 0.0, 0.1, &[])];
     assert_marks(
-        &generate(&p, &r).unwrap(),
+        &clip(&p, &r).unwrap(),
         &[[-1.0, 0.30000000000000004, 1.0, 0.30000000000000004]],
         &[],
         0.0,
@@ -1334,9 +1307,9 @@ fn decimal_spacing_contact_uncertainty_is_not_replaced_by_a_rounded_line() {
 #[test]
 fn decimal_spacing_preserves_cumulative_limits_and_gap_only_semantics() {
     let r = region(-1.0, -0.95, 1.0, 0.95);
-    let p = pattern(vec![family([0.0, 0.0], 0.0, 0.1, &[])]);
+    let p = [family([0.0, 0.0], 0.0, 0.1, &[])];
     assert_eq!(
-        generate_with_limits(
+        clip_with_limits(
             &p,
             &r,
             Limits {
@@ -1370,11 +1343,11 @@ fn decimal_spacing_preserves_cumulative_limits_and_gap_only_semantics() {
             ..Limits::default()
         },
     ] {
-        assert!(generate_with_limits(&p, &r, limits).is_err());
+        assert!(clip_with_limits(&p, &r, limits).is_err());
     }
-    let gap = pattern(vec![family([0.0, 0.0], 0.5, 0.1, &[-1.0])]);
-    assert!(generate(&gap, &r).unwrap().is_empty());
-    assert!(generate_with_limits(
+    let gap = [family([0.0, 0.0], 0.5, 0.1, &[-1.0])];
+    assert!(clip(&gap, &r).unwrap().is_empty());
+    assert!(clip_with_limits(
         &gap,
         &r,
         Limits {
@@ -1410,8 +1383,8 @@ fn decimal_spacing_strokes_keep_their_phase_across_hole_fragments() {
         .collect();
     assert_eq!(lines.len(), 13);
     for (dx, dy) in [(0.5, 0.1), (-0.5, -0.1)] {
-        let p = pattern(vec![family([0.0, 0.0], dx, dy, &[1.0, -1.0])]);
-        assert_marks(&generate(&p, &r).unwrap(), &lines, &[], 0.0);
+        let p = [family([0.0, 0.0], dx, dy, &[1.0, -1.0])];
+        assert_marks(&clip(&p, &r).unwrap(), &lines, &[], 0.0);
     }
 }
 
@@ -1424,9 +1397,9 @@ fn decimal_spacing_circle_contact_is_not_invented_by_nearest_rounding() {
             outer: Loop2::circle(Vec2::ZERO, radius),
             holes: vec![],
         };
-        let p = pattern(vec![family([0.0, 0.0], 0.0, 0.1, &[])]);
+        let p = [family([0.0, 0.0], 0.0, 0.1, &[])];
         assert!(
-            generate(&p, &r).is_err(),
+            clip(&p, &r).is_err(),
             "uncertain contact at radius {radius}"
         );
     }
@@ -1461,8 +1434,8 @@ fn decimal_spacing_beyond_a_rectangle_is_not_false_boundary_contact() {
     // Member 0 lies on the lower boundary; the boundary-run contract omits it.
     let r = region(0.0, 0.0, 10.0, 10.0);
     for spacing in [0.2, -0.2] {
-        let p = pattern(vec![family([0.0, 0.0], 0.0, spacing, &[])]);
-        let marks = generate(&p, &r).unwrap();
+        let p = [family([0.0, 0.0], 0.0, spacing, &[])];
+        let marks = clip(&p, &r).unwrap();
         assert_eq!(marks.len(), 49);
         let lines: Vec<_> = (1..50)
             .map(|k| [0.0, f64::from(k) / 5.0, 10.0, f64::from(k) / 5.0])

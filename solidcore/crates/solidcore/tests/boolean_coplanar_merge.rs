@@ -79,10 +79,11 @@ fn grid(k: &mut Kernel, n: u32, w: f64, parity: u32) -> solidcore::Brep {
 
 /// The even strips of an `n` x `n` woven grid united with the odd ones, as a woven panel's
 /// halves are joined: the two bottoms lie on one plane and coincide on the squares where a
-/// strip of one grid crosses a strip of the other. Checks the union's exact volume and
-/// returns the points its imprint classified on the faces it split
-/// ([`solidcore::kernel::WorkCounters::split_face_classifications`]).
-fn interleaved_grids_union(n: u32) -> u64 {
+/// strip of one grid crosses a strip of the other. Checks the union's exact volume (a closed
+/// form) and that it is valid at Level 2, and returns the points its imprint classified on
+/// the faces it split ([`solidcore::kernel::WorkCounters::split_face_classifications`]) and
+/// its faces, edges and vertices.
+fn interleaved_grids_union(n: u32) -> (u64, [usize; 3]) {
     let mut k = Kernel::default();
     let w = 1.0;
     let a = grid(&mut k, n, w, 0);
@@ -93,12 +94,25 @@ fn interleaved_grids_union(n: u32) -> u64 {
     let length = 2.0 * w * f64::from(n);
     let exact = f64::from(n) * length * w * (1.0 + 2.0) - f64::from(n * n) * w * w;
     let volume = brep_volume_default(&k, &mut u, 1e-9).unwrap();
-    println!("{n} x {n} interleaved grids: {classified} points classified on split faces, volume {volume}");
+    let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{n} x {n}: {lines:?}");
+    let topology = [
+        get_faces(&u).unwrap().len(),
+        solidcore::topology::brep::p1::edges(&u, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::vertices(&u, None)
+            .unwrap()
+            .len(),
+    ];
+    println!("{n} x {n} interleaved grids: {classified} points classified on split faces, volume {volume}, faces, edges, vertices {topology:?}");
     assert!(
         (volume - exact).abs() <= 1e-9 * exact,
         "volume {volume}, exact {exact}"
     );
-    classified
+    (classified, topology)
 }
 
 /// Joining two woven grids whose bottoms are each one face imprints every crossing of a
@@ -111,7 +125,8 @@ fn interleaved_grids_union(n: u32) -> u64 {
 #[test]
 fn interleaved_grids_on_one_plane_classify_no_coincident_edges_at_face_splits() {
     let counts = [4, 8].map(interleaved_grids_union);
-    assert_eq!(counts, [61, 288]);
+    assert_eq!(counts.map(|c| c.0), [61, 288]);
+    assert_eq!(counts.map(|c| c.1), [[66, 219, 146], [226, 819, 546]]);
 }
 
 /// A strip `w` wide across the `n` x `n` grid of [`grid`] on its diagonal, standing on z = 0:
