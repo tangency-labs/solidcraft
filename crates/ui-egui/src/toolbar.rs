@@ -3033,7 +3033,11 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if app.sketch_notices.focus_shortcut(ctx, app.session.uid, app.view_windows.current_window()) {
         return;
     }
-    if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    // A pending Insert Design question handles Escape before clean view does.
+    if crate::view_windows::is_clean(app)
+        && app.insert_design_options.is_none()
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
         let window = app.view_windows.current_window();
         drop(app.run("tab.window.clean", json!({"window": window, "on": false})));
         return;

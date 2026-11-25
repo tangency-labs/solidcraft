@@ -4827,6 +4827,7 @@ impl SolveApp {
         timeline::tick_playback(self, ui.ctx());
         if !self.home.open && view_windows::is_clean(self) {
             view_windows::show_clean(self, ui);
+            insert_design_options::show(self, ui.ctx());
             return;
         }
         if !self.embedded && !self.embed_editor {

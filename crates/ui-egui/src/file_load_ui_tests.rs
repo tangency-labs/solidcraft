@@ -1737,6 +1737,47 @@ fn insert_design_configuration_picker_uses_the_chosen_row_or_the_saved_state() {
 }
 
 #[test]
+fn insert_design_configuration_picker_can_be_used_in_clean_view() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ask_insert_design_configuration = true;
+    h.app.preferences.language = "en".into();
+    let (_, long) = insert_design_configuration_source(&h.dir.join("family.sc"));
+    h.app.run("tab.window.clean", json!({"window": 0, "on": true})).unwrap();
+    assert!(crate::view_windows::is_clean(&h.app));
+
+    h.step(&json!({"choose_file": "family.sc"})).unwrap();
+    h.app.start("component.insert_design");
+    h.frame(); // Deliver the native Browse response before waiting for the file worker.
+    h.settle();
+    assert!(h.app.insert_design_options.is_some());
+    h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
+    h.step(&json!({"widget": "Long"})).unwrap();
+    h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+    h.settle();
+    let link = h.app.session.doc.links.values().next().expect("the selected design was inserted");
+    assert_eq!(link.configuration, Some(long));
+    assert!(crate::view_windows::is_clean(&h.app));
+
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"choose_file": "family.sc"})).unwrap();
+    h.app.start("component.insert_design");
+    h.frame();
+    h.settle();
+    assert!(h.app.insert_design_options.is_some() && h.app.file_load_holds());
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.settle();
+    assert!(h.app.insert_design_options.is_none() && !h.app.file_load_holds());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(crate::view_windows::is_clean(&h.app));
+
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(!crate::view_windows::is_clean(&h.app), "Escape leaves clean view when no question is open");
+}
+
+#[test]
 fn insert_design_configuration_cancel_and_escape_leave_the_design_and_source_unchanged() {
     for escape in [false, true] {
         let mut h = crate::scenario::Harness::new();
