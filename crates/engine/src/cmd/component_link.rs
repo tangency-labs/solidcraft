@@ -3631,6 +3631,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Deleting or updating an early linked component must not re-evaluate later independent
+    /// linked components, either in-session or on the first edit after opening a saved assembly.
+    #[test]
+    fn deleting_or_updating_early_linked_component_keeps_later_links_cached() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let save_part = |path: &Path, body_name: &str, height: f64| {
+            let mut part = Session::default();
+            run(&mut part, "solid.box", json!({"length": 10, "width": 20, "height": height, "body_name": body_name}));
+            run(&mut part, "file.save", json!({"path": path}));
+        };
+        let (p_a, p_b, p_c, p_d, asm) =
+            (dir.join("PartA.sc"), dir.join("PartB.sc"), dir.join("PartC.sc"), dir.join("PartD.sc"), dir.join("Assembly.sc"));
+        save_part(&p_a, "BlockA", 10.0);
+        save_part(&p_b, "BlockB", 10.0);
+        save_part(&p_c, "BlockC", 10.0);
+        save_part(&p_d, "BlockD", 10.0);
+
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": p_a}));
+        let comp_b = run(&mut s, "component.insert_design", json!({"path": p_b}))["component"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": p_c}));
+        run(&mut s, "component.insert_design", json!({"path": p_d}));
+        run(&mut s, "file.save", json!({"path": asm}));
+
+        // First edit after opening: deleting PartB recomputes zero later linked components.
+        let mut opened_del = Session::default();
+        run(&mut opened_del, "doc.open", json!({"path": asm}));
+        let before = opened_del.model.recomputed;
+        run(&mut opened_del, "component.delete", json!({"component": comp_b}));
+        assert_eq!(opened_del.model.recomputed - before, 0, "opened delete must not recompute later linked imports");
+        assert!((volume(&mut opened_del) - 6000.0).abs() < 1e-6, "{}", volume(&mut opened_del));
+
+        // In-session delete of PartB also recomputes zero later linked components.
+        let before = s.model.recomputed;
+        run(&mut s, "component.delete", json!({"component": comp_b}));
+        assert_eq!(s.model.recomputed - before, 0, "in-session delete must not recompute later linked imports");
+        assert!((volume(&mut s) - 6000.0).abs() < 1e-6, "{}", volume(&mut s));
+
+        // Save the 3-part assembly, update PartA on disk, and verify Update Links recomputes only
+        // PartA (never PartC or PartD) both in-session and right after opening.
+        run(&mut s, "file.save", json!({"path": asm}));
+        save_part(&p_a, "BlockA", 25.0);
+
+        let mut opened_upd = Session::default();
+        run(&mut opened_upd, "doc.open", json!({"path": asm}));
+        let before = opened_upd.model.recomputed;
+        assert_eq!(run(&mut opened_upd, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(opened_upd.model.recomputed - before, 1, "opened update_links must recompute only PartA");
+        assert!((volume(&mut opened_upd) - 9000.0).abs() < 1e-6, "{}", volume(&mut opened_upd));
+
+        let before = s.model.recomputed;
+        assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["PartA"]));
+        assert_eq!(s.model.recomputed - before, 1, "in-session update_links must recompute only PartA");
+        assert!((volume(&mut s) - 9000.0).abs() < 1e-6, "{}", volume(&mut s));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn save_material_boxes(path: &Path, items: &[(&str, f64, &str)]) {
         let mut part = Session::default();
         for &(name, x, material) in items {
