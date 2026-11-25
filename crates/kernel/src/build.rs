@@ -331,13 +331,13 @@ pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
 pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "torus");
     let (major, minor) = (finite(major, "major radius")?, finite(minor, "minor radius")?);
+    if !center.is_finite() {
+        return Err(KernelError::Invalid("torus center must be finite".into()));
+    }
     if !(minor > 1e-6 && major > minor) {
         return Err(KernelError::Invalid("torus needs major > minor > 0".into()));
     }
-    let plane = Plane { origin: center, ..Plane::XZ };
-    let r = Region2 { outer: Loop2::circle(Vec2::new(major, 0.0), minor), holes: vec![] };
-    let mut v = revolve(&plane, &[r], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
-    v.pop().ok_or_else(|| KernelError::Failed("torus".into()))
+    crate::smlib_sweeps::torus(center, major, minor)
 }
 
 /// Offset every segment of a loop to its right by `d` (outward for a region's outer loop and

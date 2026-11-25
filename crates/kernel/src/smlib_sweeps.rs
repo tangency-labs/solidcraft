@@ -80,7 +80,7 @@ pub(crate) struct Draft {
 
 pub(crate) use imp::{
     body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_to_point,
-    loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
+    loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, revolve, screw, screw_radial, sphere, sweep, sweep_controlled, torus,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -451,6 +451,15 @@ mod imp {
     pub(crate) fn sphere(center: Vec3, radius: f64) -> Result<Body> {
         let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
         let body = body_of(brep, "sphere")?;
+        let faces = body.face_count();
+        Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
+    }
+
+    /// SMLib's torus about the Z axis through `center`, each face swept from the circle
+    /// (segment 0) a torus revolves.
+    pub(crate) fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
+        let brep = Brep::make_torus(p(center), major, minor).map_err(|e| failed("torus", e))?;
+        let body = body_of(brep, "torus")?;
         let faces = body.face_count();
         Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
     }
