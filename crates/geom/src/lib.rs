@@ -46,6 +46,9 @@ pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
 pub mod table;
+/// Polygon meshes for programs that edit what they are given (a live link), and the convex parts
+/// of a planar region they cut faces with holes into: solidcore-tess's, under their old path.
+pub use solidcore_tess::{convex_parts, poly_mesh};
 /// The plan evaluator and the display plan, solidcore-tess's (RFC 0003, items 1.1 and 1.8;
 /// `solidcore_tess::eval`), under their old path.
 pub mod tess {

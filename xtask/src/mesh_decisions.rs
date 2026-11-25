@@ -43,6 +43,7 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/doc/src/point_cloud_complex.rs", "no mesh: the triangles of a point cloud's own complex"),
     ("crates/doc/src/point_cloud_distribution.rs", "no mesh: the triangles of a point cloud's own complex"),
     ("crates/engine/src/cmd/file_thumbnail.rs", "a design's thumbnail picture"),
+    ("crates/engine/src/cmd/live.rs", "a live link's meshes: the bodies' tessellation sent to another program"),
     ("crates/engine/src/cmd/mesh.rs", "mesh bodies: repair, decimate and inspect imported meshes"),
     ("crates/engine/src/cmd/render", "rendered pictures"),
     ("crates/engine/src/cmd/render.rs", "rendered pictures"),
@@ -81,6 +82,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ModelBody::gpu_plan_at", "the display plan in the form the GPU evaluates"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
+    ("crates/doc/src/eval.rs:ModelBody::plan_in_place_at", "the display plan where the body stands"),
     ("crates/doc/src/eval.rs:ModelBody::plan_mesh", "the display plan's mesh"),
     ("crates/doc/src/eval.rs:ModelBody::plan_mesh_at", "the display plan's mesh"),
     ("crates/doc/src/eval.rs:ModelBody::plan_mesh_in_place_at", "the display plan's mesh where the body stands"),
@@ -111,7 +113,8 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
 /// - `.mesh()` (none), in [`MODEL_BODY_CRATES`]: `ModelBody::mesh`, its display mesh;
 /// - `.mesh_plan(t)`, `.mesh_of(plan)`: the tessellation plan and the mesh it evaluates to;
 /// - `.plan_mesh()`, `.plan_mesh_at(q)`, `.display_plan()`, `.display_plan_at(q)`: the display
-///   plan and its mesh;
+///   plan and its mesh, and `.plan_in_place_at(q)`, `.plan_mesh_in_place_at(q)`: the same where
+///   the body's definition stands;
 /// - `mesh_box(..)`, `body_box(..)`, `reference_mesh(..)`: a box or mesh from a tessellation;
 /// - `.triangles`: reading a mesh's triangles (nearest point, ray casts, inside tests);
 /// - `closest_on_triangle(..)`: the nearest point of a triangle.
@@ -121,8 +124,8 @@ fn site_uses(call: &Call, model_body: bool) -> Option<&'static str> {
         (Call::Method { args: 0, .. }, "mesh") if model_body => Some(".mesh()"),
         (Call::Method { .. }, "mesh_plan") => Some(".mesh_plan()"),
         (Call::Method { .. }, "mesh_of") => Some(".mesh_of()"),
-        (Call::Method { .. }, "plan_mesh" | "plan_mesh_at") => Some(".plan_mesh()"),
-        (Call::Method { .. }, "display_plan" | "display_plan_at") => Some(".display_plan()"),
+        (Call::Method { .. }, "plan_mesh" | "plan_mesh_at" | "plan_mesh_in_place_at") => Some(".plan_mesh()"),
+        (Call::Method { .. }, "display_plan" | "display_plan_at" | "plan_in_place_at") => Some(".display_plan()"),
         (Call::Function { .. }, "mesh_box") => Some("mesh_box()"),
         (Call::Function { .. }, "body_box") => Some("body_box()"),
         (Call::Function { .. }, "reference_mesh") => Some("reference_mesh()"),

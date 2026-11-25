@@ -2,7 +2,7 @@
 //! for bit, the planner was built and measured with (SolidCraft's geometry traits), so its plans
 //! do not move with the move into solidcore.
 
-use solidcore_record::Vec3;
+use solidcore_record::{Vec2, Vec3};
 
 /// Below this length a vector has no direction ([`VecExt::normalized`]).
 const EPS: f64 = 1e-9;
@@ -23,6 +23,8 @@ pub(crate) trait VecExt: Sized {
     fn max(self, o: Self) -> Self;
     /// Distance from this point to the segment `a`–`b`.
     fn dist_to_segment(self, a: Self, b: Self) -> f64;
+    /// Any unit vector perpendicular to `self` (which should be non-zero); +Z when there is none.
+    fn any_perp(self) -> Self;
     /// Whether every coordinate is finite.
     #[allow(clippy::wrong_self_convention)] // a copy type, as `f64::is_finite`
     fn is_finite(self) -> bool;
@@ -74,6 +76,16 @@ macro_rules! vec_ext {
                 };
                 self.dist(a + ab * t)
             }
+            fn any_perp(self) -> $v {
+                let a = if self.x.abs() < 0.9 {
+                    <$v>::new(1.0, 0.0, 0.0)
+                } else {
+                    <$v>::new(0.0, 1.0, 0.0)
+                };
+                self.cross(a)
+                    .normalized()
+                    .unwrap_or(<$v>::new(0.0, 0.0, 1.0))
+            }
         }
     };
 }
@@ -81,3 +93,33 @@ macro_rules! vec_ext {
 // The record's vector and the kernel's: the same formulas on each.
 vec_ext!(Vec3);
 vec_ext!(solidcore::Vec3);
+
+/// Products and lengths of a [`Vec2`], by the same formulas as [`VecExt`].
+// `len` is the vector's length, not a count.
+#[allow(clippy::len_without_is_empty)]
+pub(crate) trait Vec2Ext: Sized {
+    fn dot(self, o: Self) -> f64;
+    /// The z component of the 3D cross product.
+    fn cross(self, o: Self) -> f64;
+    fn len2(self) -> f64;
+    fn len(self) -> f64;
+    fn dist(self, o: Self) -> f64;
+}
+
+impl Vec2Ext for Vec2 {
+    fn dot(self, o: Vec2) -> f64 {
+        self.x * o.x + self.y * o.y
+    }
+    fn cross(self, o: Vec2) -> f64 {
+        self.x * o.y - self.y * o.x
+    }
+    fn len2(self) -> f64 {
+        self.dot(self)
+    }
+    fn len(self) -> f64 {
+        self.x.hypot(self.y)
+    }
+    fn dist(self, o: Vec2) -> f64 {
+        (self - o).len()
+    }
+}

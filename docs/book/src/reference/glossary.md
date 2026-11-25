@@ -416,6 +416,20 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### live link
+
+A connection through which another program follows the open design and receives its bodies as
+polygon meshes whenever the design changes.
+
+The receiving program (a modelling or rendering program) only reads: it never changes the design.
+It may ask for a body to be tessellated more or less finely. Compare a *design link*, which
+brings another design file's bodies into this one.
+
+- **In SolidCraft:** `live.meshes`; the `control.subscribe` method and its `design.changed`
+  events; the `live_meshes` entry of `control.capabilities`.
+- **Don't use:** bridge, sync (for the connection itself), link (alone).
+- **Elsewhere:** live link, bridge, live connection.
+- **For translators:** not a design link or a component link.
 ### library entry
 
 One material or one appearance kept in a *material library*, known by an id that stays the same
