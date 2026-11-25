@@ -33,7 +33,7 @@ use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -610,17 +610,9 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-/// Unit and square axes, each within 8 ulps of 1: the record construction's
-/// and the exact-form check's shared frame test.
-fn unit_square(x: Vec3, y: Vec3) -> bool {
-    let ulps = 8.0 * f64::EPSILON;
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    unit(x) && unit(y) && x.dot(y).abs() <= ulps
-}
-
 fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
     let (x, y) = (p3(f.x_axis), p3(f.y_axis));
-    if !unit_square(x, y) {
+    if !axes_are_orthonormal(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
@@ -641,7 +633,7 @@ pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
         && rx.is_finite()
         && ry.is_finite()
         && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
-        && unit_square(x, y))
+        && axes_are_orthonormal(x, y))
     {
         return Ok(false);
     }
