@@ -1393,11 +1393,15 @@ impl BSplineCurve {
         *other = other_back;
         let composite = match composite {
             Ok(c) => c,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 return Err(crate::error::Failure::new(
                     OP_JOIN,
-                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::StageFailed),
+                    crate::error::nurbs::NurbsFailure::BSpline(BSplineFailure::JoinNotBuilt),
                 )
                 .caused_by(e)
                 .into_error());
@@ -1425,10 +1429,8 @@ impl BSplineCurve {
         let (knots, _) = self.knots(None)?; // Unique knot vector
         let (_, continuities) = self.calculate_continuities(k, continuity_angle_tol)?;
 
-        // check state
-        if knots.len() != continuities.len() {
-            return Err(SolidError::b_spline(OP_SUBDIV, BSplineFailure::StageFailed));
-        }
+        // (upstream's check that the two lengths agree is not ported: `calculate_continuities`
+        // returns one continuity per unique knot of this same curve)
 
         // init iter params
         let mut start = *knots
@@ -2580,9 +2582,11 @@ mod tests {
         assert_eq!(
             e.nurbs_failure(),
             Some(&crate::error::nurbs::NurbsFailure::BSpline(
-                BSplineFailure::StageFailed
+                BSplineFailure::JoinNotBuilt
             ))
         );
+        // the class is the cause's: an argument check, neither a defect nor a refusal
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         let cause = e.cause().expect("the join construction's error is kept");
         assert!(

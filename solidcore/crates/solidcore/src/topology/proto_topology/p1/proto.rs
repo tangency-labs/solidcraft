@@ -7,14 +7,12 @@
 //! (#374), including the two entries of a closed edge. Upstream removes only one.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, passed_on, EntityRef, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
-use crate::geom::tol::{xsect_tol3d, zone_tol3d};
+use crate::geom::tol::{within_coincidence_tol, xsect_tol3d, zone_tol3d};
 use crate::intersect::curve_class::{src_zone_tol_3d_of, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
@@ -48,8 +46,6 @@ const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::p
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
 const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
 const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_position";
-const OP_COMBINE: &str =
-    "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
 use crate::error::topology::TopologyFailure;
 
@@ -291,21 +287,6 @@ fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&
         .ok_or(dangling("curve handle is null or unknown"))
 }
 
-/// A status upstream ignores, except the errors that cannot be ignored here: unported
-/// callees and undefined behaviour upstream.
-fn ignore_soft<T>(r: Result<T>) -> Result<()> {
-    if let Err(
-        e @ (SolidError::Unported { .. }
-        | SolidError::Cancelled { .. }
-        | SolidError::InvalidInput { .. }
-        | SolidError::PortInvariant { .. }),
-    ) = r
-    {
-        return Err(e);
-    }
-    Ok(())
-}
-
 /// `FindObjPoint3d` with its status ignored: the object point, `SetUninitialized`
 /// on failure.
 fn obj_point<O: ClassObject>(
@@ -316,31 +297,31 @@ fn obj_point<O: ClassObject>(
     Ok(ignored(pc.find_obj_point_3d(k, geometry))?.unwrap_or(Vec3::UNDEF))
 }
 
-/// `EvaluatePoint` with its status ignored: the point, `SM_UNDEF` on failure.
-fn eval_point(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
-    Ok(ignored(curve.evaluate_point(k, t))?.unwrap_or(Vec3::UNDEF))
+/// `FindObjPoint3d` of a vertex definition's classification `pc`, the definition being
+/// at `position`. A classification without parameters (an interval's midpoint after a
+/// split, a region) has no object point, and upstream's `FindObjPoint3d` fails on it,
+/// its status ignored and the unset point read. Not upstream (#18927): such a side gives
+/// no evidence against the definition, whose position `sm_FindPositionFromPCs` took from
+/// the other side, so its object point is `position`; the definition is then moved only
+/// by a gap between two real object points. Every other failure is passed on, as the
+/// fork does (bcc6f01).
+fn definition_object_point<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+    position: Point3,
+) -> Result<Point3> {
+    if !pc.are_parameters_set() || pc.point_class() == PointClassType::Region {
+        return Ok(position);
+    }
+    pc.find_obj_point_3d(k, geometry)
 }
 
-/// [`eval_point`] under `ssi_proto_topology_statuses_pass_on` (fork bcc6f01): `None` for a
-/// point that cannot be evaluated, where the answer is then "no" ("no value, no
-/// evidence"); without the flag the unset point as upstream.
+/// `EvaluatePoint` as the fork reads it (bcc6f01): `None` for a point that cannot be
+/// evaluated, where the answer is then "no" ("no value, no evidence"; upstream reads
+/// the unset point).
 fn eval_point_or_no(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Point3>> {
-    match ignored(curve.evaluate_point(k, t))? {
-        Some(p) => Ok(Some(p)),
-        None if k.fixes.ssi_proto_topology_statuses_pass_on => Ok(None),
-        None => Ok(Some(Vec3::UNDEF)),
-    }
-}
-
-/// [`eval_point`] of an evaluation the fork passes on (`SER`, fork bcc6f01): with
-/// `ssi_proto_topology_statuses_pass_on` its error is returned, without it the unset
-/// point as upstream.
-fn eval_point_passed(k: &Kernel, curve: &Curve, t: f64) -> Result<Point3> {
-    if k.fixes.ssi_proto_topology_statuses_pass_on {
-        curve.evaluate_point(k, t)
-    } else {
-        eval_point(k, curve, t)
-    }
+    ignored(curve.evaluate_point(k, t))
 }
 
 // ---- static helpers ------------------------------------------------------------------
@@ -419,16 +400,20 @@ fn onto_seam(k: &Kernel, curve: &Curve, p: Point3) -> Result<Point3> {
     let natural = curve.natural_interval();
     let foot = curve.drop_point(k, &natural, p, None, 0.0, None, SolverOperation::Minimize)?;
     if !foot.success {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_RESOLVE,
-            "the definition's position does not drop onto its vertex's seam",
+            TopologyFailure::NoFootOnSeam,
         ));
     }
     let eval = curve.evaluate(k, foot.parameter, 1, false, false)?;
     let (Some(&at), Some(&tangent)) = (eval.first(), eval.get(1)) else {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_RESOLVE,
-            "the seam does not evaluate at the definition's foot",
+            TopologyFailure::Defect {
+                why: "the seam's evaluation with one derivative at the definition's foot gave \
+                      no point or no tangent, though it returns both at every parameter it \
+                      evaluates",
+            },
         ));
     };
     let len2 = tangent.dot(tangent);
@@ -463,9 +448,9 @@ pub fn find_position_from_pcs<O: ClassObject>(
 
     // error - both Parameters are not Set
     if !found1 && !found2 {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_POSITION,
-            "neither point classification has its parameters set",
+            TopologyFailure::ClassificationParametersUnset,
         ));
     }
 
@@ -940,7 +925,7 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
     if brep1 != brep2 {
         return Err(SolidError::topology(
             OP_DEGEN,
-            TopologyFailure::Inconsistent("the edges are on different B-reps"),
+            TopologyFailure::EdgesOnDifferentBreps,
         ));
     }
 
@@ -966,22 +951,6 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
     // If no common faces, or deleted common face w/out deleting edge, then we have
     // coincident unstitched edges
     Ok(0)
-}
-
-/// `lCanDelete` after `sm_FindEDOnDegenFace`, whose status `CanCombineEdgeDefinitions`
-/// ignores: 0 on an error return (set before any error past the B-rep check). Unported
-/// callees and undefined behaviour upstream still fail.
-fn degen_face_choice(r: Result<u64>) -> Result<u64> {
-    match r {
-        Ok(n) => Ok(n),
-        Err(
-            e @ (SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }
-            | SolidError::InvalidInput { .. }
-            | SolidError::PortInvariant { .. }),
-        ) => Err(e),
-        Err(_) => Ok(0),
-    }
 }
 
 // ---- SmVertexDefinition -----------------------------------------------------------------
@@ -1238,6 +1207,64 @@ fn common_point(surfaces: [&Surface; 3], start: Point3) -> Option<Point3> {
     None
 }
 
+/// The largest curvature of `a` at `x`, a bound on how fast its normal turns along it: none
+/// for a plane, one over the radius there for a cylinder or cone (a cone's normal turns by
+/// less, its radius's cosine over it), one over the radius for a sphere; infinite at a cone's
+/// apex, `None` for a torus.
+fn curvature_bound(a: &crate::surface::implicit::Implicit, x: Point3) -> Option<f64> {
+    use crate::surface::implicit::Implicit;
+    Some(match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let r = (radius + tan_angle * (x - origin).dot(axis)).abs();
+            if r > 0.0 {
+                1.0 / r
+            } else {
+                f64::INFINITY
+            }
+        }
+        Implicit::Sphere { radius, .. } => 1.0 / radius.abs(),
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// Whether surfaces `a` and `b` are tangent at `x` as far as a point within `tol` of it can
+/// tell (`None` where one is not a plane, cylinder, cone or sphere). Where two surfaces touch
+/// along a line, at a point `d` off it each one's normal has turned from the shared one by at
+/// most its curvature times `d`: within `tol`, their normals differ by up to `tol` times the
+/// sum of the curvatures. Tangent there, the two do not cross at `x`, and with a third surface
+/// they have no one common point: their equations meet in a double root, which rounding moves
+/// along the line (a sheet's web running into its bend: 2.8e-6 at a hole across their line).
+fn tangent_within(a: &Surface, b: &Surface, x: Point3, tol: f64) -> Option<bool> {
+    use crate::surface::implicit::AnalyticSupport;
+    implicits_tangent_within(
+        &AnalyticSupport::of(a)?.implicit(),
+        &AnalyticSupport::of(b)?.implicit(),
+        x,
+        tol,
+    )
+}
+
+/// [`tangent_within`] on the surfaces' implicit equations.
+fn implicits_tangent_within(
+    a: &crate::surface::implicit::Implicit,
+    b: &crate::surface::implicit::Implicit,
+    x: Point3,
+    tol: f64,
+) -> Option<bool> {
+    let (_, ga) = implicit_value(a, x)?;
+    let (_, gb) = implicit_value(b, x)?;
+    let sine = ga.cross(gb).length() / (ga.length() * gb.length());
+    let turn = tol * (curvature_bound(a, x)? + curvature_bound(b, x)?);
+    // (a NaN sine, from a zero gradient, is not a crossing either)
+    Some(sine.is_nan() || sine <= turn)
+}
+
 impl<O: ClassObject> VertexDefinition<O> {
     /// Not upstream (#3062): where this definition is a crossing of an edge of one B-rep
     /// (between two faces) and a face of the other, all three on planes, cylinders, cones or
@@ -1278,6 +1305,11 @@ impl<O: ClassObject> VertexDefinition<O> {
         ) else {
             return Ok(false);
         };
+        // An edge whose two faces are tangent where it is crossed (a flat running into a
+        // round) is not a crease the three surfaces fix a point on: left where the crossing put it.
+        if tangent_within(sa, sb, self.position, self.tolerance(k)) != Some(false) {
+            return Ok(false);
+        }
         let Some(x) = common_point([sa, sb, sf], self.position) else {
             return Ok(false);
         };
@@ -1604,10 +1636,9 @@ impl<O: ClassObject> VertexDefinition<O> {
     /// `position` is not finite; the definition is left unchanged then.
     pub fn set_position(&mut self, k: &Kernel, position: Point3) -> Result<()> {
         let needed = self.covering_tolerance(k, position).ok_or_else(|| {
-            SolidError::topology_failed(
+            SolidError::topology(
                 OP_SET_POSITION,
-                "a vertex definition holding an absorbed curve cannot move to a position \
-                 at no finite distance from it",
+                TopologyFailure::AbsorbedCurveAtNoFiniteDistance,
             )
         })?;
         self.position = position;
@@ -1676,37 +1707,30 @@ impl<O: ClassObject> VertexDefinition<O> {
         } else if which == 2 {
             self.pc2.set_class_object(t, topo);
         } else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_SRC_TOPO,
-                "the source B-rep is neither 1 nor 2",
+                TopologyFailure::BrepSideNotOneOrTwo { which },
             ));
         }
         Ok(())
     }
 
     /// Recomputes both classifications' parameters at the position
-    /// (`SetPointParameters`; statuses ignored, passed on with
-    /// `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
+    /// (`SetPointParameters`; statuses ignored upstream, passed on as the fork does,
+    /// bcc6f01).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the classifications; with the flag, their errors.
+    /// Those of the classifications.
     pub fn set_point_parameters(
         &mut self,
         k: &Kernel,
         geometry: &impl ClassGeometry<O>,
     ) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
-        ignore_or_pass_on(
-            self.pc1
-                .compute_point_parameters(k, geometry, self.position),
-            pass,
-        )?;
-        ignore_or_pass_on(
-            self.pc2
-                .compute_point_parameters(k, geometry, self.position),
-            pass,
-        )?;
+        self.pc1
+            .compute_point_parameters(k, geometry, self.position)?;
+        self.pc2
+            .compute_point_parameters(k, geometry, self.position)?;
         Ok(())
     }
 }
@@ -1731,10 +1755,10 @@ pub struct EdgeDefinition<O> {
     xsect_uv_curve2: Option<O>,
     /// `m_pXSectInterval`.
     xsect_interval: Extent1d,
-    /// `m_pSrcTopo1`.
-    src_topo1: Option<O>,
-    /// `m_pSrcTopo2`.
-    src_topo2: Option<O>,
+    /// `m_pSrcTopo1` (never null: set by the constructor and by `set_src_topo`).
+    src_topo1: O,
+    /// `m_pSrcTopo2` (never null, as `src_topo1`).
+    src_topo2: O,
     /// `m_pSrcTopo1_TYPE`.
     src_topo1_type: ClassObjectKind,
     /// `m_pSrcTopo2_TYPE`.
@@ -1769,8 +1793,8 @@ impl<O: ClassObject> EdgeDefinition<O> {
             xsect_uv_curve1,
             xsect_uv_curve2,
             xsect_interval,
-            src_topo1: Some(src_topo1),
-            src_topo2: Some(src_topo2),
+            src_topo1,
+            src_topo2,
             src_topo1_type: src_type(src_topo1),
             src_topo2_type: src_type(src_topo2),
             proto_edge,
@@ -1854,9 +1878,9 @@ impl<O: ClassObject> EdgeDefinition<O> {
     #[must_use]
     pub const fn src_topo(&self, which: i32) -> Option<O> {
         if which == 1 {
-            self.src_topo1
+            Some(self.src_topo1)
         } else {
-            self.src_topo2
+            Some(self.src_topo2)
         }
     }
 
@@ -1932,17 +1956,17 @@ impl<O: ClassObject> EdgeDefinition<O> {
     /// (`SetSrcTopo`; the classification type is unused).
     pub fn set_src_topo(&mut self, which: i32, _t: PointClassType, topo: O) {
         if which == 1 {
-            self.src_topo1 = Some(topo);
+            self.src_topo1 = topo;
             self.src_topo1_type = src_type(topo);
         } else {
-            self.src_topo2 = Some(topo);
+            self.src_topo2 = topo;
             self.src_topo2_type = src_type(topo);
         }
     }
 
     /// The 3d curve's point at the start (or end) of the interval
-    /// (`GetEndPosition(SmBoolean, SmPoint3d&)`; the evaluation status is ignored,
-    /// passed on with `ssi_proto_topology_statuses_pass_on`).
+    /// (`GetEndPosition(SmBoolean, SmPoint3d&)`; the evaluation status is ignored
+    /// upstream, passed on as the fork does, bcc6f01).
     ///
     /// # Errors
     ///
@@ -1961,8 +1985,8 @@ impl<O: ClassObject> EdgeDefinition<O> {
             self.xsect_interval.max()
         };
 
-        // evaluate Pos3d (passed on with `ssi_proto_topology_statuses_pass_on`)
-        eval_point_passed(k, curve_of(geometry, self.xsect_curve_3d)?, param)
+        // evaluate Pos3d (passed on, fork bcc6f01)
+        curve_of(geometry, self.xsect_curve_3d)?.evaluate_point(k, param)
     }
 
     /// The point and/or tangent of the 3d curve at `param` (`Evaluate`): `None` for
@@ -2060,12 +2084,11 @@ impl<O: ClassObject> EdgeDefinition<O> {
         max: f64,
     ) -> Result<()> {
         // fork bcc6f01: returns the reversal's and the interval's statuses
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         if min <= max {
-            ignore_status(passed_on(self.xsect_interval.set_min_max(min, max), pass)?)?;
+            self.xsect_interval.set_min_max(min, max)?;
         } else {
-            ignore_soft(passed_on(self.reverse_orientation(k, geometry), pass)?)?;
-            ignore_status(passed_on(self.xsect_interval.set_min_max(max, min), pass)?)?;
+            self.reverse_orientation(k, geometry)?;
+            self.xsect_interval.set_min_max(max, min)?;
         }
         Ok(())
     }
@@ -2086,10 +2109,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
         reverse: bool,
     ) -> Result<()> {
         if reverse {
-            ignore_soft(passed_on(
-                self.reverse_orientation(k, geometry),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            self.reverse_orientation(k, geometry)?;
         }
 
         if new_domain.are_same(&self.xsect_interval) {
@@ -2142,19 +2162,10 @@ impl<O: ClassObject> EdgeDefinition<O> {
         };
         let mut param = guess;
 
-        let end_pos = if k.fixes.ssi_proto_topology_statuses_pass_on {
-            // fork bcc6f01: no end position, no evidence
-            let param = if at_start {
-                self.xsect_interval.min()
-            } else {
-                self.xsect_interval.max()
-            };
-            match eval_point_or_no(k, curve_of(geometry, self.xsect_curve_3d)?, param)? {
-                Some(p) => p,
-                None => return Ok((false, guess)),
-            }
-        } else {
-            self.end_position(k, geometry, at_start)?
+        // fork bcc6f01: no end position, no evidence
+        let Some(end_pos) = eval_point_or_no(k, curve_of(geometry, self.xsect_curve_3d)?, guess)?
+        else {
+            return Ok((false, guess));
         };
         let dist = position.distance(end_pos);
         if dist < tol {
@@ -2200,8 +2211,8 @@ impl<O: ClassObject> EdgeDefinition<O> {
             Ok((Some(p), _)) => p,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // fork bcc6f01: no value, no evidence
-            Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok((false, param)),
-            _ => Vec3::UNDEF,
+            Err(_) => return Ok((false, param)),
+            Ok((None, _)) => Vec3::UNDEF,
         };
         let dist = edge_pt.distance(end_pos);
         Ok((dist > tol, param))
@@ -2388,10 +2399,7 @@ impl ProtoVertex {
                 self.vertex_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::topology_failed(
-                OP,
-                "the vertex definition is not listed",
-            )),
+            None => Err(SolidError::topology(OP, TopologyFailure::NotOnOwnerList)),
         }
     }
 
@@ -2406,10 +2414,7 @@ impl ProtoVertex {
                 self.proto_edges.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::topology_failed(
-                OP,
-                "the proto edge is not listed",
-            )),
+            None => Err(SolidError::topology(OP, TopologyFailure::NotOnOwnerList)),
         }
     }
 }
@@ -2566,10 +2571,7 @@ impl ProtoEdge {
                 self.edge_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::topology_failed(
-                OP,
-                "the edge definition is not listed",
-            )),
+            None => Err(SolidError::topology(OP, TopologyFailure::NotOnOwnerList)),
         }
     }
 
@@ -2591,9 +2593,9 @@ impl ProtoEdge {
         if deleted {
             Ok(())
         } else {
-            Err(SolidError::topology_failed(
+            Err(SolidError::topology(
                 OP,
-                "the proto vertex is neither end",
+                TopologyFailure::ProtoVertexNotAnEnd,
             ))
         }
     }
@@ -2773,7 +2775,10 @@ impl DeclaredContact {
     }
 
     /// Whether this region and `other` are not proved apart: a lower bound of the distance
-    /// between their segments is within the sum of their radii. The bound is the gap
+    /// between their segments is within the coincidence rule of their radii
+    /// ([`within_coincidence_tol`]: the larger radius, at least the contact tolerance, and
+    /// the rounding of the copies past it; docs/booleans.md, "One point or two"), where
+    /// upstream's intersection tolerance would take their sum. The bound is the gap
     /// between the two segments' projections onto one direction, which no pair of their
     /// points is closer than whatever the direction, with the projections' rounding
     /// (`γ_4` of each point's distance from `other.a` times the direction's length)
@@ -2782,7 +2787,7 @@ impl DeclaredContact {
     /// solve gets wrong (near-parallel segments) gives a smaller bound, never a larger one.
     /// The regions are taken for overlapping in doubt. A NaN is apart.
     #[must_use]
-    pub fn overlaps(&self, other: &Self) -> bool {
+    pub fn overlaps(&self, k: &Kernel, other: &Self) -> bool {
         let (d1, d2, r) = (self.b - self.a, other.b - other.a, self.a - other.a);
         let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
         let unit = |x: f64| x.clamp(0.0, 1.0);
@@ -2830,8 +2835,10 @@ impl DeclaredContact {
         } else {
             width
         };
-        let reach = (self.radius + other.radius) * (1.0 + gamma(1));
-        !(least.is_nan() || least > reach)
+        let size = [self.a, self.b, other.a, other.b]
+            .iter()
+            .fold(0.0_f64, |m, p| m.max(largest_coordinate(*p)));
+        within_coincidence_tol(k, least, self.radius, other.radius, size)
     }
 
     /// Whether `p` is within the radius of the segment, by an upper bound of its distance:
@@ -2853,6 +2860,13 @@ impl DeclaredContact {
             * (1.0 + gamma(2));
         !(distance.is_nan() || distance > self.radius)
     }
+}
+
+/// The largest magnitude of `p`'s coordinates: the size whose rounding the coincidence rule
+/// allows past its tolerance ([`within_coincidence_tol`]). A NaN coordinate is passed over
+/// (`f64::max`); a NaN distance is apart whatever the size.
+fn largest_coordinate(p: Point3) -> f64 {
+    p.x.abs().max(p.y.abs()).max(p.z.abs())
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2950,7 +2964,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
     /// neither split nor dropped. Not upstream. It also holds the refusal of a resolution
     /// that would grow a tolerance into another vertex definition (#18312,
-    /// [`ProtoTopologyManager::refuse_growth_overlap`]).
+    /// [`ProtoTopologyManager::refuse_growth_overlap`]), and the refusal of an overlapping
+    /// proto edge group whose replacement failed part way (#18927,
+    /// [`ProtoTopologyManager::resolve_overlapping_proto_edges`]).
     pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
         self.self_loop_refusal.take()
     }
@@ -3491,7 +3507,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
     /// hull point covered.
     ///
-    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// Not upstream (#18274): a definition on a vertex that ends
     /// a seam edge ([`vertex::seam_edge`]), or on a seam edge itself, is put onto that seam,
     /// at the seam's point under the position worked out as upstream ([`onto_seam`]). The
     /// seam edge's curve is the seam, an iso line of its face's surface, and its vertex ends
@@ -3523,19 +3539,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let dist1 = v.pc1.gap_3d(k, geometry, None)?;
         let dist2 = v.pc2.gap_3d(k, geometry, None)?;
 
-        // passed on with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01)
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
-        let (pt1, pt2) = if pass {
-            (
-                v.pc1.find_obj_point_3d(k, geometry)?,
-                v.pc2.find_obj_point_3d(k, geometry)?,
-            )
-        } else {
-            (
-                obj_point(k, &v.pc1, geometry)?,
-                obj_point(k, &v.pc2, geometry)?,
-            )
-        };
+        // statuses ignored upstream; passed on as the fork does (bcc6f01), except for a
+        // classification with no object point (#18927; see `definition_object_point`)
+        let pt1 = definition_object_point(k, geometry, &v.pc1, v.position)?;
+        let pt2 = definition_object_point(k, geometry, &v.pc2, v.position)?;
 
         let dist = pt1.distance(pt2);
 
@@ -3543,14 +3550,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex or edge keeps to
-        let seam = if k.fixes.seam_vertex_stays_on_seam {
-            match seam_curve(geometry, &v.pc1)? {
-                Some(c) => Some(c),
-                None => seam_curve(geometry, &v.pc2)?,
-            }
-        } else {
-            None
+        // (#18274) the seam a definition on a seam's vertex or edge keeps to
+        let seam = match seam_curve(geometry, &v.pc1)? {
+            Some(c) => Some(c),
+            None => seam_curve(geometry, &v.pc2)?,
         };
 
         if dist > tol && dist1 + dist2 > EFF_ZERO {
@@ -3565,7 +3568,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let mut frac_ivl = Extent1d::from_min_max(0.0, 1.0);
             let disjoint = frac_max < frac_min;
             if !disjoint {
-                ignore_or_pass_on(frac_ivl.set_min_max(frac_min, frac_max), pass)?;
+                frac_ivl.set_min_max(frac_min, frac_max)?;
             }
 
             let frac = dist1 / (dist1 + dist2);
@@ -3588,7 +3591,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         v.proto_vertex,
                         &[vd],
                     )? {
-                        return Err(self.refuse_growth_overlap());
+                        return Err(self.refuse_growth_overlap(cover));
                     }
                 }
             }
@@ -3629,8 +3632,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// The 3d curve's point at the end of the definition bounded by `which_pv`
     /// (`SmEdgeDefinition::GetEndPosition(SmProtoVertex*, SmPoint3d&)`; the
-    /// evaluation status is ignored, passed on with
-    /// `ssi_proto_topology_statuses_pass_on`).
+    /// evaluation status is ignored upstream, passed on as the fork does, bcc6f01).
     ///
     /// # Errors
     ///
@@ -3650,12 +3652,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == pe.end_pv {
             d.xsect_interval.max()
         } else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_END,
-                "the proto vertex is neither end of the proto edge",
+                TopologyFailure::ProtoVertexNotAnEnd,
             ));
         };
-        eval_point_passed(k, curve_of(geometry, d.xsect_curve_3d)?, t)
+        curve_of(geometry, d.xsect_curve_3d)?.evaluate_point(k, t)
     }
 
     /// Whether the intersection interval `tgt_curve` over `tgt_domain` between
@@ -3706,7 +3708,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // when ED->SrcTopos are the same as the TgtInterval->MidPt->Objects
-        let identical = mid_pc1.object() == d.src_topo1 && mid_pc2.object() == d.src_topo2;
+        let identical =
+            mid_pc1.object() == Some(d.src_topo1) && mid_pc2.object() == Some(d.src_topo2);
         Ok((true, identical))
     }
 
@@ -3975,9 +3978,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == e.end_pv {
             self.proto_edge_end_position(k, geometry, pe, false)
         } else {
-            Err(SolidError::topology_failed(
+            Err(SolidError::topology(
                 OP_END,
-                "the proto vertex is neither end of the proto edge",
+                TopologyFailure::ProtoVertexNotAnEnd,
             ))
         }
     }
@@ -4029,9 +4032,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let e = self.pe(Some(pe))?;
         let num_eds = e.edge_defs.len();
         if num_eds == 0 {
-            return Err(SolidError::topology_invalid_value(
+            return Err(SolidError::topology(
                 OP_EVALUATE,
-                "the proto edge has no edge definitions",
+                TopologyFailure::ProtoEdgeWithoutDefinitions,
             ));
         }
 
@@ -4214,6 +4217,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         tolerance: f64,
         region: Option<&DeclaredContact>,
     ) -> Result<Option<ProtoVertexId>> {
+        self.find_proto_vertex_within_if(k, position, tolerance, region, |_| Ok(true))
+    }
+
+    /// The closest reachable proto vertex satisfying an additional incidence predicate.
+    pub(crate) fn find_proto_vertex_within_if(
+        &self,
+        k: &Kernel,
+        position: Point3,
+        tolerance: f64,
+        region: Option<&DeclaredContact>,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
+    ) -> Result<Option<ProtoVertexId>> {
         let point = DeclaredContact::of_point(position, tolerance);
         let region = region.unwrap_or(&point);
         let mut ret_val = None;
@@ -4224,17 +4239,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             let this_dist = face_p2::proto_vertex_distance_to(pv, position);
-            let combined = (pv.tolerance(k) + tolerance) * (1.0 + gamma(1));
-            let excess = this_dist * (1.0 - gamma(4)) - combined;
-            let apart = excess.is_nan() || excess > 0.0;
+            let size = largest_coordinate(pv.position).max(largest_coordinate(position));
+            let apart = !within_coincidence_tol(
+                k,
+                this_dist * (1.0 - gamma(4)),
+                pv.tolerance(k),
+                tolerance,
+                size,
+            );
             // (the proto vertex's own ball, and the regions of the points it holds)
             let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
             let one_region = || {
-                region.overlaps(&own)
+                region.overlaps(k, &own)
                     || self
                         .regions
                         .iter()
-                        .any(|(of, r)| *of == id && region.overlaps(r))
+                        .any(|(of, r)| *of == id && region.overlaps(k, r))
             };
             if apart
                 && !one_region()
@@ -4245,7 +4265,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             {
                 continue;
             }
-            if this_dist < min_dist {
+            if this_dist < min_dist && compatible(id)? {
                 ret_val = Some(id);
                 min_dist = this_dist;
             }
@@ -4270,12 +4290,38 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for a deleted listed proto vertex; those of
-    /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on with
-    /// `pass`, as the combine of `SplitIntersectingProtoEdges`).
-    pub fn combine_proto_vertices_not_proved_apart(
+    /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on, as the
+    /// combine of `SplitIntersectingProtoEdges`).
+    pub fn combine_proto_vertices_not_proved_apart(&mut self, k: &Kernel) -> Result<()> {
+        self.combine_proto_vertices_if(k, |_, _, _| Ok(true))
+    }
+
+    /// Coalesces reachable events whose native vertex/face incidences are compatible.
+    pub(crate) fn combine_proto_vertices_with_incidence(
         &mut self,
         k: &Kernel,
-        pass: bool,
+        geometry: &impl super::super::p2::ProtoBrep<O>,
+    ) -> Result<()> {
+        self.combine_proto_vertices_if(k, |this, of, id| {
+            for &def in this.pv(Some(of))?.vertex_definitions() {
+                let def = this.vd(def)?;
+                if this.proto_vertex_incidence_conflicts(
+                    k,
+                    geometry,
+                    id,
+                    [def.brep_point_classif(1), def.brep_point_classif(2)],
+                )? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+    }
+
+    fn combine_proto_vertices_if(
+        &mut self,
+        k: &Kernel,
+        compatible: impl Fn(&Self, ProtoVertexId, ProtoVertexId) -> Result<bool>,
     ) -> Result<()> {
         // sweeps over the regions until one combines nothing (each combine removes a
         // listed proto vertex, so there are at most as many as proto vertices)
@@ -4285,7 +4331,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let mut i = 0;
             while let Some(&(of, region)) = self.regions.get(i) {
                 let other = if self.pvs.contains(&of) {
-                    self.proto_vertex_not_apart_from(k, of, &region)?
+                    self.proto_vertex_not_apart_from(k, of, &region, |id| compatible(self, of, id))?
                 } else {
                     None
                 };
@@ -4294,9 +4340,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     continue;
                 };
                 // (the same region is compared again: its proto vertex now holds more)
-                ignore_soft(passed_on(self.combine_proto_vertex(of, gone), pass)?)?;
+                self.combine_proto_vertex(of, gone)?;
                 self.pv_mut(gone)?.clear_vertex_definitions();
-                ignore_soft(passed_on(self.remove_proto_vertex(gone), pass)?)?;
+                self.remove_proto_vertex(gone)?;
                 self.delete_proto_vertex_object(gone);
                 // (a region whose proto vertex is gone without a combine reaches nothing)
                 self.regions.retain(|(at, _)| *at != gone);
@@ -4315,6 +4361,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         k: &Kernel,
         of: ProtoVertexId,
         region: &DeclaredContact,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
     ) -> Result<Option<ProtoVertexId>> {
         let centre = region.a + (region.b - region.a) * 0.5;
         for &id in &self.pvs {
@@ -4326,12 +4373,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 continue;
             }
             let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
-            if region.overlaps(&own)
+            if region.overlaps(k, &own)
                 || self
                     .regions
                     .iter()
-                    .any(|(at, r)| *at == id && region.overlaps(r))
+                    .any(|(at, r)| *at == id && region.overlaps(k, r))
             {
+                if !compatible(id)? {
+                    continue;
+                }
                 return Ok(Some(id));
             }
         }
@@ -4367,25 +4417,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for deleted objects or no proto vertex; with
-    /// `ssi_proto_topology_statuses_pass_on` (fork bcc6f01), the removals' `SM_ERR`.
+    /// [`SolidError::InvalidInput`] for deleted objects or no proto vertex; the
+    /// removals' `SM_ERR` (passed on as the fork does, bcc6f01).
     pub fn remove_vertex_definition(
         &mut self,
-        k: &Kernel,
         vd: VertexDefId,
         remove_owner_if_empty: bool,
     ) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         let owner = self
             .vd(vd)?
             .proto_vertex
             .ok_or(dangling("vertex definition has no proto vertex"))?;
 
-        // status ignored upstream (passed on with the flag)
-        let _ = passed_on(self.pv_mut(owner)?.remove_vertex_definition(vd), pass)?;
+        // status ignored upstream; passed on as the fork does (bcc6f01)
+        self.pv_mut(owner)?.remove_vertex_definition(vd)?;
 
         if remove_owner_if_empty && self.pv(Some(owner))?.vertex_defs.is_empty() {
-            let _ = passed_on(self.remove_proto_vertex(owner), pass)?;
+            self.remove_proto_vertex(owner)?;
             self.delete_proto_vertex(owner);
         }
         Ok(())
@@ -4402,10 +4450,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 self.pvs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::topology_failed(
-                OP,
-                "the proto vertex is not listed",
-            )),
+            None => Err(SolidError::topology(OP, TopologyFailure::NotOnOwnerList)),
         }
     }
 
@@ -4415,30 +4460,25 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// # Errors
     ///
     /// `SM_ERR` when `pe` is not listed; [`SolidError::InvalidInput`] for deleted
-    /// objects; with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01), the end
-    /// proto vertices' `SM_ERR` when `pe` is not listed there.
-    pub fn remove_proto_edge(&mut self, k: &Kernel, pe: ProtoEdgeId) -> Result<()> {
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+    /// objects; the end proto vertices' `SM_ERR` when `pe` is not listed there (passed
+    /// on as the fork does, bcc6f01).
+    pub fn remove_proto_edge(&mut self, pe: ProtoEdgeId) -> Result<()> {
         match self.pes.iter().position(|&x| x == pe) {
             Some(i) => {
                 self.pes.remove(i);
             }
-            None => {
-                return Err(SolidError::topology_failed(
-                    OP,
-                    "the proto edge is not listed",
-                ))
-            }
+            None => return Err(SolidError::topology(OP, TopologyFailure::NotOnOwnerList)),
         }
 
-        // remove End PV->PE back pointers (statuses ignored, passed on with the flag)
+        // remove End PV->PE back pointers (statuses ignored upstream; passed on as the
+        // fork does, bcc6f01)
         let e = self.pe(Some(pe))?;
         let (start, end) = (e.start_pv, e.end_pv);
         if let Some(s) = start {
-            let _ = passed_on(self.pv_mut(s)?.remove_proto_edge(pe), pass)?;
+            self.pv_mut(s)?.remove_proto_edge(pe)?;
         }
         if let Some(e) = end {
-            let _ = passed_on(self.pv_mut(e)?.remove_proto_edge(pe), pass)?;
+            self.pv_mut(e)?.remove_proto_edge(pe)?;
         }
         Ok(())
     }
@@ -4521,9 +4561,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a definition without a source object; those of the
-    /// `geometry` topology walks and of [`find_ed_on_degen_face`] but its statuses
-    /// (those too with `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
+    /// Those of the `geometry` topology walks and of [`find_ed_on_degen_face`] but its statuses
+    /// (those too, passed on as the fork does, bcc6f01).
     pub fn can_combine_edge_definitions(
         &self,
         k: &Kernel,
@@ -4552,12 +4591,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<u64> {
         let d1 = self.ed(ed1)?;
         let d2 = self.ed(ed2)?;
-        let null =
-            || SolidError::topology_missing(OP_COMBINE, "the edge definition's source topology");
-        let t11 = d1.src_topo1.ok_or_else(null)?;
-        let t12 = d1.src_topo2.ok_or_else(null)?;
-        let t21 = d2.src_topo1.ok_or_else(null)?;
-        let t22 = d2.src_topo2.ok_or_else(null)?;
+        let (t11, t12, t21, t22) = (d1.src_topo1, d1.src_topo2, d2.src_topo1, d2.src_topo2);
 
         // If they're sitting on the same topology in both Breps, combine.
         if t11 == t21 && t12 == t22 {
@@ -4619,18 +4653,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let is_edge = |t: O| t.class_kind() == ClassObjectKind::Edge;
         if is_edge(t11) && is_edge(t12) && is_edge(t21) && is_edge(t22) {
             if t11 != t21 && t12 == t22 {
-                let n = degen_face_choice(passed_on(
-                    find_ed_on_degen_face(geometry, t11, t21),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                let n = find_ed_on_degen_face(geometry, t11, t21)?;
                 if n != 0 {
                     return Ok(n);
                 }
             } else if t11 == t21 && t12 != t22 {
-                let n = degen_face_choice(passed_on(
-                    find_ed_on_degen_face(geometry, t12, t22),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                let n = find_ed_on_degen_face(geometry, t12, t22)?;
                 if n != 0 {
                     return Ok(n);
                 }
@@ -4642,12 +4670,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Removes the proto vertex `pv` when it has no proto edges and lies on the curve
     /// of `pe` (the first definition's curve over the proto edge's interval, within
     /// twice the proto edge's tolerance) (`RemoveCoincidentNoEdgeProtoVertex`; the
-    /// proto vertex is unlisted, not deleted). As upstream, `true` is also returned,
-    /// with nothing removed, when the point solve fails or finds nothing (upstream
-    /// returns `SM_SUCCESS` from its `SmBoolean` function there), unless
-    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`). With that
-    /// opt-in a proto vertex that has proto edges is `false` without its point solve (not
-    /// upstream: no outcome of the solve gives another answer).
+    /// proto vertex is unlisted, not deleted). When the point solve fails or finds
+    /// nothing the answer is `false`, nothing removed (WR-73: upstream returns
+    /// `SM_SUCCESS` from its `SmBoolean` function there, which reads as `true`). A proto
+    /// vertex that has proto edges is `false` without its point solve (not upstream: no
+    /// outcome of the solve gives another answer).
     ///
     /// # Errors
     ///
@@ -4682,11 +4709,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let crv = curve_of(geometry, crv_handle)?;
         let crv_ivl = e.xsect_interval;
 
-        // (not upstream) a proto vertex with proto edges is never removed, and with
-        // `proto_vertex_miss_is_false` a miss is FALSE as well: the answer is FALSE whatever
-        // the point solve finds, so it is not run. (Without the opt-in a miss is TRUE, which
-        // ends the caller's loop over the proto edges, and the solve decides it.) A boolean
-        // of N tools in one call ran 4 N^2 - 2 N of these solves for nothing.
+        // (not upstream) a proto vertex with proto edges is never removed, and a miss is
+        // FALSE as well (WR-73): the answer is FALSE whatever the point solve finds, so it
+        // is not run. A boolean of N tools in one call ran 4 N^2 - 2 N of these solves for
+        // nothing.
         //
         // Under an already-fired cancel token the solve runs as it did (it is where this
         // test notices the cancel, when it builds a curve's cache; a line's or a circle's
@@ -4694,10 +4720,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // skipped solve leaves its curve's cache cold, which a later cancelled call can
         // show as another label or outcome; the boolean asks the token again after this
         // step.
-        if k.fixes.proto_vertex_miss_is_false
-            && !p.proto_edges.is_empty()
-            && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok()
-        {
+        if !p.proto_edges.is_empty() && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok() {
             return Ok(false);
         }
 
@@ -4717,21 +4740,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             &opts,
         ))?;
         // upstream returns SM_SUCCESS here, which reads as TRUE (the proto vertex is
-        // not removed): plan/upstream-issues.md WR-73; FALSE with the opt-in
-        // `Kernel::fixes.proto_vertex_miss_is_false` (tangency-labs/solidcore#848)
-        let missed = !k.fixes.proto_vertex_miss_is_false;
+        // not removed): plan/upstream-issues WR-73; the port answers FALSE
+        // (tangency-labs/solidcore#848)
         let Some(sols) = sols else {
-            return Ok(missed);
+            return Ok(false);
         };
         if sols.is_empty() {
-            return Ok(missed);
+            return Ok(false);
         }
 
         // When the ProtoVertex is Edgeless and XSects a ProtoEdge - remove it
         if p.proto_edges.is_empty() {
             let removed = self.remove_proto_vertex(pv);
             // fork bcc6f01: a vertex it could not remove was not removed
-            if removed.is_err() && k.fixes.ssi_proto_topology_statuses_pass_on {
+            if removed.is_err() {
                 return Ok(false);
             }
             return Ok(true);
@@ -4773,12 +4795,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
                 // fork bcc6f01: no value, no evidence
-                Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok(None),
-                _ => Vec3::UNDEF,
+                Err(_) => return Ok(None),
+                Ok((None, _)) => Vec3::UNDEF,
             };
 
         // return matching End PV or NULL for none
@@ -4823,20 +4846,74 @@ mod tests {
             .remove_vertex_definition(VertexDefId::from_index(7))
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(
-            e.topology_failure(),
-            Some(&TopologyFailure::Failed(
-                "the vertex definition is not listed"
-            ))
-        );
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotOnOwnerList));
         let e = m
             .remove_proto_vertex(ProtoVertexId::from_index(99))
             .unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(
-            e.topology_failure(),
-            Some(&TopologyFailure::Failed("the proto vertex is not listed"))
-        );
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotOnOwnerList));
+    }
+
+    /// An entry the caller names that is not on the list, or a proto vertex that is
+    /// neither end of the proto edge, is the caller's argument: class `invalid_input`,
+    /// with the status upstream reports (`SM_ERR`).
+    #[test]
+    fn a_list_entry_or_end_the_caller_names_wrongly_is_invalid_input() {
+        use crate::error::{ErrorKind, SM_ERR};
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let pv = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let other = m.new_proto_vertex(Point3::X, 1e-5).unwrap();
+        let pe = m
+            .new_proto_edge(&k, Some(pv), None, Extent1d::from_raw(0.0, 1.0))
+            .unwrap();
+        let unlisted = TopologyFailure::NotOnOwnerList;
+        let errors = [
+            (
+                m.proto_vertex_mut(pv)
+                    .unwrap()
+                    .remove_vertex_definition(VertexDefId::from_index(7))
+                    .unwrap_err(),
+                unlisted,
+            ),
+            (
+                m.proto_vertex_mut(pv)
+                    .unwrap()
+                    .remove_proto_edge(ProtoEdgeId::from_index(7))
+                    .unwrap_err(),
+                unlisted,
+            ),
+            (
+                m.proto_edge_mut(pe)
+                    .unwrap()
+                    .remove_edge_definition(EdgeDefId::from_index(7))
+                    .unwrap_err(),
+                unlisted,
+            ),
+            (
+                m.proto_edge_mut(pe)
+                    .unwrap()
+                    .remove_proto_vertex(Some(other))
+                    .unwrap_err(),
+                TopologyFailure::ProtoVertexNotAnEnd,
+            ),
+            (
+                m.remove_proto_vertex(ProtoVertexId::from_index(99))
+                    .unwrap_err(),
+                unlisted,
+            ),
+            (
+                m.remove_proto_edge(ProtoEdgeId::from_index(99))
+                    .unwrap_err(),
+                unlisted,
+            ),
+        ];
+        for (e, cause) in errors {
+            assert_eq!(e.topology_failure(), Some(&cause), "{e}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e}");
+            assert!(!e.is_defect(), "{e}");
+        }
     }
 
     #[test]
@@ -4885,10 +4962,17 @@ mod tests {
 
     /// Two segments crossing at an angle of 1e-9 (their determinant rounds to zero, and the
     /// closest pair the clamped solve finds is 1e-9 apart) are not proved apart, however
-    /// small the radii; parallel segments 1e-6 apart are, with radii of 1e-7; a NaN is
-    /// apart.
+    /// small the radii. Regions are one place by the coincidence rule
+    /// (`within_coincidence_tol`): within the larger radius, never under the contact
+    /// tolerance (the system zone tolerance, 1e-5 here), and the rounding of the copies
+    /// past it (`γ_32` of the coordinates' size, 1.5: 5.3e-15). Parallel segments 1.5e-5
+    /// apart with radii of 1e-5 are proved apart (upstream's intersection tolerance, the
+    /// radii's sum of 2e-5, took them for one); 0.9e-5 apart they are one. A radius of
+    /// 3e-5 takes in a segment 2.5e-5 off whatever the other's; radii of 1e-7 still reach
+    /// the contact tolerance (0.9e-5 apart: one; 1.1e-5: two). A NaN is apart.
     #[test]
     fn near_parallel_crossing_regions_are_not_proved_apart() {
+        let k = Kernel::default();
         let seg = |a: Point3, b: Point3, radius: f64| DeclaredContact { a, b, radius };
         let one = seg(
             Point3::new(-1.0, 0.0, 0.0),
@@ -4900,20 +4984,70 @@ mod tests {
             Point3::new(1.5, 1e-9, 0.0),
             1e-12,
         );
-        assert!(one.overlaps(&other));
-        assert!(other.overlaps(&one));
-        let parallel = seg(
-            Point3::new(-0.5, 1e-6, 0.0),
-            Point3::new(1.5, 1e-6, 0.0),
-            1e-7,
-        );
-        assert!(!one.overlaps(&parallel));
-        assert!(!parallel.overlaps(&one));
-        let ball = DeclaredContact::of_point(Point3::new(0.3, 2e-7, 0.0), 1e-7);
-        assert!(!one.overlaps(&ball));
-        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-7, 0.0), 1e-7).overlaps(&one));
+        assert!(one.overlaps(&k, &other));
+        assert!(other.overlaps(&k, &one));
+        let at = |off: f64, radius: f64| {
+            seg(
+                Point3::new(-0.5, off, 0.0),
+                Point3::new(1.5, off, 0.0),
+                radius,
+            )
+        };
+        let one = at(0.0, 1e-5);
+        for (off, radius, overlaps) in [
+            (1.5e-5, 1e-5, false),
+            (0.9e-5, 1e-5, true),
+            (2.5e-5, 3e-5, true),
+            (3.1e-5, 3e-5, false),
+        ] {
+            let parallel = at(off, radius);
+            assert_eq!(one.overlaps(&k, &parallel), overlaps, "{off:e} {radius:e}");
+            assert_eq!(parallel.overlaps(&k, &one), overlaps, "{off:e} {radius:e}");
+        }
+        let small = at(0.0, 1e-7);
+        assert!(small.overlaps(&k, &at(0.9e-5, 1e-7)));
+        assert!(!small.overlaps(&k, &at(1.1e-5, 1e-7)));
+        let ball = DeclaredContact::of_point(Point3::new(0.3, 1.5e-5, 0.0), 1e-5);
+        assert!(!one.overlaps(&k, &ball));
+        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-5, 0.0), 1e-5).overlaps(&k, &one));
         let nan = DeclaredContact::of_point(Point3::new(f64::NAN, 0.0, 0.0), 1.0);
-        assert!(!one.overlaps(&nan));
+        assert!(!one.overlaps(&k, &nan));
+    }
+
+    /// Two points are one proto vertex within the larger of their tolerances (the coincidence
+    /// rule), not their sum: with tolerances of 1e-5 (the contact tolerance too), a point
+    /// 1.5e-5 from a proto vertex is past both balls, so it is two points (the sum, 2e-5,
+    /// made them one); 0.9e-5 away it is one. A proto vertex with a tolerance of 2e-5 takes a
+    /// point of tolerance 1e-5 1.5e-5 away (within its own ball); 2.1e-5 away it does not.
+    #[test]
+    fn two_points_are_one_proto_vertex_within_the_larger_tolerance() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let tol = 1e-5;
+        let pv = m.new_proto_vertex(Point3::new(1.0, 2.0, 3.0), tol).unwrap();
+        m.add_proto_vertex(pv);
+        let at = |x: f64| Point3::new(1.0 + x, 2.0, 3.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(1.5e-5), tol, None)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(0.9e-5), tol, None)
+                .unwrap(),
+            Some(pv)
+        );
+        m.proto_vertex_mut(pv).unwrap().set_raw_tolerance(2e-5);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(1.5e-5), tol, None)
+                .unwrap(),
+            Some(pv)
+        );
+        assert_eq!(
+            m.find_proto_vertex_within(&k, at(2.1e-5), tol, None)
+                .unwrap(),
+            None
+        );
     }
 
     /// A proto vertex combined into another hands over the uncertainty regions of its
@@ -4990,7 +5124,7 @@ mod tests {
         assert_eq!(coinc(&m, f1), vec![gone, other, gone, kept]);
         assert_eq!(coinc(&m, f2), vec![kept, gone]);
         // unlisting alone keeps upstream's lists
-        m.remove_proto_edge(&Kernel::default(), gone).unwrap();
+        m.remove_proto_edge(gone).unwrap();
         assert_eq!(coinc(&m, f2), vec![kept, gone]);
         assert_eq!(m.proto_edges(), &[kept, other]);
         // the library's delete drops every reference first
@@ -5000,5 +5134,54 @@ mod tests {
         assert_eq!(coinc(&m, f2), vec![kept]);
         assert!(m.proto_edge(other).unwrap().overlapping_pes().is_empty());
         assert_eq!(m.proto_edge(kept).unwrap().overlapping_pes(), &[other]);
+    }
+
+    /// A cylinder of radius 5.25 touching the plane z = 0 along the x axis (a web running into
+    /// its bend): 1.7e-6 off that line, still within a tolerance of 2.2e-4, the normals differ
+    /// by 1.7e-6 / 5.25 = 3.2e-7, under the 2.2e-4 / 5.25 = 4.2e-5 a point that close can see:
+    /// tangent. Two planes at right angles, and the cylinder cut by a plane through its axis's
+    /// height, cross.
+    #[test]
+    fn a_crossing_of_a_flat_and_the_round_it_runs_into_is_not_a_crease() {
+        use crate::surface::implicit::Implicit;
+        let r = 5.25;
+        let flat = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        let round = Implicit::Cone {
+            origin: Point3::new(0.0, 0.0, r),
+            axis: Vec3::new(1.0, 0.0, 0.0),
+            radius: r,
+            tan_angle: 0.0,
+        };
+        let near = Point3::new(10.0, 1.7e-6, 0.0);
+        assert_eq!(
+            implicits_tangent_within(&flat, &round, near, 2.2e-4),
+            Some(true)
+        );
+        let side = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&flat, &side, Point3::new(0.0, 3.0, 0.0), 2.2e-4),
+            Some(false)
+        );
+        let across = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, r),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&across, &round, Point3::new(10.0, r, r), 2.2e-4),
+            Some(false)
+        );
+        let torus = Implicit::Torus {
+            centre: Point3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            major: 10.0,
+            minor: 1.0,
+        };
+        assert_eq!(implicits_tangent_within(&flat, &torus, near, 2.2e-4), None);
     }
 }

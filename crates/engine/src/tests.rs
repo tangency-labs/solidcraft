@@ -765,6 +765,66 @@ fn fillet_and_chamfer_the_top_loop_of_rounded_overlapping_cylinders() {
     assert!((v - expect).abs() < 1.5, "{v} vs {expect}");
 }
 
+/// #20411: the top edge of an 8 mm extrusion of a closed control-point spline (24 and 48 poles
+/// on the superellipse |x/35.75|⁴ + |y/73.75|⁴ = 1, at equal angles, as the report gives them)
+/// rounds 1 mm. The round along the whole closed edge starts and ends at the wall's seam, and
+/// was taken for a piece of one ball there (its two feet on the wall a rounding apart): it
+/// failed with "the curve's cache is missing" (24) or "Fillet Face Creation Error" (48).
+#[test]
+fn a_closed_control_point_spline_s_extrusion_rounds_its_top_edge() {
+    use std::f64::consts::TAU;
+    let (a, b, h, r) = (35.75_f64, 73.75_f64, 8.0, 1.0);
+    for n in [24_usize, 48] {
+        let round5 = |v: f64| (v * 1e5).round() / 1e5;
+        let poles: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let t = TAU * i as f64 / n as f64;
+                let (c, s) = (t.cos(), t.sin());
+                [round5(a * c.signum() * c.abs().sqrt()), round5(b * s.signum() * s.abs().sqrt())]
+            })
+            .collect();
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.spline.control_point", json!({"points": poles, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": h}));
+        let base = volume(&mut s);
+        // the edge picked 0.2 mm outside its middle on the +x side, as in the report
+        run(&mut s, "solid.fillet", json!({"edges": [[a, 0, h]], "radius": r}));
+        // The outline's length: each span of the uniform cubic B-spline by Simpson's rule.
+        let pole = |i: usize| poles[i % n];
+        let speed = |i: usize, t: f64| {
+            let w = [-3.0 * (1.0 - t).powi(2), 9.0 * t * t - 12.0 * t, -9.0 * t * t + 6.0 * t + 3.0, 3.0 * t * t];
+            let (mut x, mut y) = (0.0, 0.0);
+            for (j, wj) in w.iter().enumerate() {
+                let p = pole(i + n - 1 + j);
+                x += wj * p[0] / 6.0;
+                y += wj * p[1] / 6.0;
+            }
+            x.hypot(y)
+        };
+        let steps = 400;
+        let length: f64 = (0..n)
+            .map(|i| {
+                let dt = 1.0 / steps as f64;
+                (0..steps)
+                    .map(|k| {
+                        let t = k as f64 * dt;
+                        (speed(i, t) + 4.0 * speed(i, t + dt / 2.0) + speed(i, t + dt)) * dt / 6.0
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        // By Pappus: the corner's section, (1 − π/4)·r², swept along the outline drawn in by its
+        // centroid's inset, (10 − 3π)/(3(4 − π))·r; a closed convex outline drawn in by d is
+        // 2πd shorter (its curvature radius is over 14 mm everywhere).
+        let inset = (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)) * r;
+        let removed = (1.0 - PI / 4.0) * r * r * (length - TAU * inset);
+        let v = volume(&mut s);
+        assert!(((base - v) - removed).abs() < 1e-3 * removed, "{n} poles: removed {} vs {removed}", base - v);
+    }
+}
+
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.
 #[test]
 fn box_fillet_cut_part() {
@@ -1143,168 +1203,175 @@ fn hostile_params_never_panic() {
     let _reset = mesh_convert::MadeUp;
     *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Vec::new());
     let keys = [
-        "plane",
-        "offset",
-        "name",
-        "sketch",
-        "points",
+        "a",
+        "add",
+        "anchor",
+        "angle",
+        "apex",
+        "ascii",
+        "at",
+        "axis",
+        "b",
+        "base",
+        "bodies",
+        "body",
+        "body_name",
+        "center",
+        "chain",
+        "clip",
         "closed",
+        "comment",
+        "configuration",
         "construction",
+        "continuity",
+        "copy",
+        "corner",
+        "count",
+        "count2",
+        "crown",
+        "curve",
+        "curves",
+        "damping",
+        "datum",
+        "delete",
+        "density",
+        "depth",
+        "detail",
+        "diameter",
+        "dir",
+        "direction",
+        "distance",
+        "distance2",
+        "dot_grid",
+        "drills",
+        "drills_text",
+        "driven",
+        "edges",
+        "effort",
+        "end",
+        "entities",
+        "entity",
+        "expression",
+        "extend",
+        "face",
+        "faces",
+        "factor",
+        "favorite",
+        "favorites",
+        "feature",
+        "features",
+        "filter",
+        "fixed",
+        "format",
+        "friction",
+        "from",
+        "gap",
+        "head",
+        "head_gap",
+        "height",
+        "id",
         "ids",
         "infer",
+        "items",
+        "keep",
+        "keep_tools",
+        "keep_with",
+        "kind",
+        "length",
+        "line",
+        "line_group",
+        "lines",
+        "link",
+        "major",
+        "margin",
+        "measure",
+        "members",
+        "mid",
+        "minor",
+        "minor_radius",
+        "mode",
+        "name",
+        "names",
+        "near",
+        "new_name",
+        "next_pair",
+        "offset",
+        "operation",
+        "orientation",
+        "origin",
+        "outline",
+        "outline_text",
         "p0",
         "p1",
         "p2",
-        "center",
-        "corner",
-        "radius",
-        "diameter",
-        "start",
-        "end",
-        "through",
-        "sides",
-        "angle",
-        "width",
-        "point",
-        "id",
-        "entities",
-        "type",
-        "value",
-        "line",
-        "mode",
-        "a",
-        "b",
-        "entity",
-        "fixed",
-        "curves",
-        "to",
-        "distance",
-        "profiles",
-        "direction",
+        "pairs",
         "parallel_to",
-        "distance2",
-        "start_offset",
-        "operation",
-        "targets",
-        "body_name",
-        "axis",
-        "length",
-        "height",
-        "base",
-        "major",
-        "minor",
-        "top_radius",
-        "top_diameter",
-        "edges",
-        "body",
-        "target",
-        "tools",
-        "keep_tools",
-        "bodies",
-        "translate",
-        "expression",
-        "unit",
-        "comment",
-        "delete",
-        "features",
-        "feature",
-        "position",
-        "suppressed",
-        "set",
-        "items",
-        "add",
         "path",
-        "format",
-        "ascii",
-        "measure",
-        "refs",
-        "link",
-        "project_edges",
-        "mid",
-        "near",
-        "factor",
-        "copy",
-        "count",
-        "spacing",
-        "count2",
-        "spacing2",
-        "dir",
-        "side",
-        "chain",
-        "at",
-        "curve",
-        "minor_radius",
-        "apex",
-        "rho",
-        "text",
-        "lines",
-        "driven",
-        "from",
-        "datum",
-        "tolerance",
-        "face",
-        "new_name",
-        "favorite",
-        "favorites",
-        "filter",
-        "kind",
-        "detail",
+        "plane",
+        "point",
+        "points",
+        "position",
+        "position_mm",
         "prefix",
-        "orientation",
-        "seam",
-        "twist",
-        "scale",
-        "continuity",
-        "crown",
-        "faces",
-        "u",
-        "v",
-        "keep",
-        "with",
-        "keep_with",
-        "stitch",
-        "extend",
-        "view",
-        "visual_style",
-        "reference_style",
+        "profile",
+        "profiles",
+        "project_edges",
+        "radius",
         "reference_hides_model",
         "reference_shown_percent",
-        "tangent_edges",
-        "line_group",
-        "sheet",
-        "position_mm",
-        "profile",
-        "anchor",
-        "density",
-        "names",
-        "pairs",
-        "next_pair",
-        "members",
+        "reference_style",
         "references",
-        "head",
-        "head_gap",
-        "configuration",
-        "outline",
-        "outline_text",
-        "drills",
-        "drills_text",
-        "thickness",
-        "origin",
+        "refs",
+        "rho",
+        "scale",
+        "seam",
+        "set",
         "shape",
+        "sheet",
+        "side",
+        "sides",
         "size",
-        "web",
-        "clip",
-        "margin",
+        "sketch",
+        "spacing",
+        "spacing2",
+        "start",
+        "start_offset",
+        "stitch",
+        "suppressed",
+        "tangent_edges",
+        "target",
+        "targets",
+        "text",
+        "thickness",
+        "through",
         "through_all",
-        "depth",
-        "dot_grid",
+        "to",
+        "tolerance",
+        "tools",
+        "top_diameter",
+        "top_radius",
+        "translate",
         "turn",
+        "twist",
+        "type",
+        "u",
+        "unit",
+        "v",
+        "value",
+        "velocity",
+        "view",
+        "visual_style",
+        "web",
+        "width",
+        "with",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
         .iter()
         .map(|spec| spec.id)
-        .filter(|id| !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf")) // file system side effects are covered by their own tests
+        .filter(|id| {
+            !matches!(*id, "doc.open" | "file.save" | "file.save_as" | "file.export" | "file.save_mesh" | "sketch.export_dxf" | "sketch.export_svg")
+        }) // file system side effects are covered by their own tests
         .collect();
     assert!(ids.contains(&"inspect.classify_points"), "exact point inspection must receive every hostile value");
     let next = std::sync::atomic::AtomicUsize::new(0);
@@ -1342,6 +1409,7 @@ fn hostile_params_never_panic() {
                                                 | "file.export_step"
                                                 | "file.export_stl"
                                                 | "file.export_urdf"
+                                                | "file.export_urdf_options"
                                         ))
                                 {
                                     continue; // parameter, script and export files: covered by their own tests (no stray files)
@@ -4073,6 +4141,42 @@ fn split_body_of_a_body_of_two_pieces_splits_both() {
     }
 }
 
+/// A cap: a plate, a skirt round its edge and a tube through a hole in the plate.
+fn cap(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 50, "height": 15, "base": [0, 0, 0], "body_name": "Cap"}));
+    run(s, "solid.cylinder", json!({"radius": 46, "height": 20, "base": [0, 0, 2], "operation": "cut", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [-10, -10, 0], "operation": "join", "targets": ["Cap"]}));
+    run(s, "solid.box", json!({"length": 16, "width": 16, "height": 60, "corner": [-8, -8, -10], "operation": "cut", "targets": ["Cap"]}));
+}
+
+/// Split Body at the plate's inner face (#6762): the skirt and the tube above it do not touch, so
+/// they are two bodies, not one body of two pieces. The plate keeps the name it had, `Cap (1)`;
+/// the pieces' volumes are the analytic ones and add up to the cap's (a slab would add 3.5e-4 of
+/// it). The same with the plane the dialog sends for the picked face, tilted about 2e-15 by
+/// rounding: no slab is left under the face to join the skirt and the tube.
+#[test]
+fn split_body_makes_each_piece_that_does_not_touch_a_body() {
+    let picked = json!({"origin": [-27.14101384226774, -19.861536909343386, 1.9999999999997158], "normal": [-2.164854201260163e-15, -3.46457633831685e-16, 1]});
+    for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
+        let mut s = Session::default();
+        cap(&mut s);
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
+        run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
+        let st = s.world_state().unwrap();
+        let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+        let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");
+        assert!(st.bodies.iter().all(|b| b.body.lumps().unwrap().len() == 1), "{plane}");
+        let (plate, skirt, tube) = (PI * 2500.0 * 2.0 - 16.0 * 16.0 * 2.0, PI * (2500.0 - 2116.0) * 13.0, (400.0 - 256.0) * 38.0);
+        assert!(rel(volume("Cap (1)"), plate) < 1e-3, "{plane}: {}", volume("Cap (1)"));
+        let mut upper = [volume("Cap"), volume("Cap (2)")];
+        upper.sort_by(f64::total_cmp);
+        assert!(rel(upper[0], tube) < 1e-3 && rel(upper[1], skirt) < 1e-3, "{plane}: {upper:?}");
+        let total: f64 = names.iter().map(|n| volume(n)).sum();
+        assert!(rel(total, whole) < 1e-5, "{plane}: {total} vs {whole}");
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]
@@ -4677,6 +4781,53 @@ fn counterbore_for_a_cap_screw_head() {
     assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
     run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
     assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
+}
+
+/// #17728: a countersunk screw's head (ISO 10642) gets a 90° countersink as wide as its head plus
+/// `head_gap` each side, so the head sits `head_gap` below the face.
+#[test]
+fn countersink_for_a_countersunk_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    let hole = cmd::clearance_diameter("M6", "normal").unwrap();
+    // A through hole with a 90° countersink `d` wide at the face: the cone's frustum, then the hole.
+    let removed = |d: f64| {
+        let h = (d - hole) / 2.0;
+        PI * h / 12.0 * (d * d + d * hole + hole * hole) + PI * hole * hole / 4.0 * (10.0 - h)
+    };
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Countersink { cs_diameter, cs_angle, .. }, .. }) => {
+            (cs_diameter.as_str().to_string(), cs_angle.as_str().to_string())
+        }
+        other => panic!("not a countersink: {other:?}"),
+    };
+    // ISO 10642 M6: dk 13.44, plus the 0.5 mm gap each side; the type follows the head.
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M6", "head": "ISO 10642"}));
+    let v1 = volume(&mut s);
+    assert_eq!(recess(&s), ("14.44 mm".to_string(), "90 deg".to_string()));
+    assert!(rel(v0 - v1, removed(14.44)) < 1e-3, "{} vs {}", v0 - v1, removed(14.44));
+    // The family name parts.insert takes, no gap, and the type written out: flush with the face.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [30, 15, 10], "clearance": "M6", "head": "countersunk_socket_screw", "head_gap": 0, "type": "countersink"}),
+    );
+    let v2 = volume(&mut s);
+    assert_eq!(recess(&s).0, "13.44 mm");
+    assert!(rel(v1 - v2, removed(13.44)) < 1e-3, "{}", v1 - v2);
+    // A diameter given by hand keeps its value.
+    run(&mut s, "solid.hole", json!({"position": [50, 15, 10], "clearance": "M6", "head": "ISO 10642", "cs_diameter": 15}));
+    assert_eq!(recess(&s).0, "15");
+}
+
+#[test]
+fn head_countersink_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
+    assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
+    assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
@@ -6168,7 +6319,7 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     let saved = s.doc.clone();
     let mut computed = s.scratch();
     run(&mut computed, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_eq!(s.path.as_deref(), Some("existing.solidcraft"));
     assert!(s.is_dirty());
     assert_eq!(s.model.state().bodies.len(), 2);
@@ -6301,7 +6452,7 @@ fn design_tokens_computed_save_preserves_the_saved_token() {
     run(&mut saved, "file.save_as", json!({"path": folder.path("renamed.sc")}));
     s.adopt_save(&saved);
     let unchanged = s.scratch();
-    s.accept_computed(unchanged);
+    s.accept_computed(unchanged).unwrap();
     assert_eq!(s.design_token(), token, "adopting a save preserves the association too");
 }
 
@@ -6317,7 +6468,7 @@ fn design_tokens_open_pinning_preserves_token_on_noop_acceptance() {
     let mut opened = Session::opened_at(doc, None, None);
     let token = opened.design_token();
     let unchanged = opened.scratch();
-    opened.accept_computed(unchanged);
+    opened.accept_computed(unchanged).unwrap();
     assert_eq!(opened.design_token(), token);
 }
 
@@ -6328,7 +6479,7 @@ fn design_tokens_direct_computed_mutations_after_commands_get_a_fresh_token() {
     run(&mut computed, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
     let executed = computed.design_token();
     computed.doc_mut().name = "Direct candidate edit".into();
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert_ne!(s.design_token(), executed);
 }
 
@@ -6344,10 +6495,10 @@ fn design_tokens_accepting_historical_candidates_never_reuses_their_tokens() {
     let older_edited = s.scratch();
     run(&mut s, "edit.undo", json!({}));
     let current = s.design_token();
-    s.accept_computed(older);
+    s.accept_computed(older).unwrap();
     assert_eq!(s.design_token(), current, "an identical historical candidate keeps the live token");
     assert_eq!(s.doc.to_json(), bytes);
-    s.accept_computed(older_edited);
+    s.accept_computed(older_edited).unwrap();
     assert_eq!(s.doc.to_json(), edited_bytes);
     assert_ne!(s.design_token(), historical);
     assert_ne!(s.design_token(), edited);
@@ -6502,7 +6653,7 @@ fn a_model_put_back_from_an_earlier_copy_lets_go_of_the_bodies_it_replaces() {
     warm(&changed);
     run(&mut s, "inspect.measure", json!({}));
     assert_eq!(warm_bodies(&changed), ["Other", "Block"]);
-    s.accept_computed(original);
+    s.accept_computed(original).unwrap();
     assert_eq!(warm_bodies(&changed), ["Other"]);
 }
 
@@ -6660,7 +6811,7 @@ fn adopting_a_computed_component_keeps_its_warm_world_geometry() {
     for b in &prepared.bodies {
         let _ = b.mesh();
     }
-    s.accept_computed(computed);
+    s.accept_computed(computed).unwrap();
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
     s.invalidate_view(100);
     assert!(std::sync::Arc::ptr_eq(&prepared, &s.world_state().unwrap()));
@@ -6792,6 +6943,32 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     assert_eq!(s.model.state().bodies.len(), 3);
     let expected = (900.0 - 400.0 + 100.0 + 100.0) * 5.0;
+    let actual = volume(&mut s);
+    assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
+}
+
+/// Four closed strips laid out as a # cross each other and close off a square in the middle that
+/// lies inside none of them. A cut with `profiles` left out takes the strips and keeps the middle
+/// (#19963); four separate cuts give the same block.
+#[test]
+fn default_extrude_profiles_leave_the_gap_overlapping_loops_enclose() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 3, "corner": [-5, -5, 0], "operation": "new_body", "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Strips"}));
+    for points in [
+        [[-6, 3], [6, 3], [6, 4], [-6, 4]],
+        [[-6, -4], [6, -4], [6, -3], [-6, -3]],
+        [[-4, -6], [-3, -6], [-3, 6], [-4, 6]],
+        [[3, -6], [4, -6], [4, 6], [3, 6]],
+    ] {
+        run(&mut s, "sketch.line", json!({"points": points, "closed": true}));
+    }
+    run(&mut s, "sketch.solve", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Strips", "distance": 5, "start_offset": -1, "operation": "cut", "targets": ["Block"]}));
+    // The block, 300, less the strips inside it: four 10 x 1 x 3 bars less the four 1 x 1 x 3
+    // crossings counted twice. The 6 x 6 middle, the four corners and the four edge pieces stay.
+    let expected = 300.0 - (4.0 * 30.0 - 4.0 * 3.0);
     let actual = volume(&mut s);
     assert!(rel(actual, expected) < 1e-6, "{actual} vs {expected}");
 }
@@ -7835,6 +8012,61 @@ fn draft_on_a_cylinder_side_makes_a_frustum() {
     let small = big - h * 5f64.to_radians().tan();
     let expect = PI * h / 3.0 * (big * big + big * small + small * small);
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
+}
+
+/// #19686: a 2400 x 1600 x 1000 block with a Ø190 blind hole from the top, 500 deep, its four
+/// sides drafted 3° about the base. 3° leans the +X side in by 1000 tan 3° = 52.4 at the top, so a
+/// hole whose wall is nearer the side than that is cut through by the drafted side, which no
+/// draft does: it is refused naming the hole's wall, for the issue's 0.00002 wall as for a 10 one,
+/// and the design is left as it was. A 60 wall stays clear of the drafted side and builds: the
+/// drafted block less the whole hole.
+#[test]
+fn a_draft_that_would_cut_through_a_hole_near_the_side_is_refused_naming_it() {
+    let block = |hole: Option<f64>| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2400, "width": 1600, "height": 1000, "corner": [-1200, -800, 0], "operation": "new", "body_name": "Part"}),
+        );
+        if let Some(x) = hole {
+            run(
+                &mut s,
+                "solid.cylinder",
+                json!({"radius": 95, "height": 500, "base": [x, 0, 500], "axis": "Z", "operation": "cut", "targets": ["Part"]}),
+            );
+        }
+        s
+    };
+    let draft = json!({"faces": [[1200, 0, 500], [-1200, 0, 500], [0, 800, 500], [0, -800, 500]], "angle": "3 deg", "neutral": "XY"});
+    for wall in [0.00002, 10.0] {
+        let mut s = block(Some(1200.0 - 95.0 - wall));
+        let features = s.doc.features.len();
+        let error = s.execute("solid.draft", &draft).unwrap_err().to_string();
+        // The whole sentence, the point and depth between its words, with no run of spaces.
+        let words = [
+            "draft: the drafted face would cut through the face at (",
+            concat!(
+                " mm past it without meeting it (a hole's or pocket's wall near the side); ",
+                "a draft only extends or trims the faces around the drafted face: use a smaller draft angle, ",
+                "or move that face farther from the drafted one"
+            ),
+        ];
+        let (Some(start), Some(end)) = (error.find(words[0]), error.find(words[1])) else { panic!("wall {wall}: {error}") };
+        let between = &error[start + words[0].len()..end];
+        assert!(between.contains("), which reaches at least ") && !error.contains("  "), "wall {wall}: {error}");
+        assert_eq!(s.doc.features.len(), features, "wall {wall}: the draft is not added");
+    }
+    let mut plain = block(None);
+    run(&mut plain, "solid.draft", draft.clone());
+    let mut s = block(Some(1200.0 - 95.0 - 60.0));
+    run(&mut s, "solid.draft", draft);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
+    drop(state);
+    let expect = volume(&mut plain) - PI * 95.0 * 95.0 * 500.0;
+    assert!(rel(volume(&mut s), expect) < 1e-9, "{} vs {expect}", volume(&mut s));
 }
 
 /// The copies added after a rename keep their numbers through undo/redo, save/reopen and a

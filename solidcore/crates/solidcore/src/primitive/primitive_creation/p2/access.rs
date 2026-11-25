@@ -15,6 +15,7 @@
 //! pcurves (`pbOptCrvOnSurf`).
 
 use crate::curve::composite_curve::OffsetMapAttribute;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::math::{Point3, Vec3};
@@ -212,9 +213,14 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         let count = operands.len();
         if count > breps.len() {
-            return Err(SolidError::primitive_failed(
+            // only a tree that names a B-rep twice and combines neither leaf leaves more
+            // B-reps than it was given (each operator takes two and leaves one)
+            return Err(SolidError::primitive(
                 OP,
-                "the Boolean tree returned more B-reps than it was given",
+                PrimitiveFailure::TreeLeavesMoreBreps {
+                    left: count,
+                    given: breps.len(),
+                },
             ));
         }
         let mut missing = false;
@@ -229,10 +235,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         breps.truncate(count);
         if missing {
-            return Err(SolidError::primitive_missing(
-                OP,
-                "a B-rep the Boolean tree should leave",
-            ));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::TreeLeftNoBrep));
         }
         Ok(())
     }

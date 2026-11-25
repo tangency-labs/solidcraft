@@ -25,6 +25,16 @@ pub struct AssistantResult {}
 #[schemars(deny_unknown_fields)]
 pub struct AppBarResetParams {}
 
+/// Validate access to the app-owned editor. Only an interactive start toggles its tray.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppBarCustomizeParams {}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppBarCustomizeResult {
+    pub available: bool,
+}
+
 /// Validated reset request; the connected app applies it to its toolbar preferences.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AppBarResetResult {
@@ -628,6 +638,12 @@ marker_params!(
     TimelineRollToParams,
     "Move the history marker right after a feature, or to a number of features from the start, or to the end: the features after it are not built, and the selection is cleared. `timeline.rollback` does the same."
 );
+
+/// `timeline.step_back` and `timeline.step_forward` take no parameters: the marker steps one
+/// feature from where it is now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimelineStepParams {}
 
 /// What `timeline.rollback` and `timeline.roll_to` return.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1604,8 +1620,8 @@ mod tests {
         MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SelectModeParams, SelectModeResult,
         SetFields, TimelineComputeAllParams, TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams,
         TimelineDependentsResult, TimelineEditParams, TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult,
-        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
-        ToggleVisibilityParams, UndoParams, UndoResult,
+        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineStepParams, TimelineSuppressParams,
+        TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
@@ -1615,6 +1631,23 @@ mod tests {
     use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
     use crate::{PickMode, Session};
+
+    #[test]
+    fn app_bar_customize_has_an_empty_contract_and_typed_reply() {
+        let spec = crate::find_command("ui.appBarCustomize").unwrap();
+        let contract = spec.contract.unwrap();
+        assert!(contract.allowed_keys().is_empty());
+        assert!(contract.check(&json!({})).is_empty());
+        for input in [json!({"open":true}), json!([]), json!(false), json!(5), json!("customize")] {
+            assert!(!contract.check(&input).is_empty(), "{input}");
+        }
+        let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        assert!(session.execute(spec.id, &json!({"open":true})).is_err());
+        let reply = session.execute(spec.id, &json!({})).unwrap();
+        let output = spec.output.unwrap()();
+        assert_eq!(reply, json!({"available":true}));
+        assert!(conforms(output.as_value(), output.as_value(), &reply));
+    }
 
     #[test]
     fn app_bar_reset_has_an_empty_contract_and_a_typed_reply() {
@@ -1638,6 +1671,7 @@ mod tests {
 
     #[test]
     fn schemas_and_the_key_check_agree() {
+        assert_keys(input_schema_for::<super::AppBarCustomizeParams>(), &[]);
         assert_keys(input_schema_for::<super::AppBarResetParams>(), &[]);
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
@@ -1653,6 +1687,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineRenameParams>(), &["feature", "name"]);
         assert_keys(input_schema_for::<TimelineRollbackParams>(), &["feature", "position"]);
         assert_keys(input_schema_for::<TimelineRollToParams>(), &["feature", "position"]);
+        assert_keys(input_schema_for::<TimelineStepParams>(), &[]);
         assert_keys(input_schema_for::<TimelineDependentsParams>(), &["feature"]);
         assert_keys(input_schema_for::<TimelineSuppressParams>(), &["feature", "features", "groups", "suppressed"]);
         assert_keys(input_schema_for::<TimelineEditParams>(), &["feature", "set"]);
@@ -2089,6 +2124,7 @@ mod tests {
             }
         };
         takes(input_schema_for::<TimelineComputeAllParams>(), &[(json!({}), true)]);
+        takes(input_schema_for::<TimelineStepParams>(), &[(json!({}), true), (json!({"position": 1}), false)]);
         takes(
             input_schema_for::<TimelineDeleteParams>(),
             &[

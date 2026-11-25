@@ -1153,6 +1153,36 @@ mod tests {
         crate::write_design_container_with_provenance(doc, crate::DesignCompression::Fast, None, None, None, &save(None, chain, None, None)).unwrap()
     }
 
+    /// A save over the open limit keeps the history it wrote: the bytes just written are read back
+    /// without that limit, while opening such a file still needs it raised (#18686). A 1 MB limit for
+    /// this thread stands in for the real one.
+    #[test]
+    fn a_chain_written_over_the_open_limit_is_read_back_from_the_save() {
+        let first = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        let chain = crate::read_design_provenance_chain(&first).expect("the signed file has a chain");
+        let mut doc = Document::new("Noisy import");
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::Import {
+                file: "noisy.step".into(),
+                step: crate::design::tests::noise(2_600_000).into(),
+                components: Vec::new(),
+                skip: Vec::new(),
+                records: None,
+            },
+            None,
+        )
+        .unwrap();
+        crate::limits::test_cap::set(Some(1 << 20));
+        let big = unsigned_save(&doc, &chain);
+        let over = big.len() > crate::limits::max_design_bytes();
+        let opened = crate::read_design_provenance_chain(&big);
+        let kept = crate::written_design_provenance_chain(&big);
+        crate::limits::test_cap::set(None);
+        assert!(over, "{} bytes is not past the limit", big.len());
+        assert!(opened.is_none(), "opening still keeps to the limit");
+        assert_eq!(kept.expect("the save's own chain is read back").records.len(), chain.records.len());
+    }
+
     fn report(bytes: &[u8]) -> Option<ProvenanceReport> {
         crate::read_design_provenance(bytes)
     }
@@ -1362,6 +1392,31 @@ mod tests {
         let unsigned = std::env::temp_dir().join(format!("solidcraft-unsigned-entry-{}.sc", std::process::id()));
         std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
         assert!(!crate::has_design_provenance(&unsigned.to_string_lossy()));
+        let _ = std::fs::remove_file(&unsigned);
+    }
+
+    /// Reading a design for opening gives its document, model, signature presence, provenance
+    /// records and signature check from one reading: a signed file gives no model, its records and
+    /// (when asked) its check, which matches the check of the file on its own.
+    #[test]
+    fn reading_a_design_once_gives_its_model_signature_records_and_check() {
+        let path = std::env::temp_dir().join(format!("solidcraft-read-once-signed-{}.sc", std::process::id()));
+        let bytes = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        std::fs::write(&path, &bytes).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let file = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(file.signed && file.model.is_none(), "a signed file is evaluated from its timeline");
+        assert_eq!(file.doc.name, "Plate");
+        assert_eq!(file.chain, crate::read_design_provenance_chain(&bytes));
+        assert_eq!(file.report, report(&bytes), "the check is the check of these bytes");
+        assert!(file.report.is_some());
+        let quiet = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, false).unwrap();
+        assert!(quiet.signed && quiet.report.is_none(), "no check unless asked");
+        let _ = std::fs::remove_file(&path);
+        let unsigned = std::env::temp_dir().join(format!("solidcraft-read-once-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
+        let file = crate::read_design_file_once(&unsigned.to_string_lossy(), None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(!file.signed && file.chain.is_none() && file.report.is_none());
         let _ = std::fs::remove_file(&unsigned);
     }
 
