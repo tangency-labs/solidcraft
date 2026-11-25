@@ -2139,15 +2139,12 @@ impl Deferred {
 
     /// The search ended unresolved: the kept refusal, or `Ok(None)` when nothing refused.
     fn finish<T>(self) -> Result<Option<T>> {
-        match self.kept {
-            Some((e, n)) => {
-                note_back(n);
-                Err(e)
-            }
-            None => {
-                note_back(self.before);
-                Ok(None)
-            }
+        if let Some((e, n)) = self.kept {
+            note_back(n);
+            Err(e)
+        } else {
+            note_back(self.before);
+            Ok(None)
         }
     }
 }
