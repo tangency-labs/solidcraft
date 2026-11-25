@@ -1516,7 +1516,7 @@ fn placement_frame(doc: &Document, component: u64, path: &[u64], what: &str) -> 
 
 /// Is `m` a rotation (or a reflection) and a translation, as a placement is?
 fn is_rigid(m: &Mat) -> bool {
-    solidcore_ops::affine::is_rigid(m, 1e-6, 1e-12)
+    solidcraft_kernel::services::affine::is_rigid(m, 1e-6, 1e-12)
 }
 
 /// The transform from the source's own frame (its body's frame, or its sketch's component
@@ -1663,7 +1663,8 @@ impl Motion2 {
 /// moved, or when it tilts against the plane (its projection then changes shape).
 fn in_plane_motion(seen: &Mat, now: &Mat, plane: &Plane) -> Option<Motion2> {
     let coordinates = |v: Vec3| [v.x, v.y, v.z];
-    let (a, [x, y]) = solidcore_ops::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
+    let (a, [x, y]) =
+        solidcraft_kernel::services::affine::projection_motion(seen, now, coordinates(plane.origin), coordinates(plane.x), coordinates(plane.y))?;
     Some(Motion2 { a, b: Vec2::new(x, y) })
 }
 
