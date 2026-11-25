@@ -353,6 +353,8 @@ A constraint that sets a size, such as a length, a distance, an angle or a radiu
 
 A dimension can drive the sketch, or be driven by it and only show the value.
 
+The Parameters window's Dimensions view lists automatic `dN` values; naming one moves it to Named.
+
 - **In SolidCraft:** `sketch.dimension`, `sketch.dimension_text`, `sketch.toggle_driven`; a
   dimension's id is a constraint id.
 - **Don't use:** measurement (for a dimension), size.
@@ -477,6 +479,13 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
 
 ### keyboard profile
 
@@ -641,6 +650,13 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Don't use:** cope (one kind of cut it makes), trim on its own.
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
+
+### named parameter
+
+A value with a chosen identifier, including renamed model dimensions and feature inputs.
+
+- **In SolidCraft:** `parameters.add`, `parameters.rename`; the Named view of Parameters.
+- **Don't use:** user parameter for the whole Named view.
 
 ### note
 
