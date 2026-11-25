@@ -1417,7 +1417,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
+        Kind::Surface(k) => {
+            enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
+            if d.legacy_closed_sheet {
+                keep_as_surface_row(ui, &mut d.extra);
+            }
+        }
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
@@ -1447,6 +1452,22 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         _ => {}
     }
     enter
+}
+
+/// Keep as Surface (#21969), on a surface feature saved while a result that closed became a
+/// solid: ticked, the feature saves `stays_surface: true` and its closed result is a surface body.
+/// Unticked, the feature keeps the solid it made.
+fn keep_as_surface_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) {
+    let mut keep = extra.get("stays_surface").and_then(Value::as_bool).unwrap_or(false);
+    let before = keep;
+    ui_kit::checkbox_grid(ui, &mut [("ui.keep_as_surface", &mut keep)], 1);
+    if keep != before {
+        if keep {
+            extra.insert("stays_surface".into(), json!(true));
+        } else {
+            extra.remove("stays_surface");
+        }
+    }
 }
 
 fn fmt_mm(app: &SolveApp, v: &Value) -> String {

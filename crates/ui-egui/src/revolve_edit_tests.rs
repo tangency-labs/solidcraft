@@ -642,3 +642,50 @@ fn dialog_axis_from_another_sketch_keeps_its_sketch() {
     let expected = std::f64::consts::PI * 300.0 * 10.0;
     assert!((volume - expected).abs() / expected < 1e-4, "{volume} != {expected}");
 }
+
+/// #21969: Edit Feature on a Surface Revolve saved before `stays_surface`, whose closed full turn
+/// made a solid, offers Keep as Surface. Left alone, an edit keeps the solid; ticked, the feature
+/// saves `stays_surface` and the ring is a surface body. A new surface revolve, and a legacy one
+/// that does not close, never show it.
+#[test]
+fn a_legacy_closed_surface_revolve_offers_keep_as_surface() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"S"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[10,-10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let turn = |name: &str, body: &str, angle: &str, stays: bool| json!({"sketch":"S","axis":{"origin":[0,0,0],"dir":[0,0,1]},"angle":angle,"name":name,"body_name":body,"stays_surface":stays});
+    h.app.run("surface.revolve", turn("Turn", "Ring", "360 deg", false)).unwrap();
+    h.app.run("surface.revolve", turn("Half", "Arc", "180 deg", false)).unwrap();
+    h.app.run("surface.revolve", turn("New", "NewRing", "360 deg", true)).unwrap();
+    h.frames(4);
+    let offered = |h: &mut Harness, feature: &str| {
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":feature}})).unwrap();
+        h.frames(8);
+        let offered = h.app.dialog.as_ref().unwrap().legacy_closed_sheet;
+        assert_eq!(offered, crate::scenario::rect_of("dialog:checkbox:ui.keep_as_surface").is_some(), "{feature}");
+        offered
+    };
+    let stays = |h: &Harness| matches!(h.app.session.doc.find_feature("Turn").unwrap().kind, FeatureKind::SurfaceRevolve { stays_surface: true, .. });
+    let ring = |h: &Harness| {
+        let st = h.app.session.world_state().unwrap();
+        let b = st.body("Ring").unwrap();
+        (b.is_surface(), b.is_closed())
+    };
+    for (feature, want) in [("New", false), ("Half", false)] {
+        assert_eq!(offered(&mut h, feature), want);
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+    }
+    assert!(offered(&mut h, "Turn"));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(!stays(&h), "an edit left alone keeps the legacy solid");
+    assert_eq!(ring(&h), (false, true));
+    assert!(offered(&mut h, "Turn"));
+    h.step(&json!({"widget":"Keep as surface"})).unwrap();
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(stays(&h), "Keep as surface saves stays_surface");
+    assert_eq!(ring(&h), (true, false), "the ring is a closed surface body");
+    // Saved, it is no longer a legacy feature, so the option is gone.
+    assert!(!offered(&mut h, "Turn"));
+}
