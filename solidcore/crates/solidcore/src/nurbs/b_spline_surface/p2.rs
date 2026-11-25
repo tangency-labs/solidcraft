@@ -420,29 +420,17 @@ impl BSplineSurface {
     ///
     /// Those of the recognisers ([`Plane::is_nurb_surface_plane`],
     /// [`crate::surface::cone::Cone::is_nurb_surface_cone`], ...);
-    /// [`SolidError::Unported`] from the still-unwired recognised sphere conversion; with the
-    /// test-only feature `wr57-replay`, the replay seam's.
+    /// [`SolidError::Unported`] from the still-unwired recognised sphere conversion.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         let Some(analytic) = self.recognised_analytic(k)? else {
             // arrive here - make sure it's a copy
             return Ok(Surface::from(self.copy()));
         };
-        let exact = !self.same_parameterization(k, &analytic);
-        // (test-only seam of the WR-450 replay, feature `wr57-replay`: the goldens put
-        // upstream's choice, the analytic, in place to show which rows the copy moved)
-        #[cfg(feature = "wr57-replay")]
-        let exact = crate::surface::surface::replay::choose(
-            k,
-            &analytic,
-            crate::surface::surface::replay::Seam::AnalyticCopy,
-            &[],
-            exact,
-        )?;
-        if exact {
-            Ok(Surface::from(self.copy()))
-        } else {
+        if self.same_parameterization(k, &analytic) {
             Ok(analytic)
+        } else {
+            Ok(Surface::from(self.copy()))
         }
     }
 

@@ -688,9 +688,6 @@ fn sketch_lines_in(
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.spline_handle_of.is_some() {
-            continue;
-        }
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -748,7 +745,7 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() {
+    if c.spline_handle_of.is_some() || (c.spline_control_polygon_of.is_some() && sk.view.hide_control_polygons) {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {

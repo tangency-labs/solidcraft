@@ -137,7 +137,9 @@ pub(crate) fn refresh(app: &mut SolveApp, ctx: &egui::Context) {
     if current && !app.tree.links.again {
         return;
     }
-    let copy = app.session.scratch();
+    let mut copy = app.session.scratch();
+    // A scratch copy has no file: its links are read against this session's.
+    copy.path.clone_from(&app.session.path);
     let badges = &mut app.tree.links;
     badges.again = false;
     if !current {
