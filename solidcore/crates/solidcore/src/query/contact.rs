@@ -231,7 +231,7 @@ fn nurb_boxes(c: &crate::nurbs::crv_basic::Curve) -> Result<Option<Vec<[f64; 4]>
 /// The boxes of face `f`'s own UV trim curves (each its NURBS form's parts,
 /// [`nurb_boxes`], or the curve's whole box where it has none); `None` where a trim curve or
 /// its box is missing.
-fn trim_boxes(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Vec<[f64; 4]>>> {
+pub(crate) fn trim_boxes(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Vec<[f64; 4]>>> {
     use crate::curve::curve::CurveKind;
     let Some(fu) = b.face(f)?.faceuse else {
         return Ok(None);
