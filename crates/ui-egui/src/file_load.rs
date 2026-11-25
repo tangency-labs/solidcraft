@@ -365,6 +365,11 @@ pub struct FileLoad {
 }
 
 impl FileLoad {
+    #[cfg(test)]
+    pub(crate) fn current_request(&self) -> Option<&Request> {
+        self.running.as_ref().map(|running| &running.request).or_else(|| self.queued.front())
+    }
+
     /// How many more requests can wait.
     pub(crate) fn room(&self) -> usize {
         crate::documents::MAX_OPEN.saturating_sub(self.queued.len())

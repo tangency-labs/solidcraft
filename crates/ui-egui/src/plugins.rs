@@ -643,6 +643,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
                 }
             }
             if job.command == "plugin.remove" {
+                crate::plugin_menu::forget_options(app, id);
                 #[cfg(not(target_arch = "wasm32"))]
                 crate::plugin_shaders::drop_pictures(app, id);
                 app.preferences.disabled_plugins.remove(id);

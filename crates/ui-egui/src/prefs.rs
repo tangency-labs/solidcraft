@@ -1633,9 +1633,11 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         let stand_up_answers = std::mem::take(&mut app.preferences.stand_up_answers);
         let plugin_grants = std::mem::take(&mut app.preferences.plugin_grants);
+        let plugin_importer_options = std::mem::take(&mut app.preferences.plugin_importer_options);
         let view_window_setups = std::mem::take(&mut app.preferences.view_window_setups);
         app.preferences = self.prefs;
         app.preferences.plugin_grants = plugin_grants;
+        app.preferences.plugin_importer_options = plugin_importer_options;
         app.preferences.view_window_setups = view_window_setups;
         app.plugin_themes.signature = None;
         crate::plugins::sync_policy(app);
@@ -1705,6 +1707,7 @@ impl Snapshot {
             held.update.clone_from(&app.preferences.update);
             held.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
             held.plugin_grants.clone_from(&app.preferences.plugin_grants);
+            held.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
             held.view_window_setups.clone_from(&app.preferences.view_window_setups);
             held == app.preferences
         };
@@ -1742,6 +1745,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
     prefs.update.clone_from(&app.preferences.update);
     prefs.stand_up_answers.clone_from(&app.preferences.stand_up_answers);
     prefs.plugin_grants.clone_from(&app.preferences.plugin_grants);
+    prefs.plugin_importer_options.clone_from(&app.preferences.plugin_importer_options);
     prefs.view_window_setups.clone_from(&app.preferences.view_window_setups);
     let mut shortcut_box = app.sbox.prefs();
     if let Some(o) = shortcut_box.as_object_mut() {
@@ -3954,6 +3958,11 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !accepted::max_sketch_points(&p) {
         p.max_sketch_points = Prefs::default().max_sketch_points;
     }
+    p.plugin_importer_options.retain(|id, entries| {
+        entries.retain(|name, memory| crate::plugin_menu::valid_saved_options(name, &memory.values));
+        crate::plugins::valid_id(id) && entries.len() <= crate::plugins::MAX_DISABLED
+    });
+    p.plugin_importer_options = p.plugin_importer_options.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     p.plugin_grants.retain(|id, grants| crate::plugins::valid_id(id) && crate::plugins::valid_grants(grants));
     p.plugin_grants = p.plugin_grants.into_iter().take(crate::plugins::MAX_DISABLED).collect();
     for grants in p.plugin_grants.values_mut() {
@@ -4201,6 +4210,15 @@ fn prepare_preferences(
     }
     if new.ui_font != app.preferences.ui_font && !new.ui_font.trim().is_empty() && crate::fonts::ui_font(&new.ui_font).is_none() {
         return Err(format!("`ui_font`: `{}` is not an installed font family or a readable font file", new.ui_font.trim()));
+    }
+    if new.plugin_importer_options.len() > crate::plugins::MAX_DISABLED
+        || new.plugin_importer_options.iter().any(|(id, entries)| {
+            !crate::plugins::valid_id(id)
+                || entries.len() > crate::plugins::MAX_DISABLED
+                || entries.iter().any(|(name, memory)| !crate::plugin_menu::valid_saved_options(name, &memory.values))
+        })
+    {
+        return Err("`plugin_importer_options` needs bounded plugin ids, entry names and option objects".into());
     }
     if new.plugin_grants.len() > crate::plugins::MAX_DISABLED
         || new.plugin_grants.iter().any(|(id, grants)| !crate::plugins::valid_id(id) || !crate::plugins::valid_grants(grants))
