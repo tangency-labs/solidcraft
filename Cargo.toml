@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.48.0"
+version = "0.49.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -23,6 +23,8 @@ solidcraft-profile = { path = "crates/profile" }
 solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+# The kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md)
+solidcraft-kernel-api = { path = "crates/kernel-api" }
 solidcraft-smlib = { path = "crates/smlib" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }
