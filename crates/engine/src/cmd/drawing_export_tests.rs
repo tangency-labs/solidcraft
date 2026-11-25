@@ -876,10 +876,19 @@ fn a_sheet_exports_as_a_vector_pdf_at_its_paper_size() {
     // Millimetres scaled to points once, so the page's numbers are the sheet's.
     assert!(content.starts_with(&format!("q {:.9} 0 0 {:.9} 0 0 cm", 72.0 / 25.4, 72.0 / 25.4)), "{content}");
     let ops: Vec<&str> = content.split_whitespace().filter(|t| t.chars().all(|c| c.is_ascii_alphabetic() || c == '*')).collect();
-    for op in ["m", "l", "S", "f"] {
+    for op in ["m", "l", "S", "Tj"] {
         assert!(ops.contains(&op), "{op} in {content}");
     }
-    assert!(ops.iter().filter(|op| **op == "f").count() > 12, "each title block label and value filled");
+    assert!(ops.iter().filter(|op| **op == "Tj").count() > 12, "each title block label and value set as text");
+    assert!(!ops.contains(&"f"), "no glyph outline is filled: the text is real text");
+    let file = String::from_utf8_lossy(&bytes);
+    assert!(file.contains("/Subtype /Type3") && file.contains("/ToUnicode"), "an embedded font that maps back to Unicode");
+    // The same sheet asked for outlines: the old file, whose text is filled outlines and no font.
+    let (_, old) = export_file(&mut s, json!({"sheet": ids::encode(sheet), "format": "pdf", "text": "outlines"}));
+    let old_content = &pdf_pages(&old)[0].1;
+    assert!(old_content.split_whitespace().filter(|t| *t == "f").count() > 12, "each title block label and value filled");
+    assert!(!old_content.contains("Tj") && !String::from_utf8_lossy(&old).contains("/Type3"), "outlines carry no text");
+    assert!(refused(&mut s, json!({"sheet": ids::encode(sheet), "format": "svg", "text": "outlines"})).contains("`text` is for pdf only"));
     assert!(!content.contains(" Do"), "lines only: no picture");
     let name = s.drawing("test").unwrap().sheets[0].name.clone();
     assert_eq!(exported(&mut s, json!({"sheet": name, "format": "pdf"})), bytes, "the same bytes by name");

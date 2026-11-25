@@ -239,7 +239,8 @@ fn the_box_a_face_is_paired_by_holds_the_face() {
                     );
                 }
             }
-            let Some(bx) = solidcore::query::face::p1::proved_bounding_box(&k, &b, f).unwrap()
+            let Some(bx) =
+                solidcore::query::face::p1::proved_bounding_box(&k, &b, f, &mut None).unwrap()
             else {
                 continue;
             };
@@ -863,46 +864,55 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
 /// of the cut's time, in the edges' curve analyses). Measured in the token's polls, not in
 /// time: a counting token (`CancelToken::after_polls`) first counts the polls of the whole
-/// check, `whole`; a token cancelled from a quarter of them then stops a second check there.
-/// It returns `Cancelled`, and the token is polled exactly once after the poll that cancelled
-/// it: by the session as the call returns, asking whether it was cancelled (`run_with`, after
-/// the kernel's call). Any further poll would be work done after the cancel.
+/// check, `whole`; a token cancelled from a quarter of them then stops the check of the same
+/// cut moved up by 1 there. It returns `Cancelled`, and the token is polled exactly once after
+/// the poll that cancelled it: by the session as the call returns, asking whether it was
+/// cancelled (`run_with`, after the kernel's call). Any further poll would be work done after
+/// the cancel. (The second check is of the moved cut, not of the same one: a check skips the
+/// geometric tests of neighbourhoods an earlier check on the kernel found clean,
+/// `solidcore::geom::check_memo`, so the same cut checked again polls far fewer times. The
+/// moved cut has no neighbourhood in common with it, so its check is as whole as the first.)
 #[test]
 fn the_check_of_a_long_coil_cut_stops_on_cancel() {
     use solidcore_ops::cancel::{within, CancelToken};
     use solidcore_ops::sweep::{screw_sweep, Curve};
-    let corners = [
-        [19.0, 0.0, 12.0],
-        [32.0, 0.0, 12.0],
-        [32.0, 0.0, 25.0],
-        [19.0, 0.0, 25.0],
-    ];
-    let square: Vec<Curve> = (0..4)
-        .map(|i| Curve::Line {
-            start: corners[i],
-            end: corners[(i + 1) % 4],
-        })
-        .collect();
-    let coil = screw_sweep(
-        &square,
-        [0.0; 3],
-        [0.0, 0.0, 1.0],
-        15.24,
-        20.0,
-        None,
-        15.24e-4,
-    )
-    .unwrap();
-    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
-    let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
+    // (the cut, moved up by `dz`)
+    let cut_at = |dz: f64| {
+        let corners = [
+            [19.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 12.0 + dz],
+            [32.0, 0.0, 25.0 + dz],
+            [19.0, 0.0, 25.0 + dz],
+        ];
+        let square: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: corners[i],
+                end: corners[(i + 1) % 4],
+            })
+            .collect();
+        let coil = screw_sweep(
+            &square,
+            [0.0, 0.0, dz],
+            [0.0, 0.0, 1.0],
+            15.24,
+            20.0,
+            None,
+            15.24e-4,
+        )
+        .unwrap();
+        let stock = solidcore_ops::make_cylinder([0.0, 0.0, dz], 20.0, 304.5).unwrap();
+        boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let cut = cut_at(0.0);
     let probe = CancelToken::after_polls(u64::MAX);
     within(&probe, || cut.check(CheckLevel::All)).unwrap();
     let whole = probe.polls().unwrap();
     let n = whole / 4;
     // cancelled well inside the check, not at its last poll
     assert!(n >= 1 && whole >= 2 * n, "the check polls {whole} times");
+    let moved = cut_at(1.0);
     let token = CancelToken::after_polls(n);
-    let r = within(&token, || cut.check(CheckLevel::All));
+    let r = within(&token, || moved.check(CheckLevel::All));
     eprintln!(
         "the check polls {whole} times; cancelled at {n}, polled {:?}",
         token.polls()
@@ -2156,6 +2166,25 @@ fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
         let record: Record = serde_json::from_value(records[key].clone()).unwrap();
         Body::from_record(&record, true).unwrap().0
     }
+}
+
+/// #21581: a 15 × 1.7 × 20 mm box crosses one side of a loft between two
+/// identical rounded spline profiles. Integrating (x + 20) dz along the
+/// cubic profile spans inside x <= -20 and z <= 0 gives 32.675328686804
+/// mm². The two straight clipping boundaries contribute zero to that
+/// integral, and the same section runs through the box's 1.7 mm width.
+#[test]
+fn a_box_notches_a_periodic_spline_loft_and_leaves_valid_trim_curves() {
+    all_fixes();
+    let body = traced_operands("issue_21581_loft_box_cut");
+    let (loft, tool) = (body("loft"), body("box"));
+    let before = volume(&loft);
+    let cut = boolean(loft, tool, BooleanOp::Subtract).unwrap().unwrap();
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    let removed = before - volume(&cut);
+    assert!(near(removed, 32.675328686804 * 1.7), "{removed}");
+    let full_check = cut.check(CheckLevel::All).unwrap();
+    assert!(full_check.is_valid(), "{}", full_check.text);
 }
 
 /// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
@@ -4243,4 +4272,117 @@ fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
         cut.classify_point([-15.0, 16.0, 0.0]).unwrap(),
         PointClass::Inside
     );
+}
+
+/// #21801's insert: a prism over the quadrilateral (2.85, 7), (26.868841, 7), (9.247749, 28),
+/// (2.85, 28) in x-z from y = 2.85 to 249.15, less a loft through three sections at x = -5,
+/// 95, 195 whose quadratic runs from (y, z) = (2.85, 28) to (249.15, 7) with its middle
+/// control point at y = ym, ym - 50, ym and z = 7. The loft meets z = 7 tangentially at
+/// y = 249.15, so the insert ends in a knife along the bin's floor there.
+fn fitted_loft_insert(ym: f64) -> Body {
+    let (f, top) = (7.0, 28.0);
+    let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], 2.85, a[1]],
+                end: [b[0], 2.85, b[1]],
+            }
+        })
+        .collect();
+    let prism = extrude(
+        &section,
+        [0.0, 1.0, 0.0],
+        246.3,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let above = |x: f64, ym: f64| {
+        vec![
+            Curve::Nurbs {
+                degree: 2,
+                points: vec![[x, 2.85, top, 1.0], [x, ym, f, 1.0], [x, 249.15, f, 1.0]],
+                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            },
+            Curve::Line {
+                start: [x, 249.15, f],
+                end: [x, 249.15, top],
+            },
+            Curve::Line {
+                start: [x, 249.15, top],
+                end: [x, 2.85, top],
+            },
+        ]
+    };
+    let cut = solidcore_ops::sweep::loft(
+        &[above(-5.0, ym), above(95.0, ym - 50.0), above(195.0, ym)],
+        2,
+        true,
+    )
+    .unwrap();
+    boolean(prism, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #21801: with `simple_coincidence_crossing_is_point` off, the union of #18064's bin with
+/// the fitted-loft insert failed with `NotSolid`: imprinting the vertex where the loft's
+/// section curve leaves the bin's floor arc at (4, 248) split the arc, and the vertex
+/// definition that split added to the same proto vertex was never imprinted, so the insert's
+/// bottom face was not split along the arc. With that imprinted, it failed with
+/// `RelateConflict`: the insert's bottom-face arc edge and its top-face section edge along the
+/// same arc had no certified coincidence bound (an ellipse against a B-spline).
+///
+/// The union now gets through the imprint and the relations. It still refuses in
+/// `manifold_boolean`'s leak check (#21822: the bin's wall is classified against only one of
+/// the insert's two coincident edges); once #21822 is fixed this test requires the joined
+/// solid. The volume of that solid lies in a certified enclosure: the bin and the insert
+/// share no volume except in the two pocket corners the insert covers, outside the rounds
+/// about (4, 4) and (4, 248), each of area 1.15^2 (1 - pi / 4), between z = 7 and the
+/// insert's top, at most z = 28; their sum is at most `share`.
+#[test]
+fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relate() {
+    let no_crossing = solidcore::kernel::UpstreamFixes::NAMES
+        .iter()
+        .copied()
+        .filter(|n| *n != "simple_coincidence_crossing_is_point");
+    session::set_thread_fixes(no_crossing).unwrap();
+    let bin = pocketed_bin();
+    let insert = fitted_loft_insert(200.0);
+    let (vb, vi) = (volume(&bin), volume(&insert));
+    let share = 2.0 * 1.15 * 1.15 * (1.0 - PI / 4.0) * 21.0;
+    let _ = (session::take_failure_code(), session::take_failure_detail());
+    let joined = boolean(bin, insert, BooleanOp::Union);
+    let (code, detail) = (session::take_failure_code(), session::take_failure_detail());
+    match joined {
+        Ok(Some(r)) => {
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+            assert!(r.is_manifold_solid().unwrap());
+            let got = volume(&r);
+            // each of the three volumes is computed to `1e-8` relative accuracy (`volume`)
+            let slack = 1e-8 * (vb + vi + got);
+            assert!(
+                got >= vb + vi - share - slack && got <= vb + vi + slack,
+                "volume {got} outside [{}, {}]",
+                vb + vi - share,
+                vb + vi
+            );
+        }
+        Ok(None) => panic!("the union of two solids is empty"),
+        Err(e) => {
+            let code = code.unwrap_or_else(|| panic!("{e:?} without a failure code"));
+            assert_eq!(
+                code.operation, "boolean::merge::p4::manifold_boolean",
+                "{e:?} ({code}): refused before the leak check (#21822)"
+            );
+            // the leak check's own cause (`BooleanFailure::SolidLeaks`), not another refusal there
+            let detail = detail.unwrap_or_default();
+            assert!(
+                detail.contains("the solid it bounded merged into the outside"),
+                "{e:?}: {detail}"
+            );
+        }
+    }
 }

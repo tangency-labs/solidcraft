@@ -29,7 +29,8 @@ pub(super) fn binds_to_the_hook(compiled: &shader::Compiled, textures: usize) {
 
 /// Loads a plugin folder's panel shader as the app does and checks it against the hook.
 pub(super) fn loads_and_binds(folder: &std::path::Path, key: &str) -> crate::plugin_shaders::Loaded {
-    let loaded = crate::plugin_shaders::load(folder.to_string_lossy().into_owned(), key.into(), 4096).unwrap_or_else(|e| panic!("{key}: {e}"));
+    let loaded = crate::plugin_shaders::load(folder.to_string_lossy().into_owned(), key.into(), Default::default(), 4096)
+        .unwrap_or_else(|e| panic!("{key}: {e}"));
     assert_eq!(loaded.kind, shader::ShaderKind::Panel);
     let source = std::fs::read_to_string(folder.join(&loaded.shader.source)).unwrap();
     binds_to_the_hook(&shader::compile(&loaded.shader, &source).unwrap(), loaded.shader.textures.len());

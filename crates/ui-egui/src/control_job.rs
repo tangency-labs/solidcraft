@@ -673,6 +673,7 @@ impl SolveApp {
             solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
+            copy.plugin_state.user.dialog_folders = crate::plugin_menu::take_folder_consent(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -937,6 +938,8 @@ impl SolveApp {
                         replies.map_err(|error| {
                             if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
                                 stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else if error.host_error().is_some() {
                                 error.to_string()
                             } else {
                                 self.tr("ui.plugin_context_changed").to_string()
