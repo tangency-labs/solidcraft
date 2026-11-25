@@ -105,13 +105,17 @@ it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
 which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
 a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
 (c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
-planes along a straight edge it is a circular cylinder, an exact class (§4). The concave bound
-holds where the faces' sections are straight or circular. A face that curves towards the bead
-more tightly near its toe than the arc does comes back into the arc between the toe and the edge
-though the arc leaves the toe off the face, so the foot blend also keeps a concave arc no deeper
-than the arc through both toes and a point of a face's section, over the edge and 15 points of
-each face's section between the edge and the toe (`FootBlend::clearance_bound`): sampled along
-the leg, as the stations are along the joint.
+planes along a straight edge it is a circular cylinder, an exact class (§4). The bound at a toe
+only says that the arc leaves the toe off the face. For a concave arc that is enough where the
+face's section (in the plane square to the edge) lies on the material's side of its own tangent at
+the toe, with the other toe on the bead's side of it: the arc leaves the toe into the bead's side
+of that tangent, ends there, and a circle meets a line twice at most. That holds on a plane (the
+section is the tangent) and on the outside of a cylinder, a cone or a sphere (the section bounds a
+convex region). On any other face (the inside of a cylinder, a cone or a sphere, a torus, a
+free-form face) a section that curves towards the bead more tightly near the toe than the arc does
+comes back into the arc between the toe and the edge, so a concave bead there is refused as not
+built yet (`FootBlend::concave_unproved`, `WeldGap::ConcaveNotProved`). A convex arc is checked at
+its toes only.
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -338,11 +342,12 @@ that predates it can take a bead for a chamfer (as one that predates `ChamferRec
 | a leg below the smallest size the body builds (eight times its tolerance), on any joint of the call: checked first, as the planar bead's frame checks it | `SizeBelowResolution`, naming the edge and the leg | `InvalidInput` | none |
 | a toe on its face's surface but off the face (classified on the face, at least 32 stations; a foot past a periodic support's seam moved into its domain first) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down (until the bracket is 1e-7 (1 + its upper end) wide), less the face's tolerance (a toe that far past the face's edge still classifies on it), as the exact bead's; 0 where it is below the smallest leg the body builds |
 | no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes over the whole weld, halved down the same way; 0 below the smallest leg the body builds |
-| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave and no more than the bound along the legs (§2, `FootBlend::clearance_bound`), a hair below it: over the whole weld and over every joint of the call, naming the joint whose fit it is; the legs and toes of every joint are checked before it, so a retry at it is not refused for a leg or a toe off its face. Sampled: the joints not yet built are read at their check stations only, so a retry can be refused again, with a smaller fit |
+| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it: over the whole weld and over every joint of the call, naming the joint whose fit it is; the legs and toes of every joint are checked before it, so a retry at it is not refused for a leg or a toe off its face. Sampled: the joints not yet built are read at their check stations only, so a retry can be refused again, with a smaller fit |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
 | the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
 | beads meeting at a vertex | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
+| a concave bead on a face where the bound at the toe is not proved enough: any face but a plane and the outside of a cylinder, a cone or a sphere (§2); checked on every joint before any sagitta is read against its size | `WeldNotBuilt(ConcaveNotProved)`, naming the edge, the face and the toe | `Unsupported` | none |
 | a tapered or rounded end on a joint that is not straight between two planes | `WeldNotBuilt(EndShapeOnCurvedJoint)`, naming the edge | `Unsupported` | none |
 | a tapered or rounded end of a flat bead (sagitta 0), between planes too | `WeldNotBuilt(EndShapeOfFlatBead)`, naming the edge | `Unsupported` | none |
 

@@ -143,8 +143,9 @@ fn toes_on_faces(
                 hi = mid;
             }
         }
-        // a toe holds up to the face's tolerance past its edge: the fit named keeps it on the
-        // face itself
+        // a toe holds up to the face's tolerance past its edge: the fit named is that much
+        // less, which puts the toe on the face itself where the face's edge is square to the
+        // toe's travel and no farther past it than the tolerance elsewhere
         let fit = (lo - target.face(face)?.tolerance).max(0.0);
         // a leg below the body's resolution is refused before the toes are read
         // (`setback_below_resolution`), so a retry at it would not build: no leg fits
@@ -961,8 +962,10 @@ fn sagitta_fit_of(refused: &SolidError) -> Option<f64> {
 /// [`BlendFailure::SizeBelowResolution`] naming the edge for a leg below the smallest size a
 /// fillet builds on `target`, with square ends as with shaped ones;
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
-/// naming the vertex for two of `edges` that meet at one, and for a shaped end the foot blend
-/// does not build; the foot blend's refusals, typed and with the size that builds (a toe off
+/// naming the vertex for two of `edges` that meet at one, for a shaped end the foot blend
+/// does not build, and for a concave bead on a face where the arc's bound is not proved
+/// ([`WeldGap::ConcaveNotProved`]: any face but a plane and the outside of a cylinder, a cone
+/// or a sphere); the foot blend's refusals, typed and with the size that builds (a toe off
 /// its face: checked on every edge, with the legs' sizes and what a shaped end refuses,
 /// before anything that depends on the sagitta; no toe at the leg, found while a bead is
 /// built; an arc that would cut into a face: the smallest sagitta that fits over all of
@@ -1035,6 +1038,11 @@ pub fn bead_body(
         let params = span_parameters(k, &blend, &spans)?;
         blend.toes_on_faces(k, target, legs, &params)?;
         if !shaped {
+            // a concave arc only on supports where its bound is proved: refused here, before
+            // any joint's sagitta is read against its size
+            if sagitta < 0.0 {
+                blend.sagitta_that_fits(k, legs, sagitta, &params)?;
+            }
             joints.push((legs, blend, params));
             continue;
         }

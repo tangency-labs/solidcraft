@@ -1951,16 +1951,6 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
 /// flat at the root (its first three points in line) and tighter towards its end.
 const TROUGH: [(f64, f64); 4] = [(0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (8.0, 4.0)];
 
-/// The trough's section at the Bezier's parameter `t`.
-fn trough_at(t: f64) -> (f64, f64) {
-    let s = 1.0 - t;
-    let w = [s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t];
-    TROUGH
-        .iter()
-        .zip(w)
-        .fold((0.0, 0.0), |(x, y), (p, w)| (x + w * p.0, y + w * p.1))
-}
-
 /// A plate standing in a trough, swept `LENGTH` along z: the plate's face is the plane x = 0
 /// above the root at the origin, the trough's the section `TROUGH` swept, curving up towards
 /// the bead. The body and a point on the joint's edge.
@@ -1983,79 +1973,52 @@ fn trough(k: &mut Kernel) -> (Brep, [f64; 3]) {
     (b, [0.0, 0.0, LENGTH / 2.0])
 }
 
-/// The sagitta of the concave arc through the feet `a` and `b` and the point `p` of a
-/// support's section in the trough's plane (`p` on the root's side of the chord).
-fn arc_through(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
-    let c = (b.0 - a.0).hypot(b.1 - a.1);
-    let along = ((b.0 - a.0) / c, (b.1 - a.1) / c);
-    let q = (p.0 - (a.0 + b.0) / 2.0, p.1 - (a.1 + b.1) / 2.0);
-    let (x, y) = (
-        q.0 * along.0 + q.1 * along.1,
-        (q.0 * along.1 - q.1 * along.0).abs(),
-    );
-    let depth = (c * c / 4.0 - x * x - y * y) / (2.0 * y);
-    (c * c / 4.0 + depth * depth).sqrt() - depth
-}
-
-/// For the legs `on_trough` and `on_plate` in the trough's plane: the largest concave sagitta
-/// whose arc stays off both sections between the root and the feet, from 4096 points of each
-/// and one a ten-millionth short of each foot (the arc tangent there); and the sagitta of the
-/// arc tangent to the trough at its foot alone.
-fn trough_bound(on_trough: f64, on_plate: f64) -> (f64, f64) {
-    // the Bezier's parameter at the trough's foot: its distance from the root grows with it
-    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
-    for _ in 0..60 {
-        let t = 0.5 * (lo + hi);
-        let (x, y) = trough_at(t);
-        if x.hypot(y) < on_trough {
-            lo = t;
-        } else {
-            hi = t;
-        }
-    }
-    let (a, b) = (trough_at(lo), (0.0, on_plate));
-    let mut least = arc_through(a, b, TROUGH[0]);
-    for i in (1..4096).map(|i| f64::from(i) / 4096.0).chain([1.0 - 1e-7]) {
-        least = least
-            .min(arc_through(a, b, trough_at(lo * i)))
-            .min(arc_through(a, b, (0.0, on_plate * i)));
-    }
-    (least, arc_through(a, b, trough_at(lo * (1.0 - 1e-7))))
-}
-
-/// A concave arc is bounded along the leg, not at its foot alone: where a support curves
-/// towards the bead more tightly near the foot than the arc does, the arc tangent to the face
-/// at the foot comes back into the support between the foot and the root. In the trough (flat
-/// at the root, tighter towards the foot of a leg of 8) with a leg of 1.5 on the plate, the
-/// sagitta that fits is the bound along the trough's section, more than a fifth below the
-/// tangent arc's; with the legs the other way round it is the tangent arc's at the plate.
+/// A concave arc is built only where the bound at its toes is proved to keep it off the
+/// faces: on a plane and on the outside of a cylinder, a cone or a sphere. On any other face
+/// the arc tangent to the face at the toe can come back into it between the toe and the
+/// edge, as in the trough (a free-form face, flat at the root and tighter towards the toe of
+/// a leg of 8). There a concave bead is refused as not built yet, naming the edge and the
+/// same face whichever face the first leg runs along and however shallow the arc; in a blind
+/// hole (the inside of a cylinder, against the hole's flat bottom) likewise. Neither part
+/// changes.
 #[test]
-fn a_concave_arc_is_bounded_along_the_leg_on_a_support_that_tightens_towards_its_foot() {
-    use solidcore::blend::foot_blend::FootBlend;
+fn a_concave_bead_is_refused_where_its_bound_is_not_proved() {
+    use solidcore::boolean::api_brep::boolean_difference;
     let mut k = kernel();
     let (mut b, at) = trough(&mut k);
     let joint = pick(&k, &b, at);
-    let (deep, tangent) = trough_bound(8.0, 1.5);
-    let (shallow, _) = trough_bound(1.5, 8.0);
-    println!("along the leg {deep}, shallow {shallow}");
-    let mut got: Vec<f64> = edge::faces(&b, joint, None)
-        .unwrap()
-        .into_iter()
-        .map(|face| {
-            let blend = FootBlend::of_edge(&k, &mut b, joint, Some(face)).unwrap();
-            blend.sagitta_that_fits(&k, [1.5, 8.0], -1.0, &[]).unwrap()
-        })
-        .collect();
-    got.sort_by(f64::total_cmp);
-    println!("the sagittas that fit {got:?}");
-    assert_eq!(got.len(), 2);
-    for (got, want) in got.iter().zip([shallow, deep]) {
-        assert!(
-            *got >= want * (1.0 - 1e-4) && *got <= want * 1.002,
-            "{got} {want}"
-        );
+    let before = smb(&k, &b);
+    let size = ChamferSize::Distances([1.5, 8.0]);
+    let mut named = Vec::new();
+    for face in edge::faces(&b, joint, None).unwrap() {
+        for h in [-1.0, -1e-3] {
+            let along = [Some(face)];
+            let err = weld_bead_body(&mut k, &mut b, &[joint], &[size], h, &along, &[], SQUARE)
+                .err()
+                .unwrap();
+            assert_not_built(&err, WeldGap::ConcaveNotProved);
+            assert_eq!(named_edge(&err), Some(joint), "{err:?}");
+            named.push(err.site().and_then(|s| s.face));
+        }
     }
-    assert!(deep < 0.85 * tangent, "{deep} {tangent}");
+    assert!(
+        named[0].is_some() && named.iter().all(|f| *f == named[0]),
+        "{named:?}"
+    );
+    assert!(smb(&k, &b) == before, "the trough changed");
+    // a blind hole of radius 15, its flat bottom 10 above the cup's base
+    let cup = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 40.0).unwrap();
+    let hole = create_cylinder(&mut k, Point3::new(0.0, 0.0, 10.0), 15.0, 40.0).unwrap();
+    let mut cup = boolean_difference(&mut k, cup, hole).unwrap();
+    let joint = pick(&k, &cup, [0.0, 15.0, 10.0]);
+    let before = smb(&k, &cup);
+    let size = ChamferSize::Distances([3.0; 2]);
+    let err = weld_bead_body(&mut k, &mut cup, &[joint], &[size], -0.5, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert_not_built(&err, WeldGap::ConcaveNotProved);
+    assert_eq!(named_edge(&err), Some(joint), "{err:?}");
+    assert!(smb(&k, &cup) == before, "the cup changed");
 }
 
 /// A sagitta too large for several joints of one call is refused with the smallest sagitta
@@ -2201,9 +2164,9 @@ fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
 /// support (its supports stay where the bead was made, as a section blend's has none). A
 /// scale, uniform or not, and a mirror move the face without its definition: its legs,
 /// sagitta and bound are not the moved net's (a mirrored part with a bead still moves). A
-/// scale of 1 within rounding is no scale: `transform_matrix` passes the lengths of a
-/// rotation's rows, 1 to the last digit or so, and the bead's body turned and moved by it
-/// keeps its foot faces, each still its definition's.
+/// scale of 1 within rounding (1e-12; 1 + 1e-11 is a scale) is no scale: `transform_matrix`
+/// passes the lengths of a rotation's rows, 1 to the last digit or so, and the bead's body
+/// turned and moved by it keeps its foot faces, each still its definition's.
 #[test]
 fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
     use solidcore::topology::brep::mirror::transform_matrix;
@@ -2238,6 +2201,7 @@ fn a_moved_bead_keeps_its_motion_and_a_scale_or_mirror_leaves_its_definition() {
             Vec3::new(2.0, 2.0, 2.0),
             Vec3::new(1.0, 2.0, 1.0),
             Vec3::new(-1.0, 1.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0 + 1e-11),
         ] {
             let mut left = made.clone();
             left.transform(&k, &turn, Some(scale)).unwrap();

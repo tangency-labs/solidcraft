@@ -13,6 +13,12 @@ pub enum WeldGap {
     /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
     /// vertex.
     BeadsMeetAtVertex,
+    /// A concave bead (sagitta below 0) on a face where the bound on its sagitta is not proved
+    /// to keep the arc off the face between the toe and the edge: any face but a plane and the
+    /// outside of a cylinder, a cone or a sphere
+    /// (`crate::blend::foot_blend::FootBlend::station_bound`). The failure's site names the
+    /// edge, the face and the toe.
+    ConcaveNotProved,
     /// A joint that is not a straight edge between two planes for the exact planar bead
     /// ([`crate::blend::weld_bead::beads_apart`]); the bead on any joint is the foot blend's
     /// ([`crate::blend::weld_bead::bead_body`]). The failure's site names the edge.

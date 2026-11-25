@@ -73,11 +73,6 @@ fn defect(why: &'static str) -> SolidError {
 /// The most Newton steps a foot takes.
 const NEWTON_STEPS: usize = 40;
 
-/// The points along each leg at which a concave arc is checked against its support's section
-/// ([`FootBlend::clearance_bound`]): on a section whose curvature grows fourfold from the root
-/// to the foot, 16 put the bound within a thousandth of the one from 4096.
-const ALONG_LEG: u32 = 16;
-
 /// The sagitta that fits, as a share of its bound: the bound is open (at it the arc lies along
 /// its support at a toe), so the fit is a thousand-millionth below it. Not the float below, as
 /// the exact bead's is: this bound is read from solved feet, which another start gives to
@@ -709,16 +704,37 @@ impl FootBlend {
     /// concave, `(c / 2) tan((pi - max(beta_i)) / 2)` convex
     /// ([`crate::surface::procedural_blend::bead::sagitta_bound`]), `c` the chord and `beta_i`
     /// the angle at foot `i` between the chord and the face's direction back towards the root
-    /// in the station's plane. Concave, no more than [`FootBlend::clearance_bound`] either:
-    /// the angle at the foot only says that the arc leaves the foot off the face, and a
-    /// support that curves towards the bead more tightly near its foot than the arc does
-    /// comes back into the arc between the foot and the root.
+    /// in the station's plane. The angle at a foot only says that the arc leaves the foot off
+    /// the face: a concave arc is bounded so only on supports where that is proved enough
+    /// ([`FootBlend::concave_unproved`]).
     ///
     /// # Errors
     ///
-    /// Those of the evaluations; a defect where a face's normal is not defined at its foot.
+    /// [`crate::error::blend::WeldGap::ConcaveNotProved`] naming the edge, the face and the
+    /// foot for a concave arc on a support where the bound is not proved; those of the
+    /// evaluations; a defect where a face's normal is not defined at its foot.
     fn station_bound(&self, k: &Kernel, s: &FootStation, sagitta: f64) -> Result<f64> {
         let [a, b] = s.feet;
+        let unproved = if sagitta < 0.0 {
+            self.concave_unproved(k, s)?
+        } else {
+            None
+        };
+        if let Some(i) = unproved {
+            let gap = crate::error::blend::WeldGap::ConcaveNotProved;
+            return Err(Failure::new(OP, BlendFailure::WeldNotBuilt(gap))
+                .or_at(Site {
+                    edge: self.edge.map(TargetEdge::of_target),
+                    face: self
+                        .sides
+                        .get(i)
+                        .and_then(|side| side.face)
+                        .map(crate::error::TargetFace::of_target),
+                    at: s.feet.get(i).copied(),
+                    ..Site::default()
+                })
+                .into_error());
+        }
         let mut toes = [0.0_f64; 2];
         for (i, (toe, other)) in toes.iter_mut().zip([b, a]).enumerate() {
             let (Some(side), Some(&uv), Some(&foot)) =
@@ -736,64 +752,81 @@ impl FootBlend {
             let c = other - foot;
             *toe = c.cross(d).length().atan2(c.dot(d));
         }
-        let bound = sagitta_bound(b.distance(a), toes, sagitta);
-        if sagitta < 0.0 {
-            return Ok(bound.min(self.clearance_bound(k, s)?));
-        }
-        Ok(bound)
+        Ok(sagitta_bound(b.distance(a), toes, sagitta))
     }
 
-    /// The largest concave sagitta at the station `s` whose arc stays off the supports between
-    /// the root and the feet, sampled: the least sagitta of the arcs through both feet and a
-    /// point of a support's section, over the root and `ALONG_LEG - 1` points of each section
-    /// at even distances from the root up to the foot (each a foot at a shorter leg; one not
-    /// found is left out). The supports' sections lie on the root's side of the chord, and an
-    /// arc deeper than the one through a point of them has that point inside its circle. As
-    /// the point nears a foot the arc through it nears the one tangent to the face there,
-    /// [`FootBlend::station_bound`]'s. Infinite where the root lies on the chord's line.
+    /// The first support, if any, on which a concave arc at the station `s` is not proved
+    /// clear of the support by the bound at its feet ([`FootBlend::station_bound`]). The bound
+    /// is enough where, in the station's plane, the support's section from the root to the
+    /// foot lies on the material's side of its own tangent at the foot and the other foot on
+    /// the bead's side of that tangent: below the bound the arc leaves the foot into the
+    /// bead's side, it ends there, and a circle meets a line twice at most, so it stays
+    /// there, off the section. A plane's section is that tangent. On the outside of a
+    /// cylinder, a cone or a sphere the section bounds the convex region the plane cuts
+    /// from the solid inside, which lies on one side of each of its tangents; the other foot
+    /// is checked against the tangent plane at the foot. Any other support is not proved:
+    /// the inside of a cylinder, a cone or a sphere, a torus, a free-form face. There a
+    /// section that curves towards the bead more tightly near the foot than the arc does
+    /// comes back into the arc between the foot and the root, though the arc leaves the foot
+    /// off the face.
+    ///
+    /// The bead's side of a support is the side of its tangent plane at the root on which the
+    /// other foot lies; it is on the outside where neither of the surface's normal
+    /// curvatures along its parameter lines at the foot turns towards that side (on a
+    /// cylinder, a cone and a sphere every normal curvature has one sign).
     ///
     /// # Errors
     ///
     /// Those of the evaluations.
-    fn clearance_bound(&self, k: &Kernel, s: &FootStation) -> Result<f64> {
-        let [a, b] = s.feet;
-        let chord = b - a;
-        let c = chord.length();
-        let Ok(along) = chord.unitize() else {
-            return Ok(f64::INFINITY);
-        };
-        let middle = a + chord * 0.5;
-        // towards the root, square to the chord
-        let to_root = s.root - middle;
-        let Ok(up) = (to_root - along * to_root.dot(along)).unitize() else {
-            return Ok(f64::INFINITY);
-        };
-        let through = |p: Point3| {
-            let q = p - middle;
-            let (x, y) = (q.dot(along), q.dot(up));
-            if y <= 0.0 {
-                // across the chord from the root: between the feet even the chord cuts it
-                return if x.abs() < 0.5 * c {
-                    0.0
-                } else {
-                    f64::INFINITY
-                };
+    fn concave_unproved(&self, k: &Kernel, s: &FootStation) -> Result<Option<usize>> {
+        use crate::surface::surface::p2::SurfaceKind;
+        for (i, side) in self.sides.iter().enumerate() {
+            match side.surface.geometry().kind() {
+                SurfaceKind::Plane(_) => continue,
+                SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) => {}
+                _ => return Ok(Some(i)),
             }
-            // the circle through the feet and p: its centre `depth` beyond the chord
-            let depth = (0.25 * c * c - x * x - y * y) / (2.0 * y);
-            (0.25 * c * c + depth * depth).sqrt() - depth
-        };
-        let mut least = through(s.root);
-        for (i, foot) in s.feet.iter().enumerate() {
-            let leg = foot.distance(s.root);
-            for j in 1..ALONG_LEG {
-                let z = leg * f64::from(j) / f64::from(ALONG_LEG);
-                if let Ok((p, _, _)) = self.foot(k, i, s.root, s.tangent, z, Some(s))? {
-                    least = least.min(through(p));
-                }
+            let (Some(&uv), Some(&root_uv), Some(&foot), Some(&other)) = (
+                s.uv.get(i),
+                s.root_uv.get(i),
+                s.feet.get(i),
+                s.feet.get(1 - i),
+            ) else {
+                return Ok(Some(i));
+            };
+            // the bead's side at the root, carried to the foot by the surface's own normal
+            let Some(at_root) = normal_at(k, &side.surface, root_uv)? else {
+                return Ok(Some(i));
+            };
+            let towards = if at_root.dot(other - s.root) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            let d = side
+                .surface
+                .evaluate(k, uv, 2, 2, EvaluateFlags::default())?;
+            let (Some(&du), Some(&dv), Some(&duu), Some(&dvv)) = (
+                d.get(1).and_then(|r| r.first()),
+                d.first().and_then(|r| r.get(1)),
+                d.get(2).and_then(|r| r.first()),
+                d.first().and_then(|r| r.get(2)),
+            ) else {
+                return Ok(Some(i));
+            };
+            let Ok(n) = du.cross(dv).unitize() else {
+                return Ok(Some(i));
+            };
+            let n = n * towards;
+            // the normal curvatures along u and along v, towards the bead where positive
+            let (ku, kv) = (duu.dot(n) / du.dot(du), dvv.dot(n) / dv.dot(dv));
+            let rounding = 1e-9 * ku.abs().max(kv.abs());
+            let outside = ku <= rounding && kv <= rounding;
+            if !outside || (other - foot).dot(n) <= 0.0 {
+                return Ok(Some(i));
             }
         }
-        Ok(least)
+        Ok(None)
     }
 }
 
@@ -891,7 +924,9 @@ impl FootBlend {
     ///
     /// # Errors
     ///
-    /// Those of the evaluations.
+    /// [`crate::error::blend::WeldGap::ConcaveNotProved`] for a concave arc on a support where
+    /// the bound is not proved (any but a plane and the outside of a cylinder, a cone or a
+    /// sphere); those of the evaluations.
     pub fn sagitta_that_fits(
         &self,
         k: &Kernel,
@@ -1015,8 +1050,10 @@ impl FootBlend {
                 hi = mid;
             }
         }
-        // a toe holds up to the face's tolerance past its edge: the fit named keeps it on the
-        // face itself, as the exact bead's does (`weld_bead`'s `toes_on_faces`)
+        // a toe holds up to the face's tolerance past its edge: the fit named is that much
+        // less, as the exact bead's (`weld_bead`'s `toes_on_faces`), which puts the toe on the
+        // face itself where the face's edge is square to the toe's travel and no farther past
+        // it than the tolerance elsewhere
         if let Some(face) = face {
             lo = (lo - target.face(face)?.tolerance).max(0.0);
         }
