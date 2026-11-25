@@ -307,7 +307,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 }
 
-fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
+pub(crate) fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup], feature_menu: bool) {
     let features = selected_feature_ids(app);
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
@@ -618,7 +618,7 @@ fn visible_order(
 }
 
 /// Start a folder rename typed in its History row: no floating box (#16217).
-fn start_folder_rename(app: &mut SolveApp, group: u64) {
+pub(crate) fn start_folder_rename(app: &mut SolveApp, group: u64) {
     crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
     if let Some(rename) = app.menu.rename.as_mut() {
         rename.inline = true;
@@ -937,14 +937,19 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
                 rendered_group_header = true;
             }
         }
+        let feature_hidden = table.is_hidden(index);
         let group_open = group_id.is_none_or(|id| table.is_open(&folds, id));
         let indent_group = (!rendered_group_header).then_some(previous_visible_group).flatten().filter(|previous| Some(*previous) != group_id);
         if index == marker && !marker_before_group {
-            slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group: group_open.then_some(group_id).flatten(), indent_group });
+            let marker_group = if feature_hidden { None } else { group_open.then_some(group_id).flatten() };
+            slots.push(VerticalSlot { y: ui.cursor().top(), position: index, group: marker_group, indent_group });
             marker_y = vertical_marker(app, ui, &mut rows.drag);
         }
         // A sketch listed under a feature is drawn after that feature's row.
-        if group_open && let Some(row) = plan.row_at(index) {
+        if !feature_hidden
+            && group_open
+            && let Some(row) = plan.row_at(index)
+        {
             slots.push(VerticalSlot { y: ui.cursor().top(), position: row.slot.min(index), group: group_id, indent_group });
             let indent = group_id.map(|id| (table.depth_of(id) + 1) as f32 * FOLDER_INDENT).unwrap_or(0.0);
             feature_row(app, ui, &mut rows, index, indent, RowKind::Own);
@@ -2737,5 +2742,113 @@ mod tests {
         }
         let after: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert_eq!(after, order, "measuring moved nothing");
+    }
+
+    /// Hide Component History (#10393) hides a component's and its children's entries from the
+    /// vertical History panel too (#22211), and the History menu's toggle brings them back.
+    #[test]
+    fn vertical_history_hides_components_and_their_children_and_toggles_them_back() {
+        use crate::context_menu::{self, Target};
+        for dock in ["left", "under_browser"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("view.history_layout", json!({"dock": dock})).unwrap();
+            h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "CopyBox"})).unwrap();
+            h.app.run("component.create", json!({"name": "Inner"})).unwrap();
+            h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "name": "InnerBox"})).unwrap();
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 5, "name": "RootBox"})).unwrap();
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some() && handle_at("timeline:RootBox").is_some(),
+                "dock={dock}: all features start visible"
+            );
+
+            h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+            h.frames(4);
+            assert!(handle_at("timeline:CopyBox").is_none(), "dock={dock}: hidden component leaves vertical History");
+            assert!(handle_at("timeline:InnerBox").is_none(), "dock={dock}: child component leaves vertical History");
+            assert!(handle_at("timeline:RootBox").is_some(), "dock={dock}: root feature stays");
+
+            let toggle = |h: &Harness| {
+                context_menu::items(&h.app, &Target::HistoryControls)
+                    .into_iter()
+                    .find(|i| i.id == "ui.historyShowHidden")
+                    .expect("vertical History menu offers to show hidden entries")
+            };
+            let item = toggle(&h);
+            context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some(),
+                "dock={dock}: show-hidden brings hidden entries back"
+            );
+            let kept = RowPlan::kept(&h.ctx).expect("the History drew a plan");
+            assert_eq!(kept.summary(), RowPlan::of(&h.app, kept.under_feature()).summary(), "dock={dock}: cached plan matches after toggle");
+
+            let item = toggle(&h);
+            context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_none() && handle_at("timeline:InnerBox").is_none(),
+                "dock={dock}: toggling off hides them again"
+            );
+
+            h.app.run("component.show_history", json!({"component": "Copy"})).unwrap();
+            h.frames(4);
+            assert!(
+                handle_at("timeline:CopyBox").is_some() && handle_at("timeline:InnerBox").is_some(),
+                "dock={dock}: component.show_history restores entries"
+            );
+        }
+    }
+
+    /// A folder whose features are all in hidden components (and has no joints) is left out of the
+    /// vertical History, while mixed folders and genuinely empty folders stay visible (#22211).
+    #[test]
+    fn vertical_history_hides_folders_with_only_hidden_features() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Hidden1"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [15, 0, 0], "operation": "new_body", "name": "Hidden2"}))
+            .unwrap();
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 5, "name": "RootBox"})).unwrap();
+        h.app.run("timeline.group", json!({"name": "AllHidden", "features": ["Hidden1"]})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Mixed", "features": ["Hidden2", "RootBox"]})).unwrap();
+        h.app.run("timeline.group", json!({"name": "Empty"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+
+        assert!(handle_at("timeline-folder:AllHidden").is_none(), "folder with only hidden features is left out");
+        assert!(handle_at("timeline-folder:Mixed").is_some(), "folder with a visible feature stays");
+        assert!(handle_at("timeline-folder:Empty").is_some(), "genuinely empty folder stays");
+        assert!(handle_at("timeline:Hidden1").is_none() && handle_at("timeline:Hidden2").is_none());
+        assert!(handle_at("timeline:RootBox").is_some());
+
+        h.app.tree.history_show_hidden = true;
+        h.frames(4);
+        assert!(handle_at("timeline-folder:AllHidden").is_some(), "show-hidden brings the folder back");
+        assert!(handle_at("timeline:Hidden1").is_some() && handle_at("timeline:Hidden2").is_some());
+    }
+
+    /// With sketches listed under their features, hiding a component keeps a visible sketch from
+    /// disappearing under a hidden feature built from it (#22211).
+    #[test]
+    fn vertical_history_under_feature_keeps_visible_sketch_when_consumer_is_hidden() {
+        let mut h = nested_history();
+        square(&mut h, "RootSketch", 0.0);
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        extrude(&mut h, "RootSketch", "HiddenExtrude", "new");
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+
+        assert!(handle_at("timeline:HiddenExtrude").is_none(), "hidden feature is left out");
+        assert!(handle_at("timeline:RootSketch").is_some(), "visible sketch keeps its own row");
     }
 }

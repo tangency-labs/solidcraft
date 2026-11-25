@@ -1414,7 +1414,11 @@ fn bar_action(app: &mut SolveApp, ctx: &Context, action: Option<crate::window_ch
 
 fn window_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, rect: egui::Rect, chrome: &Chrome) {
     let tokens = solidcraft_theme::Tokens::get();
-    let titlebar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+    let titlebar = crate::window_chrome::TitleBar {
+        traffic_lights: app.integrated_titlebar,
+        caption_buttons: app.custom_titlebar,
+        hide_caption_buttons: !app.preferences.show_window_controls,
+    };
     let layout = titlebar.layout(rect);
     if let Some(drag) = layout.drag {
         crate::window_chrome::drag_area(ui, drag);
@@ -1471,7 +1475,7 @@ fn window_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, rect: egui::Rect, c
         documents::tabs(app, ui, rect, left, right);
     }
 
-    if app.custom_titlebar {
+    if titlebar.shows_caption_buttons() {
         let action = crate::window_chrome::caption_buttons(ui, rect);
         bar_action(app, ui.ctx(), action);
     }
@@ -1493,7 +1497,7 @@ fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect
     app.shell.top_bar_overlays = [
         visible.is_positive().then_some(visible),
         grip_visible.then_some(grip),
-        app.custom_titlebar
+        (app.custom_titlebar && app.preferences.show_window_controls)
             .then(|| Rect::from_min_max(pos2(rect.right() - crate::window_chrome::WIDTH, rect.top()), rect.right_bottom()).intersect(canvas))
             .filter(|rect| rect.is_positive()),
     ];

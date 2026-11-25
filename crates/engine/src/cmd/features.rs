@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::construct::DatumItem;
 use solidcraft_doc::{
-    AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
-    Touching, expr::Kind, point_expr,
+    AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide,
+    ThinWall, Touching, expr::Kind, point_expr,
 };
 use solidcraft_doc::{BodyName, FeatureName, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -127,8 +127,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.loft", "Loft", loft).begins_edit().at("SOLID", "CREATE").icon("loft").params(concat!(
         "sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); ",
-        "rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); ",
-        "rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
+        "rails?: [{sketch, curves: [ids in order]}] (1…16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes; one or two to an apex); ",
+        "rail_fit?: scale|stretch (one or two rails; with three or more it has no effect: each section is warped between them to pass through them all; default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
         "operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?",
     )),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box)).begins_edit()
@@ -226,6 +226,10 @@ pub static COMMANDS: &[CommandSpec] = &[
             "operation?: join|cut|intersect; ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
             "keep_tools?: bool; ",
+            "offset?: expr (cut only: each tool is grown this far along its faces' outward normals before it cuts, so the cut leaves that clearance round it; negative: shrunk, for a press fit; the tool bodies themselves are not changed; default 0); ",
+            "offset_edges?: sharp|round (with offset: sharp, the default, extends the grown faces until they meet; round rounds each edge between two grown faces, convex for a positive offset and concave for a negative one, so with the offset as the radius the clearance is the same everywhere); ",
+            "offset_faces?: [[x,y,z] points on tool faces] (with offset: only these faces move, the faces round them extended or trimmed to meet them; the other faces, and tools with none of them, cut as they are; default: every face of every tool); ",
+            "offset_radius?: expr (with offset_edges: round: the radius of the rounds, default the offset's size; one too large for the faces round an edge is refused as a fillet's is, naming the largest that fits); ",
             "new_component?: bool (the result goes into a new component; component_name?)",
         )),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
@@ -289,18 +293,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params(concat!(
-            "position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
+            "position: [x,y,z] on a face of a body (numbers, or length expressions the hole follows; a position on no face is refused: the hole starts at that face, its depths are measured from it, and material above it (a body over it, a taller wall beside it) is left standing) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
             "flip?: bool (sketch points: drill to the other side); ",
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
             "direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
             "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
-            "depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); ",
+            "depth? (default through all; from where the hole starts, not from `position`: the face it enters, or for a sketch point inside a body the sketch plane) | to?: [x,y,z] (To Object: drill to that face or point); ",
             "references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); ",
             "type?: simple|drilled|counterbore|countersink; ",
             "tip_angle?; ",
-            "cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
+            "cb_diameter?, cb_depth? (from where the hole starts, as depth), bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
             "cs_diameter?, cs_angle?; ",
             "thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); ",
             "hand?: right|left (the tapped thread's hand; default right; needs thread); ",
@@ -358,8 +362,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
-            "form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
+            "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); ",
+            "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
             "acme \"1/2-10 ACME\" (ASME B1.5); ",
@@ -1602,7 +1607,7 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         }
         // STEP links remain editable import bases: downstream features rebuild when their
         // source updates. Linked designs keep their own editable history in the source file.
-        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
+        if s.doc.links.get(&c).is_some_and(|link| link.is_design()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -1933,19 +1938,24 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, &p, kind)
 }
 
-/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
-/// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
+/// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis (also
+/// as saved: {type: sketch_axis, axis: x|y}), a world axis (also as saved: {type: world, axis:
+/// X|Y|Z}), a construction axis by name
 /// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
 /// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
 /// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
-pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
+pub(crate) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
     if let Some((geo, ..)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok(AxisRef::Model { geo });
     }
     if let Some(o) = p.get("axis").filter(|v| v.is_object()) {
+        if str_(o, "type") == Some("sketch_axis") {
+            let axis = str_(o, "axis").filter(|a| matches!(*a, "x" | "y")).ok_or_else(|| bad(cmd, "sketch axis requires `axis` to be x or y"))?;
+            return Ok(AxisRef::SketchAxis { axis: axis.into() });
+        }
         if str_(o, "type") == Some("world") {
             let axis =
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
@@ -2901,6 +2911,53 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
         None => Operation::Join,
         Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
     };
+    // A cut's clearance (#3774): each tool grown by it before it cuts. A value given that is no
+    // expression is refused, never read as none (`null` is none).
+    let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
+    let offset = expr(p, "offset");
+    if given("offset") && offset.is_none() {
+        return Err(bad(cmd, format!("`offset` {}", expr_problem(p.get("offset")))));
+    }
+    if given("offset_edges") && str_(p, "offset_edges").is_none() {
+        return Err(bad(cmd, "`offset_edges` must be sharp or round"));
+    }
+    if let Some(d) = &offset {
+        if op != Operation::Cut {
+            return Err(bad(cmd, "`offset` is only for a cut"));
+        }
+        check_expr(s, d, Kind::Length, cmd, "offset")?;
+    }
+    let offset_edges = match str_(p, "offset_edges") {
+        None => OffsetEdges::Sharp,
+        Some(_) if offset.is_none() => return Err(bad(cmd, "`offset_edges` needs an `offset`")),
+        Some(e) => OffsetEdges::parse(e).ok_or_else(|| bad(cmd, "`offset_edges` must be sharp or round"))?,
+    };
+    // Only these tool faces move; none given: every face of every tool.
+    let offset_faces = match p.get("offset_faces").filter(|v| !v.is_null()) {
+        None => Vec::new(),
+        Some(_) if offset.is_none() => return Err(bad(cmd, "`offset_faces` needs an `offset`")),
+        Some(v) => {
+            let a = v
+                .as_array()
+                .filter(|a| !a.is_empty() && a.len() <= 1000)
+                .ok_or_else(|| bad(cmd, "`offset_faces` must list 1…1000 points on tool faces"))?;
+            a.iter().map(|f| super::face::face_ref(s, f, None, cmd).map(FacePick)).collect::<Result<Vec<_>>>()?
+        }
+    };
+    // The rounding radius; none given: the offset's size.
+    let offset_radius = expr(p, "offset_radius");
+    if given("offset_radius") && offset_radius.is_none() {
+        return Err(bad(cmd, format!("`offset_radius` {}", expr_problem(p.get("offset_radius")))));
+    }
+    if let Some(r) = &offset_radius {
+        if offset_edges != OffsetEdges::Round {
+            return Err(bad(cmd, "`offset_radius` needs `offset_edges: round`"));
+        }
+        check_expr(s, r, Kind::Length, cmd, "offset_radius")?;
+        if !s.doc.eval(r, Kind::Length).is_ok_and(|v| v > 0.0) {
+            return Err(bad(cmd, "`offset_radius` must be positive"));
+        }
+    }
     let mut out = add_feature(
         s,
         p,
@@ -2909,6 +2966,10 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             tools: tools.into_iter().map(BodyName).collect(),
             operation: op,
             keep_tools: bool_(p, "keep_tools").unwrap_or(false),
+            offset,
+            offset_edges,
+            offset_faces,
+            offset_radius,
         },
     )?;
     // New Component: the result goes into a component of its own.
@@ -4088,8 +4149,15 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
+    // More surface bodies cut only with a face tool's whole surface body (#13303): a plane or a
+    // sketch line would drop them.
+    let face_tool = p.get("tool").is_some_and(|t| !t.is_null());
+    let lines = p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null());
+    if p.get("tool_bodies").is_some_and(|v| !v.is_null()) && (!face_tool || lines) {
+        return Err(bad(cmd, "`tool_bodies` needs a face `tool` with `tool_sheet` \"body\""));
+    }
     // A straight sketch line as the tool: `sketch` and `line` (#1552).
-    if p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null()) {
+    if lines {
         let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
         let line = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must name a line of the sketch"))?.to_string();
         let st = s.model.state();
@@ -4107,6 +4175,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane: false,
                 tool_sheet: SplitSheet::Extended,
                 tool_faces: Vec::new(),
+                tool_bodies: Vec::new(),
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -4159,6 +4228,41 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
         if tool_sheet == SplitSheet::Body && !tbody.body.is_surface() {
             return Err(bad(cmd, format!("`{tb}` is not a surface body, so it cannot split as a whole")));
         }
+        // More surface bodies that cut with the tool's, each whole (#13303).
+        let tool_bodies = match p.get("tool_bodies").filter(|v| !v.is_null()) {
+            None => Vec::new(),
+            Some(v) => {
+                let names = v.as_array().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                if names.len() > MAX_SPLIT_TOOL_BODIES {
+                    return Err(bad(cmd, format!("`tool_bodies` takes at most {MAX_SPLIT_TOOL_BODIES} bodies")));
+                }
+                let mut bodies: Vec<BodyName> = Vec::with_capacity(names.len());
+                // A further placement's body (`Sheet (Part:2)`) keeps its name and cuts where its
+                // occurrence puts it, as a combine's tool does (#20040); the model holds only a
+                // component's first placement, the placed model the others.
+                let further = names.iter().any(|n| n.as_str().is_some_and(|n| st.body(n).is_none()));
+                let world = if further { Some(s.world_state()?) } else { None };
+                for name in names {
+                    let name = name.as_str().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
+                    let other =
+                        st.body(name).or_else(|| world.as_ref().and_then(|w| w.body(name))).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+                    if !other.body.is_surface() {
+                        return Err(bad(cmd, format!("`{name}` is not a surface body, so it cannot split as a whole")));
+                    }
+                    if name == body {
+                        return Err(bad(cmd, format!("`{body}` cannot split itself")));
+                    }
+                    if name == tb || bodies.iter().any(|b| b.as_ref() == name) {
+                        return Err(bad(cmd, format!("`{name}` is a splitting tool twice")));
+                    }
+                    bodies.push(BodyName(name.to_string()));
+                }
+                bodies
+            }
+        };
+        if tool_sheet != SplitSheet::Body && !tool_bodies.is_empty() {
+            return Err(bad(cmd, "`tool_bodies` needs `tool_sheet` \"body\""));
+        }
         return add_feature(
             s,
             p,
@@ -4169,6 +4273,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 tool_plane,
                 tool_sheet,
                 tool_faces,
+                tool_bodies,
                 sketch: None,
                 line: None,
             },
@@ -4185,6 +4290,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
             tool_plane: false,
             tool_sheet: SplitSheet::Extended,
             tool_faces: Vec::new(),
+            tool_bodies: Vec::new(),
             sketch: None,
             line: None,
         },
@@ -4193,6 +4299,9 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The most other faces one Split Body by faces takes (`tool_faces`).
 const MAX_SPLIT_TOOL_FACES: usize = 1024;
+
+/// The most other surface bodies one Split Body takes (`tool_bodies`).
+const MAX_SPLIT_TOOL_BODIES: usize = 256;
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
@@ -5129,7 +5238,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option
     Ok((rails, rail_fit))
 }
 
-/// A sweep's or a loft's (`what`) `rails` (one or two `{sketch?, curves}`, each rail's sketch
+/// A sweep's or a loft's (`what`) `rails` (a sweep's one or two, a loft's 1…16 `{sketch?, curves}`, each rail's sketch
 /// `default_sketch` when it names none) and `rail_fit` (scale | stretch).
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
@@ -5139,9 +5248,14 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
     let given = match p.get("rails") {
         None | Some(Value::Null) => return Ok((Vec::new(), rail_fit)),
         Some(Value::Array(a)) => a,
-        Some(_) => return Err(bad(cmd, "`rails` must list one or two rails: [{sketch, curves: [ids]}]")),
+        Some(_) => return Err(bad(cmd, "`rails` must list guide rails: [{sketch, curves: [ids]}]")),
     };
-    if !(1..=2).contains(&given.len()) {
+    if what == "loft" {
+        let most = solidcraft_kernel::MAX_LOFT_RAILS;
+        if !(1..=most).contains(&given.len()) {
+            return Err(bad(cmd, format!("a loft takes 1…{most} guide rails")));
+        }
+    } else if !(1..=2).contains(&given.len()) {
         return Err(bad(cmd, format!("a {what} takes one or two guide rails")));
     }
     let mut rails = Vec::with_capacity(given.len());
@@ -5273,9 +5387,14 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    // Resolve and store the form at creation or redefinition, including an inferred Unified
+    // designation. Evaluation must not reinterpret an older Thread that saved no form.
     let form = match str_(p, "form") {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
-            bad(cmd, format!("unknown thread form `{f}` (metric, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"))
+            bad(
+                cmd,
+                format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
+            )
         })?,
         None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
     };
@@ -5427,7 +5546,9 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
     if let Some(w) = &wall {
-        check_expr(s, w, Kind::Length, cmd, "wall")?;
+        // A wall is a thickness. A word such as "hollow" is not one, and the message says so
+        // instead of naming an unknown parameter (#18344).
+        check_expr(s, w, Kind::Length, cmd, "wall").map_err(|_| bad(cmd, "the wall must be a thickness, such as 2 mm"))?;
     }
     add_feature(
         s,

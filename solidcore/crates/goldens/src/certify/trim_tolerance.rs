@@ -36,13 +36,11 @@
 //! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
-//! cover an edge end that `n` does.
+//! cover an edge end that `n` does. One raise is upstream's margin instead, in the units and
+//! numbers [`VERTEX_MARGIN`] pins: a vertex at twice its gap to its edge uses' starts, to the
+//! bit (`topology::face::p3`'s UV trim gaps, which the stitch reaches while it edits since
+//! WR-732's retirement, #18934), still covering every end ([`vertex_is_twice_its_end_gap`]).
 
-mod gap_samples;
-mod p6_split;
-
-use gap_samples::{GAP_CHANGES, GAP_MAIN};
-use p6_split::{P6_CURVE_CLASS_CHANGES, P6_CURVE_CLASS_MAIN, P6_HEAL_CHANGES, P6_HEAL_MAIN};
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
 use solidcore::kernel::Kernel;
@@ -103,6 +101,17 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
 ///   NURBS net, so no enclosure (`fillet_executive_p3`'s coons, bottle and letter-g cases;
 ///   the sampled gaps, over every trim of the edge, at most 50 % of the new tolerance);
+/// - `not-enclosed`: a lowered edge with a trim whose bound is not enclosed (no proof either
+///   way: nothing shows the bound is exceeded), its other trims enclosed within the new
+///   tolerance (tangency-labs/solidcraft#21987). No lowered edge of these rows is in it now:
+///   the seven there were (`topology.brep_local_operation`'s `fc0000`, `fc0006`, `fc0008` and
+///   `fc0025` edge 73, `topology.brep_mirror`'s `mat0094` edge 26, `topology.brep_p2`'s
+///   `refine_cci_f7_plane_b_uv` edges 26 and 47, each a UV line on a B-spline face) are
+///   certified by the any-surface line enclosure lowered edges use since #21301. The class is
+///   read by `kept_trim_rows` for its rows' kept trims (`heal.heal_data_p3`'s two
+///   `r0.02_0.03` `s60` cones, edges 1 and 5, tolerance 1e-5) and by
+///   `operand_trim_rows`' `local_operation_bodies_are_certified` for its cases' trims (none
+///   now), [`not_enclosed_entries`];
 ///
 /// The test requires the uncertified edges to be exactly these, so an entry that becomes
 /// certified (or a new failure) shows up.
@@ -110,17 +119,17 @@ const OPEN: &str = include_str!("trim_tolerance_open.tsv");
 
 /// The edges raised by `SetUVTrimCurve`'s margin (`topology::edgeuse::p1::set_uv_trim_curve`:
 /// an edge below twice its new trim's raise distance `r` is raised to `2 r`, upstream's
-/// `TOL_FACTOR`) where this branch's read of `Fillet/sphere_diff_3cylinders.smb` makes the
-/// classified trims (`tolsub::state::CLASSIFIED_READ_TRIMS`, #20179: the read's face
-/// classification makes its missing trims) and main's read makes none: unit, case, body, edge.
-/// `r` is upstream's drop distance `d` (the trim's `max_dist_to_surface`) or, where the trim's
-/// proved bound is below it, that bound (`trim_raise_distance`, #18162), so `n = 2 r <= 2 d`.
-/// The raise is not needed for the trim (its `B` is within the old tolerance): the margin is
-/// upstream's, wider than the B-rep check needs (a gap within the tolerance), and moves every
-/// dropped trim kernel-wide (#20912). Each is certified by [`drop_margin_raise`]: the
-/// drop replayed on main's read gives `n` bit for bit, and `n` is `trim_raise_distance`'s
-/// doubled, `2 d` with the made trim's `B` within `n`, or `2 B` with `B` below `d`. The
-/// edge's vertices follow it (`edge::set_tolerance`).
+/// `TOL_FACTOR`) where the read of `Fillet/sphere_diff_3cylinders.smb` makes the trims its
+/// face classification finds missing (#20179): unit, case, body, edge. `r` is upstream's drop
+/// distance `d` (the trim's `max_dist_to_surface`) or, where the trim's proved bound is below
+/// it, that bound (`trim_raise_distance`, #18162), so `n = 2 r <= 2 d`. The raise is not
+/// needed for the trim (its `B` is within the old tolerance): the margin is upstream's, wider
+/// than the B-rep check needs (a gap within the tolerance), and moves every dropped trim
+/// kernel-wide (#20912). Each is certified as a raise whose every trim's `B` is within the new
+/// tolerance (none need be past the old), and derived: the drop, made again on a copy of the
+/// body with the edge put back to its old tolerance, gives the new one bit for bit
+/// ([`drop_margin_raise`]). The edge's vertices follow it
+/// (`edge::set_tolerance`).
 const DROP_MARGIN: &[(&str, &str, usize, usize)] = &[
     ("topology.brep_p10", "gen0026", 0, 20),
     ("topology.brep_p10", "gen0026", 0, 22),
@@ -160,6 +169,24 @@ fn open_entries(unit: &str) -> std::collections::BTreeMap<(String, usize, String
                     f[4].to_string(),
                 )
             })
+        })
+        .collect()
+}
+
+/// The `not-enclosed` entries of [`OPEN`], of every unit: unit, case, body and edge index
+/// (`kept_trim_rows` reads those of its rows).
+pub(crate) fn not_enclosed_entries() -> Vec<(String, String, usize, usize)> {
+    OPEN.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split('\t').collect::<Vec<&str>>())
+        .filter(|f| f.get(4) == Some(&"not-enclosed"))
+        .map(|f| {
+            (
+                f[0].to_string(),
+                f[1].to_string(),
+                f[2].parse().expect("body"),
+                f[3].parse().expect("edge"),
+            )
         })
         .collect()
 }
@@ -210,8 +237,7 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 /// - `domain`: a value of a face's surface record (its natural domain, or a sample over it)
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
-///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
-///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before).
+///   within its edge's tolerance (no entry holds it now).
 const OTHER: &str = include_str!("trim_tolerance_other.tsv");
 
 /// The accuracy `blend.fillet_executive_p3`'s runner asks of the mass integrator
@@ -404,8 +430,8 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 }
 
 /// [`trim_bounds`] with a UV line enclosed on any surface with an exact net, not only a plane
-/// ([`uv_line_slack_on_surface`]), each with its edge use: the WR-450 certificate of the trims
-/// a copied analytic face keeps (`wr450_rows`).
+/// ([`uv_line_slack_on_surface`]), each with its edge use: the certificate of the trims a
+/// split's new face keeps (`kept_trim_rows`).
 pub(crate) fn trim_bounds_any_surface(
     k: &Kernel,
     b: &Brep,
@@ -877,7 +903,7 @@ fn face_bound(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId, n: f64) -> Option<f64>
 /// `None` where a gap is not enclosed, and a single `None` for an edge on no face. With the
 /// number of faces bounded without a trim. With `any_surface`, a UV line trim on a surface
 /// other than a plane is enclosed too ([`use_bound_on`], the certificate
-/// [`trim_bounds_any_surface`] gives `wr450_rows`).
+/// [`trim_bounds_any_surface`] gives).
 fn edge_bounds(
     k: &Kernel,
     b: &Brep,
@@ -913,86 +939,63 @@ fn edge_bounds(
     (out, trimless)
 }
 
-/// Certifies a [`DROP_MARGIN`] raise of edge `e` of `b` (body `body` of `case`) from `old` to
-/// `new`: the edge's one classified use that holds a trim (the made trim, `eu`); `case` run
-/// again with main's read put back (`tolsub::state::strip_classified_trims`: the classified
-/// trims off, the raises at the zone tolerance), where the edge holds `old` and `eu` no trim;
-/// there `get_or_create_uv_trim_curve` on `eu` (the drop the classification makes) reports the
-/// drop distance `d` and leaves the edge at `new`, bit for bit, with `old < new`; and with the
-/// made trim's `B` on `b` ([`use_bound`]), `new` is one of `trim_raise_distance`'s raises,
-/// doubled: `2 d` with `B <= new` (upstream's, where `B` is from `d` to `2 d`, or where `2 B`
-/// would not cover another trim of the edge; then `B < new / 2`), or `2 B` with `B < d` (the
-/// proved distance, below upstream's). Either way `B <= new` and `new <= 2 d`. Returns
-/// `(d, B)`.
-fn drop_margin_raise(
-    unit: &str,
-    case: &str,
-    body: usize,
-    b: &Brep,
-    e: EdgeId,
-    old: f64,
-    new: f64,
-) -> Result<(f64, f64), String> {
-    use crate::tolsub::state::{strip_classified_trims, CLASSIFIED_READ_TRIMS};
-    let made: Vec<EdgeuseId> = b
+/// Derives a [`DROP_MARGIN`] raise of edge `e` of `b` from `old` to `new` on a copy of `b`:
+/// for a use of the edge that holds a trim, the copy with that trim taken off and the edge put
+/// back to `old`, where `get_or_create_uv_trim_curve` on the use (the drop the classification
+/// makes) reports the drop distance `d` and leaves the edge at `new`, bit for bit, with
+/// `old < new`; and with the trim's `B` on `b` ([`use_bound`]), `new` is one of
+/// `trim_raise_distance`'s raises, doubled: `2 d` with `B <= new` (upstream's), or `2 B` with
+/// `B < d` (the proved distance, below upstream's). Either way `B <= new` and `new <= 2 d`.
+/// Returns `(d, B)` of the first use that gives `new`.
+fn drop_margin_raise(b: &Brep, e: EdgeId, old: f64, new: f64) -> Result<(f64, f64), String> {
+    let uses: Vec<EdgeuseId> = b
         .edge(e)
         .expect("edge")
         .edgeuses
         .iter()
         .copied()
-        .filter(|&eu| {
-            CLASSIFIED_READ_TRIMS.contains(&eu.index())
-                && b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
-        })
+        .filter(|&eu| b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some())
         .collect();
-    let [eu] = made[..] else {
-        return Err(format!("made trims {made:?}"));
-    };
-    let ((), reads) = strip_classified_trims(|| {
-        super::watch_written();
-        let _ = replay_case(unit, case);
-    });
-    let mut bodies = super::take_written();
-    if reads == 0 {
-        return Err("no classified read put back".to_string());
+    let mut tried = Vec::new();
+    for eu in uses {
+        let mut m = b.clone_standing_for_self().map_err(|x| format!("{x:?}"))?;
+        m.edgeuse_mut(eu)
+            .map_err(|x| format!("{x:?}"))?
+            .uv_trim_curve = None;
+        edge::set_tolerance(&mut m, e, old, false, false).map_err(|x| format!("{x:?}"))?;
+        let k = Kernel::default();
+        let fetch = solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+            &k, &mut m, eu, true, false, true,
+        )
+        .map_err(|x| format!("{x:?}"))?;
+        if let Err(x) = fetch.status {
+            tried.push(format!("use {}: the drop: {x:?}", eu.index()));
+            continue;
+        }
+        let d = fetch.dist_to_surf;
+        let now = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
+        if now.to_bits() != new.to_bits() {
+            tried.push(format!(
+                "use {}: the drop leaves {now:e} (d {d:e})",
+                eu.index()
+            ));
+            continue;
+        }
+        let bm = match use_bound(&k, b, e, eu) {
+            UseBound::Bound(x) => x,
+            x => return Err(format!("use {}: the trim: {x:?}", eu.index())),
+        };
+        // (written so a NaN fails; doubling is exact)
+        let upstream = new.to_bits() == (2.0 * d).to_bits() && bm <= new;
+        let proved = new.to_bits() == (2.0 * bm).to_bits() && bm < d;
+        if !(d > 0.0 && new > old && (upstream || proved)) {
+            return Err(format!(
+                "{old:e} -> {new:e} is neither 2 d (d {d:e}) covering B {bm:e} nor 2 B below 2 d"
+            ));
+        }
+        return Ok((d, bm));
     }
-    let m = bodies.get_mut(body).ok_or("no body on main's read")?;
-    let was = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
-    if was.to_bits() != old.to_bits() {
-        return Err(format!("main's read holds {was:e}, not {old:e}"));
-    }
-    if m.edgeuse(eu)
-        .map_err(|x| format!("{x:?}"))?
-        .uv_trim_curve
-        .is_some()
-    {
-        return Err("main's read holds the trim".to_string());
-    }
-    let k = crate::runner_kernel();
-    let fetch =
-        solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(&k, m, eu, true, false, true)
-            .map_err(|x| format!("{x:?}"))?;
-    fetch.status.map_err(|x| format!("the drop: {x:?}"))?;
-    let d = fetch.dist_to_surf;
-    let replayed = m.edge(e).map_err(|x| format!("{x:?}"))?.tolerance;
-    if replayed.to_bits() != new.to_bits() {
-        return Err(format!(
-            "the drop leaves {replayed:e}, not {new:e} (d {d:e})"
-        ));
-    }
-    let bm = match use_bound(&Kernel::default(), b, e, eu) {
-        UseBound::Bound(x) => x,
-        x => return Err(format!("the made trim: {x:?}")),
-    };
-    // (written so a NaN fails; doubling is exact)
-    let upstream = new.to_bits() == (2.0 * d).to_bits() && bm <= new;
-    let proved = new.to_bits() == (2.0 * bm).to_bits() && bm < d;
-    if !(d > 0.0 && new > old && (upstream || proved)) {
-        return Err(format!(
-            "{old:e} -> {new:e} is neither 2 d (d {d:e}) covering B {bm:e} nor 2 B below 2 d"
-        ));
-    }
-    Ok((d, bm))
+    Err(format!("no use gives {new:e}: {tried:?}"))
 }
 
 /// Whether the point of `v` is within `n` of the end of every edge curve of `v` that ends
@@ -1028,6 +1031,50 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     true
 }
 
+/// The units whose vertices the stitch raises to upstream's margin while it edits
+/// (#18934), with how many raised vertices each row set holds there; a raise of that kind
+/// anywhere else, or another count, fails.
+const VERTEX_MARGIN: &[(&str, usize)] = &[("heal.stitch_p1", 24), ("heal.stitch_p2", 14)];
+
+/// Whether `n` is upstream's margin on the gap of `v`, bit for bit as the kernel computes
+/// it: `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a vertex below
+/// `2 gap` to `2 gap`, `gap` the distance from its point to the 3D point of an edge use
+/// that starts there, at the use's start (`NormalizedEvaluate(0)`). So `n` is twice the
+/// largest such gap of `v`'s edge uses, to the bit (doubling is exact), and every gap is
+/// finite (a NaN fails). The stitch reaches those gaps while it edits since WR-732's
+/// retirement (#18934), where main kept the gap plus the zone tolerance.
+fn vertex_is_twice_its_end_gap(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
+    let Ok(mut b) = b.clone_standing_for_self() else {
+        return false;
+    };
+    let at = b.vertex(v).expect("vertex").point;
+    let starts: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(_, u)| {
+            u.vertexuse
+                .and_then(|vu| b.vertexuse(vu).ok())
+                .and_then(|vu| vu.vertex)
+                == Some(v)
+        })
+        .map(|(eu, _)| eu)
+        .collect();
+    let mut gap = None::<f64>;
+    for eu in starts {
+        let Ok(e) = solidcore::topology::edgeuse::p3::normalized_evaluate(
+            k, &mut b, eu, 0.0, false, false, true,
+        ) else {
+            return false;
+        };
+        let d = at.distance(e.point);
+        if !d.is_finite() {
+            return false;
+        }
+        gap = Some(gap.map_or(d, |g| if d > g { d } else { g }));
+    }
+    gap.is_some_and(|g| g > 0.0 && (2.0 * g).to_bits() == n.to_bits())
+}
+
 /// What one unit's moved values were certified by.
 #[derive(Debug, Default)]
 struct Tally {
@@ -1038,6 +1085,10 @@ struct Tally {
     edges: usize,
     /// Moved vertices within their tolerance of their edges' ends.
     vertices: usize,
+    /// Raised vertices at upstream's margin, twice their gap to their edge uses' starts
+    /// ([`vertex_is_twice_its_end_gap`]), still covering every end; as many as
+    /// [`VERTEX_MARGIN`] pins.
+    vertex_margin: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
     /// Faces of moved edges on which the edge holds no UV trim, bounded against the face's
@@ -1049,8 +1100,7 @@ struct Tally {
     open_values: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
-    /// [`DROP_MARGIN`] raises certified by [`drop_margin_raise`], every trim within the new
-    /// tolerance.
+    /// [`DROP_MARGIN`] raises, every trim within the new tolerance.
     drop_margin: usize,
     /// [`OTHER`] values: `rounding`, `quadrature`, `integration`, `padding`, `trim`,
     /// and `domain`.
@@ -1086,371 +1136,417 @@ fn certify(unit: &str) -> Tally {
     let other = other_entries(unit);
     let mut other_seen = std::collections::BTreeSet::new();
     for row in &rows {
-        let case = cases
-            .iter()
-            .find(|c| c.name == row.case)
-            .unwrap_or_else(|| panic!("{unit}: no case {}", row.case));
-        super::watch_written();
-        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
-        let out =
-            crate::wr450_rows::with_mains_choices_for(unit, &row.case, || runner.run_rust(case));
-        let bodies = super::take_written();
-        let mut mass_bands = std::collections::BTreeMap::new();
-        let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
-        tally.cases += 1;
-        // each moved output value is the new tolerance of a moved entity, old to new
-        for (key, index, old, new) in &row.moved {
-            let at = format!("{unit} {} {key}[{index}]", row.case);
-            let now = out
-                .values
-                .get(key)
-                .and_then(|v| v.get(*index))
-                .unwrap_or_else(|| panic!("{at}: not in the output"));
-            assert_eq!(
-                now.to_bits(),
-                new.to_bits(),
-                "{at}: output {now:e}, table {new:e}"
-            );
-            // (a value is a moved entity's tolerance by its old and new bits, not by the
-            // output's layout, which 21 units lay out 21 ways: a coordinate that moved by
-            // exactly a moved tolerance's pair, both bit for bit, would pass as one. Every
-            // entity is certified below whichever values match it)
-            if row
-                .entities
+        // every row is checked: a check that cannot go on fails its own row, and the next row
+        // is still checked, so one failing row never hides another
+        let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let case = cases
                 .iter()
-                .any(|e| e.3.to_bits() == old.to_bits() && e.4.to_bits() == new.to_bits())
-            {
-                tally.values += 1;
-                continue;
-            }
-            let entry = (row.case.clone(), key.clone(), *index);
-            let (class, body) = other
-                .get(&entry)
-                .unwrap_or_else(|| panic!("{at}: {old:e} -> {new:e} is no moved entity's"));
-            other_seen.insert(entry);
-            match class.as_str() {
-                "rounding" if ulps(*old, *new) <= 2.0 => tally.rounding += 1,
-                "quadrature" if (new - old).abs() <= 1e-13 * old.abs().max(new.abs()) => {
-                    tally.quadrature += 1;
-                }
-                "integration"
-                    if key.ends_with("mass_properties")
-                        && row.moved.iter().all(|(key, _, old, new)| {
-                            key.ends_with("mass_properties")
-                                || row.entities.iter().any(|e| {
-                                    e.3.to_bits() == old.to_bits() && e.4.to_bits() == new.to_bits()
-                                })
-                        })
-                        && bodies.get(*body).is_some() =>
-                {
-                    let b = bodies.get(*body).expect("a body");
-                    let bands = mass_bands
-                        .entry(*body)
-                        .or_insert_with(|| MassBands::of(&k, b, &row.case));
-                    match bands.check(*index, *new) {
-                        Ok(()) => tally.integration += 1,
-                        Err(why) => failures.push(format!("{at}: {old:e} -> {new:e}: {why}")),
-                    }
-                }
-                "padding"
-                    if row.entities.iter().any(|e| {
-                        e.1 && e.4 < e.3
-                            && ((new - old).abs() - (e.3 - e.4)).abs()
-                                <= 4.0 * f64::EPSILON * old.abs().max(new.abs())
-                    }) && new.abs() < old.abs() =>
-                {
-                    tally.padding += 1;
-                }
-                "trim" => {
-                    let b = bodies.get(*body).unwrap_or_else(|| panic!("{at}: no body"));
-                    // a `record` by its layout, the graph's `geometry` by the value (an end of
-                    // the trims' natural intervals, every trim holding it checked)
-                    let uses = if key.ends_with("record") {
-                        let owner = record_owners(&k, b, true, true).get(*index).copied();
-                        let Some(Owner::Trim(e, eu)) = owner else {
-                            panic!("{at}: not a UV trim's value");
-                        };
-                        // (and the trim's record holds the value: the layout is right)
-                        let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
-                        assert!(
-                            trim.is_some_and(|c| curve_record_values(&k, c)
-                                .iter()
-                                .any(|v| v.to_bits() == new.to_bits())),
-                            "{at}: not in its trim's record"
-                        );
-                        vec![(e, eu)]
-                    } else {
-                        // the graph's `geometry` by its layout: an end of an edge's interval,
-                        // that edge's every trim checked
-                        let graph = key
-                            .strip_suffix("geometry")
-                            .and_then(|p| out.ints.get(&format!("{p}graph")))
-                            .unwrap_or_else(|| panic!("{at}: no graph"));
-                        let Some((e, end)) = graph_edge_interval(graph, *index) else {
-                            panic!("{at}: not an end of an edge's interval");
-                        };
-                        let walked = crate::units::boolean_merge_p1::Canon::reachable(b);
-                        let e = *walked
-                            .edges
-                            .items
-                            .get(e)
-                            .unwrap_or_else(|| panic!("{at}: no edge {e}"));
-                        let ivl = b.edge(e).expect("edge").interval;
-                        let now = if end == 0 { ivl.min() } else { ivl.max() };
-                        assert_eq!(now.to_bits(), new.to_bits(), "{at}: the edge's interval");
-                        b.edge(e)
-                            .expect("edge")
-                            .edgeuses
-                            .iter()
-                            .map(|&eu| (e, eu))
-                            .filter(|&(_, eu)| {
-                                b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
-                            })
-                            .collect()
-                    };
-                    if uses.is_empty() {
-                        failures.push(format!("{at}: no UV trim's interval ends at {new:e}"));
-                    }
-                    let mut covered = true;
-                    for (e, eu) in uses {
-                        let tol = b.edge(e).expect("edge").tolerance;
-                        let key = (row.case.clone(), *body, e.index().to_string());
-                        match use_bound(&k, b, e, eu) {
-                            UseBound::Bound(x) if x <= tol => {
-                                tally.worst = tally.worst.max(x / tol);
-                            }
-                            // the trim of an edge in OPEN: open with it (the edge's own
-                            // entry is checked below)
-                            _ if open.contains_key(&key) => {
-                                covered = false;
-                                tally.open_values += 1;
-                            }
-                            x => {
-                                covered = false;
-                                failures.push(format!(
-                                    "{at}: the trim of edge {} use {}: B {x:?} over {tol:e}",
-                                    e.index(),
-                                    eu.index()
-                                ));
-                            }
-                        }
-                    }
-                    if covered {
-                        tally.trim_values += 1;
-                    }
-                }
-                "domain" => {
-                    let b = bodies.get(*body).unwrap_or_else(|| panic!("{at}: no body"));
-                    // a `record` by its layout, a graph's `geometry` by the value
-                    let faces = if key.ends_with("record") {
-                        match record_owners(&k, b, false, false).get(*index) {
-                            // (and the face's record holds the value: the layout is right)
-                            Some(&Owner::Face(f))
-                                if faces_with_surface_value(&k, b, *new).contains(&f) =>
-                            {
-                                vec![f]
-                            }
-                            _ => Vec::new(),
-                        }
-                    } else {
-                        faces_with_surface_value(&k, b, *new)
-                    };
-                    let covered = if faces.is_empty() {
-                        Err("no face's surface record".to_string())
-                    } else {
-                        faces.iter().try_fold(0.0_f64, |w, &f| {
-                            face_trims_covered(&k, b, f).map(|x| w.max(x))
-                        })
-                    };
-                    match covered {
-                        Ok(w) => {
-                            tally.domain += 1;
-                            tally.worst = tally.worst.max(w);
-                        }
-                        Err(why) => failures.push(format!("{at}: {why}")),
-                    }
-                }
-                _ => failures.push(format!("{at}: {old:e} -> {new:e} is not `{class}`")),
-            }
-        }
-        // each moved entity: its tolerance covers what it is the tolerance for, and is lower,
-        // or raised past what the old one covered
-        for &(body, is_edge, index, old, new) in &row.entities {
-            let kind = if is_edge { "edge" } else { "vertex" };
-            let at = format!("{unit} {} body {body} {kind} {index}", row.case);
-            assert!(new != old && new > 0.0, "{at}: {old:e} -> {new:e}");
-            let raised = new > old;
-            let b = bodies.get(body).unwrap_or_else(|| panic!("{at}: no body"));
-            if is_edge {
-                let (e, rec) = b
-                    .edges()
+                .find(|c| c.name == row.case)
+                .unwrap_or_else(|| panic!("{unit}: no case {}", row.case));
+            super::watch_written();
+            let out = runner.run_rust(case);
+            let bodies = super::take_written();
+            let mut mass_bands = std::collections::BTreeMap::new();
+            let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
+            tally.cases += 1;
+            // each moved output value is the new tolerance of a moved entity, old to new
+            for (key, index, old, new) in &row.moved {
+                let at = format!("{unit} {} {key}[{index}]", row.case);
+                let now = out
+                    .values
+                    .get(key)
+                    .and_then(|v| v.get(*index))
+                    .unwrap_or_else(|| panic!("{at}: not in the output"));
+                assert_eq!(
+                    now.to_bits(),
+                    new.to_bits(),
+                    "{at}: output {now:e}, table {new:e}"
+                );
+                // (a value is a moved entity's tolerance by its old and new bits, not by the
+                // output's layout, which 21 units lay out 21 ways: a coordinate that moved by
+                // exactly a moved tolerance's pair, both bit for bit, would pass as one. Every
+                // entity is certified below whichever values match it)
+                if row
+                    .entities
                     .iter()
-                    .find(|(e, _)| usize::try_from(e.index()) == Ok(index))
-                    .unwrap_or_else(|| panic!("{at}: no edge"));
-                assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
-                // (each face of the edge: its trims' bounds, or the curve's distance to its
-                // surface where the edge holds no trim on it; for a lowered edge a UV line on
-                // any surface with an exact net is enclosed too, as `fc0000`'s edge 73, whose
-                // line trim on its B-spline face 27 is enclosed at 1.0e-8 once WR-495's mate
-                // leaves it there, tangency-labs/solidcraft#21301; a raise keeps the plane-only
-                // enclosure its `loose-raise` entries are recorded against)
-                let (bounds, trimless) = edge_bounds(&k, b, e, new, !raised);
-                tally.trimless += trimless;
-                let mut bad = Vec::new();
-                for x in &bounds {
-                    tally.trims += 1;
-                    match x {
-                        Some(x) if *x <= new => tally.worst = tally.worst.max(x / new),
-                        Some(x) => bad.push(format!("B {x:e}")),
-                        None => bad.push("B not enclosed".to_string()),
-                    }
+                    .any(|e| e.3.to_bits() == old.to_bits() && e.4.to_bits() == new.to_bits())
+                {
+                    tally.values += 1;
+                    continue;
                 }
-                let key = (row.case.clone(), body, index.to_string());
-                if raised {
-                    // a raise: the new tolerance covers every trim, and one trim's bound is
-                    // above the old tolerance (in OPEN only as a `loose-raise`: at least one
-                    // trim enclosed, none past the old tolerance, every one within the new,
-                    // and the new tolerance exactly the entry's, so a raise that moves is
-                    // seen; counted open, never proved)
-                    let past = bounds.iter().flatten().any(|x| *x > old);
-                    if DROP_MARGIN.contains(&(unit, row.case.as_str(), body, index)) {
-                        // a raise by `SetUVTrimCurve`'s margin: derived and certified by
-                        // [`drop_margin_raise`]; every trim within the new tolerance, or the
-                        // edge in OPEN as `UNCOVERED`, every bound past the new tolerance past
-                        // the old as well (the old tolerance did not cover it either: #20906)
-                        match drop_margin_raise(unit, &row.case, body, b, e, old, new) {
-                            Err(why) => failures.push(format!("{at}: drop margin: {why}")),
-                            Ok((d, bm)) if bad.is_empty() => {
-                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}");
+                let entry = (row.case.clone(), key.clone(), *index);
+                let (class, body) = other
+                    .get(&entry)
+                    .unwrap_or_else(|| panic!("{at}: {old:e} -> {new:e} is no moved entity's"));
+                other_seen.insert(entry);
+                match class.as_str() {
+                    "rounding" if ulps(*old, *new) <= 2.0 => tally.rounding += 1,
+                    "quadrature" if (new - old).abs() <= 1e-13 * old.abs().max(new.abs()) => {
+                        tally.quadrature += 1;
+                    }
+                    "integration"
+                        if key.ends_with("mass_properties")
+                            && row.moved.iter().all(|(key, _, old, new)| {
+                                key.ends_with("mass_properties")
+                                    || row.entities.iter().any(|e| {
+                                        e.3.to_bits() == old.to_bits()
+                                            && e.4.to_bits() == new.to_bits()
+                                    })
+                            })
+                            && bodies.get(*body).is_some() =>
+                    {
+                        let b = bodies.get(*body).expect("a body");
+                        let bands = mass_bands
+                            .entry(*body)
+                            .or_insert_with(|| MassBands::of(&k, b, &row.case));
+                        match bands.check(*index, *new) {
+                            Ok(()) => tally.integration += 1,
+                            Err(why) => failures.push(format!("{at}: {old:e} -> {new:e}: {why}")),
+                        }
+                    }
+                    "padding"
+                        if row.entities.iter().any(|e| {
+                            e.1 && e.4 < e.3
+                                && ((new - old).abs() - (e.3 - e.4)).abs()
+                                    <= 4.0 * f64::EPSILON * old.abs().max(new.abs())
+                        }) && new.abs() < old.abs() =>
+                    {
+                        tally.padding += 1;
+                    }
+                    "trim" => {
+                        let b = bodies.get(*body).unwrap_or_else(|| panic!("{at}: no body"));
+                        // a `record` by its layout, the graph's `geometry` by the value (an end of
+                        // the trims' natural intervals, every trim holding it checked)
+                        let uses = if key.ends_with("record") {
+                            let owner = record_owners(&k, b, true, true).get(*index).copied();
+                            let Some(Owner::Trim(e, eu)) = owner else {
+                                panic!("{at}: not a UV trim's value");
+                            };
+                            // (and the trim's record holds the value: the layout is right)
+                            let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref();
+                            assert!(
+                                trim.is_some_and(|c| curve_record_values(&k, c)
+                                    .iter()
+                                    .any(|v| v.to_bits() == new.to_bits())),
+                                "{at}: not in its trim's record"
+                            );
+                            vec![(e, eu)]
+                        } else {
+                            // the graph's `geometry` by its layout: an end of an edge's interval,
+                            // that edge's every trim checked
+                            let graph = key
+                                .strip_suffix("geometry")
+                                .and_then(|p| out.ints.get(&format!("{p}graph")))
+                                .unwrap_or_else(|| panic!("{at}: no graph"));
+                            let Some((e, end)) = graph_edge_interval(graph, *index) else {
+                                panic!("{at}: not an end of an edge's interval");
+                            };
+                            let walked = crate::units::boolean_merge_p1::Canon::reachable(b);
+                            let e = *walked
+                                .edges
+                                .items
+                                .get(e)
+                                .unwrap_or_else(|| panic!("{at}: no edge {e}"));
+                            let ivl = b.edge(e).expect("edge").interval;
+                            let now = if end == 0 { ivl.min() } else { ivl.max() };
+                            assert_eq!(now.to_bits(), new.to_bits(), "{at}: the edge's interval");
+                            b.edge(e)
+                                .expect("edge")
+                                .edgeuses
+                                .iter()
+                                .map(|&eu| (e, eu))
+                                .filter(|&(_, eu)| {
+                                    b.edgeuse(eu).expect("edge use").uv_trim_curve.is_some()
+                                })
+                                .collect()
+                        };
+                        if uses.is_empty() {
+                            failures.push(format!("{at}: no UV trim's interval ends at {new:e}"));
+                        }
+                        let mut covered = true;
+                        for (e, eu) in uses {
+                            let tol = b.edge(e).expect("edge").tolerance;
+                            let key = (row.case.clone(), *body, e.index().to_string());
+                            match use_bound(&k, b, e, eu) {
+                                UseBound::Bound(x) if x <= tol => {
+                                    tally.worst = tally.worst.max(x / tol);
+                                }
+                                // the trim of an edge in OPEN: open with it (the edge's own
+                                // entry is checked below)
+                                _ if open.contains_key(&key) => {
+                                    covered = false;
+                                    tally.open_values += 1;
+                                }
+                                x => {
+                                    covered = false;
+                                    failures.push(format!(
+                                        "{at}: the trim of edge {} use {}: B {x:?} over {tol:e}",
+                                        e.index(),
+                                        eu.index()
+                                    ));
+                                }
+                            }
+                        }
+                        if covered {
+                            tally.trim_values += 1;
+                        }
+                    }
+                    "domain" => {
+                        let b = bodies.get(*body).unwrap_or_else(|| panic!("{at}: no body"));
+                        // a `record` by its layout, a graph's `geometry` by the value
+                        let faces = if key.ends_with("record") {
+                            match record_owners(&k, b, false, false).get(*index) {
+                                // (and the face's record holds the value: the layout is right)
+                                Some(&Owner::Face(f))
+                                    if faces_with_surface_value(&k, b, *new).contains(&f) =>
+                                {
+                                    vec![f]
+                                }
+                                _ => Vec::new(),
+                            }
+                        } else {
+                            faces_with_surface_value(&k, b, *new)
+                        };
+                        let covered = if faces.is_empty() {
+                            Err("no face's surface record".to_string())
+                        } else {
+                            faces.iter().try_fold(0.0_f64, |w, &f| {
+                                face_trims_covered(&k, b, f).map(|x| w.max(x))
+                            })
+                        };
+                        match covered {
+                            Ok(w) => {
+                                tally.domain += 1;
+                                tally.worst = tally.worst.max(w);
+                            }
+                            Err(why) => failures.push(format!("{at}: {why}")),
+                        }
+                    }
+                    _ => failures.push(format!("{at}: {old:e} -> {new:e} is not `{class}`")),
+                }
+            }
+            // each moved entity: its tolerance covers what it is the tolerance for, and is lower,
+            // or raised past what the old one covered
+            for &(body, is_edge, index, old, new) in &row.entities {
+                let kind = if is_edge { "edge" } else { "vertex" };
+                let at = format!("{unit} {} body {body} {kind} {index}", row.case);
+                assert!(new != old && new > 0.0, "{at}: {old:e} -> {new:e}");
+                let raised = new > old;
+                let b = bodies.get(body).unwrap_or_else(|| panic!("{at}: no body"));
+                if is_edge {
+                    let (e, rec) = b
+                        .edges()
+                        .iter()
+                        .find(|(e, _)| usize::try_from(e.index()) == Ok(index))
+                        .unwrap_or_else(|| panic!("{at}: no edge"));
+                    assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
+                    // (each face of the edge: its trims' bounds, or the curve's distance to its
+                    // surface where the edge holds no trim on it; for a lowered edge a UV line on
+                    // any surface with an exact net is enclosed too, as `fc0000`'s edge 73, whose
+                    // line trim on its B-spline face 27 is enclosed at 1.0e-8 once WR-495's mate
+                    // leaves it there, tangency-labs/solidcraft#21301; a raise keeps the
+                    // plane-only enclosure its `loose-raise` entries are recorded against)
+                    let (bounds, trimless) = edge_bounds(&k, b, e, new, !raised);
+                    tally.trimless += trimless;
+                    let mut bad = Vec::new();
+                    for x in &bounds {
+                        tally.trims += 1;
+                        match x {
+                            Some(x) if *x <= new => tally.worst = tally.worst.max(x / new),
+                            Some(x) => bad.push(format!("B {x:e}")),
+                            None => bad.push("B not enclosed".to_string()),
+                        }
+                    }
+                    let key = (row.case.clone(), body, index.to_string());
+                    if raised {
+                        // a raise: the new tolerance covers every trim, and one trim's bound is
+                        // above the old tolerance (in OPEN only as a `loose-raise`: at least one
+                        // trim enclosed, none past the old tolerance, every one within the new,
+                        // and the new tolerance exactly the entry's, so a raise that moves is
+                        // seen; counted open, never proved)
+                        let past = bounds.iter().flatten().any(|x| *x > old);
+                        if DROP_MARGIN.contains(&(unit, row.case.as_str(), body, index)) {
+                            // a raise by `SetUVTrimCurve`'s margin: every trim within the new
+                            // tolerance, or the edge in OPEN as `UNCOVERED`, every bound past the
+                            // new tolerance past the old as well (the old tolerance did not cover
+                            // it either: #20906); and the raise is the drop's, derived on a copy
+                            // ([`drop_margin_raise`])
+                            if let Err(why) = drop_margin_raise(b, e, old, new) {
+                                failures.push(format!("{at}: drop margin not derived: {why}"));
+                            } else if bad.is_empty() {
                                 assert!(
                                     !open.contains_key(&key),
                                     "{at}: certified, remove it from OPEN"
                                 );
                                 tally.drop_margin += 1;
-                            }
-                            Ok((d, bm))
-                                if open.get(&key).is_some_and(|c| c == "UNCOVERED")
-                                    && bounds
-                                        .iter()
-                                        .all(|x| x.is_some_and(|x| x <= new || x > old)) =>
+                            } else if open.get(&key).is_some_and(|c| c == "UNCOVERED")
+                                && bounds
+                                    .iter()
+                                    .all(|x| x.is_some_and(|x| x <= new || x > old))
                             {
-                                println!("{at}: drop margin d {d:e} B {bm:e} n {new:e}, open");
                                 open_seen.insert(key);
                                 tally.open += 1;
+                            } else {
+                                failures.push(format!("{at}: drop margin: {bad:?}"));
                             }
-                            Ok(_) => failures.push(format!("{at}: drop margin: {bad:?}")),
+                        } else if bad.is_empty() && past {
+                            tally.raised += 1;
+                        } else if open.get(&key).is_some_and(|c| c == "loose-raise")
+                            && !past
+                            && bounds.iter().any(Option::is_some)
+                            && bounds.iter().flatten().all(|x| *x <= new)
+                            && open_tolerance(unit, &key).map(f64::to_bits) == Some(new.to_bits())
+                        {
+                            open_seen.insert(key);
+                            tally.open += 1;
+                        } else {
+                            failures.push(format!(
+                            "{at}: raised {old:e} -> {new:e}: {bad:?}, a bound past old: {past}"
+                        ));
                         }
-                    } else if bad.is_empty() && past {
-                        tally.raised += 1;
-                    } else if open.get(&key).is_some_and(|c| c == "loose-raise")
-                        && !past
-                        && bounds.iter().any(Option::is_some)
-                        && bounds.iter().flatten().all(|x| *x <= new)
-                        && open_tolerance(unit, &key).map(f64::to_bits) == Some(new.to_bits())
-                    {
+                    } else if bad.is_empty() {
+                        tally.edges += 1;
+                        assert!(
+                            !open.contains_key(&key),
+                            "{at}: certified, remove it from OPEN"
+                        );
+                    } else if let Some(class) = open.get(&key) {
+                        // open: the old tolerance does not certify the new geometry either (some
+                        // trim's `B` past it, or not enclosed). Not a claim about the old geometry,
+                        // which this test does not build: the entry is counted open, never proved.
+                        assert!(
+                            class != "rounding-bound",
+                            "{at}: `rounding-bound` is a vertex class"
+                        );
+                        // (`not-enclosed`: only the missing enclosure is open, every enclosed
+                        // bound within the new tolerance)
+                        if class == "not-enclosed"
+                            && !(bounds.iter().any(Option::is_none)
+                                && bounds.iter().flatten().all(|x| *x <= new))
+                        {
+                            failures.push(format!(
+                                "{at}: {old:e} -> {new:e}: not `not-enclosed`: {bad:?}"
+                            ));
+                        }
+                        if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
+                            failures.push(format!(
+                                "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
+                             the new: {bad:?}"
+                            ));
+                        }
                         open_seen.insert(key);
                         tally.open += 1;
                     } else {
-                        failures.push(format!(
-                            "{at}: raised {old:e} -> {new:e}: {bad:?}, a bound past old: {past}"
-                        ));
+                        failures.push(format!("{at}: {old:e} -> {new:e}: {bad:?}"));
                     }
-                } else if bad.is_empty() {
-                    tally.edges += 1;
-                    assert!(
-                        !open.contains_key(&key),
-                        "{at}: certified, remove it from OPEN"
-                    );
-                } else if let Some(class) = open.get(&key) {
-                    // open: the old tolerance does not certify the new geometry either (some
-                    // trim's `B` past it, or not enclosed). Not a claim about the old geometry,
-                    // which this test does not build: the entry is counted open, never proved.
-                    assert!(
-                        class != "rounding-bound",
-                        "{at}: `rounding-bound` is a vertex class"
-                    );
-                    if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
-                        failures.push(format!(
-                            "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \
-                             the new: {bad:?}"
-                        ));
-                    }
-                    open_seen.insert(key);
-                    tally.open += 1;
                 } else {
-                    failures.push(format!("{at}: {old:e} -> {new:e}: {bad:?}"));
-                }
-            } else {
-                let (v, rec) = b
-                    .vertices()
-                    .iter()
-                    .find(|(v, _)| usize::try_from(v.index()) == Ok(index))
-                    .unwrap_or_else(|| panic!("{at}: no vertex"));
-                assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
-                let key = (row.case.clone(), body, format!("v{index}"));
-                // (a vertex raised to exactly the new tolerance of an edge of its that this row
-                // raises: `edge::set_tolerance` keeps a vertex's tolerance at least its edges',
-                // so it follows that edge, whose own raise is certified above or fails; the
-                // raise is then the edge's, not the vertex's, and the new tolerance must still
-                // cover the ends of every edge of the vertex)
-                let follows_a_raised_edge = || {
-                    solidcore::topology::vertex::edges(b, v, None)
-                        .expect("edges")
-                        .into_iter()
-                        .any(|e| {
-                            let tol = b.edge(e).expect("edge").tolerance;
-                            tol.to_bits() == new.to_bits()
-                                && row.entities.iter().any(|&(eb, ie, ei, eo, en)| {
-                                    eb == body
-                                        && ie
-                                        && usize::try_from(e.index()) == Ok(ei)
-                                        && en > eo
-                                })
-                        })
-                };
-                let follows = raised && follows_a_raised_edge();
-                if follows && vertex_covers_its_ends(&k, b, v, new) {
-                    tally.vertices += 1;
-                    assert!(
-                        !open.contains_key(&key),
-                        "{at}: certified, remove it from OPEN"
-                    );
-                } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
-                    failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
-                } else if vertex_covers_its_ends(&k, b, v, new) {
-                    tally.vertices += 1;
-                    assert!(
-                        !open.contains_key(&key),
-                        "{at}: certified, remove it from OPEN"
-                    );
-                } else if open.contains_key(&key) && !vertex_covers_its_ends(&k, b, v, old) {
-                    // open: neither tolerance covers the new edge ends (the old geometry is
-                    // not built here: counted open, never proved)
-                    if open.get(&key).is_some_and(|c| c == "rounding-bound") {
+                    let (v, rec) = b
+                        .vertices()
+                        .iter()
+                        .find(|(v, _)| usize::try_from(v.index()) == Ok(index))
+                        .unwrap_or_else(|| panic!("{at}: no vertex"));
+                    assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
+                    let key = (row.case.clone(), body, format!("v{index}"));
+                    // (a vertex raised to exactly the new tolerance of an edge of its that this row
+                    // raises: `edge::set_tolerance` keeps a vertex's tolerance at least its edges',
+                    // so it follows that edge, whose own raise is certified above or fails; the
+                    // raise is then the edge's, not the vertex's, and the new tolerance must still
+                    // cover the ends of every edge of the vertex)
+                    let follows_a_raised_edge = || {
+                        solidcore::topology::vertex::edges(b, v, None)
+                            .expect("edges")
+                            .into_iter()
+                            .any(|e| {
+                                let tol = b.edge(e).expect("edge").tolerance;
+                                tol.to_bits() == new.to_bits()
+                                    && row.entities.iter().any(|&(eb, ie, ei, eo, en)| {
+                                        eb == body
+                                            && ie
+                                            && usize::try_from(e.index()) == Ok(ei)
+                                            && en > eo
+                                    })
+                            })
+                    };
+                    let follows = raised && follows_a_raised_edge();
+                    if follows && vertex_covers_its_ends(&k, b, v, new) {
+                        tally.vertices += 1;
                         assert!(
-                            all_far(&[rec.point]),
-                            "{at}: `rounding-bound` near the origin"
+                            !open.contains_key(&key),
+                            "{at}: certified, remove it from OPEN"
                         );
+                    } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
+                        // (upstream's margin: a vertex the UV trim gaps raise to twice its gap
+                        // to an end of its edges, which the old tolerance covered already; the
+                        // new one must still cover every end)
+                        if VERTEX_MARGIN.iter().any(|m| m.0 == unit)
+                            && vertex_is_twice_its_end_gap(&k, b, v, new)
+                            && vertex_covers_its_ends(&k, b, v, new)
+                        {
+                            tally.vertex_margin += 1;
+                        } else {
+                            failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                        }
+                    } else if vertex_covers_its_ends(&k, b, v, new) {
+                        tally.vertices += 1;
+                        assert!(
+                            !open.contains_key(&key),
+                            "{at}: certified, remove it from OPEN"
+                        );
+                    } else if open.contains_key(&key) && !vertex_covers_its_ends(&k, b, v, old) {
+                        // open: neither tolerance covers the new edge ends (the old geometry is
+                        // not built here: counted open, never proved)
+                        if open.get(&key).is_some_and(|c| c == "rounding-bound") {
+                            assert!(
+                                all_far(&[rec.point]),
+                                "{at}: `rounding-bound` near the origin"
+                            );
+                        }
+                        open_seen.insert(key);
+                        tally.open += 1;
+                    } else {
+                        failures.push(format!("{at}: {old:e} -> {new:e}: an edge end is farther"));
                     }
-                    open_seen.insert(key);
-                    tally.open += 1;
-                } else {
-                    failures.push(format!("{at}: {old:e} -> {new:e}: an edge end is farther"));
                 }
             }
+        }));
+        if let Err(p) = checked {
+            let why = p
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a non-string panic".into());
+            failures.push(format!("{unit} {}: {why}", row.case));
         }
     }
     println!("{unit}: {tally:?}");
-    assert_eq!(
-        open_seen,
-        open.keys().cloned().collect(),
-        "{unit}: OPEN entries not reached"
-    );
-    assert_eq!(
-        other_seen,
-        other.keys().cloned().collect(),
-        "{unit}: OTHER entries not reached"
-    );
+    let margin = VERTEX_MARGIN
+        .iter()
+        .find(|m| m.0 == unit)
+        .map_or(0, |m| m.1);
+    if tally.vertex_margin != margin {
+        failures.push(format!(
+            "{unit}: {} vertices at upstream's margin, VERTEX_MARGIN pins {margin}",
+            tally.vertex_margin
+        ));
+    }
+    let open_keys: std::collections::BTreeSet<_> = open.keys().cloned().collect();
+    if open_seen != open_keys {
+        failures.push(format!(
+            "{unit}: OPEN entries not reached (or reached but not listed): {:?}",
+            open_keys
+                .symmetric_difference(&open_seen)
+                .collect::<Vec<_>>()
+        ));
+    }
+    let other_keys: std::collections::BTreeSet<_> = other.keys().cloned().collect();
+    if other_seen != other_keys {
+        failures.push(format!(
+            "{unit}: OTHER entries not reached (or reached but not listed): {:?}",
+            other_keys
+                .symmetric_difference(&other_seen)
+                .collect::<Vec<_>>()
+        ));
+    }
     assert!(
         failures.is_empty(),
         "{unit}: {} not certified:\n{}",
@@ -1491,446 +1587,6 @@ certified_units! {
     brep_p4: "topology.brep_p4",
     edgeuse_p3: "topology.edgeuse_p3",
     face_p3: "topology.face_p3",
-}
-
-/// The digest of each [`ROWS`] unit's expected file on main, one `unit<TAB>digest` (hex) per
-/// line after the `#` lines that name main's commit: [`expected_digest`] of the file with
-/// nothing put back, written by [`main_expected_digests`] from main's files, in which the line
-/// of each [`ROWS`] case is the one main's kernel writes for it (the line main's file keeps can
-/// lag main's own run within the golden compare's tolerance, which the compare accepts, and a
-/// moved line is written whole from the run; the regen blesses those cases again on a tree whose
-/// kernel is main's).
-const MAIN: &str = include_str!("trim_tolerance_main.tsv");
-
-/// A later golden change independent of the tolerance changes in [`ROWS`]. Both hashes
-/// are FNV-1a of the whole canonical row, including its newline, as in [`expected_digest`].
-struct GoldenChange {
-    case: &'static str,
-    old_hash: u64,
-    new_hash: u64,
-    reason: &'static str,
-}
-
-/// The complete diff of `blend.fillet_executive_p3` from main at this PR's merge.
-/// These rows already moved in b318df14c; the merged tolerance change moved none of them,
-/// and none belongs to [`ROWS`]. The vertex crossing correction itself moves no golden.
-/// Derivation: `plan/findings/blend.fillet_solver_p5--issue-17016-non-tangent-rollover.md`,
-/// "Three goldens rows that move, and why". No topology or status changes in these rows.
-/// #18294 moves the two setbacks rows again (each reason names the change and the row before
-/// it); its other seven `issue-880-*` rows are in [`MAIN`]'s digest.
-const FILLET_UV_CHANGES: &[GoldenChange] = &[
-    GoldenChange {
-        case: "issue-880-half-arc-rim-0-setbacks-1-1",
-        old_hash: 0x0c84b1bb5aabdeb6,
-        new_hash: 0xff20292224de653a,
-        reason: "Keep the domain-proved oblique UV jets on the procedural surface: the old \
-                 boundary fix-up flattened slopes of 5.3e-5 to 8.5e-4 and moved control \
-                 polygons by up to 2.2e-5 in UV without a bound on the procedural surface. \
-                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
-                 edge, so two vertex and one edge tolerance fall from 6.82e-5 to 4e-5 and \
-                 three of the ten vertices are listed in another order (row was 064c8b893b765eaf).",
-    },
-    GoldenChange {
-        case: "issue-880-half-arc-rim-0-setbacks-1-2",
-        old_hash: 0x0c29e482175fe1e2,
-        new_hash: 0x338bc7a48039bef7,
-        reason: "Keep the domain-proved oblique UV jets on the procedural surface for the \
-                 unequal setbacks too; the old boundary flattening and polygon moves have \
-                 no bound on that surface, and preserving the jets moves the mass integral. \
-                 Then #18294: the glue keeps a trim curve only when it spans the surviving \
-                 edge, so two vertex and one edge tolerance fall from 7.47e-5 to 4.15e-5 \
-                 (row was 94a9c0596e8f0db7).",
-    },
-    GoldenChange {
-        case: "source-file-nurb_box-edge0",
-        old_hash: 0xfa66dbe7062ca1e2,
-        new_hash: 0xdcf4807bfc81eec3,
-        reason: "Preserve the procedural drop's transverse UV tangent (at most 7e-13) \
-                 instead of zeroing it in four spans. The polygon stays unchanged; the \
-                 resulting mass estimate moves far below its requested 1e-4 accuracy.",
-    },
-];
-
-/// The three original whole rows from origin/main (2f632eafb), also unchanged by #18166.
-/// Putting these back keeps [`MAIN`]'s original digest and every tolerance proof intact.
-const FILLET_UV_MAIN: &str = include_str!("trim_tolerance_fillet_uv_main.jsonl");
-
-/// Reverse the listed changes, rejecting a missing, duplicate, overlapping or
-/// differently changed row. Every other line is retained for the whole-file digest.
-fn put_back_independent_changes(
-    text: &str,
-    rows: &[Row],
-    changes: &[GoldenChange],
-    originals: &str,
-) -> Result<String, String> {
-    use crate::json::to_canonical_string;
-    let mut original = std::collections::BTreeMap::new();
-    for line in originals.lines() {
-        let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-        let case = v["case"].as_str().ok_or("an original row has no case")?;
-        let change = changes
-            .iter()
-            .find(|r| r.case == case)
-            .ok_or_else(|| format!("{case}: unlisted original row"))?;
-        if change.reason.trim().is_empty() || rows.iter().any(|r| r.case == case) {
-            return Err(format!(
-                "{case}: missing reason or overlap with tolerance rows"
-            ));
-        }
-        let got = crate::rng::fnv1a64(&to_canonical_string(&v));
-        if got != change.old_hash {
-            return Err(format!(
-                "{case}: original {got:016x}, row {:016x}",
-                change.old_hash
-            ));
-        }
-        if original.insert(case.to_string(), line).is_some() {
-            return Err(format!("{case}: duplicate original row"));
-        }
-    }
-    if original.len() != changes.len() {
-        return Err("the independent changes and their original rows differ".into());
-    }
-    let mut out = String::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let v: serde_json::Value = serde_json::from_str(line).map_err(|e| e.to_string())?;
-        let change = v["case"]
-            .as_str()
-            .and_then(|case| changes.iter().find(|r| r.case == case));
-        let line = if let Some(change) = change {
-            if !seen.insert(change.case) {
-                return Err(format!("{}: duplicate changed row", change.case));
-            }
-            let got = crate::rng::fnv1a64(&to_canonical_string(&v));
-            if got != change.new_hash {
-                return Err(format!(
-                    "{}: changed {got:016x}, row {:016x}",
-                    change.case, change.new_hash
-                ));
-            }
-            original
-                .remove(change.case)
-                .ok_or_else(|| format!("{}: no original row", change.case))?
-        } else {
-            line
-        };
-        out.push_str(line);
-        out.push('\n');
-    }
-    if let Some(change) = changes.iter().find(|r| !seen.contains(r.case)) {
-        return Err(format!("{}: missing changed row", change.case));
-    }
-    Ok(out)
-}
-
-/// Whole-row pins reject an unrecorded field change, a missing or duplicate case, and a
-/// later change that would bypass one of the tolerance proofs.
-#[test]
-fn independent_golden_changes_cannot_hide_other_changes_or_tolerance_rows() {
-    for (text, changes, originals) in [
-        (
-            include_str!("../../expected/blend.fillet_executive_p3.jsonl"),
-            FILLET_UV_CHANGES,
-            FILLET_UV_MAIN,
-        ),
-        (
-            include_str!("../../expected/heal.gap.jsonl"),
-            GAP_CHANGES,
-            GAP_MAIN,
-        ),
-        (
-            include_str!("../../expected/heal.face_props.jsonl"),
-            P6_HEAL_CHANGES,
-            P6_HEAL_MAIN,
-        ),
-        (
-            include_str!("../../expected/intersect.curve_class_p5.jsonl"),
-            P6_CURVE_CLASS_CHANGES,
-            P6_CURVE_CLASS_MAIN,
-        ),
-    ] {
-        let put_back =
-            |text: &str, rows: &[Row]| put_back_independent_changes(text, rows, changes, originals);
-        let lines: Vec<&str> = text
-            .lines()
-            .filter(|line| {
-                let v: serde_json::Value = serde_json::from_str(line).expect("a golden row");
-                changes.iter().any(|r| v["case"] == r.case)
-            })
-            .collect();
-        let changed = lines.join("\n") + "\n";
-        assert_eq!(
-            put_back(&changed, &[]).expect("the documented changes"),
-            originals
-        );
-        let first = lines[0];
-        let missing = lines[1..].join("\n");
-        assert!(put_back(&missing, &[]).is_err());
-        let duplicate = format!("{changed}{first}\n");
-        assert!(put_back(&duplicate, &[]).is_err());
-        let mut v: serde_json::Value = serde_json::from_str(first).expect("a golden row");
-        v["error"] = serde_json::json!("an unrecorded change");
-        let corrupted = changed.replacen(first, &serde_json::to_string(&v).expect("a row"), 1);
-        assert!(put_back(&corrupted, &[]).is_err());
-        let overlap = Row {
-            case: changes[0].case.to_string(),
-            moved: Vec::new(),
-            entities: Vec::new(),
-        };
-        assert!(put_back(&changed, &[overlap]).is_err());
-    }
-}
-
-/// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
-/// parsed and written again, so the digest is of the values, not of their spelling), with
-/// each moved value of `rows` (`key[index]` of its case, bit for bit its `n`) put back to its
-/// `o`. An `Err` names a moved value the file does not hold as the row has it, or a row the
-/// file does not have.
-///
-/// A key the file stores in blocks (`{"n", "blocks"}`, [`crate::golden::encode`]) holds no
-/// single value to put back: its case is run again (`replay`), its output must encode to the
-/// file's line bit for bit, and the line is that output encoded with the moved values put
-/// back.
-fn expected_digest(
-    text: &str,
-    rows: &[Row],
-    replay: &mut dyn FnMut(&str) -> Result<crate::Output, String>,
-) -> Result<u64, String> {
-    use crate::json::{num, num_of, to_canonical_string};
-    let mut canonical = String::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for line in text.lines().filter(|l| !l.trim().is_empty()) {
-        let mut v: serde_json::Value =
-            serde_json::from_str(line).map_err(|e| format!("a line: {e}"))?;
-        let case = v["case"].as_str().map(str::to_string);
-        if let Some(row) = case.and_then(|c| rows.iter().find(|r| r.case == c)) {
-            seen.insert(row.case.clone());
-            let blocked = row.moved.iter().any(|(key, ..)| {
-                v["values"]
-                    .get(key)
-                    .is_some_and(|a| a.get("blocks").is_some())
-            });
-            if blocked {
-                let mut out = replay(&row.case)?;
-                let run = to_canonical_string(&crate::golden::encode(&row.case, &out));
-                if run != to_canonical_string(&v) {
-                    return Err(format!("{}: the run is not the file's line", row.case));
-                }
-                for (key, index, old, new) in &row.moved {
-                    let at = format!("{} {key}[{index}]", row.case);
-                    let slot = out
-                        .values
-                        .get_mut(key)
-                        .and_then(|a| a.get_mut(*index))
-                        .ok_or_else(|| format!("{at}: not in the run"))?;
-                    if slot.to_bits() != new.to_bits() {
-                        return Err(format!("{at}: run {slot:e}, row {new:e}"));
-                    }
-                    *slot = *old;
-                }
-                v = crate::golden::encode(&row.case, &out);
-            } else {
-                for (key, index, old, new) in &row.moved {
-                    let at = format!("{} {key}[{index}]", row.case);
-                    let slot = v["values"]
-                        .get_mut(key)
-                        .and_then(|a| a.get_mut(*index))
-                        .ok_or_else(|| format!("{at}: not in the expected file"))?;
-                    match num_of(slot) {
-                        Some(x) if x.to_bits() == new.to_bits() => *slot = num(*old),
-                        x => return Err(format!("{at}: expected {x:?}, row {new:e}")),
-                    }
-                }
-            }
-        }
-        canonical.push_str(&to_canonical_string(&v));
-    }
-    if let Some(row) = rows.iter().find(|r| !seen.contains(&r.case)) {
-        return Err(format!("{}: not in the expected file", row.case));
-    }
-    Ok(crate::rng::fnv1a64(&canonical))
-}
-
-/// The units of [`ROWS`].
-fn row_units() -> std::collections::BTreeSet<String> {
-    ROWS.lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("a row");
-            v[0].as_str().expect("unit").to_string()
-        })
-        .collect()
-}
-
-/// The ledger is the whole golden diff from main: every expected file, with each moved value
-/// of [`ROWS`] put back to its old value, is main's file ([`MAIN`] holds the digest of every
-/// unit's expected file on main, each row case's line as main's kernel writes it). So no unit,
-/// case, moved value or other change is left out of the rows, and each row's new value is the
-/// expected one. The ledger restores the original lines of [`FILLET_UV_CHANGES`] and
-/// [`GAP_CHANGES`], [`P6_HEAL_CHANGES`] and [`P6_CURVE_CLASS_CHANGES`], and main's lines of WR-587's loop normal rows (replayed with main's
-/// loop normal, [`crate::wr587_replay::put_back_main_lines`]), before it reverses the
-/// tolerance changes.
-#[test]
-fn the_rows_are_the_whole_golden_diff_from_main() {
-    let main: std::collections::BTreeMap<String, u64> = MAIN
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
-        .map(|l| {
-            let (unit, hex) = l.split_once('\t').expect("unit and digest");
-            (
-                unit.to_string(),
-                u64::from_str_radix(hex, 16).expect("a hex digest"),
-            )
-        })
-        .collect();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("expected");
-    let units = expected_units(&dir);
-    assert_eq!(
-        main.keys()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>(),
-        units,
-        "the expected units here and on main"
-    );
-    let missing: Vec<_> = row_units()
-        .into_iter()
-        .filter(|u| !units.contains(u))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "ROWS units with no expected file: {missing:?}"
-    );
-    let mut left_out: Vec<(String, String)> = Vec::new();
-    let mut moved = Vec::new();
-    for (unit, want) in &main {
-        let text = std::fs::read_to_string(dir.join(format!("{unit}.jsonl")))
-            .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        // (a known-failing case has no line here or on main, so it is outside the golden diff;
-        // its rows are certified by the unit's own test all the same. Each one left out must be
-        // known-failing on main too: [`LEDGER_KNOWN_FAILING`])
-        let known = crate::golden::known_failing(&dir, unit).unwrap_or_else(|e| panic!("{e}"));
-        let (out, rows): (Vec<Row>, Vec<Row>) = rows(unit)
-            .into_iter()
-            .partition(|r| known.contains_key(&r.case));
-        left_out.extend(out.into_iter().map(|r| (unit.clone(), r.case)));
-        let text = match unit.as_str() {
-            "blend.fillet_executive_p3" => {
-                put_back_independent_changes(&text, &rows, FILLET_UV_CHANGES, FILLET_UV_MAIN)
-            }
-            "heal.gap" => put_back_independent_changes(&text, &rows, GAP_CHANGES, GAP_MAIN),
-            "heal.face_props" => {
-                put_back_independent_changes(&text, &rows, P6_HEAL_CHANGES, P6_HEAL_MAIN)
-            }
-            "intersect.curve_class_p5" => put_back_independent_changes(
-                &text,
-                &rows,
-                P6_CURVE_CLASS_CHANGES,
-                P6_CURVE_CLASS_MAIN,
-            ),
-            _ => Ok(text),
-        }
-        .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        // (the rows the WR-450 retirement moved: main's lines, [`crate::wr450_rows::DATA`])
-        let text = crate::wr450_rows::with_mains_lines(unit, &text);
-        // and WR-587's loop normal rows (#21291), each replayed to main's line
-        let keep: Vec<&str> = rows.iter().map(|r| r.case.as_str()).collect();
-        let text = crate::wr587_replay::put_back_main_lines(unit, &text, &keep)
-            .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        let mut replay = |case: &str| replay_case(unit, case);
-        let got =
-            expected_digest(&text, &rows, &mut replay).unwrap_or_else(|e| panic!("{unit}: {e}"));
-        if got != *want {
-            moved.push(format!("{unit}: {got:016x}, main {want:016x}"));
-        }
-    }
-    assert!(moved.is_empty(), "{}", moved.join("\n"));
-    let pinned: Vec<(String, String)> = LEDGER_KNOWN_FAILING
-        .iter()
-        .map(|&(u, c)| (u.to_string(), c.to_string()))
-        .collect();
-    assert_eq!(
-        left_out, pinned,
-        "the known-failing ROWS cases the ledger leaves out (each must be known-failing on main)"
-    );
-}
-
-/// The [`ROWS`] cases the ledger leaves out as known-failing (`expected/known_failing.json`),
-/// each known-failing on main as well (main's list at [`MAIN`]'s commit, checked when the
-/// digests were written): unit, case, in the ledger's order. Pinned, so a case that becomes
-/// known-failing on this branch only is not dropped from the diff unseen.
-const LEDGER_KNOWN_FAILING: &[(&str, &str)] = &[
-    ("topology.brep_local_operation", "gen0014"),
-    ("topology.brep_local_operation", "gen0019"),
-    ("topology.brep_mirror", "mat0076"),
-];
-
-/// The Rust output of `case` of `unit`, run as [`certify`] runs it.
-fn replay_case(unit: &str, case: &str) -> Result<crate::Output, String> {
-    let runner = crate::registry()
-        .into_iter()
-        .find(|u| u.id() == unit)
-        .ok_or_else(|| format!("no unit {unit}"))?;
-    let ctx = CaseContext {
-        root: repo_root(),
-        seeds: 16,
-    };
-    let cases = runner.cases(&ctx).map_err(|e| format!("{unit}: {e:?}"))?;
-    let c = cases
-        .iter()
-        .find(|c| c.name == case)
-        .ok_or_else(|| format!("{unit}: no case {case}"))?;
-    crate::wr450_rows::with_mains_choices_for(unit, case, || runner.run_rust(c))
-        .map_err(|e| format!("{unit} {case}: {e:?}"))
-}
-
-/// The units of the `*.jsonl` expected files in `dir`.
-fn expected_units(dir: &std::path::Path) -> std::collections::BTreeSet<String> {
-    std::fs::read_dir(dir)
-        .expect("the expected directory")
-        .map(|e| e.expect("an entry").path())
-        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
-        .map(|p| {
-            p.file_stem()
-                .and_then(|s| s.to_str())
-                .expect("a unit name")
-                .to_string()
-        })
-        .collect()
-}
-
-/// Writes [`MAIN`] from main's expected files in `MAIN_EXPECTED_DIR` (every unit, each
-/// [`ROWS`] case's line blessed again by main's kernel) to `MAIN_EXPECTED_OUT`, after the line
-/// `# main <MAIN_SHA>`.
-///
-/// To make that directory: in a worktree at main's commit, check out main's
-/// `crates/goldens/expected`, delete from it the line of every [`ROWS`] case, and bless those
-/// units again (`cargo run --profile goldens -p goldens -- --unit <unit> ... --goldens
-/// --bless`), which writes each deleted line from main's kernel and leaves every other line as
-/// main's file has it; then run this test (`MAIN_EXPECTED_DIR=<that expected dir>
-/// MAIN_SHA=<main's commit> MAIN_EXPECTED_OUT=<file> cargo test --profile goldens -p goldens
-/// --lib certify::trim_tolerance::main_expected_digests -- --ignored --exact`) and copy the
-/// file to `trim_tolerance_main.tsv`.
-#[test]
-#[ignore = "writes the main digests of the ledger; run on main's expected files"]
-fn main_expected_digests() {
-    use std::fmt::Write as _;
-    let dir = std::env::var("MAIN_EXPECTED_DIR").expect("MAIN_EXPECTED_DIR");
-    let sha = std::env::var("MAIN_SHA").expect("MAIN_SHA");
-    let mut out = format!("# main {sha}\n");
-    for unit in expected_units(std::path::Path::new(&dir)) {
-        let text =
-            std::fs::read_to_string(std::path::Path::new(&dir).join(format!("{unit}.jsonl")))
-                .unwrap_or_else(|e| panic!("{unit}: {e}"));
-        let mut replay = |case: &str| Err(format!("{case}: main's file has no rows"));
-        let digest = expected_digest(&text, &[], &mut replay).expect("main's file");
-        writeln!(out, "{unit}\t{digest:016x}").expect("written");
-    }
-    std::fs::write(
-        std::env::var("MAIN_EXPECTED_OUT").expect("MAIN_EXPECTED_OUT"),
-        out,
-    )
-    .expect("written");
 }
 
 /// An edge that holds a UV trim on one of its faces only is bounded on the other against

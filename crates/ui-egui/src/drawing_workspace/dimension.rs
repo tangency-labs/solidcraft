@@ -44,7 +44,59 @@ pub(super) struct Draft {
     revision: u64,
     view: u64,
     picks: Vec<Picked>,
+    /// A straight edge picked alone makes the body's overall width or height, rounded corners
+    /// included, not the edge's own length: set by a double-click on the edge or the panel's option.
+    overall: bool,
     preview: Option<Preview>,
+}
+
+/// What the pointer did on the sheet this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Clicks {
+    /// A click that isn't the second of a double-click.
+    pub clicked: bool,
+    /// A double-click.
+    pub double: bool,
+}
+
+impl Clicks {
+    /// The frame's clicks from egui's two answers. A user's double-click is two frames: the first
+    /// click only `clicked`, the second `clicked` and `double_clicked` both, which is the
+    /// double-click alone, not another click for the tool to place something with.
+    pub(crate) fn of_frame(clicked: bool, double_clicked: bool) -> Clicks {
+        Clicks { clicked: clicked && !double_clicked, double: double_clicked }
+    }
+
+    /// Whether this frame offers the overall size option (a hint at the panel's checkbox): a
+    /// double-click, on a draft that offers it, on the edge it picked (`on_picked_edge` is only asked
+    /// when the rest holds). It sets nothing.
+    pub(crate) fn offers_overall(self, offers: bool, on_picked_edge: impl FnOnce() -> bool) -> bool {
+        self.double && offers && on_picked_edge()
+    }
+}
+
+impl Draft {
+    /// Whether the picks are one straight edge that runs across or up the sheet, the only thing an
+    /// overall size is asked of: a slanted edge is not offered it, since it would measure the edge.
+    fn offers_overall(&self) -> bool {
+        matches!(self.picks.as_slice(), [one] if matches!(one.shape, Shape::Straight([a, b]) if overall_direction(a, b).is_some()))
+    }
+
+    /// Asks for the body's overall size (or the edge's own length) when [`Draft::offers_overall`].
+    fn set_overall(&mut self, on: bool) {
+        if self.offers_overall() {
+            self.overall = on;
+            self.preview = None;
+        }
+    }
+}
+
+/// Sets the open draft's overall size option, as the panel's checkbox does. Whether the draft offers it.
+pub(crate) fn set_overall(app: &mut SolveApp, on: bool) -> bool {
+    app.drawing_workspace.dimension.as_mut().is_some_and(|draft| {
+        draft.set_overall(on);
+        draft.offers_overall()
+    })
 }
 
 /// What a click would pick where the pointer is, looked up once for each place the pointer rests:
@@ -93,6 +145,9 @@ struct Preview {
     at: Vec2,
     /// The dimension alone on its sheet, as the sheet will draw it once placed.
     marks: Option<crate::drawing_sheet_page::Marks>,
+    /// Why the engine won't place it here, when it won't (#20181): the panel says so before the
+    /// click, where the preview would otherwise just be missing.
+    refused: Option<String>,
 }
 
 /// What a stroke drawn on paper is: one line (its pieces on one line, as hidden-line removal
@@ -208,7 +263,7 @@ pub(crate) fn kind_for(app: &SolveApp, picks: &[Picked], at: Vec2) -> Option<Val
         [one] => match one.shape {
             Shape::Straight([a, b]) => json!({"length": {"edge": one.edge(), "direction": axis_name(linear_axis(a, b, at))}}),
             Shape::Round(_) => json!({"radial": {"edge": one.edge()}}),
-            Shape::Other => json!({"length": {"edge": one.edge()}}),
+            Shape::Other => return None,
         },
         [first, second] => match (first.shape, second.shape) {
             (Shape::Straight(a), Shape::Straight(b)) => match smaller_angle(a, b) {
@@ -239,15 +294,42 @@ pub(crate) fn kind_for(app: &SolveApp, picks: &[Picked], at: Vec2) -> Option<Val
 
 pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let picked = app.drawing_workspace.dimension.as_ref().is_some_and(|draft| !draft.picks.is_empty());
-    let key = if picked { "ui.drawing_dimension_tool.place" } else { "ui.drawing_dimension_tool.pick" };
+    let refused = refusal(app).map(str::to_owned);
+    let key = match (picked, &refused) {
+        (true, Some(_)) => "ui.drawing_dimension_tool.refused",
+        (true, None) => "ui.drawing_dimension_tool.place",
+        (false, _) => "ui.drawing_dimension_tool.pick",
+    };
+    let text = match &refused {
+        Some(reason) => solidcraft_ui_text::format(key, &[("reason", reason)]),
+        None => solidcraft_ui_text::tr(key).to_owned(),
+    };
+    // The option is for a lone straight edge: what it picks stays the edge's own length without it.
+    let straight = app.drawing_workspace.dimension.as_ref().is_some_and(Draft::offers_overall);
+    let mut overall = app.drawing_workspace.dimension.as_ref().is_some_and(|draft| draft.overall);
     let close = super::inset(ui, |ui| {
-        ui_kit::text(ui, solidcraft_ui_text::tr(key), ui_kit::Text::Note(key));
+        ui_kit::text(ui, &text, ui_kit::Text::Note(key));
+        if straight && ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.drawing_dimension_tool.overall"), &mut overall).changed() {
+            set_overall(app, overall);
+        }
         ui.separator();
         ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), Button::Normal).clicked()
     });
     if close {
         close_panel(app);
     }
+}
+
+/// Why the dimension can't go where the pointer is, as the engine says, while it can't (#20181).
+pub(crate) fn refusal(app: &SolveApp) -> Option<&str> {
+    app.drawing_workspace.dimension.as_ref()?.preview.as_ref()?.refused.as_deref()
+}
+
+/// The engine's reason without the command's name in front, in the user's language where known.
+fn reason(error: &solidcraft_engine::EngineError) -> String {
+    let text = error.to_string();
+    let prefix = format!("invalid parameters for `{COMMAND}`: ");
+    crate::i18n::tr_diagnostic(text.strip_prefix(&prefix).unwrap_or(&text))
 }
 
 /// Whether the tool has picked something for the dimension it is making.
@@ -270,10 +352,37 @@ fn pick(app: &mut SolveApp, sheet: u64, point: Vec2, band: f64) -> Result<Option
     Ok(Some((hit.view, Picked { body: hit.body.body, of, path: hit.body.path, shape: shape_of(&hit.path), stroke: hit.path })))
 }
 
+/// The overall size of the body of a lone straight edge, when the draft asks for it: along the edge,
+/// as the view shows it, so the end edge of a plate with rounded corners gives the plate's width. An
+/// edge that is neither across nor up the sheet (slanted) has none.
+fn overall_kind(draft: &Draft) -> Option<Value> {
+    let [one] = draft.picks.as_slice() else { return None };
+    let Shape::Straight([a, b]) = one.shape else { return None };
+    if !draft.overall {
+        return None;
+    }
+    let direction = overall_direction(a, b)?;
+    Some(json!({"overall": {"body": one.body, "path": one.path, "direction": direction}}))
+}
+
+/// Which way an overall size along the straight edge from `a` to `b` on paper reads: `horizontal` for an
+/// edge across the sheet, `vertical` for one up it, none for a slanted one. The same tolerance as a
+/// picked edge's straightness ([`PARALLEL`]).
+pub(crate) fn overall_direction(a: Vec2, b: Vec2) -> Option<&'static str> {
+    let run = b - a;
+    if run.y.abs() <= PARALLEL * run.x.abs().max(1.0) {
+        Some("horizontal")
+    } else if run.x.abs() <= PARALLEL * run.y.abs().max(1.0) {
+        Some("vertical")
+    } else {
+        None
+    }
+}
+
 /// What `drawing.dimension.add` takes for the picks with the text at `at`, or `None` when they make
 /// no dimension.
 fn params_for(app: &SolveApp, draft: &Draft, at: Vec2) -> Option<Value> {
-    let kind = kind_for(app, &draft.picks, at)?;
+    let kind = overall_kind(draft).or_else(|| kind_for(app, &draft.picks, at))?;
     // A radius's text goes where the pointer is, its leader turned to it; the others' line or arc
     // passes through the pointer, their text on it, as a sketch dimension's line does.
     let drag = if kind.get("radial").is_some() { "text_to_mm" } else { "line_through_mm" };
@@ -286,8 +395,10 @@ fn params_for(app: &SolveApp, draft: &Draft, at: Vec2) -> Option<Value> {
 /// group from the same layout, at its paper size, so the preview is what the click places.
 fn preview(app: &mut SolveApp, draft: &Draft, at: Vec2) -> Option<Preview> {
     let params = params_for(app, draft, at)?;
-    let scene = solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params).ok();
-    Some(Preview { at, marks: scene.map(|scene| crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)) })
+    Some(match solidcraft_engine::cmd::drawing_dimension_preview(&app.session, &params) {
+        Ok(scene) => Preview { at, marks: Some(crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM)), refused: None },
+        Err(error) => Preview { at, marks: None, refused: Some(reason(&error)) },
+    })
 }
 
 /// Paints a picked edge's stroke, so the picks show.
@@ -322,9 +433,21 @@ fn hovered(app: &mut SolveApp, at: OnScreen, sheet: u64, point: Vec2, band: f64,
     hit
 }
 
-pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, sheet: u64, point: Vec2, band: f64, clicked: bool) {
+pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, sheet: u64, point: Vec2, band: f64, clicks: Clicks) {
+    let Clicks { clicked, .. } = clicks;
     let revision = app.session.revision;
     let mut draft = app.drawing_workspace.dimension.take().filter(|draft| draft.sheet == sheet && draft.revision == revision);
+    // A double-click on the lone picked straight edge only offers the overall size, pointing to the
+    // panel's option: placing stays what it was, the edge's own length, until the option is ticked.
+    if let Some(d) = &draft
+        && let [only] = d.picks.as_slice()
+        && clicks.offers_overall(
+            d.offers_overall(),
+            || matches!(pick(app, sheet, point, band), Ok(Some((view, ref hit))) if view == d.view && hit.same(only)),
+        )
+    {
+        app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.overall_hint"), false);
+    }
     if clicked {
         let more = draft.as_ref().is_none_or(|draft| draft.picks.len() < 2);
         let hit = if more {
@@ -338,22 +461,38 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen
         } else {
             None
         };
+        // A curve that is neither a line nor a face-on circle on paper (a fillet junction, a
+        // tilted circle) has no dimension the engine measures: say so rather than pick it.
+        let hit = match hit {
+            Some((_, picked)) if picked.shape == Shape::Other && !picked.is_outline() => {
+                app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.curve"), true);
+                None
+            }
+            hit => hit,
+        };
         match (&mut draft, hit) {
             // A first pick, or another edge of the same view as the first.
-            (None, Some((view, picked))) => draft = Some(Draft { sheet, revision, view, picks: vec![picked], preview: None }),
+            (None, Some((view, picked))) => draft = Some(Draft { sheet, revision, view, picks: vec![picked], overall: false, preview: None }),
             (Some(d), Some((view, picked))) if view == d.view && !d.picks.iter().any(|p| p.same(&picked)) => {
-                d.picks.push(picked);
-                d.preview = None;
-            }
-            // Anywhere else: the dimension the picks make goes where the pointer is.
-            (Some(d), _) => {
-                if let Some(params) = params_for(app, d, point) {
-                    match app.run(COMMAND, params) {
-                        Ok(_) => draft = None,
-                        Err(error) => app.set_status(error, true),
-                    }
+                // A second pick that makes no dimension with the first is refused with a reason,
+                // rather than taken and then a place on the sheet asked for in vain (#20181).
+                let mut picks = d.picks.clone();
+                picks.push(picked);
+                if kind_for(app, &picks, point).is_some() {
+                    d.picks = picks;
+                    d.preview = None;
+                } else {
+                    app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true);
                 }
             }
+            // Anywhere else: the dimension the picks make goes where the pointer is.
+            (Some(d), _) => match params_for(app, d, point) {
+                Some(params) => match app.run(COMMAND, params) {
+                    Ok(_) => draft = None,
+                    Err(error) => app.set_status(error, true),
+                },
+                None => app.set_status(solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"), true),
+            },
             (None, None) => {}
         }
     }
@@ -397,4 +536,57 @@ pub(crate) fn hovered_shape(app: &SolveApp) -> Option<Shape> {
 #[cfg(test)]
 pub(crate) fn picked_shapes(app: &SolveApp) -> Vec<Shape> {
     app.drawing_workspace.dimension.as_ref().map(|d| d.picks.iter().map(|p| p.shape).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A box with a 6 mm hole through it inside component Block, and a front view of it.
+    fn block_in_a_component() -> (SolveApp, Value, u64) {
+        let mut s = solidcraft_engine::Session::default();
+        let block = s.execute("component.create", &json!({"name": "Block"})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"})).unwrap();
+        s.execute("solid.hole", &json!({"position": [10, 15, 10], "direction": [0, 0, -1], "diameter": 6})).unwrap();
+        s.execute("component.activate", &json!({"component": 0})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let view = s.execute("drawing.view.base", &json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [200, 150]})).unwrap()["view"].clone();
+        (SolveApp::new(s, crate::Services::default()), view, block)
+    }
+
+    /// The index of Block's edge whose points all pass `on`.
+    fn edge_of(app: &SolveApp, on: impl Fn(Vec3) -> bool) -> usize {
+        let state = app.session.model.state();
+        let mesh = state.body("Block").unwrap().mesh();
+        mesh.edges.iter().position(|line| line.iter().all(|p| on(*p))).unwrap()
+    }
+
+    fn add(app: &mut SolveApp, view: &Value, kind: Value) -> Result<Value, String> {
+        app.session.execute("drawing.dimension.add", &json!({"view": view, "kind": kind})).map_err(|e| e.to_string())
+    }
+
+    /// An edge picked on a part inside a component is dimensioned.
+    #[test]
+    fn an_edge_of_a_part_in_a_component_can_be_dimensioned() {
+        let (mut app, view, block) = block_in_a_component();
+        let index = edge_of(&app, |p| p.y.abs() < 1e-9 && p.z.abs() < 1e-9);
+        let picked = Picked { body: "Block".into(), of: Of::Edge(index), path: vec![block], shape: Shape::Other, stroke: Vec::new() };
+        add(&mut app, &view, json!({"length": {"edge": picked.edge()}})).unwrap();
+    }
+
+    /// Two parallel edges, and a hole's rim with an edge, picked on a part inside a component are
+    /// dimensioned across: the picks' ends and centres carry the path too.
+    #[test]
+    fn two_picks_on_a_part_in_a_component_can_be_dimensioned_across() {
+        let (mut app, view, block) = block_in_a_component();
+        let bottom = edge_of(&app, |p| p.y.abs() < 1e-9 && p.z.abs() < 1e-9);
+        let top = edge_of(&app, |p| p.y.abs() < 1e-9 && (p.z - 10.0).abs() < 1e-9);
+        let rim = edge_of(&app, |p| (p.z - 10.0).abs() < 1e-9 && ((p.x - 10.0).hypot(p.y - 15.0) - 3.0).abs() < 1e-6);
+        let pick = |index, shape| Picked { body: "Block".into(), of: Of::Edge(index), path: vec![block], shape, stroke: Vec::new() };
+        let line = |z: f64| Shape::Straight([Vec2::new(0.0, z), Vec2::new(20.0, z)]);
+        for picks in [[pick(bottom, line(0.0)), pick(top, line(10.0))], [pick(rim, Shape::Round(Vec2::new(10.0, 10.0))), pick(bottom, line(0.0))]] {
+            let kind = kind_for(&app, &picks, Vec2::new(30.0, 5.0)).unwrap();
+            add(&mut app, &view, kind.clone()).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        }
+    }
 }
