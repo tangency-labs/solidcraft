@@ -10849,6 +10849,59 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), design);
     }
 
+    #[test]
+    fn custom_navigator_explains_the_missing_body_and_hides_the_hint_once_assigned() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10})).unwrap();
+        h.app.session.mark_saved();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        let history = h.app.session.undo.len();
+        let camera = h.app.cam;
+        let nav = h.app.preferences.nav.clone();
+        let hint = "Close Preferences, right-click the navigator and choose Custom. Pick a body in the view to use it as the navigator.";
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+        h.call("ui.prefs", json!({"open": "Navigation"}));
+        super::reveal_preference(&mut h, "prefs:navigator");
+        assert!(h.widget(hint).is_none(), "Axes needs no custom body");
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
+        h.call("ui.click", json!({"x": custom.x, "y": custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.widget(hint).is_some(), "Custom explains why it still shows axes without a body");
+
+        h.app.run("view.navigator", json!({"body": "Body1"})).unwrap();
+        h.frames(3);
+        assert!(h.app.view_gizmo.shape.is_some());
+        assert!(h.widget(hint).is_none(), "the assigned body's snapshot needs no missing-body hint");
+        h.app.run("view.navigator", json!({"body": null})).unwrap();
+        h.frames(3);
+        assert!(h.widget(hint).is_some(), "clearing the body restores the hint");
+        assert_eq!(h.app.preferences.nav, nav);
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert_eq!(h.app.session.revision, revision);
+        assert_eq!(h.app.session.undo.len(), history);
+        assert!(!h.app.session.is_dirty());
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+
+        // The hinted route remains reachable while Custom has no body and shows axes.
+        h.call("ui.prefs", json!({"open": "Navigation", "navigator_style": "custom"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
+        assert!(h.app.view_gizmo.shape.is_none());
+        assert_eq!(crate::view_gizmo::style(&h.app), NavigatorStyle::Axes);
+        let fallback = crate::scenario::rect_of("axis_view:outer").unwrap().center();
+        h.call("ui.click", json!({"x": fallback.x, "y": fallback.y, "button": "right"}));
+        assert_eq!(h.call("ui.menuPick", json!({"item": "Custom"}))["ok"], true);
+        h.frames(2);
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ViewNavigator(_))));
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        assert!(h.app.view_gizmo.shape.is_none(), "opening and cancelling the picker assigns no body");
+    }
+
     /// The texts one frame paints.
     fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
         // Use the harness clock and consume its texture updates like every other frame.
