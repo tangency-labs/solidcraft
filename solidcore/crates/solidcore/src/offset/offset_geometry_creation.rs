@@ -300,6 +300,9 @@ struct TrimmedEdge<O> {
     interval: Extent1d,
     /// The trim points run against the base edge use.
     inverted: bool,
+    /// (not upstream) Neither end had a trim point but the drop of its vertex onto the
+    /// curve: no neighbour's offset, tangent or not, reaches the curve at either end.
+    unreached: bool,
     /// Material boundaries reached through a chart seam that disappears.
     periodic_ends: Vec<PeriodicBoundaryEnd<O>>,
 }
@@ -734,6 +737,19 @@ pub trait OffsetExecutive<O> {
     /// keeps it.
     fn note_inverted_face(&mut self, offset_face: O) {
         let _ = offset_face;
+    }
+    /// Not upstream: notes original edge use `original`, whose mated offset reached no
+    /// neighbour's offset at either end (see `TrimmedEdge::unreached`); nothing unless
+    /// the adapter keeps it.
+    fn note_unreached_edgeuse(&mut self, original: O) {
+        let _ = original;
+    }
+    /// Not upstream: whether original face `face` is a face of two edges whose offset is
+    /// empty, its neighbours' offsets mated across it (`empty_lens`); `false` unless the
+    /// adapter says so.
+    fn is_eliminated_face(&self, face: O) -> bool {
+        let _ = face;
+        false
     }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall).
@@ -2874,6 +2890,22 @@ fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Op
 
 // ---- the geometry creation --------------------------------------------------------------------
 
+/// (not upstream) Whether edge use `eu` lies on one of the faces `curve_faces` and its radial on
+/// the other: an edge between the two faces whose offsets a curve is the meeting of.
+fn between_faces<O: ClassObject + SolutionObject>(
+    brep: &mut impl OffsetBrep<O>,
+    eu: O,
+    curve_faces: [Option<O>; 2],
+) -> Result<bool> {
+    let (Some(here), Some(radial)) = (brep.edgeuse_face(eu)?, brep.edgeuse_radial(eu)?) else {
+        return Ok(false);
+    };
+    let Some(there) = brep.edgeuse_face(radial)? else {
+        return Ok(false);
+    };
+    Ok(here != there && curve_faces.contains(&Some(here)) && curve_faces.contains(&Some(there)))
+}
+
 /// Whether `curve` at `t` passes through `surface` at `uv` (where they meet) by more than
 /// `tol`. To second order in arc length s the curve's height over the surface is
 /// `g1 s + g2 s^2 / 2`, `g1` the sine of the angle between them and `g2` the curve's
@@ -4622,10 +4654,24 @@ impl OffsetGeometryCreation {
             .edgeuse_edge(base_edgeuse)?
             .ok_or(dangling("edge use without edge"))?;
 
+        // (not upstream) for a curve mated across a lens the offset eliminates (`empty_lens`),
+        // the faces whose offsets the curve is the meeting of; none otherwise
+        let across = match brep.edgeuse_radial(base_edgeuse)? {
+            Some(radial) => brep
+                .edgeuse_face(radial)?
+                .is_some_and(|face| executive.is_eliminated_face(face)),
+            None => false,
+        };
+        let curve_faces = match other_base_edgeuse {
+            Some(other) if across => [brep.edgeuse_face(base_edgeuse)?, brep.edgeuse_face(other)?],
+            _ => [None, None],
+        };
         // (not upstream) the trim point of the base edge use's start vertex, then its end's
         let mut ends = [0.0_f64; 2];
         // (not upstream) whether each trim point is a cut by a neighbour's offset surface
         let mut cuts = [false; 2];
+        // (not upstream) whether each trim point is the drop of its vertex, no candidate found
+        let mut dropped = [false; 2];
         let mut periodic_ends = Vec::new();
         // (not upstream) where the base edge's middle drops onto the curve, once it is asked
         // for: one parameter for both ends
@@ -4663,6 +4709,7 @@ impl OffsetGeometryCreation {
                         bcw,
                         uv_curve_base,
                         tan_tol_deg,
+                        curve_faces,
                         &mut tan_eus,
                         &mut tan_uvs,
                         &mut off_adj_eus,
@@ -4692,6 +4739,7 @@ impl OffsetGeometryCreation {
                             obccw,
                             uv_curve_other_base,
                             tan_tol_deg,
+                            curve_faces,
                             &mut tan_eus,
                             &mut tan_uvs,
                             &mut off_adj_eus,
@@ -4723,6 +4771,7 @@ impl OffsetGeometryCreation {
                         bccw,
                         uv_curve_base,
                         tan_tol_deg,
+                        curve_faces,
                         &mut tan_eus,
                         &mut tan_uvs,
                         &mut off_adj_eus,
@@ -4752,6 +4801,7 @@ impl OffsetGeometryCreation {
                             obcw,
                             uv_curve_other_base,
                             tan_tol_deg,
+                            curve_faces,
                             &mut tan_eus,
                             &mut tan_uvs,
                             &mut off_adj_eus,
@@ -4888,6 +4938,44 @@ impl OffsetGeometryCreation {
 
                 // If this has already been mated then we should just grab the point of the vertex
                 let mut found_3d_vertex = false;
+                // (not upstream) a neighbour between the curve's own two faces, mated before
+                // any edge mated across a lens beside it (`empty_lens`): the end is where its
+                // offset starts at the base vertex, where it lies nearest the curve (both are
+                // the meeting of the same two offsets)
+                if between_faces(brep, tan_eu, curve_faces)? {
+                    let tan_edge = brep
+                        .edgeuse_edge(tan_eu)?
+                        .ok_or(dangling("edge use without edge"))?;
+                    for eu in brep.edge_edgeuses(tan_edge)? {
+                        if brep.edgeuse_vertex(eu)? != Some(base_vertex) {
+                            continue;
+                        }
+                        let Some(off_eu) = executive.offset_edgeuse(eu) else {
+                            continue;
+                        };
+                        // where its offset's curve starts (its vertex may have been moved to
+                        // the ends of the lens's own offset edges, which go)
+                        let point =
+                            edgeuse_normalized_evaluate(k, brep, off_eu, 0.0, false, false, true)?;
+                        let sols2 = Self::point_solve(
+                            k,
+                            brep,
+                            curve_3d,
+                            SolverOperation::Minimize,
+                            point,
+                            self.this_approx_tol_3d * 10.0,
+                            None,
+                            SolutionRequested::All,
+                        )?;
+                        // the curve's point nearest the vertex, not another local nearest
+                        if let Some(nearest) = sols2.as_slice().iter().min_by(|a, b| {
+                            a.start.solution_value.total_cmp(&b.start.solution_value)
+                        }) {
+                            solutions.add(nearest);
+                        }
+                    }
+                    continue;
+                }
                 // (the mate is dereferenced only when the edge use is marked)
                 if brep.edgeuse_is_marked(k, tan_eu, mark)? && {
                     let tan_mate = brep
@@ -5167,6 +5255,9 @@ impl OffsetGeometryCreation {
             // If we have no candidate TrimPoints found by intersecting the 3DCurve with other
             // geometry, get a candidate TrimPoint by dropping the Vertex->Point onto the 3DCurve
             if solutions.is_empty() {
+                if let Some(d) = dropped.get_mut(i) {
+                    *d = true;
+                }
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let point = brep.vertex_point(base_vertex)?;
                 solutions = Self::point_solve(
@@ -5378,6 +5469,7 @@ impl OffsetGeometryCreation {
             Ok(Some(TrimmedEdge {
                 interval: trim_ivl,
                 inverted,
+                unreached: dropped == [true, true],
                 periodic_ends,
             }))
         } else {
@@ -5725,6 +5817,7 @@ impl OffsetGeometryCreation {
         neighbour: O,
         base_uv: Option<O>,
         tan_tol_deg: f64,
+        curve_faces: [Option<O>; 2],
         tan_eus: &mut Vec<O>,
         tan_uvs: &mut Vec<Option<O>>,
         off_adj_eus: &mut Vec<O>,
@@ -5741,6 +5834,15 @@ impl OffsetGeometryCreation {
                 }
                 return Ok(());
             }
+        }
+        // (not upstream) a neighbour between the curve's own two faces (an edge beside a lens
+        // its two neighbours are mated across, `empty_lens`): its offset lies on the two
+        // surfaces the curve does, so their cuts of the curve are no trim points; its offset
+        // vertices are, as a mated tangent neighbour's are (and nothing else: no UV curve)
+        if between_faces(brep, neighbour, curve_faces)? {
+            tan_eus.push(neighbour);
+            tan_uvs.push(None);
+            return Ok(());
         }
         let n_edge = brep
             .edgeuse_edge(neighbour)?
@@ -6310,6 +6412,7 @@ impl OffsetGeometryCreation {
         let Some(TrimmedEdge {
             interval: trim_ivl,
             inverted,
+            unreached,
             periodic_ends,
         }) = trimmed
         else {
@@ -6388,6 +6491,12 @@ impl OffsetGeometryCreation {
         executive.note_mated_edgeuse(edgeuse)?;
         if let Some(other) = other_edgeuse {
             executive.note_mated_edgeuse(other)?;
+        }
+        if unreached {
+            executive.note_unreached_edgeuse(edgeuse);
+            if let Some(other) = other_edgeuse {
+                executive.note_unreached_edgeuse(other);
+            }
         }
         for event in periodic_ends {
             executive.note_periodic_boundary_end(event)?;
@@ -6678,6 +6787,7 @@ impl OffsetGeometryCreation {
         let mut min_curve: Option<(O, O, O)> = None;
         let mut trim_ivl = Extent1d::new();
         let mut inverted = false;
+        let mut unreached = false;
         let mut periodic_ends = Vec::new();
         let mut periodic_curve = None;
 
@@ -6748,6 +6858,7 @@ impl OffsetGeometryCreation {
             if let Some(TrimmedEdge {
                 interval: my_trim,
                 inverted: my_inverted,
+                unreached: my_unreached,
                 periodic_ends: my_periodic_ends,
             }) = my_trim
             {
@@ -6762,6 +6873,7 @@ impl OffsetGeometryCreation {
                     min_curve = Some((c3, uv1, uv2));
                     trim_ivl = my_trim;
                     inverted = my_inverted;
+                    unreached = my_unreached;
                     periodic_ends = my_periodic_ends;
                     continue;
                 }
@@ -6782,12 +6894,14 @@ impl OffsetGeometryCreation {
                         min_dist = dist;
                         trim_ivl = my_trim;
                         inverted = my_inverted;
+                        unreached = my_unreached;
                         periodic_ends = my_periodic_ends;
                     }
                 } else {
                     // only 1 curve to check branch - use this curve
                     trim_ivl = my_trim;
                     inverted = my_inverted;
+                    unreached = my_unreached;
                     min_curve = Some((c3, uv1, uv2));
                     periodic_ends = my_periodic_ends;
                 }
@@ -6881,6 +6995,10 @@ impl OffsetGeometryCreation {
 
         executive.note_mated_edgeuse(edgeuse)?;
         executive.note_mated_edgeuse(other_edgeuse)?;
+        if unreached {
+            executive.note_unreached_edgeuse(edgeuse);
+            executive.note_unreached_edgeuse(other_edgeuse);
+        }
         for event in periodic_ends {
             executive.note_periodic_boundary_end(event)?;
         }
