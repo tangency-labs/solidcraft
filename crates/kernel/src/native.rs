@@ -424,7 +424,12 @@ mod tests {
             std::fs::write(path, serde_json::to_string_pretty(&actual).unwrap() + "\n").unwrap();
         }
         let expected: Value = serde_json::from_str(include_str!("native/fixtures/box-fillet-v5.json")).unwrap();
-        compare_wire(&expected, &actual);
+        // On a mismatch the records made are printed, so a change can be read (and blessed) from
+        // the test's log without a local build.
+        if let Err(e) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compare_wire(&expected, &actual))) {
+            eprintln!("WIRE_RECORDS_BEGIN\n{actual}\nWIRE_RECORDS_END");
+            std::panic::resume_unwind(e);
+        }
     }
 
     fn compare_wire(expected: &Value, actual: &Value) {
