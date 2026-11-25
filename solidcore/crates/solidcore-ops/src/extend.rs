@@ -19,7 +19,8 @@
 //! A face on a surface that goes on past its trims (a plane: [`Surface::reaches_past_trims`])
 //! that is its surface's whole box grows its surface as any face does: the plane widened. Any
 //! other such face (one with holes, or trimmed within its plane), or one whose widening is
-//! refused, is extended by growing its trim within the surface instead, as the kernel's
+//! refused (but for a distance below the side's resolution, which no route extends), is
+//! extended by growing its trim within the surface instead, as the kernel's
 //! [`extend_trim`] makes it: the edge moved outward by the distance, its neighbours carried
 //! along their tangents to meet it, its holes kept; every continuation is the plane itself.
 //!
@@ -354,8 +355,11 @@ fn one_face(
     // refused, it grows its trim within the surface, the same for every continuation, its holes
     // kept
     if !holed && surf.is_whole_box(k, &dom)? {
-        if let Ok(made) = surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance)? {
-            return Ok(Ok(made));
+        match surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance)? {
+            // a distance below the side's resolution is the answer whatever the route: there is
+            // no extension that short (the trim's route would only refuse it otherwise)
+            r @ (Ok(_) | Err(Error::NoEffect)) => return Ok(r),
+            Err(_) => {}
         }
     }
     trim_grown(k, b, f, picked, distance)
