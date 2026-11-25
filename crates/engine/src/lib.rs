@@ -40,6 +40,7 @@ pub mod occurrences;
 pub mod origins;
 pub mod panels;
 pub mod params;
+pub mod pick_pieces;
 pub mod plugin;
 pub mod point_cloud_pick;
 pub mod product_scene;
@@ -50,6 +51,7 @@ pub mod render_preparation;
 pub mod report_issue;
 pub mod sample;
 pub mod schema;
+pub mod selection_context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;
@@ -213,6 +215,12 @@ pub struct FeatureFailure {
     /// The kernel call's stable code.
     pub code: solidcraft_kernel::ErrorCode,
 }
+impl From<serde_json::Error> for EngineError {
+    fn from(e: serde_json::Error) -> Self {
+        EngineError::Other(e.to_string())
+    }
+}
+
 impl From<solidcraft_io::IoError> for EngineError {
     fn from(e: solidcraft_io::IoError) -> Self {
         EngineError::Other(e.to_string())
@@ -295,7 +303,7 @@ pub enum Sel {
     Feature {
         id: u64,
     },
-    /// A view, dimension or balloon of the drawing open.
+    /// A selectable object of the drawing open.
     Drawing {
         #[serde(with = "solidcraft_doc::ids")]
         drawing: u64,
@@ -311,6 +319,14 @@ pub enum Sel {
     },
     SketchPoint {
         id: String,
+    },
+    /// A point of a component sketch, picked on another copy of its part than the one the sketch
+    /// is edited at: the copy's placement (occurrence ids from the root), as a joint's origin
+    /// takes it.
+    PlacedSketchPoint {
+        sketch: u64,
+        id: String,
+        path: Vec<u64>,
     },
     /// The associative midpoint of a line in the active sketch. Selection alone creates no geometry.
     SketchMidpoint {
@@ -741,7 +757,7 @@ impl ComputedCommands {
     }
 
     fn selection_is_current(&self, session: &Session) -> bool {
-        if session.selection == self.source.selection {
+        if session.selection == self.source.selection && session.selection_all_bodies == self.source.selection_all_bodies {
             return true;
         }
         // A Model transaction keeps its captured picks when focus moves to the retained
@@ -827,7 +843,16 @@ pub struct Session {
     /// Sketch temporarily shown while editing a feature that consumes it. View state only.
     pub feature_edit_sketch: Option<u64>,
     pub selection: Vec<Sel>,
+    /// Every shown body of the design is selected: "select all" in the body scope is a *scope*
+    /// rather than a list of 56,100 names. [`Session::selected_items`] resolves it where an
+    /// operation needs the bodies; code that only asks whether anything is selected reads
+    /// [`Session::has_selection`]. Any explicit select replaces the scope.
+    pub selection_all_bodies: bool,
     pub path: Option<String>,
+    /// The file of the design this session is a scratch copy of ([`Session::scratch`]): the copy's
+    /// own `path` stays `None` so nothing run on it saves over that file. Read only by `doc.info`;
+    /// never saved, never adopted. `None` in a session that is not a copy.
+    pub(crate) source_path: Option<String>,
     /// Where the drawing commands' object ids come from: one source for the session, kept across
     /// a file change, so a session seeded alike and run alike gives the same ids
     /// ([`Session::seed_ids`]). A failed command draws none.
@@ -906,6 +931,12 @@ pub struct Session {
     /// save leaves them out of the file and an opened design starts without them. The user's,
     /// like `param_check`, so it survives opening and starting designs.
     pub keep_print_faces: bool,
+    /// Whether a save keeps the bodies of linked designs in the design's file. On for a new
+    /// design. Off: `file.save` writes each link without its bodies, and opening the file reads
+    /// them from the linked design files again (#8170). The design's own choice, set by
+    /// `file.save`'s `linked_bodies` and carried by its file
+    /// ([`Document::linked_bodies_left_out`]), so it follows the design and not the user.
+    pub linked_bodies: bool,
     /// After a live frame: its sketch, the document it left and the revision. Its links were
     /// brought up to date by that frame, so the gesture's next frame needn't project them again
     /// while nothing else has run (#3222).
@@ -937,6 +968,9 @@ pub struct Session {
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
     is_copy: bool,
+    /// A design's refresh shows its results without waiting for the SMLib checks of its last
+    /// features ([`Session::set_background_checks`]). Never a copy's.
+    background_checks: bool,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
@@ -1312,6 +1346,8 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // Likewise the choice to save without linked bodies: the session keeps it.
+        let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         let mut doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
         let model = match Self::saved_model(&doc, saved).filter(|model| model.validation() == validation) {
@@ -1327,7 +1363,7 @@ impl Session {
                 model
             }
         };
-        Self::with_model(doc, visibility, model)
+        Session { linked_bodies, ..Self::with_model(doc, visibility, model) }
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -1364,6 +1400,7 @@ impl Session {
         Session {
             stop: Default::default(),
             is_copy: false,
+            background_checks: false,
             saved: doc.clone(),
             doc,
             model,
@@ -1388,7 +1425,9 @@ impl Session {
             sketch_entry: None,
             feature_edit_sketch: None,
             selection: Vec::new(),
+            selection_all_bodies: false,
             path: None,
+            source_path: None,
             ids: solidcraft_doc::ids::IdSource::from_entropy(),
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
@@ -1415,6 +1454,7 @@ impl Session {
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
+            linked_bodies: true,
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
@@ -1584,7 +1624,7 @@ impl Session {
 
     /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
     /// refuses the command as an internal error instead of taking the session down.
-    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+    pub(crate) fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
         let Some(check) = &self.command_check else { return Ok(()) };
         // The check sees the parameters as the command will (no parameters: an empty object).
         let empty = Value::Object(Default::default());
@@ -2014,6 +2054,47 @@ impl Session {
     }
 
     /// Re-evaluate the model after a document change.
+    /// Whether the whole-body scope is in force: Select All set it, no item has been named since
+    /// and no sketch is open. Anything that names items or clears the selection ends it, so a
+    /// stale flag never outlives the list it stood for.
+    pub fn all_bodies_selected(&self) -> bool {
+        self.selection_all_bodies && self.selection.is_empty() && self.active_sketch.is_none()
+    }
+
+    /// Clear the selection: the named items and the whole-body scope.
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.selection_all_bodies = false;
+    }
+
+    /// Whether anything is selected: a list of items or the whole-body scope.
+    pub fn has_selection(&self) -> bool {
+        !self.selection.is_empty() || self.all_bodies_selected()
+    }
+
+    /// The selection as the items an operation works on: the whole-body scope resolves to the
+    /// name of every shown body, in the world's order.
+    pub fn selected_items(&self) -> Result<Vec<Sel>> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.clone());
+        }
+        Ok(self.shown_body_names()?.into_iter().map(|name| Sel::Body { name }).collect())
+    }
+
+    /// How many things are selected, resolving the whole-body scope against the world.
+    pub fn selected_count(&self) -> Result<usize> {
+        if !self.all_bodies_selected() {
+            return Ok(self.selection.len());
+        }
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).count())
+    }
+
+    /// The bodies the whole-body scope covers: every body the view shows (not hidden itself, nor
+    /// through its occurrence or folder), in the world's order.
+    pub(crate) fn shown_body_names(&self) -> Result<Vec<String>> {
+        Ok(self.world_state()?.bodies.iter().filter(|b| self.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    }
+
     /// The model placed in the world through component occurrences (and uncaptured moves): what
     /// to display, measure, pick and export. The same as `model.state()` without components.
     /// An error when the model cannot be placed (see [`solidcraft_doc::world_state`]).
@@ -2034,18 +2115,19 @@ impl Session {
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
         let drag = self.drag_moves();
-        let w = if drag.is_empty() {
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &self.pending_moves, &mut reuse)
+        // A drag's frame places its occurrences over any move not captured yet.
+        let dragged;
+        let moves = if drag.is_empty() {
+            &self.pending_moves
         } else {
-            // A drag's frame places its occurrences over any move not captured yet.
-            let mut moves = self.pending_moves.clone();
-            moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
-            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &moves, &mut reuse)
+            dragged = self.pending_moves.iter().chain(drag).map(|(o, m)| (*o, *m)).collect();
+            &dragged
         };
+        let w = solidcraft_doc::world_state_moved_reusing(&self.doc, &st, moves, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
-        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(Arc::new);
+        let w = w.map_err(EngineError::from).and_then(|w| self.authored_sketches(w)).map(|w| self.sketch_copies(w, moves)).map(Arc::new);
         if let Ok(mut c) = self.world_cache.lock() {
             *c = Some(WorldCache {
                 doc: self.doc.clone(),
@@ -2102,6 +2184,57 @@ impl Session {
             }
         }
         Ok(w)
+    }
+
+    /// `w` with the other placements of each component sketch ([`solidcraft_doc::SketchCopy`]):
+    /// each placement of its component under `moves`, but the one it is drawn at
+    /// ([`Session::feature_path`]), as a move from there.
+    fn sketch_copies(
+        &self,
+        mut w: solidcraft_doc::ModelState,
+        moves: &std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    ) -> solidcraft_doc::ModelState {
+        let mut owners: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for sketch in &w.sketches {
+            if let Some(f) = self.doc.feature(sketch.feature)
+                && f.component != 0
+            {
+                owners.entry(f.component).or_default().push(sketch.feature);
+            }
+        }
+        if owners.is_empty() {
+            return w;
+        }
+        let mut of: std::collections::BTreeMap<u64, Vec<(Vec<u64>, solidcraft_doc::Mat)>> = std::collections::BTreeMap::new();
+        for (component, path, m) in self.doc.placements_moved(moves) {
+            if owners.contains_key(&component) {
+                of.entry(component).or_default().push((path, m));
+            }
+        }
+        for (component, sketches) in owners {
+            let placements = of.remove(&component).unwrap_or_default();
+            if placements.len() < 2 {
+                continue;
+            }
+            // Where the sketch is drawn: the placement being authored, at its frame as
+            // `authored_sketches` put it there, else the first, where the world state placed it.
+            let shown = self.feature_path(component);
+            let drawn = if self.active_occurrence_path.is_some() && self.active_component == component {
+                Some(self.active_component_frame())
+            } else {
+                placements.iter().find(|(path, _)| *path == shown).map(|(_, m)| *m)
+            };
+            let Some(inverse) = drawn.and_then(|m| solidcraft_doc::mat_inverse(&m)) else { continue };
+            let copies: Arc<[solidcraft_doc::SketchCopy]> = placements
+                .into_iter()
+                .filter(|(path, _)| *path != shown)
+                .map(|(path, m)| solidcraft_doc::SketchCopy { path, delta: solidcraft_doc::mat_mul(&m, &inverse) })
+                .collect();
+            for sketch in sketches {
+                w.sketch_copies.insert(sketch, copies.clone());
+            }
+        }
+        w
     }
 
     /// Every placed body's world name, own name and frame. Kept with the world state while it is
@@ -2175,6 +2308,32 @@ impl Session {
         }
     }
 
+    /// Let this design's refreshes show their results without waiting for the SMLib checks of
+    /// the bodies their last features keep ([`solidcraft_doc::Model::set_background_checks`]):
+    /// for a window, which settles them as they end ([`Session::settle_feature_checks`]). Off
+    /// (the default: scripts, the CLI, agents' commands and tests), a refresh waits for them.
+    pub fn set_background_checks(&mut self, on: bool) {
+        self.background_checks = on;
+    }
+
+    /// Whether refreshes leave their last features' checks running ([`Session::set_background_checks`]).
+    pub fn background_checks(&self) -> bool {
+        self.background_checks
+    }
+
+    /// Settle the SMLib checks of features the last refresh left running, once they have ended
+    /// (or after waiting for them, with `wait`), and when one refused a feature's bodies,
+    /// evaluate the design again, which fails that feature with the check's error: except during
+    /// a live edit, which a refresh would end (a later call does it). Returns whether it
+    /// refreshed.
+    pub fn settle_feature_checks(&mut self, wait: bool) -> bool {
+        if self.model.settle_feature_checks(wait) && self.live_links.is_none() {
+            self.refresh();
+            return true;
+        }
+        false
+    }
+
     /// Settle what the imports' background checks found ([`solidcraft_doc::Model::settle_import_checks`]),
     /// and when they healed parts the design does not show yet, evaluate it again: except during
     /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
@@ -2201,7 +2360,10 @@ impl Session {
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.
     fn refresh_with_joint_report(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let mut solved = None;
-        if self.model.evaluate_shared(&self.doc) {
+        self.model.set_background_checks(self.background_checks && !self.is_copy);
+        let evaluated = self.model.evaluate_shared(&self.doc);
+        self.model.set_background_checks(false);
+        if evaluated {
             self.evaluations = self.evaluations.saturating_add(1);
         }
         // Component Pattern features keep their count/spacing expressions; place their copies
@@ -2265,14 +2427,16 @@ impl Session {
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
-    /// the model is the one that solve read and the design is as the solve left it, apart from
-    /// its features (the joints read those only through the model). A command that refreshes on
+    /// the model is the one that solve read and the design is as the solve left it, including
+    /// which component patterns are active. A command that refreshes on
     /// its own (a parameter change) is refreshed again after it, and that second solve would
     /// find every occurrence where it is.
     fn solve_joints(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let state = self.model.state();
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
-            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc)
+                    || (same_but_features(doc, &self.doc) && doc.inactive_pattern_occurrences() == self.doc.inactive_pattern_occurrences()))
         });
         if settled {
             return None;
@@ -2681,6 +2845,41 @@ impl Session {
             {
                 return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
             }
+            if r.error.is_some()
+                && let Some(before) = solved_before.get(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && (!sk.offsets.is_empty() || !sk.freeform_offsets.is_empty() || !sk.freeform_chain_offsets.is_empty())
+            {
+                let vals = self.doc.evaluation_values();
+                let mut trial = sk.clone();
+                let applied = self.doc.apply_dimension_values(&vals, &mut trial);
+                let offset_err = if own_values(&trial) == *before {
+                    None
+                } else {
+                    match applied {
+                        Ok(()) => {
+                            let mut solved_trial = sk.clone();
+                            self.doc
+                                .solve_sketch_with_analysis(
+                                    &vals,
+                                    &mut solved_trial,
+                                    &sk.driving_values(),
+                                    Some(sk),
+                                    solidcraft_sketch::Analysis::StatusOnly,
+                                )
+                                .err()
+                                .map(|e| e.to_string())
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            msg.contains("offset dimension").then_some(msg)
+                        }
+                    }
+                };
+                if let Some(e) = offset_err {
+                    return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
+                }
+            }
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
                 continue;
@@ -2774,6 +2973,8 @@ impl Session {
 
     fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
+        // Before an open edit is finished for it: a refused sheet sketch leaves the model's open.
+        cmd::refuse_outside_drawing(self, spec)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
         let prepared = self.take_prepared_edit_source(spec, params);
@@ -2839,8 +3040,17 @@ impl Session {
         self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
+            // A command that reads the model reads it checked: the checks the window's last
+            // refresh left running end first, and a refusal among them leaves the model stale,
+            // evaluated just below ([`Session::set_background_checks`]).
+            if reads_model {
+                self.model.settle_feature_checks(true);
+            }
             if reads_model && (self.model.is_stale() || self.sketch_finish_pending) {
+                // Evaluated for the command to read: its checks end before it reads.
+                let background = std::mem::replace(&mut self.background_checks, false);
                 self.refresh();
+                self.background_checks = background;
             }
         }
         spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
@@ -3267,7 +3477,7 @@ impl Session {
         if self.section_state() != c.section {
             self.set_section_state(c.section);
         }
-        self.selection.clear();
+        self.clear_selection();
         self.prune_sheet_sketch_edit();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
@@ -3296,6 +3506,7 @@ impl Session {
         Session {
             stop: self.stop.clone(),
             is_copy: true,
+            background_checks: false,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -3319,7 +3530,9 @@ impl Session {
             sketch_entry: self.sketch_entry.clone(),
             feature_edit_sketch: self.feature_edit_sketch,
             selection: self.selection.clone(),
+            selection_all_bodies: self.selection_all_bodies,
             path: None,
+            source_path: self.path.clone().or_else(|| self.source_path.clone()),
             ids: self.ids.clone(),
             uid: self.uid,
             disk: self.disk,
@@ -3352,6 +3565,7 @@ impl Session {
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
+            linked_bodies: self.linked_bodies,
             live_links: None,
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
@@ -3485,13 +3699,17 @@ impl Session {
     }
 
     fn compute_commands_under(
-        self,
+        mut self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        computed.plugin_state.defer_user_settings();
+        // UI consent travels to the worker invocation, never to the source identity that is
+        // compared with the live session when accepting its result.
+        self.plugin_state.user.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();
@@ -3505,10 +3723,12 @@ impl Session {
                 let undo = std::mem::take(&mut computed.undo);
                 let redo = std::mem::take(&mut computed.redo);
                 let selection = computed.selection.clone();
+                let all_bodies = computed.selection_all_bodies;
                 let reply = computed.execute("timeline.roll_to", &params)?;
                 computed.undo = undo;
                 computed.redo = redo;
                 computed.selection = selection;
+                computed.selection_all_bodies = all_bodies;
                 reply
             };
             let changed = !Arc::ptr_eq(&before, &computed.doc);
@@ -3558,6 +3778,9 @@ impl Session {
                 }
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        if !self.plugin_state.user.defer_user_settings {
+            prepared.computed.plugin_state.publish_user_settings()?;
         }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
@@ -3645,6 +3868,7 @@ impl Session {
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
+        let all_bodies = self.selection_all_bodies;
         let redo_watch = self.redo_watch.clone();
         let ids = self.ids.clone();
         original.visibility.hidden_joints.clear();
@@ -3659,6 +3883,7 @@ impl Session {
         self.redo_watch = redo_watch;
         self.ids = ids;
         self.selection = selection;
+        self.selection_all_bodies = all_bodies;
         Ok(())
     }
 
@@ -3724,6 +3949,7 @@ impl Session {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
+        self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -3825,6 +4051,7 @@ impl Session {
         drawing_scene::forget_closed(self);
         if self.model_focus == computed.model_focus {
             self.selection = computed.selection;
+            self.selection_all_bodies = computed.selection_all_bodies;
         }
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
@@ -3901,6 +4128,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.plugin_state.defer_user_settings();
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }
@@ -4098,6 +4326,8 @@ mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
 #[cfg(test)]
+mod midsurface_samples_tests;
+#[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
 mod pattern_suppress_tests;
@@ -4144,8 +4374,24 @@ pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension
 /// The values of a sketch's driving dimensions that come from parameters: what a value edit
 /// changes in it (as opposed to geometry it projects or links from upstream).
 fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<String, f64> {
-    let mut values: std::collections::BTreeMap<_, _> =
-        sk.constraints.iter().filter(|c| c.param.is_some() && !c.driven).filter_map(|c| Some((c.id.clone(), c.kind.value()?))).collect();
+    let mut values: std::collections::BTreeMap<_, _> = sk
+        .constraints
+        .iter()
+        .filter(|c| c.param.is_some() && !c.driven)
+        .filter_map(|c| {
+            let v = match c.kind {
+                solidcraft_sketch::ConstraintKind::OffsetDistance { value, reverse, .. } => {
+                    if reverse {
+                        -value
+                    } else {
+                        value
+                    }
+                }
+                _ => c.kind.value()?,
+            };
+            Some((c.id.clone(), v))
+        })
+        .collect();
     // 3D dimensions, and 3D points placed by expressions (#10608).
     for c in &sk.wire_constraints {
         match &c.kind {
@@ -4237,6 +4483,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         param_comments,
         materials,
         print_faces,
+        collision_shapes,
         user_materials,
         appearances,
         body_components,
@@ -4245,13 +4492,17 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
         notes,
         visibility,
         drawings,
         next_component_color_index,
+        plane_extents,
         plugin_data,
+        linked_bodies_left_out,
     } = a;
     *plugin_data == b.plugin_data
+        && *linked_bodies_left_out == b.linked_bodies_left_out
         && *render == b.render
         && *format == b.format
         && *format_pending == b.format_pending
@@ -4277,6 +4528,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *param_comments == b.param_comments
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *collision_shapes == b.collision_shapes
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
@@ -4285,10 +4537,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *saved_sections == b.saved_sections
         && *notes == b.notes
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+        && *plane_extents == b.plane_extents
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link

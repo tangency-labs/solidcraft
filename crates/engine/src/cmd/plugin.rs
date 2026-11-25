@@ -19,7 +19,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options, named?: bool (refusals name the missing grant and how to approve it); opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
     CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
-        .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
+        .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, corners at the same point shared, at most 8192 vertices and 16384 triangles; no files or model changes"),
     CommandSpec::new("plugin.check", "Check Plugin", checked!("plugin.check", check)).icon("inspect").noundo().read_only().doc_only()
         .contract(&TypedContract::<CheckParams>::new()).output(output_schema_for::<crate::schema::plugin::CheckResult>)
         .params("path: plugin package folder or .zip; checks it as Install and a call would (manifest, size limits, permissions, the component's WIT world and version) and lists each problem with how to fix it; runs no plugin code and installs nothing"),
@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
     CommandSpec::new("plugin.remove", "Remove Plugin", checked!("plugin.remove", remove)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RemoveParams>::new()).output(output_schema_for::<RemoveResult>)
-        .params("id: installed plugin id; removes its folder and stored grants without executing code"),
+        .params("id: installed plugin id, remove_user_data: optional bool (omitted or false keeps per-user settings, true deletes them too); removes its folder and stored grants without executing code or prompting"),
     CommandSpec::new("plugin.revoke", "Revoke Plugin Approvals", checked!("plugin.revoke", revoke)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RevokeParams>::new()).output(output_schema_for::<RevokeResult>)
         .params("id: plugin id; takes back everything approved for it and keeps it installed: it runs with nothing granted until it is installed again with approvals"),
@@ -68,6 +68,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|r| limits.check(&r.limits).err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, exporting: false, error }.text());
     serde_json::to_value(InspectResult {
+        granted_capabilities: package.manifest.granted_capabilities(),
         manifest: package.manifest,
         approval: package.approval,
         host_limits: limits,
@@ -131,7 +132,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check_new(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+            // Only the write holds the lock: the archive was read and checked above without it.
+            let _write = plugin::install::write_lock();
+            plugin::install::install_locked(&plugin, &dir, p.replace).map_err(failed)?;
             std::mem::swap(&mut s.plugin_state.grants, &mut approved_state.grants);
             // Installed: a later session finds the approvals bound to this exact package.
             s.plugin_state.persist_stored().map_err(|e| crate::EngineError::Other(format!("“{}” is installed, but {e}", manifest.name)))?;
@@ -140,6 +143,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         s.plugin_state.packages.insert(manifest.id.clone(), folder.to_string_lossy().into_owned());
     }
     let runtime = manifest.runtime.as_ref();
+    let keys = |kind: craft_plugin::shader::ShaderKind| -> Vec<String> {
+        manifest.shaders.iter().filter(|shader| shader.kind == kind).map(|shader| format!("{}/{}", manifest.id, shader.id)).collect()
+    };
     serde_json::to_value(InstallResult {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
@@ -149,6 +155,10 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
+        min_host_version: manifest.min_host_version.clone(),
+        optional_capabilities: manifest.optional_capabilities.clone(),
+        granted_capabilities: manifest.granted_capabilities(),
+        extensions: manifest.extensions.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
         limits: runtime.map(|r| r.limits.clone()),
         host_limits: s.plugin_limits,
@@ -162,6 +172,10 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Exporter).flat_map(|e| e.extensions.iter().cloned()).collect())
             .unwrap_or_default(),
         listeners: runtime.map(|r| r.listeners.clone()).unwrap_or_default(),
+        shaders: keys(craft_plugin::shader::ShaderKind::Background),
+        tints: keys(craft_plugin::shader::ShaderKind::Tint),
+        panel_shaders: keys(craft_plugin::shader::ShaderKind::Panel),
+        themes: manifest.themes.clone(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -211,6 +225,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
                 sketch_exits: vec![],
                 view: None,
                 param_warnings: vec![],
+                messages: vec![],
             })
             .map_err(|e| bad("plugin.run", e.to_string()));
         }
@@ -237,19 +252,66 @@ fn mesh(s: &mut Session, p: &Value) -> Result<Value> {
     let state = s.model.state();
     let body = state.body(&p.body).ok_or_else(|| bad("model.mesh", "unknown body"))?;
     let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(p.tolerance))?;
-    if mesh.positions.len() > 8192 || mesh.triangles.len() > 16384 {
-        return Err(bad("model.mesh", "mesh exceeds the plugin transfer budget"));
+    // (sharing never changes the triangle count, so a body over that limit is refused before any
+    // array of its corners is built)
+    if mesh.triangles.len() > MESH_MAX_TRIANGLES {
+        return Err(bad(
+            "model.mesh",
+            format!("mesh exceeds the plugin transfer budget: {} triangles, at most {MESH_MAX_TRIANGLES}", mesh.triangles.len()),
+        ));
     }
+    let (positions, triangles) = shared_corners(mesh.positions.iter().map(|v| [v.x, v.y, v.z]), &mesh.triangles)?;
     let component = body.component;
-    let result = MeshResult {
-        body: p.body,
-        component,
-        frame: "component-local-mm".into(),
-        positions: mesh.positions.iter().map(|v| [v.x, v.y, v.z]).collect(),
-        triangles: mesh.triangles.to_vec(),
-        param_warnings: vec![],
-    };
+    let result = MeshResult { body: p.body, component, frame: "component-local-mm".into(), positions, triangles, param_warnings: vec![] };
     serde_json::to_value(result).map_err(|e| bad("model.mesh", e.to_string()))
+}
+
+/// The most distinct vertices `model.mesh` hands a plugin.
+const MESH_MAX_VERTICES: usize = 8192;
+/// The most triangles `model.mesh` hands a plugin.
+const MESH_MAX_TRIANGLES: usize = 16384;
+
+/// `positions` and `triangles` with each vertex at exactly the position of an earlier one replaced
+/// by that one, in first-seen order. A mesh body comes with three corners of its own per triangle;
+/// shared, a corner counts once against the transfer budget. Positions are compared exactly (`-0`
+/// and `0` are the same point), so no vertex moves and no triangle changes shape; a vertex that is
+/// not finite is never shared. Refused as soon as more than [`MESH_MAX_VERTICES`] distinct vertices
+/// are seen, so what is built stays within the budget.
+pub(crate) fn shared_corners(positions: impl ExactSizeIterator<Item = [f64; 3]>, triangles: &[[u32; 3]]) -> Result<(Vec<[f64; 3]>, Vec<[u32; 3]>)> {
+    let corners = positions.len();
+    let mut first: std::collections::HashMap<[u64; 3], u32> = std::collections::HashMap::with_capacity(corners.min(MESH_MAX_VERTICES));
+    let mut shared: Vec<[f64; 3]> = Vec::with_capacity(corners.min(MESH_MAX_VERTICES));
+    let mut remap: Vec<u32> = Vec::with_capacity(corners);
+    for p in positions {
+        let next = u32::try_from(shared.len()).map_err(|_| bad("model.mesh", "mesh has too many vertices"))?;
+        let index = if p.iter().all(|c| c.is_finite()) {
+            // (adding 0 turns -0 into 0, so the two spellings of the same point share)
+            *first.entry(p.map(|c| (c + 0.).to_bits())).or_insert(next)
+        } else {
+            next
+        };
+        if index == next {
+            if shared.len() == MESH_MAX_VERTICES {
+                return Err(bad(
+                    "model.mesh",
+                    format!("mesh exceeds the plugin transfer budget: more than {MESH_MAX_VERTICES} distinct vertices (of {corners} corners)"),
+                ));
+            }
+            shared.push(p);
+        }
+        remap.push(index);
+    }
+    let triangles = triangles
+        .iter()
+        .map(|t| {
+            let corner = |i: u32| usize::try_from(i).ok().and_then(|i| remap.get(i).copied());
+            match (corner(t[0]), corner(t[1]), corner(t[2])) {
+                (Some(a), Some(b), Some(c)) => Ok([a, b, c]),
+                _ => Err(bad("model.mesh", "mesh triangle names a vertex it does not have")),
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((shared, triangles))
 }
 
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -344,7 +406,7 @@ fn remove(_s: &mut Session, p: &Value) -> Result<Value> {
     let p: RemoveParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.remove", e.to_string()))?;
     #[cfg(not(target_arch = "wasm32"))]
     {
-        serde_json::to_value(plugin::remove(_s, &p.id)?).map_err(|e| bad("plugin.remove", e.to_string()))
+        serde_json::to_value(plugin::remove(_s, &p.id, p.remove_user_data)?).map_err(|e| bad("plugin.remove", e.to_string()))
     }
     #[cfg(target_arch = "wasm32")]
     {

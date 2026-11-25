@@ -17,6 +17,7 @@
 //! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
 use solidcraft_engine::geom::prelude::*;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -62,6 +63,10 @@ pub struct Colors {
     /// are left out altogether, so they are fully transparent and only outlines are drawn. A
     /// combine's ghosts always show.
     pub cut_tint: bool,
+    /// Whether the old shape of a body the preview replaces is drawn as a ghost, and a body that
+    /// lost volume shows its new faces in the cut colour. Off (Scale): only the new body shows,
+    /// in its own colour, so a smaller result is never hidden inside or tinted by its old self.
+    pub replaced_ghost: bool,
     /// Whether bodies the preview creates are drawn see-through, in `new_body` and its alpha
     /// (Ghost Frame Members: this Frame Member's own new members, #15705).
     pub glass_new: bool,
@@ -88,6 +93,7 @@ impl Colors {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
             glass_new: false,
         }
     }
@@ -296,6 +302,23 @@ pub struct PreviewState {
 }
 
 impl PreviewState {
+    /// Tests: wait until the running preview worker has answered, and leave its result for the
+    /// next frame's poll, as a frame drawn once the worker is done would find it. Whether a
+    /// result then shows is decided by that poll, as in the app. False when nothing runs.
+    #[cfg(test)]
+    pub(crate) fn wait_for_worker(&mut self) -> bool {
+        let Some((key, rx)) = self.running.take() else { return false };
+        let job = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(job) => job,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("the preview failed".into()),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("the preview worker did not answer in 60 s"),
+        };
+        let (tx, done) = std::sync::mpsc::channel();
+        let _ = tx.send(job);
+        self.running = Some((key, done));
+        true
+    }
+
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
@@ -612,6 +635,7 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.as_built"
                     | "joint.edit"
                     | "joint.limits"
+                    | "joint.dynamics"
                     | "joint.gear"
                     | "joint.rack_pinion"
                     | "joint.screw"
@@ -667,6 +691,10 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
             "solid.chamfer" => &["distance", "distance2", "angle"],
+            // Every value is its own setup: a count, spacing or extent typed on the way to
+            // another (a spacing of 1 on the way to 15 over an 80 mm extent makes 81 copies) is
+            // left behind as soon as the next is typed, not waited for (#8523).
+            "solid.pattern.rectangular" => &[],
             _ => return None,
         };
         let params = params.as_object_mut()?;
@@ -693,6 +721,11 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
     if crate::viewport::frame_ghosting(app) {
         colors.new_body[3] = crate::viewport::frame_ghost_alpha();
         colors.glass_new = true;
+    }
+    // Scale shows only its result, in the body's own colour: every face of a scaled body is new.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. })) {
+        colors.replaced_ghost = false;
+        colors.tint_new = false;
     }
     colors
 }
@@ -916,7 +949,10 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
             let combine = combine_of(cmds);
-            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
+            // A plugin run's new bodies in the colours Run gives them (#19707).
+            let plugin = cmds.iter().all(|(command, _)| command == "plugin.run");
+            let looks = if plugin { new_body_looks(&p) } else { HashMap::new() };
+            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref(), &looks))?;
             b.bounds = state_bounds(&p.after);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
@@ -1232,22 +1268,42 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 pub(crate) fn build_motion(before: &ModelState, after: &ModelState, mut colors: Colors) -> Built {
     colors.tint_new = false;
     colors.cut_tint = false;
-    build_scene(before, after, colors, None, true)
+    build_scene(before, after, colors, None, true, &HashMap::new())
 }
 
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
-    build_as(before, after, c, None)
+    build_as(before, after, c, None, &HashMap::new())
 }
 
 /// [`build`], or as a combine shows its result: in the selected colour (with any piece a cut or
 /// intersect splits off its target), never tinted, and nothing drawn through the bodies. A join
 /// shows the joined body alone; a cut, its tools whole as red ghosts (a kept tool too, the
 /// preview standing in for it); an intersect, the tools' material it drops as yellow ghosts.
-fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>) -> Built {
-    build_scene(before, after, c, combine, false)
+fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>, looks: &HashMap<String, [u8; 4]>) -> Built {
+    build_scene(before, after, c, combine, false, looks)
 }
 
-fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>, motion: bool) -> Built {
+/// The colour each body the previewed commands make has once they are applied (its look,
+/// material or imported colour), by name: a plugin's live preview shows them as Run will
+/// (#19707). Bodies without one keep the New Body colour.
+fn new_body_looks(p: &solidcraft_engine::Preview) -> HashMap<String, [u8; 4]> {
+    let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+    p.after
+        .bodies
+        .iter()
+        .filter(|b| p.before.body(&b.name).is_none())
+        .filter_map(|b| p.doc.body_color(b).map(|[r, g, bl]| (b.name.clone(), [to8(r), to8(g), to8(bl), 255])))
+        .collect()
+}
+
+fn build_scene(
+    before: &ModelState,
+    after: &ModelState,
+    c: Colors,
+    combine: Option<&Combine>,
+    motion: bool,
+    looks: &HashMap<String, [u8; 4]>,
+) -> Built {
     let mut sc = GpuScene::default();
     let added_color = sc.color(c.added);
     let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
@@ -1296,7 +1352,13 @@ fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Opti
         // Material removed from a body (a hole, a pocket): its new faces also show through the
         // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
         // tools instead, as ghosts that bodies in front of them hide.
-        let cut = !moved && c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // Not for a body only resized (Scale): smaller is not cut material, and the tint would
+        // colour the whole result.
+        let cut = !moved
+            && c.cut_tint
+            && c.replaced_ghost
+            && combine.is_none()
+            && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
@@ -1335,6 +1397,8 @@ fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Opti
             selected
         } else if old.is_some() {
             body_color
+        } else if let Some(look) = looks.get(&a.name) {
+            sc.color(*look)
         } else {
             new_body
         };
@@ -1407,7 +1471,10 @@ fn build_scene(before: &ModelState, after: &ModelState, c: Colors, combine: Opti
                 _ => None,
             },
         };
-        if cut_tint && let Some(colour) = fill {
+        if cut_tint
+            && c.replaced_ghost
+            && let Some(colour) = fill
+        {
             let fill = sc.color(colour);
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
@@ -1732,6 +1799,7 @@ mod tests {
             ghost: true,
             tint_new: true,
             cut_tint: true,
+            replaced_ghost: true,
             glass_new: false,
         }
     }
@@ -2657,6 +2725,21 @@ mod tests {
         assert_eq!(s.undo.len(), undo);
     }
 
+    /// Scale's preview hides the old body and draws no ghost of it, so a body scaled down is not
+    /// covered by its old self; the new body is still drawn and still stands in for the old one.
+    #[test]
+    fn scale_preview_draws_no_ghost_of_the_old_body() {
+        let s = plate();
+        let cmds = [("solid.scale".to_string(), json!({"bodies": ["Body1"], "factor": 0.5}))];
+        let b = compute(&s, &cmds, Colors { replaced_ghost: false, ..colors() }).unwrap();
+        assert_eq!(b.replaced, vec!["Body1".to_string()]);
+        assert!(!b.scene.tris.is_empty(), "the scaled body is drawn");
+        assert!(b.scene.ghost.is_empty(), "no ghost of the old body");
+        assert!(b.scene.xray.is_empty(), "the smaller body is not shown as cut material");
+        let ghosted = compute(&s, &cmds, colors()).unwrap();
+        assert!(!ghosted.scene.ghost.is_empty(), "other tools keep the ghost");
+    }
+
     /// A fillet running into a boss: the boss's cylinder face keeps its surface but is meshed
     /// anew (the fillet's end moves its boundary), so the ghost leaves it out. Drawn as ghost it
     /// crossed the new triangulation and showed through the face in slivers.
@@ -2745,6 +2828,29 @@ mod tests {
         assert!(b.scene.ghost.is_empty());
         assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
+    }
+
+    /// A plugin's live preview shows the bodies it makes in the colours Run gives them (#19707):
+    /// a new body with a look is drawn in it, one without keeps the New Body colour, and other
+    /// commands' new bodies keep it whatever their look.
+    #[test]
+    fn new_bodies_are_drawn_in_the_colour_they_are_given() {
+        let s = Session::default();
+        let cmds = [
+            ("solid.box".to_owned(), json!({"length": 10, "width": 10, "height": 2, "body_name": "Plate"})),
+            ("solid.box".to_owned(), json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0], "body_name": "Text"})),
+            ("appearance.assign".to_owned(), json!({"bodies": ["Plate"], "color": "#228b22", "name": "Forest"})),
+        ];
+        let p = s.preview(&cmds).unwrap();
+        let looks = new_body_looks(&p);
+        let green = *looks.get("Plate").expect("the plate has its look");
+        assert!(green[1] > green[0] && green[1] > green[2] && green[3] == 255, "{green:?}");
+        assert!(!looks.contains_key("Text"), "{looks:?}");
+        let b = build_as(&p.before, &p.after, colors(), None, &looks);
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green) > 0, "the plate in its colour");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0, "the text in the New Body colour");
+        let b = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, green), 0, "not a plugin run: the New Body colour");
     }
 
     fn session_of(cmds: &[(&str, Value)]) -> Session {

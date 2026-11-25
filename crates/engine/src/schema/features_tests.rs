@@ -71,6 +71,7 @@ fn schemas_and_the_key_check_agree() {
             "thin",
             "through_all",
             "to",
+            "to_body_apart",
             "to_offset",
             "touching",
         ],
@@ -139,7 +140,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<BoundingSolidParams>(),
         &["bodies", "body_name", "body_names", "component", "margin", "margins", "name", "participants"],
     );
-    assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
+    assert_keys(input_schema_for::<ScaleParams>(), &["about", "bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
     assert_keys(
@@ -188,6 +189,10 @@ fn combine_schema_and_the_key_check_agree() {
             "keep_tools",
             "name",
             "new_component",
+            "offset",
+            "offset_edges",
+            "offset_faces",
+            "offset_radius",
             "operation",
             "participants",
             "target",
@@ -372,6 +377,20 @@ fn combine_check_takes_what_the_schema_allows() {
         (json!({"target": "A", "tools": ["B"], "touching": "glued"}), false),
         (json!({"target": "A", "tools": ["B"], "keep_tools": "yes"}), false),
         (json!({"target": "A", "tools": ["B"], "targets": ["A"]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": "gap + 0.1 mm", "offset_edges": "round"}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 0.2, "offset_edges": "sharp"}), true),
+        (json!({"target": "A", "tools": ["B"], "offset": null, "offset_edges": null}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": [1]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "wavy"}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": true}), false),
+        (
+            json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_edges": "round", "offset_radius": "2 mm", "offset_faces": [[1, 2, 3]]}),
+            true,
+        ),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": []}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [[1, 2]]}), false),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_faces": [{"point": [1, 2, 3]}, "Top"]}), true),
+        (json!({"target": "A", "tools": ["B"], "operation": "cut", "offset": 1, "offset_radius": [2]}), false),
     ] {
         let issues = crate::schema::issues("solid.combine", &p);
         assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
@@ -454,6 +473,7 @@ fn sweep_schemas_and_the_key_check_agree() {
         "path_sketch",
         "profiles",
         "sketch",
+        "stays_surface",
     ];
     surface.extend(shape);
     surface.sort_unstable();
@@ -1377,10 +1397,16 @@ fn pattern_schemas_and_the_key_check_agree() {
             "body_name",
             "body_names",
             "components",
+            "copy_at_end1",
+            "copy_at_end2",
             "count1",
             "count2",
             "dir1",
             "dir2",
+            "distance1",
+            "distance2",
+            "extent1",
+            "extent2",
             "features",
             "name",
             "participants",
@@ -1448,9 +1474,21 @@ fn rectangular_pattern_contract_keeps_the_handlers_errors() {
             with(row(), json!({"reversed": "yes"})),
             with(row(), json!({"reversed2": "yes"})),
             with(row(), json!({"reversed2": null})),
+            with(row(), json!({"distance1": "pitch"})),
+            with(row(), json!({"distance1": 2})),
+            with(row(), json!({"distance2": "pitch"})),
+            with(row(), json!({"copy_at_end1": "yes"})),
+            with(row(), json!({"copy_at_end2": 1})),
+            with(row(), json!({"distance1": "count_extent"})),
+            with(row(), json!({"distance1": "count_extent", "extent1": 0})),
+            with(row(), json!({"distance1": "count_extent", "extent1": "5 deg"})),
+            with(without(row(), "spacing1"), json!({"distance1": "spacing_extent", "extent1": 80})),
+            with(row(), json!({"distance1": "spacing_extent", "spacing1": 90, "extent1": 80})),
+            with(row(), json!({"distance1": "spacing_extent", "spacing1": -15, "extent1": 80})),
         ],
     );
     for p in [
+        with(row(), json!({"extent1": true})),
         with(row(), json!({"dir2": 5})),
         with(row(), json!({"dir2": [0, 1, 0], "count2": true, "spacing2": 10})),
         with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": true})),
@@ -1515,6 +1553,14 @@ fn the_pattern_checks_take_what_the_schemas_allow() {
         (with(row(), json!({"dir1": {"x": 1, "y": 0, "z": 0}, "count1": "n + 1", "spacing1": "10 mm"})), true),
         (with(row(), json!({"dir2": [0, 1, 0], "count2": 2, "spacing2": 8, "alignment2": "center", "reversed2": true})), true),
         (with(row(), json!({"dir2": null, "count2": null, "spacing2": null})), true),
+        (with(without(row(), "spacing1"), json!({"distance1": "count_extent", "extent1": "80 mm"})), true),
+        (with(without(row(), "count1"), json!({"distance1": "spacing_extent", "extent1": 80, "copy_at_end1": true})), true),
+        (with(row(), json!({"dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 8, "extent2": 30, "copy_at_end2": false})), true),
+        (with(row(), json!({"distance1": null, "distance2": null, "extent1": null, "copy_at_end1": null})), true),
+        (with(row(), json!({"distance1": "pitch"})), false),
+        (with(row(), json!({"distance2": "Count_Extent"})), false),
+        (with(row(), json!({"extent1": true})), false),
+        (with(row(), json!({"copy_at_end1": "yes"})), false),
         (with(row(), json!({"bodies": "B", "components": [], "alignment": "left", "reversed": false, "name": "Grid"})), true),
         (with(row(), json!({"dir1": [1, 0]})), false),
         (with(row(), json!({"dir1": null})), false),

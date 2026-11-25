@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.recover_after_browser_leave": "عرض الاستعادة بعد مغادرة علامة تبويب المتصفح هذه",
+    "prefs.recover_after_browser_leave_tip": "عند إيقافه، تؤدي مغادرة علامة التبويب هذه دون استخدام ذاكرة التخزين المؤقت للرجوع والتقدم إلى إخفاء عرض استعادة الحفظ التلقائي الخاص بها، حتى إذا تخطّى المتصفح طلب التأكيد. تظل إعادة التحميل تعرض الاستعادة. يستخدم خيار «الاحتفاظ بالعمل غير المحفوظ في هذا المتصفح» نسخًا منفصلة."
+  },
+  "de": {
+    "prefs.recover_after_browser_leave": "Wiederherstellung nach dem Verlassen dieses Browser-Tabs anbieten",
+    "prefs.recover_after_browser_leave_tip": "Wenn ausgeschaltet, wird beim Verlassen dieses Tabs ohne Zurück-/Vorwärts-Cache das Wiederherstellungsangebot seiner automatischen Speicherung ausgeblendet, selbst wenn der Browser die Bestätigung überspringt. Nach erneutem Laden wird die Wiederherstellung weiterhin angeboten. „Keep unsaved work in this browser“ verwendet separate Kopien."
+  },
+  "en": {
+    "prefs.recover_after_browser_leave": "Offer recovery after leaving this browser tab",
+    "prefs.recover_after_browser_leave_tip": "When off, leaving this tab without the back/forward cache hides its autosave recovery offer, even if the browser skips its confirmation. Reloads still offer recovery. Keep unsaved work in this browser uses separate copies."
+  },
+  "he": {
+    "prefs.recover_after_browser_leave": "הצעת שחזור לאחר יציאה מכרטיסיית דפדפן זו",
+    "prefs.recover_after_browser_leave_tip": "כשהאפשרות כבויה, יציאה מכרטיסייה זו ללא מטמון הקודם/הבא מסתירה את הצעת השחזור מהשמירה האוטומטית שלה, גם אם הדפדפן מדלג על בקשת האישור. טעינה מחדש עדיין מציעה שחזור. האפשרות ״לשמור עבודה שלא נשמרה בדפדפן זה״ משתמשת בעותקים נפרדים."
+  },
+  "ja": {
+    "prefs.recover_after_browser_leave": "このブラウザータブを離れた後に復元を提案する",
+    "prefs.recover_after_browser_leave_tip": "オフの場合、戻る/進むキャッシュを使わずにこのタブを離れると、ブラウザーが確認を省略した場合でも、このタブの自動保存からの復元の提案が非表示になります。再読み込み時には引き続き復元を提案します。「未保存の作業をこのブラウザーに保持する」では別のコピーを使用します。"
+  },
+  "ko": {
+    "prefs.recover_after_browser_leave": "이 브라우저 탭을 떠난 후 복구 제안",
+    "prefs.recover_after_browser_leave_tip": "끄면 뒤로/앞으로 캐시를 사용하지 않고 이 탭을 떠날 때 브라우저가 확인을 생략하더라도 이 탭의 자동 저장 복구 제안을 숨깁니다. 새로고침할 때는 계속 복구를 제안합니다. “Keep unsaved work in this browser”는 별도의 사본을 사용합니다."
+  },
+  "vi": {
+    "prefs.recover_after_browser_leave": "Đề nghị khôi phục sau khi rời thẻ trình duyệt này",
+    "prefs.recover_after_browser_leave_tip": "Khi tắt, việc rời thẻ này mà không dùng bộ nhớ đệm quay lại/tiến tới sẽ ẩn đề nghị khôi phục bản tự động lưu của thẻ, ngay cả khi trình duyệt bỏ qua bước xác nhận. Tải lại vẫn đề nghị khôi phục. “Giữ công việc chưa lưu trong trình duyệt này” dùng các bản sao riêng."
+  },
+  "zh": {
+    "prefs.recover_after_browser_leave": "离开此浏览器标签页后提示恢复",
+    "prefs.recover_after_browser_leave_tip": "关闭时，如果离开此标签页且未使用后退/前进缓存，将隐藏其自动保存的恢复提示，即使浏览器跳过确认也如此。重新加载仍会提示恢复。“在此浏览器中保留未保存的工作”使用单独的副本。"
+  }
+}

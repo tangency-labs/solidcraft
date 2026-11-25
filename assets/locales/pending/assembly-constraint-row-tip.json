@@ -1,0 +1,29 @@
+{
+  "en": {
+    "constrain.row_tip": "{rule} constraint"
+  },
+  "de": {
+    "constrain.row_tip": "Abhängigkeit {rule}"
+  },
+  "ja": {
+    "constrain.row_tip": "{rule}拘束"
+  },
+  "zh": {
+    "constrain.row_tip": "{rule}约束"
+  },
+  "ko": {
+    "constrain.row_tip": "{rule} 구속"
+  },
+  "vi": {
+    "constrain.row_tip": "Ràng buộc {rule}"
+  },
+  "ar": {
+    "constrain.row_tip": "قيد {rule}"
+  },
+  "he": {
+    "constrain.row_tip": "אילוץ {rule}"
+  },
+  "fr": {
+    "constrain.row_tip": "Contrainte : {rule}"
+  }
+}

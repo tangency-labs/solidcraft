@@ -862,7 +862,8 @@ fn convert_to_sheet(
             let (read, _) = crate::sheet_surface_cuts::engraved(&as_modelled, &built, &mb.body)?;
             let mut sheet = sheet;
             sheet.recesses = read.recesses;
-            let solid = if sheet.recesses.is_empty() { solid } else { sheet.build()? };
+            sheet.countersinks = read.countersinks;
+            let solid = if sheet.recesses.is_empty() && sheet.countersinks.is_empty() { solid } else { sheet.build()? };
             (sheet, solid)
         }
     };
@@ -1259,7 +1260,7 @@ pub(super) fn sheet_eval(
             }
             Ok(())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             // The profile as the sketch draws it, exactly, end to end, and the sketch curve each
             // of its pieces was drawn on with the piece's key, the curves put in chain order first
@@ -1270,13 +1271,32 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let rule = convert_rule(&doc.rule_values(vals, &r)?);
+            let mut rv = doc.rule_values(vals, &r)?;
+            if let Some(radius) = radius {
+                rv.bend_radius = val(vals, radius, Kind::Length)?;
+                if !(rv.bend_radius >= 0.0 && rv.bend_radius < 1e4) {
+                    return Err(DocError::Invalid("the contour flange bend radius must be non-negative".into()));
+                }
+            }
+            let rule = convert_rule(&rv);
+            // Where the sketched profile lies across the sheet's thickness, as its depth into the
+            // material from the face the sheet's surfaces are (`side1`): on that face, through the
+            // middle (`center`) or on the other face (`side2`).
+            let depth = match orientation.as_deref() {
+                None | Some("side1") => 0.0,
+                Some("center") => rule.thickness / 2.0,
+                Some("side2") => rule.thickness,
+                Some(_) => return Err(DocError::Invalid("contour flange orientation must be center, side1 or side2".into())),
+            };
+            // `reverse` (Other side) mirrors the sketch, taking the width to the other side of
+            // its plane, with an orientation saved or not.
             let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
             let segs: Vec<Seg2> = if *reverse { segs.iter().map(mirrored_y).collect() } else { segs };
             // Mirroring the sketch swaps the material side too. A sheet made from surfaces (#6748):
             // each piece pushed out along the normal is a panel of it.
             let name = new_name(st, f, 0);
-            let (sheet, solid) = crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, *flip != *reverse, f.id, &drawn)?;
+            let (sheet, solid) =
+                crate::SurfaceSheet::contour(&name, &r.name, &rule, &plane, &segs, w, depth, *symmetric, *flip != *reverse, f.id, &drawn)?;
             st.bodies.push(new_sheet_body(name, &sheet, solid, f.id));
             st.surface_sheets.push(sheet);
             Ok(())
@@ -1603,6 +1623,130 @@ pub(super) fn sheet_eval(
                 Err(_) => Err(first_error.unwrap_or_else(|| DocError::Invalid(sheet::TAB_OFF_SHEET.into()))),
             }
         }
+        FeatureKind::SheetBead {
+            sketch,
+            curves,
+            shape,
+            depth,
+            width,
+            angle,
+            crown_width,
+            base_radius,
+            crown_radius,
+            end_length,
+            margin,
+            flip,
+            body,
+        } => {
+            if !matches!(shape.as_deref(), None | Some("trapezoid")) {
+                return Err(DocError::Invalid(format!(
+                    "not supported yet: a bead of shape {:?} (only \"trapezoid\")",
+                    shape.as_deref().unwrap_or_default()
+                )));
+            }
+            let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
+            if curves.is_empty() || curves.len() > crate::sheet_surface_bead::MAX_BEADS {
+                return Err(DocError::Invalid(format!("a bead feature needs 1…{} centrelines", crate::sheet_surface_bead::MAX_BEADS)));
+            }
+            let mut lines = Vec::with_capacity(curves.len());
+            for id in curves {
+                let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("curve `{id}`")))?;
+                match ss.sketch.segs(ci).as_slice() {
+                    [Seg2::Line { a, b }] => lines.push((id, ss.plane.to_world(*a), ss.plane.to_world(*b))),
+                    _ => return Err(DocError::Invalid(format!("not supported yet: a bead along `{id}`, which is not a straight line"))),
+                }
+            }
+            // A bead is a form on a planar panel of a sheet: the named sheet's, else the one sheet
+            // with a planar panel the first centreline lies on. Which is never a matter of the
+            // sheets' order, so a centreline two sheets would take is refused.
+            let Some(&(_, a0, b0)) = lines.first() else {
+                return Err(DocError::Invalid("a bead feature needs a centreline".into()));
+            };
+            // A line of the sketch on sheet `s`, read from the sketch's component into the sheet's
+            // (its body's), as a fold's line is.
+            let source = doc.feature(sketch.0).map(|x| x.component).unwrap_or(f.component);
+            let on = |s: &crate::SurfaceSheet, a: Vec3, b: Vec3| {
+                let comp = st.body(&s.body).map(|m| doc.model_body_component(m)).unwrap_or(source);
+                let m = relative_transform(doc, source, comp).unwrap_or(crate::IDENTITY);
+                let (origin, normal) = (crate::apply_point(&m, ss.plane.origin), crate::apply_vector(&m, ss.plane.normal()));
+                s.bead_line(origin, normal, crate::apply_point(&m, a), crate::apply_point(&m, b))
+            };
+            let i = match body {
+                Some(n) => st
+                    .surface_sheets
+                    .iter()
+                    .position(|s| &s.body == n)
+                    .ok_or_else(|| DocError::Invalid(format!("`{n}` is not a sheet metal body")))?,
+                None => {
+                    let on: Vec<usize> =
+                        (0..st.surface_sheets.len()).filter(|&i| st.surface_sheets.get(i).is_some_and(|s| on(s, a0, b0).is_ok())).collect();
+                    match on.as_slice() {
+                        [i] => *i,
+                        [] => return Err(DocError::Invalid("a bead's centreline must lie on a planar panel of a sheet".into())),
+                        _ => return Err(DocError::Invalid("a bead's centreline lies on more than one sheet: name the sheet with `body`".into())),
+                    }
+                }
+            };
+            let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sk.unfolded {
+                return Err(DocError::Invalid("refold the sheet before adding beads".into()));
+            }
+            let rv = doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?;
+            let t = sk.sheet.thickness;
+            let d = val(vals, depth, Kind::Length)?;
+            let w = val(vals, width, Kind::Length)?;
+            let a = match (angle, crown_width) {
+                (Some(_), Some(_)) => return Err(DocError::Invalid("a bead takes its flanks' angle or its crown width, not both".into())),
+                (Some(e), None) => val(vals, e, Kind::Angle)?,
+                (None, Some(e)) => {
+                    let c = val(vals, e, Kind::Length)?;
+                    solidcraft_develop::bead_flank_angle(d, w, c)
+                        .map_err(|_| DocError::Invalid(format!("a bead's crown width ({c}) must be at least 0 and less than its width ({w})")))?
+                }
+                (None, None) => std::f64::consts::FRAC_PI_4,
+            };
+            let or = |e: &Option<crate::Expr>, default: f64| -> Result<f64> {
+                match e {
+                    Some(e) => val(vals, e, Kind::Length),
+                    None => Ok(default),
+                }
+            };
+            let (rb, rc) = (or(base_radius, rv.bend_radius)?, or(crown_radius, rv.bend_radius)?);
+            let (el, m) = (or(end_length, 3.0 * d)?, or(margin, 3.0 * t)?);
+            if sk.beads.len().saturating_add(lines.len()) > crate::sheet_surface_bead::MAX_BEADS {
+                return Err(DocError::Invalid(format!("a sheet takes at most {} beads", crate::sheet_surface_bead::MAX_BEADS)));
+            }
+            let mut sk = sk.clone();
+            let mut notes = Vec::new();
+            for (curve, pa, pb) in lines {
+                let (panel, qa, qb, far) = on(&sk, pa, pb)?;
+                let bead = crate::SurfaceBead {
+                    feature: f.id,
+                    curve: curve.clone(),
+                    panel,
+                    a: qa,
+                    b: qb,
+                    // Out of the face it is sketched on; with `flip`, out of the other one.
+                    far: far != *flip,
+                    depth: d,
+                    width: w,
+                    angle: a,
+                    base_radius: rb,
+                    crown_radius: rc,
+                    end_length: el,
+                };
+                sk.check_new_bead(&bead, m, &mut notes)?;
+                sk.beads.push(bead);
+            }
+            notes.dedup();
+            if !notes.is_empty() {
+                append_warning(warning, notes.join("; "));
+            }
+            if let Some(slot) = st.surface_sheets.get_mut(i) {
+                *slot = sk;
+            }
+            rebuild_surface_sheet(st, i)
+        }
         FeatureKind::SheetUnfold { body, refold, fixed } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {
                 Some(_) => no_sheet(body),
@@ -1891,6 +2035,7 @@ pub(super) fn surface_prism_cut(
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
+                || out.countersinks.iter().any(|c| c.panel == p && near(&Region2 { outer: c.outer_loop(), holes: Vec::new() }))
                 || out.loose.iter().any(|l| l.panel == p && near(&l.region))
                 || !out.sheet.cuts.is_empty()
             {
@@ -2014,15 +2159,16 @@ fn stops_inside(sk: &crate::SurfaceSheet, reach: &[Option<Aabb3>], plane: &Plane
 /// panel, inside its thickness, a bore of it (see [`crate::sheet::SheetBore`]). Each drill must
 /// meet one panel so and nothing else of the sheet. The sheets' bodies drilled; none, and nothing
 /// changed, for any other hole, which the generic path takes.
-pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Traced, Option<PrimitivePrism>)]) -> Result<Vec<String>> {
+pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[super::HoleTool]) -> Result<Vec<String>> {
     if tools.is_empty() || tools.len() > 10_000 {
         return Ok(Vec::new());
     }
     let mut drills = Vec::with_capacity(tools.len());
-    for (_, prism) in tools {
+    for tool in tools {
         // A drill meets a panel by what the tool holds whole, and reaches all its cylinder may.
-        let Some(PrimitivePrism::Cylinder { base, axis, radius, height, reach }) = *prism else { return Ok(Vec::new()) };
-        drills.push((base, axis, radius, height, drill_box(base, axis, radius, reach)));
+        let Some(PrimitivePrism::Cylinder { base, axis, radius, height, reach, part }) = tool.prism else { return Ok(Vec::new()) };
+        let role = tool.point_role.as_ref().map(|point| format!("{point}:{part}"));
+        drills.push((base, axis, radius, height, drill_box(base, axis, radius, reach), role));
     }
     let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
     for (i, sk) in st.surface_sheets.iter().enumerate() {
@@ -2040,7 +2186,7 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
         let t = sk.thickness;
         let tol = 1e-7;
         let mut out = sk.clone();
-        for &&(base, axis, radius, height, reach) in &reaching {
+        for &(base, axis, radius, height, reach, ref role) in reaching {
             let mut found: Option<(usize, bool, Vec3, Vec3, (f64, f64), (f64, f64))> = None;
             for (p, frame, own) in &panels {
                 let inv = frame.inverse();
@@ -2104,7 +2250,12 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 let (s, e) = (o + d * (u0 - p0), o + d * (u1 + p1));
                 Loop2::polygon(&[s - side, e - side, e + side, s + side])
             };
-            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region)) {
+            if out.recesses.iter().any(|r| r.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &r.region))
+                || out
+                    .countersinks
+                    .iter()
+                    .any(|c| c.panel == p && !crate::sheet_surface::loop_clear_of(&footprint, &Region2 { outer: c.outer_loop(), holes: Vec::new() }))
+            {
                 return Ok(Vec::new());
             }
             if !out.sheet.cuts.is_empty() {
@@ -2126,10 +2277,19 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 if !crate::sheet_surface::holds_clear(&panel.region, &circle) {
                     return Ok(Vec::new());
                 }
+                if let Some(role) = role {
+                    out.holes.push(crate::sheet_surface_convert::HoleRecord {
+                        panel: panel.name.clone(),
+                        feature: f.id,
+                        segs: circle.outer.segs.iter().map(|seg| (*seg, String::new(), Some(*seg))).collect(),
+                        drill_role: Some(format!("{role}:side:0")),
+                    });
+                }
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
                 // Through the panel's material only, a hair past it where it runs out of it.
-                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
+                let source = role.as_ref().map(|role| crate::sheet::BoreSource { feature: f.id, role: role.clone() });
+                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1, source });
             }
         }
         plans.push((i, out));
@@ -2334,7 +2494,7 @@ pub(super) enum PrimitivePrism {
     /// A cylinder: base centre, unit axis, radius and signed height, which the tool holds whole.
     /// The tool lies within the cylinder of the same base `reach` long: longer than `height` where
     /// material above the hole's entry face was left out of the tool (see `hole_run_on`).
-    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64, reach: f64 },
+    Cylinder { base: Vec3, axis: Vec3, radius: f64, height: f64, reach: f64, part: &'static str },
 }
 
 /// The most outline segments of a sketch's text a cut tells letters by, and the most letters it
@@ -2676,7 +2836,7 @@ fn body_under(st: &ModelState, body: &Option<crate::BodyName>, p: Vec3) -> Resul
     let i = body_at(st, body, &[p])?;
     let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("there is no body".into()))?;
     let tolerance = (b.body.size() * 1e-5).max(1e-4);
-    if crate::project::nearest_face(&b.mesh(), p).is_none_or(|(_, _, distance)| distance > tolerance) {
+    if b.body.nearest_face(p).is_none_or(|(distance, _)| distance > tolerance) {
         return Err(DocError::Invalid("the plastic feature's placement is no longer on its body face".into()));
     }
     Ok(b.name.clone())

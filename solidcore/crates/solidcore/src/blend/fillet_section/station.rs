@@ -20,7 +20,7 @@
 use std::borrow::Cow;
 
 use super::series::{GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, STORE_E, V3};
-use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit};
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, SectionProof};
 use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
@@ -615,6 +615,9 @@ pub struct GnSystem<'a, T: GnScalar> {
     /// `pR`: a ball whose radius varies, `r(s)` as a series in sigma (`r` unused), or
     /// none (014f66f).
     pub law: Option<&'a Ser<T>>,
+    /// Equal setbacks measured at the current oriented normals, instead of fixed offsets
+    /// or a radius prescribed along the leader.
+    pub equal_setback: Option<f64>,
 }
 
 /// The Taylor coefficients `W[a][b]` (`a + b <= deg`) of a face's offset point
@@ -886,6 +889,40 @@ fn offset_at<T: GnScalar>(w: &[V3<T>], deg: usize, a: usize, b: usize) -> V3<T> 
     w.get(a * (deg + 1) + b).copied().unwrap_or(vz)
 }
 
+/// An equal setback d has radius d * (1 + q) / sqrt((1 - q) * (1 + q)), where
+/// q is the dot product of the unit normals towards the centre. Both factors must be
+/// positive over the station or enclosure. Treating q as a series retains its dependence
+/// on the two feet in the Jacobian as well as in the higher coefficients.
+fn equal_setback_radius<T: GnScalar>(
+    normals: &[VSer<T>; 2],
+    side: [f64; 2],
+    distance: f64,
+    tr: Trunc,
+) -> Result<Ser<T>> {
+    if !(distance.is_finite() && distance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the chamfer's setback is finite and positive",
+        ));
+    }
+    let [first, second] = normals;
+    let [side_first, side_second] = side;
+    let q = first
+        .dot(second, tr)
+        .scale(T::of(side_first * side_second), tr);
+    let one = Ser::constant(T::of(1.0));
+    let one_plus = one.add(&q, tr);
+    let one_minus = one.sub(&q, tr);
+    if !(one_plus.at(0, 0).is_positive() && one_minus.at(0, 0).is_positive()) {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
+        ));
+    }
+    let inv_sqrt = one_plus.mul(&one_minus, tr).inv_sqrt(tr)?;
+    Ok(one_plus.mul(&inv_sqrt, tr).scale(T::of(distance), tr))
+}
+
 /// G's four series and the two feet's (`sm_GnEvaluate`'s `rG`, `rF`).
 pub type GnValues<T> = ([Ser<T>; 4], [VSer<T>; 2]);
 
@@ -965,7 +1002,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         // the offset point's own expansion (enclosures near a focal distance, #16652,
         // #19306): its constant offset d0
         let d0 = offset_d0(sys, rf, sidef);
-        let wt = if offset_near_focal(pf, d0) {
+        let wt = if sys.equal_setback.is_none() && offset_near_focal(pf, d0) {
             Some(offset_taylor(pf, d0, top)?)
         } else {
             None
@@ -1021,6 +1058,13 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         }
         let nrm = su.cross(&sv, tr);
         let inv_len = nrm.dot(&nrm, tr).inv_sqrt(tr)?;
+        if sys.equal_setback.is_some() {
+            if let (Some(foot), Some(normal)) = (f_out.get_mut(f), n_out.get_mut(f)) {
+                *foot = s;
+                *normal = nrm.times(&inv_len, tr);
+            }
+            continue;
+        }
         // the offset towards the ball: tau r_i s_i, tau = 1 + eps (r_i a series in sigma
         // for a law)
         let mut d = Ser::constant(T::of(rf * sidef));
@@ -1045,6 +1089,19 @@ pub fn gn_evaluate_vn<T: GnScalar>(
             *vo = vf;
             *no = nrm.times(&inv_len, tr);
             *fo = s;
+        }
+    }
+    if let Some(distance) = sys.equal_setback {
+        let radius = equal_setback_radius(&n_out, sys.side, distance, tr)?;
+        let mut tau = Ser::constant(T::of(1.0));
+        if !sys.hold && tr.e() >= 1 {
+            tau.set(0, 1, T::of(1.0));
+        }
+        let offset = radius.mul(&tau, tr);
+        for (((centre, foot), normal), side) in
+            v_out.iter_mut().zip(&f_out).zip(&n_out).zip(sys.side)
+        {
+            *centre = foot.add(&normal.times(&offset.scale(T::of(side), tr), tr), tr);
         }
     }
     let [v0, v1] = &v_out;
@@ -1174,6 +1231,14 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     ///
     /// As [`gn_evaluate_vn`].
     pub fn evaluate(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
+        // With equal setbacks the two faces' offsets depend on both normals. The
+        // per-face cache below assumes each offset is independent of the other foot.
+        if self.sys.equal_setback.is_some() {
+            self.computed = self
+                .computed
+                .saturating_add(u64::from(tr.computed_mask().count_ones()));
+            return gn_evaluate_vn(self.sys, x, tr);
+        }
         let out = self.evaluate_kept(x, tr);
         if out.is_err() {
             // the kept series are part way through an update
@@ -1406,16 +1471,25 @@ pub fn gn_top_jets<T: GnScalar>(top: usize, tr: Trunc, n: &[VSer<T>; 2], f: &mut
     }
 }
 
-/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms, offsets held: G along
-/// `x + e_j eps`, first order.
+/// `sm_GnJacobian`: the Jacobian `dG/dx` at x's constant terms and tau = 1: G along
+/// `x + e_j eps`, first order. An equal setback's offset still follows the feet.
 ///
 /// # Errors
 ///
 /// Those of [`gn_evaluate`].
 pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Result<[[T; 4]; 4]> {
+    Ok(gn_linearize(sys, x)?.1)
+}
+
+/// Each seeded column has the same constant term, G(x) at tau = 1.
+fn gn_linearize<T: GnScalar>(
+    sys: &GnSystem<'_, T>,
+    x: &[Ser<T>; 4],
+) -> Result<([T; 4], [[T; 4]; 4])> {
     let tr = Trunc::new(0, 1)?;
     let mut held = sys.clone();
     held.hold = true;
+    let mut residual = [T::of(0.0); 4];
     let mut jac = [[T::of(0.0); 4]; 4];
     for j in 0..4 {
         let mut sx = core::array::from_fn(|_| Ser::constant(T::of(0.0)));
@@ -1426,13 +1500,16 @@ pub fn gn_jacobian<T: GnScalar>(sys: &GnSystem<'_, T>, x: &[Ser<T>; 4]) -> Resul
             }
         }
         let (g, _) = gn_evaluate(&held, &sx, tr)?;
+        if j == 0 {
+            residual = g.each_ref().map(|gi| gi.at(0, 0));
+        }
         for (row, gi) in jac.iter_mut().zip(&g) {
             if let Some(x) = row.get_mut(j) {
                 *x = gi.at(0, 1);
             }
         }
     }
-    Ok(jac)
+    Ok((residual, jac))
 }
 
 /// `sm_Solve4`: solves `A y = b`, 4 x 4, by Gaussian elimination with partial pivoting.
@@ -1571,6 +1648,8 @@ impl GnStation {
 pub struct StationOptions<'a> {
     /// `pR`.
     pub law: Option<&'a Ser<f64>>,
+    /// Equal setbacks measured at the current station, instead of a leader law.
+    pub equal_setback: Option<f64>,
     /// `lTop`.
     pub top: usize,
     /// `pSides`.
@@ -1750,6 +1829,7 @@ fn solve_station_body(
     steps: &mut u32,
 ) -> Result<(GnStation, StationCurves)> {
     let law = opts.law;
+    let equal_setback = opts.equal_setback;
     let sides = opts.sides.unwrap_or([0, 0, 0, 0]);
     if tr.s() > MAX_S {
         return Err(SolidError::blend(
@@ -1787,7 +1867,6 @@ fn solve_station_body(
 
     // the feet at tau = 1, by Newton (the leader at sigma = 0 only)
     let mut x = seed;
-    let point = Trunc::new(0, 0)?;
     let mut converged = false;
     let mut it = 0;
     // the last iteration's residual and step, for a station that does not converge
@@ -1804,14 +1883,14 @@ fn solve_station_body(
             side,
             hold: false,
             law,
+            equal_setback,
         };
         let sx = x.map(Ser::constant);
-        let (g, _) = gn_evaluate(&sys, &sx, point)?;
-        let jac = gn_jacobian(&sys, &sx)?;
+        let (g, jac) = gn_linearize(&sys, &sx)?;
         let mut b = [0.0_f64; 4];
         let mut res = 0.0_f64;
         for (bi, gi) in b.iter_mut().zip(&g) {
-            *bi = -gi.at(0, 0);
+            *bi = -gi;
             res = smax(res, bi.abs());
         }
         let dx = solve4(&jac, &b)?;
@@ -1851,6 +1930,7 @@ fn solve_station_body(
         side,
         hold: false,
         law,
+        equal_setback,
     };
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
@@ -2057,6 +2137,55 @@ mod tests {
     /// Two planes at a square corner, the ball of radius r on the edge along y: the point
     /// at distance tau r from both is (tau r, y, tau r), its feet (tau r, y, 0) and
     /// (0, y, tau r), linear in tau, and y = L s along the leader.
+    #[test]
+    fn equal_setback_uses_the_oriented_wedge_and_its_derivative() {
+        let tr = Trunc::new(1, 0).unwrap();
+        let first = VSer::constant(V3 {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        });
+        let root3 = 3.0_f64.sqrt();
+        let mut second = VSer::constant(V3 {
+            x: 0.5,
+            y: 0.5 * root3,
+            z: 0.0,
+        });
+        let [cosine, sine, _] = &mut second.a;
+        cosine.set(1, 0, 1.0);
+        sine.set(1, 0, -1.0 / root3);
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first, second], [1.0, -1.0], d, tr).unwrap();
+        // The signed cosine is -1/2. The radius is d/sqrt(3), and
+        // differentiating its squared constraint gives dr/dq = r/(1-q^2).
+        let expected = d / root3;
+        assert!((radius.at(0, 0) - expected).abs() < 1.0e-15);
+        assert!((radius.at(1, 0) + 4.0 * expected / 3.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn equal_setback_encloses_the_radius_only_inside_its_wedge_domain() {
+        let tr = Trunc::new(0, 0).unwrap();
+        let normal = |x, y| {
+            VSer::constant(V3 {
+                x,
+                y,
+                z: Ivl::from(0.0),
+            })
+        };
+        let first = normal(Ivl::from(1.0), Ivl::from(0.0));
+        let second = normal(Ivl::new(0.4, 0.6), Ivl::new(0.8, 0.92));
+        let d = 0.2;
+        let radius = equal_setback_radius(&[first.clone(), second], [1.0, 1.0], d, tr)
+            .unwrap()
+            .at(0, 0);
+        assert!(radius.lo <= d * (7.0_f64 / 3.0).sqrt());
+        assert!(radius.hi >= 2.0 * d);
+        // A box reaching the degenerate wedge cannot prove a radius there.
+        let second = normal(Ivl::new(0.9, 1.0), Ivl::new(0.0, 0.44));
+        assert!(equal_setback_radius(&[first, second], [1.0, 1.0], d, tr).is_err());
+    }
+
     #[test]
     fn square_corner_station_is_the_closed_form() {
         let k = Kernel::default();
@@ -2473,6 +2602,7 @@ mod tests {
             side: [1.0, -1.0],
             hold,
             law: law.then_some(&law_ser),
+            equal_setback: None,
         };
         let near = [
             offset_near_focal(p0, offset_d0(&sys, r[0], 1.0)),
@@ -2516,6 +2646,47 @@ mod tests {
             gn_evaluate_vn(&sys, &sx, tr).unwrap()
         );
         (before, whole, near)
+    }
+
+    #[test]
+    fn seeded_newton_residual_matches_the_point_evaluation() {
+        let (n, u, v, ku, kv) = cylinder_at();
+        let curved = nurbs_partials::<f64>(&n, ku, kv, u, v, 2);
+        let flat = surface_partials(
+            &Kernel::default(),
+            &plane(Vec3::X, Vec3::Y),
+            Point2::new(0.4, 0.7),
+            2,
+        )
+        .unwrap();
+        let sx = [u, v, 0.4, 0.7].map(Ser::constant);
+        let law = Ser::constant(0.85);
+        for (law, equal_setback) in [(None, None), (Some(&law), None), (None, Some(0.75))] {
+            let sys = GnSystem {
+                p: [&curved, &flat],
+                leader: VSer::constant(V3 {
+                    x: 0.3,
+                    y: 0.4,
+                    z: 0.5,
+                }),
+                tangent: VSer::constant(V3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                }),
+                r: [9.99, 1.25],
+                side: [-1.0, 1.0],
+                hold: false,
+                law,
+                equal_setback,
+            };
+            let (point, _) = gn_evaluate(&sys, &sx, Trunc::new(0, 0).unwrap()).unwrap();
+            let (residual, _) = gn_linearize(&sys, &sx).unwrap();
+            assert_eq!(
+                residual.map(f64::to_bits),
+                point.map(|g| g.at(0, 0).to_bits())
+            );
+        }
     }
 
     #[test]
@@ -2831,6 +3002,7 @@ mod tests {
             side: [side, 1.0],
             hold: true,
             law: None,
+            equal_setback: None,
         };
         let half = 1e-6;
         let mut xu = Ser::constant(Ivl::from(u));

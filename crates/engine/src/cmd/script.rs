@@ -247,6 +247,7 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.saved_sections.is_empty(), "saved section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),
@@ -626,6 +627,24 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         // The offset and the rest angle travel as they are stored, zero
         // included: a value left out would be re-inferred at creation from
         // wherever the parts sit (`least_turn_angle`), not restored.
+        match (&j.exprs.offset_x, j.offset_xy[0]) {
+            (Some(e), _) => {
+                o.insert("offset_x".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_x".into(), json!(v));
+            }
+            _ => {}
+        }
+        match (&j.exprs.offset_y, j.offset_xy[1]) {
+            (Some(e), _) => {
+                o.insert("offset_y".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_y".into(), json!(v));
+            }
+            _ => {}
+        }
         match (&j.exprs.offset, j.offset) {
             (Some(e), _) => {
                 o.insert("offset".into(), json!(e));

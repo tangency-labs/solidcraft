@@ -855,14 +855,26 @@ pub struct Brep {
 /// as a raise that covers an edge/face gap does not.
 ///
 /// A clone and a copy (`topology::brep::p3::copy_brep`) carry the entries their entities
-/// still hold. A merge into another B-rep and a written file do not: a B-rep written with
-/// a raised tolerance stores it as its own tolerance, and a read of it fits at that value.
+/// still hold. A merge into another B-rep does not. A written file
+/// (`topology::brep_data_write::BrepData::from_brep`) stores a raised tolerance that is
+/// still held as the tolerance before the raise when the raise followed a B-rep file's end
+/// check ([`TrimCoverRaises::end_checked`]): the read of the written file then checks the
+/// same trims at the same tolerances, keeps the same ones and raises them again, so it
+/// fits as the written B-rep does (#16922). A part file's read runs no end check, so a
+/// raise it made is written as the edge's own tolerance: written before the raise, the end
+/// check of the written file's read could delete trims the part kept. A native rebuild
+/// (`topology::api_files::rebuild_native`), which runs no cover, also keeps the raised
+/// tolerance as the edge's own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrimCoverRaises {
     /// The raised edges: `(before, after)` tolerance.
     pub edges: std::collections::BTreeMap<EdgeId, (f64, f64)>,
     /// The vertices the raised edges' tolerances cascaded to: `(before, after)`.
     pub vertices: std::collections::BTreeMap<VertexId, (f64, f64)>,
+    /// The raises followed a B-rep file's end check (`sm_CheckAndFixUVTrimCurves`), which
+    /// kept every covered trim at the tolerance before its raise; false for a part
+    /// file's read, which runs none.
+    pub end_checked: bool,
 }
 
 impl TrimCoverRaises {
@@ -1378,7 +1390,25 @@ impl Brep {
     /// Those of [`Brep::clone_standing_for_self`] and of the cache copies (a trimmed
     /// surface cache in use).
     pub(crate) fn clone_for_trial(&self) -> Result<Self> {
-        let mut copy = self.clone_standing_for_self()?;
+        self.trial_copy(false)
+    }
+
+    /// [`Brep::clone_for_trial`] with every face surface's definition kept, as
+    /// [`Brep::clone_standing_for_self_keeping_definitions`] keeps it: a copy a query that
+    /// edits its B-reps runs on in place of this B-rep, so that it reads the same faces this
+    /// B-rep has, a round by its definition.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_for_trial`].
+    pub(crate) fn clone_for_trial_keeping_definitions(&self) -> Result<Self> {
+        self.trial_copy(true)
+    }
+
+    /// [`Brep::clone_for_trial`], keeping the face surfaces' definitions when
+    /// `keep_definitions` says so.
+    fn trial_copy(&self, keep_definitions: bool) -> Result<Self> {
+        let mut copy = self.standing_copy(keep_definitions)?;
         let ids: Vec<FaceId> = copy.faces.ids().collect();
         for &id in &ids {
             if let Some(surface) = copy.face_mut(id)?.surface.as_mut() {
@@ -2720,6 +2750,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(again, surface_key);
+    }
+
+    #[test]
+    fn a_trial_copy_keeping_definitions_keeps_every_face_s_definition() {
+        use crate::kernel::Kernel;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::sweep::screw::screw_sweep;
+
+        let mut k = Kernel::default();
+        let points = [
+            Vec3::new(4.1, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.9),
+            Vec3::new(4.1, 0.0, 0.9),
+        ];
+        let profile: Vec<Curve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let b = screw_sweep(&mut k, &profile, Vec3::ZERO, Vec3::Z, 1.5, 2.0, 1.5e-4).unwrap();
+        let defined = |b: &Brep| -> Vec<FaceId> {
+            b.faces()
+                .iter()
+                .filter(|(_, f)| {
+                    f.surface
+                        .as_ref()
+                        .is_some_and(|s| s.procedural_definition().is_some())
+                })
+                .map(|(id, _)| id)
+                .collect()
+        };
+        let kept = defined(&b);
+        assert!(!kept.is_empty(), "the thread keeps no definition");
+        assert_eq!(
+            defined(&b.clone_for_trial_keeping_definitions().unwrap()),
+            kept
+        );
+        // the copy without them drops them: the check above tells the two apart
+        assert!(defined(&b.clone_for_trial().unwrap()).is_empty());
     }
 
     #[test]

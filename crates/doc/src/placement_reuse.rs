@@ -25,7 +25,10 @@ impl Model {
                     && !self.is_stale()
                     && (Arc::ptr_eq(doc, &inputs.document) || same_geometry_inputs(doc, &inputs.document))
             });
-        if reusable {
+        // Or the checks of the last evaluation still run ([`Model::set_background_checks`]) and
+        // `doc` is what it evaluated: evaluating again would keep every result, after waiting
+        // for the checks.
+        if reusable || (!self.no_cache && self.checking_features() && self.is_current(doc)) {
             self.last_recomputed = 0;
             self.last_restored = 0;
             return false;
@@ -149,6 +152,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         plastic,
         parts,
         links,
+        // What a file keeps of its links; a design in memory holds their bodies either way.
+        linked_bodies_left_out: _,
         configs,
         favorites,
         canvases,
@@ -157,6 +162,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         materials,
         print_faces,
+        // Read only by robot exports: no feature's geometry depends on it.
+        collision_shapes: _,
         user_materials,
         appearances,
         body_components,
@@ -165,8 +172,11 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        saved_sections,
         visibility,
         point_clouds,
+        // Display only: a plane's drawn size shapes nothing.
+        plane_extents: _,
         notes: _,
         // Plugin data is kept beside the design; no feature reads it.
         plugin_data: _,
@@ -204,6 +214,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *saved_sections == b.saved_sections
         && *visibility == b.visibility
         && *point_clouds == b.point_clouds
 }

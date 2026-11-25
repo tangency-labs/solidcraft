@@ -24,6 +24,27 @@ fn messages(issues: &[Issue]) -> Vec<String> {
 }
 
 #[test]
+fn plugin_remove_defaults_to_keeping_user_data_in_the_schema_and_parser() {
+    let schema = input_schema_for::<plugin::RemoveParams>();
+    let root = schema.as_value();
+    assert_eq!(root["required"], json!(["id"]));
+    assert_eq!(root["properties"]["remove_user_data"]["default"], false);
+    for (params, expected) in [
+        (json!({"id":"gears"}), false),
+        (json!({"id":"gears", "remove_user_data":false}), false),
+        (json!({"id":"gears", "remove_user_data":true}), true),
+    ] {
+        assert!(conforms(root, root, &params));
+        assert_eq!(parse::<plugin::RemoveParams>(params).unwrap().remove_user_data, expected);
+    }
+    for value in [json!(null), json!("false"), json!(0)] {
+        let params = json!({"id":"gears", "remove_user_data":value});
+        assert!(!conforms(root, root, &params));
+        assert!(parse::<plugin::RemoveParams>(params).is_none());
+    }
+}
+
+#[test]
 fn expressions_accept_what_params_expr_accepts() {
     for v in [json!(5), json!(-2.5), json!("w / 2"), json!("  30 mm  "), json!(999_999_999.0)] {
         let want = crate::params::expr(&json!({ "v": v.clone() }), "v");
@@ -302,13 +323,13 @@ fn present_null_is_refused_but_absent_is_fine() {
     assert!(c.check(&json!({"distance": 5})).is_empty());
     // `body` picks the placed instance `face` is read in (frames::to_local), so it is a key.
     assert!(c.check(&json!({"distance": 5, "face": [0, 0, 0], "body": "Part"})).is_empty());
-    for key in ["sketch", "profiles", "faces", "convention", "to", "from", "thin"] {
+    for key in ["sketch", "profiles", "faces", "face", "convention", "to", "from", "thin"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert_eq!(c.check(&p).len(), 1, "{key}: null");
     }
     // Keys today's reader treats `null` like absence stay optional.
-    for key in ["taper", "direction", "face", "operation", "name"] {
+    for key in ["taper", "direction", "operation", "name"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert!(c.check(&p).is_empty(), "{key}: null");
@@ -1264,6 +1285,10 @@ fn revolve_axes_match_the_axis_reader() {
         (json!({"type": "sketch_line", "sketch": 12, "curve": "l1"}), true),
         (json!({"sketch": 12}), false),
         (json!({"sketch": 12, "curve": 5}), false),
+        (json!({"type": "sketch_axis", "axis": "x"}), true),
+        (json!({"type": "sketch_axis", "axis": "y"}), true),
+        (json!({"type": "sketch_axis", "axis": "z"}), false),
+        (json!({"type": "sketch_axis", "dir": [0, 0, 1]}), false),
         (json!({"type": "world", "axis": "X"}), true),
         (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
         (json!({"type": "world", "axis": "x"}), false),
@@ -1354,6 +1379,69 @@ fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
         let r = run(&mut s, exit, json!({}));
         let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
         assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn step_and_component_link_schema_keys_and_replies() {
+    use super::{component_link::*, insert_step::InsertStepParams};
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
+    assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
+    assert_keys(input_schema_for::<LinksParams>(), &[]);
+    let examples = [
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "importer": {"format": "step"}, "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 2, "name": "Board", "path": "board.kic", "importer": {"format": "kic.convert", "plugin": "kic", "version": "1.2"}, "file": "/parts/board.kic", "found": true, "changed": true}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "state": "not_allowed", "reason": "not allowed"}]}),
+        ),
+        (
+            "component.update_links",
+            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
+        ),
+        ("component.break_link", json!({"component": 1, "path": "part.step"})),
+        ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
+        (
+            "file.insert_step",
+            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft", "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
+        ),
+    ];
+    for (id, reply) in examples {
+        let spec = crate::find_command(id).unwrap();
+        let schema = spec.output.unwrap()();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{id}: {reply}");
+    }
+    let mut s = crate::Session { param_check: ParamCheck::Strict, ..Default::default() };
+    for (id, params) in [
+        ("file.insert_step", json!({"path": "part.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "part.step", "unknown": true})),
+        ("component.update_links", json!({"components": "all"})),
+        ("component.update_links", json!({"component": null})),
+        ("component.update_links", json!({"components": null})),
+        ("component.break_link", json!({"component": []})),
+        ("component.links", json!({"unknown": true})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &params).is_err(), "{id} {params}");
         assert_eq!(s.doc.to_json(), before);
     }
 }

@@ -3,6 +3,9 @@
 //! when asked (the grid lies on Z 0 and cuts through a part that straddles it). Pictures are drawn
 //! on the GPU and compared with a tolerance; without a GPU adapter the tests that draw are skipped
 //! with the reason printed (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -342,6 +345,72 @@ fn a_forced_cpu_snapshot_is_the_cpu_rasterizers_and_says_so() {
     assert_eq!(std::fs::read(dir.0.join("cpu.png")).unwrap(), cpu);
 }
 
+/// The box from the side, centred in a view ±64 mm high and ±102 mm across, so it covers the centre and no corner.
+fn side_camera() -> Value {
+    json!({"target": [40, 0, 0], "yaw": 0.0, "pitch": 0.0, "distance": 160})
+}
+
+/// `snapshot` by [`side_camera`] without grid and axes under a `SOLIDCRAFT_GPU` policy; `first`
+/// goes before the script. → the PNG.
+fn side_under(dir: &Scratch, script: &Path, out: &str, policy: &str, first: &[&str]) -> Vec<u8> {
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .env("SOLIDCRAFT_GPU", policy)
+        .arg("snapshot")
+        .args(first)
+        .arg(script)
+        .arg("--out")
+        .arg(dir.0.join(out))
+        .args(["--width", &SIZE.0.to_string(), "--height", &SIZE.1.to_string(), "--camera", &side_camera().to_string(), "--no-grid", "--no-axes"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{policy} {first:?}: {}", String::from_utf8_lossy(&output.stderr));
+    std::fs::read(dir.0.join(out)).unwrap()
+}
+
+fn pixel(rgba: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let at = ((y * SIZE.0 + x) * 4) as usize;
+    rgba[at..at + 4].try_into().unwrap()
+}
+
+/// `--transparent`: corners clear, the model opaque in its colour on the gradient; on the CPU it
+/// is the rasterizer's own transparent picture, byte for byte.
+#[test]
+fn a_transparent_snapshot_clears_the_background_and_keeps_the_model_opaque() {
+    let dir = Scratch::new();
+    let script = dir.script("part.json", &[]);
+    for (policy, slack) in [("cpu", 0u8), ("auto", 2)] {
+        let (_, _, clear) = decode(&side_under(&dir, &script, &format!("{policy}-clear.png"), policy, &["--transparent"]));
+        let (_, _, opaque) = decode(&side_under(&dir, &script, &format!("{policy}-opaque.png"), policy, &[]));
+        for (x, y) in [(0, 0), (SIZE.0 - 1, 0), (0, SIZE.1 - 1), (SIZE.0 - 1, SIZE.1 - 1)] {
+            assert!(pixel(&clear, x, y)[3] <= slack, "{policy}: corner ({x}, {y}) is clear");
+        }
+        let (model, plain) = (pixel(&clear, SIZE.0 / 2, SIZE.1 / 2), pixel(&opaque, SIZE.0 / 2, SIZE.1 / 2));
+        assert!(model[3] >= 255 - slack, "{policy}: the model is opaque: {model:?}");
+        assert!(model.iter().zip(&plain).all(|(a, b)| a.abs_diff(*b) <= 2), "{policy}: {model:?} against {plain:?}");
+    }
+    let mut s = Session::default();
+    s.run_script(&serde_json::from_slice(&std::fs::read(&script).unwrap()).unwrap()).unwrap();
+    s.execute("view.apply", &json!({"camera": side_camera()})).unwrap();
+    let cam = s.camera.unwrap();
+    let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+    let canvas = solidcraft_viewport::render_transparent(&scene, &cam, SIZE.0 as usize, SIZE.1 as usize);
+    let expected = solidcraft_viewport::png(canvas.w, canvas.h, canvas.rgba).unwrap();
+    assert_eq!(std::fs::read(dir.0.join("cpu-clear.png")).unwrap(), expected);
+}
+
+/// Without `--transparent` every pixel stays opaque (the CPU bytes are pinned by
+/// `a_forced_cpu_snapshot_is_the_cpu_rasterizers_and_says_so`).
+#[test]
+fn without_transparent_a_snapshot_stays_opaque() {
+    let dir = Scratch::new();
+    let script = dir.script("part.json", &[]);
+    for policy in ["cpu", "auto"] {
+        let (_, _, rgba) = decode(&side_under(&dir, &script, &format!("{policy}.png"), policy, &[]));
+        assert!(rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 255), "{policy}: a pixel is not opaque");
+    }
+}
+
 /// `hardware` (and `software`) never fall to the CPU rasterizer: without such an adapter the
 /// snapshot fails, naming the policy, and writes nothing; with one it says it was drawn on the GPU.
 /// `auto` lands where `solidcraft-cli gpu` says it does.
@@ -377,6 +446,42 @@ fn a_strict_policy_never_falls_to_the_cpu() {
     assert_eq!(reply["renderer"], report["renderer"], "{reply} vs {report}");
     let (_, cpu) = survey("cpu");
     assert_eq!((cpu["lands_on"].clone(), cpu["renderer"].clone()), (json!("cpu"), json!("cpu")), "{cpu}");
+}
+
+/// Linux machines without a Vulkan ICD still find llvmpipe over OpenGL under the software policy (#22109).
+#[test]
+fn linux_software_policy_finds_opengl_llvmpipe_without_vulkan_icd() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let o = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+        .args(["gpu", "--policy", "software"])
+        .env("VK_DRIVER_FILES", "/nonexistent")
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .env_remove("WGPU_BACKEND")
+        .output()
+        .unwrap();
+    if !o.status.success() {
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        if stderr.contains("No OpenGL context") || stderr.contains("libGL.so") || stderr.contains("libEGL.so") {
+            // Environment lacks OpenGL runtime libraries entirely (e.g. minimal container).
+            return;
+        }
+        panic!(
+            "gpu --policy software failed unexpectedly: exit {:?}\nstdout: {}\nstderr: {}",
+            o.status.code(),
+            String::from_utf8_lossy(&o.stdout),
+            stderr
+        );
+    }
+    let reply: Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(reply["policy"], "software");
+    assert_eq!(reply["renderer"], "gpu-software");
+    assert_eq!(reply["lands_on"], "software");
+    let backends = reply["backends"].as_str().unwrap();
+    assert!(backends.contains("GL"), "{backends}");
+    let adapters = reply["adapters"].as_array().unwrap();
+    assert!(adapters.iter().any(|a| a["backend"] == "Gl" && a["tier"] == "software"), "{adapters:?}");
 }
 
 #[test]
@@ -449,7 +554,7 @@ fn repeated_snapshot_input_is_refused_before_loading_or_replacing_files() {
 fn the_usage_names_the_camera_and_the_guides() {
     let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).arg("snapshot").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    for word in ["--camera", "--view", "view.save", "--no-grid", "--no-axes"] {
+    for word in ["--camera", "--view", "view.save", "--no-grid", "--no-axes", "--transparent"] {
         assert!(stderr.contains(word), "usage lacks {word}: {stderr}");
     }
 }

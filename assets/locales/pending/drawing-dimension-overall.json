@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.drawing_dimension_tool.overall": "Overall size of the part (corners included)",
+    "ui.drawing_dimension_tool.overall_hint": "Double-click: tick “Overall size of the part” in the panel for the part's full width or height"
+  },
+  "de": {
+    "ui.drawing_dimension_tool.overall": "Gesamtmaß des Teils (Ecken eingeschlossen)",
+    "ui.drawing_dimension_tool.overall_hint": "Doppelklick: „Gesamtmaß des Teils“ im Bereich ankreuzen für die volle Breite oder Höhe"
+  },
+  "ja": {
+    "ui.drawing_dimension_tool.overall": "部品の全体寸法(角を含む)",
+    "ui.drawing_dimension_tool.overall_hint": "ダブルクリック: パネルの「部品の全体寸法」をオンにすると部品の全幅または全高になります"
+  },
+  "zh": {
+    "ui.drawing_dimension_tool.overall": "零件整体尺寸(含圆角)",
+    "ui.drawing_dimension_tool.overall_hint": "双击:在面板中勾选“零件整体尺寸”,即可得到零件的整个宽度或高度"
+  },
+  "ko": {
+    "ui.drawing_dimension_tool.overall": "부품 전체 치수(모서리 포함)",
+    "ui.drawing_dimension_tool.overall_hint": "더블클릭: 패널에서 '부품 전체 치수'를 선택하면 부품의 전체 너비 또는 높이가 됩니다"
+  },
+  "vi": {
+    "ui.drawing_dimension_tool.overall": "Kích thước tổng thể của chi tiết (gồm cả góc)",
+    "ui.drawing_dimension_tool.overall_hint": "Nhấp đúp: chọn “Kích thước tổng thể của chi tiết” trong bảng để lấy toàn bộ chiều rộng hoặc chiều cao"
+  },
+  "ar": {
+    "ui.drawing_dimension_tool.overall": "الحجم الكلي للقطعة (مع الزوايا)",
+    "ui.drawing_dimension_tool.overall_hint": "نقر مزدوج: فعّل «الحجم الكلي للقطعة» في اللوحة للحصول على العرض أو الارتفاع الكامل"
+  },
+  "he": {
+    "ui.drawing_dimension_tool.overall": "הגודל הכולל של החלק (כולל פינות)",
+    "ui.drawing_dimension_tool.overall_hint": "לחיצה כפולה: סמנו ״הגודל הכולל של החלק״ בלוח לקבלת הרוחב או הגובה המלאים"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.revert_to_saved": "Revert to Saved",
+    "ui.revert": "Revert",
+    "document.revert_changes": "Unsaved changes to {name} will be lost, and it is read again from its file.",
+    "ui.revert_question": "Revert to the saved version?",
+    "cmd.file.revert_saved": "Revert to Saved"
+  },
+  "es": {
+    "ui.revert_to_saved": "Volver a la versión guardada",
+    "ui.revert": "Volver",
+    "document.revert_changes": "Se perderán los cambios sin guardar de {name} y se leerá de nuevo desde su archivo.",
+    "ui.revert_question": "¿Volver a la versión guardada?",
+    "cmd.file.revert_saved": "Volver a la versión guardada"
+  },
+  "ar": {
+    "ui.revert_to_saved": "الرجوع إلى المحفوظ",
+    "ui.revert": "رجوع",
+    "document.revert_changes": "ستُفقد التغييرات غير المحفوظة في {name} وستتم قراءته من جديد من ملفه.",
+    "ui.revert_question": "الرجوع إلى النسخة المحفوظة؟",
+    "cmd.file.revert_saved": "الرجوع إلى المحفوظ"
+  },
+  "he": {
+    "ui.revert_to_saved": "חזרה לגרסה השמורה",
+    "ui.revert": "חזרה",
+    "document.revert_changes": "השינויים שלא נשמרו ב-{name} יאבדו והוא ייקרא שוב מהקובץ שלו.",
+    "ui.revert_question": "לחזור לגרסה השמורה?",
+    "cmd.file.revert_saved": "חזרה לגרסה השמורה"
+  },
+  "ja": {
+    "ui.revert_to_saved": "保存した状態に戻す",
+    "ui.revert": "元に戻す",
+    "document.revert_changes": "{name} の未保存の変更は失われ、ファイルから読み込み直されます。",
+    "ui.revert_question": "保存した状態に戻しますか?",
+    "cmd.file.revert_saved": "保存した状態に戻す"
+  },
+  "vi": {
+    "ui.revert_to_saved": "Quay về bản đã lưu",
+    "ui.revert": "Quay về",
+    "document.revert_changes": "Các thay đổi chưa lưu của {name} sẽ mất và nó được đọc lại từ tệp.",
+    "ui.revert_question": "Quay về bản đã lưu?",
+    "cmd.file.revert_saved": "Quay về bản đã lưu"
+  },
+  "zh": {
+    "ui.revert_to_saved": "还原为已保存的版本",
+    "ui.revert": "还原",
+    "document.revert_changes": "{name} 中未保存的更改将丢失,并从其文件重新读取。",
+    "ui.revert_question": "还原为已保存的版本?",
+    "cmd.file.revert_saved": "还原为已保存的版本"
+  },
+  "fr": {
+    "ui.revert_to_saved": "Revenir à la version enregistrée",
+    "ui.revert": "Rétablir",
+    "document.revert_changes": "Les modifications non enregistrées de {name} seront perdues et le fichier sera relu.",
+    "ui.revert_question": "Revenir à la version enregistrée ?",
+    "cmd.file.revert_saved": "Revenir à la version enregistrée"
+  }
+}
