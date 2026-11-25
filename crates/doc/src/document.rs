@@ -1236,6 +1236,12 @@ pub enum FeatureKind {
         /// The chamfered tip at the thread's free end (ISO 4753).
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         tip: crate::thread_forms::ThreadTip,
+        /// Continue onto the coaxial point next to the shank.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        point: crate::thread_forms::ThreadPoint,
+        /// Fade at the point's small end or cut at full depth.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        point_depth: crate::thread_forms::ThreadPointDepth,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Chamfer angle")]
         chamfer_angle: Option<Expr>,
@@ -1249,7 +1255,7 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
-        /// Other cylindrical faces threaded with the same options, in selection order.
+        /// Other faces threaded with the same options, in selection order.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         additional_faces: Vec<FacePick>,
         /// The definition body for each selected face, primary first. Empty keeps legacy selection.

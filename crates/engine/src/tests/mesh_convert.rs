@@ -357,6 +357,30 @@ fn stl_export_is_closed_where_faces_meet() {
 }
 
 #[test]
+fn fine_stl_of_crossed_pointed_screw_keeps_its_closed_edges() {
+    use solidcraft_io::{Format, MeshQuality, export_with_quality, read_stl};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 3, "body_name": "Pointed screw"}));
+    run(&mut s, "solid.cone", json!({"radius": 4, "height": -8, "operation": "join", "targets": ["Pointed screw"]}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 3], "radius": 6, "height": 2.5, "operation": "join", "targets": ["Pointed screw"]}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [-7, -0.65, 4.5], "length": 14, "width": 1.3, "height": 2, "operation": "cut", "targets": ["Pointed screw"]}),
+    );
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"faces": [{"body": "Pointed screw", "point": [4, 0, 1]}], "designation": "M8x1.25", "modeled": true, "point": "follow", "point_depth": "fade", "hand": "both"}),
+    );
+    let bytes = export_with_quality(&s.model.state(), &[], Format::StlBinary, "Crossed M8 screw", &s.doc.metadata, MeshQuality::Fine).unwrap();
+    let triangles = read_stl(&bytes).unwrap();
+    assert!(!triangles.is_empty());
+    assert!(solidcraft_kernel::triangle_edges_closed(triangles.into_iter().map(|t| Some(t.map(|p| p.map(|x| (x + 0.0).to_bits()))))));
+}
+
+#[test]
 fn save_mesh_rejects_unknown_format_and_slicer_without_writing() {
     let mut s = imported_box();
     // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solidcraft-save-mesh-<pid>.stl`, and

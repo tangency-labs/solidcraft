@@ -22,31 +22,7 @@ pub struct ScrewSweepOptions<'a> {
     pub tolerance: f64,
 }
 
-/// A 3D curve of a profile, path or section.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Curve {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    /// Counter-clockwise about the unit `axis` from angle `start` to `end` (radians,
-    /// 0 < end - start <= 2 pi), angle 0 along the unit `reference` (square to `axis`).
-    Arc {
-        center: [f64; 3],
-        axis: [f64; 3],
-        reference: [f64; 3],
-        radius: f64,
-        start: f64,
-        end: f64,
-    },
-    /// Control points (x, y, z, weight > 0) and the clamped knot vector (points + degree + 1
-    /// knots).
-    Nurbs {
-        degree: usize,
-        points: Vec<[f64; 4]>,
-        knots: Vec<f64>,
-    },
-}
+pub use solidcore_ops::sweep::Curve;
 
 /// How a drafted [`Brep::extrude`] closes the gap its offset opens at a sharp corner of the
 /// profile. Where the offsets overlap instead, all three trim them where they cross.
@@ -246,8 +222,8 @@ impl Brep {
         r
     }
 
-    /// A loft from the planar `section` (one closed loop of lines, in order) to the point `apex`
-    /// off its plane: a pyramid, its base the section and a triangle on each line.
+    /// A loft from the planar `section` (one closed loop, in order) to the point `apex`
+    /// off its plane. Each line gives a triangle and each curved edge gives a ruled face.
     pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Brep> {
         let r = core::sweep::loft_to_point(section, apex).map(Brep::made_core);
         trace::made("loft_to_point", &[], &r, || json!({"section": trace::curves(section), "apex": apex}));

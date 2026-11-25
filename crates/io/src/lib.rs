@@ -1775,10 +1775,19 @@ pub fn export_with_parts_noted(
     let sel = selected(state, bodies)?;
     let (bytes, notes) = match format {
         Format::StlBinary | Format::StlAscii => {
-            // Each body welded on its own (as for 3MF), so shared vertices are written identically
-            // and the file is closed where faces meet.
+            // A closed STL needs no proximity weld. Merging nearby but distinct
+            // points on an already closed mesh can pinch faces into non-manifold
+            // edges, particularly where a fine mesh follows a narrow crease.
             let (items, notes) = per_placed_body(&sel, |b, body| {
                 let (m, mut n) = body_mesh(b, body, quality)?;
+                // Our reader uses f32 for both encodings. ASCII also needs
+                // to close at the full precision written to the file.
+                let closed = solidcraft_kernel::mesh_edges_closed_by(&m.positions, &m.triangles, |p| p.to_f32().map(|x| (x + 0.0).to_bits()))
+                    && (format == Format::StlBinary
+                        || solidcraft_kernel::mesh_edges_closed_by(&m.positions, &m.triangles, |p| [p.x, p.y, p.z].map(|x| (x + 0.0).to_bits())));
+                if closed {
+                    return Ok((m, n));
+                }
                 let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
                 if !b.body.is_surface() && !b.body.is_mesh() {
                     n.extend(unsealed_note(&positions, &triangles, true).map(|note| format!("{}: {note}", b.name)));

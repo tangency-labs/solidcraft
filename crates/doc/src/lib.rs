@@ -225,6 +225,7 @@ pub use eval::sketch_hole_direction;
 pub use eval::sketch_line_plane;
 pub use eval::state_in_frame;
 pub use eval::state_in_frame_at;
+pub use eval::suggested_modeled_thread_in;
 pub use eval::suggested_thread;
 pub use eval::suggested_thread_in;
 pub use eval::tangent_face_chain;

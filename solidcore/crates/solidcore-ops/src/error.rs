@@ -26,6 +26,8 @@ pub enum Error {
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
+    /// A cone too steep for a thread profile, with the permitted half-angle in degrees.
+    ThreadConeTooSteep(f64),
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
     /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
@@ -510,6 +512,7 @@ impl Error {
             Error::Status(..) => "Status",
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
+            Error::ThreadConeTooSteep(..) => "ThreadConeTooSteep",
             Error::Empty => "Empty",
             Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
@@ -987,6 +990,7 @@ impl std::fmt::Display for Error {
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
+            Error::ThreadConeTooSteep(limit) => write!(f, "the cone is too steep for this thread's flanks: its half-angle must be below {limit:.2}°"),
             Error::Empty => write!(f, "the result is empty"),
             Error::EmptyRefuted { at: [x, y, z] } => write!(
                 f,

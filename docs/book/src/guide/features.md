@@ -261,6 +261,63 @@ The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Bot
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,
 `"both"`) on `solid.thread`; omitted, a thread is right-handed. Tapped holes are right-handed.
 
+**Model a pointed screw**
+
+1. Make a cylindrical shank and a cone that narrows away from it. Give the cone and shank the
+   same axis and match their diameters where they meet. Choose **Join** when you add the cone so
+   they form one solid with a shared rim. For example, make a cylinder at the origin with an
+   8 mm diameter and a 3 mm height. Make a cone at the same origin with an 8 mm base diameter,
+   a zero top diameter, and a height of `-8 mm`.
+2. For a slotted head, add a wider cylinder at the other end with **Join**. Use **Cut** to
+   remove a shallow rectangular slot across the head's top.
+3. Open **Thread** and select the shank's cylindrical side. Choose the size and pitch, such
+   as `M8x1.25` for this example. Turn on **Modeled** and choose **Follow point** under **Point**.
+   The **Point** option appears when the selected shank has a joined cone the thread can follow.
+   If both ends have a cone, use **Start end (optional)** to pick the rim of the one to follow.
+4. Leave **Point depth** at **Fade** and apply the thread. The groove keeps its full depth where
+   the core is thick enough. It fades to zero at the tip while keeping the tooth crests narrow.
+   On a shallow point, the groove can stay shallow across the cone and reach full depth on the
+   cylindrical shank. **Length** and **Up to** limit the run along the shank, measured from the
+   point's rim. Choose **Both** under **Hand** to cut crossed grooves. A selected **End** runout
+   tapers the groove inside a free shank end.
+
+Choose **Full depth** for a point with enough material around its axis to keep the full groove
+depth. A sharp point needs **Fade**. To cut a constant-depth groove on a cone alone, select its
+conical face directly and turn on **Modeled**. **Length** and **Up to** start at the wide rim.
+Limit the cut to the part of the cone where the cutting profile clears the axis. Leave **Start**
+set to **None** and **End** set to **Square**.
+
+To script the thread on the blank above, name the body `Pointed screw` or use its name in
+`faces`. This command picks the shank's cylindrical side and cuts both hands.
+
+```json
+{
+  "command": "solid.thread",
+  "params": {
+    "faces": [{"body": "Pointed screw", "point": [4, 0, 1]}],
+    "designation": "M8x1.25",
+    "modeled": true,
+    "point": "follow",
+    "point_depth": "fade",
+    "hand": "both"
+  }
+}
+```
+
+Omit `hand` for a right-hand thread. Set `point_depth` to
+`"full"` for a flat tip with enough material around its axis.
+
+Save the finished design as `pointed-screw.sc` to export a Fine STL from the command line.
+
+```sh
+solidcraft-cli run --in pointed-screw.sc --out pointed-screw.stl --quality fine
+```
+
+For standard hardware, use **Insert Fastener** or the separately installed **Screw** plugin.
+Use **Follow point** when you need to model threads on the point of a custom screw blank.
+The example uses nominal thread geometry. For a printed part, check the fit with the intended
+printer and material.
+
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.

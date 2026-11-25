@@ -32,6 +32,7 @@ use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::math::Transform;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use solidcore::primitive::primitive_creation::SweepOptions;
@@ -58,8 +59,7 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{
-    create_face_from_surface, create_planar_face_with_3d_curves,
-    create_planar_faces_with_3d_curves, FaceBuildEnv,
+    create_face_from_surface, create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
 use solidcore::topology::{Brep, FaceId};
@@ -74,7 +74,7 @@ pub use solidcore::geom::certified::Verdict;
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_under, Body, Contract, Expect};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, with_body};
@@ -1029,6 +1029,10 @@ pub fn match_loft_sections(
 /// [`Error::Argument`] for a section or number refused; the kernel's status; [`Error::Empty`],
 /// [`Error::NotSolid`].
 pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
+    loft_with(sections, degree, cap, Contract::Proved)
+}
+
+fn loft_with(sections: &[Vec<Curve>], degree: u32, cap: bool, contract: Contract) -> Result<Body> {
     if sections.len() < 2 || sections.len() > MAX_CURVES || !(1..=3).contains(&degree) {
         return Err(Error::Argument);
     }
@@ -1043,7 +1047,13 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
         }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         match create_skin_primitive(k, &counts, &made.refs(), degree as usize, cap) {
-            Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => Ok(finish_under(
+                k,
+                r.brep,
+                if cap { Expect::SOLID } else { Expect::FACES },
+                contract,
+            )?
+            .map(|(body, _)| body)),
             Err(e) => Ok(Err(status(e))),
         }
     })
@@ -1254,28 +1264,58 @@ pub fn skin_with_ends(
     create_skin_primitive_with_ends(k, counts, curves, 3, cap, kernel_ends).map(|r| Ok(r.brep))
 }
 
-/// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the
-/// section's plane): the base and a triangle on each line, stitched and oriented.
+/// A capped skin through corresponding section curves, optionally continued from the first
+/// section to an apex. The sections keep their caller-supplied curve order.
 ///
 /// # Errors
-/// [`Error::Argument`] for a section that is not one closed loop of lines, or an apex not
+/// [`Error::Argument`] when the sections are not aligned or exceed the curve limit, the degree
+/// is not 2 or 3, or the apex is refused. Otherwise the loft, cap or union's error.
+pub fn loft_aligned(sections: &[Vec<Curve>], degree: u32, apex: Option<[f64; 3]>) -> Result<Body> {
+    let first = sections.first().ok_or(Error::Argument)?;
+    let count = first.len();
+    if !(2..=3).contains(&degree)
+        || sections.len() <= degree as usize
+        || count == 0
+        || sections.len().saturating_mul(count) > MAX_CURVES
+        || sections.iter().any(|section| section.len() != count)
+        || apex.is_some_and(|p| !coord_ok(&p))
+    {
+        return Err(Error::Argument);
+    }
+    // These sections form an intermediate tool. A thin, closed loft can
+    // have a pole too near a seam for a separate outward proof.
+    let body = loft_with(sections, degree, true, Contract::Closed)?;
+    match apex {
+        None => Ok(body),
+        Some(apex) => crate::boolean::boolean(
+            body.through_record()?,
+            loft_to_point_with(first, apex, Contract::Closed)?.through_record()?,
+            crate::boolean::BooleanOp::Union,
+        )?
+        .ok_or(Error::Empty),
+    }
+}
+
+/// The planar `section` (one closed loop, in order) continued to `apex` off its plane.
+/// Each line gives a planar triangle; arcs and splines give ruled faces with a pole at the
+/// apex. The base and walls are stitched and oriented.
+///
+/// # Errors
+/// [`Error::Argument`] for a section that is not one closed loop, or an apex not
 /// proved off its plane; the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
 pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
+    loft_to_point_with(section, apex, Contract::Proved)
+}
+
+fn loft_to_point_with(section: &[Curve], apex: [f64; 3], contract: Contract) -> Result<Body> {
     if !coord_ok(&apex) {
         return Err(Error::Argument);
     }
     making("loft_to_point", |k| {
         let made = parsed!(parse(k, section));
         let curves = &made.curves;
-        if curves.len() < 3 || !path::closed_loop(k, curves, 1e-6)?.is_yes() {
+        if !path::closed_loop(k, curves, 1e-6)?.is_yes() {
             return Ok(Err(Error::Argument));
-        }
-        let mut corners = Vec::new();
-        for c in curves {
-            if !matches!(c.kind(), CurveKind::Line(_)) {
-                return Ok(Err(Error::Argument));
-            }
-            corners.push(c.ends(k)?.start);
         }
         let top: Point3 = v3(apex);
         match path::point_off_plane_of(k, curves, top, 1e-9) {
@@ -1286,28 +1326,44 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
         let region = b.infinite_region();
         let tol = 1e-6;
         let built = build_faces(&mut b, |b, fenv| -> Out<()> {
-            let mut face =
-                |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
-                    let mut edges = Vec::new();
-                    for (i, &p) in pts.iter().enumerate() {
-                        let q = pts.get(i + 1).or_else(|| pts.first()).copied().unwrap_or(p);
-                        edges.push(KCurve::from(called(Line::create_line_segment(
-                            3, p, q, None,
-                        ))?));
-                    }
+            called(create_planar_face_with_3d_curves(
+                k, b, region, curves, tol, fenv,
+            ))?;
+            for (curve, next) in curves.iter().zip(curves.iter().cycle().skip(1)) {
+                if matches!(curve.kind(), CurveKind::Line(_)) {
+                    let p = called(curve.ends(k))?.start;
+                    let q = called(next.ends(k))?.start;
+                    let edges = [(p, q), (q, top), (top, p)]
+                        .into_iter()
+                        .map(|(a, b)| {
+                            called(Line::create_line_segment(3, a, b, None)).map(KCurve::from)
+                        })
+                        .collect::<Out<Vec<_>>>()?;
                     called(create_planar_face_with_3d_curves(
                         k, b, region, &edges, tol, fenv,
-                    ))
-                    .map(|_| ())
-                };
-            face(b, fenv, &corners)?;
-            for (i, &p) in corners.iter().enumerate() {
-                let q = corners
-                    .get(i + 1)
-                    .or_else(|| corners.first())
-                    .copied()
-                    .unwrap_or(p);
-                face(b, fenv, &[p, q, top])?;
+                    ))?;
+                } else {
+                    let base = called(bspline(curve))?.ok_or(Error::Argument)?;
+                    let tip = called(BSplineCurve::create_canonical(&CanonicalData {
+                        dim: 3,
+                        degree: 1,
+                        control_points: &[top, top],
+                        form: BSplineCurveForm::Unspecified,
+                        knot_multiplicities: &[2, 2],
+                        knots: &[0.0, 1.0],
+                        knot_type: KnotType::Unspecified,
+                        weights: None,
+                        trim: None,
+                    }))?;
+                    let ruled = called(BSplineSurface::create_ruled_surface(
+                        &base,
+                        &tip,
+                        SurfParamType::Unknown,
+                    ))?;
+                    let surface = Surface::from(ruled);
+                    let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+                    called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
+                }
             }
             Ok(())
         });
@@ -1318,7 +1374,7 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        Ok(finish_under(k, b, Expect::SOLID, contract)?.map(|(body, _)| body))
     })
 }
 

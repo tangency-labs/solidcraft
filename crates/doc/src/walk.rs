@@ -82,6 +82,8 @@ impl Walk for crate::document::FoldSide {}
 impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
+impl Walk for crate::thread_forms::ThreadPoint {}
+impl Walk for crate::thread_forms::ThreadPointDepth {}
 impl Walk for crate::thread_forms::SteepFlank {}
 // An Align frame's joint origin: picks in its component's coordinates, found by their names.
 impl Walk for Box<crate::joints::JointOrigin> {}

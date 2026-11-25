@@ -315,6 +315,44 @@ pub(crate) fn mesh_ray(m: &TriMesh, o: Vec3, d: Vec3) -> Option<(f64, Vec3)> {
     Some((t, if !m.closed && n.dot(d) > 0.0 { n * -1.0 } else { n }))
 }
 
+/// Check whether an indexed mesh is closed after identifying vertices by the supplied keys.
+/// Compact matching keys to indices so the edge table stores only small keys.
+pub fn mesh_edges_closed_by<K: Eq + Hash>(positions: &[Vec3], indices: &[[u32; 3]], key: impl Fn(Vec3) -> K) -> bool {
+    let mut unique = HashMap::new();
+    let vertices = positions
+        .iter()
+        .map(|&p| {
+            let next = unique.len();
+            *unique.entry(key(p)).or_insert(next)
+        })
+        .collect::<Vec<_>>();
+    drop(unique);
+    triangle_edges_closed(indices.iter().map(|&[a, b, c]| Some([*vertices.get(a as usize)?, *vertices.get(b as usize)?, *vertices.get(c as usize)?])))
+}
+
+/// Whether each side is used by exactly two triangles in opposite directions.
+/// The caller supplies the vertex keys. A missing triangle or a repeated corner
+/// prevents the sides from forming a closed surface.
+pub fn triangle_edges_closed<V: Copy + Ord + std::hash::Hash>(triangles: impl IntoIterator<Item = Option<[V; 3]>>) -> bool {
+    let mut sides = HashMap::new();
+    for triangle in triangles {
+        let Some([a, b, c]) = triangle else { return false };
+        for (a, b) in [(a, b), (b, c), (c, a)] {
+            let (edge, direction) = match a.cmp(&b) {
+                std::cmp::Ordering::Less => ((a, b), 1),
+                std::cmp::Ordering::Greater => ((b, a), 2),
+                std::cmp::Ordering::Equal => return false,
+            };
+            let seen = sides.entry(edge).or_insert(0);
+            if *seen & direction != 0 {
+                return false;
+            }
+            *seen |= direction;
+        }
+    }
+    sides.values().all(|&seen| seen == 3)
+}
+
 impl Body {
     /// Build from the packed coordinates and corner normals stored in a design.
     pub fn from_packed_mesh(positions: &[[f64; 3]], triangles: &[[u32; 3]], normals: &[[f64; 9]]) -> Result<Self> {

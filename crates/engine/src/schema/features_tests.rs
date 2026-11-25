@@ -9,12 +9,44 @@ use super::{
 };
 use super::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use super::{SurfaceSweepParams, SweepParams};
+use super::{ThreadParams, ThreadResult};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<ThreadParams>(),
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "chamfer_angle",
+            "chamfer_depth",
+            "continuous_flanks",
+            "designation",
+            "ease_out",
+            "extent",
+            "face",
+            "faces",
+            "form",
+            "from",
+            "hand",
+            "length",
+            "modeled",
+            "name",
+            "old_auto_size",
+            "participants",
+            "point",
+            "point_depth",
+            "single_face_selection",
+            "starts",
+            "steep_flank",
+            "tip",
+            "up_to",
+        ],
+    );
     assert_keys(
         input_schema_for::<MoveParams>(),
         &[
@@ -179,6 +211,28 @@ fn schemas_and_the_key_check_agree() {
 }
 
 #[test]
+fn thread_schema_covers_face_forms_and_point_options() {
+    let schema = input_schema_for::<ThreadParams>();
+    let schema = schema.as_value();
+    for face in [json!({"face":[4,0,2]}), json!({"face":{"point":[4,0,2]}}), json!({"faces":[{"body":"Shaft","point":[4,0,2]}]})] {
+        let mut params = face.clone();
+        params["modeled"] = json!(true);
+        params["point"] = json!("follow");
+        params["point_depth"] = json!("full");
+        assert!(conforms(schema, schema, &params), "{params}");
+        assert!(serde_json::from_value::<ThreadParams>(params.clone()).is_ok(), "{params}");
+        params["point_depth"] = json!("wrong");
+        assert!(!conforms(schema, schema, &params), "{params}");
+        assert!(serde_json::from_value::<ThreadParams>(params).is_err());
+    }
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("solid.cylinder", &json!({"radius":4,"height":5,"body_name":"Shaft"})).unwrap();
+    let result = s.execute("solid.thread", &json!({"faces":[{"body":"Shaft","point":[4,0,2]}]})).unwrap();
+    let schema = output_schema_for::<ThreadResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &result), "{result}");
+}
+
+#[test]
 fn combine_schema_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CombineParams>(),
@@ -201,6 +255,7 @@ fn combine_schema_and_the_key_check_agree() {
 #[test]
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
+        ("solid.thread", json!({"face": [4, 0, 2], "starts": 9})),
         ("solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "bogus"})),
         ("solid.box", json!({"length": true, "width": 5, "height": 5})),
         ("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [1, 2]})),

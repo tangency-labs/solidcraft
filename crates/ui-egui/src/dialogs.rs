@@ -315,7 +315,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// kept out of `suggested`, which tells command construction to leave the size out;
                 /// like `suggested`, a different designation is a manual override.
                 filled: Option<String>,
-                /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
+                /// The picks used for point availability and the suggestion.
                 of: Vec<Sel>,
                 options: crate::dialogs_thread::Options,
             },
@@ -1509,21 +1509,23 @@ impl Dialog {
         editor.sync_selection(&s.doc, &bodies, index);
     }
 
-    /// Resolve a newly selected face without replacing an authored size or changing the
-    /// document. Clearing the face also clears a suggestion that no longer applies.
-    fn sync_thread(&mut self, s: &Session) {
+    /// Refresh point availability and the suggested size when the face picks change,
+    /// keeping an authored size.
+    pub(crate) fn sync_thread(&mut self, s: &Session) {
         let Kind::Thread { designation, suggested, filled, of, options, .. } = &mut self.kind else { return };
-        let automatic = suggested.as_deref() == Some(designation.as_str()) || filled.as_deref() == Some(designation.as_str());
-        if !designation.trim().is_empty() && !automatic {
-            return;
-        }
         let picks = self.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
         if picks == of.as_slice() {
             return;
         }
         *of = picks.to_vec();
-        *suggested = crate::dialogs_thread::suggested(s, picks, options);
-        *filled = if suggested.is_some() { None } else { crate::dialogs_thread::large_size(s, picks, options) };
+        options.has_point = crate::dialogs_thread::selected_have_points(s, picks);
+        let automatic = suggested.as_deref() == Some(designation.as_str()) || filled.as_deref() == Some(designation.as_str());
+        if !designation.trim().is_empty() && !automatic {
+            return;
+        }
+        let modeled = self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+        *suggested = crate::dialogs_thread::suggested(s, picks, options, modeled);
+        *filled = if suggested.is_some() { None } else { crate::dialogs_thread::large_size(s, picks, options, modeled) };
         *designation = suggested.clone().or_else(|| filled.clone()).unwrap_or_default();
     }
 
@@ -5209,8 +5211,8 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         // The sizes come back; which ends an edit could not find belonged to that edit.
         (Kind::EndCap(c), Kind::EndCap(_)) => c.unresolved.clear(),
         (
-            Kind::Thread { designation, suggested, filled, of, .. },
-            Kind::Thread { suggested: fresh_suggested, filled: fresh_filled, of: fresh_of, .. },
+            Kind::Thread { designation, suggested, filled, of, options, .. },
+            Kind::Thread { suggested: fresh_suggested, filled: fresh_filled, of: fresh_of, options: fresh_options, .. },
         ) => {
             // A remembered auto-suggestion belonged to the old face: the new face gets its own.
             // An authored designation stays.
@@ -5220,6 +5222,7 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
             *suggested = fresh_suggested.clone();
             *filled = fresh_filled.clone();
             *of = fresh_of.clone();
+            options.has_point = fresh_options.has_point;
         }
         (Kind::BoundaryFill { cells, of, .. }, Kind::BoundaryFill { cells: fresh_cells, of: fresh_of, .. }) => {
             *cells = fresh_cells.clone();
@@ -7189,6 +7192,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             ("solid.offset_face", with_single_body(json!({"faces": faces}), sels(d, 0)))
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
+            if sels(d, 0).is_empty() && d.extra.get("modeled").and_then(Value::as_bool) == Some(true) {
+                return Err(solidcraft_ui_text::tr("thread.select_modeled_face").to_string());
+            }
             need(0, "a cylindrical face")?;
             let mut common = Value::Object(d.extra.clone());
             if let Some(params) = common.as_object_mut() {
@@ -9592,7 +9598,6 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         FeatureKind::Thread { .. } => {
             let mut d = start("solid.thread")?;
             crate::dialogs_thread::reopen(&mut d, s, &f);
-            d.sync_thread(s);
             d
         }
         FeatureKind::BoundingSolid { bodies, contents, .. } => {

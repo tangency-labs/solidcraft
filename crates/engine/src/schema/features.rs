@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use super::check::whole;
 use super::config::NameList;
+use super::inspect::{ModelThread, ThreadHand};
 use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
@@ -23,6 +24,7 @@ use super::types::{
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
+use solidcraft_doc::thread_forms::{SteepFlank, ThreadPoint, ThreadPointDepth, ThreadTip};
 
 /// Add a box primitive.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1594,6 +1596,180 @@ pub struct DraftParams {
     pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// A face pick, given directly or wrapped with its point.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ThreadFaceParam {
+    Point(Point3),
+    Wrapped { point: Point3 },
+}
+
+/// The point on a face and the body it belongs to.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ThreadBodyFaceParam {
+    pub body: String,
+    #[serde(flatten)]
+    pub face: ThreadFaceParam,
+}
+
+/// Which part of a face is threaded.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadExtentParam {
+    Full,
+    Length,
+    UpTo,
+}
+
+/// The end of an Up To thread: a point, or a plane that crosses the axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ThreadLimitParam {
+    Point(Point3),
+    Plane(PlaneParam),
+}
+
+/// ISO 3508 runout lengths (2.5 pitches and 1.25 pitches).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadRunoutPreset {
+    Standard,
+    Short,
+}
+
+/// The length over which the modeled thread fades at its inward end.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ThreadRunoutParam {
+    Preset(ThreadRunoutPreset),
+    Length(LengthExpr),
+}
+
+fn thread_point_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": [ThreadPoint::None, ThreadPoint::Follow]})
+}
+
+fn thread_point_depth_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": [ThreadPointDepth::Fade, ThreadPointDepth::Full]})
+}
+
+fn thread_tip_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "enum": [ThreadTip::None, ThreadTip::Start, ThreadTip::Both, Value::Null]})
+}
+
+fn thread_steep_flank_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "enum": [SteepFlank::Start, SteepFlank::End, Value::Null]})
+}
+
+fn thread_face_or_faces(schema: &mut Schema) {
+    schema.insert("oneOf".into(), json!([{"required": ["face"]}, {"required": ["faces"]}]));
+}
+
+/// Add a cosmetic or modeled thread, with an optional continuation onto a screw's point.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = thread_face_or_faces)]
+pub struct ThreadParams {
+    /// A pick on a cylindrical face, or a conical face for a modeled thread. Use `face` or `faces`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ThreadFaceParam")]
+    pub face: Option<ThreadFaceParam>,
+    /// Between 1 and 1024 body-qualified face picks, all in one component. Use `face` or `faces`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<ThreadBodyFaceParam>", length(min = 1, max = 1024))]
+    pub faces: Option<Vec<ThreadBodyFaceParam>>,
+    /// The body whose `face` is picked when a point lies on several placed bodies.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// A single body-qualified face in `faces` stays in single-face selection mode when edited.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub single_face_selection: Option<bool>,
+    /// The thread size as its standard writes it. When omitted, choose a standard size from the face.
+    #[serde(default)]
+    pub designation: Option<String>,
+    /// Metric, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, or npt (case-insensitive).
+    /// By default the designation names the form, or Metric if it gives none.
+    #[serde(default)]
+    pub form: Option<String>,
+    /// Direction of the groove. Default: right.
+    #[serde(default)]
+    pub hand: Option<ThreadHand>,
+    /// The number of starts. Default: one, unless the designation gives the lead.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 8))]
+    pub starts: Option<u32>,
+    /// Which way the steep flank of a buttress thread faces. Default: end.
+    #[serde(default)]
+    #[schemars(schema_with = "thread_steep_flank_schema")]
+    pub steep_flank: Option<SteepFlank>,
+    /// Full face, `length` from the start, or `up_to` a point or plane. Default: inferred from
+    /// the supplied length or limit, else the whole face.
+    #[serde(default)]
+    pub extent: Option<ThreadExtentParam>,
+    /// Length of the thread along the selected face from its starting end.
+    #[serde(default)]
+    pub length: Option<LengthExpr>,
+    /// End the thread where the point or plane meets the axis.
+    #[serde(default)]
+    pub up_to: Option<ThreadLimitParam>,
+    /// Point near the end of the face the thread starts from.
+    #[serde(default)]
+    pub from: Option<Point3>,
+    /// Cut the thread geometry. Default: false, make a cosmetic annotation.
+    #[serde(default)]
+    pub modeled: Option<bool>,
+    /// Runout at the end away from where the thread starts. Default: no runout.
+    #[serde(default)]
+    pub ease_out: Option<ThreadRunoutParam>,
+    /// Chamfer the start or both free ends of a modeled external thread. Default: none.
+    #[serde(default)]
+    #[schemars(schema_with = "thread_tip_schema")]
+    pub tip: Option<ThreadTip>,
+    /// Angle of a chamfered tip to the axis. Default: 45 degrees.
+    #[serde(default)]
+    pub chamfer_angle: Option<AngleExpr>,
+    /// Radial depth of a chamfered tip.
+    #[serde(default)]
+    pub chamfer_depth: Option<LengthExpr>,
+    /// Continue the modeled external groove down the narrowing coaxial cone at its starting end.
+    /// Default: none. Follow cannot be combined with a chamfered tip.
+    #[serde(default)]
+    #[schemars(schema_with = "thread_point_schema")]
+    pub point: ThreadPoint,
+    /// When following a point, fade to zero depth at its small end (default), or keep full depth
+    /// where the root stays clear of the axis.
+    #[serde(default)]
+    #[schemars(schema_with = "thread_point_depth_schema")]
+    pub point_depth: ThreadPointDepth,
+    /// Keep the historical half-turn faces when false. Default: true.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub continuous_flanks: Option<bool>,
+    /// When editing a saved thread with an automatic size, keep its older tap-drill fit rule.
+    #[serde(default)]
+    pub old_auto_size: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What `solid.thread` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadResult {
+    pub feature: u64,
+    pub name: String,
+    /// The first cosmetic thread, or null for a modeled thread.
+    pub thread: Option<ModelThread>,
+    /// All cosmetic threads for a call with `faces`. Omitted for `face`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<Vec<ModelThread>>,
+    /// A note about evaluation, such as narrowing a hole to its minor diameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What a feature command returns.

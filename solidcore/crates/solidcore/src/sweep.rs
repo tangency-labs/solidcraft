@@ -14,6 +14,7 @@ pub mod extrude;
 pub mod loft_rails;
 pub mod loft_sections;
 pub mod member;
+pub mod point_thread;
 pub mod rotational_sweep_geometry;
 pub mod screw;
 pub mod section_blend;

@@ -575,6 +575,13 @@ impl Body {
         }
     }
 
+    /// Rebuild a construction in the same canonical order as a saved body
+    /// before combining pieces whose caps or seams coincide.
+    pub(crate) fn through_record(&self) -> Result<Body> {
+        let (record, _) = self.to_record()?;
+        Self::from_record(&record, true).map(|(body, _)| body)
+    }
+
     /// This body as the record in canonical order ([`to_record`]), and the kernel entity each
     /// record face, edge and vertex is. The kernel gives every use on a face its UV trim first,
     /// which is why the body is edited.

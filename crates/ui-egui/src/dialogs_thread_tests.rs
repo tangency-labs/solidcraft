@@ -76,6 +76,42 @@ fn shown(row: &str) -> bool {
     rect.is_some()
 }
 
+#[test]
+fn point_requires_a_joined_cone_on_every_selected_shank() {
+    let mut h = shaft();
+    click(&mut h, &["dialog:Modeled"]);
+    h.step(&json!({"expect":{"shown_handles":["dialog:Start"],"hidden_handles":["dialog:thread.point","dialog:thread.point_depth"]}})).unwrap();
+
+    h.app.run("solid.cylinder", json!({"radius":4,"height":10,"base":[20,0,0],"body_name":"Pointed"})).unwrap();
+    for (base, height) in [([20, 0, 0], -8), ([20, 0, 10], 8)] {
+        h.app.run("solid.cone", json!({"radius":4,"base":base,"height":height,"operation":"join","targets":["Pointed"]})).unwrap();
+    }
+    let straight = thread_face(&h.app, "Body1");
+    let pointed = thread_face(&h.app, "Pointed");
+    let select = |h: &mut Harness, picks: Vec<Sel>, add| {
+        h.app.dialog.as_mut().unwrap().take_box(&h.app.session, picks, add);
+        h.frames(2);
+    };
+    // An authored designation must not stop the geometry from updating when the pick changes.
+    type_in(&mut h, "Designation", "M8x1");
+    select(&mut h, vec![pointed], false);
+    choose(&mut h, "thread.point", "thread.follow_point");
+    choose(&mut h, "thread.point_depth", "thread.point_full_depth");
+    h.step(&json!({"expect":{"shown_handles":["dialog:row:Start end (optional)"],"hidden_handles":["dialog:Start"]}})).unwrap();
+    assert_eq!(params(&h)["point"], "follow");
+    assert_eq!(params(&h)["point_depth"], "full");
+
+    select(&mut h, vec![straight.clone()], true);
+    h.step(&json!({"expect":{"shown_handles":["dialog:Start"],"hidden_handles":["dialog:thread.point","dialog:thread.point_depth","dialog:row:Start end (optional)"]}})).unwrap();
+    assert!(params(&h).get("point").is_none());
+    assert!(params(&h).get("point_depth").is_none());
+
+    select(&mut h, vec![straight], false);
+    assert_eq!(params(&h)["designation"], "M8x1");
+    click(&mut h, &["dialog:OK"]);
+    h.step(&json!({"expect":{"dialog":null,"errors":0}})).unwrap();
+}
+
 /// Every option of the command, set in the dialog, reaches it under the command's names.
 #[test]
 fn every_option_reaches_the_command() {
@@ -325,7 +361,7 @@ fn a_saved_thread_reopens_with_every_option() {
         (
             json!({"designation":"S20x4","steep_flank":"start","hand":"left","starts":2,"length":"12 mm","from":[10,0,20],"modeled":true,
                 "ease_out":"1 mm","tip":"start","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
-            vec!["Cylindrical face", START_END],
+            vec!["thread.modeled_face", START_END],
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
         (json!({"designation":"M20","up_to":"XY","from":[10,0,20]}), vec!["Cylindrical face", START_END, UP_TO]),
@@ -484,7 +520,7 @@ fn thread_box_selection_keeps_one_face_until_explicit_add() {
         // Start/Up To inputs keep their existing single-selection contract.
         let Kind::Thread { options, .. } = &mut d.kind else { panic!("Thread") };
         options.extent = UP_TO_EXTENT;
-        sync_inputs(&mut d.inputs, &mut d.active, options);
+        sync_inputs(&mut d.inputs, &mut d.active, options, false);
         let up_to = d.inputs.iter().position(|i| i.label == UP_TO).unwrap();
         d.active = up_to;
         d.take_box(&h.app.session, picks[..2].to_vec(), false);

@@ -1268,10 +1268,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 d.extra.insert("modeled".into(), json!(modeled));
             }
             enter |= submitted;
-            if reset {
+            if reset || modeled != before {
                 of.clear();
             }
-            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options);
+            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options, modeled);
         }
         Kind::Loft { operation, rail_fit } => {
             crate::op_auto::op_row(ui, "lf_op", operation);

@@ -313,7 +313,7 @@ pub struct ModelThread {
 }
 
 /// Which way a thread turns.
-#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadHand {
     Right,
