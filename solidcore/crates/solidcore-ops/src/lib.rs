@@ -184,6 +184,7 @@ pub use measure::MassPropertiesEstimate;
 pub use measure::MembersClosest;
 pub use measure::Normal;
 pub use measure::PointClass;
+pub use measure::PointLocation;
 pub use measure::PointNormalFace;
 pub use measure::PointSetSummary;
 pub use measure::RayEntity;
