@@ -982,6 +982,70 @@ impl Sketch {
         Some(geom.iter().enumerate().flat_map(|(i, g)| pieces.remove(&i).unwrap_or_else(|| vec![g.clone()])).collect())
     }
 
+    /// `geom` with each spline that runs between the ends of an arc link `id` holds, and stays
+    /// on that arc within a thousandth of its radius, given back as that arc. A shelled wall's
+    /// rim of more than half a turn is held by the kernel as a spline that only follows its
+    /// circle to a few thousandths of a millimetre, and reads back as a spline: a sketch saved
+    /// with the rim as an arc names that arc from outside the link (an offset's sources), and
+    /// lost it on reopening (#21018). `None` when no spline is given back as an arc.
+    fn saved_arcs(&self, id: &str, geom: &[LinkGeom]) -> Option<Vec<LinkGeom>> {
+        let arcs: Vec<(Vec2, Vec2, Vec2)> = self
+            .link_curves(id)
+            .into_iter()
+            .filter_map(|ci| match self.curves.get(ci)?.kind {
+                CurveKind::Arc { c, a, b } => Some((self.point(c)?, self.point(a)?, self.point(b)?)),
+                _ => None,
+            })
+            .collect();
+        if arcs.is_empty() {
+            return None;
+        }
+        let mut used = vec![false; arcs.len()];
+        let mut changed = false;
+        let mut out = geom.to_vec();
+        for g in &mut out {
+            let LinkGeom::Spline { pts, control, degree, periodic: false, nurbs } = &*g else { continue };
+            let along = crate::curves::spline_polyline_mode(pts, *control, *degree, false, nurbs.as_ref());
+            let (Some(&p0), Some(&p1)) = (along.first(), along.last()) else { continue };
+            let found = arcs.iter().enumerate().find_map(|(k, &(c, a, b))| {
+                let r = c.dist(a);
+                let dev = 1e-3 * r;
+                if used[k] || r <= 0.0 || !r.is_finite() || (c.dist(b) - r).abs() > dev {
+                    return None;
+                }
+                // The spline's ends are the arc's, whichever way it runs.
+                let (na, nb) = if p0.dist(a) <= dev && p1.dist(b) <= dev {
+                    (p0, p1)
+                } else if p0.dist(b) <= dev && p1.dist(a) <= dev {
+                    (p1, p0)
+                } else {
+                    return None;
+                };
+                // Every point of it on the arc: at its radius, within its sweep.
+                let start = (a - c).angle();
+                let sweep = ((b - c).angle() - start).rem_euclid(TAU);
+                let slack = dev / r;
+                let on = |p: Vec2| {
+                    let turn = ((p - c).angle() - start).rem_euclid(TAU);
+                    (c.dist(p) - r).abs() <= dev && (turn <= sweep + slack || turn >= TAU - slack)
+                };
+                if !along.iter().all(|p| on(*p)) {
+                    return None;
+                }
+                // About the point on the new ends' bisector nearest the old centre.
+                let mid = na.lerp(nb, 0.5);
+                let across = (nb - na).normalized()?.perp();
+                Some((k, LinkGeom::Arc { c: mid + across * (c - mid).dot(across), a: na, b: nb }))
+            });
+            if let Some((k, arc)) = found {
+                used[k] = true;
+                *g = arc;
+                changed = true;
+            }
+        }
+        changed.then_some(out)
+    }
+
     /// Replace a link's geometry with a newly resolved one. When the shape is the same (same
     /// curve kinds sharing the same points) the entities keep their ids and only move, so
     /// constraints and dimensions on them survive; otherwise the link is rebuilt, and the
@@ -1083,6 +1147,8 @@ impl Sketch {
         let halves = self.saved_halves(id, geom);
         let pieces = geom.len();
         let geom = halves.as_deref().unwrap_or(geom);
+        let arcs = self.saved_arcs(id, geom);
+        let geom = arcs.as_deref().unwrap_or(geom);
         let lay = layout(geom, kind)?;
         // Each curve of the layout is the piece of `geom` of the same index.
         let one_for_one = halves.is_none() && lay.curves.len() == pieces && lay.lone.is_empty();
@@ -1287,9 +1353,9 @@ impl Sketch {
             let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
             let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
             parameters_agree
-                && old
-                    .zip(fresh)
-                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+                && old.zip(fresh).is_some_and(|(old, fresh)| {
+                    solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false)
+                })
         } else {
             false
         };

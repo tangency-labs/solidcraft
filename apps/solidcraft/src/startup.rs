@@ -687,7 +687,7 @@ pub struct AdapterChoice {
 }
 
 impl AdapterChoice {
-    fn of(adapter: &eframe::wgpu::Adapter, surface: Option<&eframe::wgpu::Surface<'_>>) -> Self {
+    pub fn of(adapter: &eframe::wgpu::Adapter, surface: Option<&eframe::wgpu::Surface<'_>>) -> Self {
         let info = adapter.get_info();
         Self { name: info.name, compatible: surface.is_none_or(|s| adapter.is_surface_supported(s)) }
     }
@@ -2065,6 +2065,7 @@ mod tests {
             ctx: ctx.clone(),
             #[cfg(target_os = "windows")]
             window_move: crate::native_frame::WindowMove::default(),
+            clear_stored_background: false,
         };
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput::default();
@@ -2432,9 +2433,14 @@ full"
         assert!(pick_cpu_adapter(&[], None).unwrap_err().contains("none"));
         // The adapters the software renderer chooses among: it starts D3D12 alone on Windows
         // (WARP), not every backend, so the test doesn't load the OpenGL driver either (#1156).
-        let options = crate::wgpu_options(true, None, SkippedBackends::default(), None);
-        let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
-        let backends = setup.instance_descriptor.backends;
+        // Both startups (`gpu_startup`) give the software renderer the same backends.
+        let backends_of = |strategy| {
+            let options = crate::wgpu_options(strategy, true, None, SkippedBackends::default(), None);
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
+            setup.instance_descriptor.backends
+        };
+        let backends = backends_of(crate::gpu_startup::GpuStartup::Standard);
+        assert_eq!(backends, backends_of(crate::gpu_startup::GpuStartup::Legacy));
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
             assert_eq!(backends, eframe::wgpu::Backends::DX12);
         }
