@@ -201,6 +201,8 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tiles = views.tiles().cloned().unwrap_or(Tiles::Leaf(views.active().id));
     let focus = app.docs.views.active().id;
     let headers = crate::view_windows::child_options(app).card_headers;
+    // Tile chrome (headers, the focused view's name) only tells views apart: with one view, none.
+    let several = crate::ui_kit::disambiguates(tiles.views().len());
     let render_ground = app.docs.views.active().kind == ViewKind::Render;
     let (free, _) = layout_bounds(app, area);
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
@@ -287,7 +289,7 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen = None;
     for (id, body) in cards.iter().filter(|_| !clean) {
         let card = Rect::from_min_max(body.min - vec2(0.0, HEADER), body.max);
-        if let Some(action) = card_chrome(app, ui, *id, card, headers) {
+        if let Some(action) = card_chrome(app, ui, *id, card, if several { headers } else { solidcraft_views::CardHeaders::Hidden }) {
             chosen = Some((*id, action));
         }
     }
@@ -298,7 +300,7 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     if !clean {
-        if !crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
+        if several && !crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
             ground_chip(app, ui, focus, ground);
         }
         if visible.is_none() {

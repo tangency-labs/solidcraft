@@ -2940,19 +2940,18 @@ fn view_tip(view: &DesignView, place: usize) -> String {
 /// and the same colour under it while it is shown.
 fn view_tab<'a>(
     view: &'a DesignView,
+    sketch_mark: bool,
     active: bool,
     on_screen: bool,
     tip: &'a str,
     to_window: Option<u32>,
     window: Option<&'a crate::view_windows::WindowChoice>,
 ) -> crate::app_bar::ViewTab<'a> {
-    let colour = if view.editing.is_some() {
-        solidcraft_theme::Tokens::get().sketch_accent
-    } else {
-        crate::workspace::view_icon_colour(kind_word(view.kind), true)
-    };
+    let sketch_mode = sketch_mark && view.editing.is_some();
+    let colour =
+        if sketch_mode { solidcraft_theme::Tokens::get().sketch_accent } else { crate::workspace::view_icon_colour(kind_word(view.kind), true) };
     crate::app_bar::ViewTab {
-        sketch_mode: view.editing.is_some(),
+        sketch_mode,
         compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
@@ -3039,7 +3038,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             if design == selected {
                 let set = &app.docs.views;
                 let tiles = set.tiles().filter(|_| set.is_tiled());
-                crate::view_windows::strip_views(app)
+                let strip = crate::view_windows::strip_views(app);
+                // The sketch mark on a view tab only tells views apart: with one view, none.
+                let sketch_mark = crate::ui_kit::disambiguates(strip.len());
+                strip
                     .into_iter()
                     .map(|(window, view)| {
                         let elsewhere = (window != current_window).then_some(window);
@@ -3048,7 +3050,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                         (
                             {
                                 let mut view = view.clone();
-                                if view.editing.is_some()
+                                if sketch_mark
+                                    && view.editing.is_some()
                                     && let Some(name) = crate::sketch_view::name(app, view.id)
                                 {
                                     view.name = name;
@@ -3095,12 +3098,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .iter()
         .zip(&view_tips)
         .map(|(views, tips)| {
+            let sketch_mark = crate::ui_kit::disambiguates(views.len());
             views
                 .iter()
                 .zip(tips)
                 .map(|((view, active, on_screen, window), tip)| {
                     let choice = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
-                    view_tab(view, *active, *on_screen, tip, *window, choice)
+                    view_tab(view, sketch_mark, *active, *on_screen, tip, *window, choice)
                 })
                 .collect()
         })
