@@ -71,6 +71,20 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
+/// The axes `x` and `y` of a frame whose normal runs along `d`, through the kernel's
+/// [`Transform::frame_axes`]: `x` is the unit cross product of `v`'s part square to `d` with `d`
+/// and `y = d × x`, so both are unit and square to `d` within a few ulps, `x × y` runs along `d`,
+/// and `y` along `v`'s part square to `d`. Any finite lengths are taken.
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite, a `d` or `v` of no length, or a `v` that leans
+/// within [`solidcore::math::FRAME_LEAN`] (a sine of 1e-6) of `d`, where `y` would follow the
+/// rounding and not `v`.
+pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    let [x, y] = Transform::frame_axes(vec3(d), vec3(v)).ok_or(Error::Argument)?;
+    Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
 /// A plane's axes `x` and `y` with the coordinates smaller than `noise` dropped, each unit
 /// again, through [`Transform::axis_squared_frame`]: a flat face's plane, tilted only by
 /// rounding, made exactly square to the world axes it lies along. `None` when the kernel finds
@@ -308,6 +322,57 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame's axes along a direction: `y` keeps the part of `v` square to `d`, `x = y × d`;
+    /// a `v` along `d` or a `d` of no length is refused.
+    #[test]
+    fn frame_axes_take_v_square_to_d_and_cross_them() {
+        assert_eq!(
+            frame_axes([0.0, 0.0, 2.0], [0.0, 3.0, 5.0]).unwrap(),
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert_eq!(
+            frame_axes([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]).unwrap(),
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert!(frame_axes([0.0, 0.0, 1.0], [0.0, 0.0, 3.0]).is_err());
+        assert!(frame_axes([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).is_err());
+    }
+
+    /// brett19's probe on #22066: `v` the unit `d` leaned by `k` ulps along `p` square to it. Up
+    /// to a sine of 1e-6 it is refused; past it, and at 1e300, `x` and `y` are unit and square to
+    /// `d` and to each other within a few ulps.
+    #[test]
+    fn frame_axes_are_a_frame_for_any_v_taken_and_refuse_one_along_d() {
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        // d along the unit u, its frame checked against u
+        let check = |d: [f64; 3], u: [f64; 3], v: [f64; 3]| {
+            let [x, y] = frame_axes(d, v).unwrap();
+            for (a, b, want) in [
+                (x, x, 1.0),
+                (y, y, 1.0),
+                (x, y, 0.0),
+                (x, u, 0.0),
+                (y, u, 0.0),
+            ] {
+                assert!((dot(a, b) - want).abs() < 8.0 * f64::EPSILON, "{x:?} {y:?}");
+            }
+            // y along v's part square to d
+            assert!(dot(y, v) > 0.0);
+        };
+        // (2, 3, 6) / 7 and (6, 2, -3) / 7: unit and square to each other
+        let d = [2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0];
+        let p = [6.0 / 7.0, 2.0 / 7.0, -3.0 / 7.0];
+        let leaned = |k: f64| [0, 1, 2].map(|i| d[i] + k * f64::EPSILON * p[i]);
+        for k in [65.0, 100.0, 1e3, 1e4, 1e9] {
+            assert!(frame_axes(d, leaned(k)).is_err(), "{k}");
+        }
+        for k in [1e11, 1e12, 1e15] {
+            check(d, d, leaned(k));
+        }
+        check([2e300, 3e300, 6e300], d, [1e300, 0.0, 0.0]);
+        check([2e-300, 3e-300, 6e-300], d, [0.0, 0.0, 1e-300]);
+    }
 
     /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
     /// keeps its axes; parallel axes give `None`.

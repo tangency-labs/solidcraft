@@ -17,6 +17,8 @@ use solidcore::mass::integrator::properties::{
     face_centroid, face_centroid_prepared, region_material, AreaAbout, EstimatedMassProperties,
     MassPropertyRequest, PropertyAttributes,
 };
+use solidcore::prism::measure::FaceRun;
+pub use solidcore::prism::measure::StraightBy;
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
     edge_face_gap_samples, face_normal_at_edge,
@@ -1886,6 +1888,42 @@ impl Body {
         })
     }
 
+    /// What record face `face` gives towards the direction a set of faces runs straight along
+    /// ([`straight_direction`]), with its band for the zone tolerance `zone`: its plane's normal,
+    /// its cylinder's axis, or neither ([`solidcore::prism::measure::face_run`]).
+    pub(crate) fn face_run(&self, order: &Order, face: usize, zone: f64) -> Result<FaceRun> {
+        let f = order::face(order, face)?;
+        read_body("face_run", self, |k, b| {
+            Ok(Ok::<FaceRun, Error>(solidcore::prism::measure::face_run(
+                k, b, f, zone,
+            )))
+        })?
+    }
+
+    /// The unit direction into record face `face` from the middle of its record edge `edge`'s
+    /// interval: in the face's tangent plane there, square to the edge, pointing into the face.
+    /// It is the binormal of the face's use of the edge
+    /// ([`solidcore::query::api_queries::edge_inward`]: the face use's normal crossed with the
+    /// edge use's tangent), so which side is "into" comes from the face's loop and its
+    /// normal, not from where the face's points lie: a face that is not convex is read as a
+    /// convex one is. The vector is rounded, not certified; its side is the topology's.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges or faces, or an edge that does not bound
+    /// the face; the kernel's error for a seam of the face (an edge it lies on both sides of, as
+    /// a cylinder's), an edge use in no loop, no usable tangent or binormal, or an edge interval
+    /// that is not finite.
+    pub fn edge_inward(&self, order: &Order, edge: usize, face: usize) -> Result<[f64; 3]> {
+        let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
+        let v = with_body("edge_inward", self, |k, b| {
+            if edge::edgeuse_of_face(b, e, Some(f))?.is_none() {
+                return Ok(Err(Error::Argument));
+            }
+            q::edge_inward(k, b, e, f).map(Ok)
+        })??;
+        Ok(array(v))
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -2154,6 +2192,86 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
             "a rim edge without exactly one face across it",
         )),
     })
+}
+
+/// The direction a set of faces runs straight along, as [`straight_direction`] finds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Straight {
+    /// Every face runs straight along the unit `direction` within the zone tolerance
+    /// ([`Body::face_straying`]). `direction` is in a canonical sense (its largest component
+    /// positive); `by` says which faces gave it (indices into the faces passed).
+    Along {
+        /// The unit direction, in its canonical sense.
+        direction: [f64; 3],
+        /// Which faces gave it.
+        by: StraightBy,
+    },
+    /// The faces give no direction: no two planes among them are proved apart, and none is a
+    /// cylinder.
+    Undetermined,
+    /// Face `face` (an index into the faces passed) strays across the first direction tried by
+    /// more than the zone tolerance, and no other candidate proves every face straight. When the
+    /// faces are planes and cylinders, no direction does (up to the kernel's octagon for a
+    /// cylinder's band, [`solidcore::prism::measure::straight_candidates`]).
+    NotStraight {
+        /// The face, as an index into the faces passed.
+        face: usize,
+    },
+    /// No bound is proved for face `face` (an index into the faces passed) along the first
+    /// direction tried (a surface kind [`Body::face_straying`] does not cover), and no other
+    /// candidate proves every face straight.
+    Unproved {
+        /// The face, as an index into the faces passed.
+        face: usize,
+    },
+}
+
+/// The direction a set of `faces` (record faces, each with its body and order: the faces may be
+/// of several bodies) runs straight along, proved.
+///
+/// The candidates are the kernel's ([`solidcore::prism::measure::straight_candidates`]): first the
+/// cross product of the two plane normals furthest from parallel, when they are proved apart (a
+/// plane pair wins); when that one is outside a plane's or cylinder's band (how far a direction
+/// may lean for the face to stay within the zone), a direction inside every band; then each
+/// cylinder axis. The order of the faces and the senses of their normals change neither the
+/// candidates, their order, nor the faces they name. Each candidate is tried in turn: the
+/// first along which every face strays by no more than the zone tolerance
+/// ([`crate::sweep::zone_tolerance`]) is the answer. Faces of other kinds give no candidate and
+/// no band but are proved along one when [`Body::face_straying`] covers them (a ruled spline net);
+/// an extruded surface gives none, so faces of extrusions and parallel planes alone are
+/// [`Straight::Undetermined`].
+///
+/// # Errors
+/// [`Error::Argument`] for an index past a body's faces; the errors of the session and the zone
+/// tolerance.
+pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> {
+    let zone = crate::sweep::zone_tolerance()?;
+    let mut runs = Vec::with_capacity(faces.len());
+    for &(body, order, face) in faces {
+        runs.push(body.face_run(order, face, zone)?);
+    }
+    let mut first = None;
+    for (d, by) in solidcore::prism::measure::straight_candidates(&runs) {
+        let d = array(d);
+        let mut failed = None;
+        for (i, &(body, order, face)) in faces.iter().enumerate() {
+            match body.face_straying(order, face, d)? {
+                None => failed = Some(Straight::Unproved { face: i }),
+                Some(e) if e > zone => failed = Some(Straight::NotStraight { face: i }),
+                Some(_) => {}
+            }
+            if failed.is_some() {
+                break;
+            }
+        }
+        match failed {
+            None => return Ok(Straight::Along { direction: d, by }),
+            Some(f) => {
+                first.get_or_insert(f);
+            }
+        }
+    }
+    Ok(first.unwrap_or(Straight::Undetermined))
 }
 
 /// `direction` made unit at any finite length, `None` for a coordinate that is not finite or a

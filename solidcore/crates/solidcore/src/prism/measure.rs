@@ -29,7 +29,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
 use std::collections::BTreeSet;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 use super::profile::{axes, cross2, height, to_local, to_world, Loop2, Region2, Seg2};
 use super::read::{edge_run, planar_pieces, Run};
@@ -912,6 +912,14 @@ pub struct PrismSection {
 pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
     let (_, d) = d.length_and_unit()?;
     let surface = b.face(f).ok()?.surface.as_ref()?;
+    let (size, definition) = straying_scale(k, b, f, surface)?;
+    Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
+}
+
+/// The size [`face_straying`] scales face `f`'s bound by (the diagonal of its tight box) and the
+/// distance of its net from its procedural definition. `None` where [`face_straying`] proves no
+/// bound for want of them.
+fn straying_scale(k: &Kernel, b: &Brep, f: FaceId, surface: &Surface) -> Option<(f64, f64)> {
     let definition = surface
         .procedural_definition()
         .map_or(0.0, |def| def.bound());
@@ -923,7 +931,278 @@ pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
     if !size.is_finite() {
         return None;
     }
-    Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
+    Some((size, definition))
+}
+
+/// What a face gives towards the direction a set of faces runs straight along
+/// ([`straight_candidates`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FaceRun {
+    /// A plane label, by its unit normal (either sense) and its band: a unit `d` with
+    /// `|normal · d| <= slope` is one the face runs straight along within the zone.
+    Plane {
+        /// The unit normal, either sense.
+        normal: Vec3,
+        /// The band's half width.
+        slope: f64,
+    },
+    /// A cylinder label, by its unit axis (either sense) and its band: a unit `d` with
+    /// `|axis × d| <= slope` is one the face runs straight along within the zone.
+    Axis {
+        /// The unit axis, either sense.
+        axis: Vec3,
+        /// The band's half width.
+        slope: f64,
+    },
+    /// Another surface, or none, or one whose size is not found: it may still run straight
+    /// along a direction ([`face_straying`]), but gives none and no band.
+    Other,
+}
+
+/// [`FaceRun`] of face `f` of `b`, from its surface's label, with its band for the zone tolerance
+/// `zone`. The band is [`face_straying`]'s plane or cylinder term solved for the direction, made
+/// a little narrower so that it is enough: a plane strays by
+/// `(|n · d| + 1024ε (Σ|nᵢ dᵢ| + 1)) · 2 · size`, with `Σ|nᵢ dᵢ| <= |n| |d| < 2`, and a cylinder by
+/// `(|a × d| + 1024ε) · 4 · size`, each plus the definition's distance. A band of no width (a face
+/// too large for the zone) is kept: nothing is inside it.
+#[must_use]
+pub fn face_run(k: &Kernel, b: &Brep, f: FaceId, zone: f64) -> FaceRun {
+    let Some(surface) = b.face(f).ok().and_then(|face| face.surface.as_ref()) else {
+        return FaceRun::Other;
+    };
+    let Some((size, definition)) = straying_scale(k, b, f, surface) else {
+        return FaceRun::Other;
+    };
+    let room = zone - definition;
+    if let Some((_, normal)) = plane_of(surface).and_then(|(_, n)| n.length_and_unit()) {
+        let slope = room / (2.0 * size) - 3072.0 * f64::EPSILON;
+        return FaceRun::Plane { normal, slope };
+    }
+    if let Some((_, axis)) = cylinder_of(surface).and_then(|(_, a, _)| a.length_and_unit()) {
+        let slope = room / (4.0 * size) - 1024.0 * f64::EPSILON;
+        return FaceRun::Axis { axis, slope };
+    }
+    FaceRun::Other
+}
+
+/// Where a candidate of [`straight_candidates`] comes from: indices into its `runs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StraightBy {
+    /// The cross product of two plane normals.
+    Planes(usize, usize),
+    /// A cylinder's axis.
+    Axis(usize),
+    /// A direction inside every plane's and cylinder's band, found near the first candidate when
+    /// that one is outside a band.
+    Bands,
+}
+
+/// The longest cross product of two unit plane normals that is still taken for parallel. Two
+/// normals stored exactly parallel have an exact cross product of 0 whatever their lengths, and the
+/// computed one is off only by its rounding: each component `aᵢbⱼ - aⱼbᵢ` by at most
+/// `γ₂ (|aᵢbⱼ| + |aⱼbᵢ|)`, at most `2ε |a| |b|` (about `2ε`) over the three, and the square root
+/// adds an ulp; `8ε` covers that. The `2e-12` is a margin for normals parallel only before they
+/// were rounded apart (each read from its own plane, or rotated), which nothing here bounds.
+const PARALLEL: f64 = 2.0 * 1e-12 + 8.0 * f64::EPSILON;
+
+/// The most rows [`lean`] solves over: 64 band rows and its 4 chart rows.
+const LEAN_ROWS: usize = 68;
+
+/// The directions faces with `runs` may run straight along, best first, each a unit vector in a
+/// canonical sense (its largest component positive, the first of equal ones), with where it comes
+/// from:
+/// - the cross product of the two plane normals furthest from parallel, when one pair is proved
+///   not parallel (`PARALLEL`): two planes that both run along a direction fix it but for their
+///   bands;
+/// - when that one (or, with no such pair, the first axis) is outside a plane's or cylinder's
+///   band, a direction inside every band near it, if there is one (`lean`);
+/// - then each cylinder axis, in a canonical order, the same axes once.
+///
+/// Each normal and axis is taken in its canonical sense and the runs in a canonical order (by
+/// their values; equal values by index), so neither the runs' order nor their senses change
+/// which direction comes first, nor the indices it names. Nothing here proves a face straight
+/// along a candidate; a caller checks each face with [`face_straying`]. Empty when no plane pair
+/// is proved apart and no face is a cylinder.
+#[must_use]
+pub fn straight_candidates(runs: &[FaceRun]) -> Vec<(Vec3, StraightBy)> {
+    let mut planes: Vec<(Vec3, usize)> = Vec::new();
+    let mut axes: Vec<(Vec3, usize)> = Vec::new();
+    for (i, run) in runs.iter().enumerate() {
+        match *run {
+            FaceRun::Plane { normal, .. } => planes.push((canonical(normal), i)),
+            FaceRun::Axis { axis, .. } => axes.push((canonical(axis), i)),
+            FaceRun::Other => {}
+        }
+    }
+    let by_value = |a: &(Vec3, usize), b: &(Vec3, usize)| {
+        let (p, q) = (a.0, b.0);
+        p.x.total_cmp(&q.x)
+            .then(p.y.total_cmp(&q.y))
+            .then(p.z.total_cmp(&q.z))
+            .then(a.1.cmp(&b.1))
+    };
+    planes.sort_by(by_value);
+    axes.sort_by(by_value);
+    let mut out = Vec::new();
+    let mut best: Option<(f64, Vec3, StraightBy)> = None;
+    for (i, &(n, a)) in planes.iter().enumerate() {
+        for &(m, b) in planes.iter().skip(i + 1) {
+            let Some((s, d)) = n.cross(m).length_and_unit() else {
+                continue;
+            };
+            if s > PARALLEL && best.is_none_or(|(t, ..)| s > t) {
+                best = Some((s, d, StraightBy::Planes(a, b)));
+            }
+        }
+    }
+    if let Some((_, d, by)) = best {
+        out.push((canonical(d), by));
+    }
+    for &(a, i) in &axes {
+        if !out.iter().any(|&(d, _)| d.cross(a).length() <= PARALLEL) {
+            out.push((a, StraightBy::Axis(i)));
+        }
+    }
+    if let Some(&(first, _)) = out.first() {
+        if !inside(first, runs) {
+            if let Some(d) = lean(first, runs) {
+                out.insert(1, (canonical(d), StraightBy::Bands));
+            }
+        }
+    }
+    out
+}
+
+/// Whether the unit `d` is inside every plane's and cylinder's band of `runs`.
+fn inside(d: Vec3, runs: &[FaceRun]) -> bool {
+    runs.iter().all(|run| match *run {
+        FaceRun::Plane { normal, slope } => normal.dot(d).abs() <= slope,
+        FaceRun::Axis { axis, slope } => axis.cross(d).length() <= slope,
+        FaceRun::Other => true,
+    })
+}
+
+/// A unit direction inside every plane's and cylinder's band of `runs`, near the unit `base`, or
+/// `None` when there is none in reach.
+///
+/// It is a small linear programme in the plane square to `base`: `d = base + p u + q w`, with `u`
+/// and `w` unit, square to `base` and to each other, and `|p|, |q| <= 1`. A plane's band
+/// `|n · d| <= slope` is two rows linear in `p` and `q`. A cylinder's band `|a × d| <= slope` is a
+/// disc in the plane square to its axis; it takes the regular octagon inside it, four rows
+/// `|e · d| <= slope cos(π/8)` for `e` square to the axis at every eighth of a turn. Every row is
+/// enough for its band once `d` is made unit, as `|d| >= 1`. Of the points inside every row it
+/// takes the one furthest inside (the centre of the largest circle that fits), found at the
+/// corners of the rows taken three at a time; `None` when that circle has no radius, or past
+/// [`LEAN_ROWS`] rows. So for planes the answer is exact up to the rounding of the rows, for
+/// cylinders up to the octagon (a band `cos(π/8)` as wide); it reaches directions within 45° of
+/// `base` across each of `u` and `w`.
+fn lean(base: Vec3, runs: &[FaceRun]) -> Option<Vec3> {
+    let (u, w) = square_pair(base)?;
+    let mut rows: Vec<[f64; 3]> = vec![
+        [1.0, 0.0, 1.0],
+        [-1.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+        [0.0, -1.0, 1.0],
+    ];
+    let mut band = |n: Vec3, slope: f64| {
+        let (c, a, b) = (n.dot(base), n.dot(u), n.dot(w));
+        rows.push([a, b, slope - c]);
+        rows.push([-a, -b, slope + c]);
+    };
+    // cos and sin of every eighth of a turn up to a half, and cos(π/8)
+    let eighths = [
+        (1.0, 0.0),
+        (FRAC_1_SQRT_2, FRAC_1_SQRT_2),
+        (0.0, 1.0),
+        (-FRAC_1_SQRT_2, FRAC_1_SQRT_2),
+    ];
+    let octagon = 0.923_879_532_511_286_7;
+    for run in runs {
+        let (direction, slope, round) = match *run {
+            FaceRun::Plane { normal, slope } => (normal, slope, false),
+            FaceRun::Axis { axis, slope } => (axis, slope, true),
+            FaceRun::Other => continue,
+        };
+        if slope == f64::INFINITY {
+            continue;
+        }
+        if !slope.is_finite() {
+            return None;
+        }
+        if round {
+            let (e1, e2) = square_pair(direction)?;
+            for (c, s) in eighths {
+                band(e1 * c + e2 * s, slope * octagon);
+            }
+        } else {
+            band(direction, slope);
+        }
+    }
+    if rows.len() > LEAN_ROWS {
+        return None;
+    }
+    let row = |r: [f64; 3]| {
+        let [a, b, h] = r;
+        (Vec3::new(a, b, a.hypot(b)), h)
+    };
+    let holds = |x: Vec3| {
+        rows.iter().all(|&r| {
+            let (m, h) = row(r);
+            let slack = 64.0
+                * f64::EPSILON
+                * ((m.x * x.x).abs() + (m.y * x.y).abs() + (m.z * x.z).abs() + h.abs());
+            m.dot(x) <= h + slack
+        })
+    };
+    let mut best: Option<Vec3> = None;
+    for (i, &r1) in rows.iter().enumerate() {
+        for (j, &r2) in rows.iter().enumerate().skip(i + 1) {
+            for &r3 in rows.iter().skip(j + 1) {
+                let ((m1, h1), (m2, h2), (m3, h3)) = (row(r1), row(r2), row(r3));
+                let (c23, c31, c12) = (m2.cross(m3), m3.cross(m1), m1.cross(m2));
+                let det = m1.dot(c23);
+                if det.abs() <= 1e-9 * m1.length() * m2.length() * m3.length() {
+                    continue;
+                }
+                let x = (c23 * h1 + c31 * h2 + c12 * h3) / det;
+                if best.is_some_and(|b| b.z >= x.z) || !holds(x) {
+                    continue;
+                }
+                best = Some(x);
+            }
+        }
+    }
+    let x = best?;
+    if x.z <= 0.0 {
+        return None;
+    }
+    let (_, d) = (base + u * x.x + w * x.y).length_and_unit()?;
+    Some(d)
+}
+
+/// Two unit vectors square to the unit `v` and to each other.
+fn square_pair(v: Vec3) -> Option<(Vec3, Vec3)> {
+    let pick = if v.x.abs() < 0.5 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    let (_, u) = (pick - v * pick.dot(v)).length_and_unit()?;
+    let (_, w) = v.cross(u).length_and_unit()?;
+    Some((u, w))
+}
+
+/// `v` in its canonical sense: its largest component positive (the first of equal ones), with
+/// no negative zero (so a flipped `v` sorts as `v` does).
+fn canonical(v: Vec3) -> Vec3 {
+    let mut lead = v.x;
+    for c in [v.y, v.z] {
+        if c.abs() > lead.abs() {
+            lead = c;
+        }
+    }
+    let v = if lead < 0.0 { -v } else { v };
+    Vec3::new(v.x + 0.0, v.y + 0.0, v.z + 0.0)
 }
 
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).
@@ -1161,5 +1440,136 @@ mod tests {
             area: Interval::enclosing(800.0, 1e-8).unwrap(),
         };
         assert!(separated_material(&[doubled], 1e-6, &mut 16_000_000).is_none());
+    }
+}
+
+#[cfg(test)]
+mod straight_tests {
+    use super::*;
+
+    fn v(x: f64, y: f64, z: f64) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    fn plane(x: f64, y: f64, z: f64) -> FaceRun {
+        FaceRun::Plane {
+            normal: v(x, y, z).unitize().unwrap(),
+            slope: 1.0,
+        }
+    }
+
+    fn axis(x: f64, y: f64, z: f64) -> FaceRun {
+        FaceRun::Axis {
+            axis: v(x, y, z),
+            slope: 1.0,
+        }
+    }
+
+    /// Two planes that are not parallel give their cross product first, whatever the order and
+    /// sense of the runs; a cylinder's axis comes after (once); parallel planes alone give nothing.
+    #[test]
+    fn a_plane_pair_comes_before_an_axis_in_any_order_and_sense() {
+        let runs = [
+            plane(1.0, 0.0, 0.0),
+            FaceRun::Other,
+            plane(0.0, 1.0, 0.0),
+            axis(0.0, 0.0, -1.0),
+        ];
+        let got = straight_candidates(&runs);
+        // the axis is the pair's direction, so it is not listed again
+        assert_eq!(
+            got,
+            vec![(v(0.0, 0.0, 1.0), StraightBy::Planes(2, 0))],
+            "{got:?}"
+        );
+        let flipped = [
+            axis(0.0, 0.0, 1.0),
+            plane(0.0, -1.0, 0.0),
+            plane(-1.0, 0.0, 0.0),
+        ];
+        let got = straight_candidates(&flipped);
+        assert_eq!(got.first().map(|c| c.0), Some(v(0.0, 0.0, 1.0)), "{got:?}");
+        // parallel planes and a cylinder: the cylinder's axis
+        let round = [
+            plane(0.0, 1.0, 0.0),
+            axis(0.0, 0.0, -1.0),
+            plane(0.0, -1.0, 0.0),
+        ];
+        assert_eq!(
+            straight_candidates(&round),
+            vec![(v(0.0, 0.0, 1.0), StraightBy::Axis(1))]
+        );
+        // parallel planes only: nothing
+        let flat = [plane(0.0, 1.0, 0.0), plane(0.0, 1.0, 1e-13)];
+        assert!(straight_candidates(&flat).is_empty());
+    }
+
+    /// brett19's runs (+x, +y, -x) on #22066: flipping the first and last senses changes neither
+    /// the direction nor the faces it names (no negative zero sorts ahead of a zero).
+    #[test]
+    fn a_flipped_sense_names_the_same_faces() {
+        let runs = [
+            plane(1.0, 0.0, 0.0),
+            plane(0.0, 1.0, 0.0),
+            plane(-1.0, 0.0, 0.0),
+        ];
+        let flipped = [
+            plane(-1.0, 0.0, 0.0),
+            plane(0.0, 1.0, 0.0),
+            plane(1.0, 0.0, 0.0),
+        ];
+        let got = straight_candidates(&runs);
+        assert_eq!(straight_candidates(&flipped), got);
+        assert_eq!(got, vec![(v(0.0, 0.0, 1.0), StraightBy::Planes(1, 0))]);
+    }
+
+    /// brett19's three faces on #22066, each tilted off square to y by 0.9 of its band: y is in
+    /// every band, the cross product of the two furthest from parallel is not (the third strays
+    /// along it by twice its band), so the next candidate is a direction inside every band.
+    #[test]
+    fn a_direction_inside_every_band_follows_a_pair_outside_one() {
+        let slope = 1e-5 / (2.0 * 10.0 * 2.0_f64.sqrt());
+        let alpha = 0.9 * slope;
+        let band = |n: Vec3| FaceRun::Plane {
+            normal: n.unitize().unwrap(),
+            slope,
+        };
+        let runs = [
+            band(v(0.0, alpha, 1.0)),
+            band(v(1.0, alpha, 0.0)),
+            band(v(1.0, -alpha, 1.0)),
+        ];
+        assert!(inside(v(0.0, 1.0, 0.0), &runs));
+        let got = straight_candidates(&runs);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(!inside(got[0].0, &runs), "{got:?}");
+        assert_eq!(got[1].1, StraightBy::Bands);
+        assert!(inside(got[1].0, &runs), "{got:?}");
+        assert!((got[1].0.length() - 1.0).abs() < 4.0 * f64::EPSILON);
+        // the same planes with bands too narrow to meet: no direction inside them all
+        let narrow: Vec<FaceRun> = runs
+            .iter()
+            .map(|r| match *r {
+                FaceRun::Plane { normal, .. } => FaceRun::Plane {
+                    normal,
+                    slope: 0.3 * alpha,
+                },
+                other => other,
+            })
+            .collect();
+        assert_eq!(straight_candidates(&narrow).len(), 1);
+        // a cylinder whose axis leans off the planes' direction by half its band
+        let lean = 0.5 * slope;
+        let cylinder = [
+            band(v(0.0, alpha, 1.0)),
+            band(v(1.0, alpha, 0.0)),
+            FaceRun::Axis {
+                axis: v(lean, 1.0, 0.0).unitize().unwrap(),
+                slope,
+            },
+        ];
+        let got = straight_candidates(&cylinder);
+        let bands = got.iter().find(|c| c.1 == StraightBy::Bands);
+        assert!(bands.is_some_and(|c| inside(c.0, &cylinder)), "{got:?}");
     }
 }
