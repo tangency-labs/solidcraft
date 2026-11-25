@@ -3025,4 +3025,138 @@ mod tests {
         assert_eq!(meshes(&a), chip);
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// A part holding one pin, a cylinder beside the Z axis, saved as `path`.
+    fn save_pin(path: &Path) {
+        let mut part = Session::default();
+        run(&mut part, "solid.cylinder", json!({"base": [20, 0, 0], "radius": 2, "height": 10, "body_name": "Pin"}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+
+    /// Every body the world shows (each placement's), by name, with its volume.
+    fn shown_bodies(s: &Session) -> std::collections::BTreeMap<String, f64> {
+        let world = s.world_state().unwrap();
+        let shown: std::collections::BTreeMap<String, f64> = world.bodies.iter().map(|b| (b.name.clone(), b.volume().unwrap_or(f64::NAN))).collect();
+        assert_eq!(shown.len(), world.bodies.len(), "one body per name: {shown:?}");
+        shown
+    }
+
+    /// Every feature evaluates, and no pattern leaves a body out (which it says in a warning).
+    fn assert_every_copy_made(s: &Session, when: &str) {
+        for f in &s.doc.features {
+            let r = s.model.result(f.id).unwrap_or_else(|| panic!("{when}: `{}` has no result", f.name));
+            assert!(r.error.is_none(), "{when}: `{}` failed: {:?}", f.name, r.error);
+            if matches!(f.kind, FeatureKind::Pattern { .. }) {
+                assert!(r.warning.is_none(), "{when}: `{}` warns: {:?}", f.name, r.warning);
+            }
+        }
+    }
+
+    /// The bodies `shown` holds sum to `count` pins of `pin` each.
+    fn assert_pins(shown: &std::collections::BTreeMap<String, f64>, count: usize, pin: f64, when: &str) {
+        assert_eq!(shown.len(), count, "{when}: {shown:?}");
+        let total: f64 = shown.values().sum();
+        let want = count as f64 * pin;
+        assert!((total - want).abs() < 1e-5 * want, "{when}: volume {total}, want {count} x {pin}: {shown:?}");
+    }
+
+    /// Five pins about Z, then those five twice: the issue's ten pins.
+    fn chained_patterns() -> [Value; 2] {
+        [json!({"axis": "Z", "count": 5, "angle": "360 deg"}), json!({"axis": "Z", "count": 2, "angle": "36 deg"})]
+    }
+
+    /// The pin part linked into a new assembly with `reuse` (placed once, at the origin), then
+    /// patterned there by each circular pattern of `patterns` in turn, each copying every body the
+    /// world shows: the session, the linked component, the part's file, its folder and one pin's
+    /// volume.
+    fn patterned_pin(case: &str, patterns: &[Value]) -> (Session, u64, PathBuf, PathBuf, f64) {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-reuse-{case}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("pin.solidcraft");
+        save_pin(&part);
+        let mut s = Session::default();
+        let inserted = run(&mut s, "component.insert_design", json!({"path": part, "reuse": true}));
+        let component = inserted["component"].as_u64().unwrap();
+        let pin = shown_bodies(&s).get("Pin").copied().unwrap_or_else(|| panic!("no pin: {inserted}"));
+        assert!(pin > 0.0, "{pin}");
+        for pattern in patterns {
+            let mut p = pattern.clone();
+            p["bodies"] = json!(shown_bodies(&s).into_keys().collect::<Vec<_>>());
+            run(&mut s, "solid.pattern.circular", p);
+        }
+        assert_every_copy_made(&s, case);
+        (s, component, part, dir, pin)
+    }
+
+    /// `component.insert_design` of the pin part again with `reuse`, `x` mm along X: the new
+    /// placement, of the component the part is already linked to.
+    fn place_pin_again(s: &mut Session, part: &Path, component: u64, x: f64) -> u64 {
+        let p = json!({"path": part, "reuse": true, "parent": 0, "matrix": [1, 0, 0, x, 0, 1, 0, 0, 0, 0, 1, 0]});
+        let placed = run(s, "component.insert_design", p);
+        assert_eq!(placed["component"].as_u64(), Some(component), "the link is reused: {placed}");
+        placed["occurrence"].as_u64().unwrap()
+    }
+
+    /// A pattern of a linked part's body keeps its copies when the part is placed again with
+    /// `reuse`, and the new placement shows the part's own body only.
+    #[test]
+    fn reusing_a_linked_part_keeps_its_pattern_copies() {
+        let (mut s, component, part, dir, pin) = patterned_pin("single", &chained_patterns()[..1]);
+        let before = shown_bodies(&s);
+        assert_pins(&before, 5, pin, "patterned");
+        place_pin_again(&mut s, &part, component, 100.0);
+        let after = shown_bodies(&s);
+        assert_pins(&after, 6, pin, "placed again");
+        assert!(before.keys().all(|name| after.contains_key(name)), "{before:?} -> {after:?}");
+        assert_every_copy_made(&s, "placed again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The issue: a linked pin patterned five times about Z, then the five pins twice, ten pins.
+    /// Placing the part again with `reuse` moves the first pattern's copies out of the part (else
+    /// every placement would show them), and the second pattern, which picked them at the part's
+    /// placement, no longer found them there: it left four pins out, and their copies, keeping 7
+    /// bodies of 11. Now every pin stays, with no error or warning, and the new placement shows
+    /// the one pin.
+    #[test]
+    fn reusing_a_linked_part_keeps_chained_pattern_copies() {
+        let (mut s, component, part, dir, pin) = patterned_pin("chained", &chained_patterns());
+        let before = shown_bodies(&s);
+        assert_pins(&before, 10, pin, "patterned");
+        place_pin_again(&mut s, &part, component, 100.0);
+        let after = shown_bodies(&s);
+        assert_pins(&after, 11, pin, "placed again");
+        assert!(before.keys().all(|name| after.contains_key(name)), "{before:?} -> {after:?}");
+        assert_every_copy_made(&s, "placed again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Later changes keep the chained copies too: a third placement, moving it, and undoing back
+    /// to the part placed once, which shows the ten pins it showed before.
+    #[test]
+    fn chained_pattern_copies_stay_through_further_placements_and_undo() {
+        let (mut s, component, part, dir, pin) = patterned_pin("further", &chained_patterns());
+        let once = shown_bodies(&s);
+        assert_pins(&once, 10, pin, "patterned");
+        place_pin_again(&mut s, &part, component, 100.0);
+        let third = place_pin_again(&mut s, &part, component, -100.0);
+        assert_pins(&shown_bodies(&s), 12, pin, "placed a third time");
+        assert_every_copy_made(&s, "placed a third time");
+        run(&mut s, "occurrence.move", json!({"occurrence": third, "translate": [0, 50, 0]}));
+        assert_pins(&shown_bodies(&s), 12, pin, "moved");
+        assert_every_copy_made(&s, "moved");
+        for _ in 0..10 {
+            if s.doc.occurrences.len() == 1 {
+                break;
+            }
+            run(&mut s, "edit.undo", json!({}));
+        }
+        assert_eq!(s.doc.occurrences.len(), 1, "undone back to one placement");
+        let undone = shown_bodies(&s);
+        assert_pins(&undone, 10, pin, "undone");
+        assert!(once.keys().eq(undone.keys()), "{once:?} -> {undone:?}");
+        assert_every_copy_made(&s, "undone");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
