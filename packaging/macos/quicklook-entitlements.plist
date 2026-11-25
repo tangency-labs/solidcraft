@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The Quick Look extensions (apps/solidcraft-quicklook) must run in the App Sandbox, or macOS
+	     doesn't load them; they are signed with this even when the app is only ad-hoc signed. They
+	     only read the design Quick Look hands them, which the host opens to them; read-only access
+	     to files the user picked covers that. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>

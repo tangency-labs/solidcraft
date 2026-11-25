@@ -73,7 +73,7 @@ fn pair(s: &Session, st: &solidcraft_doc::ModelState, p: &Value, cmd: &str) -> R
         (Some(a), Some(b)) => (a, b),
         (None, None) => {
             let selected: Vec<String> =
-                s.selection.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
+                s.selected_items()?.into_iter().filter_map(|x| if let Sel::Body { name } = x { Some(name) } else { None }).collect();
             let all: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
             match (selected.as_slice(), all.as_slice()) {
                 ([a, b], _) | (_, [a, b]) => (a.clone(), b.clone()),
@@ -166,7 +166,12 @@ struct Measured {
 /// The pieces of `from` − `tool`, the material only `from` has, each measured as
 /// `inspect.measure` measures a body (none when `tool` takes all of it).
 fn cut_pieces(from: &solidcraft_kernel::Body, tool: &solidcraft_kernel::Body) -> std::result::Result<Vec<Measured>, String> {
-    let rest = solidcraft_kernel::boolean(from, tool, solidcraft_kernel::BoolOp::Cut).map_err(|e| e.to_string())?;
+    // SMLib's check of the difference runs here: one it refuses is not measured.
+    let rest = solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+        solidcraft_kernel::boolean(from, tool, solidcraft_kernel::BoolOp::Cut)
+    })
+    .0
+    .map_err(|e| e.to_string())?;
     let Some(rest) = rest else { return Ok(Vec::new()) };
     rest.lumps()
         .map_err(|e| e.to_string())?

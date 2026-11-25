@@ -146,7 +146,9 @@ fn fix_for(field: &str) -> String {
         "runtime.commands" => {
             "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
         }
-        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands, all importers or all exporters.",
+        "runtime.entries" => {
+            "Declare 1 to 32 entries, all commands, all importers or all exporters, each with its own name of lowercase letters, digits and dashes, such as \"make-gear\" (no underscores)."
+        }
         "runtime.entries.slots" => {
             "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
         }
@@ -161,7 +163,9 @@ fn fix_for(field: &str) -> String {
         "runtime.permissions.net" => {
             "Remove \"net\": SolidCraft gives plugins no network access. Read and write files through named folder grants instead."
         }
-        "runtime.limits.fuel" => "Set \"fuel\" to a positive number that fits the app's ceiling (100000000000 unless the user raised it).",
+        "runtime.limits.fuel" => {
+            "Set \"fuel\" to a positive number up to 10000000000000. Above Max plugin fuel, Install asks the user to approve it."
+        }
         "runtime.limits.memory_mib" => {
             "Set \"memory_mib\" to 1..4096. Above the user's ceiling (128 unless raised), Install asks the user to approve it."
         }
@@ -199,6 +203,11 @@ fn fix_for(field: &str) -> String {
 fn host_problem(e: &HostError) -> CheckProblem {
     let text = e.to_string();
     match e {
+        HostError::OverCeiling { limit, allowed, .. } if limit == "fuel" => error_problem(
+            "runtime.limits.fuel",
+            text,
+            format!("Lower \"fuel\" to at most {allowed}: this is the hard host ceiling for install approval."),
+        ),
         HostError::InvalidManifest { field, reason } => error_problem(field.clone(), reason.clone(), fix_for(field)),
         HostError::UnsupportedCapability { reason, .. } => error_problem(
             "capabilities",
@@ -339,10 +348,11 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     result.entries = runtime.entries.clone();
     let ceilings = session.plugin_limits;
     if runtime.limits.fuel > ceilings.max_fuel {
-        result.problems.push(error_problem(
+        result.problems.push(problem(
+            Severity::Warning,
             "runtime.limits.fuel",
             format!("asks for {} fuel, over the app's ceiling of {}", runtime.limits.fuel, ceilings.max_fuel),
-            format!("Lower \"fuel\" to at most {}: the app refuses to run a plugin that asks for more.", ceilings.max_fuel),
+            "Install asks the user to allow the extra fuel, up to 10000000000000; without approval, the request must fit Max plugin fuel.",
         ));
     }
     if runtime.limits.memory_mib > ceilings.max_memory_mib {

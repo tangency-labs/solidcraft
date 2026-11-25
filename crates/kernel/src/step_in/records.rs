@@ -240,6 +240,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             source_item: source as u64,
             face_origin: part.face_origin,
             name: r.name.clone(),
+            common_face_name: None,
             body,
             color,
             path: r.path.clone(),
