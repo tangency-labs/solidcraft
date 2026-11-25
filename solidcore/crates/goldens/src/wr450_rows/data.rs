@@ -609,8 +609,6 @@ pub(super) const DATA: &[Row] = &[
     ("topology.brep_cutting", "gen0009", "copy"),
     ("topology.brep_cutting", "gen0037", "copy"),
     ("topology.brep_cutting", "gen0044", "copy"),
-    ("topology.brep_cutting", "gen0049", "copy"),
-    ("topology.brep_cutting", "gen0050", "copy"),
     ("topology.brep_cutting", "gen0068", "copy"),
     (
         "topology.brep_local_operation",

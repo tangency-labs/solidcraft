@@ -54,6 +54,10 @@
 //! --lib -- wr450_rows::record --ignored` rewrites `DATA` and `main.jsonl`; then set
 //! [`MAIN_COMMIT`] (the recorder does not write it), `UNITS`, the total and
 //! [`WITHIN_RULE`] by hand from its output.
+//!
+//! WR-732's retirement (#18934) moves `topology.brep_cutting`'s `gen0049` (within the
+//! comparator) and `gen0050` (edge 8 and its vertices raised) apart from main's lines with
+//! main's choices put back, so their entries are deleted.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -346,7 +350,7 @@ replay_tests! {
     api_files: "topology.api_files", 18;
     api_projection: "topology.api_projection", 1;
     assert_valid: "topology.assert_valid", 3;
-    brep_cutting: "topology.brep_cutting", 6;
+    brep_cutting: "topology.brep_cutting", 4;
     brep_local_operation: "topology.brep_local_operation", 36;
     brep_mirror: "topology.brep_mirror", 51;
     brep_p1: "topology.brep_p1", 4;
@@ -552,7 +556,7 @@ fn data_covers_the_moved_rows() {
     }
     let want: BTreeMap<&str, usize> = UNITS.iter().copied().collect();
     assert_eq!(per_unit, want);
-    assert_eq!(DATA.len(), 402);
+    assert_eq!(DATA.len(), 400);
     // each (unit, case) once
     let keys: std::collections::BTreeSet<(&str, &str)> = DATA.iter().map(|r| (r.0, r.1)).collect();
     assert_eq!(keys.len(), DATA.len(), "a (unit, case) listed twice");
