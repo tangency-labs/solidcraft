@@ -6330,7 +6330,6 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore",
- "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
