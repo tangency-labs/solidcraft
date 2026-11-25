@@ -167,6 +167,7 @@ fn de_boor(p: usize, knots: &[f64], control: &[[f64; 4]], t: f64) -> [f64; 4] {
 enum IsoCurve {
     Line { origin: P, step: P },
     Circle { o: P, x: P, y: P, r: f64 },
+    Ellipse { o: P, x: P, y: P, a: f64, b: f64 },
     BSpline { degree: usize, points: Vec<P>, weights: Vec<f64>, knots: Vec<f64> },
 }
 
@@ -175,6 +176,7 @@ impl IsoCurve {
         match self {
             IsoCurve::Line { origin, step } => add(*origin, mul(t, *step)),
             IsoCurve::Circle { o, x, y, r } => add(*o, add(mul(r * t.cos(), *x), mul(r * t.sin(), *y))),
+            IsoCurve::Ellipse { o, x, y, a, b } => add(*o, add(mul(a * t.cos(), *x), mul(b * t.sin(), *y))),
             IsoCurve::BSpline { degree, points, weights, knots } => {
                 let control: Vec<[f64; 4]> = points.iter().zip(weights).map(|(q, w)| [q[0] * w, q[1] * w, q[2] * w, *w]).collect();
                 let h = de_boor(*degree, knots, &control, t);
@@ -190,6 +192,10 @@ impl IsoCurve {
             IsoCurve::Circle { o, x, y, .. } => {
                 let d = sub(q, *o);
                 dot(d, *y).atan2(dot(d, *x))
+            }
+            IsoCurve::Ellipse { o, x, y, a, b } => {
+                let d = sub(q, *o);
+                (dot(d, *y) / b).atan2(dot(d, *x) / a)
             }
             IsoCurve::BSpline { knots, .. } => {
                 let (lo, hi) = (knots[0], knots[knots.len() - 1]);
@@ -502,7 +508,7 @@ impl File {
         let curve = self.curve(rid(&ec[3]));
         let t0 = curve.param_of(a);
         let mut t1 = curve.param_of(b);
-        if let IsoCurve::Circle { .. } = curve {
+        if matches!(curve, IsoCurve::Circle { .. } | IsoCurve::Ellipse { .. }) {
             let tau = std::f64::consts::TAU;
             if along {
                 while t1 <= t0 + 1e-12 {
@@ -564,6 +570,12 @@ impl File {
             "CIRCLE" => {
                 let (o, x, y, _) = self.frame(rid(&p[1]));
                 IsoCurve::Circle { o, x, y, r: real(&p[2]) }
+            }
+            "ELLIPSE" => {
+                let (o, x, y, _) = self.frame(rid(&p[1]));
+                let (a, b) = (real(&p[2]), real(&p[3]));
+                assert!(a >= b && b > 0.0, "#{id}: ELLIPSE semi_axis_1 ({a}) < semi_axis_2 ({b})");
+                IsoCurve::Ellipse { o, x, y, a, b }
             }
             "B_SPLINE_CURVE_WITH_KNOTS" => {
                 let points: Vec<P> = list(&p[2]).iter().map(|q| self.point(rid(q))).collect();
@@ -736,7 +748,7 @@ fn half_moment(curve: &IsoCurve, a: P, b: P, along: bool) -> P {
     }
     let t0 = curve.param_of(a);
     let mut t1 = curve.param_of(b);
-    if let IsoCurve::Circle { .. } = curve {
+    if matches!(curve, IsoCurve::Circle { .. } | IsoCurve::Ellipse { .. }) {
         let tau = std::f64::consts::TAU;
         if along {
             while t1 <= t0 + 1e-12 {
@@ -1517,4 +1529,55 @@ fn same_sense_follows_swapped_and_inside_out_parameterisations() {
         }
     }
     assert!(wrong.is_empty(), "same_sense against the loops: {wrong:?}");
+}
+
+/// Two equal-diameter perpendicular through-holes with intersecting axes cut into a 40 mm block
+/// (#22220): the cylinder-cylinder intersection produces analytic ellipses whose minor axis is the
+/// cylinder radius, so the writer must turn each ellipse a quarter turn to satisfy
+/// `semi_axis_1 >= semi_axis_2` (required by OpenCascade) while keeping its orientation, signed
+/// volume (Steinmetz-corrected) and round-trip validity.
+#[test]
+fn equal_diameter_perpendicular_intersecting_holes_are_written_valid_and_right_side_out() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::mass::integrator::properties::brep_volume_default;
+    use solidcore::topology::brep::p5::transform;
+    use solidcore::topology::brep::validation::{CheckLevel, check_brep};
+    use solidcore_convert::brep::to_kernel_body;
+    use std::f64::consts::PI;
+
+    let mut kernel = Kernel::default();
+    let r = 5.0_f64;
+    let side = 40.0_f64;
+    let block = api::create_box(&mut kernel, Point3::new(3.0, 4.0, 5.0), side, side, side).unwrap();
+    let hole_z = api::create_cylinder(&mut kernel, Point3::new(23.0, 24.0, 0.0), r, 50.0).unwrap();
+    let mut hole_x = api::create_cylinder(&mut kernel, Point3::ZERO, r, 50.0).unwrap();
+    let to_x = Axis2Placement::new(Point3::new(-2.0, 24.0, 25.0), Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0));
+    transform(&mut kernel, &mut hole_x, &to_x, None, false).unwrap();
+
+    let one = boolean_difference(&mut kernel, block, hole_z).unwrap();
+    let mut body = boolean_difference(&mut kernel, one, hole_x).unwrap();
+    let expected = side.powi(3) - 2.0 * PI * r * r * side + 16.0 * r.powi(3) / 3.0;
+
+    assert_right_side_out("intersecting equal holes", &mut kernel, &mut body, expected, 1e-4);
+
+    let text = write_step("intersecting equal holes", &mut kernel, &mut body);
+    let ex = p21::parse(&text).unwrap();
+    let ellipses: Vec<(f64, f64)> =
+        ex.entities.values().filter(|e| e.name() == "ELLIPSE").map(|e| (real(&e.params()[2]), real(&e.params()[3]))).collect();
+    assert!(ellipses.len() >= 4, "expected analytic intersection ellipses, got {ellipses:?}");
+    for &(a, b) in &ellipses {
+        assert!(a >= b && b > 0.0, "ELLIPSE semi_axis_1 ({a}) < semi_axis_2 ({b})");
+    }
+
+    let read = solidcore_step::topology::read_solids(&ex);
+    assert!(read.failures.is_empty(), "{:?}", read.failures);
+    assert_eq!(read.solids.len(), 1);
+    let solid = &read.solids[0];
+    assert!(!solid.sheet && solid.turned.is_empty(), "turned faces: {:?} {:?}", solid.turned, solid.notes);
+    let mut back = to_kernel_body(&mut kernel, &solid.brep, false).unwrap();
+    let check = check_brep(&mut kernel, &mut back, CheckLevel::Level2).unwrap();
+    assert_eq!(check.pointers, solidcore::topology::brep::validation::PointerCheck::Passed);
+    assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
+    let back_volume = brep_volume_default(&kernel, &mut back, 1e-9).unwrap();
+    assert!((back_volume - expected).abs() <= 1e-6 * expected, "read-back volume {back_volume}, expected {expected}");
 }

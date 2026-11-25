@@ -417,6 +417,39 @@ fn exported_spline_curves_say_when_they_are_closed() {
     assert_eq!(written_flags(&open), ".F.,.U.");
 }
 
+#[test]
+fn topology_curve_normalizes_minor_major_ellipse() {
+    use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
+    let frame = Frame { origin: [1.0, 2.0, 3.0], x_axis: [0.0, 1.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+    let record = BCurve::Ellipse { frame, radii: [5.0, 8.0] };
+    let step_curve = crate::write::topology::curve(&record).unwrap_or_else(|e| panic!("{e}"));
+    let Curve::Ellipse { position, semi_axis_1, semi_axis_2 } = step_curve else { panic!("{step_curve:?}") };
+    assert_eq!((semi_axis_1, semi_axis_2), (8.0, 5.0));
+    assert!(close(position.origin, [1.0, 2.0, 3.0]));
+    assert!(close(position.axis, [1.0, 0.0, 0.0]));
+    assert!(close(position.ref_direction, [0.0, 0.0, 1.0]));
+    for t in [0.0, 0.4, FRAC_PI_2, 2.1, PI] {
+        let want = [1.0, 2.0 + 5.0 * t.cos(), 3.0 + 8.0 * t.sin()];
+        let got = step_curve.point(t - FRAC_PI_2).unwrap_or_else(|| panic!("no point at {t}"));
+        assert!(close(got, want), "t={t}: got {got:?}, want {want:?}");
+    }
+    // PlacedRevolution with a minor-first ellipse shifts v in its parameter map so pcurves stay exact.
+    let pf = Frame { origin: [10.0, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+    let profile = BCurve::Ellipse { frame: pf, radii: [2.0, 4.0] };
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let rev = BSurface::PlacedRevolution { profile: Box::new(profile), origin: [0.0; 3], axis: [0.0, 0.0, 1.0], matrix: identity, forward: true };
+    let (step_surf, map) = crate::write::topology::surface(&rev).unwrap_or_else(|e| panic!("{e}"));
+    let Surface::Revolution { profile: rev_profile, .. } = &step_surf else { panic!("{step_surf:?}") };
+    assert!(matches!(**rev_profile, Curve::Ellipse { semi_axis_1, semi_axis_2, .. } if semi_axis_1 == 4.0 && semi_axis_2 == 2.0));
+    for (t, ang) in [(0.0, 0.3), (FRAC_PI_4, 1.1), (FRAC_PI_2, 2.0)] {
+        let r = 10.0 + 2.0 * t.cos();
+        let want = [r * ang.cos(), r * ang.sin(), 4.0 * t.sin()];
+        let [u, v] = map.apply([t, ang]);
+        let got = step_surf.point(u, v).unwrap_or_else(|| panic!("no point at ({u}, {v})"));
+        assert!(close(got, want), "t={t}, ang={ang}: got {got:?}, want {want:?}");
+    }
+}
+
 /// A CURVE_REPLICA's operator: x' = +Y, z' = +Z (so y' = z' x x' = -X), origin (5, 0, 0), scale 2.
 const TURNED: &str = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',#5,$,#20,2.,#2);";
 
