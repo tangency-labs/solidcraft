@@ -119,7 +119,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub exact_regions: Option<bool>,
     /// A point on a planar body face to extrude instead of a sketch profile.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
     pub face: Option<Point3>,
     /// Several coplanar faces of one body to extrude together, by a point on each. Not with
     /// `face`, `sketch` or `profiles`.

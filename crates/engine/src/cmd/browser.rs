@@ -2094,6 +2094,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// In a window, a feature's result shows before SMLib's check of it ends
+    /// ([`Session::set_background_checks`]). The join on the block (refused by the check, as in
+    /// the test above) can show at once; a command that reads the model next reads it checked: the
+    /// join failed with the check's error, and no check left running, also for the evaluation the
+    /// refusal needed before it.
+    #[test]
+    fn a_command_that_reads_the_model_reads_it_checked_in_a_window() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-bg-checks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check").settled().expect("the check ends");
+        s.set_background_checks(true);
+        let joined =
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}));
+        let measured = s.execute("inspect.measure", &json!({}));
+        assert!(measured.is_ok(), "{measured:?}");
+        assert!(!s.model.checking_features(), "the command read the model with no check left running");
+        // Refused at once (the check ended in time) or once settled: the same error either way.
+        let error = match joined {
+            Err(e) => e.to_string(),
+            Ok(_) => s.model.results.last().and_then(|r| r.error.clone()).expect("the join fails once its check is settled"),
+        };
+        assert!(error.contains("SMLib's check refuses the result"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
         let mut s = Session::default();

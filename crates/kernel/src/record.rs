@@ -41,6 +41,39 @@ pub(crate) fn generated(origins: Vec<FaceOrigin>) -> FaceProv {
 
 pub(crate) use solidcore_record::brep::history::mark_shared_split;
 
+/// A SolidCore edit of one operand, in record order. A retained face whose trim
+/// changed is modified even when it still has a single parent.
+pub(crate) fn from_ops_edit(result: &Brep, edit: solidcore_ops::history::History, retrimmed: &BTreeSet<usize>) -> History {
+    use solidcore_ops::history::{Change as OpsChange, FaceOrigin as OpsOrigin};
+
+    let faces = edit
+        .faces
+        .into_iter()
+        .map(|f| {
+            let change = match f.change {
+                OpsChange::Kept if matches!(f.origins.as_slice(), [OpsOrigin::Face(i)] if retrimmed.contains(i)) => Change::Modified,
+                OpsChange::Kept => Change::Kept,
+                OpsChange::Modified => Change::Modified,
+                OpsChange::Split => Change::Split,
+                OpsChange::Merged => Change::Merged,
+                OpsChange::Generated => Change::Generated,
+            };
+            let origins = f
+                .origins
+                .into_iter()
+                .map(|origin| match origin {
+                    OpsOrigin::Face(face) => FaceOrigin::Face { operand: 0, face },
+                    OpsOrigin::OffsetOf(face) => FaceOrigin::Offset { operand: 0, face },
+                    OpsOrigin::AlongEdge(edge) => FaceOrigin::Edge { operand: 0, edge },
+                })
+                .collect();
+            FaceProv { change, origins }
+        })
+        .collect();
+    let edges: Vec<_> = edit.edges.into_iter().map(|e| pieces_of(0, e)).collect();
+    of_faces(result, 1, faces, &edges)
+}
+
 /// The origins of a result edge that is (a piece of, or the moved) edges `edges` of operand
 /// `operand`.
 pub(crate) fn pieces_of(operand: usize, edges: impl IntoIterator<Item = usize>) -> Vec<EdgeOrigin> {

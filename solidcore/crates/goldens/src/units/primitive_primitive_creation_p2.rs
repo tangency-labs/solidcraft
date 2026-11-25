@@ -24,7 +24,7 @@ use solidcore::topology::{Brep, BrepId, Region, RegionId};
 /// Differential runner.
 pub struct Runner;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Inputs {
     #[serde(default)]
     expected_rejection: bool,
@@ -526,6 +526,7 @@ impl UnitDiff for Runner {
 mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
+    use solidcore::error::sweep::SweepFailure;
     use solidcore::kernel::Kernel;
 
     /// Why no requested body exists for the row.
@@ -675,6 +676,56 @@ mod moved_rows {
         }
     }
 
+    /// tangency-labs/solidcraft#14425 (WR-448's `revolve_analytic_profile_faces` retired)
+    /// moved two cone rows from one refusal to another (1007 to 1006): their side face is
+    /// now the analytic cylinder, which the sweep's `is_degenerate_curve` check no longer
+    /// takes as a surface degenerating to a curve (the B-spline surface of revolution
+    /// was refused there, 1007), so the call refuses one step later (tangency-labs/solidcraft#15350 tracks that test's
+    /// dependence on the parametrisation). The cone's height is within the B-rep's
+    /// tolerance of zero, so its base and top circles, and each vertex of one with the
+    /// vertex above it, are one within tolerance: no solid of that height has a valid
+    /// B-rep, and the call is refused either way (the API drops the B-rep it was
+    /// building on a refusal, so no body reaches the caller). The refusing step follows:
+    /// the swept profile edge's own curve is the side line from a base vertex to the
+    /// vertex above it, of length the height, within tolerance of zero, so the face
+    /// builder drops that line as degenerate and the sweep refuses with the typed
+    /// [`SweepFailure::SweptEdgeCurveDropped`] (status 1006), which is asserted here.
+    #[test]
+    fn the_cones_below_tolerance_height_stay_refused() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/primitive.primitive_creation_p2/ub215_degenerate_faces.json"
+        ))
+        .unwrap();
+        let mut seen = 0;
+        for name in [
+            "ub215_degenerate_face_side_line_5e-7",
+            "ub215_degenerate_face_side_line_9.9e-7",
+        ] {
+            let case = data["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            assert_eq!(i.op, 1, "{name}: a partial cone");
+            let (result, faces, tolerance) = run(&i);
+            assert!(i.data[1] > 0.0 && i.data[1] <= tolerance, "{name}: height {}", i.data[1]);
+            let err = result.expect_err(name);
+            // the refusal is the sweep's: `create_partial_rotational_sweep` has built the
+            // planar profile face it turns, and no swept face follows (the API layer then
+            // drops this B-rep)
+            assert_eq!(faces, 1, "{name}: the profile face only");
+            assert!(
+                matches!(err.sweep_failure(), Some(SweepFailure::SweptEdgeCurveDropped)),
+                "{name}: {err:?}"
+            );
+            assert_eq!(error(&err), 1006.0, "{name}");
+            seen += 1;
+        }
+        assert_eq!(seen, 2);
+    }
+
     /// (row, reason)
     const ROWS: [(&str, Reason); 21] = [
         ("gen0027", Reason::Small),
@@ -699,6 +750,33 @@ mod moved_rows {
         ("ub50_taper_line_back_through_the_last_mid", Reason::NoArea),
         ("ub50_taper_two_identical_lines", Reason::Open),
     ];
+
+    /// tangency-labs/solidcraft#18634: partial cones far from the origin whose refusal
+    /// status moved when the degeneracy tests stopped scaling their zero with position.
+    /// Main refused each of them too, so no answer is lost. Their status is now the one
+    /// the same cone gets at the origin (the row with its frame's origin set to zero and
+    /// its axes kept), so where the cone is no longer decides how it is refused.
+    const FAR_CONES: [&str; 4] = [
+        "ub215b_cone_random_refused_1",
+        "ub215b_cone_random_refused_3",
+        "ub215b_cone_top_1.0005e-6_at_1000",
+        "ub215b_cone_top_2e-6_at_1e5",
+    ];
+
+    #[test]
+    fn far_cones_are_refused_as_at_the_origin() {
+        for name in FAR_CONES {
+            let far: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(far.op, 1, "{name}");
+            assert!(far.data[6..9].iter().any(|c| c.abs() >= 1e3), "{name}: far");
+            let mut near = far.clone();
+            near.data[6..9].fill(0.0);
+            let far_error = run(&far).0.expect_err(name);
+            let near_error = run(&near).0.expect_err(name);
+            assert_eq!(error(&far_error), error(&near_error), "{name}: {far_error:?} / {near_error:?}");
+            assert_eq!(far_error.operation(), near_error.operation(), "{name}");
+        }
+    }
 
     #[test]
     fn each_moved_row_is_refused_for_its_reason() {

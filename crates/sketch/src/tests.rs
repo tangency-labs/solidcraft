@@ -3264,6 +3264,39 @@ fn removing_a_point_from_a_spline_with_its_own_knots_is_refused() {
     assert_eq!((kept.len(), now), (7, &nurbs));
 }
 
+/// A loose spline that ends at a corner of a loop, tangent to the loop's arc there and bending
+/// a little less than it, so that it hugs the arc from outside: its sampled chords cut inside
+/// the circle and "cross" the arc a few thousandths from the corner, where the spline itself
+/// only touches it. That crossing is no cut, and the turn at the corner follows the spline's own
+/// tangent and bend, not its chord's: the loop is the arc and the two lines, with no hairline
+/// piece of the spline in it (the extrude of such a profile was not a closed solid).
+#[test]
+fn a_loose_spline_tangent_to_an_arc_at_a_corner_leaves_the_loop_whole() {
+    use solidcraft_geom::Seg2Geom;
+    let mut sk = Sketch::new();
+    let (o, corner, top) = (v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0));
+    sk.add_arc(o, corner, top, [None, None, None], Some("a1")).unwrap();
+    sk.add_line(top, o, None, None, Some("l1")).unwrap();
+    sk.add_line(o, corner, None, None, Some("l2")).unwrap();
+    // A cubic Bézier along the circle of radius 12.5 about (-2.5, 0), which touches the arc's
+    // circle from outside at the corner, from 40 degrees down to the corner.
+    let (c, r, sweep) = (v(-2.5, 0.0), 12.5_f64, 40_f64.to_radians());
+    let k = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let at = |a: f64| c + v(a.cos(), a.sin()) * r;
+    let tangent = |a: f64| v(-a.sin(), a.cos());
+    let cv = [at(sweep), at(sweep) - tangent(sweep) * k, corner + tangent(0.0) * k, corner];
+    let pts: Vec<usize> = cv.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    let profiles = find_profiles(&sk);
+    assert_eq!(profiles.len(), 1, "{:?}", profiles.iter().map(|p| p.outer_curves.clone()).collect::<Vec<_>>());
+    let profile = &profiles[0];
+    assert_eq!(distinct_curves(&profile.outer_curves), ["a1", "l1", "l2"].map(String::from), "{:?}", profile.outer_curves);
+    assert!((profile.area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{}", profile.area);
+    for seg in &profile.region.outer.segs {
+        assert!(seg.start().dist(seg.end()) > 1.0, "a hairline piece {seg:?}");
+    }
+}
+
 /// A circle just inside a hexagon's corners (a hex socket drawn with a circle nearly through its
 /// corners, #20661): the circle crosses each side twice, close to the corner. The sketch keeps
 /// the central region and a sliver at each corner, so a point at the centre finds a profile.

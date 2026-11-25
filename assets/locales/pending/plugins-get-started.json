@@ -22,7 +22,7 @@
   "ar": {
     "prefs.plugins_get_started": "ثبّت حزمة إضافة بصيغة .zip لإضافة أدوات. راجع الأذونات قبل الموافقة على التثبيت.",
     "prefs.plugins_guide": "قراءة دليل الإضافات",
-    "prefs.plugins_advanced_limits": "عرض حدود الوقود والذاكرة المتقدمة"
+    "prefs.plugins_advanced_limits": "عرض حدود fuel والذاكرة المتقدمة"
   },
   "he": {
     "prefs.plugins_get_started": "יש להתקין חבילת תוסף מסוג .zip כדי להוסיף כלים. יש לבדוק את ההרשאות לפני אישור ההתקנה.",
