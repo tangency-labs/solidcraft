@@ -37,13 +37,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIBRARY_CONTRACT)
         .output(output_schema_for::<PartsLibrary>)
         .params("family? → families (name, standard, system: metric|inch, sizes, lengths) and, with family, each size's dimensions (mm)"),
-    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic))
+    CommandSpec::new("parts.fastener", "Insert Fastener", crate::checked!("parts.fastener", insert_atomic)).begins_edit()
         .at("SOLID", "INSERT")
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
-    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?, material?"),
+    CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic)).begins_edit()
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
-         with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         with point); material?: physical material (default \"Steel\"); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SEATS_CONTRACT)
         .output(output_schema_for::<PartsSeats>)
         .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
-    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
+    CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic)).begins_edit()
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
@@ -581,6 +581,17 @@ fn size_with_length(family: &str, size: &str, len: f64) -> String {
     }
 }
 
+/// A metric size as the head tables write it (`M6`, `M1.6`), from any form `clearance` takes:
+/// `6`, `m6`, `M6.0`, `M6x1`. A size that is not a number is returned as written (trimmed, without
+/// the pitch), so the error can name it.
+fn metric_size_key(size: &str) -> String {
+    let nominal = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    match nominal.trim_start_matches(['M', 'm']).parse::<f64>() {
+        Ok(d) if d.is_finite() && d > 0.0 => format!("M{d}"),
+        _ => nominal.to_string(),
+    }
+}
+
 fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
@@ -594,16 +605,38 @@ pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<
         s if s.eq_ignore_ascii_case("ISO 4762") || s.eq_ignore_ascii_case("socket_head_cap_screw") => ("ISO 4762", &SHCS),
         s if s.eq_ignore_ascii_case("ISO 7380-1") || s.eq_ignore_ascii_case("button_head_cap_screw") => ("ISO 7380-1", &BHCS),
         other => {
-            return Err(format!("no head standard `{}`: ISO 4762 (socket head) or ISO 7380-1 (button head)", super::features::brief(other)));
+            return Err(format!(
+                "no head standard `{}`: ISO 4762 (socket head), ISO 7380-1 (button head) or ISO 10642 (countersunk head)",
+                super::features::brief(other)
+            ));
         }
     };
-    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let size = metric_size_key(size);
     let (first, last) = (table.first().map_or("", |r| r.0), table.last().map_or("", |r| r.0));
     table
         .iter()
-        .find(|r| r.0.eq_ignore_ascii_case(size))
+        .find(|r| r.0.eq_ignore_ascii_case(&size))
         .map(|r| (r.1, r.2))
-        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(size)))
+        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(&size)))
+}
+
+/// The head a countersink seats, for `solid.hole`'s `head`: the theoretical head diameter dk of
+/// a metric countersunk screw (ISO 10642 socket countersunk head, or the family name `parts.insert`
+/// takes), the 90° cone's width at the top plane. The size is written as `clearance` takes it.
+/// `None` for a standard that is not a countersunk head; the error names a size the table lacks.
+pub(crate) fn countersunk_head(standard: &str, size: &str) -> Option<std::result::Result<f64, String>> {
+    let s = standard.trim();
+    if !(s.eq_ignore_ascii_case("ISO 10642") || s.eq_ignore_ascii_case("countersunk_socket_screw")) {
+        return None;
+    }
+    let size = metric_size_key(size);
+    let (first, last) = (CSK.first().map_or("", |r| r.0), CSK.last().map_or("", |r| r.0));
+    Some(
+        CSK.iter()
+            .find(|r| r.0.eq_ignore_ascii_case(&size))
+            .map(|r| r.1)
+            .ok_or_else(|| format!("no ISO 10642 head for `{}`: {first} to {last}", super::features::brief(&size))),
+    )
 }
 
 fn default_length(d: f64) -> f64 {
@@ -1131,6 +1164,16 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let c = run(s, "component.create", json!({"name": name, "grounded": false}))?;
     let (comp, occ) = (c["component"].as_u64().unwrap_or(0), c["occurrence"].as_u64().unwrap_or(0));
     build(s, &sh, None)?;
+    let material_name = str_(p, "material").unwrap_or("Steel");
+    let canonical = s.doc.material_name(material_name).ok_or_else(|| bad(cmd, format!("unknown material `{material_name}` (see material.list)")))?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
+            s.doc_mut().materials.remove(&name);
+        } else {
+            s.doc_mut().materials.insert(name, canonical.clone());
+        }
+    }
     s.doc_mut().parts.insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh) });
     set_identity(s, comp, identity(&family, &size, &sh), None);
     run(s, "component.activate", json!({"component": active}))?;
@@ -1488,6 +1531,10 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
     let active = s.active_component;
     run(s, "component.activate", json!({"component": comp}))?;
     build(s, &sh, body_name.as_deref())?;
+    let bodies: Vec<String> = s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()).collect();
+    for name in bodies {
+        s.doc_mut().materials.entry(name).or_insert_with(|| "Steel".to_string());
+    }
     let added = s.doc.marker.unwrap_or(position).saturating_sub(position);
     // Keep the rollback boundary among the surviving features. If it was inside the
     // part's feature block, leave the same number of replacement features active.
@@ -1956,6 +2003,23 @@ mod tests {
     /// #13361: a countersunk socket screw (ISO 10642) takes the same parameters as the other
     /// screws, with a 90° cone sunk below its seating plane: the top of the head is level with
     /// the face, and the length counts the head.
+    #[test]
+    fn head_sizes_are_read_in_every_form_clearance_takes() {
+        // `clearance` reads `6`, `m6`, `M6.0` and `M6x1` as M6 (clearance_diameter); `head` must too.
+        for size in ["M6", "6", "m6", "M6.0", " M6x1 ", "6X1"] {
+            assert_eq!(
+                super::countersunk_head("ISO 10642", size).unwrap().unwrap(),
+                super::countersunk_head("ISO 10642", "M6").unwrap().unwrap(),
+                "{size}"
+            );
+            assert_eq!(super::cap_screw_head("ISO 4762", size).unwrap(), super::cap_screw_head("ISO 4762", "M6").unwrap(), "{size}");
+        }
+        assert_eq!(super::cap_screw_head("ISO 4762", "3.0").unwrap(), super::cap_screw_head("ISO 4762", "M3").unwrap());
+        // Still refused, and named as written: a size the table lacks, or not a size at all.
+        assert!(super::countersunk_head("ISO 10642", "2").unwrap().unwrap_err().contains("`M2`"));
+        assert!(super::cap_screw_head("ISO 4762", "big").unwrap_err().contains("`big`"));
+    }
+
     #[test]
     fn a_countersunk_head_is_a_cone_sunk_below_the_seating_plane() {
         let l = run(&mut Session::default(), "parts.library", json!({"family": "countersunk_socket_screw"}));
@@ -2502,5 +2566,43 @@ mod tests {
         assert_eq!(s.undo.len(), crate::MAX_UNDO);
         assert_eq!(s.undo.first().map(|step| step.label.as_str()), Some("Earlier step 1"));
         assert_eq!(s.undo.last().map(|step| step.label.as_str()), Some("Change Part Size"));
+    }
+
+    #[test]
+    fn inserted_fastener_defaults_to_steel_and_accepts_custom_material() {
+        let mut s = Session::default();
+        let part = run(&mut s, "parts.fastener", json!({"family":"socket_head_cap_screw","size":"M5","length":16}));
+        let Some(comp) = part["component"].as_u64() else { panic!("component id missing") };
+        let Some(body_name) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == comp).map(|b| b.name.clone()) else {
+            panic!("part body missing")
+        };
+        assert_eq!(s.doc.body_material(&body_name), "Steel");
+        assert!((s.doc.density(&body_name) - 7.85).abs() < 1e-6);
+
+        // BOM reports Steel
+        let bom = run(&mut s, "assembly.bom", json!({"mass": true}));
+        let Some(rows) = bom["rows"].as_array() else { panic!("rows missing") };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["material"], "Steel");
+        let Some(mass) = rows[0]["mass_g"].as_f64() else { panic!("mass_g missing") };
+        assert!(mass > 4.0 && mass < 5.0, "M5x16 steel screw mass should be ~4.42g, got {mass}");
+
+        // Insert with explicit material (Brass)
+        let brass_part = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","material":"Brass"}));
+        let Some(brass_comp) = brass_part["component"].as_u64() else { panic!("brass component missing") };
+        let Some(brass_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("brass body missing")
+        };
+        assert_eq!(s.doc.body_material(&brass_body), "Brass");
+
+        // Resizing preserves material
+        run(&mut s, "parts.resize", json!({"component": brass_comp, "size": "M10"}));
+        let Some(resized_body) = s.model.state().bodies.iter().find(|b| s.doc.model_body_component(b) == brass_comp).map(|b| b.name.clone()) else {
+            panic!("resized body missing")
+        };
+        assert_eq!(s.doc.body_material(&resized_body), "Brass");
+
+        // Unknown material error
+        assert!(s.execute("parts.insert", &json!({"family":"hex_nut","size":"M6","material":"Vibranium"})).is_err());
     }
 }

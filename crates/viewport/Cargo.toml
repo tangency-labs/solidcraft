@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 image = { workspace = true }
 serde = { workspace = true }
-solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }

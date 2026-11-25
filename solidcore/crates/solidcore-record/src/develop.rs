@@ -188,9 +188,14 @@ pub enum Relief {
     #[default]
     None,
     /// Past the end both panels stop at their tangent lines: where the bend meets another at a
-    /// corner, where a rip cuts the panels beside it, or at a free end whose zone carries on both
-    /// panels' outlines, neither panel running on past it.
+    /// corner, or where a rip cuts the panels beside it. The zone's end runs straight from its
+    /// given end on the `a` panel's tangent line to its given end on the `b` panel's.
     Notch,
+    /// A free end, neither panel running on past it: past the end both panels stop at their
+    /// tangent lines, as at a notch, and the zone's end is each panel's outline from its tangent
+    /// line on to the sharp, carried into the zone square through the sheet (the kernel's
+    /// `develop::Relief::Outline`).
+    Outline,
     /// A bend relief in each panel that runs on past the end: a slot `width` along past the
     /// end, cut from `depth` inside the panel's tangent line out through its edge. None is cut
     /// in a panel that runs on less far than that.
@@ -349,4 +354,164 @@ pub struct Mismatch {
     pub joint: usize,
     pub distance: f64,
     pub angle: f64,
+}
+
+/// A bead's section and end ramps (the kernel's `develop::BeadSection`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeadSection {
+    /// From the face it stands out of to its crown on that side.
+    pub depth: f64,
+    /// Across, between the flanks' virtual sharps on that face.
+    pub width: f64,
+    /// The flanks' angle to the face (radians).
+    pub angle: f64,
+    /// The inner radius of the bends at the base.
+    pub base_radius: f64,
+    /// The inner radius of the bends at the crown.
+    pub crown_radius: f64,
+    /// Along the centreline, from an end's virtual sharp on the face to the virtual sharp where
+    /// the ramp reaches the crown.
+    pub end_length: f64,
+}
+
+/// A formed bead on a planar panel, in the panel's chart (the kernel's `develop::Bead`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bead {
+    /// The panel it is pressed into.
+    pub panel: usize,
+    /// The centreline's start, where the first end ramp's virtual sharp meets the face.
+    pub a: Vec2,
+    /// The centreline's end.
+    pub b: Vec2,
+    /// It stands out of the panel's far face, else out of its near face (the sheet's surface).
+    pub far: bool,
+    /// Its section.
+    pub section: BeadSection,
+}
+
+/// What a face of a bead is: its crown, or the `piece`th piece of its profile from the base (0:
+/// the base bend, 1: the flank or the end ramp, 2: the crown bend), across it on its left or
+/// right (seen from the sheet's surface, from the centreline's start to its end) or along it at
+/// its start or end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BeadPart {
+    /// The crown.
+    Crown,
+    /// A piece of the section across it.
+    Across {
+        /// On the centreline's left.
+        left: bool,
+        /// Which piece, from the base.
+        piece: usize,
+    },
+    /// A piece of an end ramp.
+    Along {
+        /// At the centreline's start.
+        start: bool,
+        /// Which piece, from the base.
+        piece: usize,
+    },
+}
+
+/// A face of a bead: its part, on the skin that continues the sheet's surface (`top`) or the
+/// other one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BeadFace {
+    /// Which part of the skin.
+    pub part: BeadPart,
+    /// On the skin that continues the sheet's surface.
+    pub top: bool,
+}
+
+/// An edge of a bead's face in space.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FormEdge {
+    /// A straight line from `a` to `b`.
+    Line {
+        /// Its start.
+        a: Vec3,
+        /// Its end.
+        b: Vec3,
+    },
+    /// A circular arc from `a` through `mid` to `b`.
+    Arc {
+        /// Its start.
+        a: Vec3,
+        /// Its end.
+        b: Vec3,
+        /// A point between them.
+        mid: Vec3,
+    },
+    /// A chain of cubic Bézier pieces: their control points, each piece's last shared with the
+    /// next one's first.
+    Chain {
+        /// The control points.
+        ctrl: Vec<Vec3>,
+    },
+}
+
+/// The surface a bead's face lies on.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FormSurface {
+    /// The plane of its loop.
+    Plane,
+    /// The circular arc from `a` through `mid` to `b`, swept along `dir`.
+    Extruded {
+        /// The arc's start.
+        a: Vec3,
+        /// The arc's end.
+        b: Vec3,
+        /// A point of the arc between them.
+        mid: Vec3,
+        /// The sweep.
+        dir: Vec3,
+    },
+}
+
+/// A face of a bead in space: its loop, its surface, a point on it and the way out of the
+/// material there, and what it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormFace {
+    /// Its loop, the right way round about `out`.
+    pub edges: Vec<FormEdge>,
+    /// Its surface.
+    pub surface: FormSurface,
+    /// A point on it.
+    pub point: Vec3,
+    /// The way out of the material at `point`.
+    pub out: Vec3,
+    /// What it is.
+    pub face: BeadFace,
+}
+
+/// What a bead does to the folded solid: the footprint its panel's faces leave open (its corners
+/// in the flat, clockwise as a cell's holes run) and the bead's faces that close it, in space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeadForm {
+    /// The footprint's corners in the flat, clockwise.
+    pub open: [Vec2; 4],
+    /// The footprint's middle in the flat.
+    pub centre: Vec2,
+    /// The bead's faces.
+    pub faces: Vec<FormFace>,
+}
+
+/// A bead in the flat: its footprint, its centreline, its crown, and how a note along it is
+/// written.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BeadOutline {
+    /// The footprint's corners in the flat, counter-clockwise.
+    pub footprint: [Vec2; 4],
+    /// The centreline's start in the flat.
+    pub start: Vec2,
+    /// The centreline's end in the flat.
+    pub end: Vec2,
+    /// The crown's width between its virtual sharps.
+    pub crown_width: f64,
+    /// The crown line's length between the end ramps.
+    pub crown_length: f64,
+    /// The angle of a note written along the centreline (radians, in (−π/2, π/2]).
+    pub note_angle: f64,
+    /// The unit vector across the note, toward where it stands beside the centreline.
+    pub note_side: Vec2,
 }

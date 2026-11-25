@@ -40,8 +40,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Turn Around adds one portable Navigation preference.
     assert_eq!(
         keys.len(),
-        110,
-        "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
+        111,
+        "include document browser visibility and sizing, the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
         "nav",
@@ -815,6 +815,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
+        "command_search_centred",
         "design_reopen_views",
         "design_reuse_views",
         "design_sub_tab_render",
@@ -925,8 +926,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    // Turn Around adds one portable Navigation preference to the 109 keys on main.
-    assert_eq!(expected.len(), 110);
+    // Turn Around adds one portable Navigation preference to the 110 keys on main.
+    assert_eq!(expected.len(), 111);
     assert_eq!(actual, expected);
 }
 

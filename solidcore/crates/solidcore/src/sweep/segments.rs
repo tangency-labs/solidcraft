@@ -171,9 +171,9 @@ pub fn sweep_along_segments(
         let this_face = |f: FaceId| key_of(EntityRef::Face(f));
         let (_, copied) = copy_faces(k, &mut piece, &faces, &mut b, false, &this_face, &mut env)?;
         if !copied {
-            return Err(SolidError::sweep_failed(
+            return Err(SolidError::sweep_defect(
                 "CopyFaces",
-                "the segment pieces' faces could not be copied",
+                "copy_faces copies the segment pieces' faces the kernel just built, each a face of one closed piece with its surface and loops",
             ));
         }
         m = carry(g, &m, 1.0);

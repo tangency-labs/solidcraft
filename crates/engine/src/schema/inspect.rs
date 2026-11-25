@@ -852,6 +852,56 @@ pub struct RevisionResult {
     pub param_warnings: Vec<String>,
 }
 
+/// `doc.info` reads no keys.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DocInfoParams {}
+
+/// A design file's size and time when the design was opened from it or last saved to it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct DiskStamp {
+    /// The file's size in bytes.
+    pub len: u64,
+    /// Its modification time in nanoseconds since the Unix epoch, as a decimal string (larger than a
+    /// JSON number holds exactly); null where the file system keeps no time.
+    pub modified_ns: Option<String>,
+}
+
+/// What `doc.info` returns. In a plugin run: the design the run started on, as it was before the run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct DocInfoResult {
+    /// The design's file; null until it is first saved.
+    pub path: Option<String>,
+    /// Opened read-only: a save to its own file is refused.
+    pub read_only: bool,
+    /// It has changes its file does not hold (as `document.inspect`'s `dirty`).
+    pub unsaved: bool,
+    /// The file's size and time when the design was opened or last saved; null without a file, in
+    /// the browser, or when they could not be read then.
+    pub disk: Option<DiskStamp>,
+    /// This open design's id, as `document.revision` gives it.
+    pub document_id: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// The world-coordinate box used to filter measured bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeasureRegion {
+    pub min: super::types::Point3,
+    pub max: super::types::Point3,
+}
+
+/// How a body's bounding box must meet the query region.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MeasureRegionMode {
+    Intersects,
+    Inside,
+}
+
 /// How `inspect.measure` selects: bodies, or one or two picked items. With `items`, `bodies` and
 /// `names_only` are not read, so the check leaves them alone.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -865,6 +915,14 @@ pub struct MeasureKeys {
     /// with `items`.
     #[serde(default)]
     pub names_only: Option<bool>,
+    /// Limit the bodies to a world-coordinate box (mm), inclusive of its boundary.
+    #[serde(default, deserialize_with = "super::types::present")]
+    #[schemars(with = "MeasureRegion")]
+    pub within: Option<MeasureRegion>,
+    /// Intersects (default) includes touching boxes; inside requires full containment.
+    #[serde(default, deserialize_with = "super::types::present")]
+    #[schemars(with = "MeasureRegionMode")]
+    pub mode: Option<MeasureRegionMode>,
     /// One or two selections to measure, instead of bodies: a face or edge `{type, body, point}`,
     /// `{type, body, index}` (as `model.faces` and `model.edges` list it) or both, or a body,
     /// vertex, sketch curve or profile as `Sel` has it.
@@ -890,7 +948,10 @@ impl<'de> Deserialize<'de> for MeasureParams {
             if list.is_empty() || list.len() > 1000 {
                 return Err(D::Error::custom(whole("measure one or two items")));
             }
-            return Ok(MeasureParams(MeasureKeys { bodies: None, names_only: None, items: Some(list.clone()) }));
+            if value.get("within").is_some() || value.get("mode").is_some() {
+                return Err(D::Error::custom(whole("`within` and `mode` cannot be combined with `items`")));
+            }
+            return Ok(MeasureParams(MeasureKeys { bodies: None, names_only: None, within: None, mode: None, items: Some(list.clone()) }));
         }
         serde_path_to_error::deserialize(&value).map(MeasureParams).map_err(|e| D::Error::custom(located(&e)))
     }
@@ -1463,6 +1524,19 @@ pub struct SketchWire {
     pub link: Option<String>,
     /// For an exact circular arc: its geometry; `null` otherwise.
     pub arc: Option<WireArcInfo>,
+    /// For a control point spline: its degree and control points; left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<WireControlInfo>,
+}
+
+/// A control point spline of a 3D sketch: the B-spline over its control points.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct WireControlInfo {
+    /// The degree of the curve (3: cubic). With fewer control points than the degree plus one,
+    /// the curve has one less than their count.
+    pub degree: u8,
+    /// The control points, in order. The curve passes through the first and the last only.
+    pub points: Vec<[f64; 3]>,
 }
 
 /// An exact circular arc of a 3D curve.

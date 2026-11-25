@@ -962,6 +962,26 @@ fn turn_around_is_only_offered_to_the_focused_tiled_view() {
 }
 
 #[test]
+fn screen_up_policy_leaves_other_view_animations_unchanged() {
+    use solidcraft_viewport::ease_in_out;
+    let from = Camera { roll: 0.4, ..Default::default() };
+    let mut to = from;
+    to.rotate_in_view(Vec3::new(0.0, 0.8, 0.0));
+    let generic = CameraAnim::new(from, to, 0.0);
+    assert!(!generic.is_screen_up_turn());
+    for fraction in [0.0, 0.2, 0.5, 0.8] {
+        assert_eq!(generic.sample(generic.duration * fraction).0, Camera::interpolate(&from, &to, ease_in_out(fraction)));
+    }
+    for to in [Camera { up: solidcraft_viewport::UpAxis::Y, ..to }, Camera { roll: to.roll + 0.3, ..to }, Camera { yaw: f64::NAN, ..to }] {
+        let fallback = SolveApp::screen_up_turn(CameraAnim::new(from, to, 0.0));
+        assert!(!fallback.is_screen_up_turn(), "different or invalid screen-up directions keep the ordinary path");
+        if to.is_valid() {
+            assert_eq!(fallback.sample(fallback.duration * 0.4).0, Camera::interpolate(&from, &to, ease_in_out(0.4)));
+        }
+    }
+}
+
+#[test]
 fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
