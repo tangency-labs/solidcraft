@@ -92,6 +92,61 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+/// The Flange window has no thickness, bend radius or K-factor of its own: a line under its Rule
+/// box says they are changed in Sheet Metal Rules (#17421).
+#[test]
+fn flange_window_says_where_the_rule_values_are_changed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sk = h.app.session.doc.features[0].id;
+    h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    h.app.start("sheet.flange");
+    h.frames(3);
+    let note = crate::scenario::rect_of("dialog:note:sheet_flange_rule_values");
+    assert!(note.is_some_and(|r| r.width() > 0.0), "the note under the Rule box is shown");
+    // The whole sentence is shown: it wraps over lines rather than being cut to one.
+    let line = solidcraft_theme::Tokens::get().font_small * 1.5;
+    assert!(note.is_some_and(|r| r.height() > line + solidcraft_theme::Tokens::get().space_4 * 2.0), "{note:?}");
+    let text = solidcraft_ui_text::tr("ui.sheet_flange_rule_values");
+    assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
+}
+
+/// egui wraps a right-to-left note as one string, so the lines of a wrapped Arabic or Hebrew
+/// sentence would come out in reverse order: those notes are split with `\n` at a clause, and
+/// each line fits the control column unwrapped, so every line is reordered on its own.
+#[test]
+fn flange_rule_note_in_arabic_and_hebrew_keeps_its_lines_unwrapped() {
+    for language in ["ar", "he"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = language.into();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sk = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+        h.app.start("sheet.flange");
+        h.frames(4);
+        let lines = {
+            let _language = solidcraft_ui_text::scope(language);
+            solidcraft_ui_text::tr("ui.sheet_flange_rule_values").lines().count()
+        };
+        assert!(lines > 1, "{language}: the note is split at a clause");
+        let rows = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if solidcraft_ui_text::bidi::has_rtl(&text.galley.job.text) && text.galley.job.text.contains('K') => {
+                    Some(text.galley.rows.len())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{language}: the note is drawn"));
+        assert_eq!(rows, lines, "{language}: each line of the note fits without wrapping");
+    }
+}
+
 #[test]
 fn contour_flange_options_round_trip_through_feature_editing() {
     let mut app = plate(crate::ui_kit::LayoutMode::Docked);
@@ -1630,7 +1685,7 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     let mut h = crate::scenario::Harness::new();
-    h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    *h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
     h.app.home.open = false;
     h.app.preferences.navigation_bar = serde_json::from_value(json!({
         "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]

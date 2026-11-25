@@ -570,3 +570,81 @@ fn find_limits_refuses_what_it_cannot_do() {
     run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "Block", "b": "Door", "name": "Lock"}));
     assert!(s.execute("joint.find_limits", &json!({"joint": "Lock"})).is_err(), "a rigid joint does not move");
 }
+
+#[test]
+fn joint_sweep_apply_preserves_expr_baselines_prunes_pending_moves_and_restores() {
+    let mut s = Session::default();
+    block(&mut s, "A", [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    block(&mut s, "B", [20.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    let b_occ = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "ang0", "expression": "0 deg"}));
+    run(&mut s, "parameters.add", json!({"name": "dist0", "expression": "5 mm"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "cylindrical", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": ["ang0", "dist0"], "name": "Cyl"}),
+    );
+    // Queue an uncaptured move on B that will be superseded by sweeping Cyl.
+    run(&mut s, "occurrence.move", json!({"occurrence": b_occ, "translate": [0, 0, 10], "capture": false}));
+    assert!(s.pending_moves.contains_key(&b_occ));
+
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Cyl", "index": 0, "from": 0, "to": 60, "apply": true}));
+    assert_eq!(r["applied"], true, "{r}");
+    assert!((s.doc.assembly.joints[0].values[0] - 60.0_f64.to_radians()).abs() < 1e-6);
+    assert!((s.doc.assembly.joints[0].values[1] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+    assert!(!s.pending_moves.contains_key(&b_occ));
+
+    let cp_id = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.joints[0].base_values, Some(vec![0.0, 5.0]));
+    assert_eq!(s.doc.assembly.joints[0].base_exprs, vec![Some("ang0".to_string()), Some("dist0".to_string())]);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": true}));
+    assert!(s.doc.assembly.joints[0].values[0].abs() < 1e-9);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp_id, "suppressed": false}));
+    assert!((s.doc.assembly.joints[0].values[0] - 60.0_f64.to_radians()).abs() < 1e-6);
+    let idx = s.doc.feature_index(cp_id).unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": idx}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    run(&mut s, "timeline.roll_to", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": cp_id}));
+    assert_eq!(s.doc.assembly.joints[0].base_values, None);
+    assert!(s.doc.assembly.joints[0].values[0].abs() < 1e-9);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("ang0"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(1), Some("dist0"));
+}
+
+#[test]
+fn joint_sweep_same_value_after_cp1_creates_cp2_and_prevents_expr_resurrection() {
+    let mut s = Session::default();
+    block(&mut s, "A", [0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    block(&mut s, "B", [20.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "values": ["gap"], "name": "Rail"}));
+    let _cp1 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+
+    // Sweeping from 5 to 5 with apply: true clears "gap" at the same numeric value.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Rail", "from": 5, "to": 5, "apply": true}));
+    assert_eq!(r["applied"], true, "{r}");
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    let cp2 = run(&mut s, "component.capture_position", json!({}))["feature"].as_u64().unwrap();
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    assert!((s.doc.assembly.joints[0].values[0] - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), None);
+
+    run(&mut s, "timeline.suppress", json!({"feature": cp2, "suppressed": true}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.value(0), Some("gap"));
+    assert!((s.doc.assembly.joints[0].values[0] - 20.0).abs() < 1e-6);
+}

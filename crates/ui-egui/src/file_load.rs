@@ -109,11 +109,17 @@ pub struct Request {
     pub tab: Option<u64>,
     /// How many times it ran again because the design changed while it ran.
     pub tries: u8,
+    /// An open into a new design tab at this place among the tabs (files dropped on the tab bar,
+    /// `doc.open`'s `tab`), never in place of the design shown, blank or not.
+    pub new_tab_at: Option<usize>,
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
     /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
     pub plugin_import: bool,
+    /// The person started this Open from Home. A plugin importer's refusal then leaves Home
+    /// showing, as the dialog says nothing was opened (the command's start closed it).
+    pub(crate) from_home: bool,
     /// Consent from an entry dialog for this request only; never populated from command params.
     pub(crate) plugin_folders: Option<Box<solidcraft_engine::plugin::folders::DialogFolders>>,
     /// An export written to be printed: once written it opens in the system's PDF viewer
@@ -142,8 +148,10 @@ impl Request {
             serial: crate::operations::serial(),
             tab: None,
             tries: 0,
+            new_tab_at: None,
             auto_verify: false,
             plugin_import: false,
+            from_home: false,
             plugin_folders: None,
             print: false,
             new_tab: false,
@@ -202,15 +210,24 @@ impl Request {
         }
     }
     fn answer(&self, r: Result<Value, String>) {
+        self.answer_response(match r {
+            Ok(v) => json!({"ok": true, "result": v}),
+            Err(e) => json!({"ok": false, "error": e}),
+        });
+    }
+    fn answer_failure(&self, failure: &LoadFailure) {
+        let mut response = json!({"ok": false, "error": failure.text});
+        if let Some(refusal) = &failure.refusal
+            && let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error
+        {
+            response["plugin_error"] = json!({"kind": "unsupported", "plugin": refusal.plugin, "reason": reason});
+        }
+        self.answer_response(response);
+    }
+    fn answer_response(&self, response: Value) {
         if let Some(reply) = &self.reply {
-            let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
-                crate::control::cancelled_chat_response()
-            } else {
-                match r {
-                    Ok(v) => json!({"ok": true, "result": v}),
-                    Err(e) => json!({"ok": false, "error": e}),
-                }
-            };
+            let mut response =
+                if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) { crate::control::cancelled_chat_response() } else { response };
             if let Some((level, warnings)) = &self.param_check {
                 crate::control::add_param_warnings(&mut response, warnings.clone());
                 if let Some(o) = response.as_object_mut() {
@@ -234,7 +251,43 @@ struct Made {
     /// Draw its Home picture once it is open (off the UI thread: a large design takes a while).
     thumbnail: bool,
 }
-type Job = Result<Made, String>;
+/// Keep a plugin's deliberate refusal alongside the worker's localised error text until it
+/// reaches the window. All other failures retain their existing status-line behaviour.
+#[derive(Debug)]
+struct LoadFailure {
+    text: String,
+    refusal: Option<Box<solidcraft_engine::plugin::PluginFailure>>,
+}
+
+impl From<String> for LoadFailure {
+    fn from(text: String) -> Self {
+        Self { text, refusal: None }
+    }
+}
+
+impl From<&str> for LoadFailure {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+impl From<solidcraft_engine::EngineError> for LoadFailure {
+    fn from(error: solidcraft_engine::EngineError) -> Self {
+        // Format here, within the worker's language scope, as before.
+        let text = error.to_string();
+        let refusal = match error {
+            solidcraft_engine::EngineError::PluginFailed(failure)
+                if matches!(failure.error, solidcraft_engine::plugin::HostError::Unsupported { .. }) =>
+            {
+                Some(failure)
+            }
+            _ => None,
+        };
+        Self { text, refusal }
+    }
+}
+
+type Job = Result<Made, LoadFailure>;
 struct Running {
     request: Request,
     base: Arc<Document>,
@@ -343,6 +396,10 @@ impl Running {
 
 #[derive(Default)]
 pub struct FileLoad {
+    /// Home was showing when Open started; read by the next request that begins.
+    pub(crate) home_at_start: bool,
+    /// Interactive importer refusals, each kept until the person acknowledges it.
+    refusals: VecDeque<solidcraft_engine::plugin::PluginFailure>,
     queued: VecDeque<Request>,
     running: Option<Running>,
     /// Results that are in and wait to land: their design's tab is not shown, or the person is in
@@ -593,6 +650,11 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    // Starting `doc.open` closed Home before the file was chosen: `home_at_start` remembers it.
+    let started_from_home = std::mem::take(&mut app.file_load.home_at_start);
+    if request.kind == Kind::Open && request.reply.is_none() {
+        request.from_home = app.home.open || started_from_home;
+    }
     if request.kind == Kind::Open
         && !request.plugin_import
         && app.preferences.verify_opened_designs
@@ -802,6 +864,17 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
+    // The tab to open in is the window's business, not the command's.
+    let new_tab_at = match options.remove("tab").filter(|_| kind == Kind::Open) {
+        None => None,
+        Some(v) => match open_tab_param(&v) {
+            Ok(at) => Some(at),
+            Err(e) => {
+                let _ = req.reply.send(json!({"ok": false, "error": e}));
+                return None;
+            }
+        },
+    };
     // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
     // A value that is no boolean stays in the options, for the engine's own check of them.
     let new_tab =
@@ -822,14 +895,21 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         serial: crate::operations::serial(),
         tab: None,
         tries: 0,
+        new_tab_at,
         auto_verify: false,
         plugin_import: id == "file.import",
+        from_home: false,
         plugin_folders: None,
         print: false,
         new_tab,
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// `doc.open`'s `tab`: a place among the design tabs (0 is the first; past the last is the end).
+fn open_tab_param(v: &Value) -> Result<usize, String> {
+    v.as_u64().map(|at| usize::try_from(at).unwrap_or(usize::MAX)).ok_or_else(|| "doc.open: `tab` must be a whole number, 0 or more".to_string())
 }
 
 /// What to say once a linked design is inserted: whether its file carries a signature, without
@@ -901,6 +981,14 @@ fn start(app: &mut SolveApp) {
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
         crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
+        return;
+    }
+    if request.new_tab_at.is_some()
+        && let Err(e) = crate::documents::tab_room(app)
+    {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
+        app.set_status(e.clone(), true);
+        request.answer(Err(e));
         return;
     }
     if matches!(request.kind, Kind::Open | Kind::Recover { .. })
@@ -1188,7 +1276,7 @@ fn step_staged(running: &mut Running) {
                 running.phase.store(1, Ordering::Relaxed);
                 staged.ran = Some(result);
             }
-            Some(Err(e)) => send(staged, Err(e)),
+            Some(Err(e)) => send(staged, Err(e.into())),
         }
         return;
     }
@@ -1206,7 +1294,7 @@ fn step_staged(running: &mut Running) {
                 staged.session = Some(session);
                 staged.ran = Some(result);
             }
-            Err(e) => send(staged, Err(e.to_string())),
+            Err(e) => send(staged, Err(e.to_string().into())),
         }
         return;
     }
@@ -1222,7 +1310,7 @@ fn step_staged(running: &mut Running) {
         });
         match read {
             Ok(reading) => staged.reading = Some(reading),
-            Err(e) => send(staged, Err(e)),
+            Err(e) => send(staged, Err(e.into())),
         }
         return;
     };
@@ -1244,7 +1332,7 @@ fn step_staged(running: &mut Running) {
         Err(e) => Err(format!("{path}: {e}")),
     };
     let (Some(mut session), Ok(import)) = (staged.session.take(), import.clone()) else {
-        send(staged, Err(import.err().unwrap_or_else(|| "file operation cancelled".into())));
+        send(staged, Err(import.err().unwrap_or_else(|| "file operation cancelled".into()).into()));
         return;
     };
     let (command, params) = (staged.command, staged.params.clone());
@@ -1259,7 +1347,7 @@ fn step_staged(running: &mut Running) {
             staged.session = Some(session);
             staged.ran = Some(result);
         }
-        Err(e) => send(staged, Err(e.to_string())),
+        Err(e) => send(staged, Err(e.to_string().into())),
     }
 }
 
@@ -1466,7 +1554,7 @@ fn compute(
 ) -> Job {
     let profile = solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some();
     let began = std::time::Instant::now();
-    let cancelled = || Err("file operation cancelled".to_string());
+    let cancelled = || Err("file operation cancelled".into());
     if progress.is_cancelled() {
         return cancelled();
     }
@@ -1475,7 +1563,7 @@ fn compute(
     // agent's scope is per thread, so it is set again here.
     let result =
         solidcraft_engine::io::vfs::scoped(scope, || solidcraft_engine::doc::progress::watch(progress.clone(), || session.execute(command, params)))
-            .map_err(|e| e.to_string())?;
+            .map_err(LoadFailure::from)?;
     if export {
         // A successful export has already published its complete file. A Cancel arriving
         // after that commit must not turn a completed save into a misleading cancellation.
@@ -1620,6 +1708,24 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The app's shared message card, with plugin-controlled content rendered as plain text.
+pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
+    let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_import_refusal"), "status_warning", app.tr("plugin_import.refused_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                crate::ui_kit::text(ui, &refusal.plugin, crate::ui_kit::Text::Report("plugin", false));
+                crate::ui_kit::text(ui, reason, crate::ui_kit::Text::Report("message", false));
+            });
+    app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+    if closed || action != crate::ui_kit::Action::None {
+        app.file_load.refusals.pop_front();
+    }
+}
+
 /// What a finished file operation does now.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Land {
@@ -1702,7 +1808,11 @@ fn behind(app: &mut SolveApp, mut running: Running) {
     let request = &running.request;
     let key = format!("file:{}", request.serial);
     let uid = made.session.uid;
-    match crate::documents::open_tab_behind(app, made.session) {
+    let opened = match request.new_tab_at {
+        Some(at) => crate::documents::open_tab_behind_at(app, made.session, at),
+        None => crate::documents::open_tab_behind(app, made.session),
+    };
+    match opened {
         Ok(()) => {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
@@ -1840,18 +1950,17 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     }
                     app.big_operation = true;
                 } else {
-                    // No tab left for it: `adopt` said why, and nothing else of the open happens.
+                    // A tab of its own at the place asked for, or the blank design's place.
                     // Opened by a program, not the user: nothing is asked about its links.
                     app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
-                    let adopted = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| {
-                        if request.new_tab {
-                            crate::documents::adopt_in_new_tab(app, made.session)
-                        } else {
-                            crate::documents::adopt(app, made.session)
-                        }
+                    let shown = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| match request.new_tab_at {
+                        Some(at) => crate::documents::open_tab_at(app, made.session, at).map_err(|e| app.set_status(e, true)).is_ok(),
+                        None if request.new_tab => crate::documents::adopt_in_new_tab(app, made.session),
+                        None => crate::documents::adopt(app, made.session),
                     });
                     app.docs.quiet_open = false;
-                    if !adopted {
+                    // No tab left for it: the status said why, and nothing else of the open happens.
+                    if !shown {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {
@@ -1939,10 +2048,22 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 request.answer(Err(e.into()));
                 app.set_status(e, true);
             }
-            Err(e) => {
+            Err(failure) => {
+                request.answer_failure(&failure);
+                if request.from_home && failure.refusal.is_some() {
+                    app.home.open = true;
+                }
+                // Only an interactive Open asks for acknowledgement. Programs get the error;
+                // traps, invalid input and host failures keep the status-line path.
+                if request.kind == Kind::Open
+                    && request.reply.is_none()
+                    && let Some(refusal) = failure.refusal
+                {
+                    app.file_load.refusals.push_back(*refusal);
+                }
+                let e = failure.text;
                 // A real cancel took the `running.cancelled()` arm above; this is a failure.
                 outcome = Outcome::Failed(e.clone());
-                request.answer(Err(e.clone()));
                 if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
                     app.finish_command(request.command().0, &Err(e));

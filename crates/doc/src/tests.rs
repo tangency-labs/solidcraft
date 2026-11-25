@@ -1675,7 +1675,7 @@ fn a_coil_follows_its_sketch() {
     doc.add_feature(
         FeatureKind::Coil {
             base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             axis_ref: None,
             reversed: false,
             sketch: Some(crate::SketchId(sketch)),
@@ -1917,8 +1917,20 @@ fn primitives_and_combine() {
         None,
     )
     .unwrap();
-    doc.add_feature(FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Cut,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
+        None,
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
@@ -2527,6 +2539,10 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
                 tools: vec!["Body2".into(), "Body3".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -2611,7 +2627,16 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
     )
     .unwrap();
     doc.add_feature(
-        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Join,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         None,
     )
     .unwrap();
@@ -2625,6 +2650,7 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 tool_plane: false,
                 tool_sheet: Default::default(),
                 tool_faces: Vec::new(),
+                tool_bodies: Vec::new(),
                 sketch: None,
                 line: None,
             },
@@ -2662,6 +2688,10 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
                 tools: vec!["Body3".into(), "Body2".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -2933,6 +2963,7 @@ fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
         parent: 0,
         name: "Part".into(),
         transform: IDENTITY,
+        base_transform: None,
         grounded: false,
         expressed_moves: Vec::new(),
         bom_type: None,
@@ -3008,6 +3039,7 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
             parent: 0,
             name: format!("P{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded: false,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -3310,6 +3342,1555 @@ fn an_old_cell_grid_has_no_sketched_cell_and_is_saved_as_it_was() {
     }
     assert!(saved.get("size").is_none());
     assert_eq!(kind.input_sketches(), vec![1, 2], "deleting the cell's sketch deletes the grid");
+}
+
+fn mat_close(a: &Mat, b: &Mat, tol: f64) -> bool {
+    a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < tol)
+}
+
+#[test]
+fn capture_position_serde_round_trip_and_legacy_compatibility() {
+    let mut doc = Document::new("capture serde");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ_id = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    let base = rigid(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.25);
+    let occ = doc.occurrences.iter_mut().find(|o| o.id == occ_id).unwrap();
+    occ.base_transform = Some(base);
+    occ.transform = rigid(Vec3::new(11.0, 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.25);
+
+    let rot90 = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let kind = FeatureKind::CapturePosition {
+        moves: vec![
+            CapturedOccurrenceMove {
+                occurrence: occ_id,
+                space: MoveSpace::World,
+                translate: ["10 mm".into(), "0".into(), "0".into()],
+                origin: Some(["1".into(), "2".into(), "3".into()]),
+                rotate_axis: Some([0.0, 0.0, 1.0]),
+                angle: Some("45 deg".into()),
+                rotation: None,
+                path: Some(vec![occ_id]),
+            },
+            CapturedOccurrenceMove {
+                occurrence: occ_id,
+                space: MoveSpace::Local,
+                translate: ["5 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: Some(rot90),
+                path: None,
+            },
+        ],
+        joints: vec![CapturedJoint { joint: 99, values: vec![0.5], exprs: vec![Some("theta".into())] }],
+    };
+    assert_eq!(kind.type_name(), "CapturePositionFeature");
+    assert_eq!(kind.kind_key(), "capture_position");
+    assert_eq!(FeatureKind::type_name_to_kind_key("CapturePositionFeature"), Some("capture_position"));
+    assert_eq!(kind.base_name(), "CapturePosition");
+
+    doc.add_feature(kind, None).unwrap();
+    let json = doc.to_json();
+    let reopened = Document::from_json(&json).expect("CapturePosition design should reopen");
+    assert_eq!(reopened.occurrences.iter().find(|o| o.id == occ_id).unwrap().base_transform, Some(base));
+    assert_eq!(reopened.features[0].kind, doc.features[0].kind);
+
+    // Legacy design without CapturePosition or base_transform.
+    let mut legacy_doc = Document::new("legacy");
+    legacy_doc.add_component(Some("LegacyPart"), 0).unwrap();
+    let legacy_json = legacy_doc.to_json();
+    let legacy_val: serde_json::Value = serde_json::from_str(&legacy_json).unwrap();
+    assert!(legacy_val["occurrences"][0].get("base_transform").is_none());
+    let legacy_loaded = Document::from_json(&legacy_json).unwrap();
+    assert!(!legacy_loaded.has_capture_position_timeline());
+    let mut model = Model::new();
+    model.evaluate(&legacy_loaded);
+    assert!(model.resolved_occurrences().is_empty());
+
+    // Hostile format decode rejections: non-rigid base_transform, translation in `rotation`, deep path.
+    let mut bad_base: serde_json::Value = serde_json::from_str(&json).unwrap();
+    bad_base["occurrences"][0]["base_transform"] = serde_json::json!([[2, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]);
+    assert!(Document::from_json(&bad_base.to_string()).is_err());
+
+    let mut bad_rot: serde_json::Value = serde_json::from_str(&json).unwrap();
+    bad_rot["features"][0]["moves"][1]["rotation"][3][0] = serde_json::json!(12.0);
+    assert!(Document::from_json(&bad_rot.to_string()).is_err());
+}
+
+#[test]
+fn capture_position_walk_and_parameter_references_cover_moves_and_joints() {
+    let mut doc = Document::new("capture params");
+    let a = doc.add_component(Some("A"), 0).unwrap();
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == b).unwrap().id;
+
+    for (name, expr, unit) in [
+        ("dx", "10 mm", "mm"),
+        ("dy", "0 mm", "mm"),
+        ("dz", "0 mm", "mm"),
+        ("ox", "5 mm", "mm"),
+        ("oy", "0 mm", "mm"),
+        ("oz", "0 mm", "mm"),
+        ("ang", "30 deg", "deg"),
+        ("j_ang", "15 deg", "deg"),
+    ] {
+        doc.add_user_param(name, expr, Some(unit), None).unwrap();
+    }
+    doc.params.push(Param { name: "model_keep".into(), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: true });
+
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 77,
+        name: "Rev1".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: occ_a, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: occ_b, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let mut kind = FeatureKind::CapturePosition {
+        moves: vec![CapturedOccurrenceMove {
+            occurrence: occ_b,
+            space: MoveSpace::Local,
+            translate: ["dx + model_keep".into(), "dy".into(), "dz".into()],
+            origin: Some(["ox".into(), "oy".into(), "oz".into()]),
+            rotate_axis: Some([0.0, 0.0, 1.0]),
+            angle: Some("ang".into()),
+            rotation: None,
+            path: None,
+        }],
+        joints: vec![CapturedJoint { joint: 77, values: vec![0.0], exprs: vec![Some("j_ang".into())] }],
+    };
+
+    // transform_geometry must leave MoveSpace origin untouched.
+    let before_kind = kind.clone();
+    kind.transform_geometry(&rigid(Vec3::new(50.0, 60.0, 70.0), Vec3::ZERO, Vec3::Z, 0.5));
+    assert_eq!(kind, before_kind);
+
+    let cap_id = doc.add_feature(kind, None).unwrap();
+
+    for used in ["dx", "ox", "ang", "j_ang"] {
+        assert!(!doc.param_users(used).is_empty(), "{used} should report param_users");
+        assert!(doc.remove_param(used).is_err(), "{used} should block deletion");
+        assert_eq!(doc.features_using_param(used), vec![cap_id], "{used} should list CapturePosition");
+    }
+
+    // Rename both move and joint parameter references.
+    assert!(doc.rename_param("dx", "dx_renamed").unwrap() >= 1);
+    assert!(doc.rename_param("ox", "ox_renamed").unwrap() >= 1);
+    assert!(doc.rename_param("j_ang", "j_ang_renamed").unwrap() >= 1);
+
+    doc.prune_model_params();
+    assert!(doc.param("model_keep").is_some(), "model param referenced by CapturePosition stays preserved");
+
+    if let FeatureKind::CapturePosition { moves, joints } = &doc.feature(cap_id).unwrap().kind {
+        assert_eq!(moves[0].translate[0].as_ref(), "dx_renamed + model_keep");
+        assert_eq!(moves[0].origin.as_ref().unwrap()[0].as_ref(), "ox_renamed");
+        assert_eq!(joints[0].exprs[0].as_deref(), Some("j_ang_renamed"));
+    } else {
+        panic!("expected CapturePosition");
+    }
+}
+
+#[test]
+fn capture_position_timeline_isolates_earlier_features_and_re_evaluates_on_parameter_change() {
+    let mut doc = Document::new("timeline isolation #20644");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let mover = doc.add_component(Some("Mover"), 0).unwrap();
+    let occ_mover = doc.occurrences.iter().find(|o| o.component == mover).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_mover).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "100 mm", Some("mm"), None).unwrap();
+
+    // Feature 0: construction plane in Owner (Offset XZ by 60 mm -> world origin (0, -60, 0) or (0, 60, 0)).
+    let plane_id = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "60 mm".into() },
+            },
+            Some("OwnerPlane"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_id).unwrap().component = owner;
+
+    let make_sketch = || {
+        let mut sk = Sketch::new();
+        let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+        let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+        sk.add_line_pts(p0, p1, None).unwrap();
+        FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane_id.into(), placement: None }, sketch: sk }
+    };
+
+    // Feature 1 (before CapturePosition): SketchBefore in Mover.
+    let sketch_before = doc.add_feature(make_sketch(), Some("SketchBefore")).unwrap();
+    doc.feature_mut(sketch_before).unwrap().component = mover;
+
+    // Feature 2: CapturePosition moves Mover by [dx, 0, 0].
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+
+    // Feature 3 (after CapturePosition): SketchAfter in Mover on the same Owner plane.
+    let sketch_after = doc.add_feature(make_sketch(), Some("SketchAfter")).unwrap();
+    doc.feature_mut(sketch_after).unwrap().component = mover;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    let st = model.state();
+    let before_origin = st.sketch(sketch_before).unwrap().plane.origin;
+    let after_origin = st.sketch(sketch_after).unwrap().plane.origin;
+    assert!((before_origin.x - 0.0).abs() < 1e-6, "SketchBefore saw Mover at base IDENTITY: {before_origin:?}");
+    assert!((after_origin.x + 100.0).abs() < 1e-6, "SketchAfter saw Mover at x=100, so plane x=-100 in Mover frame: {after_origin:?}");
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 100.0).abs() < 1e-9);
+
+    // Changing dx must recompute CapturePosition + SketchAfter while keeping SketchBefore cached.
+    doc.set_param("dx", "45 mm", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(model.last_recomputed, 2, "only CapturePosition and SketchAfter should recompute, got {}", model.last_recomputed);
+    let st2 = model.state();
+    assert!((st2.sketch(sketch_before).unwrap().plane.origin.x - 0.0).abs() < 1e-6);
+    assert!((st2.sketch(sketch_after).unwrap().plane.origin.x + 45.0).abs() < 1e-6);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 45.0).abs() < 1e-9);
+
+    // Verify no_cache=true and refingerprint_from parity.
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&doc);
+    assert_eq!(fresh.resolved_occurrences(), model.resolved_occurrences());
+    assert_eq!(fresh.state().sketch(sketch_after).unwrap().plane.origin, st2.sketch(sketch_after).unwrap().plane.origin);
+    let expected_fps: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    model.refingerprint_from(&doc, 0);
+    let refp_fps: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    assert_eq!(refp_fps, expected_fps, "refingerprint_from(0) must match evaluate fingerprints");
+    let mut model_mid = model.clone();
+    model_mid.refingerprint_from(&doc, 2);
+    let mid_fps: Vec<u64> = model_mid.results.iter().map(|r| r.fingerprint).collect();
+    assert_eq!(mid_fps, expected_fps, "refingerprint_from(2) must match evaluate fingerprints");
+    let _ = cap_id;
+}
+
+#[test]
+fn capture_position_suppression_rollback_reorder_deletion_and_errors() {
+    let mut doc = Document::new("timeline ops");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let mover = doc.add_component(Some("Mover"), 0).unwrap();
+    let occ_mover = doc.occurrences.iter().find(|o| o.component == mover).unwrap().id;
+    let base = rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_mover).unwrap().base_transform = Some(base);
+
+    let plane_id = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "10 mm".into() },
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(plane_id).unwrap().component = owner;
+
+    let cap1 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["20 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: vec![CapturedJoint { joint: 1, values: vec![1.25], exprs: Vec::new() }],
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(5.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    let sk_after = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane_id.into(), placement: None }, sketch: sk }, None)
+        .unwrap();
+    doc.feature_mut(sk_after).unwrap().component = mover;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Suppress CapturePosition -> reverts to base_transform (5.0) and clears resolved_joints.
+    doc.feature_mut(cap1).unwrap().suppressed = true;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 5.0).abs() < 1e-9);
+    assert!(model.resolved_joints().is_empty());
+    assert!((model.state().sketch(sk_after).unwrap().plane.origin.x + 5.0).abs() < 1e-6);
+
+    // Unsuppress -> re-applies CapturePosition (25.0).
+    doc.feature_mut(cap1).unwrap().suppressed = false;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Rollback marker before CapturePosition -> reverts to base_transform (5.0).
+    let cap_idx = doc.feature_index(cap1).unwrap();
+    doc.marker = Some(cap_idx);
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 5.0).abs() < 1e-9);
+    assert!(model.resolved_joints().is_empty());
+
+    // Roll forward past CapturePosition -> restores from rolled_results and re-applies (25.0).
+    doc.marker = None;
+    model.evaluate(&doc);
+    assert!((model.resolved_occurrences()[&occ_mover][3][0] - 25.0).abs() < 1e-9);
+    assert_eq!(model.resolved_joints().get(&1).map(|j| j.values.clone()), Some(vec![1.25]));
+
+    // Add a second non-commutative CapturePosition (90 deg rotation about world/parent origin),
+    // then reorder the two CapturePosition features and verify non-commutative result changes.
+    let cap2 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["0".into(), "0".into(), "0".into()],
+                    origin: Some(["0".into(), "0".into(), "0".into()]),
+                    rotate_axis: Some([0.0, 0.0, 1.0]),
+                    angle: Some("90 deg".into()),
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    model.evaluate(&doc);
+    // Order (cap1: +20x, cap2: rot90): base=(5,0,0) -> (25,0,0) -> rot90 => (0, 25, 0).
+    let t_order1 = model.resolved_occurrences()[&occ_mover];
+    assert!((t_order1[3][0] - 0.0).abs() < 1e-6 && (t_order1[3][1] - 25.0).abs() < 1e-6, "order1: {:?}", t_order1[3]);
+
+    // Reorder: cap2 before cap1 -> base=(5,0,0) -> rot90 => (0,5,0) -> +20x => (20, 5, 0).
+    let i1 = doc.feature_index(cap1).unwrap();
+    let i2 = doc.feature_index(cap2).unwrap();
+    doc.features.swap(i1, i2);
+    model.evaluate(&doc);
+    let t_order2 = model.resolved_occurrences()[&occ_mover];
+    assert!((t_order2[3][0] - 20.0).abs() < 1e-6 && (t_order2[3][1] - 5.0).abs() < 1e-6, "order2: {:?}", t_order2[3]);
+
+    // Delete both CapturePosition features -> reverts to base_transform (5,0,0).
+    doc.features.retain(|f| f.id != cap1 && f.id != cap2);
+    model.evaluate(&doc);
+    assert!(mat_close(&model.resolved_occurrences()[&occ_mover], &base, 1e-9));
+
+    // Atomic error: move 1 is valid, move 2 references an unknown parameter -> neither applies!
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![
+                CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["100 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+                CapturedOccurrenceMove {
+                    occurrence: occ_mover,
+                    space: MoveSpace::Local,
+                    translate: ["missing_param".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+            ],
+            joints: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.last().unwrap().error.is_some());
+    assert!(mat_close(&model.resolved_occurrences()[&occ_mover], &base, 1e-9), "atomic failure must not apply partial moves");
+}
+
+#[test]
+fn capture_position_world_space_nested_path_rotation_and_adjust_base() {
+    let mut doc = Document::new("world space nested");
+    let parent_comp = doc.add_component(Some("Parent"), 0).unwrap();
+    let child_comp = doc.add_component(Some("Child"), parent_comp).unwrap();
+    let occ_parent = doc.occurrences.iter().find(|o| o.component == parent_comp).unwrap().id;
+    let occ_child = doc.occurrences.iter().find(|o| o.component == child_comp).unwrap().id;
+
+    // Parent rotated +90 deg around Z; child starts at local (0, 0, 0).
+    let parent_rot = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_parent).unwrap().base_transform = Some(parent_rot);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_child).unwrap().base_transform = Some(IDENTITY);
+
+    // Move child +10 mm in World X -> in Parent's +90 deg Z-rotated local frame, World +X is Local -Y.
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_child,
+                space: MoveSpace::World,
+                translate: ["10 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: Some(vec![occ_parent, occ_child]),
+            }],
+            joints: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let child_local = model.resolved_occurrences()[&occ_child];
+    let child_world = mat_mul(&parent_rot, &child_local);
+    assert!((child_world[3][0] - 10.0).abs() < 1e-9 && child_world[3][1].abs() < 1e-9, "world={:?}", child_world[3]);
+    assert!(child_local[3][0].abs() < 1e-9 && (child_local[3][1] + 10.0).abs() < 1e-9, "local={:?}", child_local[3]);
+
+    // Test Occurrence::adjust_base_for_direct_move with non-commutative rotation + translation.
+    let base_before = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.3);
+    let cap_delta = rigid(Vec3::new(0.0, 5.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let old_resolved = mat_mul(&cap_delta, &base_before);
+    let direct_shift = rigid(Vec3::new(3.0, -4.0, 2.0), Vec3::ZERO, Vec3::Y, 0.4);
+    let new_resolved = mat_mul(&direct_shift, &old_resolved);
+
+    let mut test_occ = Occurrence {
+        id: 500,
+        component: 1,
+        parent: 0,
+        name: "Test:1".into(),
+        transform: old_resolved,
+        base_transform: Some(base_before),
+        grounded: false,
+        bom_type: None,
+        expressed_moves: Vec::new(),
+    };
+    test_occ.adjust_base_for_direct_move(&old_resolved, &new_resolved);
+    let replayed = mat_mul(&cap_delta, &test_occ.base_transform.unwrap());
+    assert!(mat_close(&replayed, &new_resolved, 1e-9), "replayed={replayed:?}, want={new_resolved:?}");
+
+    // Test `rotation` fallback matrix + `CapturedJoint::exprs` re-evaluation on parameter change.
+    let mut rot_doc = Document::new("rotation and joint exprs");
+    let ca = rot_doc.add_component(Some("CA"), 0).unwrap();
+    let cb = rot_doc.add_component(Some("CB"), 0).unwrap();
+    let oa = rot_doc.occurrences.iter().find(|o| o.component == ca).unwrap().id;
+    let ob = rot_doc.occurrences.iter().find(|o| o.component == cb).unwrap().id;
+    rot_doc.occurrences.iter_mut().find(|o| o.id == ob).unwrap().base_transform = Some(IDENTITY);
+    rot_doc.add_user_param("j_theta", "30 deg", Some("deg"), None).unwrap();
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    rot_doc.assembly.joints.push(crate::joints::Joint {
+        id: 11,
+        name: "Rev".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: oa, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: ob, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    let rot90 = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    rot_doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: ob,
+                    space: MoveSpace::Local,
+                    translate: ["5 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: Some(rot90),
+                    path: None,
+                }],
+                joints: vec![CapturedJoint { joint: 11, values: vec![0.0], exprs: vec![Some("j_theta".into())] }],
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut rot_model = Model::new();
+    rot_model.evaluate(&rot_doc);
+    assert!(rot_model.results.iter().all(|r| r.error.is_none()), "{:?}", rot_model.results);
+    let mut expected_rot = rot90;
+    expected_rot[3] = [5.0, 0.0, 0.0, 1.0];
+    assert!(mat_close(&rot_model.resolved_occurrences()[&ob], &expected_rot, 1e-9));
+    let jv1 = rot_model.resolved_joints()[&11].values[0];
+    assert!((jv1 - 30.0_f64.to_radians()).abs() < 1e-9, "got {jv1}");
+
+    rot_doc.set_param("j_theta", "60 deg", Some("deg"), None).unwrap();
+    rot_model.evaluate(&rot_doc);
+    let jv2 = rot_model.resolved_joints()[&11].values[0];
+    assert!((jv2 - 60.0_f64.to_radians()).abs() < 1e-9, "got {jv2}");
+}
+
+#[test]
+fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sketch_links() {
+    let mut doc = Document::new("cache invalidation coverage");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "10 mm", Some("mm"), None).unwrap();
+
+    // Cylinder in CompA at local origin (radius 5, height 10) -> axis at (0,0,z) in CompA.
+    let cyl_a = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: point_expr(Vec3::Z),
+                radius: "5 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("CylA"),
+        )
+        .unwrap();
+    doc.feature_mut(cyl_a).unwrap().component = comp_a;
+
+    // Construction plane & axis & point owned by CompA.
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "3 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    let axis_a = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 0.0, 0.0) },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 10.0, 0.0) },
+                },
+            },
+            Some("AxisA"),
+        )
+        .unwrap();
+    doc.feature_mut(axis_a).unwrap().component = comp_a;
+
+    let pt_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At { point: crate::construct::GeoRef::Point { p: Vec3::new(2.0, 3.0, 4.0) } },
+            },
+            Some("PointA"),
+        )
+        .unwrap();
+    doc.feature_mut(pt_a).unwrap().component = comp_a;
+
+    // Box in CompB (will be rotated around CompA's cylinder axis via Move { rotate_about: Some(...) }).
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "2 mm".into(),
+                width: "2 mm".into(),
+                height: "2 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxB"),
+        )
+        .unwrap();
+    doc.feature_mut(box_b).unwrap().component = comp_b;
+    doc.feature_mut(box_b).unwrap().body_names = vec!["BodyB".into()];
+
+    // Evaluate once at dx=10 to capture persistent face name of CylA.
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_a,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            Some("CapA"),
+        )
+        .unwrap();
+
+    let mut prep = Model::new();
+    prep.evaluate(&doc);
+    assert!(prep.results.iter().all(|r| r.error.is_none()), "{:?}", prep.results);
+    let prep_st = prep.state();
+    let cyl_body = prep_st.bodies.iter().find(|b| b.feature == cyl_a).unwrap();
+    let cyl_face_name = crate::naming::face_names(cyl_body)
+        .iter()
+        .enumerate()
+        .find(|(fi, _)| matches!(solidcraft_kernel::face_surface(&cyl_body.body, *fi), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })))
+        .map(|(_, n)| n.clone())
+        .expect("cylinder face name");
+
+    // 1) ConstructionAxis on named cylinder face of CompA (authored in CompB).
+    let ax_named = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::ThroughFace {
+                    face: crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name.clone()) },
+                },
+            },
+            Some("AxNamed"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_named).unwrap().component = comp_b;
+
+    // 2) ConstructionAxis referencing AxisA (foreign construction axis) & ConstructionPoint referencing PointA (foreign construction point).
+    let ax_foreign = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::ConstructPoint { name: "PointA".into() },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(0.0, 0.0, 20.0) },
+                },
+            },
+            Some("AxForeign"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_foreign).unwrap().component = comp_b;
+
+    let pt_named = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At {
+                    point: crate::construct::GeoRef::Snap {
+                        of: Box::new(crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name.clone()) }),
+                        kind: crate::construct::SnapAt::Centre,
+                        at: Vec3::new(10.0, 0.0, 10.0),
+                        end: Some(1),
+                    },
+                },
+            },
+            Some("PtNamed"),
+        )
+        .unwrap();
+    doc.feature_mut(pt_named).unwrap().component = comp_b;
+
+    let pt_foreign = doc
+        .add_feature(
+            FeatureKind::ConstructionPoint {
+                def: crate::construct::PointDef::At { point: crate::construct::GeoRef::ConstructPoint { name: "PointA".into() } },
+            },
+            Some("PtForeign"),
+        )
+        .unwrap();
+    // Root component triggers world_state in construction_state.
+    doc.feature_mut(pt_foreign).unwrap().component = 0;
+
+    // 3) Move { rotate_about: Some(GeoRef::Face { .. }) } turning BodyB around CompA's cylinder axis.
+    let move_about = doc
+        .add_feature(
+            FeatureKind::Move {
+                bodies: vec!["BodyB".into()],
+                translate: ["0".into(), "0".into(), "0".into()],
+                rotate_axis: Some(Dir(Vec3::Z)),
+                rotate_about: Some(crate::construct::GeoRef::Face { at: Vec3::new(15.0, 0.0, 5.0), name: Some(cyl_face_name) }),
+                origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
+                angle: Some("90 deg".into()),
+                copy: false,
+                copy_frames: Vec::new(),
+            },
+            Some("MoveAbout"),
+        )
+        .unwrap();
+    doc.feature_mut(move_about).unwrap().component = comp_b;
+
+    // 4) Sketch in CompB projecting LinkSource::Plane { name: "PlaneA" } and LinkSource::Axis { name: "AxisA" }.
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(13.0, -5.0), Vec2::new(13.0, 5.0))],
+    )
+    .unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Axis { name: "AxisA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(10.0, -5.0), Vec2::new(10.0, 5.0))],
+    )
+    .unwrap();
+    let sk_links = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkLinks")).unwrap();
+    doc.feature_mut(sk_links).unwrap().component = comp_b;
+
+    // Evaluate cached model at dx = 10 mm, then mutate dx -> 40 mm.
+    let mut cached = Model::new();
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()), "{:?}", cached.results);
+
+    doc.set_param("dx", "40 mm", Some("mm"), None).unwrap();
+    cached.evaluate(&doc);
+
+    let mut cold = Model::new();
+    cold.no_cache = true;
+    cold.evaluate(&doc);
+    assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+
+    for (rc, rf) in cached.results.iter().zip(&cold.results) {
+        assert_eq!(rc.error, rf.error, "error mismatch on {}", rc.name);
+    }
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == ax_named).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == ax_named).map(|c| &c.geom),
+        "ConstructionAxis on named face must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == ax_foreign).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == ax_foreign).map(|c| &c.geom),
+        "ConstructionAxis on foreign construction point must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == pt_named).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == pt_named).map(|c| &c.geom),
+        "ConstructionPoint on named face must invalidate"
+    );
+    assert_eq!(
+        cached.state().construct.iter().find(|c| c.feature == pt_foreign).map(|c| &c.geom),
+        cold.state().construct.iter().find(|c| c.feature == pt_foreign).map(|c| &c.geom),
+        "ConstructionPoint in root referencing foreign point must invalidate"
+    );
+    let cached_bounds = solidcraft_geom::MeshGeom::bounds(&*cached.state().body("BodyB").unwrap().mesh());
+    let cold_bounds = solidcraft_geom::MeshGeom::bounds(&*cold.state().body("BodyB").unwrap().mesh());
+    assert!(
+        cached_bounds.min.dist(cold_bounds.min) < 1e-6 && cached_bounds.max.dist(cold_bounds.max) < 1e-6,
+        "Move rotate_about must invalidate: cached={cached_bounds:?} cold={cold_bounds:?}"
+    );
+    let cached_st = cached.state();
+    let cold_st = cold.state();
+    let cached_sk = cached_st.sketch(sk_links).unwrap();
+    let cold_sk = cold_st.sketch(sk_links).unwrap();
+    assert_eq!(cached_sk.sketch.curves.len(), cold_sk.sketch.curves.len());
+    for (cp, qp) in cached_sk.sketch.points.iter().zip(&cold_sk.sketch.points) {
+        assert!(solidcraft_geom::Vec2Geom::dist(cp.pos, qp.pos) < 1e-9, "linked sketch point mismatch: {:?} vs {:?}", cp.pos, qp.pos);
+    }
+    let _ = cap_id;
+}
+
+#[test]
+fn capture_position_is_current_saved_adopt_and_adopt_solved_sketches() {
+    let mut doc = Document::new("model cache & adopt");
+    let comp_a = doc.add_component(Some("A"), 0).unwrap();
+    let comp_b = doc.add_component(Some("B"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().transform = rigid(Vec3::new(99.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.add_user_param("dx", "25 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("j_ang", "30 deg", Some("deg"), None).unwrap();
+
+    let origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 1,
+        name: "Rev".into(),
+        kind: crate::joints::JointKind::Revolute,
+        a: crate::joints::JointOrigin { occurrence: occ_a, ..origin.clone() },
+        b: crate::joints::JointOrigin { occurrence: occ_b, ..origin },
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+
+    let plane_a = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
+            },
+            Some("PlaneA"),
+        )
+        .unwrap();
+    doc.feature_mut(plane_a).unwrap().component = comp_a;
+
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_a,
+                space: MoveSpace::Local,
+                translate: ["dx".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: vec![CapturedJoint { joint: 1, values: vec![0.0], exprs: vec![Some("j_ang".into())] }],
+        },
+        None,
+    )
+    .unwrap();
+
+    // Downstream sketch in CompB projecting PlaneA (so changing dx moves the linked sketch geometry).
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_link(
+        solidcraft_sketch::LinkKind::Project,
+        solidcraft_sketch::LinkSource::Plane { name: "PlaneA".into() },
+        &[solidcraft_sketch::LinkGeom::Line(Vec2::new(30.0, -5.0), Vec2::new(30.0, 5.0))],
+    )
+    .unwrap();
+    let sk_id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SkB")).unwrap();
+    doc.feature_mut(sk_id).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert!(model.is_current(&doc), "Model::is_current must return true right after Model::evaluate");
+
+    // Save & adopt round-trip without recomputing.
+    let saved = model.saved(&doc).expect("Model::saved must succeed when base_transform != transform");
+    let mut adopted = Model::adopt(&doc, &saved).expect("Model::adopt must succeed");
+    assert_eq!(adopted.resolved_occurrences(), model.resolved_occurrences());
+    assert_eq!(adopted.resolved_joints(), model.resolved_joints());
+    assert!(adopted.is_current(&doc));
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 0, "adopted model must not recompute");
+
+    // Changing joint kind invalidates CapturePosition cleanly.
+    let mut doc_slider = doc.clone();
+    doc_slider.assembly.joints[0].kind = crate::joints::JointKind::Slider;
+    model.evaluate(&doc_slider);
+    assert!(model.last_recomputed >= 1, "joint kind change must recompute CapturePosition, got {}", model.last_recomputed);
+    // Restore original Revolute doc for adopt_solved_sketches test.
+    model.evaluate(&doc);
+
+    // Mutate dx so the linked sketch re-solves, then adopt_solved_sketches.
+    doc.set_param("dx", "55 mm", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.is_current(&doc));
+    assert_eq!(model.adopt_solved_sketches(&mut doc), 1);
+    assert!(model.is_current(&doc), "is_current must remain true after adopt_solved_sketches");
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "evaluate after adopt_solved_sketches must not recompute");
+}
+
+#[test]
+fn capture_position_evaluate_shared_updates_resolved_occurrences_when_base_transform_changes() {
+    let mut doc = Document::new("evaluate_shared base_transform");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+    let box_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(box_id).unwrap().component = comp;
+
+    let doc1 = std::sync::Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc1));
+    assert!((model.resolved_occurrences()[&occ][3][0] - 0.0).abs() < 1e-9);
+
+    let mut doc2 = (*doc1).clone();
+    doc2.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(rigid(Vec3::new(99.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let doc2 = std::sync::Arc::new(doc2);
+    assert!(model.evaluate_shared(&doc2), "evaluate_shared must not skip when has_capture_position_timeline is true");
+    assert!((model.resolved_occurrences()[&occ][3][0] - 99.0).abs() < 1e-9);
+}
+
+#[test]
+fn capture_position_hardening_joint_values_and_clipboard_remap() {
+    let mut doc = Document::new("hardening");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+
+    let cap_id = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ,
+                    space: MoveSpace::World,
+                    translate: ["1 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: Some(vec![occ]),
+                }],
+                joints: vec![CapturedJoint { joint: 1, values: vec![0.5], exprs: Vec::new() }],
+            },
+            None,
+        )
+        .unwrap();
+
+    // format::decode rejects oversized values / exprs (> 64) and out-of-range values.
+    let json = doc.to_json();
+    let mut too_many_vals: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_many_vals["features"][0]["joints"][0]["values"] = serde_json::json!(vec![0.0; 65]);
+    assert!(Document::from_json(&too_many_vals.to_string()).is_err());
+
+    let mut too_many_exprs: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_many_exprs["features"][0]["joints"][0]["exprs"] = serde_json::json!(vec![Option::<String>::None; 65]);
+    assert!(Document::from_json(&too_many_exprs.to_string()).is_err());
+
+    let mut too_big_val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    too_big_val["features"][0]["joints"][0]["values"] = serde_json::json!([1e10]);
+    assert!(Document::from_json(&too_big_val.to_string()).is_err());
+
+    // In-memory eval_captured_joint rejects NaN/out-of-range values even when exprs is empty.
+    let mut bad_doc = doc.clone();
+    if let FeatureKind::CapturePosition { joints, .. } = &mut bad_doc.feature_mut(cap_id).unwrap().kind {
+        joints[0].values = vec![f64::NAN];
+    }
+    let mut bad_model = Model::new();
+    bad_model.evaluate(&bad_doc);
+    assert!(bad_model.result(cap_id).and_then(|r| r.error.as_ref()).is_some());
+
+    // Feature::remap_clone remaps m.occurrence and m.path when occurrences map is populated.
+    let mut cloned = doc.feature(cap_id).unwrap().clone();
+    let mut occ_map = std::collections::BTreeMap::new();
+    occ_map.insert(occ, 777);
+    let source_roots = std::collections::BTreeSet::new();
+    let placements = crate::ClonePlacements { occurrences: &occ_map, source_roots: &source_roots, root_path: &[], doc: &doc, same_document: true };
+    cloned.remap_clone(&Default::default(), &Default::default(), &Default::default(), &Default::default(), Some(&placements)).unwrap();
+    if let FeatureKind::CapturePosition { moves, .. } = &cloned.kind {
+        assert_eq!(moves[0].occurrence, 777);
+        assert_eq!(moves[0].path.as_deref(), Some([777].as_slice()));
+    } else {
+        panic!("expected CapturePosition");
+    }
+}
+
+#[test]
+fn capture_position_moved_component_sketch_same_and_foreign_axis_links_match_cold_eval() {
+    let mut doc = Document::new("same and foreign axis link parity");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().base_transform = Some(IDENTITY);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+    doc.add_user_param("dx", "10 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("bx", "5 mm", Some("mm"), None).unwrap();
+    doc.add_user_param("by", "5 mm", Some("mm"), None).unwrap();
+
+    // CompB owns a ConstructionAxis at local x = 5 along Y.
+    let ax_b = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::TwoPoints {
+                    a: crate::construct::GeoRef::Point { p: Vec3::new(5.0, 0.0, 0.0) },
+                    b: crate::construct::GeoRef::Point { p: Vec3::new(5.0, 10.0, 0.0) },
+                },
+            },
+            Some("AxB"),
+        )
+        .unwrap();
+    doc.feature_mut(ax_b).unwrap().component = comp_b;
+
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![
+                CapturedOccurrenceMove {
+                    occurrence: occ_a,
+                    space: MoveSpace::Local,
+                    translate: ["dx".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+                CapturedOccurrenceMove {
+                    occurrence: occ_b,
+                    space: MoveSpace::Local,
+                    translate: ["bx".into(), "by".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: None,
+                },
+            ],
+            joints: Vec::new(),
+        },
+        Some("MoveParts"),
+    )
+    .unwrap();
+
+    let make_sketch = |doc: &mut Document, link_source: solidcraft_sketch::LinkSource, name: &str| {
+        let mut sk = Sketch::new();
+        let p0 = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+        let p1 = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
+        sk.add_line_pts(p0, p1, None).unwrap();
+        sk.add_link(
+            solidcraft_sketch::LinkKind::Project,
+            link_source,
+            &[solidcraft_sketch::LinkGeom::Line(Vec2::new(0.0, -5.0), Vec2::new(0.0, 5.0))],
+        )
+        .unwrap();
+        let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some(name)).unwrap();
+        doc.feature_mut(id).unwrap().component = comp_b;
+        id
+    };
+
+    let sk_same_axis = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: "AxB".into() }, "SkSameAxis");
+    let sk_same_datum = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: format!("o:{occ_b}/origin/Y") }, "SkSameDatum");
+    let sk_foreign_datum = make_sketch(&mut doc, solidcraft_sketch::LinkSource::Axis { name: format!("o:{occ_a}/origin/Y") }, "SkForeignDatum");
+
+    let mut cached = Model::new();
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()), "{:?}", cached.results);
+
+    for (dx, bx, by, expected_foreign_x) in
+        [("10 mm", "5 mm", "5 mm", 5.0), ("40 mm", "35 mm", "35 mm", 5.0), ("55 mm", "10 mm", "20 mm", 45.0), ("10 mm", "5 mm", "5 mm", 5.0)]
+    {
+        doc.set_param("dx", dx, Some("mm"), None).unwrap();
+        doc.set_param("bx", bx, Some("mm"), None).unwrap();
+        doc.set_param("by", by, Some("mm"), None).unwrap();
+        cached.evaluate(&doc);
+        assert!(cached.is_current(&doc));
+
+        let mut cold = Model::new();
+        cold.no_cache = true;
+        cold.evaluate(&doc);
+        assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+
+        let cached_st = cached.state();
+        let cold_st = cold.state();
+        for (sk_id, expected_link_x) in [(sk_same_axis, 5.0), (sk_same_datum, 0.0), (sk_foreign_datum, expected_foreign_x)] {
+            let cs = cached_st.sketch(sk_id).unwrap();
+            let fs = cold_st.sketch(sk_id).unwrap();
+            assert_eq!(cs.sketch.points.len(), fs.sketch.points.len(), "point count mismatch on {sk_id}");
+            for (cp, fp) in cs.sketch.points.iter().zip(&fs.sketch.points) {
+                assert!(
+                    solidcraft_geom::Vec2Geom::dist(cp.pos, fp.pos) < 1e-9,
+                    "cache mismatch on sketch {sk_id} ({dx}, {bx}, {by}): cached={:?} cold={:?}",
+                    cp.pos,
+                    fp.pos
+                );
+            }
+            let link_id = &cs.sketch.links[0].id;
+            for &pi in &cs.sketch.link_points(link_id) {
+                let x = cs.sketch.points[pi].pos.x;
+                assert!((x - expected_link_x).abs() < 1e-9, "sketch {sk_id} expected x={expected_link_x}, got {x}");
+            }
+        }
+    }
+}
+
+#[test]
+fn capture_position_nested_same_occurrence_reorder_local_vs_world_multi_instance() {
+    let mut doc = Document::new("nested same occ reorder");
+    let parent_comp = doc.add_component(Some("Parent"), 0).unwrap();
+    let child_comp = doc.add_component(Some("Child"), parent_comp).unwrap();
+    let occ_p1 = doc.occurrences.iter().find(|o| o.component == parent_comp).unwrap().id;
+    let occ_c = doc.occurrences.iter().find(|o| o.component == child_comp).unwrap().id;
+    let occ_p2 = doc.add_occurrence(parent_comp, 0, rigid(Vec3::new(0.0, 50.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Rotate occ_p1 +90 deg around Z; occ_p2 stays unrotated at (0, 50, 0); child starts at local (5, 0, 0).
+    let p1_rot = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2);
+    let c_base = rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_p1).unwrap().base_transform = Some(p1_rot);
+    doc.occurrences.iter_mut().find(|o| o.id == occ_c).unwrap().base_transform = Some(c_base);
+
+    // CP1: World translation (+10, 0, 0) along occ_p1 path -> in occ_p1's +90Z frame, World +X = Local -Y.
+    let cp1 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_c,
+                    space: MoveSpace::World,
+                    translate: ["10 mm".into(), "0".into(), "0".into()],
+                    origin: None,
+                    rotate_axis: None,
+                    angle: None,
+                    rotation: None,
+                    path: Some(vec![occ_p1, occ_c]),
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    // CP2: Local 90 deg rotation about Z around origin (0, 0, 0).
+    let cp2 = doc
+        .add_feature(
+            FeatureKind::CapturePosition {
+                moves: vec![CapturedOccurrenceMove {
+                    occurrence: occ_c,
+                    space: MoveSpace::Local,
+                    translate: ["0".into(), "0".into(), "0".into()],
+                    origin: Some(["0".into(), "0".into(), "0".into()]),
+                    rotate_axis: Some([0.0, 0.0, 1.0]),
+                    angle: Some("90 deg".into()),
+                    rotation: None,
+                    path: None,
+                }],
+                joints: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    // Order (CP1 -> CP2): local (5, 0, 0) + world (+10,0,0)->local (0,-10,0) = (5, -10, 0), then local rot90Z -> (10, 5, 0).
+    let t1 = model.resolved_occurrences()[&occ_c];
+    assert!((t1[3][0] - 10.0).abs() < 1e-6 && (t1[3][1] - 5.0).abs() < 1e-6, "order1 local={:?}", t1[3]);
+    let w1_p1 = mat_mul(&p1_rot, &t1);
+    assert!((w1_p1[3][0] + 5.0).abs() < 1e-6 && (w1_p1[3][1] - 10.0).abs() < 1e-6, "order1 world p1={:?}", w1_p1[3]);
+    let _ = occ_p2;
+
+    // Reorder (CP2 -> CP1): local (5, 0, 0) -> local rot90Z => (0, 5, 0), then world (+10,0,0)->local (0,-10,0) => (0, -5, 0).
+    let i1 = doc.feature_index(cp1).unwrap();
+    let i2 = doc.feature_index(cp2).unwrap();
+    doc.features.swap(i1, i2);
+    model.evaluate(&doc);
+    let t2 = model.resolved_occurrences()[&occ_c];
+    assert!(t2[3][0].abs() < 1e-6 && (t2[3][1] + 5.0).abs() < 1e-6, "order2 local={:?}", t2[3]);
+}
+
+#[test]
+fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joints() {
+    let mut doc = Document::new("#20644 multi-feature isolation");
+    let comp_a = doc.add_component(Some("CompA"), 0).unwrap();
+    let comp_b = doc.add_component(Some("CompB"), 0).unwrap();
+    let occ_a = doc.occurrences.iter().find(|o| o.component == comp_a).unwrap().id;
+    let occ_b = doc.occurrences.iter().find(|o| o.component == comp_b).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_a).unwrap().grounded = true;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_b).unwrap().base_transform = Some(IDENTITY);
+
+    // BoxA at [0..10, 0..10, 0..10], BoxB at [20..30, 0..10, 0..10].
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxA"),
+        )
+        .unwrap();
+    doc.feature_mut(box_a).unwrap().component = comp_a;
+    doc.feature_mut(box_a).unwrap().body_names = vec!["BodyA".into()];
+
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(20.0, 0.0, 0.0)),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxB"),
+        )
+        .unwrap();
+    doc.feature_mut(box_b).unwrap().component = comp_b;
+    doc.feature_mut(box_b).unwrap().body_names = vec!["BodyB".into()];
+
+    // Pre-capture ToObject Extrude in CompA up to BodyB's x=20 face (y=2..8, z=2..8, extruded +X from x=10 to x=20 -> length 10).
+    let mut sk = Sketch::new();
+    let p0 = sk.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+    let p1 = sk.add_point(Vec2::new(8.0, 2.0), None).unwrap();
+    let p2 = sk.add_point(Vec2::new(8.0, 8.0), None).unwrap();
+    let p3 = sk.add_point(Vec2::new(2.0, 8.0), None).unwrap();
+    sk.add_line_pts(p0, p1, None).unwrap();
+    sk.add_line_pts(p1, p2, None).unwrap();
+    sk.add_line_pts(p2, p3, None).unwrap();
+    sk.add_line_pts(p3, p0, None).unwrap();
+    let sk_to = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Placed { origin: crate::point_expr(Vec3::new(10.0, 0.0, 0.0)), x_dir: Vec3::Y, y_dir: Vec3::Z },
+                sketch: sk,
+            },
+            Some("SkTo"),
+        )
+        .unwrap();
+    doc.feature_mut(sk_to).unwrap().component = comp_a;
+
+    let ext_to = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                sketch: sk_to.into(),
+                profiles: ProfileSel::All,
+                extent: Extent {
+                    convention: crate::ExtrudeConvention::LegacyPerSide,
+                    distance: "1 mm".into(),
+                    direction: Direction::Positive,
+                    distance2: None,
+                    start_offset: None,
+                    symmetric_offset: false,
+                    through_all: false,
+                    second_follows_first: false,
+                    taper: None,
+                    corner: None,
+                    to: Some(crate::FacePick(Vec3::new(20.0, 5.0, 5.0))),
+                    to_offset: None,
+                    from: None,
+                    from_level: false,
+                    to_body_apart: true,
+                    picked_placements: Vec::new(),
+                    one_sided_direction: None,
+                },
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                thin: None,
+            },
+            Some("ToObj"),
+        )
+        .unwrap();
+    doc.feature_mut(ext_to).unwrap().component = comp_a;
+    doc.feature_mut(ext_to).unwrap().body_names = vec!["BodyTo".into()];
+
+    // Pre-capture Mirror & Pattern of BodyB at pre-capture pose (YZ plane / +Y 20 mm).
+    let mirror_pre = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["BodyB".into()],
+                combine: false,
+                placements: vec![vec![occ_b]],
+            },
+            Some("MirrorPre"),
+        )
+        .unwrap();
+    doc.feature_mut(mirror_pre).unwrap().body_names = vec!["MirroredPre".into()];
+
+    let pattern_pre = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: vec!["BodyB".into()],
+                placements: vec![vec![occ_b]],
+                components: Vec::new(),
+                occurrences: Vec::new(),
+            },
+            Some("PatternPre"),
+        )
+        .unwrap();
+    doc.feature_mut(pattern_pre).unwrap().body_names = vec!["PatPre1".into()];
+
+    // Pre-capture face-anchored ConstructionPlane on BodyB top face (z=10).
+    let plane_pre = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Face {
+                    plane: <Plane as solidcraft_geom::PlaneGeom>::new(Vec3::new(25.0, 5.0, 10.0), Vec3::X, Vec3::Y).unwrap(),
+                    at: Vec3::new(25.0, 5.0, 10.0),
+                    name: None,
+                    anchor: None,
+                },
+            },
+            Some("PlanePre"),
+        )
+        .unwrap();
+
+    // CapturePosition moves occ_b by (+10, 0, +15).
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ_b,
+                space: MoveSpace::Local,
+                translate: ["10 mm".into(), "0".into(), "15 mm".into()],
+                origin: None,
+                rotate_axis: None,
+                angle: None,
+                rotation: None,
+                path: None,
+            }],
+            joints: Vec::new(),
+        },
+        Some("CaptureB"),
+    )
+    .unwrap();
+
+    // Also verify joint-driven occurrence #20644 isolation: CompJ joined via Slider to CompA with base_values=[0] -> captured=[20].
+    let comp_j = doc.add_component(Some("CompJ"), 0).unwrap();
+    let occ_j = doc.occurrences.iter().find(|o| o.component == comp_j).unwrap().id;
+    let box_j = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(0.0, 40.0, 0.0)),
+                length: "10 mm".into(),
+                width: "10 mm".into(),
+                height: "10 mm".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BoxJ"),
+        )
+        .unwrap();
+    doc.feature_mut(box_j).unwrap().component = comp_j;
+    doc.feature_mut(box_j).unwrap().body_names = vec!["BodyJ".into()];
+
+    let j_origin = crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 88,
+        name: "SlideJ".into(),
+        kind: crate::joints::JointKind::Slider,
+        a: crate::joints::JointOrigin {
+            occurrence: occ_a,
+            snap: crate::joints::Snap::Point { point: Vec3::new(0.0, 40.0, 0.0), z: None, x: None },
+            ..j_origin.clone()
+        },
+        b: crate::joints::JointOrigin {
+            occurrence: occ_j,
+            snap: crate::joints::Snap::Point { point: Vec3::new(0.0, 40.0, 0.0), z: None, x: None },
+            ..j_origin
+        },
+        values: vec![20.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: Some(vec![20.0]),
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    // Pre-capture feature in timeline (at index before CaptureJ) reading BodyJ's position via ConstructionPlane.
+    let plane_j_pre = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Face {
+                    plane: <Plane as solidcraft_geom::PlaneGeom>::new(Vec3::new(5.0, 45.0, 10.0), Vec3::X, Vec3::Y).unwrap(),
+                    at: Vec3::new(5.0, 45.0, 10.0),
+                    name: None,
+                    anchor: None,
+                },
+            },
+            Some("PlaneJPre"),
+        )
+        .unwrap();
+    let cap_j = doc
+        .add_feature(
+            FeatureKind::CapturePosition { moves: Vec::new(), joints: vec![CapturedJoint { joint: 88, values: vec![20.0], exprs: Vec::new() }] },
+            Some("CaptureJ"),
+        )
+        .unwrap();
+    let _ = (occ_a, cap_j);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+
+    // Pre-capture ToObject stayed at x=[10..20] (volume 360), Mirror stayed at [-30..-20], Pattern stayed at [20..30], PlanePre stayed at z=10, PlaneJPre stayed at z=10.
+    let to_vol = solidcraft_kernel::measure(&model.state().body("BodyTo").unwrap().body).unwrap().volume;
+    assert!((to_vol - 360.0).abs() < 1e-4, "ToObject leaked post-capture pose: {to_vol}");
+    let mir_bounds = solidcraft_kernel::measure(&model.state().body("MirroredPre").unwrap().body).unwrap().bbox;
+    assert!((mir_bounds.min.x + 30.0).abs() < 1e-4 && (mir_bounds.max.x + 20.0).abs() < 1e-4, "{mir_bounds:?}");
+    let pat_bounds = solidcraft_kernel::measure(&model.state().body("PatPre1").unwrap().body).unwrap().bbox;
+    assert!((pat_bounds.min.x - 20.0).abs() < 1e-4 && (pat_bounds.min.y - 20.0).abs() < 1e-4, "{pat_bounds:?}");
+    let plane_z = model
+        .state()
+        .construct
+        .iter()
+        .find_map(|c| {
+            (c.feature == plane_pre).then_some(&c.geom).and_then(|g| match g {
+                crate::construct::ConstructGeom::Plane(p) => Some(p.origin.z),
+                _ => None,
+            })
+        })
+        .unwrap();
+    assert!((plane_z - 10.0).abs() < 1e-6, "PlanePre z leaked: {plane_z}");
+    let plane_j_z = model
+        .state()
+        .construct
+        .iter()
+        .find_map(|c| {
+            (c.feature == plane_j_pre).then_some(&c.geom).and_then(|g| match g {
+                crate::construct::ConstructGeom::Plane(p) => Some(p.origin.z),
+                _ => None,
+            })
+        })
+        .unwrap();
+    assert!((plane_j_z - 10.0).abs() < 1e-6, "PlaneJPre z leaked: {plane_j_z}");
+    assert!((model.resolved_occurrences()[&occ_j][3][2] - 20.0).abs() < 1e-6);
+}
+
+#[test]
+fn capture_position_hostile_format_decode_bounds_rejected() {
+    let mut doc = Document::new("hostile bounds");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let occ = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ).unwrap().base_transform = Some(IDENTITY);
+    doc.assembly.joints.push(crate::joints::Joint {
+        id: 1,
+        name: "J1".into(),
+        kind: crate::joints::JointKind::Slider,
+        a: crate::joints::JointOrigin::new(0, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None }),
+        b: crate::joints::JointOrigin::new(occ, crate::joints::Snap::Point { point: Vec3::ZERO, z: None, x: None }),
+        values: vec![0.0],
+        limits: vec![None],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: Some(vec![0.0]),
+        base_exprs: Vec::new(),
+        constraint: None,
+    });
+    doc.add_feature(
+        FeatureKind::CapturePosition {
+            moves: vec![CapturedOccurrenceMove {
+                occurrence: occ,
+                space: MoveSpace::World,
+                translate: ["1 mm".into(), "0".into(), "0".into()],
+                origin: None,
+                rotate_axis: Some([0.0, 0.0, 1.0]),
+                angle: None,
+                rotation: None,
+                path: Some(vec![occ]),
+            }],
+            joints: vec![CapturedJoint { joint: 1, values: vec![0.5], exprs: Vec::new() }],
+        },
+        None,
+    )
+    .unwrap();
+    let base: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
+
+    // 1. path.len() > MAX_PLACEMENT_DEPTH + 1
+    let mut bad_path = base.clone();
+    bad_path["features"][0]["moves"][0]["path"] = serde_json::json!(vec![occ; crate::MAX_PLACEMENT_DEPTH + 2]);
+    assert!(Document::from_json(&bad_path.to_string()).is_err());
+
+    // 2. moves.len() > MAX_PLACEMENTS and joints.len() > MAX_PLACEMENTS
+    let mut too_many_moves = base.clone();
+    let mv = too_many_moves["features"][0]["moves"][0].clone();
+    too_many_moves["features"][0]["moves"] = serde_json::Value::Array(vec![mv; crate::MAX_PLACEMENTS + 1]);
+    assert!(Document::from_json(&too_many_moves.to_string()).is_err());
+
+    let mut too_many_joints = base.clone();
+    let cj = too_many_joints["features"][0]["joints"][0].clone();
+    too_many_joints["features"][0]["joints"] = serde_json::Value::Array(vec![cj; crate::MAX_PLACEMENTS + 1]);
+    assert!(Document::from_json(&too_many_joints.to_string()).is_err());
+
+    // 3. j.base_values.len() > 64, j.base_exprs.len() > 64, out-of-range j.base_values
+    let mut bad_base_vals = base.clone();
+    bad_base_vals["assembly"]["joints"][0]["base_values"] = serde_json::json!(vec![0.0; 65]);
+    assert!(Document::from_json(&bad_base_vals.to_string()).is_err());
+
+    let mut bad_base_exprs = base.clone();
+    bad_base_exprs["assembly"]["joints"][0]["base_exprs"] = serde_json::json!(vec!["0 mm"; 65]);
+    assert!(Document::from_json(&bad_base_exprs.to_string()).is_err());
+
+    let mut huge_base_val = base.clone();
+    huge_base_val["assembly"]["joints"][0]["base_values"] = serde_json::json!([1e10]);
+    assert!(Document::from_json(&huge_base_val.to_string()).is_err());
+
+    // 4. Non-rigid rotation in CapturePosition move
+    let mut bad_rot = base.clone();
+    bad_rot["features"][0]["moves"][0]["rotation"] =
+        serde_json::json!([[2.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]);
+    assert!(Document::from_json(&bad_rot.to_string()).is_err());
 }
 
 /// An extrude with a start offset names its parallel caps top#1 (lower) and top#2 (upper),

@@ -137,6 +137,11 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
   guarantees 1x and 4x).
 - `src/setup.rs`: the default device asks for the adapter's largest 2D texture (at least 8192)
   instead of exactly 8192.
+- `src/setup.rs`: the default device never asks for a limit the adapter does not offer
+  (`or_worse_values_from(adapter.limits())`). Older drivers (Mesa 20.3 on Debian 11) report
+  fewer than wgpu's defaults, such as 2 colour attachments instead of 8, and asking for the
+  defaults refused the device, so no window opened. An adapter at or above the defaults gets
+  the same request as before.
 - `src/lib.rs`, `src/winit.rs`: `set_startup_hook` is told before each step of getting the
   device and the window's surface up (instance, surface, adapter request, the chosen adapter,
   device, renderer, surface configure, first present), so the app's crash journal can say which
@@ -268,6 +273,15 @@ SolidCraft changes:
 - `src/platform_impl/windows/window.rs` (`set_fullscreen`): going full screen on such a monitor
   would have sized the window 0x0, so it fills the monitor the window is on instead, and never
   applies a zero-area size (#20645).
+- `src/platform_impl/windows/drop_handler.rs`, `src/platform_impl/linux/x11/event_processor.rs`:
+  while files are dragged over a window, send `WindowEvent::CursorMoved` with where the drag is
+  (Windows: `IDropTarget`'s `DragEnter`, `DragOver` and `Drop`, screen to client coordinates;
+  X11: each `XdndPosition`, root to window coordinates). winit 0.30 gives `HoveredFile` and
+  `DroppedFile` no position, and neither platform sends the window pointer motion while a drag
+  runs, so the app could not tell where files were dropped (the design tabs open files dropped
+  on them at that place). macOS and Wayland are unchanged.
+- `src/platform_impl/windows/definitions.rs`: `IDropTarget`'s `pt` is a `POINTL` passed by value,
+  as COM declares it; winit 0.30 declared a pointer, harmless only while nothing read it.
 - `src/platform_impl/windows/event_loop.rs` (`WM_NCCALCSIZE`), `window_state.rs`
   (`WindowFlags::adjust_rect`): a resizable undecorated window with the undecorated shadow keeps
   the system frame on the left, right and bottom (its invisible resize borders and drop shadow)

@@ -855,14 +855,26 @@ pub struct Brep {
 /// as a raise that covers an edge/face gap does not.
 ///
 /// A clone and a copy (`topology::brep::p3::copy_brep`) carry the entries their entities
-/// still hold. A merge into another B-rep and a written file do not: a B-rep written with
-/// a raised tolerance stores it as its own tolerance, and a read of it fits at that value.
+/// still hold. A merge into another B-rep does not. A written file
+/// (`topology::brep_data_write::BrepData::from_brep`) stores a raised tolerance that is
+/// still held as the tolerance before the raise when the raise followed a B-rep file's end
+/// check ([`TrimCoverRaises::end_checked`]): the read of the written file then checks the
+/// same trims at the same tolerances, keeps the same ones and raises them again, so it
+/// fits as the written B-rep does (#16922). A part file's read runs no end check, so a
+/// raise it made is written as the edge's own tolerance: written before the raise, the end
+/// check of the written file's read could delete trims the part kept. A native rebuild
+/// (`topology::api_files::rebuild_native`), which runs no cover, also keeps the raised
+/// tolerance as the edge's own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrimCoverRaises {
     /// The raised edges: `(before, after)` tolerance.
     pub edges: std::collections::BTreeMap<EdgeId, (f64, f64)>,
     /// The vertices the raised edges' tolerances cascaded to: `(before, after)`.
     pub vertices: std::collections::BTreeMap<VertexId, (f64, f64)>,
+    /// The raises followed a B-rep file's end check (`sm_CheckAndFixUVTrimCurves`), which
+    /// kept every covered trim at the tolerance before its raise; false for a part
+    /// file's read, which runs none.
+    pub end_checked: bool,
 }
 
 impl TrimCoverRaises {

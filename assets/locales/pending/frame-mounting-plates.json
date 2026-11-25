@@ -206,5 +206,31 @@
     "ui.plate_width": "Chiều rộng",
     "ui.plate_x_offset": "Độ lệch X",
     "ui.plate_y_offset": "Độ lệch Y"
+  },
+  "fr": {
+    "cmd.frame.plate": "Plaque de fixation",
+    "error.plate_count": "Le nombre de trous doit être un entier compris entre 2 et 128.",
+    "error.plate_pattern": "Choisissez un motif de boulonnage.",
+    "error.plate_shape": "Choisissez une forme de plaque.",
+    "error.plate_support": "Sélectionnez une face plane d’appui.",
+    "help.frame.plate": "Ajoute une plaque plane sur une face d’un élément de structure, avec un motif facultatif de trous de boulons. Utilisez-la pour créer des platines de base, des patins de fixation et des plaques d’extrémité boulonnées.",
+    "ui.mounting_plate_title": "PLAQUE DE FIXATION",
+    "ui.plate.ribbon_label": "Plaque",
+    "ui.plate_bolt_circle": "Diamètre du cercle de boulonnage",
+    "ui.plate_circle_pattern": "Cercle de boulonnage",
+    "ui.plate_count": "Nombre de trous",
+    "ui.plate_height": "Hauteur",
+    "ui.plate_hole_diameter": "Diamètre des trous",
+    "ui.plate_holes": "Motif de boulonnage",
+    "ui.plate_none": "Aucun",
+    "ui.plate_pattern_angle": "Angle du motif",
+    "ui.plate_pitch_x": "Entraxe horizontal",
+    "ui.plate_pitch_y": "Entraxe vertical",
+    "ui.plate_rect_pattern": "Quatre trous",
+    "ui.plate_round": "Arrondie",
+    "ui.plate_shape": "Forme",
+    "ui.plate_width": "Largeur",
+    "ui.plate_x_offset": "Décalage X",
+    "ui.plate_y_offset": "Décalage Y"
   }
 }
