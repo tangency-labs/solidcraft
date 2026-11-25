@@ -8153,6 +8153,41 @@ fn every_flat_face_of_a_sheet_takes_an_attached_sketch() {
     assert_eq!(f["cutouts"].as_array().map(Vec::len), Some(1), "{f}");
 }
 
+/// #21300: a base flange from a circle of radius 40, folded 90° along a construction line 20 mm off
+/// its centre. Each flat face of both pieces takes an attached sketch, as every flat face of a
+/// sheet does: the round rim's pieces are named after the circle that made them (`side:c1`), as a
+/// straight rim is after its line, so they tell the panel's pieces apart.
+#[test]
+fn every_flat_face_of_a_folded_round_sheet_takes_an_attached_sketch() {
+    let mut s = Session::default();
+    let features = [
+        json!({"id": 1, "name": "Sketch1", "plane": {"name": "XY", "type": "origin"}, "type": "sketch", "sketch": {
+            "constraints": [], "counters": {"c": 2, "k": 0, "l": 3},
+            "curves": [{"c": 1, "construction": false, "id": "c1", "r": 40.0, "type": "circle"}, {"a": 2, "b": 3, "construction": true, "id": "l1", "type": "line"}],
+            "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": false, "id": "c1.center", "pos": [0.0, 0.0]},
+                       {"fixed": false, "id": "f0a", "pos": [-45.0, -20.0]}, {"fixed": false, "id": "f0b", "pos": [45.0, -20.0]}]}}),
+        json!({"body_names": ["Body1"], "id": 2, "name": "BaseFlange1", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1, "type": "sheet_base"}),
+        json!({"a": [-45.0, -20.0, 0.0], "b": [45.0, -20.0, 0.0], "angle": "90 deg", "curve": "l1", "id": 30, "name": "Fold1",
+               "position": "centerline", "stays": "left", "sketch": 1, "type": "sheet_fold"}),
+    ];
+    for feature in features {
+        run(&mut s, "timeline.add", json!({ "feature": feature }));
+    }
+    let faces = flat_face_points(&s);
+    // Each piece's two caps; the bend's two ends.
+    assert!(faces.len() >= 4, "{faces:?}");
+    for (index, point, normal) in faces {
+        let made = run(&mut s, "sketch.create", json!({"plane": {"face": point, "body": "Body1", "index": index}}));
+        run(&mut s, "sketch.finish", json!({}));
+        assert_eq!(made["attachment"], "exact_face", "face {index} at {point:?}");
+        let id = made["sketch"].as_u64().unwrap();
+        let solidcraft_doc::FaceAttachmentStatus::Healthy { plane, .. } = s.placed_document().sketch_face_attachment(id, &s.model) else {
+            panic!("face {index} at {point:?}")
+        };
+        assert!(plane.normal().dot(normal) > 1.0 - 1e-9 && (point - plane.origin).dot(normal).abs() < 1e-6, "face {index}: {plane:?}");
+    }
+}
+
 /// A 60 x 40 base with a 30 mm flange up its far long edge (y = 40); its thickness.
 fn l_bracket(s: &mut Session) -> f64 {
     base(s, 60.0, 40.0);

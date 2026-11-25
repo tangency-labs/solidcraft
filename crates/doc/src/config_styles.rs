@@ -147,9 +147,10 @@ impl Document {
             .map(|(_, role)| role)
             .ok_or_else(|| DocError::Invalid("face lineage does not match its feature".into()))?;
         // An exact history name may name a piece by the faces around it (`F2:top#[F2:side:l4,…]`),
-        // never by a number (an older design's piece, or a tie the faces around it left).
-        let numbered = crate::persistent_name::is_numbered_piece(&target.name);
-        let lineage_piece = matches!(target.certificate, Some(super::FaceCertificate::Lineage)) && !numbered;
+        // or by a number the feature's definition gave the pieces nothing around them tells apart
+        // (a fold's pieces of a round panel's cap, `F2:top#2`, #21300): the faces it finds must be
+        // exact (see `lineage_face_indices`), which a number by place never is.
+        let lineage_piece = matches!(target.certificate, Some(super::FaceCertificate::Lineage));
         if crate::naming::strip_piece(&target.name) != target.name && !lineage_piece {
             return Err(DocError::Invalid("configure a face lineage, not a numbered split piece".into()));
         }

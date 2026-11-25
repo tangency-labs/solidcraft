@@ -122,7 +122,15 @@ impl<'a> FaceNamer<'a> {
             Some((part, Some(along)))
         };
         match (piece, role) {
-            (Piece::Panel(i), FaceRole::Cap { surface, .. }) => Some((SheetPart::Cap { panel: parted(i)?, surface }, None)),
+            // A cap's pieces (a fold parts the panel) in the order of their panels' keys, which
+            // say what made each (see `PanelMade`): exact, never a build order, for pieces nothing
+            // around them tells apart (a round panel's, #21300).
+            (Piece::Panel(i), FaceRole::Cap { surface, .. }) => {
+                let (r, mine) = (root(self.sheet, self.recipes, i), key(i)?);
+                let pieces = self.sheet.panels.iter().enumerate().filter(|(k, _)| root(self.sheet, self.recipes, *k) == r);
+                let before = pieces.filter(|(_, p)| p.name < mine).count();
+                Some((SheetPart::Cap { panel: key(r)?, surface }, Some(before as f64)))
+            }
             (Piece::Panel(i), FaceRole::Wall { a, b, mid }) => {
                 let m = (a + b) * 0.5;
                 if let Some(relief) = cut([a, mid, b]).filter(|(p, _)| matches!(p, SheetPart::Relief { .. })) {

@@ -106,6 +106,12 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
     let operands: Vec<OperandNames> = lineage.operands.iter().map(|op| OperandNames::new(op, o)).collect::<Option<_>>()?;
     let fid = o.feature.id;
     let mut named: Vec<Option<Named>> = h.faces.iter().map(|f| from_origins(f, &operands, fid)).collect();
+    // Where the feature says a face's place among the faces of its name (a sheet cap's pieces).
+    for (slot, ordinal) in named.iter_mut().zip(&lineage.ordinals) {
+        if let (Some(n), Some(k)) = (slot.as_mut(), ordinal) {
+            n.ordinal = Some(*k);
+        }
+    }
     if named.iter().any(Option::is_none) {
         let geometric = crate::naming::geometric_names(b, o, named.len());
         // A face only a tool without roles made (a thread's groove) is named from geometry, after
