@@ -1882,10 +1882,9 @@ impl SolidError {
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
             Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
-            // a blend refusal's status varies with the site for one refusal (#21871)
-            Self::BlendRefused { code, .. } => ErrorKind::of_status(*code),
-            // built only by `round_room::refused`, with `SM_ERR`
-            Self::RoundRefused { .. } => ErrorKind::Failed,
+            // the refusal's own kind, whatever status its site records (#21871)
+            Self::BlendRefused { refusal, .. } => refusal.kind(),
+            Self::RoundRefused { refusal, .. } => refusal.kind(),
             Self::Failed(f) => f.kind(),
             Self::Unported { .. } => ErrorKind::Unported,
         }
@@ -3348,29 +3347,119 @@ mod tests {
         }
     }
 
-    /// A round's refusal is of class `Failed` whatever status it carries (it is built with
-    /// `SM_ERR` only), and the status is kept; a blend refusal still takes its status's
-    /// class, which varies with the site for one refusal (#21871).
+    /// A round's or a blend's refusal is of its refusal's class whatever status it carries,
+    /// and the status is kept (#21871): a refusal kind where one names it, so the error is a
+    /// refusal and not a defect.
     #[test]
     fn a_round_refusal_has_its_class_whatever_its_status() {
+        use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
         use crate::blend::round_room::RoundRefusal;
+        use crate::topology::{EdgeId, VertexId};
 
-        let refusal = RoundRefusal::LawRadiusUnusable {
+        let (edge, vertex) = (EdgeId::from_index(1), VertexId::from_index(2));
+        let law = RoundRefusal::LawRadiusUnusable {
             at: 2.0,
             radius: f64::INFINITY,
         };
         assert_eq!(
-            crate::blend::round_room::refused("op", refusal.clone()).kind(),
-            ErrorKind::Failed
+            crate::blend::round_room::refused("op", law.clone()).kind(),
+            ErrorKind::InvalidInput
         );
+        let rounds = [
+            (law, ErrorKind::InvalidInput),
+            (
+                RoundRefusal::RoundsCross {
+                    at: Vec::new(),
+                    fit: Some(1.0),
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                RoundRefusal::TaperEndUnsupported { vertex, lean: None },
+                ErrorKind::Unsupported,
+            ),
+            (
+                RoundRefusal::FacesCloseAtBothEnds { edge },
+                ErrorKind::FaceConsumed,
+            ),
+            (
+                RoundRefusal::RoomRunsOut {
+                    edge,
+                    at: 0.5,
+                    largest: 1.0,
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+        ];
+        let blends = [
+            (
+                BlendRefusal::EdgeNotBlendable {
+                    edge,
+                    reason: crate::blend::blend_refusal::NotBlendable::NotTwoFaces,
+                },
+                ErrorKind::InvalidInput,
+            ),
+            (
+                BlendRefusal::ContinuesInto {
+                    edge,
+                    vertex,
+                    continues_into: EdgeId::from_index(3),
+                },
+                ErrorKind::TangentContinuationEnd,
+            ),
+            (
+                BlendRefusal::RoundTooSmall {
+                    edge,
+                    turn: 0.1,
+                    tolerance: 1e-6,
+                    smallest_radius: 1e-3,
+                },
+                ErrorKind::StripBelowResolution,
+            ),
+            (
+                BlendRefusal::SetbackTooShort {
+                    vertex,
+                    least: 1.0,
+                    why: SetbackTooShortWhy::RailsCross,
+                },
+                ErrorKind::Failed,
+            ),
+            (
+                BlendRefusal::SetbackTooLong {
+                    vertex,
+                    largest: 1.0,
+                    why: SetbackTooLongWhy::Overlap,
+                },
+                ErrorKind::CornersTakeWholeEdge,
+            ),
+            (
+                BlendRefusal::ChamferAngleTooLarge {
+                    edge,
+                    angle: 2.0,
+                    largest: 1.5,
+                },
+                ErrorKind::FilletTooLarge,
+            ),
+        ];
         for code in [SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER] {
-            let e = SolidError::RoundRefused {
-                operation: "op",
-                code,
-                refusal: refusal.clone(),
-            };
-            assert_eq!(e.kind(), ErrorKind::Failed, "{code}");
-            assert_eq!(e.sm_status(), Some(code));
+            for (refusal, kind) in &rounds {
+                let e = SolidError::RoundRefused {
+                    operation: "op",
+                    code,
+                    refusal: refusal.clone(),
+                };
+                assert_eq!(e.kind(), *kind, "{code} {refusal:?}");
+                assert_eq!(e.sm_status(), Some(code));
+                assert_eq!(e.is_refusal(), kind.is_refusal(), "{refusal:?}");
+                assert!(!e.is_defect(), "{refusal:?}");
+            }
+            for (refusal, kind) in blends {
+                let e = refusal.error("op", code);
+                assert_eq!(e.kind(), kind, "{code} {refusal:?}");
+                assert_eq!(e.sm_status(), Some(code));
+                assert_eq!(e.is_refusal(), kind.is_refusal(), "{refusal:?}");
+                assert!(!e.is_defect(), "{refusal:?}");
+            }
         }
     }
 

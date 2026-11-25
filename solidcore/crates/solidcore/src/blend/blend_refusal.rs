@@ -13,6 +13,7 @@
 use crate::blend::blend_corner::end::continuing_edges;
 use crate::blend::fillet_executive::p1::{is_radius_supported, SUPPORTED_TOLERANCES};
 use crate::error::blend::BlendFailure;
+use crate::error::ErrorKind;
 use crate::math::{rad_to_deg, EFF_ZERO_SQRT, PI};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -184,6 +185,22 @@ impl BlendRefusal {
             Self::SetbackTooShort { vertex, .. } | Self::SetbackTooLong { vertex, .. } => {
                 EntityRef::Vertex(vertex)
             }
+        }
+    }
+
+    /// The refusal's stable [`ErrorKind`], whatever status its site records it with: a
+    /// refusal kind where one names it ([`ErrorKind::is_refusal`]), the caller's input for an
+    /// edge with no blend. A setback too short has no refusal kind of its own yet and stays
+    /// [`ErrorKind::Failed`].
+    #[must_use]
+    pub const fn kind(&self) -> ErrorKind {
+        match self {
+            Self::ChamferAngleTooLarge { .. } => ErrorKind::FilletTooLarge,
+            Self::ContinuesInto { .. } => ErrorKind::TangentContinuationEnd,
+            Self::EdgeNotBlendable { .. } => ErrorKind::InvalidInput,
+            Self::RoundTooSmall { .. } => ErrorKind::StripBelowResolution,
+            Self::SetbackTooLong { .. } => ErrorKind::CornersTakeWholeEdge,
+            Self::SetbackTooShort { .. } => ErrorKind::Failed,
         }
     }
 }
