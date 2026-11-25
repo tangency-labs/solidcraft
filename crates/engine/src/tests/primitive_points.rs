@@ -549,7 +549,8 @@ fn hole_direction_expressions_follow_parameters() {
     assert!((4000.0 - slant - 40.0 * std::f64::consts::PI * 2f64.sqrt()).abs() < 2.0, "{slant}");
     // Turned to 20 degrees off vertical when the parameter changes: a shorter cut.
     run(&mut s, "parameters.change", json!({"name": "t", "expression": "20 deg"}));
-    let (sin, cos) = 20f64.to_radians().sin_cos();
+    // sin and cos of 20 degrees.
+    let (sin, cos) = (0.3420201433256687, 0.9396926207859084);
     let twenty = drilled_block(&mut s, "C", 200.0, json!([0, -sin, -cos]));
     let turned = volume(&s, "A");
     assert!((turned - twenty).abs() < 1e-6 * twenty && turned > slant + 10.0, "{turned} vs {twenty}, was {slant}");
