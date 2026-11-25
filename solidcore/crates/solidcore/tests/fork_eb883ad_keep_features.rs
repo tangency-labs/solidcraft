@@ -734,3 +734,76 @@ fn crease_pieces_are_classified_on_one_snapshot_per_copy() {
     fillet_edges(&mut k, &mut b, &[e], 8.0, 1, 1, 1.0).unwrap();
     assert_eq!(k.work_counters.classification_snapshots(), 24);
 }
+
+/// One fillet r 1 on two chains that share no face (#22144): the block's top front edge, clear
+/// of a boss r 2 at (20, 15) on the top, and the bottom rim of a blind hole r 1.5 under that
+/// boss. The boss's walls continued down from the top pass through the
+/// hole's round (it spans r 1.5 to 2.5 about the hole's axis), which rolls on no face the boss
+/// stands on: the boss is in neither band, and the one fillet is the two fillets one after the
+/// other.
+fn boss_over_a_rounded_hole(k: &mut Kernel) -> Brep {
+    let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let boss = create_cylinder(k, Point3::new(20.0, 15.0, 20.0), 2.0, 5.0).unwrap();
+    let block = boolean_union(k, block, boss).unwrap();
+    let hole = create_cylinder(k, Point3::new(20.0, 15.0, -1.0), 1.5, 7.0).unwrap();
+    boolean_difference(k, block, hole).unwrap()
+}
+
+/// The faces, edges and vertices of a sound solid, its rounds (faces on a procedural blend)
+/// and its volume.
+fn sound_counts(k: &mut Kernel, b: &mut Brep) -> ((usize, usize, usize, usize), f64) {
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(b).unwrap());
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let rounds = b
+        .face_list()
+        .iter()
+        .filter(|&&f| {
+            b.face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .is_some_and(|s| s.procedural_blend().is_some())
+        })
+        .count();
+    let counts = (
+        b.face_list().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+        rounds,
+    );
+    (counts, volume_of(k, b))
+}
+
+#[test]
+fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
+    let (front, rim) = (Point3::new(20.0, 0.0, 20.0), Point3::new(20.0, 16.5, 0.0));
+    // the two rounds one after the other
+    let mut k = Kernel::default();
+    let mut apart = boss_over_a_rounded_hole(&mut k);
+    let e = pick(&k, &apart, front);
+    fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
+    let e = pick(&k, &apart, rim);
+    fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
+    let (want_counts, want) = sound_counts(&mut k, &mut apart);
+    // the closed forms: the front round's spandrel along its 40, and the rim round's revolved
+    // about the hole's axis at its centroid (Pappus)
+    let (a, r) = (1.5, 1.0);
+    let centroid = a + r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let closed =
+        24000.0 + 20.0 * PI - 13.5 * PI - 40.0 * spandrel(r) - 2.0 * PI * centroid * spandrel(r);
+    assert!(
+        (want - closed).abs() <= 1e-9 * closed,
+        "one after the other {want:.12}, closed form {closed:.12}"
+    );
+    // the two rounds in one fillet
+    let mut k = Kernel::default();
+    let mut b = boss_over_a_rounded_hole(&mut k);
+    let edges = [pick(&k, &b, front), pick(&k, &b, rim)];
+    fillet_edges(&mut k, &mut b, &edges, r, 1, 1, 1.0)
+        .expect("two chains clear of each other and of the boss");
+    let (counts, v) = sound_counts(&mut k, &mut b);
+    println!("one fillet {counts:?} {v:.12}; one after the other {want_counts:?} {want:.12}");
+    assert_eq!(counts, want_counts);
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
+}
