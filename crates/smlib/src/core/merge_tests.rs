@@ -246,7 +246,7 @@ fn cube_and_sheet(sheet: impl FnOnce(&mut Kernel) -> solidcore::Result<Brep>) ->
         let sheet = sheet(k)?;
         let mut state = ArenaNotifyState::new(&cube);
         let mut env = state.env(None);
-        merge_brep(k, &mut env, &mut cube, &sheet, &solidcore::topology::brep::p2::copy_source_ref, None, None, true)?;
+        merge_brep(k, &mut env, &mut cube, &sheet, &copy_source_ref, None, None, true)?;
         cube.refresh_cached_topology();
         Ok(cube)
     })

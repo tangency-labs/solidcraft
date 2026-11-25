@@ -865,6 +865,52 @@ fn the_provider_keeps_a_balloon_until_what_it_reads_changes() {
     assert_eq!(*moved.scene, built(&s, sheet));
 }
 
+/// Centre annotations, balloons and their table share the one-shot and retained sheet without
+/// losing one another when either annotation changes.
+#[test]
+fn a_centre_line_and_balloon_keep_their_groups_and_table_in_the_cached_sheet() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_owned();
+    let table = list(&mut s, json!({}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(view), "a": {"point": [0, 0, 0], "path": [occurrence]},
+               "b": {"point": [80, 0, 0], "path": [occurrence]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (balloon_id, line_id, table_id) = (ids::decode(&balloon).unwrap(), ids::decode(&line).unwrap(), ids::decode(&table).unwrap());
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let group = |scene: &solidcraft_geom::paper::Scene, id| scene.groups.iter().find(|group| group.object == id).unwrap().clone();
+    let first = settled(&mut s, sheet);
+    assert_eq!(*first.scene, built(&s, sheet));
+    assert!(first.balloons.iter().any(|b| b.balloon == balloon_id && b.drawn && b.row.item() == Some("1")));
+    assert!(first.tables.iter().any(|t| t.table == table_id && t.drawn));
+    let centre = group(&first.scene, line_id);
+    let _ = group(&first.scene, balloon_id);
+    let _ = group(&first.scene, table_id);
+
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"at": [70, 50]}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(*moved.scene, built(&s, sheet));
+    assert_eq!(group(&moved.scene, line_id), centre);
+    assert_ne!(group(&moved.scene, balloon_id), group(&first.scene, balloon_id));
+    assert!(moved.tables.iter().any(|t| t.table == table_id && t.drawn));
+
+    run(&mut s, "drawing.center_line.edit", json!({"line": line, "overshoot_mm": 4.0}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(*edited.scene, built(&s, sheet));
+    assert_ne!(group(&edited.scene, line_id), centre);
+    assert_eq!(group(&edited.scene, balloon_id), group(&moved.scene, balloon_id));
+    let exported = s.execute("drawing.export", &json!({"sheet": ids::encode(sheet)})).unwrap();
+    let svg = exported["svg"].as_str().unwrap();
+    assert!(svg.contains("data-kind=\"balloon\"") && svg.contains("data-kind=\"centre_line\"") && svg.contains("data-kind=\"parts_list\""));
+    assert!(exported["balloons"].as_array().unwrap().iter().any(|b| b["balloon"] == json!(balloon) && b["drawn"] == json!(true)));
+    assert!(exported["tables"].as_array().unwrap().iter().any(|t| t["table"] == json!(table) && t["drawn"] == json!(true)));
+}
+
 /// A held deferred drawing keeps a balloon as it keeps its dimensions: closed during a model change
 /// and opened again, it shows the balloon as it was and lists it out of date, and a background
 /// export writes the same; updated, the balloon is read again.

@@ -22,6 +22,7 @@ mod chain;
 pub mod compare;
 pub mod drawing_arrange;
 pub mod drawing_break;
+pub mod drawing_centre_mark;
 pub mod drawing_detail;
 pub mod drawing_sheet;
 pub mod drawing_view;
