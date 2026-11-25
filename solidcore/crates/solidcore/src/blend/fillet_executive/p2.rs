@@ -1009,8 +1009,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         reverse: false,
                     })
                 }
-                // Not set up for these yet (they fall through to SM_FS_UNKNOWN).
+                // Not set up for these yet (they fall through to SM_FS_UNKNOWN). A chamfer of
+                // setbacks is made by the session's chamfer preparation, not by a radius type.
                 FilletSolverType::SurfSurf
+                | FilletSolverType::Setbacks
                 | FilletSolverType::CurveBased
                 | FilletSolverType::ConstRadiusAssisted
                 | FilletSolverType::Unknown => None,

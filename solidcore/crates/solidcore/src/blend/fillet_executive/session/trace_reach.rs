@@ -180,6 +180,10 @@ pub(crate) fn extend_trace_to_its_rails(
             radius = smos_max(radius, r.abs());
         }
     }
+    // a chamfer of setbacks (#13710) has offsets 0: its feet reach as far as its setbacks
+    if let SolverObject::Setback(sb) = &*solver {
+        radius = smos_max(radius, smos_max(sb.setbacks[0], sb.setbacks[1]));
+    }
     // `!( dRadius > 0.0 )`: a NaN radius returns too
     let positive = radius > 0.0;
     if !positive {

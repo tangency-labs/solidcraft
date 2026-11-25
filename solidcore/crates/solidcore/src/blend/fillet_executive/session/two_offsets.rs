@@ -308,7 +308,11 @@ impl FilletSession<'_> {
             };
             let r1 = value(OP, first, index)?;
             let angle = 20.0 * (crate::math::PI / 180.0);
-            let solver = if chamfer
+            let solver = if let Some(c) = chamfer.filter(ChamferDefinition::is_setbacks) {
+                // a chamfer of setbacks held at every station (#13710): its own solver, its
+                // setbacks along this edge use's face and its radial's
+                self.new_setback_solver(k, edgeuse, c.setbacks(), approx_tol, angle, TANGENCY)?
+            } else if chamfer
                 .and_then(ChamferDefinition::constant_setback)
                 .is_some()
             {

@@ -4323,15 +4323,21 @@ fn c6_compute_point_values(
         // tangent point, where the intersection curve ends or branches, takes the forward
         // step alone when it found one (`bFoundForw && bFoundBack && !bTangentPoint`).
         let tangent_point = point.point_type == IntersectionPointType::TangentPoint;
+        // the traced curve's point: the ball's centre, the middle of its two contacts; a
+        // chamfer of setbacks (#13710) has no ball, its traced curve is rail 0 (the point's
+        // `CrvPos`)
+        let setbacks =
+            ops.solver_type()? == crate::blend::fillet_solver::p1::FilletSolverType::Setbacks;
+        let traced = |a: Point3, b: Point3| if setbacks { a } else { (a + b) / 2.0 };
         let (step_pt_forw, step_pt_back) = match (forw_pts, back_pts) {
             (Some((f0, f1)), Some((b0, b1))) if !tangent_point => {
-                let fw = (f0 + f1) / 2.0;
-                let bk = (b0 + b1) / 2.0;
+                let fw = traced(f0, f1);
+                let bk = traced(b0, b1);
                 step *= 2.0; // 2.0 * dStep (multiplication commutes exactly)
                 (fw, bk)
             }
-            (Some((f0, f1)), _) => ((f0 + f1) / 2.0, point.crv_pos()),
-            (None, Some((b0, b1))) => (point.crv_pos(), (b0 + b1) / 2.0),
+            (Some((f0, f1)), _) => (traced(f0, f1), point.crv_pos()),
+            (None, Some((b0, b1))) => (point.crv_pos(), traced(b0, b1)),
             (None, None) => return Err(fail(SolverFailure::NeighbourPointsNotFound)),
         };
 
@@ -5308,6 +5314,50 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.pre()?;
         let sur0 = Surface::from(offset_surface(&*self.ops, 0)?.surface.clone());
         let sur1 = Surface::from(offset_surface(&*self.ops, 1)?.surface.clone());
+        // (#13710) a chamfer of setbacks held at every station: the chord by its definition at
+        // the solver's stations, on its extended edge; it is built so or not at all (a ruled
+        // net between the traced rails would not hold the setbacks)
+        if solver_type == crate::blend::fillet_solver::p1::FilletSolverType::Setbacks {
+            let setback = self
+                .ops
+                .setback_mut()
+                .ok_or_else(|| invalid("setbacks type without its solver"))?;
+            let leader = setback
+                .leader()?
+                .ok_or_else(|| invalid("a chamfer of setbacks' edge is a B-spline curve"))?;
+            let chamfer = self
+                .ops
+                .solver()
+                .chamfer
+                .filter(crate::surface::procedural_blend::chamfer::ChamferDefinition::is_setbacks)
+                .ok_or_else(|| invalid("a setbacks solver without its chamfer of setbacks"))?;
+            let solver = self.ops.solver();
+            if !matches!(
+                solver.fillet_surface_generator(),
+                Some(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::Linear)
+            ) {
+                return Err(invalid(
+                    "a chamfer of setbacks is the linear section's chord",
+                ));
+            }
+            let approx_tol_3d = solver.approx_tol_3d;
+            let surface = crate::blend::fillet_standard_solver::p1::LinearCrossSectionFsg
+                .setback_surface(
+                    k,
+                    approx_tol_3d,
+                    &leader,
+                    center_line,
+                    [curve1, curve2],
+                    points,
+                    [&sur0, &sur1],
+                    [uv1, uv2],
+                    chamfer,
+                )?
+                .ok_or_else(|| {
+                    SolidError::surface(OP, crate::error::surface::SurfaceFailure::NetNotCertified)
+                })?;
+            return Ok((Some(surface), None));
+        }
         let radii = self.ops.constant_radii();
         // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
         // read only where the circle generator may take it)

@@ -222,6 +222,19 @@ pub struct GnLawRound<'a> {
     pub range: Option<Extent1d>,
 }
 
+/// Not the fork's (#13710): a chamfer of setbacks traced by its solver
+/// ([`crate::blend::fillet_standard_solver::setback::SetbackFs`]), built at the solver's
+/// stations as a law's round is ([`GnLawRound`]): `leader` the extended edge, `points` the
+/// solver's stations (their s, the edge's parameter, in `user_doubles[0]`; their feet at
+/// `curve_parameter` on the uv curves, the trace's arc length, which is not s).
+#[derive(Clone, Copy, Debug)]
+pub struct GnSetbackTrace<'a> {
+    /// The extended edge, the stations' leader.
+    pub leader: &'a BSplineCurve,
+    /// The solver's stations.
+    pub points: &'a [TsectPnt],
+}
+
 /// What `Build` makes: the surface, and with a law and `bReplaceRails` the centre line it
 /// sets (the balls' centres at the stations, over t; 0d43b4c).
 type Built = (Surface, Option<BSplineCurve>);
@@ -1242,6 +1255,7 @@ impl GnSectionFsg {
             false,
             None,
             None,
+            None,
         )?
         .map(|(s, _)| s)
         .ok_or_else(no_surface_built)
@@ -1274,6 +1288,7 @@ impl GnSectionFsg {
             false,
             [0.0, 0.0],
             false,
+            None,
             None,
             None,
         )?
@@ -1312,6 +1327,7 @@ impl GnSectionFsg {
             replace_rails,
             [radius, radius],
             false,
+            None,
             None,
             None,
         )?
@@ -1357,6 +1373,7 @@ impl GnSectionFsg {
             [radius, radius],
             true,
             law,
+            None,
             None,
         )?;
         Ok(built.map(|(s, c)| {
@@ -1406,6 +1423,7 @@ impl GnSectionFsg {
             true,
             None,
             Some(chamfer),
+            None,
         )?;
         Ok(built.map(|(s, _)| s))
     }
@@ -1433,6 +1451,53 @@ impl GnSectionFsg {
         uvs: [&mut BSplineCurve; 2],
         chamfer: ChamferDefinition,
     ) -> Result<Option<Surface>> {
+        let built = self.setback_chord(k, edge, rails, tol, faces, uvs, chamfer, None)?;
+        Ok(built.map(|(s, _)| s))
+    }
+
+    /// [`Self::build_setback_chord`] on the rails and uv curves its solver traced
+    /// ([`GnSetbackTrace`]: the stations at the solver's s on the extended edge, the leader;
+    /// the rails, uv curves and `center` over the trace's curve parameter, which is not s).
+    /// Built, the rails, the uv curves and `center` run over s: the stations' feet and the
+    /// leader's points.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::build_setback_chord`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_traced_setback_chord(
+        &mut self,
+        k: &Kernel,
+        trace: GnSetbackTrace<'_>,
+        center: &mut BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        chamfer: ChamferDefinition,
+    ) -> Result<Option<Surface>> {
+        let built = self.setback_chord(k, center, rails, tol, faces, uvs, chamfer, Some(trace))?;
+        Ok(built.map(|(s, c)| {
+            if let Some(c) = c {
+                *center = c;
+            }
+            s
+        }))
+    }
+
+    /// The body of [`Self::build_setback_chord`] and [`Self::build_traced_setback_chord`].
+    #[allow(clippy::too_many_arguments)]
+    fn setback_chord(
+        &mut self,
+        k: &Kernel,
+        center: &BSplineCurve,
+        rails: [&mut BSplineCurve; 2],
+        tol: f64,
+        faces: [&Surface; 2],
+        uvs: [&mut BSplineCurve; 2],
+        chamfer: ChamferDefinition,
+        traced: Option<GnSetbackTrace<'_>>,
+    ) -> Result<Option<Built>> {
         if self.order != 0 || !chamfer.is_setbacks() {
             return Err(SolidError::invalid_input(
                 OP,
@@ -1450,7 +1515,7 @@ impl GnSectionFsg {
         }
         let built = self.build(
             k,
-            edge,
+            center,
             rails,
             tol,
             faces,
@@ -1460,15 +1525,16 @@ impl GnSectionFsg {
             false,
             None,
             Some(chamfer),
+            traced,
         )?;
-        let Some((surface, _)) = built else {
+        let Some((surface, new_center)) = built else {
             return Ok(None);
         };
         // its feet: first crossings of their supports, its stations not crossing
         if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
             super::setback_enclose::prove_setback_feet(k, pb)?;
         }
-        Ok(Some(surface))
+        Ok(Some((surface, new_center)))
     }
 
     /// `Build`: the G^n blend surface between the rails, its stations the knots of the
@@ -1493,6 +1559,7 @@ impl GnSectionFsg {
         feet_check: bool,
         law_round: Option<&GnLawRound<'_>>,
         chamfer: Option<ChamferDefinition>,
+        traced: Option<GnSetbackTrace<'_>>,
     ) -> Result<Option<Built>> {
         // a ball whose radius varies (the ball's circle only): its law r(t) and the curve
         // whose planes square to it at t hold the ball's centre (the solver's), t the
@@ -1505,7 +1572,16 @@ impl GnSectionFsg {
         }
         let gn_law = section_law(law_round.map(|l| l.law), chamfer)?;
         let gn_law = gn_law.as_ref();
-        let leader: &BSplineCurve = law_round.map_or(center, |l| l.leader);
+        // the stations' map: a law's round, or a traced chamfer of setbacks (#13710): the
+        // solver's stations at t (s) on the leader, the rails and uv curves over the trace's
+        // curve parameter
+        let map: Option<(&BSplineCurve, &[TsectPnt], Option<Extent1d>)> = match (law_round, traced)
+        {
+            (Some(l), _) => Some((l.leader, l.points, l.range)),
+            (None, Some(t)) => Some((t.leader, t.points, None)),
+            (None, None) => None,
+        };
+        let leader: &BSplineCurve = map.map_or(center, |m| m.0);
         let n = self.order;
         let exact_circle = n == 1 && self.arcs.is_exact_circle();
         // the chord (#2486): a chamfer, its sizes given
@@ -1526,11 +1602,11 @@ impl GnSectionFsg {
         let mut law_foot: Vec<bool> = Vec::new(); // and whether it is one of the solver's
         let mut law_cp: Vec<f64> = Vec::new(); // and then its parameter on the rails
         let (mut i_min, mut i_max) = (c_min, c_max);
-        if let Some(lr) = law_round {
+        if let Some((map_leader, map_points, map_range)) = map {
             // each solver's station: its t, and its feet as the solver's uv curves hold
             // them at its curve parameter (the rails' and uv curves' own, which is not t)
             let mut pts: Vec<(f64, [f64; 5])> = Vec::new();
-            for p in lr.points {
+            for p in map_points {
                 let cp = p.curve_parameter;
                 let w0 = uvs[0].evaluate_point(cp)?;
                 let w1 = uvs[1].evaluate_point(cp)?;
@@ -1556,7 +1632,7 @@ impl GnSectionFsg {
             }
             i_min = t_front;
             i_max = t_back;
-            if let Some(r) = lr.range {
+            if let Some(r) = map_range {
                 let inside = r.min() >= t_front && r.max() <= t_back && r.max() > r.min();
                 if !inside {
                     // "the round's range is not within its stations"
@@ -1569,7 +1645,7 @@ impl GnSectionFsg {
                 i_max = r.max();
             }
             let law_scale = smax(1.0, i_max - i_min);
-            let mut at: Vec<f64> = if lr.range.is_none() {
+            let mut at: Vec<f64> = if map_range.is_none() {
                 pts.iter().map(|p| p.0).collect()
             } else {
                 let mut at = vec![i_min, i_max];
@@ -1580,7 +1656,10 @@ impl GnSectionFsg {
                 }
                 at
             };
-            for c in [lr.leader, lr.law] {
+            for c in [Some(map_leader), law_round.map(|l| l.law)]
+                .into_iter()
+                .flatten()
+            {
                 for kn in c.knots(None)?.0 {
                     if kn > i_min + 1.0e-9 * law_scale && kn < i_max - 1.0e-9 * law_scale {
                         at.push(kn);
@@ -1624,7 +1703,7 @@ impl GnSectionFsg {
         // the equal area thumbweight is resolved per station, from its own wedge
         let equal_area = self.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA;
         for c in [center, &*rail1, &*rail2] {
-            if law_round.is_some() {
+            if map.is_some() {
                 break;
             }
             let (lo, hi) = interval(c);
@@ -1637,7 +1716,7 @@ impl GnSectionFsg {
             }
             ss.extend(c.knots(None)?.0);
         }
-        if law_round.is_none() {
+        if map.is_none() {
             ss.sort_by(f64::total_cmp);
             let mut unique: Vec<f64> = Vec::new();
             for &s in &ss {
@@ -1665,7 +1744,7 @@ impl GnSectionFsg {
         // round starts inside them, where the rails' own start may be past its ball's
         // fading to a point)
         let s_first = match law_cp.first() {
-            Some(&cp) if law_round.is_some() => cp,
+            Some(&cp) if map.is_some() => cp,
             _ => c_min,
         };
 
@@ -1674,7 +1753,12 @@ impl GnSectionFsg {
         let mut r = [0.0_f64; 2];
         let mut side = [0.0_f64; 2];
         {
-            let m = center.evaluate_point(s_first)?;
+            // (a chamfer of setbacks has no ball: its stations stand on the leader, at t)
+            let m = if traced.is_some() {
+                leader.evaluate_point(i_min)?
+            } else {
+                center.evaluate_point(s_first)?
+            };
             let law_r = match law_round {
                 Some(l) => l.law.evaluate_point(i_min)?.x,
                 None => 0.0,
@@ -1723,7 +1807,7 @@ impl GnSectionFsg {
         let mut stations: Vec<GnStation> = Vec::new();
         for (j, &s) in ss.iter().enumerate() {
             k.check_cancelled(OP_BUILD)?;
-            let seed = if law_round.is_some() {
+            let seed = if map.is_some() {
                 law_seeds.get(j).copied().ok_or_else(|| {
                     SolidError::blend(
                         OP,
@@ -1770,10 +1854,10 @@ impl GnSectionFsg {
                 // builds otherwise (308cc40)
                 if feet_check {
                     // with a law, the solver's stations' feet are (0d43b4c)
-                    if law_round.is_some() && !law_foot.get(j).copied().unwrap_or(false) {
+                    if map.is_some() && !law_foot.get(j).copied().unwrap_or(false) {
                         continue;
                     }
-                    let at = if law_round.is_some() {
+                    let at = if map.is_some() {
                         law_cp.get(j).copied().unwrap_or(f64::NAN)
                     } else {
                         s
@@ -1973,7 +2057,7 @@ impl GnSectionFsg {
         // with a law the rails now run over t: the centre line too, the balls' centres at
         // the stations (0d43b4c)
         let mut new_center: Option<BSplineCurve> = None;
-        if replace_rails && law_round.is_some() {
+        if replace_rails && map.is_some() {
             let mut v = Vec::new();
             let mut d = Vec::new();
             let mut d_in = Vec::new();

@@ -305,6 +305,8 @@ pub enum SolverObject {
     VariableRadius(Box<VariableRadiusFs>),
     /// `SmSurfaceSurfaceFS`.
     SurfaceSurface(Box<SurfaceSurfaceFs>),
+    /// Not upstream (#13710): a chamfer of setbacks held at every station.
+    Setback(Box<crate::blend::fillet_standard_solver::setback::SetbackFs>),
 }
 
 impl SolverObject {
@@ -316,6 +318,7 @@ impl SolverObject {
             Self::ConstantDistance(solver) => &solver.solver,
             Self::VariableRadius(solver) => &solver.curve_based.solver,
             Self::SurfaceSurface(solver) => &solver.base.solver,
+            Self::Setback(solver) => &solver.curve_based.solver,
         }
     }
 
@@ -329,6 +332,7 @@ impl SolverObject {
             Self::ConstantDistance(solver) => FilletSolverOps::solver_type(solver.as_ref()),
             Self::VariableRadius(solver) => FilletSolverOps::solver_type(solver.as_ref()),
             Self::SurfaceSurface(solver) => FilletSolverOps::solver_type(solver.as_ref()),
+            Self::Setback(solver) => FilletSolverOps::solver_type(solver.as_ref()),
         }
     }
 
@@ -343,7 +347,7 @@ impl SolverObject {
         match self {
             Self::ConstantRadius(solver) => Ok(Some(solver.oriented_offsets()?)),
             Self::SurfaceSurface(solver) => Ok(Some(solver.base.oriented_offsets()?)),
-            Self::ConstantDistance(_) | Self::VariableRadius(_) => Ok(None),
+            Self::ConstantDistance(_) | Self::VariableRadius(_) | Self::Setback(_) => Ok(None),
         }
     }
 
@@ -354,6 +358,7 @@ impl SolverObject {
             Self::ConstantDistance(solver) => &mut solver.solver,
             Self::VariableRadius(solver) => &mut solver.curve_based.solver,
             Self::SurfaceSurface(solver) => &mut solver.base.solver,
+            Self::Setback(solver) => &mut solver.curve_based.solver,
         }
     }
 }
@@ -656,6 +661,15 @@ impl SessionObjects<'_> {
                 &mut context,
                 note,
             ),
+            // (#13710) a chamfer of setbacks inherits `SmFilletSolver::CalcFilletGeom` too
+            SolverObject::Setback(solver) => FilletSolver::calc_fillet_geom_with_context(
+                solver.as_mut(),
+                k,
+                self.target,
+                &mut self.pseudo,
+                &mut context,
+                note,
+            ),
             // SmSurfaceSurfaceFS::CalcFilletGeom
             SolverObject::SurfaceSurface(solver) => solver.calc_fillet_geom_with_context(
                 k,
@@ -679,6 +693,7 @@ fn live_solver_ops(solver: &mut SolverObject) -> &mut dyn FilletSolverOps {
         SolverObject::VariableRadius(solver) => solver.as_mut(),
         SolverObject::ConstantDistance(solver) => solver.as_mut(),
         SolverObject::SurfaceSurface(solver) => solver.as_mut(),
+        SolverObject::Setback(solver) => solver.as_mut(),
     }
 }
 
@@ -740,6 +755,7 @@ impl crate::blend::blend_corner::swept::SweptSolvers for SweptSessionSolvers<'_>
             SolverObject::VariableRadius(s) => FilletSolverOps::offset_radii_can_change(&**s),
             SolverObject::ConstantDistance(s) => FilletSolverOps::offset_radii_can_change(&**s),
             SolverObject::SurfaceSurface(s) => FilletSolverOps::offset_radii_can_change(&**s),
+            SolverObject::Setback(s) => FilletSolverOps::offset_radii_can_change(&**s),
         }
     }
     fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver> {
@@ -791,6 +807,7 @@ impl crate::blend::blend_corner::ball::BallSolvers for SweptSessionSolvers<'_> {
             SolverObject::VariableRadius(s) => FilletSolverOps::offset_radii_can_change(&**s),
             SolverObject::ConstantDistance(s) => FilletSolverOps::offset_radii_can_change(&**s),
             SolverObject::SurfaceSurface(s) => FilletSolverOps::offset_radii_can_change(&**s),
+            SolverObject::Setback(s) => FilletSolverOps::offset_radii_can_change(&**s),
         }
     }
 }
@@ -2459,6 +2476,9 @@ impl<'target> FilletSession<'target> {
                                     SolverObject::SurfaceSurface(s) => {
                                         FilletSolverOps::offset_radii_can_change(&**s)
                                     }
+                                    SolverObject::Setback(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
                                 };
                                 matches!(can_change, Ok(false))
                             })
@@ -3364,6 +3384,30 @@ impl<'target> FilletSession<'target> {
             k,
             edgeuse,
             distance,
+            approx_tol,
+            ang_tol_rad,
+            tan_tol_rad,
+        )
+    }
+
+    /// Not upstream (#13710): a chamfer of setbacks' solver on `edgeuse`'s edge, `setbacks`
+    /// along its face and its radial's.
+    ///
+    /// # Errors
+    /// Those of [`crate::blend::fillet_standard_solver::setback::SetbackFs::from_edgeuse`].
+    pub fn new_setback_solver(
+        &mut self,
+        k: &Kernel,
+        edgeuse: EdgeuseId,
+        setbacks: [f64; 2],
+        approx_tol: f64,
+        ang_tol_rad: f64,
+        tan_tol_rad: f64,
+    ) -> Result<FilletSolverId> {
+        self.objects.allocate_setback_solver(
+            k,
+            edgeuse,
+            setbacks,
             approx_tol,
             ang_tol_rad,
             tan_tol_rad,
@@ -7405,6 +7449,40 @@ impl SessionObjects<'_> {
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("lost solver slot"))? =
             Some(SolverObject::ConstantDistance(Box::new(solver)));
+        Ok(id)
+    }
+    /// Not upstream (#13710): a chamfer of setbacks' solver
+    /// ([`crate::blend::fillet_standard_solver::setback::SetbackFs::from_edgeuse`]).
+    fn allocate_setback_solver(
+        &mut self,
+        k: &Kernel,
+        edgeuse: EdgeuseId,
+        setbacks: [f64; 2],
+        approx_tol: f64,
+        ang_tol_rad: f64,
+        tan_tol_rad: f64,
+    ) -> Result<FilletSolverId> {
+        let id = FilletSolverId(
+            u32::try_from(self.solvers.len()).map_err(|_| invalid("too many solvers"))?,
+        );
+        // As for the constant-radius solver: reserve the identity first.
+        self.solvers.push(None);
+        let solver = crate::blend::fillet_standard_solver::setback::SetbackFs::from_edgeuse(
+            k,
+            self.target,
+            &mut self.pseudo,
+            id,
+            approx_tol,
+            ang_tol_rad,
+            tan_tol_rad,
+            edgeuse,
+            setbacks,
+        )?;
+        *self
+            .solvers
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("lost solver slot"))? =
+            Some(SolverObject::Setback(Box::new(solver)));
         Ok(id)
     }
     fn allocate_law(&mut self, law: FilletLaw) -> Result<FilletObject> {
