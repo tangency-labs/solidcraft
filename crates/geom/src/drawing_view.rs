@@ -369,7 +369,7 @@ impl ViewFrame {
 
     /// A curve's accuracy on paper: its deviation scaled as the curve is.
     pub fn accuracy_on_paper(&self, accuracy: CurveAccuracy) -> CurveAccuracy {
-        accuracy.scaled(self.map.scale())
+        solidcore_ops::hlr::scaled(accuracy, self.map.scale())
     }
 }
 
