@@ -8,8 +8,9 @@
 //! `lift_error`, `offset_error`, `path`, `path_curve`, `axial_radius`, `cylinder_piece`,
 //! `screw_wall` and `screw_sweep`).
 //!
-//! Planar faces, extrusions, revolutions, lofts to a point and station sweeps are
-//! solidcore-ops' ([`solidcore_ops::sweep`]); a
+//! Planar faces, extrusions, revolutions, lofts to a point, station sweeps, projected curves
+//! and face sections are solidcore-ops' ([`solidcore_ops::sweep`]), the faces picked by point
+//! through [`solidcore_ops::pick::faces`]; a
 //! straight extrusion's runs of arcs on one circle (`one_wall_per_circle` there) are joined by
 //! [`solidcore_ops::sweep::join_circle_runs`] first.
 //!
@@ -42,7 +43,6 @@ use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::{create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep};
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::p1::{ParallelProjectionOptions, create_parallel_projection_curves};
 use solidcore::topology::brep::p2::{ArenaNotifyState, is_manifold_solid};
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p4::stitch_faces;
@@ -51,14 +51,12 @@ use solidcore::topology::brep::p7::copy_faces;
 use solidcore::topology::brep::p8::{
     FaceBuildEnv, create_face_from_surface, create_faces_with_curves, create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves,
 };
-use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs, create_planar_section_curves};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::{EntityRef, SolidError};
 
 use super::blend::status;
-use super::offset::{face_miss, pick_faces};
-use super::{Body, run, with_body};
+use super::{Body, run};
 use crate::sweeps::{Affine, Curve as Profile, DraftCorner, Ends, MAX_CURVES, SweepFrame};
 use crate::sweeps::{CURVE_MAX_DEGREE, CURVE_MAX_POINTS};
 use crate::{Error, Result};
@@ -1441,42 +1439,43 @@ pub(crate) fn screw_sweep(
     })
 }
 
-/// `put_curve`: `c` as the NURBS it is, with its interval; [`Error::Unsupported`] for a curve that
-/// is no B-spline or whose knots are not clamped.
-fn put_curve(c: &Curve) -> solidcore::Result<Out<(Profile, [f64; 2])>> {
-    let Some(b) = bspline(c)? else { return Ok(Err(Error::Unsupported)) };
-    let can = b.canonical()?;
-    let degree = can.degree;
-    let count = can.control_points.len();
-    let mut knots = Vec::with_capacity(count + degree + 1);
-    for (&u, &m) in can.knots.iter().zip(&can.knot_multiplicities) {
-        knots.extend(std::iter::repeat_n(u, m));
-    }
-    let clamped = can.knot_multiplicities.first().is_some_and(|&m| m > degree) && can.knot_multiplicities.last().is_some_and(|&m| m > degree);
-    if !(1..=CURVE_MAX_DEGREE).contains(&degree) || count < degree + 1 || count > CURVE_MAX_POINTS || knots.len() != count + degree + 1 || !clamped {
-        return Ok(Err(Error::Unsupported));
-    }
-    let points = can.control_points.iter().enumerate().map(|(i, p)| [p.x, p.y, p.z, can.weights.get(i).copied().unwrap_or(1.0)]).collect();
-    let ivl = c.natural_interval();
-    Ok(Ok((Profile::Nurbs { degree, points, knots }, [ivl.min(), ivl.max()])))
-}
-
 /// The pick tolerance and the curve tolerance of `smlib_project_curves` and `smlib_face_section`.
 fn tolerances_ok(pick: f64, tolerance: f64) -> bool {
     pick.is_finite() && pick > 0.0 && pick < 1e6 && tolerance.is_finite() && (1e-9..1e3).contains(&tolerance)
 }
 
-/// The face of `b` nearest `point` (`smlib_pick::pick_faces` of one point).
-fn picked_face(k: &mut Kernel, b: &mut Brep, point: [f64; 3], tol: f64) -> solidcore::Result<Out<FaceId>> {
-    Ok(match pick_faces(k, b, &[point], tol)? {
-        Ok(f) => f.first().copied().ok_or(Error::NoMatch { point: 0 }),
-        Err(m) => Err(face_miss(m)),
-    })
+/// The face of `body` nearest `point` within `tolerance` (`smlib_pick::pick_faces` of one
+/// point, [`solidcore_ops::pick::faces`]), as an index of its own order, with that order.
+fn picked_face(call: &'static str, body: &Body, point: [f64; 3], tolerance: f64) -> Result<(solidcore_ops::Order, usize)> {
+    let order = body.own_order();
+    let picked = super::call::ops_as(call, &[("brep", body)], sweep_error, || solidcore_ops::pick::faces(body, &[point], tolerance))?;
+    match picked {
+        Ok(f) => f.first().copied().map(|f| (order, f)).ok_or(Error::NoMatch { point: 0 }),
+        Err(solidcore_ops::pick::Miss::None(point)) => Err(Error::NoMatch { point }),
+        Err(solidcore_ops::pick::Miss::Ambiguous(point)) => Err(Error::Ambiguous { point }),
+    }
+}
+
+/// Curves solidcore-ops gave back, with their intervals, as this crate's.
+fn from_ops(curves: Vec<(solidcore_ops::sweep::Curve, [f64; 2])>) -> Vec<(Profile, [f64; 2])> {
+    use solidcore_ops::sweep::Curve as Ops;
+    curves
+        .into_iter()
+        .map(|(c, interval)| {
+            let c = match c {
+                Ops::Line { start, end } => Profile::Line { start, end },
+                Ops::Arc { center, axis, reference, radius, start, end } => Profile::Arc { center, axis, reference, radius, start, end },
+                Ops::Nurbs { degree, points, knots } => Profile::Nurbs { degree, points, knots },
+            };
+            (c, interval)
+        })
+        .collect()
 }
 
 /// `smlib_project_curves`: `curves` projected along `direction` onto the face nearest
-/// `face_point` (`SmBrep::CreateParallelProjectionCurves` on that face), as NURBS with their
-/// intervals; none is [`Error::Empty`].
+/// `face_point` (`SmBrep::CreateParallelProjectionCurves` on that face,
+/// [`solidcore_ops::sweep::project_curves`]), as NURBS with their intervals; none is
+/// [`Error::Empty`].
 pub(crate) fn project_curves(
     body: &Body,
     face_point: [f64; 3],
@@ -1488,53 +1487,18 @@ pub(crate) fn project_curves(
     if !face_point.iter().chain(&direction).all(|x| x.is_finite()) || !tolerances_ok(pick_tolerance, tolerance) {
         return Err(Error::Argument);
     }
-    let len = v3(direction).length();
-    if !(len > 1e-12) {
-        return Err(Error::Argument);
-    }
-    with_body("smlib_project_curves", body, |k, b| {
-        let given = match parse(k, curves) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        let face = match picked_face(k, b, face_point, pick_tolerance)? {
-            Ok(f) => f,
-            Err(e) => return Ok(Err(e)),
-        };
-        let dir = v3(direction) * (1.0 / len);
-        let faces = [face];
-        let opts = ParallelProjectionOptions {
-            approx_tol_3d: Some(tolerance),
-            subset_faces: Some(&faces),
-            want_3d: true,
-            ..ParallelProjectionOptions::default()
-        };
-        let mut out = Vec::new();
-        for c in &given {
-            // curve->GetRootCurve(): a line, an arc and a B-spline are their own root, and
-            // go in as themselves
-            if !matches!(c.kind(), CurveKind::BSpline(_) | CurveKind::Line(_) | CurveKind::Ellipse(_)) {
-                return Ok(Err(Error::Argument));
-            }
-            let made = match create_parallel_projection_curves(k, b, c, dir, &opts) {
-                Ok(m) => m.curves_3d.unwrap_or_default(),
-                Err(e) => return Ok(Err(status(e))),
-            };
-            for m in &made {
-                match put_curve(m)? {
-                    Ok(x) => out.push(x),
-                    Err(e) => return Ok(Err(e)),
-                }
-            }
-        }
-        Ok(if out.is_empty() { Err(Error::Empty) } else { Ok(out) })
-    })?
+    const CALL: &str = "smlib_project_curves";
+    let given = ops_curves(curves);
+    let (order, face) = picked_face(CALL, body, face_point, pick_tolerance)?;
+    let made = super::call::ops_as(CALL, &[("brep", body)], sweep_error, || {
+        solidcore_ops::sweep::project_curves(body, &order, face, &given, direction, tolerance)
+    })?;
+    Ok(from_ops(made))
 }
 
 /// `smlib_face_section`: the section of the face nearest `face_point` by the plane through
-/// `plane_point` square to `plane_normal` (`SmBrep::CreatePlanarSectionCurves` over the whole
-/// B-rep, keeping the curves of the picked face), as NURBS with their intervals; none is
-/// [`Error::Empty`].
+/// `plane_point` square to `plane_normal` ([`solidcore_ops::sweep::face_section`]), as NURBS
+/// with their intervals; none is [`Error::Empty`].
 pub(crate) fn face_section(
     body: &Body,
     face_point: [f64; 3],
@@ -1546,41 +1510,10 @@ pub(crate) fn face_section(
     if !face_point.iter().chain(&plane_point).chain(&plane_normal).all(|x| x.is_finite()) || !tolerances_ok(pick_tolerance, tolerance) {
         return Err(Error::Argument);
     }
-    let Some(normal) = unit(plane_normal) else { return Err(Error::Argument) };
-    with_body("smlib_face_section", body, |k, b| {
-        let face = match picked_face(k, b, face_point, pick_tolerance)? {
-            Ok(f) => f,
-            Err(e) => return Ok(Err(e)),
-        };
-        // UV curves are asked for, so the classify is forced: an analytic face's intersector
-        // makes none, and without it the trim drops the whole section (SmBrep.h documents the
-        // flag for this). The capi leaves it FALSE, so the C++ kernel answers Empty on planes,
-        // cylinders, cones and spheres (solidcore#1769).
-        let opts = PlanarSectionOptions {
-            approx_tol_3d: Some(tolerance),
-            outputs: SectionOutputs { curves_3d: true, uv_curves: true, faces: true },
-            force_uv_classify: true,
-            ..PlanarSectionOptions::default()
-        };
-        let made = match create_planar_section_curves(k, b, v3(plane_point), normal, &opts) {
-            Ok(m) => m,
-            Err(e) => return Ok(Err(status(e))),
-        };
-        let curves = made.curves_3d.unwrap_or_default();
-        let faces = made.faces.unwrap_or_default();
-        // (each curve's face: without one apiece the picked face's curves are not known)
-        if faces.len() != curves.len() {
-            return Ok(Err(Error::Unsupported));
-        }
-        let mut out = Vec::new();
-        for (c, &f) in curves.iter().zip(&faces) {
-            if f == face {
-                match put_curve(c)? {
-                    Ok(x) => out.push(x),
-                    Err(e) => return Ok(Err(e)),
-                }
-            }
-        }
-        Ok(if out.is_empty() { Err(Error::Empty) } else { Ok(out) })
-    })?
+    const CALL: &str = "smlib_face_section";
+    let (order, face) = picked_face(CALL, body, face_point, pick_tolerance)?;
+    let made = super::call::ops_as(CALL, &[("brep", body)], sweep_error, || {
+        solidcore_ops::sweep::face_section(body, &order, face, plane_point, plane_normal, tolerance)
+    })?;
+    Ok(from_ops(made))
 }
