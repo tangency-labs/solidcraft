@@ -85,6 +85,7 @@ pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod stretch;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;

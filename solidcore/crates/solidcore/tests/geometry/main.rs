@@ -169,6 +169,8 @@ mod public_scale_ownership;
 mod query_normal_definition;
 #[path = "../section_frames.rs"]
 mod section_frames;
+#[path = "../stretch.rs"]
+mod stretch;
 #[path = "../subdivide_face_v_knots.rs"]
 mod subdivide_face_v_knots;
 #[path = "../tangent_edge.rs"]

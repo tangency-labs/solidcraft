@@ -104,7 +104,7 @@ struct CapLoop {
 }
 
 /// A planar surface's point and unit natural normal, and a bound on the normal's rounding.
-fn plane_of(s: &Surface) -> Option<(Point3, Vec3)> {
+pub(crate) fn plane_of(s: &Surface) -> Option<(Point3, Vec3)> {
     match s.kind() {
         SurfaceKind::Plane(p) => {
             let (o, n, _) = p.is_planar();
@@ -116,7 +116,7 @@ fn plane_of(s: &Surface) -> Option<(Point3, Vec3)> {
 }
 
 /// A cylinder's axis point, unit axis and radius.
-fn cylinder_of(s: &Surface) -> Option<(Point3, Vec3, f64)> {
+pub(crate) fn cylinder_of(s: &Surface) -> Option<(Point3, Vec3, f64)> {
     match s.kind() {
         SurfaceKind::Cone(c) if c.is_cylinder() => {
             let can = c.canonical();
@@ -157,7 +157,7 @@ fn net_of(s: &Surface) -> Option<Net> {
 /// A whole bound on how far the wall strays across the direction `d` over `height`: a plane's
 /// normal against `d`, a cylinder's axis against it, a ruled net's rows against it (positive
 /// weights make the hull a bound on the surface). `None` where none is proved.
-fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
+pub(crate) fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
     if let Some((_, n)) = plane_of(surface) {
         let error = 1024.0
             * f64::EPSILON
@@ -342,19 +342,19 @@ fn loops_same(a: &CapLoop, b: &CapLoop, tolerance: f64, work: &mut usize) -> Opt
 }
 
 /// A face's walk: each loop's edges, each with the way it runs about the face's outward normal.
-type Walk = Vec<Vec<(EdgeId, bool)>>;
+pub(crate) type Walk = Vec<Vec<(EdgeId, bool)>>;
 
 /// Whether face `f`'s outward side is its surface's natural normal's: its outer use (the one
 /// bounding the infinite region, [`face_p2::outer_faceuse`]) is its upward use (on the normal's
 /// side).
-fn outward_is_natural(b: &Brep, f: FaceId) -> Option<bool> {
+pub(crate) fn outward_is_natural(b: &Brep, f: FaceId) -> Option<bool> {
     let up = face_p2::upward_faceuse(b, f).ok()??;
     let outer = face_p2::outer_faceuse(b, f).ok()??;
     Some(outer == up)
 }
 
 /// Face `f`'s loops as they run about its outward normal.
-fn walk(b: &Brep, f: FaceId, natural: bool) -> Option<Walk> {
+pub(crate) fn walk(b: &Brep, f: FaceId, natural: bool) -> Option<Walk> {
     let loops = face_get_boundary_loops(b, f).ok()?;
     let mut uses = loops.edges.iter().zip(&loops.orientations);
     let mut out = Vec::new();
@@ -376,7 +376,7 @@ fn face_edges(w: &Walk) -> impl Iterator<Item = EdgeId> + '_ {
     w.iter().flatten().map(|(e, _)| *e)
 }
 
-fn face_points<'a>(b: &'a Brep, w: &'a Walk) -> impl Iterator<Item = Point3> + 'a {
+pub(crate) fn face_points<'a>(b: &'a Brep, w: &'a Walk) -> impl Iterator<Item = Point3> + 'a {
     face_edges(w)
         .filter_map(|e| edge_run(b, e, true))
         .flat_map(|r| r.ends)
