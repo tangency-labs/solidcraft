@@ -30,10 +30,8 @@ use solidcore::Kernel;
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_chamfer_cone_on_arc",
-    "offset_analytic_mate_edges",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
-    "fillet_cleanup_keeps_target_faces",
     "fillet_patch_keeps_fillet_edges",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",

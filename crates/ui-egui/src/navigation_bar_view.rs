@@ -518,6 +518,10 @@ fn display_menu(app: &SolveApp) -> Menu {
     );
     axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
     entries.push(MenuEntry::Row(axes));
+    // The scale bar in the view's bottom left corner (#375).
+    let mut scale_bar = row("scale_bar", app.tr("view.scale_bar"), "measure", "view:scale_bar_toggle", app.preferences.scale_bar);
+    scale_bar.tip = Some(app.tr("view.scale_bar_help").to_owned());
+    entries.push(MenuEntry::Row(scale_bar));
     // The Browser tree panel closes from its own host menu, which left no way back (#16058).
     let mut browser = row("browser_tree", app.tr("cmd.view_browser"), "list", "view:browser_tree", crate::browser::panel_open(app));
     browser.tip = Some(app.tr("help.view.browser").to_owned());
@@ -569,6 +573,9 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         }
         "origin_axes_across_view" => {
             let _ = app.run("view.origin_axes_across_view", json!({"enabled": !app.preferences.origin_axes_across_view}));
+        }
+        "scale_bar" => {
+            let _ = app.run("view.scale_bar", json!({"enabled": !app.preferences.scale_bar}));
         }
         "browser_tree" => {
             let _ = app.run("view.browser", json!({}));

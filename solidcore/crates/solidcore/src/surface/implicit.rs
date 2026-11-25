@@ -1913,7 +1913,11 @@ fn on_axis_from(
 /// [`SolidError::Unported`] and cancellation from the recognisers.
 fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Option<Surface>> {
     let none_on_status = |r: Result<Option<Surface>>| match r {
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
         Ok(s) => Ok(s),
     };
@@ -2758,7 +2762,11 @@ impl AnalyticSupport {
         let test = Surface::from(form.copy());
         let recognised = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
             Ok(Some(rev)) => rev,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Ok(None) | Err(_) => return Err(not_kind()),
         };
         let surface = Self::revolution_from_rows(k, &recognised, form)?.ok_or_else(not_kind)?;

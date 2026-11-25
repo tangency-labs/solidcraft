@@ -583,6 +583,65 @@ fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
     }
 }
 
+/// Rounds between planes that end square on a face or meet three at a corner are built in
+/// closed form (`blend::exact_round`): every edge of the block, or one of them, takes exactly the
+/// volume and area of the rounded block, and the result is a valid solid with the faces the
+/// sessions make: a cylinder per edge, a ball patch per corner.
+#[test]
+fn a_block_s_rounds_between_planes_take_their_closed_forms() {
+    all_fixes();
+    let r: f64 = 2.0;
+    let (a, b, c) = (30.0, 20.0, 10.0);
+    let corner = 1.0 - PI / 6.0;
+    let edge = 1.0 - PI / 4.0;
+    // one edge, ending square on the two end faces
+    let body = block();
+    let e = top_front(&body);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), ABC - edge * r * r * a) < 1e-9);
+    assert_eq!(body.counts().unwrap(), [7, 15, 10]);
+    // every edge: twelve cylinders, eight ball corners
+    let body = block();
+    let mut picks = Vec::new();
+    for y in [0.0, b] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [a / 2.0, y, z]));
+        }
+    }
+    for x in [0.0, a] {
+        for z in [0.0, c] {
+            picks.push(edge_at(&body, [x, b / 2.0, z]));
+        }
+        for y in [0.0, b] {
+            picks.push(edge_at(&body, [x, y, c / 2.0]));
+        }
+    }
+    blend(&body, Blend::Round, &picks, &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let lengths = 4.0 * (a + b + c - 6.0 * r);
+    let want = ABC - edge * r * r * lengths - 8.0 * corner * r * r * r;
+    assert!(
+        rel(volume(&body), want) < 1e-9,
+        "{} against {want}",
+        volume(&body)
+    );
+    assert_eq!(body.counts().unwrap(), [26, 48, 24]);
+    // the concave edge inside an L, ending square on the top and the bottom: material added
+    let ell = || {
+        let block = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+        let notch = make_box([20.0, 15.0, -1.0], [21.0, 16.0, 22.0]).unwrap();
+        solidcore_ops::boolean::boolean(block, notch, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    };
+    let body = ell();
+    let e = edge_at(&body, [20.0, 15.0, 10.0]);
+    blend(&body, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    assert!(rel(volume(&body), 18000.0 + edge * r * r * 20.0) < 1e-9);
+}
+
 #[test]
 fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
     all_fixes();
@@ -1185,6 +1244,90 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
 }
 
+/// [`Turn::Auto`] on the bodies of [`rounds_turn_round_a_boss_edge_mitred_or_swept`]: each turn
+/// swept where the kernel builds it, mitred where not, and never refused for its turn. The
+/// boss base's concave rounds turn round its convex upright edges, so they are swept, the
+/// swept closed form 12500 + 40 A + 2 pi M with four horn tori. The pocket floor's concave
+/// rounds meet concave upright edges, where no ball turns, so they are mitred, 11000 + 60 A -
+/// 8 M, where every turn swept is refused. Chamfers have no swept turn: Auto mitres them,
+/// 12500 + 40 A + 8 M with the chamfer's A = d^2 / 2 and M = d^3 / 6.
+#[test]
+fn auto_turns_are_swept_where_built_and_mitred_where_not() {
+    all_fixes();
+    let bx = |k: &mut Kernel, lo: [f64; 3], size: [f64; 3]| {
+        create_box(k, Vec3::new(lo[0], lo[1], lo[2]), size[0], size[1], size[2])
+    };
+    let auto = |b: &Body, order: &Order, kind, edges: &[usize]| {
+        blend_ordered(
+            b,
+            order,
+            kind,
+            edges,
+            &[1.0],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn: Turn::Auto,
+                ..BlendOptions::default()
+            },
+        )
+    };
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    let boss = || {
+        built(|k| {
+            let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+            let boss = bx(k, [15.0, 10.0, 10.0], [10.0, 10.0, 5.0])?;
+            boolean_union(k, plate, boss)
+        })
+    };
+    let b = boss();
+    let (order, edges) = loop_edges(
+        &b,
+        [[15.0, 10.0], [25.0, 10.0], [25.0, 20.0], [15.0, 20.0]],
+        10.0,
+    );
+    auto(&b, &order, Blend::Round, &edges).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert_eq!(b.counts().unwrap()[0], 19);
+    let v = b.volume(1e-10).unwrap();
+    assert!(rel(v, 12500.0 + 40.0 * a + 2.0 * PI * m) < 1e-9, "{v}");
+    let p = built(|k| {
+        let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+        let cut = bx(k, [10.0, 10.0, 5.0], [20.0, 10.0, 6.0])?;
+        boolean_difference(k, plate, cut)
+    });
+    let (order, edges) = loop_edges(
+        &p,
+        [[10.0, 10.0], [30.0, 10.0], [30.0, 20.0], [10.0, 20.0]],
+        5.0,
+    );
+    auto(&p, &order, Blend::Round, &edges).unwrap();
+    assert!(p.check(CheckLevel::All).unwrap().is_valid());
+    let v = p.volume(1e-10).unwrap();
+    assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
+    let c = boss();
+    let (order, edges) = loop_edges(
+        &c,
+        [[15.0, 10.0], [25.0, 10.0], [25.0, 20.0], [15.0, 20.0]],
+        10.0,
+    );
+    auto(&c, &order, Blend::Chamfer, &edges).unwrap();
+    assert!(c.check(CheckLevel::All).unwrap().is_valid());
+    // the chamfers mitred: each base edge gains the chamfer's triangle, A = d^2 / 2, along its
+    // 10, and each upright edge the two chamfers' parts past both walls, whose section's first
+    // moment about the upright edge is M = d^3 / 6 each (at s from the wall the triangle stands
+    // d - s high and runs on s past each end: the integral of (d - s) (10 + 2 s) over 0..d is
+    // 10 A + 2 M), so 12500 + 40 A + 8 M. Topology: the boss base's 11 faces, 24 edges and 16
+    // vertices; each base edge becomes a chamfer face (15 faces) with its two edges on the wall
+    // and on the plate, each base corner a foot on the upright edge and one on the plate (20
+    // vertices), joined by the mitre's edge: 24 - 4 + 8 + 4 = 32 edges (20 - 32 + 15 = 3, the
+    // plate's top keeping its inner loop round the boss)
+    let (a, m) = (0.5, 1.0 / 6.0);
+    let v = c.volume(1e-10).unwrap();
+    assert!(rel(v, 12500.0 + 40.0 * a + 8.0 * m) < 1e-9, "{v}");
+    assert_eq!(c.counts().unwrap(), [15, 32, 20]);
+}
+
 /// tangency-labs/solidcraft#16897: an 80 x 60 x 10.5 plate with a 30 x 3 x 65 tab on it
 /// (x -15..15, y -1.5..1.5), the tab's four base edges rounded. Past r 1.5 the rounds of the
 /// tab's 3 long ends run on past their end face's own extent to meet the long sides' rounds in
@@ -1484,6 +1627,46 @@ fn a_variable_round_runs_from_the_end_nearest_a_point() {
         fillet_variable_from(&b, 99, [0.0; 3], 1, &knots, &radii),
         Err(Error::Argument)
     );
+}
+
+/// A variable round of a closed edge, a cylinder's top or bottom rim: a smooth law from 2 at
+/// its seam, rising halfway round and back to 2, and 2 all round, builds a valid body whose
+/// volume lies between the constant rounds' of 2 and 4 (the same as 2's for 2 all round). The
+/// station closing the loop used to take t at the rim's start, not its end, and the round
+/// failed with status 1001 (#18542).
+#[test]
+fn a_variable_round_of_a_closed_rim_builds() {
+    all_fixes();
+    let cylinder = || make_cylinder([0.0; 3], 20.0, 60.0).unwrap();
+    let constant = |e: usize, r: f64| {
+        let b = cylinder();
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+        volume(&b)
+    };
+    for e in [1, 2] {
+        let (v2, v4) = (constant(e, 2.0), constant(e, 4.0));
+        for (knots, radii) in [
+            (
+                &[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0][..],
+                &[2.0, 2.0, 4.0, 2.0, 2.0][..],
+            ),
+            (&[0.0, 0.0, 1.0, 1.0][..], &[2.0, 2.0][..]),
+        ] {
+            let b = cylinder();
+            let degree = knots.len() - radii.len() - 1;
+            fillet_variable_from(&b, e, [20.0, 0.0, 60.0], degree, knots, radii).unwrap();
+            assert!(
+                b.check(CheckLevel::All).unwrap().is_valid(),
+                "edge {e}, {radii:?}"
+            );
+            let v = volume(&b);
+            if radii.len() == 2 {
+                assert!(rel(v, v2) < 1e-6, "edge {e}: {v} against {v2}");
+            } else {
+                assert!(v4 < v && v < v2, "edge {e}: {v} not between {v4} and {v2}");
+            }
+        }
+    }
 }
 
 #[test]
