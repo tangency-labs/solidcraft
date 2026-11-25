@@ -281,7 +281,14 @@ enum Role {
 
 impl Builder {
     fn new() -> Builder {
-        Builder { doc: Document::new("FreeCAD"), warnings: Vec::new(), sketches: HashMap::new(), bodies: HashMap::new(), frame: IDENTITY, made: HashMap::new() }
+        Builder {
+            doc: Document::new("FreeCAD"),
+            warnings: Vec::new(),
+            sketches: HashMap::new(),
+            bodies: HashMap::new(),
+            frame: IDENTITY,
+            made: HashMap::new(),
+        }
     }
 
     fn add(&mut self, kind: FeatureKind, name: &str) -> Result<u64, String> {
