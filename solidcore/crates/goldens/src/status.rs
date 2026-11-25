@@ -167,6 +167,30 @@ pub fn drop_status_slot<V: SlotValue>(status: i32, legacy: V) -> V {
     })
 }
 
+/// A typed outcome's slot value (a kernel result that reports success or failure in a
+/// value, not an `Err`): `0` for `None` (success), else the kind's code. The conversions in
+/// `crate::output` that kept the upstream status number until the re-bless pass that number
+/// as `legacy`.
+#[track_caller]
+pub fn outcome_slot<V: SlotValue>(kind: Option<solidcore::error::ErrorKind>, legacy: V) -> V {
+    pick("outcome_slot", legacy, || {
+        V::from_i32(kind.map_or(0, |k| i32::from(k.code())))
+    })
+}
+
+/// The kind of an upstream status number a typed outcome still carries (as
+/// [`drop_status_slot`] maps one): `None` for `SM_SUCCESS`.
+pub fn status_kind(status: i32) -> Option<solidcore::error::ErrorKind> {
+    (status != solidcore::error::SM_SUCCESS).then(|| {
+        SolidError::Upstream {
+            operation: "typed_outcome",
+            code: status,
+            entity: None,
+        }
+        .kind()
+    })
+}
+
 /// The largest size that works, for a refused extension that names one (recorded as
 /// `values["largest_size"]` beside the kind).
 pub(crate) fn largest_size(e: &SolidError) -> Option<f64> {

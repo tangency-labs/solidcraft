@@ -306,69 +306,91 @@ pub fn blend_status(e: &SolidError) -> Option<i32> {
     }
 }
 
-/// The upstream status number the goldens record for a pointer check: `SM_SUCCESS` (1000)
-/// for `PointerCheck::Passed`, `SM_ERR` (1001) for `PointerCheck::Failed` and the early
-/// boolean return (0) for `PointerCheck::StoppedEarly`, as `ValidatePointers` returned them,
-/// so the recorded rows stay as they are. The golden re-bless (#21874) replaces this
-/// conversion with the typed value.
+/// The slot the goldens record for a pointer check: upstream's status number (`SM_SUCCESS`
+/// 1000 for `PointerCheck::Passed`, `SM_ERR` 1001 for `PointerCheck::Failed` and the early
+/// boolean return 0 for `PointerCheck::StoppedEarly`, as `ValidatePointers` returned them)
+/// until the golden re-bless (#21874), then the typed value through
+/// [`crate::status::outcome_slot`]: `0` for a pass, `Failed`'s kind for a failed preflight
+/// and `Missing`'s for a walk that stopped at a missing link.
 #[must_use]
+#[track_caller]
 pub fn pointer_check_status(c: solidcore::topology::brep::validation::PointerCheck) -> i32 {
+    use solidcore::error::ErrorKind;
     use solidcore::topology::brep::validation::PointerCheck;
-    match c {
-        PointerCheck::Passed => solidcore::error::SM_SUCCESS,
-        PointerCheck::Failed => solidcore::error::SM_ERR,
-        PointerCheck::StoppedEarly => 0,
-    }
+    let (kind, legacy) = match c {
+        PointerCheck::Passed => (None, solidcore::error::SM_SUCCESS),
+        PointerCheck::Failed => (Some(ErrorKind::Failed), solidcore::error::SM_ERR),
+        PointerCheck::StoppedEarly => (Some(ErrorKind::Missing), 0),
+    };
+    crate::status::outcome_slot(kind, legacy)
 }
 
-/// The upstream status number the goldens record for a point-solve step
-/// (`FindNextStep`): 0 for a step that did not fail, `SM_ERR_NOT_CONVERGING` (1022) for a
-/// failed `TerminationReason::UnableToConverge` and `SM_ERR_OUTSIDE_OF_DOMAIN` (1020) for
-/// a failed `TerminationReason::OutOfBounds`, the only failures the step returns, so the
-/// recorded rows stay as they are. The golden re-bless (#21874) replaces this conversion with
-/// the typed value.
+/// The slot the goldens record for a point-solve step (`FindNextStep`): upstream's status
+/// number (0 for a step that did not fail, `SM_ERR_NOT_CONVERGING` 1022 for a failed
+/// `TerminationReason::UnableToConverge` and `SM_ERR_OUTSIDE_OF_DOMAIN` 1020 for a failed
+/// `TerminationReason::OutOfBounds`, the only failures the step returns) until the golden
+/// re-bless (#21874), then the typed value through [`crate::status::outcome_slot`].
 #[must_use]
+#[track_caller]
 pub fn next_step_status(step: solidcore::surface::surface_point_solve::p3::NextStep) -> i32 {
+    use solidcore::error::ErrorKind;
     use solidcore::geom::local_solve_nd::TerminationReason;
-    match (step.failed, step.reason) {
-        (false, _) => 0,
-        (true, TerminationReason::OutOfBounds) => solidcore::error::SM_ERR_OUTSIDE_OF_DOMAIN,
-        (true, _) => solidcore::error::SM_ERR_NOT_CONVERGING,
-    }
+    let (kind, legacy) = match (step.failed, step.reason) {
+        (false, _) => (None, 0),
+        (true, TerminationReason::OutOfBounds) => (
+            Some(ErrorKind::OutsideDomain),
+            solidcore::error::SM_ERR_OUTSIDE_OF_DOMAIN,
+        ),
+        (true, _) => (
+            Some(ErrorKind::NotConverged),
+            solidcore::error::SM_ERR_NOT_CONVERGING,
+        ),
+    };
+    crate::status::outcome_slot(kind, legacy)
 }
 
-/// The upstream status number the goldens record for an arc-length parameter
-/// (`FindParameterAtArcLength`): 0 when the iteration converged, `SM_ERR_NOT_CONVERGING`
-/// (1022) when it did not, so the recorded rows stay as they are. The golden re-bless
-/// (#21874) replaces this conversion with the typed value.
+/// The slot the goldens record for an arc-length parameter (`FindParameterAtArcLength`):
+/// upstream's status number (0 when the iteration converged, `SM_ERR_NOT_CONVERGING` 1022
+/// when it did not) until the golden re-bless (#21874), then the typed value through
+/// [`crate::status::outcome_slot`].
 #[must_use]
+#[track_caller]
 pub fn arc_length_status(r: &solidcore::curve::curve::p3::ArcLengthParameter) -> i32 {
     if r.converged {
-        0
+        crate::status::outcome_slot(None, 0)
     } else {
-        solidcore::error::SM_ERR_NOT_CONVERGING
+        crate::status::outcome_slot(
+            Some(solidcore::error::ErrorKind::NotConverged),
+            solidcore::error::SM_ERR_NOT_CONVERGING,
+        )
     }
 }
 
-/// The upstream status number the goldens record for `MakeVertexSplitEdge`: 0 when it split
-/// the edge, `SM_ERR` (1001) when it did not, so the recorded rows stay as they are. The
-/// golden re-bless (#21874) replaces this conversion with the typed value.
+/// The slot the goldens record for `MakeVertexSplitEdge`: upstream's status number (0 when
+/// it split the edge, `SM_ERR` 1001 when it did not) until the golden re-bless (#21874), then
+/// the typed value through [`crate::status::outcome_slot`].
 #[must_use]
+#[track_caller]
 pub fn split_edge_status(split: solidcore::topology::brep::p9::SplitEdgeOutput) -> i32 {
     if split.split {
-        0
+        crate::status::outcome_slot(None, 0)
     } else {
-        solidcore::error::SM_ERR
+        crate::status::outcome_slot(
+            Some(solidcore::error::ErrorKind::Failed),
+            solidcore::error::SM_ERR,
+        )
     }
 }
 
-/// The upstream status number the goldens record for `SetProperties` and `GetNextPoint`:
-/// the outcome's own status (`SM_SUCCESS` 1000, `SM_ERR` 1001, ..., or the number an
-/// `Other` keeps), so the recorded rows stay as they are. The golden re-bless (#21874)
-/// replaces this conversion with the typed value.
+/// The slot the goldens record for `SetProperties` and `GetNextPoint`: the outcome's own
+/// upstream status number (`SM_SUCCESS` 1000, `SM_ERR` 1001, ..., or the number an `Other`
+/// keeps) until the golden re-bless (#21874), then the typed value through
+/// [`crate::status::outcome_slot`] (`0` for success, else the kind of that status).
 #[must_use]
+#[track_caller]
 pub fn point_outcome_status(o: solidcore::intersect::surface_drop_lib::p2::PointOutcome) -> i32 {
-    o.status()
+    let status = o.status();
+    crate::status::outcome_slot(crate::status::status_kind(status), status)
 }
 
 #[cfg(test)]
