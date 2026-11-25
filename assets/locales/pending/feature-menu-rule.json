@@ -43,5 +43,10 @@
     "prefs.feature_menus_act_on_selection": "特征菜单作用于整个选择",
     "prefs.feature_menus_act_on_selection_note": "选中多个特征时，特征菜单（历史和浏览器）中的条目作用于所有选中的特征；只接受一个特征的条目显示为灰色。关闭后，编辑、重命名、抑制、回滚和查找仍像以前一样只作用于右键单击的特征。",
     "timeline.select_one_feature": "请只选择一个特征以使用此项。"
+  },
+  "fr": {
+    "prefs.feature_menus_act_on_selection": "Les menus des fonctions agissent sur toute la sélection",
+    "prefs.feature_menus_act_on_selection_note": "Lorsque plusieurs fonctions sont sélectionnées, une commande du menu d’une fonction (Historique et Explorateur) s’applique à toutes, ou apparaît en grisé si elle ne concerne qu’une seule fonction. Désactivé : Modifier, Renommer, Supprimer, Revenir en arrière et Rechercher agissent uniquement sur la fonction sur laquelle vous avez fait un clic droit, comme auparavant.",
+    "timeline.select_one_feature": "Sélectionnez une seule fonction pour utiliser cette commande."
   }
 }

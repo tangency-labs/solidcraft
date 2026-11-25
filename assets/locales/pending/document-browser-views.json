@@ -62,5 +62,13 @@
     "library.view_grid": "网格",
     "library.view_list": "列表",
     "library.view_thumbnail_list": "缩略图列表"
+  },
+  "fr": {
+    "library.modified": "Modifié le {date}",
+    "library.settings": "Paramètres de l’explorateur de documents",
+    "library.view": "Modifier l’affichage",
+    "library.view_grid": "Grille",
+    "library.view_list": "Liste",
+    "library.view_thumbnail_list": "Liste avec miniatures"
   }
 }

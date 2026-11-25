@@ -206,5 +206,31 @@
     "ui.timeline_2d_settings": "二维时间轴设置",
     "ui.timeline_2d_dots": "对齐点",
     "ui.timeline_2d_activation": "单击行以激活"
+  },
+  "fr": {
+    "ui.timeline_2d_activate_group": "Activer le groupe",
+    "ui.timeline_2d_close_group": "Fermer le groupe",
+    "ui.timeline_2d_deactivate_group": "Désactiver le groupe",
+    "ui.timeline_2d_delete_group_all": "Supprimer le groupe et son contenu",
+    "ui.timeline_2d_delete_group_expand": "Supprimer le groupe en développant son contenu",
+    "ui.timeline_2d_group_selection": "Sélection du groupe ({count} fonctions)",
+    "ui.timeline_2d_group_tip_active": "Actif",
+    "ui.timeline_2d_group_tip_features": "Fonctions de ce groupe :",
+    "ui.timeline_2d_group_tip_hint": "Double-cliquez pour ouvrir ou fermer. Faites un clic droit pour afficher les options du groupe.",
+    "ui.timeline_2d_group_tip_inactive": "Reculé (inactif)",
+    "ui.timeline_2d_group_tip_no_steps": "Aucune étape",
+    "ui.timeline_2d_group_tip_step": "Étape {step}",
+    "ui.timeline_2d_group_tip_steps": "Étapes {first}–{last}",
+    "ui.timeline_2d_group_tip_title": "{name} ({count})",
+    "ui.timeline_2d_open_group": "Ouvrir le groupe",
+    "ui.timeline_2d_rename_group": "Renommer le groupe",
+    "ui.timeline_2d_transport_title": "COMMANDES DE LA CHRONOLOGIE",
+    "ui.timeline_2d_show": "Afficher la chronologie 2D",
+    "ui.timeline_2d_hide": "Afficher la chronologie 1D",
+    "ui.timeline_2d_unsuppress_restore": "Réactiver : restaurer l’état",
+    "ui.timeline_2d_unsuppress_all": "Réactiver : toutes les fonctions",
+    "ui.timeline_2d_settings": "Paramètres de la chronologie 2D",
+    "ui.timeline_2d_dots": "Points d’alignement",
+    "ui.timeline_2d_activation": "Cliquez sur une ligne pour l’activer"
   }
 }
