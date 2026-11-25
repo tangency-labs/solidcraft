@@ -183,6 +183,11 @@ pub enum NoRoomReason {
     /// regressive station: a round's balls, or a constant ball, folding over themselves
     /// along the edge.
     BallsFold,
+    /// A chamfer of setbacks held at every station whose stations cross: a foot past the
+    /// edge's polar line, `1/κ` from it along its principal normal (#13710,
+    /// `blend::fillet_section::setback_station`), so neighbouring stations' planes meet
+    /// inside the chamfer.
+    SetbacksCross,
     /// Two unequal offsets (a chamfer of two distances) where a face curves tighter than
     /// the offset along it, which folds there (the fork's `BallIsRegular`, 410dfe1;
     /// WR-696).

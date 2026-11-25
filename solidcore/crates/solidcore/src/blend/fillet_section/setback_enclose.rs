@@ -258,10 +258,15 @@ fn inside_piece(u: &[f64], k: usize, x: Ivl, side: i32) -> bool {
     (side > 0 || a <= x.lo) && (side < 0 || x.hi <= b)
 }
 
-/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]`.
+/// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]`, to its rounding.
 fn inside_span(u: &[f64], k: usize, lo: f64, hi: f64) -> bool {
     let (a, b) = (knot(u, k as isize), knot(u, k as isize + 1));
-    a <= lo && hi <= b
+    // a span between two of the piece's knots is held by an interval rounded outward, a few
+    // ulps past them: on those the piece's polynomial is the edge's continuation (at a knot
+    // the edge is continuous, past its ends it is the extension the leader stores), so the
+    // proof stands for the piece's own s. Anything more crosses into another piece.
+    let slack = |x: f64| 8.0 * f64::EPSILON * x.abs().max(1.0);
+    a - slack(a) <= lo && hi <= b + slack(b)
 }
 
 /// A failed evaluation proves nothing (`Ok(None)`); a cancel ends the operation.
@@ -594,6 +599,26 @@ pub fn enclose_foot(
     at: Span,
     x_m: [f64; 2],
 ) -> Result<Option<FootTube>> {
+    enclose_foot_sided(k, face, edge, d, at, x_m, [0, 0])
+}
+
+/// [`enclose_foot`] with the side of a knot line or domain end of `face` its piece is taken
+/// on, per parameter ([`FootTube::sides`]): a foot that runs onto a line at a span's end
+/// (a station where it crosses one, or the face's edge) on the piece it comes from,
+/// continued past it.
+///
+/// # Errors
+///
+/// A cancel.
+pub fn enclose_foot_sided(
+    k: &Kernel,
+    face: &Nurbs,
+    edge: &NurbsCurve,
+    d: f64,
+    at: Span,
+    x_m: [f64; 2],
+    sides: [i32; 2],
+) -> Result<Option<FootTube>> {
     k.check_cancelled(OP)?;
     if !(d.is_finite() && d > 0.0 && at.valid()) {
         return Ok(None);
@@ -628,7 +653,7 @@ pub fn enclose_foot(
         &system,
         1,
         Some(Ivl::from(d)),
-        [0, 0],
+        sides,
     )
 }
 
@@ -1416,6 +1441,167 @@ pub fn enclose_chord(
         return Ok(None);
     };
     Ok(Some(ChordTube { d, feet: [t1, t2] }))
+}
+
+/// The most spans [`prove_setback_feet`] proves a definition over: its net's spans, each
+/// halved where a proof does not hold on the whole of it.
+pub const PROOF_SPANS: usize = 1 << 12;
+
+/// The proofs a chamfer of setbacks held at every station stands on (module docs), over every
+/// span of its net along the edge (`pb`'s stations: the edge's knots and wherever a foot
+/// crosses a knot line of its support, which no tube proves across): each foot enclosed
+/// ([`enclose_foot`], from the definition's seeds), its stations not crossing
+/// ([`crossing`]) and the first crossing of its support's section ([`first_crossing`],
+/// from the edge's projection on the support, [`enclose_projection`]). A span on which a
+/// proof decides nothing is halved, within [`PROOF_SPANS`] spans in all. A definition that
+/// is not a chamfer of setbacks has nothing to prove.
+///
+/// # Errors
+///
+/// `NoRoom(SetbacksCross)` where a foot is proved past the edge's polar line (the asked
+/// chamfer does not fit there); `SectionNotProved(SetbackFeet)` where the proofs do not hold
+/// within the budget; `SectionUnsupported(FaceNotNurbs)` for a support without NURBS data;
+/// a cancel; those of the evaluations.
+pub fn prove_setback_feet(
+    k: &Kernel,
+    pb: &crate::surface::procedural_blend::ProceduralBlend,
+) -> Result<()> {
+    use crate::blend::fillet_executive::p3::NoRoomReason;
+    use crate::error::blend::{BlendFailure, SectionLimit, SectionProof};
+    use crate::math::Point2;
+    use crate::surface::procedural_blend::chamfer::ChamferDefinition;
+    let d = pb.definition();
+    let Some(chamfer) = d.chamfer.filter(ChamferDefinition::is_setbacks) else {
+        return Ok(());
+    };
+    let setbacks = chamfer.setbacks();
+    let nurbs_of = |s: &crate::surface::surface::Surface| -> Result<Nurbs> {
+        let b = super::station::as_b_spline(k, s)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::SectionUnsupported(SectionLimit::FaceNotNurbs),
+            )
+        })?;
+        Nurbs::of(&b)
+    };
+    let [s0, s1] = pb.supports();
+    let faces = [nurbs_of(s0)?, nurbs_of(s1)?];
+    let edge = NurbsCurve::of(&d.leader)?;
+    // the net's stations along the edge, as the definition's s
+    let net = Nurbs::of(pb.net())?;
+    let along = if d.swapped { &net.v } else { &net.u };
+    let mut ss: Vec<f64> = along
+        .iter()
+        .map(|&p| {
+            let uv = if d.swapped {
+                Point2::new(0.0, p)
+            } else {
+                Point2::new(p, 0.0)
+            };
+            pb.definition_parameters(uv).x
+        })
+        .collect();
+    ss.sort_by(f64::total_cmp);
+    ss.dedup();
+    let not_proved = || {
+        SolidError::blend(
+            OP,
+            BlendFailure::SectionNotProved(SectionProof::SetbackFeet),
+        )
+    };
+    let mut stack: Vec<(f64, f64)> = ss
+        .windows(2)
+        .filter_map(|w| match w {
+            [a, b] if b > a => Some((*a, *b)),
+            _ => None,
+        })
+        .collect();
+    let mut spans = stack.len();
+    while let Some((lo, hi)) = stack.pop() {
+        k.check_cancelled(OP)?;
+        let at = Span {
+            m: 0.5 * (lo + hi),
+            delta: 0.5 * (hi - lo),
+        };
+        let mut held = true;
+        for ((face, seed), &setback) in faces.iter().zip(&d.seeds).zip(&setbacks) {
+            let w = seed.evaluate_point(at.m)?;
+            let x_m = [w.x, w.y];
+            // each parameter's piece continued towards the nearer of its ends: a foot that
+            // reaches a knot line or the face's edge does so at a span's end (Build puts a
+            // station where a foot crosses a line, recertify refuses a net that lacks one),
+            // so it lies in the piece's closure and is that piece's root
+            let toward = |x: f64, u: &[f64], deg: usize, n: usize| {
+                let piece = span(u, deg, n, x);
+                let (a, b) = (knot(u, piece as isize), knot(u, piece as isize + 1));
+                if x - a > b - x {
+                    -1
+                } else {
+                    1
+                }
+            };
+            let sides = [
+                toward(x_m[0], &face.u, face.p, face.nu),
+                toward(x_m[1], &face.v, face.q, face.nv),
+            ];
+            let Some(foot) = enclose_foot_sided(k, face, &edge, setback, at, x_m, sides)? else {
+                held = false;
+                break;
+            };
+            match crossing(k, &edge, &foot, at)? {
+                Proof::Fails => {
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::NoRoom(NoRoomReason::SetbacksCross),
+                    ))
+                }
+                Proof::NotProved => {
+                    held = false;
+                    break;
+                }
+                Proof::Holds => {}
+            }
+            // the edge's projection on the support (Newton from the foot), and the way into
+            // the support from the edge
+            let Some(c) = edge_at(&edge, at.m)? else {
+                held = false;
+                break;
+            };
+            // the edge's projection lies on the face within the edge's tolerance, often on its
+            // boundary: its piece as it lies, or continued past whichever end it is at, in
+            // one parameter (the first-crossing proof continues a piece across the section,
+            // not along the edge)
+            let mut proj = None;
+            for try_sides in [[0, 0], [0, 1], [0, -1], [1, 0], [-1, 0]] {
+                proj = enclose_projection(k, face, &edge, at, x_m, try_sides)?;
+                if proj.is_some() {
+                    break;
+                }
+            }
+            let Some(proj) = proj else {
+                held = false;
+                break;
+            };
+            let foot_m = f64_v(face_at(face, x_m, 0).at(0, 0));
+            let into = sub3(foot_m, c[0]);
+            if first_crossing(k, face, &edge, Ivl::from(setback), at, &foot, &proj, into)?
+                != Proof::Holds
+            {
+                held = false;
+                break;
+            }
+        }
+        if held {
+            continue;
+        }
+        spans += 1;
+        if spans > PROOF_SPANS || at.delta <= f64::EPSILON * (1.0 + at.m.abs()) {
+            return Err(not_proved());
+        }
+        stack.push((lo, at.m));
+        stack.push((at.m, hi));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

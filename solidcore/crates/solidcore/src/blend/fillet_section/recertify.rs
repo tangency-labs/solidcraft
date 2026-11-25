@@ -577,9 +577,14 @@ pub fn recertify_with_thumbweight(
     crate::profile::profile_scope!(k, "blend::certificate::recertify");
     let centre = frame_centre(pb.net())?;
     let local = pb.translated(k, centre * -1.0)?;
-    recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)?.ok_or_else(|| {
-        SolidError::invalid_input(OP, "the net is not within its bound of its definition")
-    })
+    let proved =
+        recertify_in_frame(k, &local, pb.bound(), frame_rounding(pb.net())?)?.ok_or_else(|| {
+            SolidError::invalid_input(OP, "the net is not within its bound of its definition")
+        })?;
+    // a chamfer of setbacks: its feet first crossings and its stations not crossing, as its
+    // build proved them (nothing for any other definition)
+    super::setback_enclose::prove_setback_feet(k, pb)?;
+    Ok(proved)
 }
 
 /// The bound of a blend whose net was edited after it was built (#17015: a fillet's join

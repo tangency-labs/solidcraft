@@ -1461,7 +1461,14 @@ impl GnSectionFsg {
             None,
             Some(chamfer),
         )?;
-        Ok(built.map(|(s, _)| s))
+        let Some((surface, _)) = built else {
+            return Ok(None);
+        };
+        // its feet: first crossings of their supports, its stations not crossing
+        if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
+            super::setback_enclose::prove_setback_feet(k, pb)?;
+        }
+        Ok(Some(surface))
     }
 
     /// `Build`: the G^n blend surface between the rails, its stations the knots of the
@@ -3003,13 +3010,23 @@ mod tests {
         (built, g)
     }
 
-    /// A chamfer of setbacks held at every station on the edge where a quarter wall of radius 8
-    /// stands on a plate (z = 0), 2 on the plate and 1 on the wall: its feet are at radius 10
-    /// on the plate and at height 1 on the wall, all along, in closed form. Built from rails
-    /// and uv curves off the feet, the stations' feet replace them; the chord is certified
-    /// within the tolerance, re-certifies, and its definition is the chord between the feet.
-    #[test]
-    fn a_chamfer_of_setbacks_is_built_on_its_feet_and_certified() {
+    /// The edge where a wall of radius 8 (0 to 10 high) stands on a plate z = 0, a quarter turn
+    /// of it the edge, and a
+    /// chamfer of setbacks `d1` on the plate and `d2` on the wall built on it, from rails and uv
+    /// curves off its feet (the plate's foot near radius `plate_foot`): the kernel, the
+    /// supports, the edge, the rails and uv curves after the build, and what it built.
+    #[allow(clippy::type_complexity)]
+    fn wall_on_plate_setbacks(
+        plate_foot: f64,
+        d1: f64,
+        d2: f64,
+    ) -> (
+        Kernel,
+        [Surface; 2],
+        BSplineCurve,
+        [BSplineCurve; 4],
+        Result<Option<Surface>>,
+    ) {
         use crate::geom::vector3d::Point3;
         use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
         use crate::nurbs::b_spline_surface::{
@@ -3062,50 +3079,90 @@ mod tests {
             ],
             None,
         );
+        // the wall runs past the edge's ends, as a blend's supports do: three quarters of a
+        // turn from -90 to 180 degrees, the edge on the middle one (u = 1/3 + s/3 there)
         let (mut cps, mut ws) = (Vec::new(), Vec::new());
         let h = 0.5_f64.sqrt();
-        for (p, wi) in [(wall, 0.0), (wall, wall), (0.0, wall)]
-            .into_iter()
-            .zip([1.0, h, 1.0])
+        for (p, wi) in [
+            (0.0, -wall),
+            (wall, -wall),
+            (wall, 0.0),
+            (wall, wall),
+            (0.0, wall),
+            (-wall, wall),
+            (-wall, 0.0),
+        ]
+        .into_iter()
+        .zip([1.0, h, 1.0, h, 1.0, h, 1.0])
         {
             for z in [0.0, height] {
                 cps.push(Point3::new(p.0, p.1, z));
                 ws.push(wi);
             }
         }
-        let cylinder = surface(2, 1, &cps, Some(&ws));
+        let cylinder = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 2,
+                v_degree: 1,
+                control_points: &cps,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[3, 2, 2, 3],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&ws),
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
         let k = Kernel::default();
         let id = [1.0, 0.0];
-        let (d1, d2) = (2.0, 1.0);
         let mut edge = quarter(3, wall, 0.0, id, id);
         edge.insert_knots(&[0.25, 0.5, 0.75]).unwrap();
         // the rails and uv curves off the feet (as a tracer's first guess would be)
         let off = 0.05;
-        let mut rail1 = quarter(3, wall + d1 + off, 0.0, id, id);
+        let mut rail1 = quarter(3, plate_foot + off, 0.0, id, id);
         let mut rail2 = quarter(3, wall, d2 + off, id, id);
-        let mut uv1 = quarter(2, wall + d1 + off, 0.0, [0.5 / w, 0.5], [0.5 / w, 0.5]);
+        let mut uv1 = quarter(2, plate_foot + off, 0.0, [0.5 / w, 0.5], [0.5 / w, 0.5]);
         let mut uv2 = BSplineCurve::create_line_segment(
             2,
-            Point3::new(0.0, (d2 + off) / height, 0.0),
-            Point3::new(1.0, (d2 + off) / height, 0.0),
+            Point3::new(1.0 / 3.0, (d2 + off) / height, 0.0),
+            Point3::new(2.0 / 3.0, (d2 + off) / height, 0.0),
         )
         .unwrap();
         let chamfer = ChamferDefinition::of_setbacks(ChamferSize::Distances([d1, d2])).unwrap();
         let tol = 1e-4;
         let mut g = GnSectionFsg::chord();
-        let built = g
-            .build_setback_chord(
-                &k,
-                &edge,
-                [&mut rail1, &mut rail2],
-                tol,
-                [&plate, &cylinder],
-                [&mut uv1, &mut uv2],
-                chamfer,
-            )
-            .unwrap()
-            .expect("a chamfer of setbacks builds");
-        assert!(g.certified_bound <= tol, "{}", g.certified_bound);
+        let built = g.build_setback_chord(
+            &k,
+            &edge,
+            [&mut rail1, &mut rail2],
+            tol,
+            [&plate, &cylinder],
+            [&mut uv1, &mut uv2],
+            chamfer,
+        );
+        if let Ok(Some(_)) = &built {
+            assert!(g.certified_bound <= tol, "{}", g.certified_bound);
+        }
+        (k, [plate, cylinder], edge, [rail1, rail2, uv1, uv2], built)
+    }
+
+    /// A chamfer of setbacks held at every station on the edge where a quarter wall of radius 8
+    /// stands on a plate (z = 0), 2 on the plate and 1 on the wall: its feet are at radius 10
+    /// on the plate and at height 1 on the wall, all along, in closed form. Built from rails
+    /// and uv curves off the feet, the stations' feet replace them; the chord is certified
+    /// within the tolerance, its feet proved first crossings that do not cross, it
+    /// re-certifies, and its definition is the chord between the feet.
+    #[test]
+    fn a_chamfer_of_setbacks_is_built_on_its_feet_and_certified() {
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+        let (wall, d1, d2, tol) = (8.0, 2.0, 1.0, 1e-4);
+        let (k, [plate, cylinder], edge, [mut rail1, mut rail2, mut uv1, mut uv2], built) =
+            wall_on_plate_setbacks(wall + d1, d1, d2);
+        let chamfer = ChamferDefinition::of_setbacks(ChamferSize::Distances([d1, d2])).unwrap();
+        let built = built.unwrap().expect("a chamfer of setbacks builds");
         let SurfaceKind::ProceduralBlend(pb) = built.kind() else {
             panic!("a blend by its definition: {:?}", built.kind());
         };
@@ -3143,6 +3200,22 @@ mod tests {
                 offsets,
             )
             .is_err());
+    }
+
+    /// The same edge chamfered 9 into the plate (towards the wall's axis) and 1 on the wall:
+    /// the plate's foot lies past the edge's polar line, the axis 8 from it, so neighbouring
+    /// stations' planes cross inside the chamfer. Refused as not fitting, not built.
+    #[test]
+    fn a_chamfer_of_setbacks_past_the_axis_is_refused_as_crossing() {
+        use crate::blend::fillet_executive::p3::NoRoomReason;
+        use crate::error::blend::BlendFailure;
+        let (.., built) = wall_on_plate_setbacks(8.0 - 9.0, 9.0, 1.0);
+        let e = built.expect_err("refused, not built");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
+            "{e:?}"
+        );
     }
 
     fn work_budget_case(knots: usize, tol: f64) {

@@ -68,6 +68,7 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::RailPastAxis => ErrorKind::RailPastAxis,
         R::RailRunsPastFaceIntoMaterial => ErrorKind::RunsIntoMaterial,
         R::RoundIntoMaterial => ErrorKind::RunsIntoMaterial,
+        R::SetbacksCross => ErrorKind::BallsFold,
         R::StripBelowResolution => ErrorKind::StripBelowResolution,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
     }

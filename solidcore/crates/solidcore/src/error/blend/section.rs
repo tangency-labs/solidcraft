@@ -22,6 +22,9 @@ pub enum SectionProof {
     RadiusPositive,
     /// The section's weight positive over an extension.
     SectionWeightPositive,
+    /// A chamfer of setbacks' feet: each the first crossing of its support's section with
+    /// the circle of its setback, and its stations not crossing.
+    SetbackFeet,
 }
 
 impl SectionProof {
@@ -35,6 +38,9 @@ impl SectionProof {
             Self::FaceWeightPositive => "a face's weights positive over the box",
             Self::RadiusPositive => "the ball's radius positive over the box",
             Self::SectionWeightPositive => "the section's weight positive over the extension",
+            Self::SetbackFeet => {
+                "each setback foot the first crossing of its support, and the stations not crossing"
+            }
         }
     }
 }
