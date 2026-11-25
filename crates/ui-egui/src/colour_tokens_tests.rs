@@ -189,9 +189,9 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("issue_report.rs", 1, "a shrunk screenshot's averaged pixels: image data"),
     (
         "viewport.rs",
-        12,
+        13,
         "colours from data (a component's, a face's or a body's appearance, the analysis legend), tokens given an alpha or \
-         blended (the selected origin plane, the section rim), the grey ring of the origin point and of a component's origin, the white \
+         blended (the selected origin plane, the section rim, the faded edges of what Isolate shows as wireframe), the grey ring of the origin point and of a component's origin, the white \
          outline of the orbit mark, and the yellow of a sketch path's first point, which should become a token; the guard now also counts \
          the literals below viewport.rs's mid-file test items (#13497)",
     ),
