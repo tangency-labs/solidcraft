@@ -2890,6 +2890,79 @@ fn a_body_pattern_with_no_copies_is_still_added() {
     assert_eq!(s.model.state().bodies.len(), 1);
 }
 
+/// Regression (#21245): editing a body pattern via `timeline.edit` copies source material and
+/// appearance onto newly created copies (from `count1 = 1` or more copies), preserves an
+/// existing copy's explicit override, and applies a newly chosen seed body's material/appearance.
+#[test]
+fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
+    // 1) Increasing count1 via timeline.edit copies material & appearance while keeping overrides.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 50, 0], "operation": "new", "body_name": "Post"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Base"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Base"], "color": [40, 120, 200]}));
+    run(&mut s, "material.assign", json!({"bodies": ["Post"], "material": "Brass"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Post"], "color": [200, 30, 30]}));
+    let blue = s.doc.appearances.bodies.get("Base").cloned().expect("Base has appearance");
+    let red = s.doc.appearances.bodies.get("Post").cloned().expect("Post is red");
+    let pat = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}))["feature"]
+        .as_u64()
+        .unwrap();
+    // Override Base (2) manually; it must stay Brass/green when count1 rises to 4.
+    run(&mut s, "material.assign", json!({"bodies": ["Base (2)"], "material": "Brass"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Base (2)"], "color": [20, 180, 60]}));
+    let green = s.doc.appearances.bodies.get("Base (2)").cloned().expect("Base (2) is green");
+
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"pattern.count1": 4}}));
+    assert_eq!(s.doc.materials.get("Base (2)").map(String::as_str), Some("Brass"));
+    assert_eq!(s.doc.appearances.bodies.get("Base (2)"), Some(&green));
+    for copy in ["Base (3)", "Base (4)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&blue), "{copy}");
+    }
+
+    // 2) Starting from count1 = 1 (no initial copies), raising count1 to 3 copies onto new copies.
+    let mut one = Session::default();
+    run(&mut one, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Base"}));
+    run(&mut one, "material.assign", json!({"bodies": ["Base"], "material": "Aluminum"}));
+    let single = run(&mut one, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 1, "spacing1": 30}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut one, "timeline.edit", json!({"feature": single, "set": {"pattern.count1": 3}}));
+    for copy in ["Base (2)", "Base (3)"] {
+        assert_eq!(one.doc.materials.get(copy).map(String::as_str), Some("Aluminum"), "{copy}");
+    }
+
+    // 3) Changing the seed body via timeline.edit copies the new seed body's material and look.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["Post"], "pattern.count1": 3}}));
+    for copy in ["Post (2)", "Post (3)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Brass"), "{copy}");
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
+    }
+
+    // 4) Switching to an unstyled seed body while keeping explicit copy names clears stale
+    // material and appearance entries from the previous seed.
+    let mut clear = Session::default();
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Styled"}));
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 40, 5], "operation": "new", "body_name": "Plain"}));
+    run(&mut clear, "material.assign", json!({"bodies": ["Styled"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["Styled"], "color": [40, 120, 200]}));
+    let named_pat =
+        run(&mut clear, "solid.pattern.rectangular", json!({"bodies": ["Styled"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30}))["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"body_names": ["CopyA", "CopyB"]}}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Styled"]}}));
+    // Re-seed from Styled -> CopyA/CopyB carry Steel and appearance; now switch to Plain.
+    run(&mut clear, "material.assign", json!({"bodies": ["CopyA", "CopyB"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["CopyA", "CopyB"], "color": [40, 120, 200]}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Plain"], "body_names": ["CopyA", "CopyB"]}}));
+    for copy in ["CopyA", "CopyB"] {
+        assert_eq!(clear.doc.materials.get(copy), None, "{copy}");
+        assert_eq!(clear.doc.appearances.bodies.get(copy), None, "{copy}");
+    }
+}
+
 /// #12199: a path whose curves are listed out of chain order is the same path as in chain order.
 #[test]
 fn pattern_on_path_orders_the_curves_into_one_chain() {

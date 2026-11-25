@@ -81,7 +81,10 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // picked edge and face axes too.
         SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
-        "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
+        "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
+        // Coil's axis may also be a reference (a named axis, an edge, `{origin, dir}`); `Axis`
+        // turns a bare direction as `PrimitiveAxis` does and passes X, Y or Z by name through.
+        "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
         "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
@@ -109,12 +112,12 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
-        "sheet.perforate" | "sheet.tab" => &[("body", Body)],
+        "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
-        "sketch.project" | "sketch.intersect" | "sketch.include_3d" => &[("refs", Here), ("ref", Here)],
+        "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.repair_link" => &[("refs", Here), ("ref", Here)],
         "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Here)],
         "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
@@ -620,14 +623,14 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     }
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
-    // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
+    // Edit Feature of a revolve or coil restores its saved axis (and the origin's expressions) even
     // where nothing is placed (`map_local`).
-    let revolve_edit =
-        id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
+    let axis_edit = id == "timeline.redefine"
+        && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve" | "solid.coil"));
     let grouped_thread = grouped_thread_faces(id, params);
     let copying = id == "solid.move" && params.get("copy").and_then(Value::as_bool) == Some(true);
     let copy_edit = id == "timeline.redefine" && edited_copy_frames(s, params).is_some();
-    if !picks || (!placed(s) && !revolve_edit && grouped_thread.is_none() && !copying && !copy_edit) {
+    if !picks || (!placed(s) && !axis_edit && grouped_thread.is_none() && !copying && !copy_edit) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -664,7 +667,7 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
             normalized["faces"] = faces;
         }
     }
-    if !placed && !revolve_edit && !copying && !copy_edit {
+    if !placed && !axis_edit && !copying && !copy_edit {
         return Ok(grouped_thread.map(|_| normalized));
     }
     Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref(), None).or_else(|| grouped_thread.map(|_| normalized)))
@@ -806,22 +809,26 @@ fn map_local_with_input(
         }
         // Nothing to map (a surface revolve has no picks; a design with no placed component needs
         // none): an untouched explicit axis is still restored below.
+        let stored_axis = match (cmd, &feature.kind) {
+            ("solid.revolve", solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. })
+            | ("surface.revolve", solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. })
+            | ("solid.coil", solidcraft_doc::FeatureKind::Coil { axis_ref: Some(solidcraft_doc::AxisRef::Line { origin, dir }), .. }) => {
+                Some((origin, dir))
+            }
+            _ => None,
+        };
         let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
         let copies = edited_copy_frames(s, params);
         let mapped =
             if placed(s) || copies.is_some() { map_local_with_input(&context, world, edited, params.get("params")?, input, copies) } else { None };
         let mut inner = match mapped {
             Some(inner) => inner,
-            None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
+            None if stored_axis.is_some() || matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
             None => return None,
         };
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
-        if let (
-            "solid.revolve" | "surface.revolve",
-            solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. }
-            | solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. },
-        ) = (cmd, &feature.kind)
+        if let Some((origin, dir)) = stored_axis
             && let Ok(at) = s.doc.eval_point(origin)
         {
             let frame = context.active_component_frame();
@@ -990,12 +997,13 @@ fn map_local_with_input(
                     }
                 }
                 Axis => {
-                    // A name, and among them a component origin key (`o:…/origin/X`), passes
-                    // through untouched: the command's resolver applies the one order - a feature
-                    // of the same name first, then the datum - and saves the reference that
-                    // follows what it names (#7313), instead of the axis being frozen where it
-                    // was picked.
-                    if let Some(axis) = v.as_object() {
+                    // A name, including a component origin key (`o:…/origin/X`), passes
+                    // through untouched so the command keeps its persistent reference.
+                    // Coil takes a bare direction in either vector form. Use its parser to
+                    // distinguish an object direction from a saved axis reference.
+                    if vec3(v).is_some() || (id == "solid.coil" && v.is_object() && crate::cmd::axis_dir_form(v).is_ok()) {
+                        m.dir(v)
+                    } else if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         // An `{origin, dir}` axis without its origin passes through the world's,
                         // which the component may have moved.

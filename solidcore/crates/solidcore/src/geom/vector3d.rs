@@ -53,6 +53,7 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::signed_unit_angle`]                  | not upstream: oriented angle of unit directions   |
 //! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
@@ -179,6 +180,34 @@ impl Vec3 {
     /// The uninitialized vector: all components `SM_UNDEF_DOUBLE` (upstream's default
     /// constructor).
     pub const UNDEF: Self = Self::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
+
+    /// Orient an undirected axis toward the positive side of its largest component, keeping
+    /// its length. Components within a relative 1e-9 of the largest magnitude tie in X, Y, Z
+    /// order, at any scale, so a zero component never decides; the zero vector stays as it is.
+    #[must_use]
+    pub fn canonical_axis_direction(self) -> Self {
+        let coordinates = self.to_array();
+        let largest = coordinates
+            .iter()
+            .fold(0.0_f64, |size, coordinate| size.max(coordinate.abs()));
+        match coordinates
+            .iter()
+            .find(|coordinate| coordinate.abs() >= largest * (1.0 - 1e-9))
+        {
+            Some(coordinate) if *coordinate < 0.0 => -self,
+            _ => self,
+        }
+    }
+
+    /// The unit direction of an undirected axis, oriented as [`Vec3::canonical_axis_direction`]
+    /// orients it: the vector divided by its length. `None` for a vector no longer than
+    /// `min_length` or one whose length is not finite.
+    #[must_use]
+    pub fn unit_axis_direction(self, min_length: f64) -> Option<Self> {
+        let length = self.length();
+        (length > min_length && length.is_finite())
+            .then(|| (self / length).canonical_axis_direction())
+    }
 
     /// Creates a vector from its components (`SmVector3d(dX, dY, dZ)`, `Set`).
     #[must_use]
@@ -894,6 +923,34 @@ impl Vec3 {
         }
     }
 
+    /// Signed angle in radians about the unit normal `self`, from unit `start` to unit `end`.
+    /// The directions must be perpendicular to the normal, within `1e-9` for rounding.
+    /// They are not renormalised. A half turn with a triple product below `1e-12` in
+    /// magnitude always chooses positive `PI`, including a negative rounded zero.
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] for non-finite, non-unit or non-perpendicular directions.
+    pub fn signed_unit_angle(self, start: Self, end: Self) -> Result<f64> {
+        if ![self, start, end]
+            .iter()
+            .all(|v| (v.length_squared() - 1.0).abs() <= 1e-9)
+            || self.dot(start).abs() > 1e-9
+            || self.dot(end).abs() > 1e-9
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            });
+        }
+        let sin = self.dot(start.cross(end));
+        let cos = start.dot(end).clamp(-1.0, 1.0);
+        Ok(if cos < 0.0 && sin.abs() < 1e-12 {
+            PI
+        } else {
+            sin.atan2(cos)
+        })
+    }
+
     /// Counter-clockwise angle in radians, in `[-PI, PI]`, from `start` to `end`
     /// after projecting both into the plane normal to `self` (`CCWAngleBetween`).
     /// Returns `0` when either vector is parallel to `self`.
@@ -1081,6 +1138,54 @@ impl DivAssign<f64> for Vec3 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signed_unit_angles_keep_orientation_and_choose_positive_half_turns() {
+        for (normal, start, quarter) in [
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            (Vec3::Y, Vec3::Z, Vec3::X),
+            (Vec3::new(0.0, 0.6, 0.8), Vec3::X, Vec3::new(0.0, 0.8, -0.6)),
+        ] {
+            assert_eq!(normal.signed_unit_angle(start, start).unwrap(), 0.0);
+            assert!((normal.signed_unit_angle(start, quarter).unwrap() - PI / 2.0).abs() < 1e-15);
+            assert!((normal.signed_unit_angle(quarter, start).unwrap() + PI / 2.0).abs() < 1e-15);
+            assert_eq!(normal.signed_unit_angle(start, -start).unwrap(), PI);
+        }
+        for tiny in [-5e-13, -0.0, 0.0, 5e-13] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                PI
+            );
+        }
+        for tiny in [-2e-12_f64, 2e-12] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                tiny.atan2(-1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn signed_unit_angles_refuse_invalid_frames_without_normalising_them() {
+        for invalid in [
+            Vec3::ZERO,
+            Vec3::X * 2.0,
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            Vec3::new(0.0, f64::INFINITY, 0.0),
+            Vec3::new(1e300, 1e300, 0.0),
+        ] {
+            assert!(invalid.signed_unit_angle(Vec3::X, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(invalid, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(Vec3::X, invalid).is_err());
+        }
+        assert!(Vec3::Z.signed_unit_angle(Vec3::Z, Vec3::X).is_err());
+        assert!(Vec3::Z.signed_unit_angle(Vec3::X, Vec3::Z).is_err());
+    }
+
     #[test]
     fn distance_along_is_signed_and_ignores_the_sideways_offset() {
         let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
@@ -1354,6 +1459,47 @@ mod tests {
         ] {
             assert_eq!(v.length_and_unit(), None, "{v:?}");
         }
+    }
+
+    #[test]
+    fn a_canonical_axis_direction_is_one_orientation_at_any_scale() {
+        let half = core::f64::consts::FRAC_1_SQRT_2;
+        // unit vectors: the largest component turns positive, the first of equal ones decides
+        for (v, expected) in [
+            (Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+            (Vec3::new(half, -half, 0.0), Vec3::new(half, -half, 0.0)),
+            (Vec3::new(-half, half, 0.0), Vec3::new(half, -half, 0.0)),
+        ] {
+            assert_eq!(v.canonical_axis_direction(), expected, "{v:?}");
+        }
+        // X within a relative 1e-12 of the larger Y still ties first, whichever way the axis points
+        let (x, y) = (half, half * (1.0 + 1e-12));
+        for v in [Vec3::new(-x, y, 0.0), Vec3::new(x, -y, 0.0)] {
+            assert_eq!(v.canonical_axis_direction(), Vec3::new(x, -y, 0.0), "{v:?}");
+        }
+        // below 1e-9 a zero component never decides; the length is kept
+        for (y, z) in [(1e-10, 0.0), (0.0, 1e-200), (0.0, 5e-324)] {
+            for sign in [1.0, -1.0] {
+                let v = Vec3::new(0.0, sign * y, sign * z);
+                assert_eq!(v.canonical_axis_direction(), Vec3::new(0.0, y, z), "{v:?}");
+            }
+        }
+        assert_eq!(Vec3::ZERO.canonical_axis_direction(), Vec3::ZERO);
+    }
+
+    /// An axis comes out unit and pointing its largest component positive, whichever way it
+    /// was given; a vector too short or not finite has no direction.
+    #[test]
+    fn a_unit_axis_direction_is_unit_and_oriented() {
+        let unit = |x, y, z| Vec3::new(x, y, z).unit_axis_direction(1e-9);
+        assert_eq!(unit(0.0, -2.0, 0.0), Some(Vec3::Y));
+        assert_eq!(unit(0.0, 0.0, 4.0), Some(Vec3::Z));
+        assert_eq!(unit(-3.0, 4.0, 0.0), Some(Vec3::new(-0.6, 0.8, 0.0)));
+        assert_eq!(unit(0.0, 0.0, 0.0), None);
+        assert_eq!(unit(1e-10, 0.0, 0.0), None);
+        assert_eq!(unit(f64::NAN, 1.0, 0.0), None);
+        assert_eq!(unit(f64::INFINITY, 0.0, 0.0), None);
     }
 
     #[test]

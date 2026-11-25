@@ -1380,36 +1380,14 @@ fn a_ball_centred_on_a_rolls_face_with_its_poles_on_the_face_is_cut_in_every_fra
 /// Four frames of the cut above that failed, the ball's seam turned 1e-8, 1e-10 and -1e-8 rad
 /// off the meridian the line runs into the poles along: the trim's end is then that far off the
 /// corner of the ball's domain, and these were refused too. Each is one valid solid of the same
-/// volume as above (turning the ball about its axis moves no point of it).
+/// volume as above (turning the ball about its axis moves no point of it). The coincidence
+/// crossing is found as the section curve (WR-647, #21306 parts C and D): the section's
+/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
+/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
+/// (Test #70, frame 2); it now keeps the seam side the drop point is on.
 #[test]
 fn a_ball_with_its_poles_on_a_rolls_face_and_its_seam_turned_slightly_off_is_cut() {
     all_fixes();
-    let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
-    let mut failed = Vec::new();
-    for turn in [1e-8, 1e-10, -1e-8] {
-        for frame in [2, 5, 8, 14] {
-            let what = format!("turned {turn:e}, frame {frame}");
-            let b = ball([0.0, 50.0, 20.0], turn);
-            failed.extend(cut_is_valid_solid(half_roll(frame), b, want, &what));
-        }
-    }
-    assert!(failed.is_empty(), "{failed:#?}");
-}
-
-/// The same cuts with the coincidence crossing found as the section curve
-/// (`simple_coincidence_crossing_is_point` off; WR-647, #21306 part C). The section's
-/// meridian on the ball's seam runs into its pole, where the drop's pole adjustment once
-/// moved its start across the seam (u 1 to u 1.8e-9), out of the ball face's domain
-/// (Test #70, frame 2); it now keeps the seam side the drop point is on. Same V.
-#[test]
-fn a_seam_meridian_crossing_into_the_balls_pole_cuts_with_the_crossing_as_a_curve() {
-    session::set_thread_fixes(
-        solidcore::kernel::UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| *n != "simple_coincidence_crossing_is_point"),
-    )
-    .unwrap();
     let want = 3920.0 * PI - (ball_inside(|_| 50.0, 50.0) - ball_inside(|_| 48.0, 50.0));
     let mut failed = Vec::new();
     for turn in [1e-8, 1e-10, -1e-8] {
@@ -2178,6 +2156,25 @@ fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
         let record: Record = serde_json::from_value(records[key].clone()).unwrap();
         Body::from_record(&record, true).unwrap().0
     }
+}
+
+/// #21581: a 15 × 1.7 × 20 mm box crosses one side of a loft between two
+/// identical rounded spline profiles. Integrating (x + 20) dz along the
+/// cubic profile spans inside x <= -20 and z <= 0 gives 32.675328686804
+/// mm². The two straight clipping boundaries contribute zero to that
+/// integral, and the same section runs through the box's 1.7 mm width.
+#[test]
+fn a_box_notches_a_periodic_spline_loft_and_leaves_valid_trim_curves() {
+    all_fixes();
+    let body = traced_operands("issue_21581_loft_box_cut");
+    let (loft, tool) = (body("loft"), body("box"));
+    let before = volume(&loft);
+    let cut = boolean(loft, tool, BooleanOp::Subtract).unwrap().unwrap();
+    assert_eq!(cut.solid_count().unwrap(), 1);
+    let removed = before - volume(&cut);
+    assert!(near(removed, 32.675328686804 * 1.7), "{removed}");
+    let full_check = cut.check(CheckLevel::All).unwrap();
+    assert!(full_check.is_valid(), "{}", full_check.text);
 }
 
 /// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
@@ -3383,54 +3380,32 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// joined. The range is the flank of the tangency at the touching point and is dropped. The
 /// join is the bin and the insert less what they share: the insert's corners
 /// inside the walls outside the two rounds, its full section there, of height the top's.
+///
+/// WR-647 part A: the curve where the top crosses the corner round reaches the round's floor
+/// edge only at its end vertex (4, 249.15, 7), so the curve/edge range there is that one
+/// contact. The top's other boundary, the floor's line y = 249.15, meets the round's floor
+/// arc only at that point, as its tangent; the face/face tangency witness proves the range
+/// is the point from those two carriers.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, true);
-}
-
-/// #18064 without `simple_coincidence_crossing_is_point` (WR-647 part A): the curve where the
-/// top crosses the corner round reaches the round's floor edge only at its end vertex
-/// (4, 249.15, 7), so the curve/edge range there is that one contact. The top's other
-/// boundary, the floor's line y = 249.15, meets the round's floor arc only at that point, as
-/// its tangent; the face/face tangency witness proves the range is the point from those two
-/// carriers, and the join is the same as with the flag.
-#[test]
-fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0, false);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
 }
 
 /// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
 /// times flatter where it meets the floor, so the curve where it crosses the corner round
-/// stays within the scaled zero of the round's floor edge for longer before the touch.
+/// stays within the scaled zero of the round's floor edge for longer before the touch. The
+/// witness makes the longer range at the round's end vertex the one contact there (WR-647
+/// part A).
 #[test]
 fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, true);
-}
-
-/// The flatter insert of #18064 without `simple_coincidence_crossing_is_point`: the witness
-/// makes the longer range at the round's end vertex the one contact there (WR-647 part A).
-#[test]
-fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin_by_the_witness(
-) {
-    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0, false);
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
 }
 
 /// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
 /// less what they share, the insert's corners inside the walls outside the two rounds, its
-/// full section there, of height the top's. `crossing_is_point` keeps
-/// `simple_coincidence_crossing_is_point` on; without it every other fix is on.
-fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64, crossing_is_point: bool) {
-    if crossing_is_point {
-        all_fixes();
-    } else {
-        session::set_thread_fixes(
-            solidcore::kernel::UpstreamFixes::NAMES
-                .iter()
-                .copied()
-                .filter(|n| *n != "simple_coincidence_crossing_is_point"),
-        )
-        .unwrap();
-    }
+/// full section there, of height the top's.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
+    all_fixes();
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
     // insert's height above the floor
