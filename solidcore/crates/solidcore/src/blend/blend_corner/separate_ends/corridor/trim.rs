@@ -376,16 +376,41 @@ fn terms_for_curve(curve: &Curve, interval: Extent1d) -> Result<Option<UvEnds>> 
     })
 }
 
+/// Form the normal projection and its input scale in the cap's frame.
+pub(super) fn relative_origin(
+    point: Point3,
+    anchor: Point3,
+    normal: Point3,
+) -> Option<(Vec<f64>, Ivl)> {
+    coords(point)
+        .into_iter()
+        .zip(coords(anchor))
+        .zip(coords(normal))
+        .try_fold(
+            (Vec::new(), Ivl::from(0.0)),
+            |(sum, size), ((point, anchor), normal)| {
+                let relative = expansion::sub(&[point], &[anchor]);
+                let projected = expansion::scale(&relative, normal)?;
+                let extent = expansion_span(&projected)?;
+                let magnitude = Ivl::new(extent.lo, extent.hi).mag();
+                Some((
+                    expansion::add(&sum, &projected),
+                    size.add_ulp(Ivl::from(magnitude)),
+                ))
+            },
+        )
+}
+
 /// Project the affine lift before enclosing either endpoint. UV motion parallel
 /// to the boundary then cancels exactly, even along a long trim.
 pub(super) fn projected_uv_ends(
     plane: &Plane,
     ends: &UvEnds,
     normal: Point3,
-    level: &[f64],
+    anchor: Point3,
 ) -> Option<[(Ivl, Ivl); 2]> {
     let chart = plane.position();
-    let origin = expansion::dot(normal, chart.origin())?;
+    let (origin, origin_size) = relative_origin(chart.origin(), anchor, normal)?;
     let slopes = [
         expansion::scale(&expansion::dot(normal, chart.x_axis())?, plane.uv_scale().x)?,
         expansion::scale(&expansion::dot(normal, chart.y_axis())?, plane.uv_scale().y)?,
@@ -420,8 +445,6 @@ pub(super) fn projected_uv_ends(
         let span = expansion_span(terms)?;
         Some(Ivl::from(span.lo.abs().max(span.hi.abs())))
     };
-    let origin_size = abs_dot(normal, chart.origin())?.add_ulp(magnitude(level)?);
-    let origin = expansion::sub(&origin, level);
     let project = |uv: &[Vec<f64>; 2]| {
         let (value, size) = uv.iter().zip(&slopes).zip(limits).try_fold(
             (origin.clone(), origin_size),
@@ -470,15 +493,6 @@ fn shared_clamp_branch(a: &[f64], z: &[f64], min: f64, max: f64) -> bool {
     lower.into_iter().all(|sign| sign <= 0)
         || upper.into_iter().all(|sign| sign >= 0)
         || (lower.into_iter().all(|sign| sign >= 0) && upper.into_iter().all(|sign| sign <= 0))
-}
-
-pub(super) fn abs_dot(a: Point3, b: Point3) -> Option<Ivl> {
-    let abs = |p| {
-        let [x, y, z] = coords(p).map(f64::abs);
-        Point3::new(x, y, z)
-    };
-    let sum = expansion_span(&expansion::dot(abs(a), abs(b))?)?;
-    Some(Ivl::new(sum.lo, sum.hi))
 }
 
 /// Compare the affine restriction of a stored trim to the kernel's
