@@ -1,6 +1,6 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, projection, hatching, affine maps, sheet development, frame members, the
-//! display plan, and STEP's string and parser helpers. They read records and data; none
+//! curve helpers, projection, line-family clipping, affine maps, sheet development, frame members and the
+//! display plan. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -19,32 +19,33 @@ pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::SquareFaceLevel;
 pub use solidcore_ops::affine;
 pub use solidcore_ops::cancel;
-pub use solidcore_ops::cell_grid;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::conic_projection;
+pub use solidcore_ops::constraint;
 pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
-pub use solidcore_ops::export_geometry;
+pub use solidcore_ops::dxf;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::frame_gusset;
 pub use solidcore_ops::frame_member;
 pub use solidcore_ops::frame_trim;
-pub use solidcore_ops::hatch;
 pub use solidcore_ops::hole_stacks;
-pub use solidcore_ops::import_geometry;
+pub use solidcore_ops::joint_turn;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
-pub use solidcore_ops::path_export;
 pub use solidcore_ops::pcurve;
 pub use solidcore_ops::pick;
 pub use solidcore_ops::point_displacement;
 pub use solidcore_ops::point_distance;
 pub use solidcore_ops::point_identity;
 pub use solidcore_ops::prism;
+pub use solidcore_ops::profile;
 pub use solidcore_ops::query;
+pub use solidcore_ops::section_corners;
 pub use solidcore_ops::session;
+pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
@@ -81,11 +82,4 @@ pub mod tess {
     pub use solidcore_tess::simplify;
     pub use solidcore_tess::triangulate_planar;
     pub use solidcore_tess::triangulate_union;
-}
-
-/// STEP's helpers that the application's own exchange code uses: the part 21 parser (a header's
-/// producer, the memory a file needs) and the string escape a product name is written with.
-pub mod step {
-    pub use solidcore_record::step::p21;
-    pub use solidcore_step::write::string;
 }

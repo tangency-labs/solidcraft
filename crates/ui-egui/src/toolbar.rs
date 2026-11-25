@@ -268,7 +268,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
-                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
+                leading: crate::parts_library::available(app).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -329,10 +329,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"), "documents");
                     crate::scenario::publish_target("library:toggle", rect);
                 } else {
-                    // Keep the browser's native interaction, tooltip and focus, while the
+                    // Keep the parts library button's own interaction, tooltip and focus, while the
                     // shared bar renderer owns the same shape in the bar and tray.
                     let id = ui.scope_id().with("document_browser_toggle");
-                    let available = app_bar::interaction_only(ui, |ui| crate::library::app_bar_toggle(app, ui, rect));
+                    let available = app_bar::interaction_only(ui, |ui| crate::parts_library::app_bar_toggle(app, ui, rect));
                     if available && let Some(response) = ui.ctx().read_response(id) {
                         app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, 1.0, "documents");
                     }
@@ -509,7 +509,7 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
                 row.icon = "zoom".to_string();
             }
             "leading" => {
-                row.label = app.tr(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.label = crate::parts_library::toggle_label(app).to_string();
                 row.icon = "document_browser".to_string();
             }
             _ => {
@@ -539,9 +539,7 @@ fn run_overflow_control(app: &mut SolveApp, id: &str) {
         "managed" => crate::prefs::open_at(app, 0),
         "assistant" => crate::agent_chat::toggle(app),
         "search" => app.start("ui.palette"),
-        "leading" => {
-            app.preferences.show_document_browser = !app.preferences.show_document_browser;
-        }
+        "leading" => crate::parts_library::toggle(app),
         _ => {
             if let Some(command) = id
                 .strip_prefix("quick:")
@@ -907,6 +905,12 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        if !crate::documents::saving_to_close(app) {
+            app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        }
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -938,6 +942,10 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 }
 
 pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        return;
+    }
     // The Capture Position question first, as Save asks it: the file can't hold a move not
     // captured yet (#9736).
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
@@ -1562,7 +1570,7 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
-/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+/// The ribbon's Plugins group (Model tab): commands and explicitly declared plugin menus.
 struct PluginGroup {
     label: String,
     tip: String,
@@ -1573,7 +1581,7 @@ struct PluginGroup {
 /// The tab's panels for one pass of the ribbon, as the component's data.
 struct RibbonPanels {
     panels: Vec<Panel>,
-    /// The Plugins group after the panels, when the tab has one and a plugin is on.
+    /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
     /// The last panel leaves the sketch or the edit.
     exit: bool,
@@ -1617,7 +1625,8 @@ impl RibbonPanels {
                         size,
                         enabled: can_start(app, selected),
                         pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
-                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
+                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                            || (selected.id == "view.parts_library" && app.preferences.library_open),
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
@@ -1641,7 +1650,7 @@ impl RibbonPanels {
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
                         enabled: can_start(app, c),
-                        pressed: ribbon_shows_pressed(app, c.id),
+                        pressed: ribbon_shows_pressed(app, c.id) || (c.id == "view.parts_library" && app.preferences.library_open),
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,
@@ -1716,7 +1725,7 @@ impl RibbonPanels {
         reveal: Option<ribbon::Reveal<'a>>,
         more_tip: &'a str,
     ) -> ribbon::Row<'a> {
-        ribbon::Row {
+        let mut row = ribbon::Row {
             groups: self
                 .panels
                 .iter()
@@ -1758,7 +1767,11 @@ impl RibbonPanels {
                         enabled: true,
                         pressed: false,
                         exit: false,
-                        split: None,
+                        split: b.id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX).then_some(ribbon::Split {
+                            key: &b.id,
+                            title: &b.label,
+                            name: &b.name,
+                        }),
                         app_paints: false,
                         covers: &[],
                     };
@@ -1798,17 +1811,40 @@ impl RibbonPanels {
             reveal,
             more_tip,
             handles: RIBBON_HANDLES,
+        };
+        if self.exit
+            && self.plugins.is_some()
+            && let Some(tail) = row.groups.get_mut(self.panels.len().saturating_sub(1)..)
+        {
+            // The component reserves the last group's room for leaving the edit.
+            tail.rotate_right(1);
         }
+        row
+    }
+
+    /// The Plugins group's place in the drawn row, before the exit when one is present.
+    fn plugin_group(&self) -> Option<usize> {
+        self.plugins.as_ref().map(|_| self.panels.len().saturating_sub(usize::from(self.exit)))
+    }
+
+    /// Map a drawn group back to the built-in panel list, which does not contain Plugins.
+    fn panel_index(&self, group: usize) -> Option<usize> {
+        let index = match self.plugin_group() {
+            Some(plugin) if group == plugin => return None,
+            Some(plugin) if group > plugin => group.checked_sub(1)?,
+            _ => group,
+        };
+        self.panels.get(index).map(|_| index)
     }
 
     /// The id of panel `group`'s drop-down.
     fn popup_id(&self, group: usize) -> Option<egui::Id> {
-        self.panels.get(group).map(|p| p.popup_id)
+        self.panels.get(self.panel_index(group)?).map(|p| p.popup_id)
     }
 
     /// The plugin command button the component drew as `drawn`, when it is one.
     fn plugin_button(&self, drawn: &ribbon::Drawn) -> Option<&crate::plugin_menu::RibbonButton> {
-        if drawn.group != self.panels.len() || drawn.cell {
+        if Some(drawn.group) != self.plugin_group() || drawn.cell {
             return None;
         }
         self.plugins.as_ref()?.buttons.get(drawn.index)
@@ -1816,7 +1852,7 @@ impl RibbonPanels {
 
     /// The panel button the component drew as `drawn`.
     fn panel_button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
-        let panel = self.panels.get(drawn.group)?;
+        let panel = self.panels.get(self.panel_index(drawn.group)?)?;
         if drawn.cell { panel.gallery.get(drawn.index) } else { panel.large.get(drawn.index) }
     }
 }
@@ -1933,7 +1969,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         let mut persistent_paints = Vec::new();
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(String, &'static str, Option<String>)> = None;
-        let mut menu: Option<(egui::Pos2, &'static str)> = None;
+        // A command's menu to open, and whether the drop-down stays open under it (its ⋯).
+        let mut menu: Option<(egui::Pos2, &'static str, bool)> = None;
         // A drop-down row's pin icon clicked: pin or unpin that command.
         let mut toggle: Option<&'static str> = None;
         // A command dragged to another place in its own drop-down: (panel, command, before).
@@ -2002,7 +2039,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
-                let Some((panel, cmds, shown)) = lists.get(group) else { return false };
+                let Some((panel, cmds, shown)) = panels.panel_index(group).and_then(|i| lists.get(i)) else { return false };
                 if tab == "SKETCH" && *panel == "CREATE" {
                     let cmds = menu_commands(cmds, shown);
                     sketch_create_menu(app, ui, &cmds, dropdown_width(app, ui, &cmds), &mut menu, &mut toggle);
@@ -2022,6 +2059,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let deferred = d.deferred.take();
             if let Some(b) = panels.plugin_button(d) {
                 let _ = d.response.clone().backing_on_hover_text(&b.name);
+                if d.split.as_ref().is_some_and(|arrow| arrow.clicked()) {
+                    out.actions.push(ribbon::Action::Run { id: b.id.clone(), rect: d.whole, place: ribbon::Place::Button });
+                }
                 continue;
             }
             let Some(b) = panels.panel_button(d) else {
@@ -2066,7 +2106,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // What was chosen on the row, in order.
         let mut opened = Vec::new();
-        let plugin_group = panels.plugins.as_ref().map(|_| panels.panels.len());
+        let plugin_group = panels.plugin_group();
         for action in std::mem::take(&mut out.actions) {
             if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
                 && Some(group) == plugin_group
@@ -2078,6 +2118,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
+                    if crate::plugin_menu::toggle_ribbon_group(app, ui.ctx(), &id, rect) {
+                        continue;
+                    }
                     // A plugin command's button opens that command's dialog, and nothing else.
                     if crate::plugin_menu::choose_ribbon(app, &id) {
                         continue;
@@ -2109,7 +2152,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Menu { id, at } => {
                     if let Some(command) = solidcraft_engine::find_command(&id) {
-                        menu = Some((at, command.id));
+                        menu = Some((at, command.id, false));
                     }
                 }
                 ribbon::Action::Section { group } => {
@@ -2129,10 +2172,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Drop { id, group, before } => {
                     // Plugin buttons stay in their own group; they are not pinned commands.
-                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
+                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) || id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX) {
                         continue;
                     }
-                    if let Some((panel, _, _)) = lists.get(group) {
+                    if let Some((panel, _, _)) = panels.panel_index(group).and_then(|i| lists.get(i)) {
                         drop = Some((id, *panel, before));
                     }
                 }
@@ -2155,7 +2198,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 continue;
             }
-            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(g.group), panels.panels.get(g.group)) else { continue };
+            let Some(index) = panels.panel_index(g.group) else { continue };
+            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(index), panels.panels.get(index)) else { continue };
             let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let popup_id = data.popup_id;
@@ -2270,7 +2314,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     let revealed = reveal.as_ref().is_some_and(|r| r.id == c.id);
                                     match dropdown_row(app, ui, c, row_w, pinned, revealed.then_some(pulse)) {
                                         None => {}
-                                        Some(ribbon::MenuAction::Menu(at)) => menu = Some((at, c.id)),
+                                        Some(ribbon::MenuAction::Menu(at)) => menu = Some((at, c.id, false)),
+                                        Some(ribbon::MenuAction::More(at)) => menu = Some((at, c.id, true)),
                                         Some(ribbon::MenuAction::TogglePin) => toggle = Some(c.id),
                                         Some(ribbon::MenuAction::Run(rect)) => {
                                             app.start_at(c.id, Some(rect));
@@ -2346,8 +2391,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
         }
-        if let Some((at, id)) = menu {
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        // A right-click closes the drop-down; a row's ⋯ opens its menu over it.
+        if let Some((at, id, keep_open)) = menu {
+            if !keep_open {
+                ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+            }
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
         tab_click
@@ -2447,6 +2495,8 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
         focus: egui::Id::unique("dropdown_row"),
         entry: &["toolbar:", "dropdown:"],
         pin: "dropdown_pin:",
+        more: "dropdown_more:",
+        more_tip: solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"),
         hot: "dropdown_hot:",
         reveal: "ribbon:reveal",
     }
@@ -2777,11 +2827,12 @@ fn grid_action(
     app: &mut SolveApp,
     ui: &egui::Ui,
     action: Option<(&'static str, ribbon::MenuAction)>,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     match action {
-        Some((id, ribbon::MenuAction::Menu(at))) => *menu = Some((at, id)),
+        Some((id, ribbon::MenuAction::Menu(at))) => *menu = Some((at, id, false)),
+        Some((id, ribbon::MenuAction::More(at))) => *menu = Some((at, id, true)),
         Some((id, ribbon::MenuAction::TogglePin)) => *toggle = Some(id),
         Some((id, ribbon::MenuAction::Run(rect))) => {
             app.start_at(id, Some(rect));
@@ -2824,7 +2875,7 @@ fn sketch_create_menu(
     ui: &mut egui::Ui,
     cmds: &[&'static solidcraft_engine::CommandSpec],
     width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
@@ -2855,7 +2906,7 @@ fn sketch_menu_rows(
     ui: &mut egui::Ui,
     cmds: &[&'static solidcraft_engine::CommandSpec],
     width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     for c in cmds {
@@ -2864,7 +2915,8 @@ fn sketch_menu_rows(
         let revealed = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == c.id);
         match dropdown_row(app, ui, c, width, pinned, revealed.then_some(1.0)) {
             None => {}
-            Some(ribbon::MenuAction::Menu(at)) => *menu = Some((at, c.id)),
+            Some(ribbon::MenuAction::Menu(at)) => *menu = Some((at, c.id, false)),
+            Some(ribbon::MenuAction::More(at)) => *menu = Some((at, c.id, true)),
             Some(ribbon::MenuAction::TogglePin) => *toggle = Some(c.id),
             Some(ribbon::MenuAction::Run(rect)) => {
                 app.start_at(c.id, Some(rect));

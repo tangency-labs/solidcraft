@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -454,6 +455,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
+    // Trim explains incomplete picks before OK can be pressed, including a whole cutting sheet.
+    if matches!(d.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { .. }))
+        && d.error.is_none()
+        && app.preview.error.is_none()
+        && let Err(reason) = apply_commands(app, d)
+    {
+        let hint = crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Hint("trim_missing_input"));
+        crate::scenario::publish_rect("dialog:trim_missing_input", hint.rect);
+    }
     let manage_hint = match &d.kind {
         Kind::Material { .. } => Some("manage.material_hint"),
         Kind::Appearance(_) => Some("manage.appearance_hint"),
@@ -470,6 +480,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &hint, ui_kit::Text::Hint("auto"));
     }
     placement_row(d, ui, app);
+    crate::dialogs_sweep::grow_loft_rails(d);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
@@ -485,6 +496,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
+    } else if matches!(d.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. })) && d.inputs.len() > 5 {
+        // More than four rails: the rail rows share one list that scrolls, about four in view (#12185).
+        let rail_list_height = Tokens::get().control_height * 4.5;
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        egui::ScrollArea::vertical().id_salt("loft_rails").max_height(rail_list_height).show(ui, |ui| {
+            input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..d.inputs.len());
+        });
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
         crate::command_sketch::offer_row(app, d, ui);
@@ -537,6 +555,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
         Kind::SketchProject { bodies, projection_link } => {
+            let response =
+                ui_kit::row(ui, solidcraft_ui_text::tr("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
+            crate::scenario::publish_handle("project:link-tools", response.rect.center());
+            response.backing_on_hover_text(solidcraft_ui_text::tr("ui.project_link_tools_note"));
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
@@ -548,7 +570,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
-        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
+        Kind::SketchModify(k) => {
+            let two_parallel_lines = crate::sketch_modify_ui::picks_two_parallel_lines(app, &d.inputs);
+            enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc, two_parallel_lines);
+        }
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::TextMove(k) => enter |= crate::sketch_text_move::rows(ui, k),
         Kind::EditParam { name, expr } => {
@@ -690,7 +715,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 if *direction < 2 {
                     form_row(ui, "Taper Angle", |ui| {
                         let before = taper.clone();
-                        enter |= field(ui, taper);
+                        enter |= ui_kit::stepped_field(ui, taper, "", "1 deg", |text, delta| angle_step(text, delta, 1.0, None));
                         if *taper != before {
                             *taper_present = !taper.trim().is_empty();
                         }
@@ -955,17 +980,41 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
     }
 }
 
-/// The coil's section, where the section sits on the diameter, the way it turns and where it
-/// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
-/// A sketch profile is the section, so only the turn and Flip rows show with one (#17870).
-fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from_sketch: bool) -> bool {
-    const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
-    // Flip winds the coil the other way along its axis, e.g. down from a sketch profile (#17870).
-    let options: &[(&str, &str)] = &[("Clockwise", "clockwise"), ("Flip", "flip")];
-    if from_sketch {
-        extra_options(ui, "coil_options", extra, options);
-        return false;
+/// The coil's axis, section, where the section sits on the diameter, the way it turns and where
+/// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
+/// A sketch profile is the section, so the section rows are hidden then.
+fn coil_rows(
+    ui: &mut egui::Ui,
+    extra: &mut serde_json::Map<String, Value>,
+    placed_axis: Option<Vec3>,
+    picked_axis: bool,
+    unresolved_axis: bool,
+    from_sketch: bool,
+) -> bool {
+    let placed_axis = placed_axis.map(pt);
+    let mut axis = if unresolved_axis {
+        String::new()
+    } else {
+        extra.get("axis").or(placed_axis.as_ref()).map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).unwrap_or_default()
+    };
+    let before = axis.clone();
+    let axis_enter = !picked_axis && ui_kit::text_row(ui, "ui.direction", &mut axis, "Z (X, Y, Z, [x, y, z])").0;
+    if axis != before {
+        if axis.trim().is_empty() {
+            extra.remove("axis");
+        } else {
+            let value = serde_json::from_str::<Value>(&axis).ok().filter(|v| v.is_array() || v.is_object()).unwrap_or_else(|| json!(axis.trim()));
+            extra.insert("axis".into(), value);
+        }
     }
+    let enter = !from_sketch && coil_section_rows(ui, extra);
+    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse Direction", "reversed")]);
+    enter || axis_enter
+}
+
+/// The primitive coil's own section: its shape, where it sits on the diameter and where it starts.
+fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
         let current =
@@ -984,7 +1033,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from
     });
     let mut angle = extra.get("start_angle").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = angle.clone();
-    let enter = hint_row(ui, "Start angle", &mut angle, "0 deg");
+    let enter = ui_kit::step_row(ui, "Start angle", &mut angle, "0 deg", "10 deg", |text, delta| angle_step(text, delta, 10.0, None));
     if angle != before {
         if angle.trim().is_empty() {
             extra.remove("start_angle");
@@ -992,8 +1041,29 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, options);
     enter
+}
+
+/// An angle text field stepped by `delta` arrows of `step_deg`: a plain number moves and keeps
+/// its unit, an expression is left as typed, and `max_deg` stops the step past it.
+fn angle_step(text: &str, delta: i64, step_deg: f64, max_deg: Option<f64>) -> Option<String> {
+    let text = if text.trim().is_empty() { "0 deg" } else { text };
+    let next = crate::dim_view::window::stepped(text, delta as f64, solidcraft_engine::doc::expr::Kind::Angle, "", 0.0, step_deg)?;
+    match max_deg {
+        Some(max) if delta > 0 && degrees(&next).is_some_and(|angle| angle > max + 1e-9) => None,
+        _ => Some(next),
+    }
+}
+
+/// The angle that stepped text writes, in degrees: a number with an optional unit, as the
+/// stepping keeps it ("360 deg", "0,5 deg", "6.2 rad"); None for anything else.
+fn degrees(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let split = text.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+' | ' '))).unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let value = ui_kit::parse_number(number)?;
+    let (kind, per_unit) = solidcraft_engine::doc::expr::unit_info(if unit.trim().is_empty() { "deg" } else { unit.trim() })?;
+    matches!(kind, solidcraft_engine::doc::expr::Kind::Angle).then(|| value * per_unit * 180.0 / std::f64::consts::PI)
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
@@ -1006,6 +1076,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     let pasted = crate::dialogs_move::pasted(d);
     // Picked components moved earlier and not captured: Revert Position puts just them back.
     let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
+    let unresolved_axis = unresolved_coil_axis(d, &app.session);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -1040,7 +1111,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         }
                     }
                 });
-                enter |= expr_row(ui, "Angle", angle);
+                enter |= ui_kit::step_row(ui, "Angle", angle, "", "10 deg", |text, delta| angle_step(text, delta, 10.0, Some(360.0)));
                 if dir == 1 {
                     form_row(ui, "Angle 2", |ui| {
                         enter |= extra_field(ui, &mut d.extra, "angle2", "90 deg");
@@ -1060,6 +1131,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Draft { angle } => {
             enter |= expr_row(ui, "Angle", angle);
+        }
+        Kind::Dome { spherical, reverse, .. } => {
+            form_row(ui, "Shape", |ui| {
+                let mut i = usize::from(*spherical);
+                let labels = [solidcraft_ui_text::tr("ui.dome_elliptical"), solidcraft_ui_text::tr("ui.dome_spherical")];
+                ui_kit::segmented(ui, &mut i, &labels, Default::default());
+                *spherical = i == 1;
+            });
+            ui_kit::options(ui, "feature_options", &mut [(solidcraft_ui_text::tr("ui.dome_reverse"), reverse)]);
         }
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
@@ -1322,7 +1402,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 };
             }
             if *cmd == "solid.coil" {
-                enter |= coil_rows(ui, &mut d.extra, from_sketch);
+                let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
+                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
@@ -1357,11 +1438,21 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
+        Kind::Surface(k) => {
+            enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
+            // Extend's Distance drops a kept plane or face (one the dialog couldn't pick), so
+            // going back to To Object needs a new pick; the null clears it from the feature.
+            if matches!(k, crate::dialogs_surface::Surf::Extend { to_object: false, .. })
+                && d.extra.get("up_to").is_some_and(|v| !v.is_null() && v != "bounds")
+            {
+                d.extra.insert("up_to".into(), Value::Null);
+            }
+        }
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
@@ -2318,6 +2409,15 @@ mod tests {
                 assert!(h.app.dialog.is_some(), "invalid OK stays disabled");
             }
         }
+    }
+
+    #[test]
+    fn degrees_reads_the_angle_of_stepped_text() {
+        assert!((degrees("360 deg").unwrap() - 360.0).abs() < 1e-9);
+        assert!((degrees("0,5 deg").unwrap() - 0.5).abs() < 1e-9);
+        assert!((degrees("6.283185307179586 rad").unwrap() - 360.0).abs() < 1e-9);
+        assert_eq!(degrees("a / 2"), None);
+        assert_eq!(degrees(""), None);
     }
 }
 

@@ -130,7 +130,10 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
 /// Delete `params` (as `selection.delete` takes them): at once, or after a confirmation when
 /// other features go with it or would fail. The dry run that finds out evaluates the history
 /// after what is deleted, so it may compute off the window thread (#2678).
-pub fn request(app: &mut SolveApp, params: Value) {
+pub fn request(app: &mut SolveApp, mut params: Value) {
+    if let Some(params) = params.as_object_mut() {
+        params.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+    }
     let joints: Vec<u64> = params.get("joints").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
     if !joints.is_empty() {
         // Deleting just the joint Edit Joint edits closes the dialog first, as its Cancel does.
