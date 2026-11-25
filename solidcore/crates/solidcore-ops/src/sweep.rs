@@ -1390,12 +1390,15 @@ pub fn skin_with_ends(
     create_skin_primitive_with_ends(k, counts, curves, 3, cap, kernel_ends).map(|r| Ok(r.brep))
 }
 
-/// A pyramid from the planar `section` (one closed loop of lines, in order) to `apex` (off the
-/// section's plane): the base and a triangle on each line, stitched and oriented.
+/// A pyramid or cone from the planar `section` (one closed loop of curves, in order) to `apex`
+/// (off the section's plane): the base on the section's own curves, a planar triangle on each
+/// line, and on each arc or spline the ruled surface from it to the apex (to a curve of no
+/// length there, the wall's pole), its face the surface's whole box; stitched and oriented. A
+/// circle alone is a cone.
 ///
 /// # Errors
-/// [`Error::Argument`] for a section that is not one closed loop of lines, or an apex not
-/// proved off its plane; the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// [`Error::Argument`] for a section that is not one closed loop of lines, arcs and splines, or
+/// an apex not proved off its plane; the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
 pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
     if !coord_ok(&apex) {
         return Err(Error::Argument);
@@ -1403,15 +1406,20 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
     making("loft_to_point", |k| {
         let made = parsed!(parse(k, section));
         let curves = &made.curves;
-        if curves.len() < 3 || !path::closed_loop(k, curves, 1e-6)?.is_yes() {
+        if curves.is_empty() || !path::closed_loop(k, curves, 1e-6)?.is_yes() {
             return Ok(Err(Error::Argument));
         }
+        // each piece's start, the base's corners; a curved piece's B-spline, for its wall
         let mut corners = Vec::new();
+        let mut walls: Vec<Option<BSplineCurve>> = Vec::new();
         for c in curves {
-            if !matches!(c.kind(), CurveKind::Line(_)) {
-                return Ok(Err(Error::Argument));
-            }
             corners.push(c.ends(k)?.start);
+            walls.push(match c.kind() {
+                CurveKind::Line(_) => None,
+                CurveKind::Ellipse(e) => Some(e.base().clone()),
+                CurveKind::BSpline(s) => Some(s.clone()),
+                _ => return Ok(Err(Error::Argument)),
+            });
         }
         let top: Point3 = v3(apex);
         match path::point_off_plane_of(k, curves, top, 1e-9) {
@@ -1422,28 +1430,56 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
         let region = b.infinite_region();
         let tol = 1e-6;
         let built = build_faces(&mut b, |b, fenv| -> Out<()> {
-            let mut face =
-                |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
-                    let mut edges = Vec::new();
-                    for (i, &p) in pts.iter().enumerate() {
-                        let q = pts.get(i + 1).or_else(|| pts.first()).copied().unwrap_or(p);
-                        edges.push(KCurve::from(called(Line::create_line_segment(
-                            3, p, q, None,
-                        ))?));
-                    }
-                    called(create_planar_face_with_3d_curves(
-                        k, b, region, &edges, tol, fenv,
-                    ))
-                    .map(|_| ())
-                };
-            face(b, fenv, &corners)?;
-            for (i, &p) in corners.iter().enumerate() {
+            // the base, on the section's own curves
+            called(create_planar_face_with_3d_curves(
+                k, b, region, curves, tol, fenv,
+            ))?;
+            for (i, (&p, wall)) in corners.iter().zip(&walls).enumerate() {
                 let q = corners
                     .get(i + 1)
                     .or_else(|| corners.first())
                     .copied()
                     .unwrap_or(p);
-                face(b, fenv, &[p, q, top])?;
+                match wall {
+                    // a line: the planar triangle to the apex
+                    None => {
+                        let mut edges = Vec::new();
+                        for (a, z) in [(p, q), (q, top), (top, p)] {
+                            edges.push(KCurve::from(called(Line::create_line_segment(
+                                3, a, z, None,
+                            ))?));
+                        }
+                        called(create_planar_face_with_3d_curves(
+                            k, b, region, &edges, tol, fenv,
+                        ))?;
+                    }
+                    // an arc or a spline: the ruled surface to a curve of no length at the
+                    // apex; u = 0 and u = 1 are the rulings from the piece's ends, so the face
+                    // is the surface's whole box
+                    Some(base) => {
+                        let at_apex = [top, top];
+                        let data = CanonicalData {
+                            dim: 3,
+                            degree: 1,
+                            control_points: &at_apex,
+                            form: BSplineCurveForm::Unspecified,
+                            knot_multiplicities: &[2, 2],
+                            knots: &[0.0, 1.0],
+                            knot_type: KnotType::Unspecified,
+                            weights: None,
+                            trim: None,
+                        };
+                        let tip = called(BSplineCurve::create_canonical(&data))?;
+                        let ruled = called(BSplineSurface::create_ruled_surface(
+                            base,
+                            &tip,
+                            solidcore::nurbs::b_spline_surface::p1::SurfParamType::Unknown,
+                        ))?;
+                        let surface = Surface::from(ruled);
+                        let bx = called(surface.natural_uv_domain_with_nurb(k))?;
+                        called(create_face_from_surface(k, b, Some(surface), &bx, fenv))?;
+                    }
+                }
             }
             Ok(())
         });
