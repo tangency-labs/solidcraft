@@ -1772,7 +1772,7 @@ pub enum FeatureKind {
         /// A picked axis, using the same persistent references as Revolve.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_ref: Option<AxisRef>,
-        /// Grow against the axis direction, independently of the winding direction.
+        /// Grow against the axis direction, keeping the coil's hand (`clockwise`).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed: bool,
         /// The sketch whose plane and profile the coil sweeps. Its absence means the primitive

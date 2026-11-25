@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis, independently of clockwise); \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
          end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",

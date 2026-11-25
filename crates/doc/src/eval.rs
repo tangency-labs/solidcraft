@@ -10051,8 +10051,10 @@ fn feature_tools_with_constructor(
             };
             let base = &base;
             let k = direction.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
+            // Reversed grows the coil against its axis and keeps its hand: it turns about the
+            // reversed axis as well as climbing along it, where a negated pitch would mirror it.
+            let k = if *reversed { -k } else { k };
             let p = val(vals, pitch, Kind::Length)?;
-            let p = if *reversed { -p } else { p };
             let n = val(vals, turns, Kind::Unitless)?;
             if sketch.is_some()
                 && (diameter.is_some()

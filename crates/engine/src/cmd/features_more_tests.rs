@@ -3165,18 +3165,23 @@ fn a_sketch_coil_clockwise_is_the_mirror_image() {
     }
 }
 
+/// Reversed keeps the coil's hand: the reversed quarter turn from a profile on +Y is the forward
+/// one turned half a turn about Y (x and z negated, y kept), a rotation and not a mirror. A
+/// mirror in XY (z negated alone) would change the hand.
 #[test]
-fn coil_reverse_keeps_the_rotation_sense_and_changes_only_axial_growth() {
+fn coil_reverse_keeps_the_hand_and_grows_the_other_way() {
+    let at = |v: &Value, k: &str, i: usize| v[k][i].as_f64().unwrap_or(f64::NAN);
     for clockwise in [false, true] {
         let forward = clockwise_coil_bbox(clockwise, false);
         let backward = clockwise_coil_bbox(clockwise, true);
-        for key in ["min", "max"] {
-            for i in 0..2 {
-                assert!((forward[key][i].as_f64().unwrap() - backward[key][i].as_f64().unwrap()).abs() < 1e-5, "{forward} {backward}");
-            }
+        for i in [0, 2] {
+            assert!((at(&forward, "min", i) + at(&backward, "max", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
+            assert!((at(&forward, "max", i) + at(&backward, "min", i)).abs() < 1e-5, "axis {i}: {forward} {backward}");
         }
-        assert!((forward["min"][2].as_f64().unwrap() + backward["max"][2].as_f64().unwrap()).abs() < 1e-5);
-        assert!((forward["max"][2].as_f64().unwrap() + backward["min"][2].as_f64().unwrap()).abs() < 1e-5);
+        for key in ["min", "max"] {
+            assert!((at(&forward, key, 1) - at(&backward, key, 1)).abs() < 1e-5, "{forward} {backward}");
+        }
+        assert!(at(&forward, "max", 0) - at(&forward, "min", 0) > 1.0, "the quarter turn spans x, so x tells the hand: {forward}");
     }
 }
 

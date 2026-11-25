@@ -2152,33 +2152,30 @@ fn coil_from_a_profile_hides_and_never_sends_the_section_options() {
     h.app.run(id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
 }
 
-/// Flip winds the coil the other way along its axis (#17870): down from a sketch profile, and
-/// reversed on any axis the coil already has. The option itself is never sent.
+/// Reverse Direction winds the coil the other way along its axis (#17870), down from a sketch
+/// profile too. The axis is sent as written with `reversed`, so a picked axis stays linked.
 #[test]
-fn coil_flip_winds_the_coil_down_its_axis() {
+fn coil_reverse_direction_winds_the_coil_down_its_axis() {
     use solidcraft_engine::doc::FeatureKind;
     let mut h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    d.extra.insert("flip".into(), json!(true));
-    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
-    assert_eq!(p["axis"], json!([0.0, 0.0, -1.0]), "{p}");
-    assert!(p.get("flip").is_none(), "{p}");
+    d.extra.insert("reversed".into(), json!(true));
     d.extra.insert("axis".into(), json!([1.0, 0.0, 0.0]));
     let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
-    assert_eq!(p["axis"], json!([-1.0, 0.0, 0.0]), "{p}");
+    assert_eq!((&p["axis"], &p["reversed"]), (&json!([1.0, 0.0, 0.0]), &json!(true)), "{p}");
     d.extra.remove("axis");
     let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     h.app.dialog = Some(d.clone());
     h.frames(2);
-    h.step(&json!({"expect":{"shown": "Flip"}})).unwrap();
+    h.step(&json!({"expect":{"shown": "Reverse Direction"}})).unwrap();
     let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
     h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
-    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
-        FeatureKind::Coil { axis, .. } => Some(axis.0),
+    let reversed = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { reversed, .. } => Some(*reversed),
         _ => None,
     });
-    assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
+    assert_eq!(reversed, Some(true), "the coil winds down");
 }
 
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
