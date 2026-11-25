@@ -25,6 +25,9 @@ macro_rules! mouse3d_preferences {
             space_mouse_enabled: bool = true, PAGE_MOUSE3D => check("Navigate with the 3D mouse");
             /// Where the 3D mouse picture sits in the 3D view, when it is shown there (`space_mouse_in_view`).
             space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_MOUSE3D;
+            /// Keep the horizon level during 3D mouse navigation, including free orbit.
+            /// Off by default to preserve the existing navigation behaviour.
+            space_mouse_horizon_lock: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_horizon_lock");
             /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
             /// left corner. Off by default.
             space_mouse_in_view: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_show_in_view");
