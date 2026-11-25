@@ -40,9 +40,9 @@ fn error(level: ParamCheck, id: &str, p: &Value) -> Option<String> {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ProjectParams>(), &["construction", "projection_link", "ref", "refs"]);
-    assert_keys(input_schema_for::<IntersectParams>(), &["construction", "projection_link", "ref", "refs"]);
-    assert_keys(input_schema_for::<Include3dParams>(), &["construction", "ref", "refs"]);
+    assert_keys(input_schema_for::<ProjectParams>(), &["construction", "projection_link", "ref", "refs", "strict_occurrence_references"]);
+    assert_keys(input_schema_for::<IntersectParams>(), &["construction", "projection_link", "ref", "refs", "strict_occurrence_references"]);
+    assert_keys(input_schema_for::<Include3dParams>(), &["construction", "ref", "refs", "strict_occurrence_references"]);
     assert_keys(input_schema_for::<ProjectToSurfaceParams>(), &["body", "curves", "face"]);
     assert_keys(input_schema_for::<IntersectionCurveParams>(), &["a", "b"]);
     assert_keys(input_schema_for::<SpunProfileParams>(), &["axis", "body"]);
@@ -511,4 +511,26 @@ fn values_read_as_left_out_are_reported_but_change_nothing() {
     assert_eq!(r["param_warnings"].as_array().map(Vec::len), Some(1), "{r}");
     let r = scene(ParamCheck::Warn).execute("sketch.break_link", &json!({"link": null}));
     assert!(r.is_err(), "nothing to break");
+}
+
+#[test]
+fn occurrence_policy_is_an_optional_boolean_on_all_three_commands() {
+    for schema in [input_schema_for::<ProjectParams>(), input_schema_for::<IntersectParams>(), input_schema_for::<Include3dParams>()] {
+        let root = schema.as_value();
+        assert!(conforms(root, root, &json!({"refs":["origin"]})));
+        for policy in [json!(false), json!(true)] {
+            assert!(conforms(root, root, &json!({"refs":["origin"],"strict_occurrence_references":policy})));
+        }
+        for policy in [Value::Null, json!("true"), json!(1)] {
+            assert!(!conforms(root, root, &json!({"refs":["origin"],"strict_occurrence_references":policy})));
+        }
+    }
+    for command in ["sketch.project", "sketch.intersect", "sketch.include_3d"] {
+        for policy in [Value::Null, json!("true"), json!(1)] {
+            for level in [ParamCheck::Off, ParamCheck::Strict] {
+                let e = scene(level).execute(command, &json!({"refs":["origin"],"strict_occurrence_references":policy})).unwrap_err();
+                assert!(e.to_string().contains("`strict_occurrence_references` must be a boolean"), "{e}");
+            }
+        }
+    }
 }

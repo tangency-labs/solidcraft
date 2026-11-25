@@ -3,7 +3,7 @@
 
 use std::f64::consts::{PI, TAU};
 
-use crate::hatch::support::HatchSeg;
+use crate::prism::profile::line_family::support::HatchSeg;
 use crate::prism::profile::Loop2;
 
 use super::{
