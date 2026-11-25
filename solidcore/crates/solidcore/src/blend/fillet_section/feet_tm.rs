@@ -88,7 +88,7 @@ macro_rules! tm_try {
     ($e:expr) => {
         match $e {
             Ok(v) => v,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => return Err(e),
             Err(_) => return Ok(None),
         }
     };

@@ -1758,7 +1758,9 @@ impl GnSectionFsg {
             let st = match solved.0 {
                 Ok((st, _)) => st,
                 // a cancel (#2136) is not a refused ball: it ends the operation
-                Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                    return Err(e)
+                }
                 Err(_) if feet_check => return Ok(None),
                 Err(e) => return Err(e),
             };
