@@ -1,6 +1,6 @@
-//! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`, `sketch.point3d` and
-//! `sketch.move3d`.
+//! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.create3d`,
+//! `sketch.line3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`,
+//! `sketch.point3d` and `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -22,6 +22,36 @@ use super::sketch_ends::SketchTarget;
 use super::sketch_shapes::Created;
 use super::types::{Point3, PointExpr3, SketchRef, present};
 use crate::params;
+
+/// Start a 3D sketch with no plane to choose: a new sketch with 3D Sketch on, opened for
+/// editing, so `sketch.line3d`, `sketch.spline3d`, `sketch.arc3d` and `sketch.point3d` draw in
+/// it at once. The sketch rests on the XY origin plane of the active component, and its curves
+/// may leave that plane. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct Create3dParams {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
+    /// The sketch's name. Default: numbered.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// What `sketch.create3d` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Create3dResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
+    /// The new sketch's feature id.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
 /// on for the sketch (`sketch.options` with `sketch_3d: true`). One undo step.
