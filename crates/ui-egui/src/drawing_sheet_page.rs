@@ -1239,7 +1239,7 @@ impl Marks {
                     }
                     let width = ((width_mm * at.scale) as f32).max(hair);
                     let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
-                    round_line(painter, points, *closed, Stroke::new(width, ink));
+                    round_line(painter, &points, *closed, Stroke::new(width, ink));
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -1304,51 +1304,35 @@ impl Marks {
 /// The cosine of the sharpest turn a line is drawn through in one piece: past 30° egui's miter
 /// (which has no limit) would show past the round join the writers draw, by more than 3.5% of the
 /// half width.
-const SMOOTH_TURN_COS: f32 = 0.866;
+const SMOOTH_TURN_COS: f64 = 0.866;
+
+/// Points of a line closer than this on screen are one point, in pixels.
+const SAME_POINT_PX: f64 = 1e-3;
 
 /// A line through `points` with round caps and round joins, as every writer strokes it
 /// ([`solidcraft_geom::paper`]): egui strokes with butt caps and unlimited miters, so the line is
-/// cut at each sharper turn and a disc one width across is put at the ends of every piece.
-fn round_line(painter: &egui::Painter, mut points: Vec<Pos2>, closed: bool, stroke: Stroke) {
-    points.dedup_by(|a, b| a.distance_sq(*b) < 1e-6);
+/// drawn in the runs the kernel cuts it into at each sharper turn, with a disc one width across at
+/// the ends of every run. A line that closes without a sharp turn is one loop with no ends.
+fn round_line(painter: &egui::Painter, points: &[Pos2], closed: bool, stroke: Stroke) {
+    let points: Vec<[f64; 2]> = points.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
+    let runs = solidcraft_kernel::services::stroke_runs::runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
     let r = stroke.width / 2.0;
-    let sharp = |i: usize, points: &[Pos2]| -> bool {
-        let n = points.len();
-        let (Some(prev), Some(here), Some(next)) = (points.get((i + n - 1) % n), points.get(i), points.get((i + 1) % n)) else { return false };
-        (*here - *prev).normalized().dot((*next - *here).normalized()) < SMOOTH_TURN_COS
-    };
-    if points.len() < 2 {
-        if let Some(p) = points.first() {
-            painter.circle_filled(*p, r, stroke.color);
+    let on_screen = |p: &[f64; 2]| pos2(p[0] as f32, p[1] as f32);
+    for run in &runs {
+        let piece: Vec<Pos2> = run.points.iter().map(on_screen).collect();
+        if run.closed {
+            painter.add(egui::Shape::closed_line(piece, stroke));
+            continue;
         }
-        return;
-    }
-    if closed && points.len() > 2 {
-        // A closed line with no sharp turn is one smooth loop with no ends.
-        let Some(start) = (0..points.len()).find(|i| sharp(*i, &points)) else {
-            painter.add(egui::Shape::closed_line(points, stroke));
-            return;
-        };
-        // Otherwise it is an open line from a sharp corner round to that corner again.
-        points.rotate_left(start);
-        if let Some(first) = points.first().copied() {
-            points.push(first);
+        if let Some(start) = piece.first() {
+            painter.circle_filled(*start, r, stroke.color);
+        }
+        if piece.len() > 1 {
+            painter.add(egui::Shape::line(piece, stroke));
         }
     }
-    let mut from = 0;
-    for i in 1..points.len() {
-        if i + 1 == points.len() || sharp(i, &points) {
-            if let Some(piece) = points.get(from..=i) {
-                painter.add(egui::Shape::line(piece.to_vec(), stroke));
-            }
-            if let Some(end) = points.get(from) {
-                painter.circle_filled(*end, r, stroke.color);
-            }
-            from = i;
-        }
-    }
-    if let Some(last) = points.last() {
-        painter.circle_filled(*last, r, stroke.color);
+    if let Some(end) = runs.last().filter(|run| !run.closed && run.points.len() > 1).and_then(|run| run.points.last()) {
+        painter.circle_filled(on_screen(end), r, stroke.color);
     }
 }
 

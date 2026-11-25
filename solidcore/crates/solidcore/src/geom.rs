@@ -38,6 +38,7 @@ pub mod polynomial;
 pub mod pseudo_box;
 pub mod solution_array;
 pub mod step_matrix;
+pub mod stroke_runs;
 pub mod tol;
 pub mod tools;
 pub mod transform;

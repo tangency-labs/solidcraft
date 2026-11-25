@@ -6374,8 +6374,10 @@ fn centre_line_gaps_follow_dimension_edits_and_survive_svg_export() {
     let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
     let Item::Stroke { path, .. } = &cut.items[0] else { panic!("expected stroke") };
     let x = path[0].start().x;
-    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis.
-    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.82"), (format!("M{x} 131L{x} 112"), "3.22")] {
+    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis. The pieces start 0.82 mm and
+    // 3.22 mm into the pattern. Under the round caps each dash is stroked a line width (0.18 mm)
+    // shorter about its middle, so the offsets written are 0.09 mm less: 0.73 and 3.13.
+    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.73"), (format!("M{x} 131L{x} 112"), "3.13")] {
         assert!(
             xml.split("<path ")
                 .filter_map(|path| path.split_once('>'))
