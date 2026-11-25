@@ -1855,12 +1855,8 @@ impl OffsetSurface {
         }
 
         // A simple evaluation on a collapsed boundary of the base (a pole): the limit from
-        // inside the domain (#13610), behind `Kernel::fixes`.
-        if k.fixes.offset_simple_collapsed_boundary_limit
-            && do_eval_simple
-            && !use_ext
-            && bu.cross(bv).length() < tol
-        {
+        // inside the domain (#13610).
+        if do_eval_simple && !use_ext && bu.cross(bv).length() < tol {
             let across = match self.singularities & domain.point_boundaries(uv, EFF_ZERO) {
                 SS_UMIN => Some((true, 1.0)),
                 SS_UMAX => Some((true, -1.0)),
@@ -3915,18 +3911,11 @@ mod tests {
         dome_13610_with(&rows, SS_VMIN)
     }
 
-    /// A kernel with the collapsed-boundary limit on (`Kernel::fixes`, off by default).
-    fn kernel_13610_limit() -> Kernel {
-        let mut k = Kernel::default();
-        k.fixes.offset_simple_collapsed_boundary_limit = true;
-        k
-    }
-
     /// At a point `uv` of a collapsed boundary, the simple and the exact evaluation give the
     /// regular point, and their first-order outputs are those of the limit (the values at
     /// `inside`, next to the boundary).
     fn assert_collapsed_limit(off: &OffsetSurface, uv: Point2, inside: Point2) {
-        let k = &kernel_13610_limit();
+        let k = &Kernel::default();
         let p = off.evaluate_point(k, uv).unwrap();
         let near = off
             .evaluate_simple(k, inside, 1, 1, flags(false, false))
@@ -3954,7 +3943,7 @@ mod tests {
 
     #[test]
     fn issue_13610_simple_offset_derivatives_at_a_collapsed_boundary_are_the_limits() {
-        let k = &kernel_13610_limit();
+        let k = &Kernel::default();
         let off = dome_13610();
         let uv = Point2::new(0.0, 0.5);
         for m in [
@@ -3979,19 +3968,6 @@ mod tests {
             );
         }
         assert_collapsed_limit(&off, uv, Point2::new(1e-6, 0.5));
-    }
-
-    /// With `Kernel::fixes` off (the default) the simple evaluation keeps its old value at the
-    /// collapsed boundary: `D(0,1).x` is 0, as the issue reports (#13610).
-    #[test]
-    fn issue_13610_simple_offset_keeps_the_old_value_with_the_fix_off() {
-        let k = &Kernel::default();
-        assert!(!k.fixes.offset_simple_collapsed_boundary_limit);
-        let off = dome_13610();
-        let m = off
-            .evaluate_simple(k, Point2::new(0.0, 0.5), 1, 1, flags(false, false))
-            .unwrap();
-        assert_eq!(m[0][1].x, 0.0);
     }
 
     #[test]
