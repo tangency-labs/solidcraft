@@ -228,25 +228,34 @@ fn a_refused_fillet_carries_the_kernel_calls_code() {
     assert_eq!(&row["error_code"], timeline_code, "{row}");
 }
 
-/// #22148: a refused fillet's code says the kernel's class of its error, a refusal (change the
-/// input), in the command's error and in the timeline JSON, in full and in short, so a client
-/// tells it from the kernel's fault without a copy of the kind table.
+/// #22148: a failure's code says the kernel's class of its error, so a client tells "change the
+/// input" from the kernel's fault without a copy of the kind table. A can (a cylinder of radius
+/// 10, open at its top) shelled thicker than its radius is refused by the kernel's offset (its
+/// wall's offset collapses or folds, kinds 200 to 204, every one a refusal), and the code says
+/// `refusal` in the command's error and in the timeline JSON, in full and in short.
 #[test]
-fn a_refused_fillets_code_says_it_is_a_refusal() {
-    let mut s = wall();
-    let edges = json!([[15, 0, 10], [15, 2, 10]]);
-    let e = s.execute("solid.fillet", &json!({"edges":edges, "radius":"1.5 mm"})).unwrap_err();
+fn a_shell_thicker_than_its_cans_radius_is_coded_a_refusal() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name":"wall", "expression":"2 mm"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Can"}));
+    let before = s.doc.as_ref().clone();
+    let e = s.execute("solid.shell", &json!({"faces": [[0, 0, 20]], "thickness": 12})).unwrap_err();
     let code = e.error_code().cloned().unwrap_or_else(|| panic!("no code: {e}"));
-    assert_eq!(json!(code)["class"], "refusal", "{code}");
+    assert!((200..=204).contains(&code.kind), "{code}: {e}");
+    assert_eq!(json!(code)["class"], "refusal", "{code}: {e}");
 
-    let out = run(&mut s, "solid.fillet", json!({"edges":edges, "radius":"top_radius"}));
+    let mut s = Session::new(before);
+    let out = run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": "wall"}));
     let id = out["feature"].as_u64().unwrap();
-    s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"})).ok();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
+    assert!(inspected["error"].is_null() && inspected.get("error_code").is_none(), "{inspected}");
+    s.execute("parameters.change", &json!({"name":"wall", "expression":"12 mm"})).ok();
     let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
     assert_eq!(inspected["error_code"]["class"], "refusal", "{inspected}");
+    assert_eq!(inspected["error_code"]["kind"], code.kind, "{inspected}");
     for detail in [json!(true), json!("summary")] {
         let doc = run(&mut s, "document.inspect", json!({"timeline":detail}));
         let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
-        assert_eq!(row["error_code"]["class"], "refusal", "{detail}: {row}");
+        assert_eq!(row["error_code"], inspected["error_code"], "{detail}: {row}");
     }
 }
