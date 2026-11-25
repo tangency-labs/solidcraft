@@ -603,6 +603,18 @@ pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
 
 /// Every command, in toolbar order.
 pub fn command_specs() -> Vec<&'static CommandSpec> {
+    all_command_specs().to_vec()
+}
+
+/// Every command, in toolbar order, gathered once: the window looks commands up by id many
+/// times a frame (its buttons, menus and shortcuts), and gathering them from every module each
+/// time was most of what a lookup cost.
+fn all_command_specs() -> &'static [&'static CommandSpec] {
+    static ALL: std::sync::OnceLock<Vec<&'static CommandSpec>> = std::sync::OnceLock::new();
+    ALL.get_or_init(gather_command_specs)
+}
+
+fn gather_command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
@@ -716,9 +728,17 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
 /// classification, a host's check) decides on the id this returns, never the id as sent, so it
 /// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    static BY_ID: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static CommandSpec>> = std::sync::OnceLock::new();
     let id = normalize_command_id(id)?;
-    let all = command_specs();
-    all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
+    let by_id = BY_ID.get_or_init(|| {
+        let mut by_id = std::collections::HashMap::new();
+        // The first command of an id wins, as a search in toolbar order finds it.
+        for c in all_command_specs() {
+            by_id.entry(c.id).or_insert(*c);
+        }
+        by_id
+    });
+    by_id.get(id).copied().or_else(|| all_command_specs().iter().find(|c| c.id.eq_ignore_ascii_case(id)).copied())
 }
 
 /// Whether two ids use common alternative verbs in the same namespace. This only ranks

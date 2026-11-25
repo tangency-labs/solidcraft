@@ -42,6 +42,7 @@ pub mod blend_definition;
 pub mod blend_surface;
 pub mod body;
 pub mod boolean;
+pub mod bspline;
 pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
