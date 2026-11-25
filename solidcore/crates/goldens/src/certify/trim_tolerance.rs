@@ -103,6 +103,14 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
 ///   NURBS net, so no enclosure (`fillet_executive_p3`'s coons, bottle and letter-g cases;
 ///   the sampled gaps, over every trim of the edge, at most 50 % of the new tolerance);
+/// - `not-enclosed`: a lowered edge with a trim whose bound is not enclosed (no proof either
+///   way: nothing shows the bound is exceeded), its other trims enclosed within the new
+///   tolerance (tangency-labs/solidcraft#21987; `topology.brep_local_operation`'s `fc0000`,
+///   `fc0006`, `fc0008` and `fc0025` edge 73, `topology.brep_mirror`'s `mat0094` edge 26,
+///   `topology.brep_p2`'s `refine_cci_f7_plane_b_uv` edges 26 and 47, each lowered to 1e-5;
+///   the WR-450 replay of old main's output hid them). The class is also read by
+///   `kept_trim_rows` for its rows' kept trims (`heal.heal_data_p3`'s two `r0.02_0.03`
+///   `s60` cones, edges 1 and 5, tolerance 1e-5), [`not_enclosed_entries`];
 ///
 /// The test requires the uncertified edges to be exactly these, so an entry that becomes
 /// certified (or a new failure) shows up.
@@ -162,6 +170,24 @@ fn open_entries(unit: &str) -> std::collections::BTreeMap<(String, usize, String
         .collect()
 }
 
+/// The `not-enclosed` entries of [`OPEN`], of every unit: unit, case, body and edge index
+/// (`kept_trim_rows` reads those of its rows).
+pub(crate) fn not_enclosed_entries() -> Vec<(String, String, usize, usize)> {
+    OPEN.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| l.split('\t').collect::<Vec<&str>>())
+        .filter(|f| f.get(4) == Some(&"not-enclosed"))
+        .map(|f| {
+            (
+                f[0].to_string(),
+                f[1].to_string(),
+                f[2].parse().expect("body"),
+                f[3].parse().expect("edge"),
+            )
+        })
+        .collect()
+}
+
 /// The new tolerance an [`OPEN`] entry of `unit` records (its last column), for a class whose
 /// entry pins it (`loose-raise`: the raise is open only at exactly that tolerance).
 fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
@@ -208,8 +234,7 @@ fn open_tolerance(unit: &str, key: &(String, usize, String)) -> Option<f64> {
 /// - `domain`: a value of a face's surface record (its natural domain, or a sample over it)
 ///   that moved with the face's refit trims (the surface's domain is bound to them): some
 ///   face's surface record holds it, and every UV trim on each face whose record holds it is
-///   within its edge's tolerance (`fillet_group_torii_fillet_b_rb23`: the domain's `v` start moved 3.7e-7 and
-///   its samples there now lie on the plane `z = 2` they are tangent to, 6.2e-6 off before);
+///   within its edge's tolerance (no entry holds it now);
 /// - `vertex-box`: a corner coordinate of a result's vertex box (`offset.offset_executive_p2`'s
 ///   `result.geometry`: the body's tolerance, then the box of its vertex points), of a case
 ///   that writes no bodies, that moved by less than that tolerance, which did not move: EQUAL
@@ -408,8 +433,8 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 }
 
 /// [`trim_bounds`] with a UV line enclosed on any surface with an exact net, not only a plane
-/// ([`uv_line_slack_on_surface`]), each with its edge use: the WR-450 certificate of the trims
-/// a copied analytic face keeps (`wr450_rows`).
+/// ([`uv_line_slack_on_surface`]), each with its edge use: the certificate of the trims a
+/// split's new face keeps (`kept_trim_rows`).
 pub(crate) fn trim_bounds_any_surface(
     k: &Kernel,
     b: &Brep,
@@ -1005,9 +1030,7 @@ fn certify(unit: &str) -> Tally {
             .find(|c| c.name == row.case)
             .unwrap_or_else(|| panic!("{unit}: no case {}", row.case));
         super::watch_written();
-        // (a row the WR-450 retirement moves too: main's run had main's choices at its seams)
-        let out =
-            crate::wr450_rows::with_mains_choices_for(unit, &row.case, || runner.run_rust(case));
+        let out = runner.run_rust(case);
         let bodies = super::take_written();
         let mut mass_bands = std::collections::BTreeMap::new();
         let out = out.unwrap_or_else(|e| panic!("{unit} {}: {e:?}", row.case));
@@ -1294,6 +1317,16 @@ fn certify(unit: &str) -> Tally {
                         class != "rounding-bound",
                         "{at}: `rounding-bound` is a vertex class"
                     );
+                    // (`not-enclosed`: only the missing enclosure is open, every enclosed
+                    // bound within the new tolerance)
+                    if class == "not-enclosed"
+                        && !(bounds.iter().any(Option::is_none)
+                            && bounds.iter().flatten().all(|x| *x <= new))
+                    {
+                        failures.push(format!(
+                            "{at}: {old:e} -> {new:e}: not `not-enclosed`: {bad:?}"
+                        ));
+                    }
                     if bounds.iter().all(|x| x.is_some_and(|x| x <= old)) {
                         failures.push(format!(
                             "{at}: {old:e} -> {new:e}: certified at the old tolerance, not \

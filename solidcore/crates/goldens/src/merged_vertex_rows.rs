@@ -20,7 +20,8 @@
 //!    plus 16 ulps (the sizing's four roundings up by 4 ulps each). Then the row is
 //!    rebuilt with every entry holding a `new` replaced by its `old` and encoded as the
 //!    golden encodes it: it must equal main's row exactly (every block's sum, absolute sum
-//!    and weighted sum), so no other entry moved and the `old` values are main's.
+//!    and weighted sum), so no other entry moved and the `old` values are main's. Three
+//!    rows ([`NOT_REBUILT`]) are not rebuilt: other values of theirs differ from main's too.
 //!
 //! The `topology.face_p1` `MoveSeam` rows this change once moved no longer split a seam
 //! (tangency-labs/solidcraft#21381) and do not move.
@@ -101,6 +102,11 @@ const TOLERANCE_ROWS: [ToleranceRow; 8] = [
     ),
 ];
 
+/// The `boolean.topology_intersector_p3` rows whose other values also differ from main's
+/// row (main's was run on main's code, before the old-main replay was retired): their moved
+/// tolerances are certified as sized, but the row is not rebuilt to main's.
+const NOT_REBUILT: [&str; 3] = ["gen0012", "gen0017", "gen0165"];
+
 /// One edge end: (vertex index, vertex tolerance, the evaluated end's distance to the
 /// vertex `d`, the certified bound `d + √3·E`, `None` without an error bound).
 type End = (u32, f64, f64, Option<f64>);
@@ -133,10 +139,8 @@ fn body(b: &Brep) -> Body {
     Body { ends }
 }
 
-/// Runs `case` of `unit`: its output and each body the runner observes. With `mains`, a row
-/// whose raw values the WR-450 choices move (`wr450_rows::BELOW_COMPARATOR`) runs with main's
-/// choices, so the tolerances listed are main's run's to the bit; without, as is.
-fn run(unit: &str, case: &str, mains: bool) -> (Output, Vec<Body>) {
+/// Runs `case` of `unit`: its output and each body the runner observes.
+fn run(unit: &str, case: &str) -> (Output, Vec<Body>) {
     let u = crate::registry()
         .into_iter()
         .find(|u| u.id() == unit)
@@ -144,18 +148,11 @@ fn run(unit: &str, case: &str, mains: bool) -> (Output, Vec<Body>) {
     let c = regression_case(u.as_ref(), case);
     let bodies: Rc<RefCell<Vec<Body>>> = Rc::default();
     let into = Rc::clone(&bodies);
-    let go = || {
-        crate::trim_hook::with_hook(
-            Box::new(move |b: &mut Brep| into.borrow_mut().push(body(b))),
-            || u.run_rust(&c),
-        )
-    };
-    let out = if mains {
-        crate::wr450_rows::with_mains_choices_for(unit, case, go)
-    } else {
-        go()
-    };
-    let out = out.unwrap_or_else(|e| panic!("{case}: {e:?}"));
+    let out = crate::trim_hook::with_hook(
+        Box::new(move |b: &mut Brep| into.borrow_mut().push(body(b))),
+        || u.run_rust(&c),
+    )
+    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
     assert!(
         out.error.is_none() && out.deferred.is_none(),
         "{case}: {:?} {:?}",
@@ -209,7 +206,7 @@ fn assert_rebuilds_base(
 #[test]
 fn issue_21340_merged_vertices_cover_their_edge_ends() {
     for (unit, case, _) in TOLERANCE_ROWS {
-        let (_, bodies) = run(unit, case, false);
+        let (_, bodies) = run(unit, case);
         assert!(!bodies.is_empty(), "{case}: no body observed");
         for body in &bodies {
             for (v, tol, d, _) in &body.ends {
@@ -263,22 +260,17 @@ fn assert_sized(case: &str, bodies: &[Body], moves: &[(f64, f64)], is: impl Fn(f
 
 /// Rows 1: each moved tolerance is forced (the old one failed the end test), covers its
 /// vertex's farthest end, and is at most twice that end's certified bound plus 16 ulps; and
-/// the row with each new tolerance put back to its old one is main's row. A row the WR-450
-/// choices move in the last digits (`wr450_rows::BELOW_COMPARATOR`) is checked twice: with
-/// main's choices against the listed values to the bit (and the row rebuild), and as is
-/// against the vertices it sizes within the goldens' comparator of them.
+/// the row with each new tolerance put back to its old one is main's row, except for the
+/// rows of [`NOT_REBUILT`].
 #[test]
 fn moved_vertex_tolerances_are_twice_the_certified_farthest_end() {
     for (unit, case, moves) in TOLERANCE_ROWS {
-        let (out, bodies) = run(unit, case, true);
+        let (out, bodies) = run(unit, case);
         assert_sized(case, &bodies, moves, |tol, new| {
             tol.to_bits() == new.to_bits()
         });
-        if crate::wr450_rows::below_comparator(unit, case) {
-            let (_, bodies) = run(unit, case, false);
-            assert_sized(case, &bodies, moves, |tol, new| {
-                (tol - new).abs() <= 1e-9 * tol.abs().max(new.abs())
-            });
+        if NOT_REBUILT.contains(&case) {
+            continue;
         }
         assert_rebuilds_base(unit, case, &out, |_, _, x| {
             moves

@@ -1033,12 +1033,6 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
-    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
-    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
-    /// caches, which call through the same seam.
-    #[cfg(feature = "wr57-replay")]
-    pub replay: crate::surface::surface::replay::ReplaySeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1112,8 +1106,6 @@ impl Kernel {
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
             strip_probe: Arc::default(),
-            #[cfg(feature = "wr57-replay")]
-            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 
