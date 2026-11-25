@@ -788,29 +788,35 @@ impl Body {
     /// between samples: [`Body::edge_face_gap_samples`] gives each sample with its bounds).
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the edges or faces; [`Error::Status`]
-    /// `SM_ERR_INVALID_INPUT` for an edge without a curve, a face without a surface, an empty
-    /// edge interval or a gap that is not finite; the kernel's error.
+    /// [`Error::Argument`] for an index past the edges or faces; [`Error::Refused`] with the
+    /// reason for an edge without a curve or a face without a surface, an empty edge interval or
+    /// a gap that is not finite; the kernel's error.
     pub fn edge_face_largest_gap(&self, order: &Order, edge: usize, face: usize) -> Result<f64> {
+        const OP: &str = "edge_face_largest_gap";
+        let refused = |reason: &'static str| Error::Refused {
+            operation: OP,
+            reason,
+        };
         let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
-        let gap = read_body("edge_face_largest_gap", self, |k, b| {
+        let gap = read_body(OP, self, |k, b| {
             let interval = b.edge(e)?.interval;
             let (Some(curve), Some(surface)) =
                 (b.edge(e)?.curve.as_ref(), b.face(f)?.surface.as_ref())
             else {
-                return Ok(None);
+                return Ok(Err(refused("edge without curve or face without surface")));
             };
             if interval.max().partial_cmp(&interval.min()) != Some(std::cmp::Ordering::Greater) {
-                return Ok(None);
+                return Ok(Err(refused("empty edge interval")));
             }
             // SmTol::GetXSectTol3d of the process context: it only classifies the samples
             let tol = context_xsect_tol_3d(k, None, SmallTopoType::NormalSize);
             let mut gaps = GapFunction::crv_srf(tol, curve, &interval, surface, 20);
-            Ok(Some(gaps.max_gap_sample(k, false)?.length()))
-        })?;
-        match gap {
-            Some(d) if d.is_finite() => Ok(d),
-            _ => Err(Error::Status(crate::error::INVALID_INPUT)),
+            Ok(Ok(gaps.max_gap_sample(k, false)?.length()))
+        })??;
+        if gap.is_finite() {
+            Ok(gap)
+        } else {
+            Err(refused("non-finite gap"))
         }
     }
 
