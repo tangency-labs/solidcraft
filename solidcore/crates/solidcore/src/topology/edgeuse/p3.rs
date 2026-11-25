@@ -1586,10 +1586,6 @@ fn brute_force(
             SolutionRequested::All,
         )?;
 
-        eprintln!(
-            "L9DBG ii={ii} param={param} nsol={}",
-            solutions.as_slice().len()
-        );
         if solutions.as_slice().is_empty() {
             eprintln!("L9DBG   no solution at ii={ii} param={param}");
         }
@@ -1604,10 +1600,6 @@ fn brute_force(
                 pnt.y = crate::eval::uv::unwrap(pnt.y, previous.y, v_period);
             }
 
-            eprintln!(
-                "L9DBG   pnt=({}, {}) uvtol={uv_tol} periods={u_period:?},{v_period:?}",
-                pnt.x, pnt.y
-            );
             // save the first sample Point and subsequent ones that are far enough apart
             if points.last().is_none_or(|l| pnt.distance(*l) > uv_tol) {
                 points.push(pnt);
