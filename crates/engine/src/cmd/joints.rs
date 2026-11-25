@@ -200,6 +200,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.list", "List Joints", crate::checked!("joint.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListJointsResult>)
         .params(

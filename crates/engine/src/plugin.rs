@@ -407,6 +407,18 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Who a plugin's storage reads and writes are for during its run: the plugin itself, when it has
+/// the storage capability and says which data format it writes.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn storage_caller(manifest: &Manifest, rt: &RuntimeManifest) -> Option<storage::StorageCaller> {
+    rt.data_format.filter(|_| manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| storage::StorageCaller {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        data_format,
+    })
+}
+
 /// The shared hook path for a dialog worker and plugin.run. Hook code receives a scratch host
 /// with no file or edit grants. Complete calls propagate execution failures; a form retains its
 /// declarative state and shows a quiet note instead.
@@ -433,8 +445,12 @@ pub fn update_dialog(
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
+        // The hook reads the plugin's own data the way its entry does: `storage.get {}` is its own
+        // (#22038). It runs as a read entry, so a write is still refused.
+        let mut scratch = session.scratch();
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
-            session: session.scratch(),
+            session: scratch,
             transaction: None,
             sketch_exits: Vec::new(),
             view: None,
@@ -532,15 +548,7 @@ fn run_package(
         scratch.plugin_state.file_grants = grants.folders;
         // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
         scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
-        scratch.plugin_state.storage_caller =
-            rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
-                storage::StorageCaller {
-                    id: package.manifest.id.clone(),
-                    name: package.manifest.name.clone(),
-                    version: package.manifest.version.clone(),
-                    data_format,
-                }
-            });
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
             transaction: None,

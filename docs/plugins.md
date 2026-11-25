@@ -603,8 +603,9 @@ at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
 
 Declarative conditions run first, then the validated patch, then the same input check used by
 programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
-write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
-memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+write grants, in a fresh sandbox. It reads the design with the read commands (`component.list`
+maps bodies to components) and the plugin's own data with `storage.get {}`. Its independent
+budgets are at most 10,000,000 fuel, 16 MiB memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
 The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies

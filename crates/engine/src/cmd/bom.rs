@@ -36,6 +36,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.metadata", "Part Properties", crate::checked!("component.metadata", read))
         .icon("settings")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&METADATA_CONTRACT)
         .output(output_schema_for::<ComponentMetadataResult>)
