@@ -217,6 +217,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.construction_line.vertical",
     "sketch.copy",
     "sketch.create",
+    "sketch.crosshairs",
     "sketch.cut",
     "sketch.dimension",
     "sketch.edit",
