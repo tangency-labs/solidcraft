@@ -143,7 +143,10 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
                 // An arc at the corner: the moved line and circle (or the two moved circles)
                 // cross nearest the old corner, and both pieces end there.
                 let corner = pieces.get(j).map(|p| p.a).ok_or_else(|| fail("piece"))?;
-                let x = carriers_cross(&pi, &pj, n, corner)
+                // Far enough past a line's ends: both pieces and both circles across, and the width.
+                let size = |p: &Piece| p.a.dist(p.b) + p.arc.map_or(0.0, |arc| 2.0 * p.a.dist(arc.centre));
+                let reach = size(&pi) + size(&pj) + 2.0 * w.abs();
+                let x = carriers_cross(&pi, &pj, n, corner, reach)
                     .ok_or_else(|| fail("an arc meeting another edge at a corner the band's edge can't go round"))?;
                 if let Some(e) = out.get_mut(i) {
                     e.b = x;
@@ -175,43 +178,35 @@ fn offset_loop(pieces: &[Piece], n: Vec3, w: f64, tol: f64) -> Result<Vec<Piece>
     Ok(out)
 }
 
-/// Where the carriers of two moved pieces cross (a line's line, an arc's circle, all in the plane
-/// with normal `n`), the crossing nearest `near`; `None` when they don't cross.
-fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3) -> Option<Vec3> {
-    let nearest = |x: Vec3, y: Vec3| if x.dist(near) <= y.dist(near) { x } else { y };
-    let x = match (p.arc, q.arc) {
-        (None, None) => return None,
-        (Some(arc), None) | (None, Some(arc)) => {
-            let (line, round) = if p.arc.is_none() { (p, q) } else { (q, p) };
-            let d = (line.b - line.a).normalized()?;
-            let r = round.a.dist(arc.centre);
-            // The foot of the centre on the line, and the half chord beside it: r² − h², with h
-            // the centre's distance from the line, factored to keep its digits near tangency.
-            let f = arc.centre - line.a;
-            let foot = line.a + d * f.dot(d);
-            let h = foot.dist(arc.centre);
-            let chord2 = (r - h) * (r + h);
-            if chord2 < 0.0 {
-                return None;
+/// Where the carriers of two moved pieces cross (a line's line, an arc's circle), the crossing
+/// nearest `near`, as the kernel finds it ([`solidcore_ops::develop::crossings`]) in the face's
+/// plane (normal `n`): each arc as its whole circle, each line carried on past both its ends by
+/// `reach`, farther than a crossing near the corner can lie.
+fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3, reach: f64) -> Option<Vec3> {
+    let plane = Plane::from_normal(near, n)?;
+    let carrier = |s: &Piece| -> Option<Seg2> {
+        let (a, b) = (plane.to_local(s.a), plane.to_local(s.b));
+        match s.arc {
+            None => {
+                let len = a.dist(b);
+                if !(len > 0.0 && len.is_finite()) {
+                    return None;
+                }
+                let on = (b - a) * (reach / len);
+                Some(Seg2::Line { a: a - on, b: b + on })
             }
-            let s = chord2.sqrt();
-            nearest(foot + d * s, foot - d * s)
-        }
-        (Some(a1), Some(a2)) => {
-            let (r1, r2) = (p.a.dist(a1.centre), q.a.dist(a2.centre));
-            let gap = a2.centre - a1.centre;
-            let apart = gap.len();
-            let u = gap.normalized()?;
-            // Along u from the first centre to the chord, then half the chord across it.
-            let along = ((r1 - r2) * (r1 + r2) + apart * apart) / (2.0 * apart);
-            let half2 = (r1 - along) * (r1 + along);
-            if half2 < 0.0 {
-                return None;
-            }
-            let (base, across) = (a1.centre + u * along, n.cross(u) * half2.sqrt());
-            nearest(base + across, base - across)
+            Some(arc) => Some(Seg2::Arc {
+                center: plane.to_local(arc.centre),
+                radius: s.a.dist(arc.centre),
+                start: 0.0,
+                sweep: std::f64::consts::TAU,
+            }),
         }
     };
+    let (cp, cq) = (carrier(p)?, carrier(q)?);
+    let corner = plane.to_local(near);
+    let x = solidcore_ops::develop::crossings(&[cp], &[cq]).into_iter().map(|c| c.4).min_by(|x, y| x.dist(corner).total_cmp(&y.dist(corner)))?;
+    let x = plane.to_world(x);
     x.is_finite().then_some(x)
 }
 
