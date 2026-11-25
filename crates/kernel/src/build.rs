@@ -1564,3 +1564,21 @@ pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> 
     let _span = solidcraft_profile::span("kernel", "sweep");
     smlib_sweep(plane, region, path, &crate::SweepControl::default())
 }
+
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal ([`solidcore_ops::prism::level_on_plane`]).
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    solidcore_ops::prism::level_on_plane(sketch, point, plane).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most level of `plane` above `sketch` over the profiles' outer loops
+/// ([`solidcore_ops::prism::plane_rise`]).
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_rise(sketch, plane, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the profiles' outer
+/// loops ([`solidcore_ops::prism::plane_gap`]).
+pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
