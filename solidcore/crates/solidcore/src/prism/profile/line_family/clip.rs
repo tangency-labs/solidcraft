@@ -64,8 +64,8 @@ impl Bound {
         let low = sum(self.lo, other.lo)?;
         let high = sum(self.hi, other.hi)?;
         let mut result = Self::new(low.lo, high.hi)?;
-        result.lo_open = self.lo_open || other.lo_open;
-        result.hi_open = self.hi_open || other.hi_open;
+        result.lo_open = low.lo_open || self.lo_open || other.lo_open;
+        result.hi_open = high.hi_open || self.hi_open || other.hi_open;
         Ok(result)
     }
 
@@ -97,15 +97,15 @@ impl Bound {
                 let open = (a_open && b != 0.0) || (b_open && a != 0.0);
                 if v.lo < result.lo {
                     result.lo = v.lo;
-                    result.lo_open = open;
+                    result.lo_open = open || v.lo_open;
                 } else if v.lo == result.lo {
-                    result.lo_open &= open;
+                    result.lo_open &= open || v.lo_open;
                 }
                 if v.hi > result.hi {
                     result.hi = v.hi;
-                    result.hi_open = open;
+                    result.hi_open = open || v.hi_open;
                 } else if v.hi == result.hi {
-                    result.hi_open &= open;
+                    result.hi_open &= open || v.hi_open;
                 }
             }
         }
@@ -117,27 +117,48 @@ impl Bound {
         if other.lo <= 0.0 && other.hi >= 0.0 {
             return Err(UNCERTAIN);
         }
-        let mut lo = f64::INFINITY;
-        let mut hi = f64::NEG_INFINITY;
-        for (a, b) in [
-            (self.lo, other.lo),
-            (self.lo, other.hi),
-            (self.hi, other.lo),
-            (self.hi, other.hi),
-        ] {
-            let q = a / b;
-            let v = if a == 0.0 || b.abs() == 1.0 || a == b || a == -b {
-                Self::point(q)?
-            } else {
-                Self::new(
-                    -crate::geom::certified::next_up(-q),
-                    crate::geom::certified::next_up(q),
-                )?
-            };
-            lo = lo.min(v.lo);
-            hi = hi.max(v.hi);
+        let mut result = Self {
+            lo: f64::INFINITY,
+            hi: f64::NEG_INFINITY,
+            lo_open: true,
+            hi_open: true,
+        };
+        for (a, a_open) in [(self.lo, self.lo_open), (self.hi, self.hi_open)] {
+            for (b, b_open) in [(other.lo, other.lo_open), (other.hi, other.hi_open)] {
+                let q = a / b;
+                let mut v = if a == 0.0 || b.abs() == 1.0 || a == b || a == -b {
+                    Self::point(q)?
+                } else {
+                    let mut bound = Self::new(
+                        -crate::geom::certified::next_up(-q),
+                        crate::geom::certified::next_up(q),
+                    )?;
+                    // A nearest-rounded quotient lies strictly between its neighbours,
+                    // including when the quotient itself happens to be exact.
+                    bound.lo_open = true;
+                    bound.hi_open = true;
+                    bound
+                };
+                // A zero numerator is independent of the denominator's endpoint.
+                let open = a_open || (b_open && a != 0.0);
+                v.lo_open |= open;
+                v.hi_open |= open;
+                if v.lo < result.lo {
+                    result.lo = v.lo;
+                    result.lo_open = v.lo_open;
+                } else if v.lo == result.lo {
+                    result.lo_open &= v.lo_open;
+                }
+                if v.hi > result.hi {
+                    result.hi = v.hi;
+                    result.hi_open = v.hi_open;
+                } else if v.hi == result.hi {
+                    result.hi_open &= v.hi_open;
+                }
+            }
         }
-        Self::new(lo, hi)
+        Self::new(result.lo, result.hi)?;
+        Ok(result)
     }
 
     fn sign(self) -> Result<i8> {
@@ -174,7 +195,7 @@ fn sum(a: f64, b: f64) -> Result<Bound> {
     if !error.is_finite() {
         return Err(UNCERTAIN);
     }
-    Bound::new(
+    let mut bound = Bound::new(
         if error < 0.0 {
             -crate::geom::certified::next_up(-value)
         } else {
@@ -185,7 +206,12 @@ fn sum(a: f64, b: f64) -> Result<Bound> {
         } else {
             value
         },
-    )
+    )?;
+    // A nonzero error-free residual puts the exact sum strictly between these
+    // adjacent doubles. Preserve that certificate through subsequent operations.
+    bound.lo_open = error != 0.0;
+    bound.hi_open = error != 0.0;
+    Ok(bound)
 }
 
 fn product(a: f64, b: f64) -> Result<Bound> {
@@ -212,7 +238,7 @@ fn product(a: f64, b: f64) -> Result<Bound> {
     if !error.is_finite() {
         return Err(UNCERTAIN);
     }
-    Bound::new(
+    let mut bound = Bound::new(
         if error < 0.0 {
             -crate::geom::certified::next_up(-value)
         } else {
@@ -223,7 +249,12 @@ fn product(a: f64, b: f64) -> Result<Bound> {
         } else {
             value
         },
-    )
+    )?;
+    // The guarded FMA residual is exact, so a nonzero residual excludes both
+    // neighbours. The underflow enclosure above deliberately stays closed.
+    bound.lo_open = error != 0.0;
+    bound.hi_open = error != 0.0;
+    Ok(bound)
 }
 
 fn quantum_exponent(value: f64) -> i32 {

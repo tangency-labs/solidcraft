@@ -5154,6 +5154,65 @@ fn a_cut_hole_is_not_hatched() {
     assert_eq!(sides, BTreeSet::from([-1, 1]), "{block:?}");
 }
 
+/// A 100 x 60 x 10 plate cut through a centred 10 mm bore and a 30 x 20 x 5 pocket.
+/// The bore removes -30 < x < -20 throughout the centred section; the pocket removes
+/// 5 < x < 35 above y = 0. Every complete stroke must stay out of both open rectangles.
+#[test]
+fn a_full_section_through_a_bore_and_pocket_hatches_only_material() {
+    for (hole, pocket, cut_y) in
+        [(true, true, 30.0_f64), (true, true, 29.99), (true, true, 30.01), (true, false, 30.0), (false, true, 30.0), (false, false, 30.0)]
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plaque"}));
+        if hole {
+            run(&mut s, "solid.hole", json!({"position": [25, 30, 10], "diameter": 10}));
+        }
+        if pocket {
+            run(&mut s, "solid.box", json!({"length": 30, "width": 20, "height": 5, "corner": [55, 20, 5], "operation": "cut"}));
+        }
+        run(&mut s, "drawing.create", json!({}));
+        let base = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [90, 220]}));
+        let cut = run(
+            &mut s,
+            "drawing.view.section",
+            json!({"parent": base["view"], "line": {"kind": "full", "points": [[-10, cut_y], [110, cut_y]], "arrows": "left"}}),
+        );
+        let id = ids::decode(cut["view"].as_str().unwrap()).unwrap();
+        let (set, hatches) = drawn_hatches(&s, id);
+        let hatch = hatch_of(&set, &hatches, "Plaque");
+        assert!(!hatch.filled && !hatch.strokes.is_empty(), "hole={hole}, pocket={pocket}, y={cut_y}: {hatch:?}");
+        let hole_half = (25.0 - (cut_y - 30.0).powi(2)).sqrt();
+        let mut left = false;
+        let mut right = false;
+        let mut below_pocket = false;
+        for stroke in &hatch.strokes {
+            let (a, b) = stroke_ends(stroke);
+            let (a, b) = if a.x <= b.x { (a, b) } else { (b, a) };
+            assert!(a.x < b.x && a.y >= -5.0 - EPS && b.y <= 5.0 + EPS, "{stroke:?}");
+            if hole {
+                assert!(b.x <= -25.0 - hole_half + EPS || a.x >= -25.0 + hole_half - EPS, "a stroke crosses the bore: {stroke:?}");
+            }
+            if pocket {
+                let lo = a.x.max(5.0 + EPS);
+                let hi = b.x.min(35.0 - EPS);
+                if lo < hi {
+                    let y = |x| a.y + (b.y - a.y) * ((x - a.x) / (b.x - a.x));
+                    assert!(y(lo).max(y(hi)) <= EPS || y(lo).min(y(hi)) >= 5.0 - EPS, "a stroke crosses the pocket: {stroke:?}");
+                    below_pocket |= y(lo).min(y(hi)) < -1.0;
+                }
+            }
+            left |= b.x < -30.0;
+            right |= a.x > 35.0;
+        }
+        assert!(left && right && (!pocket || below_pocket), "material on both sides and below the pocket is hatched");
+        let scene = run(&mut s, "drawing.scene", json!({"sheet": "Sheet 1"}));
+        let state = scene["views"].as_array().unwrap().iter().find(|v| v["view"] == cut["view"]).unwrap();
+        assert!(state.get("reason").is_none(), "{state}");
+        assert_eq!(state["hatches"][0]["filled"], false, "{state}");
+        assert_eq!(state["hatches"][0]["strokes"], hatch.strokes.len(), "{state}");
+    }
+}
+
 /// The tapped block cut through its hole's axis (#13051's section): the drill's sides are cut edges
 /// 1.7 mm either side of the middle at 1:2 (Ø6.8), the thread's root lines are thin and seen at
 /// 2.0 (Ø8), 6 mm down from the top (12 deep), with a limit line across; the hatching stops at the
