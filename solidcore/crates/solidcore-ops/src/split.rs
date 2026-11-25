@@ -37,7 +37,7 @@ use solidcore::topology::brep::p9::{orient_sheet_surfaces, OrientSheetNote};
 use solidcore::topology::brep::planar_section::face_plane_section_curves;
 use solidcore::topology::brep::sheet::sheet_on;
 use solidcore::topology::brep_cache::CacheObject;
-use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::edge::{is_embedded, NotifyEnv};
 use solidcore::topology::face::p2 as face_p2;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{Brep, EdgeId, FaceId, NamingScheme};
@@ -121,7 +121,22 @@ pub(crate) fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
     solidcore::topology::loopuse::notify_ref(EntityRef::Edge(e))
 }
 
-/// Cuts `face` where `tool` meets it: the faces it was split into besides itself.
+/// What one tool did to one face: the faces it was split into besides itself, and whether
+/// the tool ran into the face and ended inside it (its curve on the face a crack, an edge with
+/// the face on both sides, which cuts nothing off).
+struct Cut {
+    made: Vec<FaceId>,
+    stops_inside: bool,
+}
+
+impl Cut {
+    const NONE: Cut = Cut {
+        made: Vec::new(),
+        stops_inside: false,
+    };
+}
+
+/// Cuts `face` where `tool` meets it ([`Cut`]).
 fn cut_face(
     k: &mut Kernel,
     b: &mut Brep,
@@ -129,7 +144,7 @@ fn cut_face(
     face: FaceId,
     tool: &Made,
     tol: f64,
-) -> solidcore::Result<Result<Vec<FaceId>>> {
+) -> solidcore::Result<Result<Cut>> {
     let Some(surface) = face_p2::surface(b, face)? else {
         return Ok(Err(Error::Status(solidcore::error::SM_ERR)));
     };
@@ -150,7 +165,7 @@ fn cut_face(
                  env: &mut NotifyEnv<'_>,
                  mut c3: Vec<_>,
                  uv: Option<Vec<_>>|
-     -> solidcore::Result<Result<Vec<FaceId>>> {
+     -> solidcore::Result<Result<Cut>> {
         match merge_curves_on_surface_through_surface(
             k,
             b,
@@ -162,7 +177,23 @@ fn cut_face(
             uv.as_deref(),
             Some(tool.surface.clone()),
         ) {
-            Ok((made, _)) => Ok(Ok(made)),
+            Ok((made, edges)) => {
+                // only a cut that split nothing is asked: did its curve stop inside the face?
+                let mut stops_inside = false;
+                if made.is_empty() {
+                    for e in edges {
+                        match is_embedded(k, b, e, Some(face), true) {
+                            Ok(true) => {
+                                stops_inside = true;
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(e) => return Ok(Err(status(e))),
+                        }
+                    }
+                }
+                Ok(Ok(Cut { made, stops_inside }))
+            }
             Err(e) => Ok(Err(status(e))),
         }
     };
@@ -175,15 +206,9 @@ fn cut_face(
             reason = "the tolerance as a lower bound: a sign, not geometry"
         )]
         let below = -tol;
-        let covers = if margin.lower >= below {
-            true
-        } else if margin.upper < below {
-            false
-        } else {
-            return Ok(Err(Error::Unsupported(
-                "whether the plane reaches over the face is undecided",
-            )));
-        };
+        // a plane the kernel cannot decide reaches over the face is intersected over its own
+        // domain, as a strip is: that intersection is right either way
+        let covers = margin.lower >= below;
         if covers {
             // as the plane cutter: a face farther from the plane than the tolerance is not cut
             let section = match face_plane_section_curves(
@@ -199,11 +224,11 @@ fn cut_face(
                 None,
             ) {
                 Ok(Some(s)) => s,
-                Ok(None) => return Ok(Ok(Vec::new())),
+                Ok(None) => return Ok(Ok(Cut::NONE)),
                 Err(e) => return Ok(Err(status(e))),
             };
             if section.curves_3d.is_empty() {
-                return Ok(Ok(Vec::new()));
+                return Ok(Ok(Cut::NONE));
             }
             let uv =
                 (section.uv_curves.len() == section.curves_3d.len()).then_some(section.uv_curves);
@@ -237,7 +262,7 @@ fn cut_face(
         uv1.push(found.surface1_uv_curves.get(i).cloned().flatten());
     }
     if c3.is_empty() {
-        return Ok(Ok(Vec::new()));
+        return Ok(Ok(Cut::NONE));
     }
     let all_uv = uv1.iter().all(Option::is_some);
     merge(k, b, env, c3, all_uv.then_some(uv1))
@@ -246,12 +271,13 @@ fn cut_face(
 /// A copy of `body` with record faces `faces` (indices into `order`, distinct) cut where each
 /// tool meets them, the tools in turn, each cutting the pieces the earlier ones left; and for
 /// each face how many faces it became besides itself. `None` when no face is split. `body` is
-/// unchanged.
+/// unchanged. A plane tool reaching over a face sections it exactly; one the kernel cannot decide
+/// reaches over it is intersected over its own domain, as any other tool is.
 ///
 /// # Errors
 /// - [`Error::Argument`]: no face or tool, too many ([`MAX_FACES`], [`MAX_TOOLS`]), a face
 ///   twice or past the record's list;
-/// - [`Error::Unsupported`]: a plane tool whose reach over a face is undecided;
+/// - [`Error::ToolStopsShort`]: no face split, but a tool ran into a face and ended inside it;
 /// - the kernel's errors (a tool it refuses is its status).
 pub fn split_faces(
     body: &Body,
@@ -303,22 +329,23 @@ pub fn split_faces(
         // the edits notify through the kernel's callbacks with the body's own attributes, so
         // what an application attached follows each cut
         let cut = with_kernel_callbacks(k, &mut a, |k, a, env| {
-            let mut total = 0usize;
+            let (mut total, mut stops_inside) = (0usize, false);
             for t in &built {
                 for (list, m) in pieces.iter_mut().zip(made.iter_mut()) {
                     let now = list.clone();
                     for f in now {
-                        let split = match cut_face(k, a, env, f, t, tol)? {
-                            Ok(s) => s,
+                        let cut = match cut_face(k, a, env, f, t, tol)? {
+                            Ok(c) => c,
                             Err(e) => return Ok(Err(e)),
                         };
-                        *m += split.len();
-                        total += split.len();
-                        list.extend(split);
+                        stops_inside |= cut.stops_inside;
+                        *m += cut.made.len();
+                        total += cut.made.len();
+                        list.extend(cut.made);
                     }
                 }
             }
-            Ok(Ok(total))
+            Ok(Ok((total, stops_inside)))
         });
         a.set_editing_enabled(editing);
         k.context.set_doing_boolean(doing);
@@ -328,7 +355,8 @@ pub fn split_faces(
         a.set_naming(NamingScheme::Caller);
         Ok(match cut? {
             Err(e) => Err(e),
-            Ok(0) => Ok(None),
+            Ok((0, true)) => Err(Error::ToolStopsShort),
+            Ok((0, false)) => Ok(None),
             Ok(_) => Ok(Some((a, made))),
         })
     })??;
@@ -383,7 +411,9 @@ fn both_sides(
 
 /// The manifold solid `body` cut in two by `tool`: the part behind the surface (its normal
 /// points away) and the part in front, each closed by the tool's piece inside the body and
-/// each possibly several solids. A tool that misses leaves both parts the whole body. `None`
+/// each possibly several solids. A tool that closes on itself (a sphere, a whole torus) cuts
+/// the body into the part inside it and the part outside. A tool that misses leaves both parts
+/// the whole body. `None`
 /// when a side is left empty, or when the tool ends inside the body: it only nicks it, and a
 /// part that is no manifold solid is no cut. `body` is unchanged.
 ///
@@ -400,6 +430,13 @@ pub fn split_body(body: &Body, tool: &Tool) -> Result<Option<(Body, Body)>> {
             },
             Err(e) => return Ok(Err(e)),
         };
+        // a tool whose surface closes on itself both ways (a sphere, a whole torus): its
+        // one-face sheet is a closed shell, which a slice does not take
+        match by_closed_tool(k, body, &t, tolerance)? {
+            Ok(Some(parts)) => return Ok(Ok(parts)),
+            Ok(None) => {}
+            Err(e) => return Ok(Err(e)),
+        }
         both_sides(k, body, true, |k, flip| {
             let mut surface = t.surface.copy(k)?;
             if flip {
@@ -411,6 +448,46 @@ pub fn split_body(body: &Body, tool: &Tool) -> Result<Option<(Body, Body)>> {
         })
     })??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
+}
+
+/// [`split_body`] by a tool whose surface closes on itself both ways (a sphere, a whole torus):
+/// its one-face sheet is then a closed shell, the solid the surface bounds, which a slice does
+/// not take; the part behind the surface (inside it, its normal pointing out) is the body's
+/// intersection with that solid and the part in front their difference. `None` for a tool whose
+/// sheet is open; `Some(None)` where a side is left empty; [`Error::NotSolid`] for a body that
+/// is no manifold solid.
+fn by_closed_tool(
+    k: &mut Kernel,
+    body: &Body,
+    tool: &Made,
+    tolerance: f64,
+) -> solidcore::Result<Result<Option<Option<(Brep, Brep)>>>> {
+    if !is_manifold_solid(&body.lock())? {
+        return Ok(Err(Error::NotSolid));
+    }
+    let surface = tool.surface.copy(k)?;
+    let sheet = sheet_on(k, surface, tolerance)?.0;
+    if !is_manifold_solid(&sheet)? {
+        return Ok(Ok(None));
+    }
+    let mut parts = [None, None];
+    for (part, op) in parts
+        .iter_mut()
+        .zip([BooleanOperation::Intersection, BooleanOperation::Difference])
+    {
+        let a = brep_copy(k, &body.lock())?;
+        let t = brep_copy(k, &sheet)?;
+        let options = MergeOptions::new(false, false, false, false, false);
+        let r = match boolean_with_options(k, a, t, op, options) {
+            Ok(r) => r.result,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        *part = (!r.face_list().is_empty()).then_some(r);
+    }
+    let [Some(back), Some(front)] = parts else {
+        return Ok(Ok(Some(None)));
+    };
+    Ok(Ok(Some(Some((back, front)))))
 }
 
 /// The manifold solid `body` cut in two by `sheet` as it is (its faces joined edge to edge; it

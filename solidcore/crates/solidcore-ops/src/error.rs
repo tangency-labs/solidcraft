@@ -147,6 +147,9 @@ pub enum Error {
     CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
+    /// A split that cut no face, where a tool ran into a face and ended inside it: its curve on
+    /// the face is a crack, which cuts nothing off.
+    ToolStopsShort,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
     /// A frame-stock path or its section the kernel refuses, including the curve index
@@ -519,6 +522,7 @@ impl Error {
             Error::NoEffect => "NoEffect",
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
+            Error::ToolStopsShort => "ToolStopsShort",
             Error::Profile(..) => "Profile",
             Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
@@ -1045,6 +1049,10 @@ impl std::fmt::Display for Error {
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
+            Error::ToolStopsShort => write!(
+                f,
+                "the tool ends inside the face it runs into, so it cuts nothing off"
+            ),
             Error::Profile(r) => write!(
                 f,
                 "planar profile refused: {}",
