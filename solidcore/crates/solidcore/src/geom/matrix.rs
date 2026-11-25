@@ -73,6 +73,7 @@
 //!   `rW[-1]` (undefined upstream) it returns `InvalidInput`. Its QR loop is bounded
 //!   by `lMaxIters` (30) per singular value, as upstream; no recursion.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{sqrt, Vec3};
@@ -160,6 +161,8 @@ struct JacobiState {
     vectors: Matrix,
     rotations: u64,
     converged: bool,
+    /// The off-diagonal sum measured at the start of the last sweep.
+    off_diagonal: f64,
 }
 
 impl Matrix {
@@ -330,9 +333,12 @@ impl Matrix {
     /// Makes the matrix the identity (`MakeIdentity`); `SM_ERR` when not square.
     pub fn make_identity(&mut self) -> Result<()> {
         if self.rows != self.cols {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::matrix::Matrix::make_identity",
-                "the matrix is not square",
+                GeomFailure::NotSquare {
+                    rows: self.rows,
+                    cols: self.cols,
+                },
             ));
         }
         self.clear();
@@ -374,7 +380,7 @@ impl Matrix {
                 }
             }
             if big < zero_tol {
-                return Err(SolidError::geom_failed(OP, "the matrix is singular"));
+                return Err(SolidError::geom(OP, GeomFailure::Singular { measure: big }));
             }
             *sc = 1.0 / big;
         }
@@ -486,7 +492,10 @@ impl Matrix {
             }
             let denom = self.get(row, row, OP)?;
             if denom.abs() < zero_tol {
-                return Err(SolidError::geom_failed(OP, "the system is singular"));
+                return Err(SolidError::geom(
+                    OP,
+                    GeomFailure::Singular { measure: denom },
+                ));
             }
             *x.get_mut(row).ok_or_else(|| out_of_range(OP))? = sum / denom;
         }
@@ -521,9 +530,7 @@ impl Matrix {
             });
         }
         let mut tmp = self.clone();
-        let lu = tmp
-            .lu_decompose()
-            .map_err(|_| SolidError::geom_failed(OP, "the matrix has no LU decomposition"))?;
+        let lu = tmp.lu_decompose().map_err(SolidError::geom_call(OP))?;
         let x = tmp.solve_with_lu(&lu.index, rhs)?;
         Ok(LinearSolution {
             x,
@@ -543,11 +550,14 @@ impl Matrix {
         const OP: &str = "geom::matrix::Matrix::eigen_system_jacobi";
         let st = self
             .jacobi()?
-            .ok_or_else(|| SolidError::geom_failed(OP, "the matrix is not symmetric"))?;
+            .ok_or_else(|| SolidError::geom(OP, GeomFailure::NotSymmetric))?;
         if !st.converged {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the Jacobi sweeps did not converge",
+                GeomFailure::JacobiDidNotConverge {
+                    sweeps: JACOBI_MAX_SWEEPS,
+                    off_diagonal: st.off_diagonal,
+                },
             ));
         }
         Ok(EigenSystem {
@@ -580,6 +590,7 @@ impl Matrix {
 
         let dv = |d: &[f64], i: usize| d.get(i).copied().ok_or_else(|| out_of_range(OP));
 
+        let mut off_diagonal = 0.0;
         for i in 0..JACOBI_MAX_SWEEPS {
             // sum of the upper off-diagonal magnitudes
             let mut sm = 0.0;
@@ -588,6 +599,8 @@ impl Matrix {
                     sm += self.get(ip, iq, OP)?.abs();
                 }
             }
+
+            off_diagonal = sm;
 
             // normal exit relying on quadratic convergence
             if sm < EFF_ZERO {
@@ -603,6 +616,7 @@ impl Matrix {
                     vectors: v,
                     rotations,
                     converged: true,
+                    off_diagonal,
                 }));
             }
 
@@ -677,6 +691,7 @@ impl Matrix {
             vectors: v,
             rotations,
             converged: false,
+            off_diagonal,
         }))
     }
 
@@ -706,7 +721,7 @@ impl Matrix {
         }
         let st = self
             .jacobi()?
-            .ok_or_else(|| SolidError::geom_failed(OP, "the matrix is not symmetric"))?;
+            .ok_or_else(|| SolidError::geom(OP, GeomFailure::NotSymmetric))?;
         let vv = &st.vectors;
         let value = |i: usize| st.values.get(i).copied().ok_or_else(|| out_of_range(OP));
         let values = [value(0)?, value(1)?, value(2)?];
@@ -768,9 +783,9 @@ impl Matrix {
 
         // check input: m >= n
         if m < n || m == 0 || n == 0 {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the matrix has fewer rows than columns",
+                GeomFailure::TooFewRows { rows: m, cols: n },
             ));
         }
         let mut w = vec![0.0; n];
@@ -968,7 +983,7 @@ impl Matrix {
         let mut nm: usize;
         for kk in (0..n).rev() {
             // loop over allowed iterations
-            for its in 0..SVD_MAX_ITERATIONS {
+            for _its in 0..SVD_MAX_ITERATIONS {
                 let mut flag = true;
 
                 // test for splitting; rv1[0] is always 0
@@ -1033,14 +1048,8 @@ impl Matrix {
                     break;
                 }
 
-                // upstream's `its == lMaxIters` error exit: unreachable in the
-                // zero-based loop, kept for the same control flow
-                if its == SVD_MAX_ITERATIONS {
-                    return Err(SolidError::geom_failed(
-                        OP,
-                        "the decomposition did not converge",
-                    ));
-                }
+                // upstream's `its == lMaxIters` error exit is unreachable in the
+                // zero-based loop (`its < SVD_MAX_ITERATIONS`), so it is not ported
 
                 // shift from bottom 2-by-2 minor
                 x = vget(&w, ll, OP)?;
@@ -1144,6 +1153,7 @@ fn sort_eigen_system(d: &mut [f64], v: &mut Matrix) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorKind;
 
     fn m(rows: usize, cols: usize, v: &[f64]) -> Matrix {
         Matrix::from_row_major(rows, cols, v.to_vec()).unwrap()
@@ -1181,10 +1191,16 @@ mod tests {
         let z = m(2, 2, &[1.0, 2.0, 0.0, 0.0]);
         let singular = z.solve_linear_system(&[1.0, 2.0]).unwrap_err();
         assert_eq!(singular.upstream_status(), Some(1001));
-        assert!(matches!(
+        assert_eq!(
             singular.geom_failure(),
-            Some(crate::error::geom::GeomFailure::Failed(_))
-        ));
+            Some(&GeomFailure::CallFailed {
+                class: ErrorKind::Degenerate
+            })
+        );
+        assert_eq!(singular.kind(), ErrorKind::Degenerate);
+        assert!(singular
+            .to_string()
+            .contains("; caused by geom::matrix::Matrix::lu_decompose"));
         let big = Matrix::new(MAX_MATRIX_SIZE + 1, MAX_MATRIX_SIZE + 1);
         assert!(matches!(
             big.solve_linear_system(&vec![0.0; MAX_MATRIX_SIZE + 1]),

@@ -9,6 +9,22 @@ use solidcore_record::Vec3;
 use crate::walk::Walk;
 use crate::{FeatureKind, PointExpr, ProfileSel};
 
+/// Keep a Thread's saved pick bits when resolving its persistent face name only rounds the point.
+/// An upstream move, or a refused distance, keeps the newly resolved point instead.
+pub fn restored_thread_pick(saved: Vec3, resolved: Vec3) -> Vec3 {
+    let saved_coords = [saved.x, saved.y, saved.z];
+    let resolved_coords = [resolved.x, resolved.y, resolved.z];
+    let (Ok(change), Ok(saved_scale), Ok(resolved_scale)) = (
+        solidcraft_kernel::services::point_distance(saved_coords, resolved_coords),
+        solidcraft_kernel::services::point_distance(saved_coords, [0.0; 3]),
+        solidcraft_kernel::services::point_distance(resolved_coords, [0.0; 3]),
+    ) else {
+        return resolved;
+    };
+    let roundoff = 8.0 * f64::EPSILON * saved_scale.value.max(resolved_scale.value).max(1.0);
+    if roundoff.is_finite() && change.value <= roundoff { saved } else { resolved }
+}
+
 /// A piece of a feature's geometry: `V` is `&Vec3` or `&mut Vec3`, and so on for the others.
 pub(crate) enum Geo<V, P, G, E, S> {
     /// A point that picks a face: it moves with the feature and names the face it picks.
@@ -25,6 +41,8 @@ pub(crate) enum Geo<V, P, G, E, S> {
     Construct(G),
     /// A primitive's placement point (length expressions).
     Placement(E),
+    /// A primitive's axis (unitless expressions): it turns with the feature, and never moves.
+    DirExpr(E),
     /// A profile selection, with its sketch.
     Profiles(u64, S),
 }
@@ -68,14 +86,15 @@ impl FeatureKind {
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
-            FeatureKind::Split { .. } | FeatureKind::SurfaceTrim { .. } => &["tool"],
+            FeatureKind::Split { .. } => &["tool", "tool_faces"],
+            FeatureKind::SurfaceTrim { .. } => &["tool"],
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -90,6 +109,7 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }
@@ -100,10 +120,24 @@ impl FeatureKind {
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
             | FeatureKind::Rest { body, .. } => body.as_deref(),
-            FeatureKind::SheetConvert { body, .. } | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
+            FeatureKind::SheetConvert { body, .. }
+            | FeatureKind::SheetSurfaceConvert { body, .. }
+            | FeatureKind::SheetRecognize { body, .. }
+            | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
             FeatureKind::SurfaceUntrim { face, .. } | FeatureKind::Split { tool: Some(face), .. } => Some(face.body.as_ref()),
             _ => None,
         }
+    }
+
+    /// The recorded body for a Thread target face slot; its optional Up To face has no target body.
+    pub fn thread_target_body(&self, slot: usize) -> Option<&str> {
+        let FeatureKind::Thread { target_bodies, up_to, .. } = self else { return None };
+        let has_up_to = matches!(up_to, Some(crate::ThreadLimit::Face(_)));
+        if slot == 1 && has_up_to {
+            return None;
+        }
+        let index = if slot == 0 { 0 } else { slot.checked_sub(usize::from(has_up_to))? };
+        target_bodies.get(index).map(AsRef::as_ref)
     }
 
     /// The feature's profile selections, each with its sketch.

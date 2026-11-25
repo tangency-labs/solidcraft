@@ -40,6 +40,8 @@ thread_local! {
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
     static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The Preferences accent over the theme's own ([`set_accent`]), per thread; `None`: the theme's.
+    static ACCENT: Cell<Option<Color32>> = const { Cell::new(None) };
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
@@ -58,6 +60,7 @@ pub struct Environment {
     pub vision: ColorVision,
     pub custom_generation: u64,
     pub logo: bool,
+    pub accent: Option<Color32>,
     pub viewport: Option<bool>,
     pub background: Option<[u8; 3]>,
 }
@@ -70,6 +73,7 @@ impl Environment {
             vision: vision(),
             custom_generation: CUSTOM_GENERATION.get(),
             logo: LOGO_ACCENT.get(),
+            accent: ACCENT.get(),
             viewport: VIEWPORT_DARK.get(),
             background: viewport_background(),
         }
@@ -77,6 +81,7 @@ impl Environment {
 
     /// A window palette with this state's logo accent and colour vision mode on top.
     pub fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = self.accent.map_or(tokens, |a| tokens.with_accent(a, self.dark));
         let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
         tokens.with_vision(self.dark, self.vision)
     }
@@ -397,6 +402,81 @@ pub fn set_custom(custom: Option<Custom>) -> bool {
 /// changed anything (the visuals follow on the next [`apply`]).
 pub fn set_logo_accent(on: bool) -> bool {
     LOGO_ACCENT.with(|c| c.replace(on) != on)
+}
+
+/// Use `accent` (opaque) over the active theme's accent, or the theme's (`None`); returns whether that changed anything.
+pub fn set_accent(accent: Option<Color32>) -> bool {
+    ACCENT.with(|c| c.replace(accent) != accent)
+}
+
+/// The accent [`set_accent`] last set on this thread.
+pub fn accent() -> Option<Color32> {
+    ACCENT.get()
+}
+
+/// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
+pub fn parse_accent(s: &str) -> Option<Color32> {
+    let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
+    Color32::from_hex(&format!("#{hex}")).ok()
+}
+
+/// The File view's unset colours follow the theme's panel, border, accent and text, not its base's (#4868).
+pub fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
+    let fallback = t.text;
+    let best = |inks: &[Color32], fills: &[Color32]| {
+        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
+        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
+    };
+    if !set("file_background") {
+        t.file_background = t.panel;
+    }
+    if !set("file_surface") {
+        t.file_surface = t.dialog_bg;
+    }
+    if !set("file_border") {
+        t.file_border = t.border;
+    }
+    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
+    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
+    if !rail_set {
+        // Deepened toward the theme's darkest colour as the built-in palettes do (Dark's rail ~0.55, Light's ~0.85).
+        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
+        t.file_rail = t.accent.lerp_to_gamma(toward, k);
+    }
+    if !hover_set {
+        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
+    }
+    if !set("file_rail_ink") {
+        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
+    }
+    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
+    let away = best(&inks, &[t.file_rail_ink]);
+    for _ in 0..10 {
+        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
+        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
+            break;
+        }
+        if !rail_set {
+            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
+        }
+        if !hover_set {
+            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
+        }
+    }
+    if !set("file_primary") {
+        t.file_primary = t.accent_soft;
+    }
+    if !set("file_primary_border") {
+        t.file_primary_border = t.accent;
+    }
+    if !set("file_primary_ink") {
+        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
+    }
+    if !set("file_dim") {
+        // Dim where dim text still reads on the page and the cards, else the plain text colour.
+        let on = [t.file_surface, t.file_background];
+        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
+    }
 }
 
 /// The theme file palette [`set_custom`] last set on this thread.
@@ -739,13 +819,28 @@ impl TabAccent {
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
         let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
-        let color = match focus {
-            Some(ramp) => Self::for_ramp(&t, ramp).color,
-            None => Self::current(ui.ctx()).color,
-        };
+        let color = Self::number_accent_color(ui);
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
+        }
+    }
+
+    /// The numeric field focus ink, for controls that own their entire border.
+    pub fn number_focus_color(ui: &egui::Ui) -> Color32 {
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
+        if !active {
+            return ui.visuals().selection.stroke.color;
+        }
+        let color = Self::number_accent_color(ui);
+        if color == Tokens::get().accent { ui.visuals().selection.stroke.color } else { color }
+    }
+
+    fn number_accent_color(ui: &egui::Ui) -> Color32 {
+        let t = Tokens::get();
+        let focus = ui.ctx().data(|d| d.get_temp::<Option<AccentRamp>>(egui::Id::unique("sc_focus_ramp"))).flatten();
+        match focus {
+            Some(ramp) => Self::for_ramp(&t, ramp).color,
+            None => Self::current(ui.ctx()).color,
         }
     }
 }
@@ -867,6 +962,8 @@ pub struct IconColors {
 /// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// User-assigned document labels: red, orange, green, blue, purple.
+    pub library_highlights: [Color32; 5],
     /// Navigation chrome from the approved Navbar boards.
     pub nav_hover: Color32,
     pub nav_press: Color32,
@@ -1242,6 +1339,15 @@ pub struct Tokens {
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
+    /// Screen paper and ink for the four drawing sheet appearances.
+    pub paper_white: Color32,
+    pub paper_ink: Color32,
+    pub paper_blueprint: Color32,
+    pub paper_blueprint_ink: Color32,
+    pub paper_prussian_blue: Color32,
+    pub paper_prussian_blue_ink: Color32,
+    pub paper_dark: Color32,
+    pub paper_dark_ink: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1260,6 +1366,12 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// Neutral light over glass, shared by table cards in built-in and custom themes.
+    /// Keep this translucent so the window beneath the card remains visible.
+    pub fn table_fill(&self) -> Color32 {
+        Color32::from_white_alpha(if is_dark() { 14 } else { 153 })
+    }
+
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
     pub fn outset_radius(radius: f32, outset: f32) -> f32 {
         if radius > 0.0 { radius + outset } else { 0.0 }
@@ -1305,7 +1417,7 @@ impl Tokens {
 
     fn base_in(mode: ColorVision) -> Tokens {
         let window = Tokens::themed(is_dark(), mode);
-        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        let tokens = Tokens::viewport_own(mode).map_or(window, |view| window.with_viewport(view));
         tokens.with_background(viewport_background())
     }
 
@@ -1316,7 +1428,7 @@ impl Tokens {
         if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
             return published.view;
         }
-        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+        Tokens::viewport_own(vision()).unwrap_or_else(|| Tokens::themed(is_dark(), vision())).with_background(viewport_background())
     }
 
     pub fn protect_tab_panel(&mut self) {
@@ -1504,13 +1616,54 @@ impl Tokens {
         }
     }
 
+    /// The colours of the 3D view's own Light or Dark when Preferences give it one ([`set_viewport_dark`], #4146):
+    /// the built-in Light or Dark theme's whatever theme the window uses, so Dark on a dark theme file still shows
+    /// the built-in Dark view. `None`: the view is drawn with the window's own tokens.
+    pub fn viewport_own(mode: ColorVision) -> Option<Tokens> {
+        VIEWPORT_DARK.get().map(|dark| {
+            let t = if dark { Tokens::dark() } else { Tokens::light() };
+            let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+            t.with_vision(dark, mode)
+        })
+    }
+
     /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for
     /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
         let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = ACCENT.get().map_or(t, |a| t.with_accent(a, dark));
         let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
         t.with_vision(dark, mode)
+    }
+
+    /// These tokens with `accent` in place of the theme's; the tabs' own accents (Sketch, Surface, …) stay the theme's.
+    pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
+        let mut t = self;
+        let accent = accent.to_opaque();
+        // The panel behind a translucent theme's tint is the theme's own colour, unmultiplied.
+        let panel = t.panel.to_opaque();
+        t.accent = accent;
+        t.accent_soft = panel.lerp_to_gamma(accent, if dark { 0.3 } else { 0.18 });
+        t.selected_bg = t.accent_soft;
+        // Ink on the soft tint: the accent lifted (dark) or deepened (light) until it reads.
+        let (toward, mut k) = if dark { (Color32::WHITE, 0.35) } else { (Color32::BLACK, 0.35) };
+        t.selected_ink = accent.lerp_to_gamma(toward, k);
+        while contrast_ratio(t.selected_ink, t.accent_soft) < 4.5 && k < 1.0 {
+            k += 0.1;
+            t.selected_ink = accent.lerp_to_gamma(toward, k.min(1.0));
+        }
+        t.on_accent = if contrast_ratio(Color32::BLACK, accent) >= contrast_ratio(Color32::WHITE, accent) { Color32::BLACK } else { Color32::WHITE };
+        t.chip = accent;
+        t.form_primary = accent;
+        t.form_primary_fill = accent;
+        t.sel_face = accent;
+        t.sel_edge = accent;
+        // The File view's rail and primary action follow the new accent, as they follow a theme's.
+        file_view_from_theme(&mut t, dark, |k| {
+            !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")
+        });
+        t
     }
 
     /// These tokens with the logo's three faces in shades of the accent: lighter, the accent

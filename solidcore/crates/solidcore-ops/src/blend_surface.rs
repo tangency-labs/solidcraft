@@ -23,11 +23,10 @@
 //!   continuity at its stations, its face keeping the definition, as
 //!   [`crate::sweep::railed::loft_blend`] makes it.
 //! - Each seam is measured as an edge between two faces: copies of the two sheets and the blend
-//!   are put in one body ([`solidcore::topology::brep::p3::merge_brep`]) and sewn at the
-//!   caller's tolerance ([`crate::stitch::stitch`]); the seam on each side is the edge of the
-//!   sewn body through the middle of that side's edge, measured by
-//!   [`Body::continuity_report`] against the caller's tolerances. The blend returned is the
-//!   blend alone; the sheets are unchanged.
+//!   are put in one body ([`crate::stitch::gather`]) and sewn at the caller's tolerance
+//!   ([`crate::stitch::stitch`]); the seam on each side is the edge of the sewn body through the
+//!   middle of that side's edge, measured by [`Body::continuity_report`] against the caller's
+//!   tolerances. The blend returned is the blend alone; the sheets are unchanged.
 //!
 //! Ops chooses no tolerance, station count or crown: they are the caller's ([`BlendEdges`]).
 //! What holds: the blend passes through every station of both edges and holds each side's
@@ -41,9 +40,7 @@ use solidcore::query::continuity::{point_side, FaceSide};
 use solidcore::sweep::section_blend::{
     section_blend_surface, section_frames_outward as kernel_frames, EndOrder, SectionFrame,
 };
-use solidcore::topology::brep::p3::{
-    brep_copy, merge_brep, new_brep, notify_serial, topology_ref, with_kernel_callbacks,
-};
+use solidcore::topology::brep::p3::new_brep;
 use solidcore::Vec3;
 
 use crate::body::{finish, Body, Expect};
@@ -52,7 +49,7 @@ use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run_on, with_body};
 use crate::sweep::railed::Continuity;
-use crate::{Error, Result};
+use crate::{Contract, Error, Result};
 
 /// One side of a blend: a sheet, its record order, the record edge the blend meets, and the
 /// continuity it meets it with.
@@ -223,9 +220,9 @@ fn seams(
     how: &BlendEdges,
 ) -> Result<[SeamReport; 2]> {
     let [from, to] = sides;
-    let all = joined("blend_edges::seams", &[blend, from.body, to.body])?;
+    let all = crate::stitch::gather(&[blend, from.body, to.body])?;
     let (sewn, _) = crate::stitch::stitch(all, how.stitch_tolerance)?;
-    let order = native_order(&sewn);
+    let order = sewn.own_order();
     let mut out = Vec::with_capacity(2);
     for middle in middles {
         let Some((edge, _)) = nearest_edge(&sewn, &order, middle)? else {
@@ -251,54 +248,6 @@ fn seams(
         out.push(seam);
     }
     <[SeamReport; 2]>::try_from(out).map_err(|_| Error::Exception)
-}
-
-/// Copies of `bodies` in one body, each body once (a body named twice is copied once), unsewn:
-/// the first copied, the others merged into it ([`merge_brep`]). The bodies are unchanged.
-///
-/// # Errors
-/// [`Error::Argument`] for no body; [`Error::Empty`]; the kernel's.
-fn joined(call: &'static str, bodies: &[&Body]) -> Result<Body> {
-    let inputs: Vec<(&'static str, &Body)> = bodies.iter().map(|b| ("brep", *b)).collect();
-    let made = run_on(call, &inputs, |k| {
-        let Some((first, rest)) = bodies.split_first() else {
-            return Ok(Err(Error::Argument));
-        };
-        let mut joined = {
-            let g = first.lock();
-            brep_copy(k, &g)?
-        };
-        let mut taken: Vec<&Body> = vec![*first];
-        for body in rest {
-            if taken.iter().any(|t| std::ptr::eq(*t, *body)) {
-                continue;
-            }
-            taken.push(*body);
-            let mut copy = {
-                let g = body.lock();
-                brep_copy(k, &g)?
-            };
-            let serial = notify_serial(&mut k.context, &mut copy)?;
-            let source_key = move |e| topology_ref(serial, e);
-            with_kernel_callbacks(k, &mut joined, |k, j, env| {
-                merge_brep(k, env, j, &copy, &source_key, None, None, true)
-            })?;
-        }
-        joined.refresh_cached_topology();
-        finish(k, joined, Expect::FACES)
-    })??;
-    Ok(Body::new(made))
-}
-
-/// The record order of `body` that is its own lists (faces, edges and vertices as the kernel
-/// holds them).
-fn native_order(body: &Body) -> Order {
-    let g = body.lock();
-    Order {
-        faces: g.face_list().to_vec(),
-        edges: g.edge_list().to_vec(),
-        vertices: g.vertex_list().to_vec(),
-    }
 }
 
 /// The edge of `body` (by its index in `order`) nearest `p`, with how far it is (the kernel's
@@ -411,9 +360,9 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     if !valid {
         return Err(Error::Argument);
     }
-    let (a_order, b_order) = (native_order(a), native_order(b));
-    let (sewn, _) = crate::stitch::stitch(joined("fillet_sheets", &[a, b])?, how.tolerance)?;
-    let order = native_order(&sewn);
+    let (a_order, b_order) = (a.own_order(), b.own_order());
+    let (sewn, _) = crate::stitch::stitch(crate::stitch::gather(&[a, b])?, how.tolerance)?;
+    let order = sewn.own_order();
     // the edges the sheets share once sewn: each runs along an edge of both
     let mut shared = Vec::new();
     for i in 0..order.edges.len() {
@@ -432,7 +381,7 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     }
     let sizes = vec![size; shared.len()];
     let blended = crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
-    let rounded = native_order(&sewn);
+    let rounded = sewn.own_order();
     // The fillet's faces are the ones the kernel's blend made. Every other face is a sheet's,
     // cut back: the first's where a point inside it lies on the first sheet, else the
     // second's (the blend makes the faces it trims anew, so a face's id does not say which).
@@ -474,7 +423,7 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         None
     };
     // the seams: the fillet's edges that are edges between two faces of the rounded body
-    let fillet_order = native_order(&fillet);
+    let fillet_order = fillet.own_order();
     let mut seams = Vec::new();
     for i in 0..fillet_order.edges.len() {
         let middle = fillet.edge_middle(&fillet_order, i)?;
@@ -564,14 +513,14 @@ pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fille
         return Err(Error::Argument);
     }
     for sheet in [a, b] {
-        if native_order(sheet).faces.len() != 1 {
+        if sheet.own_order().faces.len() != 1 {
             return Err(Error::Unsupported(
                 "a fillet between crossing sheets takes sheets of one face each",
             ));
         }
     }
-    let (cut_a, _) = crate::boolean::imprint(a.copy()?, b.copy()?)?;
-    let (cut_b, _) = crate::boolean::imprint(b.copy()?, a.copy()?)?;
+    let (cut_a, _) = crate::boolean::imprint_with(a.copy()?, b.copy()?, Contract::Proved)?;
+    let (cut_b, _) = crate::boolean::imprint_with(b.copy()?, a.copy()?, Contract::Proved)?;
     let [side_a, side_b] = how.sides;
     let half_a = half(&cut_a, b, side_b, tol)?;
     let half_b = half(&cut_b, a, side_a, tol)?;
@@ -584,7 +533,7 @@ pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fille
 /// [`Error::Unsupported`] for a sheet `other` does not cut in two, or a piece its side does not
 /// decide; those of the face removal.
 fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
-    let order = native_order(cut);
+    let order = cut.own_order();
     if order.faces.len() < 2 {
         return Err(Error::Unsupported(
             "the sheets do not cross: a fillet between sheets that stand apart is not built",

@@ -945,12 +945,12 @@ fn surface_op_on(
         }),
         OpIn::Reverse { dir } => {
             let dir = param_of(*dir)?;
-            edit(&mut s, |x| x.reverse(&Kernel::default(), dir))
+            edit(&mut s, |x| x.reverse(&crate::runner_kernel(), dir))
         }
         OpIn::Reparam { dom } => edit(&mut s, |x| {
-            x.reparameterize(&Kernel::default(), &dom_of(*dom))
+            x.reparameterize(&crate::runner_kernel(), &dom_of(*dom))
         }),
-        OpIn::Swap => edit(&mut s, |x| x.swap_uv(&Kernel::default())),
+        OpIn::Swap => edit(&mut s, |x| x.swap_uv(&crate::runner_kernel())),
         OpIn::Transform {
             origin,
             x,
@@ -959,13 +959,13 @@ fn surface_op_on(
         } => {
             let ax = Axis2Placement::new(v3(*origin), v3(*x), v3(*y));
             edit(&mut s, |srf| {
-                srf.transform(&Kernel::default(), &ax, scale.map(v3))
+                srf.transform(&crate::runner_kernel(), &ax, scale.map(v3))
             })
         }
         OpIn::Trim { dom } => {
             let mut d = dom_of(*dom);
             let r = match s.as_mut() {
-                Some(x) => x.trim_with_domain(&Kernel::default(), &mut d),
+                Some(x) => x.trim_with_domain(&crate::runner_kernel(), &mut d),
                 None => Err(base_err()),
             };
             match r {
@@ -982,7 +982,7 @@ fn surface_op_on(
             let dir = param_of(*dir)?;
             record(|o| {
                 let (l, r) = match &s {
-                    Some(x) => x.split_at(&Kernel::default(), *t, dir)?,
+                    Some(x) => x.split_at(&crate::runner_kernel(), *t, dir)?,
                     None => sp2::base_split_at()?,
                 };
                 dump_state(o, Some(&l));
@@ -993,7 +993,7 @@ fn surface_op_on(
         OpIn::StepInv { dom, p, tol, guess } => record(|o| {
             let (uv, loc) = match &s {
                 Some(x) => x.step_inversion(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     &dom_of(*dom),
                     v3(*p),
                     *tol,
@@ -1006,7 +1006,7 @@ fn surface_op_on(
             Ok(())
         }),
         OpIn::AdjustStep { dom } => edit(&mut s, |x| {
-            x.adjust_step_uv_domain(&Kernel::default(), &dom_of(*dom))
+            x.adjust_step_uv_domain(&crate::runner_kernel(), &dom_of(*dom))
         }),
         OpIn::MaxAnal => record(|o| {
             let d = match &s {
@@ -1033,7 +1033,7 @@ fn surface_op_on(
         OpIn::DropFast { dom, p } => record(|_| {
             match &s {
                 Some(x) => x.drop_point_fast::<Handle>(
-                    &Kernel::default(),
+                    &crate::runner_kernel(),
                     &dom_of(*dom),
                     SolverOperation::Minimize,
                     v3(*p),
@@ -1050,8 +1050,8 @@ fn surface_op_on(
             let uv = p2(*uv);
             let (a, b) = match &s {
                 Some(x) => (
-                    x.convert_uv_from_step_to_nurbs(&Kernel::default(), uv)?,
-                    x.convert_uv_from_nurbs_to_step(&Kernel::default(), uv)?,
+                    x.convert_uv_from_step_to_nurbs(&crate::runner_kernel(), uv)?,
+                    x.convert_uv_from_nurbs_to_step(&crate::runner_kernel(), uv)?,
                 ),
                 None => (base_convert_uv(uv), base_convert_uv(uv)),
             };
@@ -1116,7 +1116,7 @@ fn surface_op_on(
             let mut other = Surface::from(bss_of(other)?);
             let mut this = s.clone();
             record(|o| {
-                let k = Kernel::default();
+                let k = crate::runner_kernel();
                 let x = this.as_mut().ok_or_else(base_err)?;
                 if let Some(t) = translate {
                     let mut ax = Axis2Placement::default();
@@ -1152,7 +1152,7 @@ fn cross_values(s: &CrossSets) -> (Vec<Vec3>, Vec<Vec3>, [Option<Vec<Vec3>>; 6])
 }
 
 fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let run = match op {
         OpIn::Lift2 { v } => {
             let a: Vec<Vec3> = v.iter().copied().map(v3).collect();
@@ -1622,6 +1622,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 ray_fire: *ray,
                 distance_tolerance: *tol,
                 surface_cache: None,
+                modes: None,
                 face_queries: None,
                 face_cache: None,
                 kernel: &k,
@@ -1685,7 +1686,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
                 },
             );
             record(|o| {
-                let s = Surface::read_from_db(&Kernel::default(), *ty, &mut r, *version)?;
+                let s = Surface::read_from_db(&crate::runner_kernel(), *ty, &mut r, *version)?;
                 dump_state(o, Some(&s));
                 Ok(())
             })
@@ -1748,7 +1749,7 @@ pub fn result_breps(case: &Case) -> Result<Drawn, HarnessError> {
     }
     let i: Inputs = case.parse()?;
     let t = i.this.as_ref().ok_or_else(|| cannot("a static op has no surface"))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (_, s) = surface_op_on(&k, &i.op, t)?;
     let s = s.ok_or_else(|| cannot("the base class (or an unread record) has no surface"))?;
     let dom = s
@@ -2780,7 +2781,7 @@ fn gen_static_case(rng: &mut Rng) -> Inputs {
 /// tolerance) and one far away; the domain is the STEP domain or a sub-domain of it.
 fn revolution_cases() -> Result<Vec<Case>, HarnessError> {
     type StepOp = (String, [f64; 4], [f64; 3], f64, Option<[f64; 2]>);
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let placements = [
         ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         ([1.0, -2.0, 0.5], [0.6, 0.8, 0.0], [0.0, 0.0, 1.0]),
@@ -2931,7 +2932,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         if case.inputs.get("common_const_make").is_some() {
             if let Some(v) = case.inputs.get("common_sphere") { return super::surface_sphere::const_make_rust(v.clone()); }
             if let Some(v) = case.inputs.get("common_torus") { return super::surface_torus::const_make_rust(v.clone()); }
@@ -2968,10 +2969,226 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// Coefficient hulls, refined by de Casteljau, bound a degree-six residual everywhere.
+    fn review_residual_bound(coefficients: [f64; 7], rounding: f64, tolerance: f64) -> f64 {
+        assert!(
+            coefficients.iter().all(|coefficient| coefficient.is_finite()),
+            "non-finite residual coefficient"
+        );
+        let mut stack = vec![(coefficients, 0_u8)];
+        let mut bound = 0.0_f64;
+        while let Some((coefficients, depth)) = stack.pop() {
+            let hull = coefficients.iter().map(|x| x.abs()).fold(0.0_f64, f64::max) + rounding;
+            if hull <= tolerance {
+                bound = bound.max(hull);
+                continue;
+            }
+            assert!(depth < 8, "uncertified residual {hull:e}");
+            let mut work = coefficients;
+            let mut left = [0.0; 7];
+            let mut right = [0.0; 7];
+            left[0] = work[0];
+            right[6] = work[6];
+            for level in 1..=6 {
+                for i in 0..=6 - level {
+                    work[i] = 0.5 * work[i] + 0.5 * work[i + 1];
+                }
+                left[level] = work[0];
+                right[6 - level] = work[6 - level];
+            }
+            stack.push((right, depth + 1));
+            stack.push((left, depth + 1));
+        }
+        bound
+    }
+
+    /// A non-finite polynomial cannot supply a certified finite residual.
+    #[test]
+    #[should_panic(expected = "non-finite residual coefficient")]
+    fn review_residual_bound_refuses_nan_coefficients() {
+        review_residual_bound([f64::NAN; 7], 1e-12, 1e-6);
+    }
+
+    /// Both full crossing branches are distinct, monotone in x, and enclosed on z=x²=y².
+    /// Each branch comes out in two pieces split at the node, where the normals are
+    /// parallel (WR-77); the two pieces of a branch meet there and together run from
+    /// x = 1 to x = -1.
+    #[test]
+    fn review_crossing_node_has_both_complete_branches() {
+        let case = crate::case::regression_case(&Runner, "tc_parabolic_cylinders_crossing_node");
+        let input: Inputs = case.parse().unwrap();
+        let first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi {
+            dom,
+            other,
+            other_dom,
+            tol,
+            ..
+        } = input.op
+        else {
+            panic!("intersection case");
+        };
+        let second = Surface::from(bss_of(&other).unwrap());
+        let k = crate::runner_kernel();
+        let result = first
+            .global_surface_intersect(
+                &k,
+                &dom_of(dom),
+                &second,
+                &dom_of(other_dom),
+                [true, true],
+                tol,
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.curves_3d.len(), 4);
+        let tol = tol.unwrap();
+        let mut branches = Vec::new();
+        let mut spans = Vec::new();
+        let mut worst = 0.0_f64;
+        for curve in &result.curves_3d {
+            let CurveKind::BSpline(curve) = curve.kind() else {
+                panic!("B-spline branch");
+            };
+            let net = curve.gw_nurb().unwrap();
+            assert_eq!(net.degree(), 3);
+            let start = net.cpts().first().unwrap();
+            let end = net.cpts().last().unwrap();
+            // the sign of y / x at the end away from the node
+            let far = if start.x.abs() > end.x.abs() { start } else { end };
+            let sign = if far.x * far.y > 0.0 { 1 } else { -1 };
+            branches.push(sign);
+            spans.push((sign, [start.x, start.y, start.z], [end.x, end.y, end.z]));
+            for segment in solidcore::nurbs::nurbs_crv::create_bez_segments(net).unwrap() {
+                let points = segment.cpts();
+                assert_eq!(points.len(), 4);
+                assert!(
+                    points.windows(2).all(|p| p[0].x > p[1].x),
+                    "monotone x covers the whole branch"
+                );
+                let magnitude = points
+                    .iter()
+                    .flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()])
+                    .fold(1.0_f64, f64::max);
+                // At most 1024 rounded operations: cubic knot insertion, residual products,
+                // and eight levels of degree-six averaging. Bound their accumulated rounding.
+                let unit = f64::EPSILON / 2.0;
+                let gamma = 1024.0 * unit / (1.0 - 1024.0 * unit);
+                let rounding = gamma * (4.0 * magnitude * magnitude + 2.0 * magnitude + 1.0);
+                for point in points {
+                    assert_eq!(point.w, NOW);
+                    assert!((point.y - f64::from(sign) * point.x).abs() <= rounding);
+                }
+                let c3 = [1.0, 3.0, 3.0, 1.0];
+                let c6 = [1.0, 6.0, 15.0, 20.0, 15.0, 6.0, 1.0];
+                for coordinate in [false, true] {
+                    let mut coefficients = [0.0; 7];
+                    for n in 0_usize..=6 {
+                        for i in 0_usize..=3 {
+                            if let Some(j) = n.checked_sub(i).filter(|&j| j < 4) {
+                                let a = if coordinate { points[i].y } else { points[i].x };
+                                let b = if coordinate { points[j].y } else { points[j].x };
+                                coefficients[n] += c3[i] * c3[j] / c6[n] * (points[i].z - a * b);
+                            }
+                        }
+                    }
+                    worst = worst.max(review_residual_bound(coefficients, rounding, tol));
+                }
+            }
+        }
+        branches.sort_unstable();
+        assert_eq!(
+            branches,
+            [-1, -1, 1, 1],
+            "opposite branches cannot duplicate one another"
+        );
+        for sign in [-1, 1] {
+            let mut pieces: Vec<_> = spans.iter().filter(|s| s.0 == sign).collect();
+            pieces.sort_by(|a, b| b.1[0].total_cmp(&a.1[0]));
+            let [(_, s0, e0), (_, s1, e1)] = pieces[..] else {
+                panic!("two pieces per branch");
+            };
+            // from x = 1 to the node, and on from the node to x = -1
+            assert!((s0[0] - 1.0).abs() < 1e-12 && (e1[0] + 1.0).abs() < 1e-12);
+            assert!(
+                e0.iter().zip(s1).all(|(a, b)| (a - b).abs() <= 1e-12),
+                "the pieces of a branch meet: {e0:?} {s1:?}"
+            );
+            assert!(e0.iter().all(|c| c.abs() <= tol), "they meet at the node: {e0:?}");
+        }
+        eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
+    }
+
+    /// The curve types of the intersection of upstream's case `name`.
+    fn curve_types(name: &str) -> Vec<sp2::TsectCurveType> {
+        let case = crate::case::regression_case(&Runner, name);
+        let input: Inputs = case.parse().unwrap();
+        let mut first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+        let OpIn::Gssi {
+            dom,
+            other,
+            other_dom,
+            tol,
+            translate,
+        } = input.op
+        else {
+            panic!("intersection case");
+        };
+        let mut second = Surface::from(bss_of(&other).unwrap());
+        let k = crate::runner_kernel();
+        if let Some(t) = translate {
+            let mut ax = Axis2Placement::default();
+            ax.translate(v3(t));
+            first.transform(&k, &ax, None).unwrap();
+            second.transform(&k, &ax, None).unwrap();
+        }
+        first
+            .global_surface_intersect(
+                &k,
+                &dom_of(dom),
+                &second,
+                &dom_of(other_dom),
+                [true, true],
+                tol,
+                None,
+            )
+            .unwrap()
+            .curve_types
+    }
+
+    /// Two surfaces that coincide over a region touch there everywhere, not along a curve
+    /// (#18930). With the tangent curve tracer, two of upstream's coincident pairs keep the
+    /// curves the marcher finds: the boundaries of the coincident region (and, for the two
+    /// surfaces of revolution, the crossing where they part), and no tangent curve. The
+    /// tracer's seeds on these pairs lie on domain edges and corners, the ends of the
+    /// region's boundary curves, where at most half of its probe circle is inside the domains.
+    #[test]
+    fn coincident_surfaces_get_no_tangent_curve_from_the_tracer() {
+        use sp2::TsectCurveType::{Coincident, Crossing};
+        for (name, want) in [
+            ("ssi_adv_ssi_rev_rev_coin_f0_f0", vec![Coincident, Coincident, Crossing]),
+            ("ssi_adv_ssi_coincident_torii_f0_f0", vec![Coincident; 4]),
+        ] {
+            assert_eq!(curve_types(name), want, "{name}");
+        }
+    }
+
+    /// Two spheres given in different parameters that coincide everywhere (#18930): the
+    /// intersection is the four boundaries of the region the domains share, with the tangent
+    /// curve tracer too. A seed at a pole of one sphere, where its parameters keep only the
+    /// meridian's direction, found the contact in two opposite directions there, and the
+    /// tracer traced the region's boundary as a tangent curve.
+    #[test]
+    fn a_pole_of_two_coincident_spheres_starts_no_tangent_curve() {
+        use sp2::TsectCurveType::Coincident;
+        let name = "ssi_adv_ssi_coincident_spheres2_f0_f0";
+        assert_eq!(curve_types(name), vec![Coincident; 4], "{name}");
+    }
+
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         let mut tally: BTreeMap<(String, String), usize> = BTreeMap::new();
         for seed in 0..2000u64 {
             let mut rng = Rng::new(0x5eed_0000 + seed);

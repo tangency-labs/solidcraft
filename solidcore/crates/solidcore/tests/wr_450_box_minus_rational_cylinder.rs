@@ -3,10 +3,9 @@
 //! four spans each. Splitting a face copies its surface for the new face with
 //! `SmBSplineSurface::CopyAndAddAnalytics`; upstream's copy is the recognised analytic
 //! cylinder in its own parameterization, so the kept UV trims point off their edges and
-//! the edges grow their tolerances to cover it. With
-//! `Kernel::fixes.analytic_copy_keeps_parameterization` the copy stays exact where the
-//! analytic form differs, and the result is valid.
-
+//! the edges grow their tolerances to cover it. The copy now stays exact where the
+//! analytic form differs (the flag `analytic_copy_keeps_parameterization` was retired
+//! into this behaviour), so the moved edge uses keep trims that lie on their edges.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -16,7 +15,6 @@
 
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
-use solidcore::geom::assert_array::labels;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
@@ -99,59 +97,36 @@ fn closed_form() -> f64 {
 }
 
 #[test]
-fn wr_450_box_minus_rational_cylinder_is_valid_only_with_the_fix() {
+fn wr_450_box_minus_rational_cylinder_is_valid() {
     let want = closed_form();
-    for fix in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.analytic_copy_keeps_parameterization = fix;
-        let cylinder = rational_cylinder(&mut k);
-        let block = create_box(&mut k, Point3::new(-14.0, 0.0, -14.0), 28.0, 20.0, 28.0).unwrap();
-        let mut r = boolean_difference(&mut k, block, cylinder).unwrap();
+    let mut k = Kernel::default();
+    let cylinder = rational_cylinder(&mut k);
+    let block = create_box(&mut k, Point3::new(-14.0, 0.0, -14.0), 28.0, 20.0, 28.0).unwrap();
+    let mut r = boolean_difference(&mut k, block, cylinder).unwrap();
 
-        // the same body either way: six faces and the closed-form volume
-        assert_eq!(r.face_list().len(), 6, "fix {fix}");
-        let got = volume(&k, &mut r);
-        assert!(
-            (got - want).abs() <= 1e-6 * want,
-            "fix {fix}: volume {got}, closed form {want}"
-        );
+    // six faces and the closed-form volume: the split faces keep the exact surface
+    // (upstream's analytic copy left trims that pointed off their edges, which carried
+    // tolerances up to 0.78 to cover them, and the body was invalid)
+    assert_eq!(r.face_list().len(), 6);
+    let got = volume(&k, &mut r);
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
 
-        let worst_edge = r
-            .edge_list()
-            .iter()
-            .map(|&e| edge::tolerance(&r, e).unwrap())
-            .fold(0.0, f64::max);
-        let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
-        let failures: Vec<_> = check
-            .failures()
-            .map(|f| (f.reporting_type, f.test_index))
-            .collect();
-        eprintln!(
-            "fix {fix}: volume {got}, worst edge tolerance {worst_edge}, body {}, {:?}",
-            r.tolerance(),
-            check.lines()
-        );
-        if fix {
-            // the split faces keep the exact surface, so the trims lie on their edges
-            assert!(worst_edge <= r.tolerance(), "{worst_edge}");
-            assert!(check.is_valid(), "{:?}", check.lines());
-            assert_eq!(check.assert_valid, Some(true));
-        } else {
-            // upstream: the copies' other parameterization puts the trims up to 0.78 off
-            // their edges, which take tolerances to cover it
-            assert!(worst_edge > 0.5, "{worst_edge}");
-            assert!(!check.is_valid());
-            assert_eq!(check.assert_valid, None, "ValidatePointers fails");
-            assert_eq!(
-                failures,
-                [
-                    (labels::BREP_TYPE, 59),
-                    (labels::BREP_TYPE, 82),
-                    (labels::BREP_TYPE, 82)
-                ],
-                "{:?}",
-                check.lines()
-            );
-        }
-    }
+    let worst_edge = r
+        .edge_list()
+        .iter()
+        .map(|&e| edge::tolerance(&r, e).unwrap())
+        .fold(0.0, f64::max);
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    eprintln!(
+        "volume {got}, worst edge tolerance {worst_edge}, body {}, {:?}",
+        r.tolerance(),
+        check.lines()
+    );
+    // the trims lie on their edges
+    assert!(worst_edge <= r.tolerance(), "{worst_edge}");
+    assert!(check.is_valid(), "{:?}", check.lines());
+    assert_eq!(check.assert_valid, Some(true));
 }

@@ -141,7 +141,9 @@ use crate::blend::fillet_solver::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::blend::trace::defect;
+use crate::error::blend::{SolverFailure, TraceFailure};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -178,6 +180,16 @@ const OP_BASE: &str = "blend::fillet_standard_solver::p1::CurveBasedFs::evaluate
 const OP_CIRC: &str =
     "blend::fillet_standard_solver::p1::CircularCrossSectionFsg::create_surface_from_curves";
 const OP_VR: &str = "blend::fillet_standard_solver::p1::VariableRadiusFs";
+/// Why an evaluation asked for one derivative has it: it returns the point and the
+/// derivative.
+const ONE_DERIVATIVE: &str =
+    "an evaluation asked for one derivative returns the point and the derivative";
+/// Why a surface evaluation asked for first partials has them.
+pub(super) const FIRST_PARTIALS: &str =
+    "a surface evaluation asked for first partials returns them";
+/// Why the circular generator's first pass has an arc to tweak or mirror: both of its
+/// branches (approximated and exact arcs) build one before.
+const FIRST_PASS_ARC: &str = "the first pass builds an arc for every section it keeps";
 
 /// `dAnalyticTol` of the surface generators and `SetExtensionFlags`.
 const ANALYTIC_TOL: f64 = 1.0e-8;
@@ -295,6 +307,7 @@ impl SolverRails for FilletSolver {
     }
 
     fn set_offsets(&mut self, radius: f64) -> Result<()> {
+        self.check_station_radius(radius, OP)?;
         for rail in 0..2 {
             let d = radius * self.orientation(rail)?;
             self.rail_mut(rail)?.set_offset_distance(d);
@@ -412,9 +425,9 @@ fn edgeuse_orientations(
     let dot1 = bin_vec2.dot(faceuse_normal);
     if dot1.abs() < EFF_ZERO_SQRT {
         // Surfaces are tangent at midpoint: can't fillet this.
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend_trace(
             op,
-            "the surfaces are tangent at the midpoint",
+            TraceFailure::EdgeFacesTangent { dot: Some(dot1) },
         ));
     }
     if dot1 < 0.0 {
@@ -424,7 +437,10 @@ fn edgeuse_orientations(
     let dot2 = bin_vec.dot(faceuse_normal2);
     if dot2.abs() < EFF_ZERO_SQRT {
         // Tangent surfaces.
-        return Err(SolidError::blend_failed(op, "the surfaces are tangent"));
+        return Err(SolidError::blend_trace(
+            op,
+            TraceFailure::EdgeFacesTangent { dot: Some(dot2) },
+        ));
     }
     if dot2 < 0.0 {
         orientations[1] = -1.0;
@@ -629,9 +645,9 @@ pub fn constant_radius_from_edgeuse(
         }; // smos_Max
         let Some(sides) = sector_sides(k, brep, [Some(edgeuse), radial], length, OP)? else {
             // Smooth, or no sector: can't fillet this.
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_trace(
                 OP,
-                "the edge is smooth or has no sector",
+                TraceFailure::EdgeFacesTangent { dot: None },
             ));
         };
         let eu1 = radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
@@ -912,9 +928,9 @@ pub(crate) fn constant_radius_load_jacobian<S: super::p2::ConstantRadiusOps + ?S
         || du_g.length_squared() < EFF_ZERO_SQ
         || dv_g.length_squared() < EFF_ZERO_SQ
     {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend_trace(
             OP,
-            "a base surface has a zero derivative",
+            TraceFailure::BaseDerivativeZero,
         ));
     }
 
@@ -1066,14 +1082,33 @@ impl SurfaceSurfaceFs {
 
 // ---- SmConstantDistanceFS -----------------------------------------------------------------
 
-/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): every cross
-/// section has the same chord length between the rails.
+/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): a fixed
+/// chord between rails, or a fixed common setback on the two tangent planes.
 #[derive(Debug, Clone)]
 pub struct ConstantDistanceFs {
     /// The `SmFilletSolver` base.
     pub solver: FilletSolver,
     /// `m_dDistance`: the distance between corresponding rail points.
     pub distance: f64,
+}
+
+/// The equal setback's rolling radius and its derivative with respect to the dot
+/// of the inward unit normals. Their angle is the supplement of the tangent
+/// planes' wedge, so r/d = tan(wedge/2) = |n0+n1| / |n0-n1|.
+pub(crate) fn equal_setback_radius(setback: f64, [n0, n1]: [Vec3; 2]) -> Result<(f64, f64)> {
+    let sum_sq = (n0 + n1).length_squared();
+    let diff_sq = (n0 - n1).length_squared();
+    let radius = setback * (sum_sq / diff_sq).sqrt();
+    let derivative = 4.0 * radius / (sum_sq * diff_sq);
+    if !radius.is_finite() || radius <= 0.0 || !derivative.is_finite() {
+        return Err(SolidError::blend_trace(
+            OP_CD_JAC,
+            TraceFailure::EdgeFacesTangent {
+                dot: Some(n0.dot(n1)),
+            },
+        ));
+    }
+    Ok((radius, derivative))
 }
 
 /// The outputs of [`ConstantDistanceFs::load_initial_values`] besides the arrays it
@@ -1254,9 +1289,9 @@ impl ConstantDistanceFs {
             || du_g.length_squared() < EFF_ZERO_SQ
             || dv_g.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_trace(
                 OP,
-                "a base surface has a zero derivative",
+                TraceFailure::BaseDerivativeZero,
             ));
         }
 
@@ -1266,9 +1301,9 @@ impl ConstantDistanceFs {
 
         // failure: zero length SurfaceNormal
         if n_f.length_squared() < EFF_ZERO_SQ || n_g.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_trace(
                 OP,
-                "a base surface normal is zero",
+                TraceFailure::BaseNormalZero { side: None },
             ));
         }
 
@@ -1295,6 +1330,34 @@ impl ConstantDistanceFs {
 
         // set sDiff2 = vector between points on the fillet center curve (desire sDiff2.Length == 0.0)
         let diff2 = diff1 + radius * (n_f - n_g);
+
+        let (value, row, diverged) = if let Some(setback) = self.solver.station_setback() {
+            let (target, dr_dp) = equal_setback_radius(setback, [n_f, n_g])?;
+            (
+                radius - target,
+                (
+                    -dr_dp * n_g.dot(unit_n_f_du),
+                    -dr_dp * n_g.dot(unit_n_f_dv),
+                    -dr_dp * n_f.dot(unit_n_g_du),
+                    -dr_dp * n_f.dot(unit_n_g_dv),
+                    1.0,
+                ),
+                diff1.length() > 20.0 * setback,
+            )
+        } else {
+            let value = diff1.dot(diff1) - self.distance * self.distance;
+            (
+                value,
+                (
+                    2.0 * diff1.dot(du_f),
+                    2.0 * diff1.dot(dv_f),
+                    -2.0 * diff1.dot(du_g),
+                    -2.0 * diff1.dot(dv_g),
+                    0.0,
+                ),
+                value.abs().sqrt() > 10.0 * self.distance,
+            )
+        };
 
         if let Some(j) = jacobian {
             let mut i = *num_equations;
@@ -1324,13 +1387,7 @@ impl ConstantDistanceFs {
                     -dv_g.z - radius * unit_n_g_dv.z,
                     n_f.z - n_g.z,
                 ),
-                (
-                    2.0 * diff1.dot(du_f),
-                    2.0 * diff1.dot(dv_f),
-                    -2.0 * diff1.dot(du_g),
-                    -2.0 * diff1.dot(dv_g),
-                    0.0,
-                ),
+                row,
             ] {
                 set_j(j, i, surf1_off, a, OP)?;
                 set_j(j, i, s1, b, OP)?;
@@ -1343,18 +1400,21 @@ impl ConstantDistanceFs {
 
         // Compute function values - distance vector between offset points on fillet center curve
         //                           distance between points on rail curves
-        let value = diff1.dot(diff1) - self.distance * self.distance;
         for v in [diff2.x, diff2.y, diff2.z, value] {
             set_f(f, *num_equations, v, OP)?;
             *num_equations = add(*num_equations, 1, OP)?;
         }
 
         // failure: railPoints more than 10*m_Distance apart
-        if value.abs().sqrt() > 10.0 * self.distance {
-            return Err(SolidError::blend_failed(
+        if diverged {
+            // No convergance just skip out of here
+            return Err(SolidError::blend_trace(
                 OP,
-                "the rail points are more than ten distances apart",
-            )); // No convergance just skip out of here
+                TraceFailure::RailPointsDiverged {
+                    gap: diff1.length(),
+                    distance: self.distance,
+                },
+            ));
         }
 
         // set offset surface distances = current radius solution
@@ -1380,9 +1440,9 @@ impl ConstantDistanceFs {
     /// extended by the extension factor becomes two new intervals at
     /// `rIntervals[len(rGuessT)..]`, two `false` periodicities and the new UV guess are
     /// appended, and `surface2_index` becomes the old guess count. Then always:
-    /// `rIntervals[surface2_index + 2] = [0, 10 L]`, a `false` periodicity, both
-    /// offset distances `L sqrt(2) / 2` (times the orientations), and that radius
-    /// appended to the guesses.
+    /// the radius is nonnegative, bounded above by `10 L` for a chord and free to
+    /// take any finite value for equal setbacks. A `false` periodicity is appended
+    /// and the initial radius `L sqrt(2) / 2` sets both offsets (with orientations).
     ///
     /// # Errors
     ///
@@ -1440,9 +1500,16 @@ impl ConstantDistanceFs {
             guess_t.push(uv2.y);
         }
 
-        // Last of all load the distance
+        // For equal setbacks the radius is d cot(phi / 2), unbounded as the
+        // normal separation phi decreases to zero. The reference wedge only
+        // seeds the solve, so retain the whole nonnegative finite range.
+        let upper = if self.solver.station_setback().is_some() {
+            f64::MAX
+        } else {
+            self.distance * 10.0
+        };
         *interval_mut(intervals, add(surface2_index, 2, OP)?, OP)? =
-            Extent1d::from_min_max(0.0, self.distance * 10.0);
+            Extent1d::from_min_max(0.0, upper);
         periodicities.push(false);
         let approx_radius = self.distance * 2.0_f64.sqrt() / 2.0;
         self.solver.set_offsets(approx_radius)?;
@@ -1555,19 +1622,13 @@ impl ConstantDistanceFs {
                 SolutionRequested::Single,
                 &GlobalPointSolveOptions::<crate::topology::ObjectHandle>::default(),
             )?;
-            if sols.len() != 1 {
-                return Err(SolidError::blend_failed(
+            let [sol] = sols.as_slice() else {
+                return Err(SolidError::blend_solver(
                     OP,
-                    "the point does not drop onto the other edge once",
+                    SolverFailure::NoSingleCurveFoot { count: sols.len() },
                 ));
-            }
-            let mut t = sols
-                .get(0)
-                .ok_or_else(|| {
-                    SolidError::blend_failed(OP, "the point does not drop onto the other edge once")
-                })?
-                .start
-                .param(0)?;
+            };
+            let mut t = sol.start.param(0)?;
 
             // If the curve is closed, and the solution is within tol of an
             // end point, snap the solution to whichever end (start or finish)
@@ -1621,12 +1682,16 @@ impl ConstantDistanceFs {
             };
             let base2 = self.solver.rail(other_rail)?.base_surface();
             let mat = base2.evaluate(k, uv2, 1, 1, flags)?;
-            let du = mat.get(1).and_then(|r| r.first()).copied().ok_or_else(|| {
-                SolidError::blend_failed(OP, "the second surface has no u derivative")
-            })?;
-            let dv = mat.first().and_then(|r| r.get(1)).copied().ok_or_else(|| {
-                SolidError::blend_failed(OP, "the second surface has no v derivative")
-            })?;
+            let du = mat
+                .get(1)
+                .and_then(|r| r.first())
+                .copied()
+                .ok_or_else(|| defect(OP, FIRST_PARTIALS))?;
+            let dv = mat
+                .first()
+                .and_then(|r| r.get(1))
+                .copied()
+                .ok_or_else(|| defect(OP, FIRST_PARTIALS))?;
             let mut deg = du.angle_between(dv)?;
             deg *= 180.0 / PI;
             // (not a range test: a NaN angle keeps the guess, as upstream)
@@ -1653,18 +1718,13 @@ impl ConstantDistanceFs {
                 pnt,
                 EFF_ZERO_SQ,
             )?;
-            if sols.len() != 1 {
-                return Err(SolidError::blend_failed(
+            let [sol] = *sols.as_slice() else {
+                return Err(SolidError::blend_trace(
                     OP,
-                    "the point does not drop onto the other rail's surface once",
+                    TraceFailure::NoSingleSurfaceFoot { count: sols.len() },
                 ));
-            }
-            uv2 = sols.first().copied().ok_or_else(|| {
-                SolidError::blend_failed(
-                    OP,
-                    "the point does not drop onto the other rail's surface once",
-                )
-            })?;
+            };
+            uv2 = sol;
         }
         Ok(uv2)
     }
@@ -1865,9 +1925,9 @@ impl CurveBasedFs {
                 // when curve is a BSpline
                 let Some(bsc) = bspline_part(original)? else {
                     // Unable to extend non BSpline curves
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend_trace(
                         OP,
-                        "a curve that is not a B-spline cannot be extended",
+                        TraceFailure::CurveNotExtendable,
                     ));
                 };
                 // But extend farther than requested, so that we won't have to do this too often.
@@ -2049,10 +2109,7 @@ impl FilletLaw {
             let left = law_curve.evaluate(law_t, 1, false, false)?;
             let right = law_curve.evaluate(law_t, 1, true, false)?;
             let (Some(left), Some(right)) = (left.get(1), right.get(1)) else {
-                return Err(SolidError::blend_failed(
-                    OP_CORNERS,
-                    "the law curve has no slope at the knot",
-                ));
+                return Err(defect(OP_CORNERS, ONE_DERIVATIVE));
             };
             let (d_left, d_right) = (left.x, right.x);
             if (d_left - d_right).abs() <= EFF_ZERO * (1.0 + d_left.abs() + d_right.abs()) {
@@ -2429,13 +2486,6 @@ fn bspline_is_arc(k: &Kernel, c: &BSplineCurve) -> Result<Option<(Axis2Placement
     )
 }
 
-/// `GetKnots` with the status ignored: the unique knots, or `old` on failure (with
-/// `pass_on`, `fixes.fillet_statuses_pass_on`, the failure is returned).
-fn knots_or(c: &BSplineCurve, old: Vec<f64>, pass_on: bool) -> Result<Vec<f64>> {
-    // fork 66b02de passes this on (SER)
-    Ok(ignored(crate::error::passed_on(c.knots(None), pass_on)?)?.map_or(old, |k| k.0))
-}
-
 /// The knot at `i` of a knot array upstream indexes unchecked.
 fn knot(knots: &[f64], i: usize, op: &'static str) -> Result<f64> {
     knots
@@ -2449,15 +2499,14 @@ fn knot(knots: &[f64], i: usize, op: &'static str) -> Result<f64> {
 /// largest span until there are four (`bail_if_stuck`: an insertion that adds no knot
 /// is `SM_ERR`; otherwise upstream loops forever, here
 /// [`SolidError::InvalidInput`]). Returns the knots of `rail1`. The insertion and
-/// `GetKnots` statuses are ignored, or returned with `pass_on`
-/// (`fixes.fillet_statuses_pass_on`).
+/// `GetKnots` statuses are returned (WR-661; upstream ignores them, fork 66b02de
+/// passes them on).
 fn add_section_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
     mut knots: Vec<f64>,
     bail_if_stuck: bool,
     op: &'static str,
-    pass_on: bool,
 ) -> Result<Vec<f64>> {
     // insert a mid knot for 2 knot curves
     if knots.len() == 2 {
@@ -2466,23 +2515,11 @@ fn add_section_knots(
         let new2 = new1 + step;
         // (statuses ignored upstream)
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            rail1.insert_one_knot(new1, 1),
-            pass_on,
-        )?)?;
-        ignore_status(crate::error::passed_on(
-            rail2.insert_one_knot(new1, 1),
-            pass_on,
-        )?)?;
-        ignore_status(crate::error::passed_on(
-            rail1.insert_one_knot(new2, 1),
-            pass_on,
-        )?)?;
-        ignore_status(crate::error::passed_on(
-            rail2.insert_one_knot(new2, 1),
-            pass_on,
-        )?)?;
-        knots = knots_or(rail1, knots, pass_on)?;
+        rail1.insert_one_knot(new1, 1)?;
+        rail2.insert_one_knot(new1, 1)?;
+        rail1.insert_one_knot(new2, 1)?;
+        rail2.insert_one_knot(new2, 1)?;
+        knots = rail1.knots(None)?.0;
     }
 
     let mut n_knots_old = knots.len();
@@ -2501,22 +2538,19 @@ fn add_section_knots(
 
         let mid = (knot(&knots, max_span, op)? + knot(&knots, sub(max_span, 1, op)?, op)?) / 2.0;
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            rail1.insert_one_knot(mid, 1),
-            pass_on,
-        )?)?;
-        ignore_status(crate::error::passed_on(
-            rail2.insert_one_knot(mid, 1),
-            pass_on,
-        )?)?;
-        knots = knots_or(rail1, knots, pass_on)?;
+        rail1.insert_one_knot(mid, 1)?;
+        rail2.insert_one_knot(mid, 1)?;
+        knots = rail1.knots(None)?.0;
 
         let n_knots_new = knots.len();
 
         // if no knots were added then bail to avoid endless loop
         if n_knots_new == n_knots_old {
             if bail_if_stuck {
-                return Err(SolidError::blend_failed(op, "the refinement adds no knots"));
+                return Err(SolidError::blend_trace(
+                    op,
+                    TraceFailure::RailKnotsNotRefinable { knots: n_knots_new },
+                ));
             }
             return Err(SolidError::invalid_input(
                 op,
@@ -2721,14 +2755,8 @@ fn section_mut<'a>(
 /// The cross boundary derivative surface at one end of a skin: the ruled surface from
 /// the end cross section to its copy scaled, translated and rotated onto the rail
 /// tangents `start` / `end` (`CreateByScaleTransRot`), over `[curve interval] x [0, 1]`
-/// (the domain status ignored, or returned with `pass_on`,
-/// `fixes.fillet_statuses_pass_on`).
-fn deriv_surface(
-    gen_curve: &BSplineCurve,
-    start: Vec3,
-    end: Vec3,
-    pass_on: bool,
-) -> Result<BSplineSurface> {
+/// (the domain status returned, WR-661; upstream ignores it).
+fn deriv_surface(gen_curve: &BSplineCurve, start: Vec3, end: Vec3) -> Result<BSplineSurface> {
     let new_curve = gen_curve.create_by_scale_trans_rot(start, end, 0.0)?;
     let mut surf = BSplineSurface::create_ruled_surface(gen_curve, &new_curve, SurfParamType::U)?;
     let crv_ivl = gen_curve.natural_interval();
@@ -2736,10 +2764,7 @@ fn deriv_surface(
     let uv_max = Point2::new(crv_ivl.max(), 1.0);
     // (status ignored upstream)
     // fork 66b02de passes this on (SER)
-    ignore_status(crate::error::passed_on(
-        surf.adjust_step_uv_domain(&Extent2d::from_points(uv_min, uv_max)),
-        pass_on,
-    )?)?;
+    surf.adjust_step_uv_domain(&Extent2d::from_points(uv_min, uv_max))?;
     Ok(surf)
 }
 
@@ -2749,40 +2774,27 @@ fn tangent_at(c: &BSplineCurve, t: f64, op: &'static str) -> Result<Vec3> {
     c.evaluate(t, 1, true, false)?
         .get(1)
         .copied()
-        .ok_or_else(|| SolidError::blend_failed(op, "the curve has no first derivative"))
+        .ok_or_else(|| defect(op, ONE_DERIVATIVE))
 }
 
 /// Inserts the mid knots of the first and last spans of `rail1` into both rails (the
-/// G1 continuity set-up of the generators; statuses ignored, or returned with
-/// `pass_on`, `fixes.fillet_statuses_pass_on`).
+/// G1 continuity set-up of the generators; statuses returned, WR-661; upstream
+/// ignores them).
 fn insert_end_span_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
     op: &'static str,
-    pass_on: bool,
 ) -> Result<()> {
     // (statuses ignored upstream)
     // fork 66b02de passes this on (SER)
-    let knts = knots_or(rail1, Vec::new(), pass_on)?;
+    let knts = rail1.knots(None)?.0;
     let n = knts.len();
     let start_knot_mid = (knot(&knts, 0, op)? + knot(&knts, 1, op)?) / 2.0;
-    ignore_status(crate::error::passed_on(
-        rail1.insert_one_knot(start_knot_mid, 1),
-        pass_on,
-    )?)?;
-    ignore_status(crate::error::passed_on(
-        rail2.insert_one_knot(start_knot_mid, 1),
-        pass_on,
-    )?)?;
+    rail1.insert_one_knot(start_knot_mid, 1)?;
+    rail2.insert_one_knot(start_knot_mid, 1)?;
     let end_knot_mid = (knot(&knts, sub(n, 2, op)?, op)? + knot(&knts, sub(n, 1, op)?, op)?) / 2.0;
-    ignore_status(crate::error::passed_on(
-        rail1.insert_one_knot(end_knot_mid, 1),
-        pass_on,
-    )?)?;
-    ignore_status(crate::error::passed_on(
-        rail2.insert_one_knot(end_knot_mid, 1),
-        pass_on,
-    )?)?;
+    rail1.insert_one_knot(end_knot_mid, 1)?;
+    rail2.insert_one_knot(end_knot_mid, 1)?;
     Ok(())
 }
 
@@ -2806,9 +2818,9 @@ fn equalise_singular_rows(
     let sing = u64::from(surface.get_singularities(k, false, false)?.approx_singular);
     let tol = zone_tol_3d(k, &surface)?;
     let SurfaceKind::BSpline(mut surface) = surface.into_kind() else {
-        return Err(SolidError::blend_failed(
+        return Err(defect(
             op,
-            "the surface is not a B-spline",
+            "a surface made from a B-spline surface stays one",
         ));
     };
     let (num_u, num_v) = match surface.gw_nurb() {
@@ -2817,9 +2829,9 @@ fn equalise_singular_rows(
             (add(ix.n, 1, op)?, add(ix.m, 1, op)?)
         }
         None => {
-            return Err(SolidError::blend_failed(
+            return Err(defect(
                 op,
-                "the surface has no NURBS form",
+                "the skinned surface is made from its NURB (from_gw_nurb)",
             ))
         }
     };
@@ -2840,10 +2852,7 @@ fn equalise_singular_rows(
             for ii in 0..num_v {
                 // (status ignored upstream)
                 // fork 66b02de passes this on (SER)
-                ignore_status(crate::error::passed_on(
-                    surface.set_control_point(form, idx_u, ii, pt1, w1),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?;
+                surface.set_control_point(form, idx_u, ii, pt1, w1)?;
             }
         }
     }
@@ -2889,7 +2898,8 @@ impl CircularCrossSectionFsg {
     /// a knot insertion that adds no knot; `SM_ERR_INVALID_INPUT` from `Unitize`; those
     /// of the curve and surface constructions; [`SolidError::InvalidInput`] where
     /// upstream indexes past its cross sections (a second pass for a ruled or revolved
-    /// surface).
+    /// surface), and for an `approx_tol_3d` that is not finite (before either rail is
+    /// edited).
     ///
     /// `center_line` is upstream's `SmBSplineCurve & rCenterLine`: an `SmBSplineCurve`
     /// kind (B-spline, line, ellipse, hyperbola or parabola) whose `GetDegree`, `IsLine`,
@@ -2952,6 +2962,14 @@ impl CircularCrossSectionFsg {
                 "the centre line is not an SmBSplineCurve kind",
             ));
         }
+        // A tolerance that is not finite decides no proximity test below (the rails' ends
+        // would be moved together for a NaN one): refused before either rail is edited.
+        if !approx_tol_3d.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the approximation tolerance is not finite",
+            ));
+        }
         let knots = rail1.knots(None)?.0;
         let knots2 = rail2.knots(None)?.0;
 
@@ -2980,14 +2998,7 @@ impl CircularCrossSectionFsg {
 
         // Surface creation requires 4 or more cross sections so add
         // some extra knots if needed.
-        let knots = add_section_knots(
-            rail1,
-            rail2,
-            knots,
-            true,
-            OP,
-            k.fixes.fillet_statuses_pass_on,
-        )?;
+        let knots = add_section_knots(rail1, rail2, knots, true, OP)?;
 
         // Where the rails meet at an end of the fillet (a degenerate corner whose cross
         // section is a point, or a trace that ends where the blend closes up), both rails
@@ -3003,7 +3014,8 @@ impl CircularCrossSectionFsg {
             let t = if end == 0 { ivl.min() } else { ivl.max() };
             let end1 = rail1.evaluate_point(t)?;
             let end2 = rail2.evaluate_point(t)?;
-            if end1.distance(end2) >= approx_tol_3d {
+            let one_point = end1.distance(end2) < approx_tol_3d;
+            if !one_point {
                 continue;
             }
             let meet = (end1 + end2) / 2.0;
@@ -3014,7 +3026,7 @@ impl CircularCrossSectionFsg {
                     rail.number_control_points()?
                         .checked_sub(1)
                         .ok_or_else(|| {
-                            SolidError::blend_failed(OP, "the rail has no control points")
+                            defect(OP, "a rail just evaluated at its ends has control points")
                         })?
                 };
                 let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
@@ -3092,17 +3104,13 @@ impl CircularCrossSectionFsg {
 
         // when surface can be constructed as a ruled surface (linear center and rail curves)
         if sweep {
-            if sections.len() < 2 {
+            let [start, .., end] = sections.as_slice() else {
                 // [B448]
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend_trace(
                     OP,
-                    "fewer than two cross sections",
-                ));
-            }
-            let (Some(start), Some(end)) = (sections.first(), sections.last()) else {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "fewer than two cross sections",
+                    TraceFailure::TooFewCrossSections {
+                        sections: sections.len(),
+                    },
                 ));
             };
             let mut surface = BSplineSurface::create_ruled_surface(start, end, SurfParamType::U)?;
@@ -3113,10 +3121,12 @@ impl CircularCrossSectionFsg {
             // when surface can be constructed as a surfaceOfRevolution
             let (Some(gen_curve), Some((ref_frame, _, _, end_ang))) = (sections.first(), &arc)
             else {
-                // [B448]
-                return Err(SolidError::blend_failed(
+                // [B448] (`revolve` is set only with the centre line's arc)
+                return Err(SolidError::blend_trace(
                     OP,
-                    "no cross section or arc to revolve",
+                    TraceFailure::TooFewCrossSections {
+                        sections: sections.len(),
+                    },
                 ));
             };
             let mut surface = BSplineSurface::create_surf_of_revolution(
@@ -3134,13 +3144,15 @@ impl CircularCrossSectionFsg {
 
         // build a skin surface to interpolate all crossSection curves and option end
         // crossTangent values
-        if sections.len() < 2 {
+        let [first_section, .., last_section] = sections.as_slice() else {
             // [B448]
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend_trace(
                 OP,
-                "fewer than two cross sections",
+                TraceFailure::TooFewCrossSections {
+                    sections: sections.len(),
+                },
             ));
-        }
+        };
         let mut deriv_surfs: [Option<BSplineSurface>; 2] = [None, None];
 
         // when asked for G1 continuity
@@ -3151,12 +3163,10 @@ impl CircularCrossSectionFsg {
                 // We need to provide cross-boundary derivative surface
                 // for skinned-surface creation.
                 let (gen_curve, t) = if kkk == 1 {
-                    (sections.last(), ivl.max())
+                    (last_section, ivl.max())
                 } else {
-                    (sections.first(), ivl.min())
+                    (first_section, ivl.min())
                 };
-                let gen_curve = gen_curve
-                    .ok_or_else(|| SolidError::blend_failed(OP, "there are no cross sections"))?;
 
                 // get railCurve endTangents
                 let st = tangent_at(rail1, t, OP)?;
@@ -3164,17 +3174,12 @@ impl CircularCrossSectionFsg {
                 let end = tangent_at(rail2, t, OP)?;
 
                 // save the crossTangent surface
-                *slot = Some(deriv_surface(
-                    gen_curve,
-                    st,
-                    end,
-                    k.fixes.fillet_statuses_pass_on,
-                )?);
+                *slot = Some(deriv_surface(gen_curve, st, end)?);
             }
 
             // add a new knot in the NewSurface start/end intervals
             // to allow the newSurface to interpolate the computed crossTangent values
-            insert_end_span_knots(rail1, rail2, OP, k.fixes.fillet_statuses_pass_on)?;
+            insert_end_span_knots(rail1, rail2, OP)?;
         }
 
         // Build the Skinned Surface to interpolate crossSections and optional end Cross Tangents
@@ -3245,21 +3250,14 @@ impl CircularCrossSectionFsg {
 
             // get center, rail1, rail2 points for dT
             let cent_pv = center_line.evaluate(k, t, 1, true, false)?;
-            let mut cent = cent_pv
-                .first()
-                .copied()
-                .ok_or_else(|| SolidError::blend_failed(OP, "the centre line has no point"))?;
             // the fork's `CircleSurfaceFromCurves` (WR-685): the rails' points and tangents,
             // and the section the circle along which the balls' envelope touches the ball,
             // square to the centre line
             let tangent = |pv: &[Vec3]| match *pv {
                 [p, d, ..] => Ok((p, d)),
-                _ => Err(SolidError::blend_failed(
-                    OP,
-                    "a rail has no first derivative",
-                )),
+                _ => Err(defect(OP, ONE_DERIVATIVE)),
             };
-            let (_, cent_d) = tangent(&cent_pv)?;
+            let (mut cent, cent_d) = tangent(&cent_pv)?;
             let (p1, d1) = tangent(&rail1.evaluate(t, 1, true, false)?)?;
             let (p2, d2) = tangent(&rail2.evaluate(t, 1, true, false)?)?;
             let mut v1 = p1 - cent;
@@ -3311,9 +3309,10 @@ impl CircularCrossSectionFsg {
             // Check for case of zero radius on interior of surface
             if radius1 < EFF_ZERO || radius2 < EFF_ZERO {
                 // Zero radius cross-section curve
-                return Err(SolidError::blend_failed(
+                let radius = if radius1 < EFF_ZERO { radius1 } else { radius2 };
+                return Err(SolidError::blend_solver(
                     OP,
-                    "a cross section has zero radius",
+                    SolverFailure::RadiusVanishes { radius },
                 ));
             } else if (radius1 - radius2).abs() > radius1 / 10.0 {
                 // skip adding a cross section for this parameter value
@@ -3334,10 +3333,12 @@ impl CircularCrossSectionFsg {
             // quit for zero and 180 angles
             if angle.abs() < EFF_ZERO_SQRT || angle.abs() > PI - EFF_ZERO_SQRT {
                 // Tangent or Degenerate Angle for cross-section curve
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "a cross section's angle is zero or straight",
-                ));
+                let failure = if angle.abs() < EFF_ZERO_SQRT {
+                    SolverFailure::SweepAngleTooSmall { angle }
+                } else {
+                    SolverFailure::SweepAngleNearHalfTurn { angle }
+                };
+                return Err(SolidError::blend_solver(OP, failure));
             }
 
             // negate normal for neg angles and recompute CCW angle
@@ -3346,10 +3347,11 @@ impl CircularCrossSectionFsg {
             }
             let mut angle = z_vec.ccw_angle_between(v1, v2)?;
             if angle < EFF_ZERO {
-                return Err(SolidError::blend_failed(
+                // Can't happen ??
+                return Err(SolidError::blend_solver(
                     OP,
-                    "a cross section's angle is zero",
-                )); // Can't happen ??
+                    SolverFailure::SweepAngleTooSmall { angle },
+                ));
             }
 
             // make unitNormal coordinate system
@@ -3465,9 +3467,7 @@ impl CircularCrossSectionFsg {
 
             // on 1st pass - See if we have a non-circle case
             if kkk == 0 && (radius1 - radius2).abs() > 1.0e-8 {
-                let a = arc
-                    .as_mut()
-                    .ok_or_else(|| SolidError::blend_failed(OP, "there is no arc to tweak"))?;
+                let a = arc.as_mut().ok_or_else(|| defect(OP, FIRST_PASS_ARC))?;
                 // Tweak arc or create a blend curve using railPoints and current pArc tangents
                 // to interpolate the railCurve sample points
                 let ivl = a.natural_interval();
@@ -3510,9 +3510,7 @@ impl CircularCrossSectionFsg {
                         .ok_or_else(|| SolidError::invalid_input(OP, "NULL cross section"))?;
                     *slot = Some(current.create_mirror_curve(&mirror)?);
                 } else {
-                    let a = arc
-                        .as_ref()
-                        .ok_or_else(|| SolidError::blend_failed(OP, "there is no arc to mirror"))?;
+                    let a = arc.as_ref().ok_or_else(|| defect(OP, FIRST_PASS_ARC))?;
                     arc = Some(a.create_mirror_curve(&mirror)?);
                 }
             }
@@ -3547,9 +3545,9 @@ mod tests {
     /// Fork 66b02de (the rail end-span knots: `SER( pRail2->InsertOneKnot(..) )`): the
     /// second rail runs over another parameter range, so the first rail's span middle
     /// is not inside it. Upstream drops the failed insertion and the rails go on out of
-    /// step; with `fillet_statuses_pass_on` the error is returned.
+    /// step; the error is returned (WR-661).
     #[test]
-    fn fillet_statuses_pass_on_end_span_knots_return_a_failed_insertion() {
+    fn end_span_knots_return_a_failed_insertion() {
         let rails = || {
             let r1 = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap();
             let mut r2 = BSplineCurve::create_line_segment(3, Vec3::Y, Vec3::X + Vec3::Y).unwrap();
@@ -3559,10 +3557,8 @@ mod tests {
         };
         let (mut r1, mut r2) = rails();
         let expected = r2.clone().insert_one_knot(0.5, 1).unwrap_err();
-        insert_end_span_knots(&mut r1, &mut r2, "test", false).unwrap();
-        let (mut r1, mut r2) = rails();
         assert_eq!(
-            insert_end_span_knots(&mut r1, &mut r2, "test", true).unwrap_err(),
+            insert_end_span_knots(&mut r1, &mut r2, "test").unwrap_err(),
             expected
         );
     }
@@ -3809,6 +3805,118 @@ mod tests {
     }
 
     #[test]
+    fn a_shallow_station_can_solve_above_the_chord_radius_limit() {
+        use crate::blend::fillet_solver::p3::StepSolveOutcome;
+        use crate::intersect::surface_intersector::p1::SrfIndex;
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+
+        let k = Kernel::default();
+        let setback = 0.2;
+        let angle = 2.0_f64.to_radians();
+        // At mid-arc one normal has rotated 45 degrees from the station normal.
+        let reference = PI - (angle.cos() * std::f64::consts::FRAC_1_SQRT_2).acos();
+        let chamfer = ChamferDefinition::new(ChamferSize::Distances([setback; 2]), reference)
+            .unwrap()
+            .at_every_station()
+            .unwrap();
+        let distance = chamfer.offsets().unwrap()[0] * std::f64::consts::SQRT_2;
+        let expected = setback / (0.5 * angle).tan();
+        assert!(expected > 10.0 * distance);
+
+        let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let mut solver = FilletSolver::new(1e-7, 0.35, 0.175);
+        solver.chamfer = Some(chamfer);
+        solver.orientations = [1.0; 2];
+        for (i, x) in [Vec3::X, Vec3::new(angle.cos(), 0.0, -angle.sin())]
+            .into_iter()
+            .enumerate()
+        {
+            let plane = Plane::new(Vec3::ZERO, x, Vec3::Y, Vec2::new(1.0, 1.0), &domain);
+            solver.surfaces[i] = Some(OffsetSurfaceSlot {
+                key: i as u64,
+                surface: OffsetSurface::new(
+                    &k,
+                    0.0,
+                    Surface::from(plane),
+                    SurfaceId::Free(i as u32),
+                    SS_UNKNOWN,
+                )
+                .unwrap(),
+            });
+        }
+
+        let mut fs = ConstantDistanceFs { solver, distance };
+        // The two rails are parallel to Y. Their centre is d along X and r above
+        // the first face. Step past v = 1 to make the trace intersect that UV edge.
+        let uv = Point2::new(0.0, 0.0);
+        let mut point = TsectPnt::new();
+        assert!(FilletSolver::point_on_plane_solve(
+            &mut fs,
+            &k,
+            None,
+            Vec3::ZERO,
+            Vec3::Y,
+            &domain,
+            &domain,
+            uv,
+            uv,
+            &mut point
+        )
+        .unwrap());
+        assert!((point.user_doubles[0] - expected).abs() < 1e-9);
+
+        for rail in [SrfIndex::First, SrfIndex::Second] {
+            *point.uv_deriv_mut(rail) = Vec2::new(0.0, 1.0);
+        }
+        *point.crv_deriv_mut() = Vec3::Y;
+        *point.crv_pos_mut() = Vec3::new(setback, 0.0, expected);
+        let mut next = TsectPnt::new();
+        let mut step = 1.5;
+        let mut outcome = StepSolveOutcome::default();
+        FilletSolver::step_solve(
+            &mut fs,
+            &k,
+            None,
+            &point,
+            &mut step,
+            &domain,
+            &domain,
+            &mut next,
+            &mut outcome,
+        )
+        .unwrap();
+        assert!(outcome.clipped && outcome.found_good_point);
+        assert!((step - 1.0).abs() < 1e-9);
+        assert!((next.uv_pos(SrfIndex::First).y - 1.0).abs() < 1e-9);
+        assert!((next.user_doubles[0] - expected).abs() < 1e-9);
+
+        let mut clipped = crate::blend::fillet_solver::p1::FindClippedRadiusEfo::new(
+            &mut fs.solver,
+            0,
+            &[domain; 2],
+            SurfParamType::U,
+            0.0,
+            [uv; 2],
+            distance,
+        )
+        .unwrap();
+        for radius in [f64::INFINITY, f64::NAN, -1.0] {
+            assert!(matches!(
+                clipped.evaluate(&k, radius),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        let parallel = equal_setback_radius(setback, [Vec3::Z; 2]).unwrap_err();
+        assert!(matches!(
+            parallel.blend_failure(),
+            Some(crate::error::blend::BlendFailure::Trace(
+                TraceFailure::EdgeFacesTangent { .. }
+            ))
+        ));
+    }
+
+    #[test]
     fn base_curve_snaps_extends_and_keeps_the_extension() {
         let k = &Kernel::default();
         let mut fs = CurveBasedFs::new(1e-6, 0.5, 0.03);
@@ -3837,7 +3945,7 @@ mod tests {
         )));
         assert_eq!(
             h.evaluate_base_curve(k, 2.0, 0).unwrap_err(),
-            SolidError::blend_failed(OP_BASE, "a curve that is not a B-spline cannot be extended")
+            SolidError::blend_trace(OP_BASE, TraceFailure::CurveNotExtendable)
         );
         assert_eq!(fs.type_string(), "SmCurveBasedFS_TYPE");
     }
@@ -3960,7 +4068,7 @@ mod tests {
             CircularCrossSectionFsg::default()
                 .create_surface_from_curves(&k, &mut c, &mut a, &mut b, 1e-6, false)
                 .unwrap_err(),
-            SolidError::blend_failed(OP_CIRC, "a cross section has zero radius")
+            SolidError::blend_solver(OP_CIRC, SolverFailure::RadiusVanishes { radius: 0.0 })
         );
     }
 

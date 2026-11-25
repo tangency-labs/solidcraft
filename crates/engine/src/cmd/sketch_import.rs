@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES};
+use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES, SvgShape};
 use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
@@ -14,7 +14,7 @@ use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{
     AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult,
-    InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve,
+    ExportSvgParams, ExportSvgResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve, SvgExported,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -24,6 +24,7 @@ const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new()
 const INSERT_AIRFOIL_CONTRACT: TypedContract<InsertAirfoilParams> = TypedContract::new();
 const DRAWING_BOUNDS_CONTRACT: TypedContract<DrawingBoundsParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+const EXPORT_SVG_CONTRACT: TypedContract<ExportSvgParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
 /// drift apart.
@@ -62,6 +63,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
+    CommandSpec::new("sketch.export_svg", "Save As SVG", crate::checked!("sketch.export_svg", export_svg))
+        .icon("svg")
+        .noundo()
+        .contract(&EXPORT_SVG_CONTRACT)
+        .output(output_schema_for::<ExportSvgResult>)
+        .params("sketch?: id|name (default active); path?: file to write (else the SVG text is returned); units?: \"mm\" | \"cm\" | \"in\" | \"inch\" (default mm). The file's width and height carry the unit and its viewBox is the same size without one, so it opens 1:1; the Y axis points down as SVG has it, so the picture is the sketch as seen. Each closed profile is one closed path with its holes as sub-paths; circles, arcs and lines stay themselves and other curves are line segments; construction curves are left out"),
 ];
 
 /// The sketch import command for a drawing file name, regardless of extension case.
@@ -168,6 +175,47 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
                     handles: Vec::new(),
                 })
             }
+            // A spline with its own knots keeps every control point, as the knots count them
+            // (#9355): only its two ends join other curves' ends; the points between are its own,
+            // even where two of them coincide. One that is no valid sketch spline (too many
+            // points for one) is drawn as before, evenly spaced over a share of its points.
+            Geom2::Nurbs { pts, degree, knots, weights } => {
+                let nurbs = solidcraft_sketch::Nurbs { knots: knots.clone(), weights: weights.clone() };
+                match (pts.first(), pts.last()) {
+                    (Some(first), Some(last)) if nurbs.check(pts.len(), *degree).is_ok() => {
+                        let mut idx = Vec::with_capacity(pts.len());
+                        idx.push(pt(sk, *first)?);
+                        for p in pts.iter().take(pts.len() - 1).skip(1) {
+                            idx.push(sk.add_point(f(*p), None)?);
+                        }
+                        idx.push(pt(sk, *last)?);
+                        Some(CurveKind::Spline { pts: idx, control: true, degree: *degree, periodic: false, nurbs: Some(nurbs), handles: Vec::new() })
+                    }
+                    _ => {
+                        let cap = solidcraft_sketch::MAX_SPLINE_POINTS;
+                        let keep: Vec<&Vec2> = if pts.len() > cap {
+                            (0..cap).map(|k| &pts[(k * (pts.len() - 1) + (cap - 1) / 2) / (cap - 1)]).collect()
+                        } else {
+                            pts.iter().collect()
+                        };
+                        let mut idx = Vec::new();
+                        for p in keep {
+                            let i = pt(sk, *p)?;
+                            if idx.last() != Some(&i) {
+                                idx.push(i);
+                            }
+                        }
+                        (idx.len() >= 2).then_some(CurveKind::Spline {
+                            pts: idx,
+                            control: true,
+                            degree: *degree,
+                            periodic: false,
+                            nurbs: None,
+                            handles: Vec::new(),
+                        })
+                    }
+                }
+            }
             Geom2::Conic { a, apex, b, rho } => {
                 let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
                 (a != b && x != a && x != b).then_some(CurveKind::Conic { a, b, apex: x, rho: *rho })
@@ -187,7 +235,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
 }
 
 /// The box around a drawing's geometry (arcs, circles and curves by their extent).
-fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+pub(super) fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     let mut pts: Vec<Vec2> = Vec::new();
     for g in geom {
         match g {
@@ -216,7 +264,8 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
                 let r = c.dist(*major).max(*minor);
                 pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
             }
-            Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // A spline lies inside its control points' hull (weights are positive).
+            Geom2::Spline { pts: sp, .. } | Geom2::Nurbs { pts: sp, .. } => pts.extend(sp.iter().copied()),
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
@@ -232,16 +281,25 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
 }
 
+/// A drawing as read: its geometry, the box around it, its text, and what the reading warns
+/// about (an SVG cubic kept as drawn that the curve check refuses, #16190).
+type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
+
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
-fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2), String)> {
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
-    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
+    let (geom, warnings) = if svg {
+        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+    } else {
+        solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
+    }
+    .map_err(|e| drawing_error(p, svg, e.to_string()))?;
     let Some(bounds) = bounds_of(&geom) else {
         let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
         return Err(drawing_error(p, svg, why));
     };
-    Ok((geom, bounds, text))
+    Ok((geom, bounds, text, warnings))
 }
 
 /// The box around a drawing, as the reply describes it: `min`, `max` and the span between them.
@@ -257,14 +315,14 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let (_, bounds, text) = read_drawing(p, cmd, svg)?;
+    let (_, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
     let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
     reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi), text) = read_drawing(p, cmd, svg)?;
+    let (geom, (lo, hi), text, warnings) = read_drawing(p, cmd, svg)?;
     // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
@@ -348,6 +406,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
                 &mut sk,
                 LinkKind::Text,
                 LinkSource::Text { text, at, height, angle: own + angle, font: None, style: Default::default(), exprs: Default::default() },
+                None,
             )
             .is_ok()
             {
@@ -367,6 +426,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             fixed: fixed.then_some(n_fixed),
             info,
             created: None,
+            warnings,
             param_warnings: Vec::new(),
         },
     )
@@ -486,7 +546,7 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     // The merged points against the spline points that stand for them, and the spline against
     // the straight lines between its points: the kernel bounds both.
     let pieces: Vec<[[f64; 3]; 4]> = solidcraft_sketch::fit_beziers(&spline).iter().map(|piece| piece.map(|c| [c.x, c.y, 0.0])).collect();
-    let fit = solidcore_ops::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
+    let fit = solidcraft_kernel::services::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
 
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -762,9 +822,70 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ExportDxfResult { exported: DxfExported::Text { dxf: text, entities: entity_count }, param_warnings: Vec::new() })
 }
 
+fn export_svg(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.export_svg";
+    let id = sketch_store::target(s, p, cmd)?;
+    let st = s.model.state();
+    let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
+    let sk = &ss.sketch;
+
+    if let Some(v) = p.get("units").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`units` must be a string"));
+    }
+    let (unit, per_mm) = match str_(p, "units") {
+        None => ("mm", 1.0),
+        Some(name) => solidcraft_io::svg_unit(name).ok_or_else(|| bad(cmd, format!("unsupported unit `{name}` (use \"mm\", \"cm\" or \"in\")")))?,
+    };
+    if let Some(v) = p.get("path").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`path` must be a string"));
+    }
+
+    // A profile is drawn as one closed contour with its holes. A profile that fills another's hole
+    // is that hole's inside, not a second outline, so it is left out as `sketch.export_dxf` leaves it.
+    let hole_keys: std::collections::HashSet<Vec<&str>> =
+        ss.profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| sorted_curve_ids(h))).collect();
+    let mut in_profile = std::collections::HashSet::new();
+    let mut shapes = Vec::new();
+    for prof in &ss.profiles {
+        for id in prof.outer_curves.iter().chain(prof.hole_curves.iter().flatten()) {
+            in_profile.insert(id.as_str());
+        }
+        if !hole_keys.contains(&sorted_curve_ids(&prof.outer_curves)) {
+            shapes.push(SvgShape::Region { outer: &prof.region.outer, holes: prof.region.holes.iter().collect() });
+        }
+    }
+    // Whatever is not part of a profile is drawn on its own, so nothing visible is lost.
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction || in_profile.contains(c.id.as_str()) {
+            continue;
+        }
+        let pt = |k: usize| sk.point(k).unwrap_or_default();
+        shapes.push(match &c.kind {
+            CurveKind::Line { a, b } => SvgShape::Line(pt(*a), pt(*b)),
+            CurveKind::Circle { c, r } => SvgShape::Circle(pt(*c), *r),
+            CurveKind::Arc { c, a, b } => SvgShape::Arc { c: pt(*c), a: pt(*a), b: pt(*b) },
+            _ => SvgShape::Polyline(sk.polyline(i)),
+        });
+    }
+    let elements = shapes.len();
+    let text = solidcraft_io::write_svg(&shapes, unit, per_mm).map_err(|e| bad(cmd, e.to_string()))?;
+
+    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+        solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let exported = SvgExported::Written { path: path.to_string(), elements };
+        return reply(cmd, ExportSvgResult { exported, param_warnings: Vec::new() });
+    }
+    reply(cmd, ExportSvgResult { exported: SvgExported::Text { svg: text, elements }, param_warnings: Vec::new() })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcore_record::Vec2;
     use solidcraft_geom::prelude::*;
     use solidcraft_io::Geom2;
 
@@ -886,6 +1007,115 @@ EOF
         assert_eq!(sk.profiles.len(), 1, "the loop closes into one profile: {r}");
         let want = std::f64::consts::PI * 900.0;
         assert!((sk.profiles[0].area - want).abs() < want * 0.01, "{} vs {want}", sk.profiles[0].area);
+    }
+
+    /// A DXF SPLINE of `degree` over `ctrl` with `knots` and `weights` (none: no 41 codes).
+    fn spline_dxf(flags: u32, degree: u8, ctrl: &[(f64, f64)], knots: &[f64], weights: &[f64]) -> String {
+        let mut e = format!("0\nSPLINE\n70\n{flags}\n71\n{degree}\n72\n{}\n73\n{}\n", knots.len(), ctrl.len());
+        for k in knots {
+            e.push_str(&format!("40\n{k}\n"));
+        }
+        for w in weights {
+            e.push_str(&format!("41\n{w}\n"));
+        }
+        for (x, y) in ctrl {
+            e.push_str(&format!("10\n{x}\n20\n{y}\n30\n0\n"));
+        }
+        e
+    }
+
+    /// The splines `sketch.insert_dxf` makes of `entities`: points, degree and knots and weights.
+    fn imported_splines(entities: &str) -> Vec<(Vec<Vec2>, u8, Option<solidcraft_sketch::Nurbs>)> {
+        let mut s = Session::default();
+        let dxf = format!("0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        sk.sketch
+            .curves
+            .iter()
+            .filter_map(|c| match &c.kind {
+                solidcraft_sketch::CurveKind::Spline { pts, control: true, degree, nurbs, .. } => {
+                    Some((pts.iter().map(|i| sk.sketch.point(*i).unwrap()).collect(), *degree, nurbs.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The point at `t` in [0, 1] of an imported spline, as the sketch draws it.
+    fn at(spline: &(Vec<Vec2>, u8, Option<solidcraft_sketch::Nurbs>), t: f64) -> Vec2 {
+        solidcraft_sketch::spline_point_mode(&spline.0, true, spline.1, false, spline.2.as_ref(), t)
+    }
+
+    /// #9355: a SPLINE keeps its own knots and weights, so it comes in as the file's curve, not
+    /// the evenly spaced, unweighted spline over its points it used to become.
+    #[test]
+    fn a_spline_keeps_its_knots_and_weights() {
+        // A rational quadratic quarter circle of radius 10: every point lies on the circle.
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let quarter = imported_splines(&spline_dxf(8, 2, &[(10.0, 0.0), (10.0, 10.0), (0.0, 10.0)], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, w, 1.0]));
+        let [arc] = &quarter[..] else { panic!("{quarter:?}") };
+        assert_eq!(arc.2.as_ref().map(|n| n.weights.clone()), Some(vec![1.0, w, 1.0]));
+        for i in 0..=20 {
+            let r = at(arc, f64::from(i) / 20.0).len();
+            assert!((r - 10.0).abs() < 1e-9, "t {i}/20: radius {r}");
+        }
+        // A cubic with a triple knot in the middle passes through its fourth control point there,
+        // a sharp corner (a font's, in a logo); two of its control points coincide, and all seven
+        // stay. Evenly spaced knots would round the corner off.
+        let ctrl = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (10.0, 30.0)];
+        let knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let cornered = imported_splines(&spline_dxf(8, 3, &ctrl, &knots, &[]));
+        let [corner] = &cornered[..] else { panic!("{cornered:?}") };
+        assert_eq!(corner.0.len(), 7, "every control point is kept");
+        assert_eq!(corner.2.as_ref().map(|n| n.knots.clone()), Some(knots.to_vec()));
+        assert!(at(corner, 0.5).dist(Vec2::new(20.0, 0.0)) < 1e-9, "{:?}", at(corner, 0.5));
+        // Evenly spaced, unweighted knots are the spline the sketch draws anyway: stored as before.
+        let plain = imported_splines(&spline_dxf(8, 3, &ctrl[3..], &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], &[]));
+        assert!(matches!(&plain[..], [(pts, 3, None)] if pts.len() == 4), "{plain:?}");
+    }
+
+    /// #9355: a periodic SPLINE (open knots, its first control points repeated at the end) comes
+    /// in as the same closed curve with clamped knots, and closes into a profile.
+    #[test]
+    fn a_periodic_spline_comes_in_closed_with_clamped_knots() {
+        let ring: Vec<(f64, f64)> = (0..6)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 6.0;
+                (20.0 * a.cos(), 20.0 * a.sin())
+            })
+            .collect();
+        let ctrl: Vec<(f64, f64)> = ring.iter().chain(&ring[..3]).copied().collect();
+        let knots: Vec<f64> = (0..13).map(f64::from).collect();
+        let mut s = Session::default();
+        let dxf = format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", spline_dxf(11, 3, &ctrl, &knots, &[]));
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        assert_eq!(sk.profiles.len(), 1, "{r}");
+        let spline = &imported_splines(&spline_dxf(11, 3, &ctrl, &knots, &[]))[0];
+        let nurbs = spline.2.as_ref().unwrap();
+        assert!(nurbs.knots[..4].iter().all(|k| *k == 3.0) && nurbs.knots[nurbs.knots.len() - 4..].iter().all(|k| *k == 9.0), "{:?}", nurbs.knots);
+        // The same curve: the uniform cubic B-spline over the ring, at its knots.
+        for i in 0..6 {
+            let (p0, p1, p2) = (ring[i], ring[(i + 1) % 6], ring[(i + 2) % 6]);
+            let want = Vec2::new((p0.0 + 4.0 * p1.0 + p2.0) / 6.0, (p0.1 + 4.0 * p1.1 + p2.1) / 6.0);
+            let got = at(spline, f64::from(i as u32) / 6.0);
+            assert!(got.dist(want) < 1e-9, "knot {i}: {got:?} vs {want:?}");
+        }
+    }
+
+    /// #9355: a knot repeated more than the degree breaks the curve (here it jumps from the third
+    /// control point to the fourth), so it comes in as two splines;
+    /// knots that aren't a spline (decreasing) come in as before, evenly spaced over the points.
+    #[test]
+    fn a_broken_or_invalid_knotted_spline_still_comes_in() {
+        let ctrl = [(0.0, 0.0), (10.0, 5.0), (20.0, 0.0), (30.0, 10.0), (40.0, 0.0), (50.0, 5.0)];
+        let broken = imported_splines(&spline_dxf(8, 2, &ctrl, &[0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0], &[]));
+        assert_eq!(broken.len(), 2, "{broken:?}");
+        assert!(broken.iter().all(|(pts, degree, nurbs)| pts.len() == 3 && *degree == 2 && nurbs.is_some()), "{broken:?}");
+        assert!(broken[0].0[2].dist(Vec2::new(20.0, 0.0)) < 1e-9 && broken[1].0[0].dist(Vec2::new(30.0, 10.0)) < 1e-9, "{broken:?}");
+        let decreasing = imported_splines(&spline_dxf(8, 2, &ctrl, &[0.0, 0.0, 0.0, 0.7, 0.3, 0.5, 1.0, 1.0, 1.0], &[]));
+        assert!(matches!(&decreasing[..], [(pts, 2, None)] if pts.len() == 6), "{decreasing:?}");
     }
 
     /// The sketch limit is process-wide: the tests that depend on it take turns.
@@ -1478,5 +1708,78 @@ EOF
                 assert!((len_in - 2.0).abs() < 1e-8 || (len_in - 3.0).abs() < 1e-8, "edge length {len_in}");
             }
         }
+    }
+
+    /// A 30 x 20 rectangle with a 4 mm circle in it, on the sketch being edited.
+    fn rectangle_with_a_round_hole() -> Session {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [10, 10], "radius": 4})).unwrap();
+        s
+    }
+
+    #[test]
+    fn export_svg_is_one_closed_path_with_the_hole_at_its_real_size() {
+        let mut s = rectangle_with_a_round_hole();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert!(svg.contains("width=\"30mm\" height=\"20mm\" viewBox=\"0 0 30 20\""), "{svg}");
+        // The profile with its hole is one element: the outline and the hole are sub-paths of it.
+        assert_eq!(out["elements"], 1, "{out}");
+        let path = svg.lines().find(|l| l.starts_with("<path")).unwrap();
+        assert_eq!((path.matches('M').count(), path.matches('Z').count()), (2, 2), "{path}");
+    }
+
+    #[test]
+    fn export_svg_reads_back_into_a_sketch_with_the_same_profiles() {
+        let mut s = rectangle_with_a_round_hole();
+        let svg = s.execute("sketch.export_svg", &json!({})).unwrap()["svg"].as_str().unwrap().to_string();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "at": [100, 0]})).unwrap();
+        let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        let mut areas: Vec<f64> = ss.profiles.iter().map(|p| p.area).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        assert!((areas[1] - (600.0 - std::f64::consts::PI * 16.0)).abs() < 1e-3, "{areas:?}");
+    }
+
+    #[test]
+    fn export_svg_units_change_the_size_and_a_bad_one_is_refused() {
+        let mut s = rectangle_with_a_round_hole();
+        let cm = s.execute("sketch.export_svg", &json!({"units": "CM"})).unwrap();
+        assert!(cm["svg"].as_str().unwrap().contains("width=\"3cm\" height=\"2cm\" viewBox=\"0 0 3 2\""), "{cm}");
+        let inch = s.execute("sketch.export_svg", &json!({"units": "in"})).unwrap();
+        assert!(inch["svg"].as_str().unwrap().contains("width=\"1.1811in\""), "{inch}");
+        assert!(s.execute("sketch.export_svg", &json!({"units": "furlong"})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"units": 5})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"path": 5})).is_err());
+    }
+
+    #[test]
+    fn export_svg_draws_loose_curves_and_leaves_construction_ones_out() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [40, 10]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [100, 50]], "construction": true})).unwrap();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        assert!(svg.contains("width=\"40mm\" height=\"10mm\""), "the construction line is not in the bounds: {svg}");
+        assert!(svg.contains("<path d=\"M0 10L40 0\"/>"), "{svg}");
+    }
+
+    #[test]
+    fn export_svg_of_an_empty_sketch_is_refused_and_a_path_writes_the_file() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        assert!(s.execute("sketch.export_svg", &json!({})).is_err());
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [12, 8]})).unwrap();
+        let file = std::env::temp_dir().join(format!("solidcraft-export-svg-{}.svg", std::process::id()));
+        let out = s.execute("sketch.export_svg", &json!({"path": file.to_str().unwrap()})).unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        let written = std::fs::read_to_string(&file).unwrap();
+        let _ = std::fs::remove_file(&file);
+        assert!(written.contains("width=\"12mm\" height=\"8mm\""), "{written}");
     }
 }

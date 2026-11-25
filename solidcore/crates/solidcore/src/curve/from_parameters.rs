@@ -33,10 +33,11 @@ use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
-use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::extent1d::Extent1d;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -118,19 +119,19 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
             knots.push(n.saturating_sub(1) as f64);
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
             Ok(EdgeCurve {
-                curve: Curve::from(spline(&knots, &rows, 3, OP)?),
+                curve: Curve::from(spline(&knots, &rows, 3, false, OP)?),
                 interval: Extent1d::from_raw(lo, hi),
             })
         }
         Record::Spline { knots, points } => {
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
             Ok(EdgeCurve {
-                curve: Curve::from(spline(knots, &rows, 3, OP)?),
+                curve: Curve::from(spline(knots, &rows, 3, false, OP)?),
                 interval: Extent1d::from_raw(lo, hi),
             })
         }
         Record::RationalSpline { knots, homogeneous } => Ok(EdgeCurve {
-            curve: Curve::from(spline(knots, homogeneous, 3, OP)?),
+            curve: Curve::from(spline(knots, homogeneous, 3, true, OP)?),
             interval: Extent1d::from_raw(lo, hi),
         }),
         Record::SurfaceIntersection { .. } => Err(SolidError::Unsupported {
@@ -164,6 +165,19 @@ pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64, at: Point3)
     angle + TAU * ((near - angle) / TAU).round()
 }
 
+/// The record parameter `t` on `interval`, as the kernel classifies a parameter against an
+/// interval (`SmExtent1d::ClassifyPoint` at its default tolerance, `EFF_ZERO`): inside as it is,
+/// on an end moved onto that end (a solve's rounding past it), outside `None`.
+#[must_use]
+pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
+    match Extent1d::from_min_max(interval[0], interval[1]).classify_point(t, EFF_ZERO) {
+        ExtentPointType::Start | ExtentPointType::Both => Some(interval[0]),
+        ExtentPointType::End => Some(interval[1]),
+        ExtentPointType::Inside => Some(t),
+        ExtentPointType::Outside | ExtentPointType::Unknown => None,
+    }
+}
+
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
 /// parameter the edge's interval and trims are in): the conic of the record's numbers
 /// (`conic`), keeping `form` as its NURBS, over the form's interval. The form must lie on the
@@ -186,9 +200,9 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     let nurbs = match form {
         Record::Spline { knots, points } => {
             let rows: Vec<[f64; 4]> = points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect();
-            spline(knots, &rows, 3, OP)?
+            spline(knots, &rows, 3, false, OP)?
         }
-        Record::RationalSpline { knots, homogeneous } => spline(knots, homogeneous, 3, OP)?,
+        Record::RationalSpline { knots, homogeneous } => spline(knots, homogeneous, 3, true, OP)?,
         _ => return Err(bad("a conic's NURBS form is not a spline")),
     };
     if !(rx > 0.0 && ry > 0.0 && rx.is_finite() && ry.is_finite()) {
@@ -245,7 +259,7 @@ pub fn uv_trim_on_edge(
     let [su, sv] = scale;
     let same = su == 1.0 && sv == 1.0;
     let at = |x: f64, y: f64| if same { (x, y) } else { (su * x, sv * y) };
-    let (knots, rows): (&[f64], Vec<[f64; 4]>) = match c {
+    let (knots, rows, rational): (&[f64], Vec<[f64; 4]>, bool) = match c {
         Record2::Spline { knots, points } => (
             knots,
             points
@@ -255,6 +269,7 @@ pub fn uv_trim_on_edge(
                     [x, y, NOZ, 1.0]
                 })
                 .collect(),
+            false,
         ),
         Record2::RationalSpline { knots, homogeneous } => (
             knots,
@@ -265,6 +280,7 @@ pub fn uv_trim_on_edge(
                     [x, y, NOZ, h[2]]
                 })
                 .collect(),
+            true,
         ),
     };
     let n = rows.len();
@@ -306,7 +322,7 @@ pub fn uv_trim_on_edge(
             })
             .collect()
     };
-    Ok(Curve::from(spline(&mapped, &rows, 2, OP_TRIM)?))
+    Ok(Curve::from(spline(&mapped, &rows, 2, rational, OP_TRIM)?))
 }
 
 /// The intersection tolerance of an entity whose zone tolerance is `zone`: twice it, the
@@ -594,17 +610,9 @@ fn p3(a: [f64; 3]) -> Point3 {
 }
 
 /// A record frame's origin and axes, the axes checked unit and square to rounding.
-/// Unit and square axes, each within 8 ulps of 1: the record construction's
-/// and the exact-form check's shared frame test.
-fn unit_square(x: Vec3, y: Vec3) -> bool {
-    let ulps = 8.0 * f64::EPSILON;
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    unit(x) && unit(y) && x.dot(y).abs() <= ulps
-}
-
 fn axes(f: &Frame) -> Result<(Point3, Vec3, Vec3)> {
     let (x, y) = (p3(f.x_axis), p3(f.y_axis));
-    if !unit_square(x, y) {
+    if !axes_are_orthonormal(x, y) {
         return Err(SolidError::invalid_input(
             OP,
             "the frame's axes are not unit and square",
@@ -625,7 +633,7 @@ pub(crate) fn ellipse_form_is_exact(e: &Ellipse) -> Result<bool> {
         && rx.is_finite()
         && ry.is_finite()
         && [o.x, o.y, o.z].iter().all(|x| x.is_finite())
-        && unit_square(x, y))
+        && axes_are_orthonormal(x, y))
     {
         return Ok(false);
     }
@@ -758,9 +766,16 @@ fn conic(
 }
 
 /// A B-spline of `dim` 2 or 3 from its knots and homogeneous rows `(w x, w y, w z, w)` (`z`
-/// [`NOZ`] in 2D, `w = 1` for a polynomial one): filled directly when its knots are clamped,
-/// else clamped to its domain by the kernel's canonical constructor.
-fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Result<BSplineCurve> {
+/// [`NOZ`] in 2D): polynomial (`w = NOW`, matching `BSplineCurve::create_canonical`) when
+/// `rational` is `false`, rational with the given weights when `true`. Filled directly when its
+/// knots are clamped, else clamped to its domain by the kernel's canonical constructor.
+fn spline(
+    knots: &[f64],
+    rows: &[[f64; 4]],
+    dim: u64,
+    rational: bool,
+    op: &'static str,
+) -> Result<BSplineCurve> {
     let bad = |reason: &'static str| SolidError::invalid_input(op, reason);
     let n = rows.len();
     let degree = knots
@@ -779,7 +794,7 @@ fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Resul
     if is_clamped(knots, degree) {
         let pw: Vec<CPoint> = rows
             .iter()
-            .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+            .map(|&[x, y, z, w]| CPoint::new(x, y, z, if rational { w } else { NOW }))
             .collect();
         let nurb = NurbCurve::new(pw, degree, knots.to_vec())?;
         let mut c = BSplineCurve::new(dim);
@@ -806,7 +821,7 @@ fn spline(knots: &[f64], rows: &[[f64; 4]], dim: u64, op: &'static str) -> Resul
         knot_multiplicities: &mults,
         knots: &unique,
         knot_type: KnotType::Unspecified,
-        weights: Some(&weights),
+        weights: rational.then_some(weights.as_slice()),
         trim: None,
     };
     BSplineCurve::create_canonical(&data)

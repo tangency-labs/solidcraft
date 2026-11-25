@@ -4,9 +4,9 @@
 //! cylinder meets the top with R 2 fails with status 1001: at each end of the arc the
 //! overhang's rim continues it tangentially with the opposite convexity, and
 //! `SmFilletNx1Corner::MakeCornerTopology` takes that rim as the corner's side edge.
-//! The rail on the cylinder never meets it. WR-457's opt-in
-//! `fillet_nx1_tangent_side_edge` skip also passes that continuation (WR-499, no longer a
-//! flag of its own), so the round ends on the front face's plane, as
+//! The rail on the cylinder never meets it. WR-457's tangent side-edge skip (once the
+//! opt-in `fillet_nx1_tangent_side_edge`, now the only path) also passes that
+//! continuation (WR-499), so the round ends on the front face's plane, as
 //! tangency-labs/smlib@420e47d does.
 #![allow(
     clippy::unwrap_used,
@@ -67,9 +67,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
-fn round(tangent_side_edge: bool) -> (Brep, Kernel, solidcore::Result<()>) {
+fn round() -> (Brep, Kernel, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = tangent_side_edge;
     let mut body = block_with_overhanging_cylinder(&mut k);
     let arc = junction_arc(&k, &body);
     assert_eq!(arc.len(), 1);
@@ -94,18 +93,8 @@ fn has_vertex(b: &Brep, p: Point3) -> bool {
 }
 
 #[test]
-fn round_fails_with_upstream_behaviour() {
-    // The continuation skip lives inside WR-457's: without it nothing changes.
-    let (_, _, r) = round(false);
-    assert!(
-        r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
-        "{r:?}"
-    );
-}
-
-#[test]
 fn round_ends_on_the_front_face_plane_with_the_fix() {
-    let (mut b, k, r) = round(true);
+    let (mut b, k, r) = round();
     r.unwrap();
     assert!(is_manifold_solid(&b).unwrap());
     // the B-rep's faces, edges and vertices (deleted ones leave their arenas)

@@ -1,4 +1,4 @@
-//! Public fillet entry points: fillet B-rep edges through one live fillet session.
+//! Public fillet entry points: fillet B-rep edges through live fillet sessions.
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiFilletEdges` 2049-2087,
 //! `SmApiFilletEdgesPerEdge` 2094-2135, `SmApiVariableRadiusFillet` 2142-2178,
@@ -32,7 +32,7 @@
 //! need an unported corner kind returns `Unported` from the session. The
 //! whole-operation wrappers here drop their session and return only the later fillet
 //! failure, so the executive's own error info is not in their `Result`: a caller that
-//! needs the retained missing-corner note (`fixes.fillet_vertex_error_diagnostics`)
+//! needs the retained missing-corner note (WR-513)
 //! drives [`FilletSession`] directly and reads
 //! [`FilletSession::error_info`].
 //! [`circular_fillet`] and [`chamfer_fillet`] ignore `LoadFilletSolver`'s status
@@ -63,14 +63,17 @@
 //! ([`is_radius_supported`]). No recursion.
 
 use super::p1::is_radius_supported;
+use super::p3::{FitKind, FitSize, NoRoomReason};
 use super::session::FilletSession;
+use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
 use crate::blend::fillet_executive::p2::SurfaceFilletOptions;
 use crate::blend::fillet_geom::p1::FilletSolverId;
 use crate::blend::fillet_solver::p1::{
     FilletSurfaceGenerator, FilletSurfaceGeneratorType, MakeSurfaceBlendSih,
 };
 use crate::blend::fillet_standard_solver::p1::{BoundaryTrimmingType, FilletLaw};
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::PI;
 use crate::surface::surface::Surface;
@@ -133,22 +136,53 @@ fn keeping_a_solid_closed(
         fillet(k, brep)?;
         k.check_cancelled(OP)?;
         if closed && !is_closed_manifold(brep)? {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the result is not a closed manifold solid",
+                BlendFailure::Defect {
+                    why: "the stitched fillet left a closed manifold body open or non-manifold: \
+                          the executive built and stitched faces that do not close the body (for \
+                          example rails that cross on a face) instead of refusing them",
+                },
             ));
         }
         Ok(())
     })
 }
 
-/// `SM_ERR_INVALID_INPUT`: the API refuses its arguments (an empty or mismatched list, a
-/// size or tolerance out of range), as a status.
-fn invalid_input() -> SolidError {
-    SolidError::blend_invalid_value(
+/// `SM_ERR_INVALID_INPUT`: the API refuses an empty edge list, as a status.
+fn no_edges() -> SolidError {
+    SolidError::blend(OP, BlendFailure::NoEdgesGiven)
+}
+
+/// `SM_ERR_INVALID_INPUT` unless `size` is a size the fillet builds on `brep`
+/// ([`is_radius_supported`]: at least eight times its tolerance).
+fn supported_size(size: f64, brep: &Brep) -> Result<()> {
+    let tolerance = brep.tolerance();
+    if is_radius_supported(size, tolerance) {
+        return Ok(());
+    }
+    Err(SolidError::blend(
         OP,
-        "an argument of the fillet call is empty, mismatched or out of range",
-    )
+        BlendFailure::SizeBelowResolution { size, tolerance },
+    ))
+}
+
+/// `SM_ERR_INVALID_INPUT` unless a list of one entry per edge holds `given` entries for
+/// `edges` edges.
+fn one_per_edge(edges: usize, given: usize) -> Result<()> {
+    if given == edges {
+        return Ok(());
+    }
+    Err(SolidError::blend(
+        OP,
+        BlendFailure::PerEdgeListLength { edges, given },
+    ))
+}
+
+/// `SM_ERR_INVALID_INPUT`: a face of the first surface's body is given where the first
+/// surface has none.
+fn no_first_body() -> SolidError {
+    SolidError::blend(OP, BlendFailure::NoFirstBody)
 }
 
 /// `SmApiFilletEdges`: fillet `edges` of `brep` with one constant `radius` and
@@ -158,7 +192,7 @@ fn invalid_input() -> SolidError {
 ///
 /// The executive's own error info is not returned here: this wrapper drops its session
 /// and returns only the later fillet failure. A caller that needs the retained
-/// missing-corner note (`fixes.fillet_vertex_error_diagnostics`) drives
+/// missing-corner note (WR-513) drives
 /// [`FilletSession`] directly and reads [`FilletSession::error_info`].
 ///
 /// # Errors
@@ -177,12 +211,22 @@ pub fn fillet_edges(
     thumbweight: f64,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     keeping_a_solid_closed(k, brep, |k, brep| {
+        let kind = match xsect_type {
+            0 => Some((SectionKind::Chamfer, FilletSurfaceGeneratorType::Linear)),
+            2 => None,
+            _ => Some((SectionKind::Round, FilletSurfaceGeneratorType::Circular)),
+        };
+        if let Some((kind, section)) = kind {
+            if try_separate_ends(k, brep, edges, &[radius], kind, |k, brep, picks, sizes| {
+                constant_group(k, brep, picks, sizes, section, continuity, thumbweight)
+            })? {
+                return Ok(());
+            }
+        }
         {
             let mut session = FilletSession::new(k, brep)?;
             session
@@ -219,17 +263,28 @@ pub fn fillet_edges_per_edge(
     thumbweight: f64,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if radii.len() != edges.len() || xsect_types.len() != edges.len() {
-        return Err(invalid_input());
-    }
+    one_per_edge(edges.len(), radii.len())?;
+    one_per_edge(edges.len(), xsect_types.len())?;
     for &radius in radii {
-        if !is_radius_supported(radius, brep.tolerance()) {
-            return Err(invalid_input());
-        }
+        supported_size(radius, brep)?;
     }
     keeping_a_solid_closed(k, brep, |k, brep| {
+        if let Some(&section) = xsect_types.first() {
+            let kind = match section {
+                FilletSurfaceGeneratorType::Linear => Some(SectionKind::Chamfer),
+                FilletSurfaceGeneratorType::Circular => Some(SectionKind::Round),
+                _ => None,
+            };
+            if let Some(kind) = kind.filter(|_| xsect_types.iter().all(|&s| s == section)) {
+                if try_separate_ends(k, brep, edges, radii, kind, |k, brep, picks, sizes| {
+                    constant_group(k, brep, picks, sizes, section, continuity, thumbweight)
+                })? {
+                    return Ok(());
+                }
+            }
+        }
         {
             let mut session = FilletSession::new(k, brep)?;
             session
@@ -245,6 +300,72 @@ pub fn fillet_edges_per_edge(
         }?;
         stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
     })
+}
+
+/// Use the corner plan for two independent groups, inside the API's whole-body transaction.
+fn try_separate_ends(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[f64],
+    kind: SectionKind,
+    mut pass: impl FnMut(&mut Kernel, &mut Brep, &[EdgeId], &[f64]) -> Result<()>,
+) -> Result<bool> {
+    match plan(k, b, edges, sizes, kind)? {
+        SeparateEndPlan::NotApplicable => Ok(false),
+        SeparateEndPlan::Limited { size, edge } => {
+            supported_size(size, b)?;
+            Err(SolidError::FilletRefused {
+                operation: OP,
+                code: crate::error::SM_ERR,
+                entity: Some(EntityRef::Edge(edge)),
+                reason: Some(NoRoomReason::RailLeavesFace),
+                fit: FitSize {
+                    size,
+                    edge: Some(edge),
+                    kind: FitKind::Radius,
+                },
+            })
+        }
+        SeparateEndPlan::Ends(groups) => {
+            let before = k.blend_face_log.clone();
+            let result = groups
+                .build(k, b, edges, sizes, |k, b, picks, widths| {
+                    Ok(pass(k, b, picks, widths))
+                })
+                .and_then(std::convert::identity);
+            if result.is_err() {
+                k.blend_face_log = before;
+            }
+            result.map(|()| true)
+        }
+    }
+}
+
+fn constant_group(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[f64],
+    section: FilletSurfaceGeneratorType,
+    continuity: u32,
+    thumbweight: f64,
+) -> Result<()> {
+    {
+        let mut session = FilletSession::new(k, b)?;
+        session.prepare_per_edge_constant_radius(
+            k,
+            edges,
+            sizes,
+            &[section],
+            continuity,
+            thumbweight,
+        )?;
+        session.do_fillet(k)?;
+    }
+    stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+    b.refresh_cached_topology();
+    Ok(())
 }
 
 /// `SmApiVariableRadiusFillet`: fillet `edges` of `brep` with a radius running
@@ -270,13 +391,10 @@ pub fn variable_radius_fillet(
     continuity: u32,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(start_radius, brep.tolerance())
-        || !is_radius_supported(end_radius, brep.tolerance())
-    {
-        return Err(invalid_input());
-    }
+    supported_size(start_radius, brep)?;
+    supported_size(end_radius, brep)?;
     let law = FilletLaw::linear(start_radius, end_radius, None);
     keeping_a_solid_closed(k, brep, |k, brep| {
         {
@@ -347,10 +465,7 @@ fn fillet_all_edges(
         };
         session.set_solver_generator(solver, generator)?;
         // fork 66b02de passes this on (SER)
-        ignored(crate::error::passed_on(
-            session.load_solver(k, solver),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        session.load_solver(k, solver)?;
     }
 
     session.create_corners(k, None)?;
@@ -372,9 +487,7 @@ fn fillet_all_edges(
 /// ([`is_radius_supported`]); the fillet executive's errors, with the body as it was
 /// before the call (not upstream).
 pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<()> {
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         {
             let mut session = FilletSession::new(k, brep)?;
@@ -402,9 +515,7 @@ pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<(
 /// ([`is_radius_supported`]); the fillet executive's errors, with the body as it was
 /// before the call (not upstream).
 pub fn chamfer_fillet(k: &mut Kernel, brep: &mut Brep, distance: f64) -> Result<()> {
-    if !is_radius_supported(distance, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(distance, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         let mut session = FilletSession::new(k, brep)?;
         fillet_all_edges(
@@ -436,11 +547,9 @@ pub fn set_bevel_corners(
     bevel_vertices: &[VertexId],
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         {
             let mut session = FilletSession::new(k, brep)?;
@@ -477,7 +586,7 @@ pub fn fillet_preview(
     radius: f64,
 ) -> Result<Vec<Option<Surface>>> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
     let preview = {
         let mut session = FilletSession::new(k, brep)?;
@@ -565,7 +674,11 @@ fn temporary_face(k: &mut Kernel, surface: &Surface) -> Result<(Brep, FaceId)> {
 /// A face argument's face, which must carry a surface (upstream a surface pointer).
 fn owned_face(body: &Brep, face: FaceId) -> Result<FaceId> {
     if body.face(face)?.surface.is_none() {
-        return Err(invalid_input());
+        return Err(SolidError::blend_at(
+            OP,
+            BlendFailure::FaceHasNoSurface,
+            EntityRef::Face(face),
+        ));
     }
     Ok(face)
 }
@@ -613,7 +726,7 @@ pub fn surface_surface_fillet(
             let face = owned_face(body, face)?;
             (BaseBrep::Caller(body), face)
         }
-        FilletSurfaceArg::FirstBodyFace(_) => return Err(invalid_input()),
+        FilletSurfaceArg::FirstBodyFace(_) => return Err(no_first_body()),
     };
     // if( !pSurface2->GetFace() ): the same surface as the first now has a face
     let (mut base2, face2) = match surface2 {
@@ -630,7 +743,7 @@ pub fn surface_surface_fillet(
         }
         FilletSurfaceArg::FirstBodyFace(face) => {
             if free1.is_some() {
-                return Err(invalid_input());
+                return Err(no_first_body());
             }
             (None, owned_face(base1.brep(), face)?)
         }
@@ -725,15 +838,13 @@ mod tests {
 
         let failed = failing_as_a_whole(&mut k, &mut body, |_, b| {
             edit(b)?;
-            Err(invalid_input())
+            Err(no_edges())
         });
         // #13790: the API's refusal of its arguments is a typed blend failure with the
         // status of the bare `Upstream` it replaced
         let failed = failed.unwrap_err();
-        assert!(matches!(
-            failed.blend_failure(),
-            Some(crate::error::blend::BlendFailure::InvalidValue(_))
-        ));
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::NoEdgesGiven));
+        assert_eq!(failed.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(failed.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(failed.upstream_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(failed.operation(), OP);
@@ -781,12 +892,11 @@ mod tests {
             open(b)
         })
         .unwrap_err();
-        assert_eq!(
-            refused.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Failed(
-                "the result is not a closed manifold solid"
-            ))
+        assert!(
+            matches!(refused.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{refused:?}"
         );
+        assert!(refused.is_defect(), "{refused:?}");
         assert_eq!(refused.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(refused.operation(), OP);
         assert_eq!(refused.entity(), None);
@@ -961,6 +1071,57 @@ mod tests {
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
 
+    /// #19823: each of the API's checks of its arguments is its own named cause, of class
+    /// `InvalidInput`, keeping the status `SM_ERR_INVALID_INPUT` it replaced and its numbers.
+    #[test]
+    fn each_argument_check_names_its_cause() {
+        use crate::error::ErrorKind;
+        let mut k = Kernel::default();
+        let mut body = boxed(&mut k);
+        let edges = p1::edges(&body, None).unwrap();
+        let tolerance = body.tolerance();
+        let check = |r: Result<()>, cause: BlendFailure| {
+            let e = r.unwrap_err();
+            assert_eq!(e.blend_failure(), Some(&cause), "{e:?}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT), "{e:?}");
+            assert_eq!(e.operation(), OP, "{e:?}");
+            assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+        };
+        check(
+            fillet_edges(&mut k, &mut body, &[], 1.0, 1, 1, 1.0),
+            BlendFailure::NoEdgesGiven,
+        );
+        let tiny = tolerance;
+        check(
+            fillet_edges(&mut k, &mut body, &edges[..1], tiny, 1, 1, 1.0),
+            BlendFailure::SizeBelowResolution {
+                size: tiny,
+                tolerance,
+            },
+        );
+        check(
+            fillet_edges_per_edge(
+                &mut k,
+                &mut body,
+                &edges[..2],
+                &[1.0],
+                &[FilletSurfaceGeneratorType::Circular; 2],
+                1,
+                1.0,
+            ),
+            BlendFailure::PerEdgeListLength { edges: 2, given: 1 },
+        );
+        check(
+            chamfer_fillet(&mut k, &mut body, tiny),
+            BlendFailure::SizeBelowResolution {
+                size: tiny,
+                tolerance,
+            },
+        );
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
+    }
+
     #[test]
     fn single_box_edge_fillet_is_a_closed_manifold_solid() {
         let mut k = Kernel::default();
@@ -1033,7 +1194,7 @@ mod tests {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
         use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
         let store = AttributeStore::default();
-        let key_of = |_: crate::EntityRef| ObjectKey(0);
+        let key_of = |_: EntityRef| ObjectKey(0);
         brep_volume(
             k,
             body,
@@ -1044,6 +1205,75 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn post_foot(k: &mut Kernel) -> (Brep, [EdgeId; 2]) {
+        use crate::boolean::api_brep::{boolean_difference, boolean_union};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::{edge, vertex};
+
+        let plate = create_box(k, Vec3::ZERO, 50.0, 50.0, 4.0).unwrap();
+        let post = create_box(k, Vec3::new(0.0, 0.0, 4.0), 10.0, 10.0, 30.0).unwrap();
+        let cut = create_box(k, Vec3::new(10.0, 10.0, -1.0), 5.0, 5.0, 6.0).unwrap();
+        let joined = boolean_union(k, plate, post).unwrap();
+        let body = boolean_difference(k, joined, cut).unwrap();
+        let edges = [Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0)].map(|at| {
+            body.edge_list()
+                .iter()
+                .copied()
+                .find(|&e| {
+                    let (Some(a), Some(z)) = edge::start_end_vertices(&body, e).unwrap() else {
+                        return false;
+                    };
+                    let a = vertex::point(&body, a).unwrap();
+                    let z = vertex::point(&body, z).unwrap();
+                    let midpoint = a + (z - a) * 0.5;
+                    (midpoint - at).length() < 1e-9
+                })
+                .unwrap()
+        });
+        (body, edges)
+    }
+
+    #[test]
+    fn joint_post_foot_blends_at_the_limit_in_the_kernel_api() {
+        for (section, code, area) in [
+            (FilletSurfaceGeneratorType::Linear, 0, 0.5),
+            (FilletSurfaceGeneratorType::Circular, 1, 1.0 - PI / 4.0),
+        ] {
+            for per_edge in [false, true] {
+                let mut k = Kernel {
+                    fixes: crate::kernel::UpstreamFixes::all(),
+                    ..Kernel::default()
+                };
+                let (mut body, edges) = post_foot(&mut k);
+                let blend = |k: &mut Kernel, b: &mut Brep, picks: &[EdgeId], size| {
+                    if per_edge {
+                        fillet_edges_per_edge(k, b, picks, &[size; 2], &[section; 2], 1, 1.0)
+                    } else {
+                        fillet_edges(k, b, picks, size, code, 1, 1.0)
+                    }
+                };
+                let limit = 5.0_f64;
+                let before = shape(&body);
+                let got = blend(&mut k, &mut body, &edges, limit.next_up());
+                assert!(
+                    matches!(got, Err(SolidError::FilletRefused { fit, .. }) if fit.size == limit),
+                    "{section:?}, per_edge={per_edge}: {got:?}",
+                );
+                assert_eq!(shape(&body), before);
+
+                for size in [limit.next_down(), limit] {
+                    let (mut attempt, picks) = post_foot(&mut k);
+                    blend(&mut k, &mut attempt, &picks, size).unwrap();
+                    assert!(is_manifold_solid(&attempt).unwrap());
+                    crate::topology::integrity::check(&attempt).unwrap();
+                    let want = 12_900.0 + 20.0 * size * size * area;
+                    let got = volume(&k, &mut attempt);
+                    assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -93,15 +93,13 @@ fn exact_form(k: &mut Kernel, sheet: &Brep, net: (usize, usize)) {
     assert!(lines.is_empty(), "{lines:?}");
 }
 
-/// A kernel whose loop check compares a seam end projected from its vertex with its
-/// neighbour on the nearest period (`check_loop_projected_seam_ends`, WR-440, the fork's
-/// reference). A sheet made on a closed surface has no UV trims, so the check takes its seam
-/// ends from vertex projections, known only modulo the period; upstream's check reports the
-/// seam of a whole turn as a UV gap of one period (`wr_440_revolved_line_seam_check.rs`).
+/// The kernel the cases run on. Its loop check compares a seam end projected from its
+/// vertex with its neighbour on the nearest period (WR-440, the fork's reference). A sheet
+/// made on a closed surface has no UV trims, so the check takes its seam ends from vertex
+/// projections, known only modulo the period; upstream's check reports the seam of a whole
+/// turn as a UV gap of one period (`wr_440_revolved_line_seam_check.rs`).
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.check_loop_projected_seam_ends = true;
-    k
+    Kernel::default()
 }
 
 fn sheet_copy(k: &mut Kernel, b: &Brep) -> Brep {

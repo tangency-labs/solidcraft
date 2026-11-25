@@ -1289,10 +1289,11 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     if kind == "selene_appearances" && !drag {
                         let bodies: Vec<_> = app
                             .session
-                            .selection
-                            .iter()
+                            .selected_items()
+                            .unwrap_or_default()
+                            .into_iter()
                             .filter_map(|selection| match selection {
-                                solidcraft_engine::Sel::Body { name } => Some(name.clone()),
+                                solidcraft_engine::Sel::Body { name } => Some(name),
                                 _ => None,
                             })
                             .collect();
@@ -1308,7 +1309,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                                 },
                             );
                         }
-                        if !app.session.selection.is_empty() {
+                        if app.session.has_selection() {
                             return Err(app.tr("render.material_choose_body").to_string());
                         }
                     }
@@ -2314,7 +2315,7 @@ mod studio_browser_tests {
             assert_eq!(h.app.session.doc, before);
             h.app.run("edit.redo", json!({})).unwrap();
             assert_eq!(h.app.session.doc, saved);
-            let reopened = solidcraft_engine::doc::Document::from_json(&saved.to_json()).unwrap();
+            let reopened = solidcraft_engine::io::read_design(&solidcraft_engine::io::write_design_container(&saved).unwrap()).unwrap();
             h.app.session = solidcraft_engine::Session::new(reopened);
             h.app.session.set_render_job_host(Some(host.clone())).unwrap();
             super::super::reset_document(&mut h.app);

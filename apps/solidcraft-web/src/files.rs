@@ -9,7 +9,9 @@
 //! changes are kept there instead, one copy per design (`keep.rs`, #10220).
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use solidcraft_engine::io::vfs;
@@ -33,7 +35,7 @@ const RECOVERY: &str = "recovery.sc";
 /// The autosaves earlier releases kept, newest first, one per entry of
 /// `solidcraft_engine::io::LEGACY_DESIGN_EXTS` (compatibility shim, docs/compatibility.md): the
 /// newest is recovered when there is no current one.
-const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
+const LEGACY_RECOVERY: [&str; 1] = ["recovery.solidcraft"];
 const RECOVERY_META: &str = "recovery.json";
 
 /// What to do with a file brought in from the computer.
@@ -90,6 +92,17 @@ pub struct Files {
     pub kept_failed: RefCell<std::collections::HashMap<String, f64>>,
     /// Copies earlier pages left, newer than their design's last save: offered at start.
     pub keep_offered: RefCell<Vec<keep::Entry>>,
+    /// Only one browser write at a time. Each prepared save retains its own acknowledgment.
+    writes: RefCell<VecDeque<Write>>,
+    writing: Cell<bool>,
+}
+
+type SaveOutcome = Result<(), String>;
+
+struct Write {
+    path: String,
+    bytes: Vec<u8>,
+    done: Option<(vfs::Snapshot, Sender<SaveOutcome>)>,
 }
 
 impl Files {
@@ -126,9 +139,6 @@ thread_local! {
 
 /// Local storage keys of stored files (under the channel's name, see `channel.rs`).
 const LOCAL_PREFIX: &str = "solidcraft.file.";
-/// Local-storage files kept by earlier releases (compatibility shim, docs/compatibility.md):
-/// still listed and opened; removing one removes either key.
-const LEGACY_LOCAL_PREFIX: &str = "solvecraft.file.";
 
 fn local() -> Result<web_sys::Storage, String> {
     web_sys::window().and_then(|w| w.local_storage().ok().flatten()).ok_or_else(|| "this browser keeps no local storage".to_string())
@@ -229,7 +239,6 @@ async fn write_file(name: &str, bytes: &[u8]) -> Result<(), String> {
 async fn remove_file(name: &str) -> Result<(), String> {
     if local_only() {
         let st = local()?;
-        st.remove_item(&format!("{LEGACY_LOCAL_PREFIX}{name}")).map_err(err)?;
         return st.remove_item(&crate::channel::key(&format!("{LOCAL_PREFIX}{name}"))).map_err(err);
     }
     let dir = root().await?;
@@ -244,9 +253,7 @@ fn read_local() -> Result<Vec<(String, Vec<u8>, f64)>, String> {
     for i in 0..st.length().unwrap_or(0).min(10_000) {
         let Some(k) = st.key(i).ok().flatten() else { continue };
         let own = crate::channel::key(LOCAL_PREFIX);
-        // The old names belong to stable; a pre-release channel has none.
-        let legacy = crate::channel::current().is_empty().then_some(LEGACY_LOCAL_PREFIX);
-        let Some(name) = k.strip_prefix(own.as_str()).or_else(|| legacy.and_then(|l| k.strip_prefix(l))) else { continue };
+        let Some(name) = k.strip_prefix(own.as_str()) else { continue };
         if let Some(v) = st.get_item(&k).ok().flatten() {
             out.push((name.to_string(), decode(&v), 0.0));
         }
@@ -354,24 +361,7 @@ pub fn start(files: &Rc<Files>) {
 pub fn flush(files: &Rc<Files>) {
     for (path, bytes) in vfs::take_writes() {
         match disk::route(&path) {
-            disk::WriteTo::Opfs => {
-                let name = path.strip_prefix(OPFS).unwrap_or(&path).to_string();
-                {
-                    let mut e = files.entries.borrow_mut();
-                    e.retain(|x| x.name != name);
-                    if name != RECOVERY && name != RECOVERY_META && keep::parse_name(&name).is_none() {
-                        e.push(Entry { name: name.clone(), size: bytes.len() as u64, modified: js_sys::Date::now() });
-                        e.sort_by_key(|a| a.name.to_lowercase());
-                    }
-                }
-                let files = files.clone();
-                spawn_local(async move {
-                    if let Err(e) = write_file(&name, &bytes).await {
-                        files.say(format!("{name}: {e}"), true);
-                    }
-                });
-            }
-            disk::WriteTo::Disk => disk::enqueue(files, &path, bytes),
+            disk::WriteTo::Opfs | disk::WriteTo::Disk => enqueue(files, Write { path, bytes, done: None }),
             disk::WriteTo::Download => {
                 let name = path.strip_prefix(DOWNLOADS).unwrap_or(&path);
                 if let Err(e) = download(name, &bytes) {
@@ -381,6 +371,66 @@ pub fn flush(files: &Rc<Files>) {
             disk::WriteTo::Memory => {}
         }
     }
+}
+
+/// A prepared Save has no effect on the engine's files or the file list until the browser
+/// closes its writable stream (or local storage accepts the value).
+pub fn persist_design(files: &Rc<Files>, path: String, bytes: Vec<u8>) -> Receiver<SaveOutcome> {
+    flush(files);
+    let snapshot = vfs::snapshot(&path);
+    let (done, reply) = std::sync::mpsc::channel();
+    enqueue(files, Write { path, bytes, done: Some((snapshot, done)) });
+    reply
+}
+
+fn enqueue(files: &Rc<Files>, write: Write) {
+    files.writes.borrow_mut().push_back(write);
+    if files.writing.replace(true) {
+        return;
+    }
+    let files = files.clone();
+    spawn_local(async move {
+        loop {
+            let write = files.writes.borrow_mut().pop_front();
+            let Some(Write { path, bytes, done }) = write else { break };
+            let result = match disk::route(&path) {
+                disk::WriteTo::Opfs => store_opfs(&files, path.strip_prefix(OPFS).unwrap_or(&path), &bytes).await,
+                disk::WriteTo::Disk => disk::write(&path, &bytes).await,
+                disk::WriteTo::Download => download(path.strip_prefix(DOWNLOADS).unwrap_or(&path), &bytes),
+                // Explicit virtual paths (for example an API fixture under /upload) use the
+                // in-memory filesystem only. The regular Save picker never returns one.
+                disk::WriteTo::Memory => Ok(()),
+            };
+            if let Some((snapshot, done)) = done {
+                if result.is_ok() {
+                    vfs::insert_if_unchanged(&path, snapshot, bytes);
+                    // This acknowledged write supersedes any earlier write the old command
+                    // queue asked the shell to mark unsaved.
+                    files.unsaved.borrow_mut().retain(|failed| failed != &path);
+                }
+                let _ = done.send(result.map_err(|e| format!("{path}: {e}")));
+            } else if let Err(e) = result {
+                if disk::route(&path) == disk::WriteTo::Disk {
+                    files.failed_disk(&path, &e);
+                } else {
+                    files.say(format!("{path}: {e}"), true);
+                }
+            }
+            files.wake();
+        }
+        files.writing.set(false);
+    });
+}
+
+async fn store_opfs(files: &Files, name: &str, bytes: &[u8]) -> SaveOutcome {
+    write_file(name, bytes).await?;
+    if name != RECOVERY && name != RECOVERY_META && keep::parse_name(name).is_none() {
+        let mut entries = files.entries.borrow_mut();
+        entries.retain(|entry| entry.name != name);
+        entries.push(Entry { name: name.to_string(), size: bytes.len() as u64, modified: js_sys::Date::now() });
+        entries.sort_by_key(|entry| entry.name.to_lowercase());
+    }
+    Ok(())
 }
 
 /// Hand `bytes` to the user as a download named `name`.
@@ -406,6 +456,29 @@ pub fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a document made in memory (`name`, of media type `kind`) in a new tab, where the browser
+/// shows it with its own viewer (a PDF, to print). Refused when the browser blocks the new tab.
+pub fn open_in_tab(name: &str, kind: &str, bytes: &[u8]) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    let parts = Array::new();
+    parts.push(&Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type(kind);
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(err)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(err)?;
+    let opened = window.open_with_url_and_target(&url, "_blank").map_err(err)?;
+    if opened.is_none() {
+        let _ = web_sys::Url::revoke_object_url(&url);
+        return Err(format!("the browser blocked a new tab for {name}: allow pop-ups for this site"));
+    }
+    // The tab keeps what it loaded; the URL goes once it has had time to.
+    let revoke = Closure::once_into_js(move || {
+        let _ = web_sys::Url::revoke_object_url(&url);
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
+    Ok(())
+}
+
 /// Delete a stored design.
 pub fn delete(files: &Rc<Files>, name: &str) {
     let _ = vfs::remove(&format!("{OPFS}{name}"));
@@ -425,7 +498,7 @@ pub fn rename(files: &Rc<Files>, from: &str, to: &str) -> Result<(), String> {
     if to.is_empty() || to.contains('/') || to.contains('\\') || to.len() > 200 {
         return Err("give a file name without slashes".into());
     }
-    if files.entries.borrow().iter().any(|e| e.name == to) {
+    if vfs::exists(&format!("{OPFS}{to}")) || files.entries.borrow().iter().any(|e| e.name == to) {
         return Err(format!("there is already a file named {to}"));
     }
     let bytes = vfs::read(&format!("{OPFS}{from}"), solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
@@ -557,10 +630,9 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
-    // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
-    // FreeCAD and Rhino files are part of it; plus the DXF and SVG drawings Open and Insert take.
-    let mut extensions = solidcraft_engine::io::formats::open_extensions(true);
-    extensions.extend(["dxf", "svg"]);
+    // Everything the browser build opens, from the format registry: cadmpeg is pure Rust, so
+    // FreeCAD and Rhino files are part of it, and so are the DXF and SVG drawings Open and Insert take.
+    let extensions = solidcraft_engine::io::formats::open_extensions(true);
     input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");

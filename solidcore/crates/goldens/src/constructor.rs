@@ -517,7 +517,7 @@ fn computed(r: &Result<Option<EdgeuseId>, SolidError>, ix: &mut Ix<EdgeuseId>) -
 }
 
 /// The integer and float dumps (layout in the shim's header).
-fn dump(k: &Kernel, b: &Brep, bound: usize) -> Result<(Vec<f64>, Vec<f64>), SolidError> {
+pub(crate) fn dump(k: &Kernel, b: &Brep, bound: usize) -> Result<(Vec<f64>, Vec<f64>), SolidError> {
     let (mut t, mut v) = (Vec::new(), Vec::new());
     let mut regions: Ix<RegionId> = Ix::new();
     let mut shells: Ix<ShellId> = Ix::new();

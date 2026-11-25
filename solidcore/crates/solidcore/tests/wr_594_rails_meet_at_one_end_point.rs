@@ -83,3 +83,41 @@ fn rails_end_at_one_point() {
     assert_eq!(bits(ends[0]), bits(ends[1]), "an exact pole");
     assert!(ends[0].distance(meet) < 1e-12);
 }
+
+/// A tolerance that is not finite is refused with a typed error before either rail is
+/// edited: a NaN one used to fail the `>=` proximity test, and the rails' separated
+/// ends were moved to their midpoint (a review of #16728).
+#[test]
+fn non_finite_tolerance_is_refused_and_rails_kept() {
+    let k = Kernel::default();
+    let p = Point3::new;
+    let line = |a: Point3, b: Point3| BSplineCurve::create_line_segment(3, a, b).unwrap();
+    for tol in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut center = Curve::from(line(p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0)));
+        // ends 0.5 apart: no finite tolerance below 0.5 joins them
+        let mut rail1 = line(p(0.0, 2.0, 0.0), p(10.0, 2.0, 0.25));
+        let mut rail2 = line(p(0.0, 0.0, 2.0), p(10.0, 2.0, -0.25));
+        let ends = |r: &BSplineCurve| {
+            let ivl = r.natural_interval();
+            [
+                bits(r.evaluate_point(ivl.min()).unwrap()),
+                bits(r.evaluate_point(ivl.max()).unwrap()),
+            ]
+        };
+        let before = (ends(&rail1), ends(&rail2));
+        let r = CircularCrossSectionFsg::default().create_surface_from_curves(
+            &k,
+            &mut center,
+            &mut rail1,
+            &mut rail2,
+            tol,
+            false,
+        );
+        assert!(
+            matches!(r, Err(solidcore::SolidError::InvalidInput { .. })),
+            "tol {tol}: {r:?}"
+        );
+        assert_eq!(ends(&rail1), before.0, "tol {tol}: rail 1 kept");
+        assert_eq!(ends(&rail2), before.1, "tol {tol}: rail 2 kept");
+    }
+}

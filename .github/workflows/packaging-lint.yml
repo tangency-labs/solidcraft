@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: packaging-lint-${{ github.ref }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: packaging-lint-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -54,20 +55,21 @@ jobs:
           }
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
-          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml*
+          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml* packaging/windows/policies/*.admx packaging/windows/policies/*/*.adml packaging/macos/policies/*.mobileconfig
           # An MSI update installs before it removes the old version, so Start menu pins survive (#9366).
           grep -q 'Schedule="afterInstallExecute"' assets/platforms/windows/solidcraft.wxs
           grep -q 'Id="REINSTALLMODE" Value="amus"' assets/platforms/windows/solidcraft.wxs
+          grep -q 'Id="REBOOT" Value="ReallySuppress"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the MSI must set REBOOT=ReallySuppress, so no install or update restarts the PC (#18774)'; exit 1; }
           # No advertised shortcuts: their Start menu app ID follows the ProductCode, which changes every build, so pins are dropped on update (#9366).
           ! grep -q 'Advertise="yes"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::Advertise="yes": an advertised shortcut loses its Start menu pin on every update; use Advertise="no" (#9366)'; exit 1; }
-          # The Start menu shortcut is not called "SolidCraft": removing an earlier release (advertised shortcut) deletes that file by name after the new one is written (#9366).
-          grep -q 'Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft CAD"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the Start menu shortcut must stay Name="SolidCraft CAD" (#9366)'; exit 1; }
+          # The Start menu shortcut is named "SolidCraft"; a leftover "SolidCraft CAD.lnk" from 0.42 is removed on install. Upgrading straight from 0.30.1 or older can lose the entry until a repair: accepted.
+          grep -q 'Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the Start menu shortcut must stay Name="SolidCraft"'; exit 1; }
+          grep -q 'RemoveFile Id="RemoveStartMenuShortcutCad".*Name="SolidCraft CAD.lnk"' assets/platforms/windows/solidcraft.wxs
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.
           grep -qx 'StartupWMClass=io.tangencylabs.solidcraft' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           grep -q '<id>ai.storyteller.solidcraft</id>' assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in
-          grep -q '<id>ai.storyteller.solvecraft</id>' assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in
-          grep -qx 'X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;ai.storyteller.solvecraft.desktop;' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          grep -qx 'X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           grep -qF -e '--end-of-life-rebase=' packaging/flatpak-site.sh
           sed -e 's/@VERSION@/0.0.0/' -e 's/@DATE@/2026-01-01/' assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in >"$RUNNER_TEMP/io.tangencylabs.solidcraft.metainfo.xml"
           appstreamcli validate --no-net --explain "$RUNNER_TEMP/io.tangencylabs.solidcraft.metainfo.xml"

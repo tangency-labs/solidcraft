@@ -18,15 +18,24 @@ pub trait AppPanelServices {
 }
 
 pub struct AppPanelRuntime {
+    pub(super) plugins: super::plugin::PluginState,
     pub(super) production: Option<super::production::ProductionState>,
-    runtime: PanelRuntime,
+    pub(super) runtime: PanelRuntime,
     services: Box<dyn AppPanelServices>,
     native: Box<dyn NativeHostAdapter>,
     #[cfg(not(target_arch = "wasm32"))]
     desktop: Option<super::native::DesktopNativeAdapter>,
+    /// The drag's window has its height before its panel measured its content.
+    #[cfg(not(target_arch = "wasm32"))]
+    drop_fit: bool,
+    /// A dropped window that fits its content once its panel has measured it.
+    #[cfg(not(target_arch = "wasm32"))]
+    fit_window: Option<(InstanceId, std::time::Instant)>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
+    sync_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
     pub(super) preferences: Option<super::preferences::PreferenceSession>,
@@ -38,15 +47,22 @@ impl AppPanelRuntime {
             return Err(error(Rule::Lifecycle, "install the app adapter before creating or restoring native placement"));
         }
         Ok(Self {
+            plugins: Default::default(),
             production: None,
             runtime,
             services,
             native: Box::<InAppNativeAdapter>::default(),
             #[cfg(not(target_arch = "wasm32"))]
             desktop: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            drop_fit: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            fit_window: None,
             host: None,
             last_tick_frame: None,
+            detached_content: Default::default(),
             last_error: None,
+            sync_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
             preferences: None,
@@ -94,7 +110,7 @@ impl AppPanelRuntime {
     }
 
     pub fn last_error(&self) -> Option<&PanelError> {
-        self.last_error.as_ref()
+        self.sync_error.as_ref().or(self.last_error.as_ref())
     }
     pub fn runtime(&self) -> &PanelRuntime {
         &self.runtime
@@ -533,15 +549,24 @@ impl AppPanelRuntime {
         Ok(())
     }
 
+    /// `drawn`: the windows that drew the open menu (#19364).
     #[cfg(not(target_arch = "wasm32"))]
-    fn show_desktop_windows(&mut self, app: &mut crate::SolveApp, ctx: &egui::Context, enabled: bool) -> PanelResult<()> {
+    fn show_desktop_windows(
+        &mut self,
+        app: &mut crate::SolveApp,
+        ctx: &egui::Context,
+        enabled: bool,
+        drawn: &mut Vec<egui::ViewportId>,
+    ) -> PanelResult<()> {
         use super::native_ui::WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
+        self.show_drop_window(ctx, &desktop);
         if !self.runtime.layout().layout().sections.iter().any(|section| section.location.zone() == Zone::Window) {
             return Ok(());
         }
         self.reconcile(&app.session)?;
+        let measure = self.host.as_ref().and_then(|host| host.frame()).and_then(|frame| frame.layout.geometry_policy.measure.clone());
         let windows: Vec<_> = self
             .runtime
             .layout()
@@ -555,6 +580,7 @@ impl AppPanelRuntime {
             .collect();
         let mut failure = None;
         for (host, section) in windows {
+            let drawn = &mut *drawn;
             let paint = (|| -> PanelResult<()> {
                 let layout = self.runtime.layout();
                 let available = section.tabs.iter().map(|id| (id.clone(), layout.availability(id))).collect();
@@ -569,9 +595,7 @@ impl AppPanelRuntime {
                     return Err(error(Rule::Lifecycle, "native window lost its layout registration"));
                 }
                 let title = self.runtime.instance_presentation(active)?.title;
-                let size = section.size;
-                let preferred =
-                    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) };
+                let preferred = window_size(section.size, (min, max));
                 let Some(builder) = desktop.builder(ctx, &host, active, title, preferred, (min, max)) else { return Ok(()) };
                 let Some(viewport) = desktop.viewport_id(&host) else { return Ok(()) };
                 let action = match desktop.ready(ctx, &host, &builder) {
@@ -590,9 +614,55 @@ impl AppPanelRuntime {
                                 return Err(error(Rule::Capability, "desktop viewport became unavailable"));
                             }
                             desktop.observe(ui.ctx(), &host, active);
-                            solidcraft_ui_registry::isolated(|| {
+                            let _blur = content.app.blur.begin(ui.ctx());
+                            let before = crate::semantic_content::presented_owners(content.app);
+                            let painted = solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
-                            })
+                            });
+                            // A window dropped before its panel measured its content fits
+                            // it once measured, as the app's side cards do.
+                            if self.fit_window.as_ref().is_some_and(|(fit, _)| fit == active) {
+                                let actions = self
+                                    .runtime
+                                    .layout()
+                                    .layout()
+                                    .instance(active)
+                                    .ok()
+                                    .and_then(|panel| self.runtime.layout().registry().get(&panel.kind).ok())
+                                    .is_some_and(|spec| !spec.header_actions.is_empty());
+                                let inner = ui.input(|input| input.viewport().inner_rect);
+                                let needed = inner.and_then(|inner| {
+                                    Some((
+                                        inner,
+                                        content_height(
+                                            measure.as_deref(),
+                                            active,
+                                            inner.width(),
+                                            super::native_ui::window_chrome(ui.ctx(), actions),
+                                        )?,
+                                    ))
+                                });
+                                if let Some((inner, needed)) = needed {
+                                    let fitted = portrait(Size { width: inner.width(), height: needed }).height;
+                                    if fitted + 0.5 < inner.height() {
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(inner.width(), fitted)));
+                                    }
+                                    self.fit_window = None;
+                                } else if self.fit_window.as_ref().is_some_and(|(_, since)| since.elapsed() > std::time::Duration::from_secs(1)) {
+                                    self.fit_window = None;
+                                } else {
+                                    ui.ctx().request_repaint();
+                                }
+                            }
+                            // This window is drawn after the frame's rows opened their menus: it
+                            // opens and draws its own rows' menu (#19364).
+                            if let Some((at, target)) = crate::semantic_content::take_late_menu(content.app, &before) {
+                                crate::context_menu::open_in_window(content.app, ui.ctx().viewport_id(), at, target);
+                            }
+                            if crate::context_menu::show_in_window(content.app, ui.ctx()) {
+                                drawn.push(ui.ctx().viewport_id());
+                            }
+                            painted
                         });
                         self.services.set_presentation_viewport(None);
                         result?
@@ -620,6 +690,82 @@ impl AppPanelRuntime {
             }
         }
         failure.map_or(Ok(()), Err)
+    }
+
+    /// While a drag would pop a panel out, show the window it would open in, at
+    /// that screen place, with the panel's own paint: release opens it only where
+    /// this showed it. The panel's window then keeps that same window.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_drop_window(&mut self, ctx: &egui::Context, desktop: &super::native::DesktopNativeAdapter) {
+        let Some(host) = self.host.as_mut() else { return };
+        if let Some((instance, outer)) = host.take_window_landing() {
+            desktop.place(ctx, &instance, super::workspace::egui_rect(outer));
+            self.fit_window = self.drop_fit.then(|| (instance.clone(), std::time::Instant::now()));
+            let opened = self.runtime.layout().layout().containing(&instance).ok().and_then(|section| match &section.location {
+                SectionLocation::Window { host, .. } => Some(host.clone()),
+                _ => None,
+            });
+            if let Some(viewport) = opened.and_then(|opened| desktop.adopt(&opened, &instance)) {
+                ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
+            }
+        }
+        let Some((instance, corner)) = host.window_landing_preview() else {
+            desktop.end_drop();
+            return;
+        };
+        // From the bottom strip, the panel is painted as the side card docking it
+        // at a side would make; its window takes that card's shape.
+        let side = host.leaving_side_card().filter(|card| card.instance == instance).map(|card| (card.outer.size, card.header.size.height));
+        let in_app = host.frame().and_then(|frame| {
+            let card = frame.layout.sections.iter().find(|card| card.instance == instance)?;
+            let measure = frame.layout.geometry_policy.measure.clone();
+            Some((card.zone, card.outer.size, card.header.size.height, frame.layout.capacity.size.height, measure))
+        });
+        let mut bootstrap = false;
+        let mut chrome = 0.0;
+        let layout = self.runtime.layout();
+        let landing = layout.layout().containing(&instance).ok().zip(layout.layout().instance(&instance).ok()).and_then(|(section, panel)| {
+            let spec = layout.registry().get(&panel.kind).ok()?;
+            let bounds = spec.size_bounds(Zone::Window);
+            chrome = super::native_ui::window_chrome(ctx, !spec.header_actions.is_empty());
+            let size = match in_app {
+                None => window_size(section.size, bounds),
+                Some((zone, size, header, column, measure)) => {
+                    let width = spec.default_size.width;
+                    // From the bottom strip, the window is as long as the panel's measured
+                    // content needs; unmeasured, it starts at the dock's height and fits
+                    // once measured, as a side card does.
+                    let fitted = (zone == Zone::Bottom).then(|| content_height(measure.as_deref(), &instance, width, chrome)).flatten();
+                    bootstrap = zone == Zone::Bottom && fitted.is_none();
+                    let size = match side {
+                        // A side card is painted with its actions in it.
+                        Some((size, header)) => drop_window_size(Zone::Left, size, header, 0.0, width, column),
+                        None => drop_window_size(zone, size, header, chrome, width, fitted.map_or(column, |needed| needed.min(column))),
+                    };
+                    if zone == Zone::Bottom { portrait(size) } else { size }
+                }
+            };
+            desktop.landing(ctx, &instance, egui::pos2(corner.x, corner.y), size, bounds)
+        });
+        self.drop_fit = bootstrap;
+        let Some(outer) = landing else { return };
+        let title = self.runtime.instance_presentation(&instance).map(|presentation| presentation.title).unwrap_or_default();
+        let (viewport, builder) = desktop.drop_window(&instance, title, outer);
+        // Drawing needs the OS window: until it exists, nothing is shown.
+        if !desktop.drop_ready(ctx, &builder).unwrap_or(false) {
+            return;
+        }
+        let shown = ctx.show_viewport_immediate(viewport, builder, |ui, class| {
+            super::native_ui::paint_drop(ui, host.window_card(), if side.is_some() { 0.0 } else { chrome });
+            class != egui::ViewportClass::EmbeddedWindow && ui.input(|input| input.viewport().native_pixels_per_point.is_some())
+        });
+        // The OS reports the window where it was before this frame's move, so
+        // release keeps the rectangle requested for it: where it is now shown.
+        if shown {
+            host.confirm_window_shown(corner, super::workspace::logical_rect(outer));
+        } else {
+            ctx.request_repaint();
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -788,7 +934,7 @@ impl AppPanelRuntime {
                         app.shell.browser = Some(rect);
                         crate::scenario::publish_rect("browser:card", rect);
                     }
-                    "history" => {
+                    "history" | "timeline-2d" => {
                         app.shell.history = Some(rect);
                         crate::scenario::publish_rect("history:card", rect);
                         crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
@@ -967,7 +1113,10 @@ impl AppPanelRuntime {
                 Err(reason)
             }
         };
-        self.last_error = result.as_ref().err().cloned();
+        // A successful service tick does not resolve a failed preference restore.
+        if result.is_err() || !self.preferences.as_ref().is_some_and(|state| state.failed) {
+            self.last_error = result.as_ref().err().cloned();
+        }
         result
     }
     /// Explicit teardown preflights all owners before any controller is destroyed.
@@ -1130,9 +1279,13 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
+        (!self.view_windows.is_child() || self.view_windows.painting_panels)
+            && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        if self.view_windows.is_child() && !self.view_windows.painting_panels {
+            return None;
+        }
         self.panel_runtime
             .as_ref()
             .and_then(|integration| integration.host.as_ref())
@@ -1199,6 +1352,45 @@ pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     Ok(())
 }
 
+/// A window from the bottom strip stays taller than wide (at least 4:3), so its
+/// panel keeps the vertical layout a side card has: a window at least as wide
+/// as tall lays its panel out wide.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn portrait(size: Size) -> Size {
+    Size { height: size.height.max(size.width * 4.0 / 3.0), ..size }
+}
+
+/// The height a panel window needs at `width` around `chrome`, when its panel
+/// sizes to its content and has measured it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn content_height(measure: Option<&dyn super::layout::HostContentMetrics>, instance: &InstanceId, width: f32, chrome: f32) -> Option<f32> {
+    let request = ContentMeasureRequest { instance: instance.clone(), width, chrome_height: chrome };
+    let measure = measure?.measure(&request).ok()?;
+    (measure.policy == SideHeightPolicy::Content && measure.needed_height.is_finite() && measure.needed_height < MAX_LOGICAL)
+        .then_some(measure.needed_height)
+}
+
+/// The content size of a dragged-out panel's window: its card's size in the
+/// app, with the window's own `chrome` in place of the card's header (`header`
+/// high), so the body keeps its size. A panel in the bottom strip, whose strip
+/// is too low for a window, takes the shape of a new side column instead (as
+/// docking it at a side would): its kind's default width and the height of the
+/// app's dock area.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn drop_window_size(zone: Zone, card: Size, header: f32, chrome: f32, side_width: f32, column_height: f32) -> Size {
+    if zone == Zone::Bottom {
+        Size { width: side_width, height: column_height }
+    } else {
+        Size { width: card.width, height: card.height - header.clamp(0.0, card.height) + chrome }
+    }
+}
+
+/// A panel window's first inner size: its dock size, at least a usable window.
+#[cfg(not(target_arch = "wasm32"))]
+fn window_size(size: Size, (min, max): (Size, Size)) -> Size {
+    Size { width: size.width.max(360.0).clamp(min.width, max.width), height: size.height.max(440.0).clamp(min.height, max.height) }
+}
+
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if let Err(reason) = ensure_production(app) {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
@@ -1206,14 +1398,21 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = Some(reason);
         }
     }
-    if let Err(reason) = super::production::drain_production_actions(app)
+    if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
+        return;
+    }
+    let plugin_error = super::plugin::sync(app).err();
+    let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
         .and_then(|()| super::production::refresh_production(app))
-        && let Some(integration) = &mut app.panel_runtime
-    {
-        integration.last_error = Some(reason);
+        .err();
+    if let Some(integration) = &mut app.panel_runtime {
+        // Context reconciliation and painting cannot resolve an earlier sync failure.
+        integration.sync_error = plugin_error.or(production_error);
     }
     let direction = crate::i18n::panel_direction(&app.preferences.language);
+    // The Browser's search field takes its title's place while it is open (#1634).
+    let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1225,6 +1424,15 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            // The 2D Timeline shows only at the bottom: a History on the left has no switch.
+            let view = ControlId(super::production::TIMELINE_VIEW.into());
+            host.set_header_action_visible(InstanceId("history".into()), view.clone(), !app.preferences.timeline_left);
+            for instance in ["history", "timeline-2d"] {
+                host.set_header_action_trailing(InstanceId(instance.into()), view.clone());
+            }
+            host.set_header_content(InstanceId("browser".into()), browser_header);
+            // The open search box holds the magnifier.
+            host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
         }
         let result = (|| {
@@ -1239,12 +1447,14 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             integration.last_error = result.err();
         }
     }
-    if app
-        .panel_runtime
-        .as_ref()
-        .and_then(|integration| integration.preferences.as_ref())
-        .is_some_and(|state| state.failed || state.rejected.is_some() || !state.reset.is_empty())
-    {
+    if app.panel_runtime.as_ref().is_some_and(|integration| {
+        integration.preferences.as_ref().is_some_and(|state| {
+            // Startup bounds can change. A pending restore that needs more space will retry;
+            // it does not mean that the saved layout is unreadable.
+            let waiting_for_space = state.pending.is_some() && integration.last_error.as_ref().is_some_and(|reason| reason.rule == Rule::NoSpace);
+            (state.failed && !waiting_for_space) || state.rejected.is_some() || !state.reset.is_empty()
+        })
+    }) {
         super::preferences::report_notice(app);
     }
 }
@@ -1253,11 +1463,15 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
 pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Context) {
     let Some(mut integration) = app.panel_runtime.take() else { return };
     let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
-    if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
+    let mut drawn = Vec::new();
+    let shown = integration.show_desktop_windows(app, ctx, enabled, &mut drawn);
+    crate::context_menu::close_unshown_window(app, &drawn);
+    if let Err(reason) = shown {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);
+    crate::context_menu::run_deferred(app);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1303,6 +1517,125 @@ pub(crate) fn reserve_host_input(app: &mut crate::SolveApp, ctx: &egui::Context)
     if host.wants_escape(&integration.runtime) && crate::ui_kit::Container::reserve_host_escape(ctx) {
         host.request_escape();
         app.esc_handled = true;
+    }
+}
+
+/// State for one detached window. Swap it in only during that viewport's pass;
+/// root paint, focus, layout commands and preference saves keep their own host.
+#[derive(Default)]
+pub(crate) struct PopOutPanels {
+    runtime: Option<AppPanelRuntime>,
+    frame: Option<HostFrame>,
+    seen_layout: Option<u64>,
+    record: Option<serde_json::Value>,
+}
+
+impl PopOutPanels {
+    pub(crate) fn load(&mut self, record: &Option<serde_json::Value>) {
+        if &self.record != record {
+            self.runtime = None;
+            self.frame = None;
+            self.seen_layout = None;
+            self.record.clone_from(record);
+        }
+    }
+
+    pub(crate) fn swap(&mut self, app: &mut crate::SolveApp) {
+        std::mem::swap(&mut self.runtime, &mut app.panel_runtime);
+        std::mem::swap(&mut self.frame, &mut app.panel_content_frame);
+    }
+
+    pub(crate) fn save(&mut self, app: &crate::SolveApp, remembered: &mut Option<serde_json::Value>) {
+        let Some(integration) = &app.panel_runtime else { return };
+        if integration.preferences.as_ref().is_some_and(|settings| settings.pending.is_some()) {
+            return;
+        }
+        let revision = integration.runtime().layout().inspect().revision;
+        if self.seen_layout == Some(revision) {
+            return;
+        }
+        if let Ok(record) = integration.preference_record()
+            && let Some(record) = solidcraft_views::ViewSet::read_panel_layout(&record.value())
+        {
+            *remembered = Some(record.clone());
+            self.record = Some(record);
+            self.seen_layout = Some(revision);
+        }
+    }
+}
+
+pub(crate) fn panel_workspace(app: &crate::SolveApp) -> Option<WorkspaceId> {
+    app.panel_runtime.as_ref().map(|integration| integration.runtime().layout().layout().workspace.clone())
+}
+
+pub(crate) fn prepare_pop_out_panels(
+    app: &mut crate::SolveApp,
+    ui: &egui::Ui,
+    domain: egui::Rect,
+    workspace: Option<&WorkspaceId>,
+    owner: &str,
+    remembered: &Option<serde_json::Value>,
+) -> bool {
+    if !domain.is_finite() || !domain.is_positive() {
+        return false;
+    }
+    let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
+    let mut capacity = domain.shrink(gap.min(domain.width().min(domain.height()) / 4.0));
+    let chrome: Vec<_> = app.shell.ribbon_overlay.into_iter().map(logical_rect).collect();
+    if let Some(ribbon) = app.shell.ribbon_overlay {
+        capacity.min.y = ribbon.bottom().clamp(capacity.min.y, capacity.max.y);
+    }
+    let force_opaque = app.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
+    let language_direction = crate::i18n::panel_direction(&app.preferences.language);
+    let shortcuts = crate::keymap::panel_shortcuts(app);
+    let result: PanelResult<()> = (|| {
+        if app.panel_runtime.is_none() {
+            super::production::enable_pop_out_production(app, owner, remembered.clone())?;
+        }
+        super::production::sync_production_visibility(app)?;
+        super::production::refresh_production(app)?;
+        let runtime = app.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "detached panel host unavailable"))?;
+        runtime.sync_native_direction(language_direction)?;
+        let frame = ui.ctx().cumulative_frame_nr();
+        if runtime.last_tick_frame != Some(frame) {
+            runtime.tick(&app.session)?;
+            runtime.last_tick_frame = Some(frame);
+        }
+        runtime.set_keyboard_shortcuts(shortcuts);
+        if let Some(host) = &mut runtime.host {
+            host.note_egui_context(ui.ctx(), force_opaque);
+            host.set_gap(gap)?;
+            host.set_live_drag(app.preferences.live_panel_drag_preview);
+        }
+        runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        if let Some(workspace) = workspace
+            && &runtime.runtime().layout().layout().workspace != workspace
+            && runtime.preferences.as_ref().is_some_and(|settings| settings.pending.is_none())
+        {
+            runtime.command(&app.session, "layout.workspace.select", &serde_json::json!({"workspace": workspace}))?;
+            runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
+        }
+        Ok(())
+    })();
+    if let Err(reason) = &result
+        && let Some(runtime) = &mut app.panel_runtime
+    {
+        runtime.last_error = Some(reason.clone());
+    }
+    result.is_ok()
+}
+
+pub(crate) fn paint_pop_out_panels(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
+    if let Some(mut integration) = app.panel_runtime.take() {
+        let mut content = std::mem::take(&mut integration.detached_content);
+        content.show(app, ui, |app, ui| {
+            if let Err(reason) = integration.show_production_host(app, ui) {
+                integration.last_error = Some(reason);
+            }
+        });
+        integration.detached_content = content;
+        app.panel_content_frame = None;
+        app.panel_runtime = Some(integration);
     }
 }
 
@@ -1368,9 +1701,14 @@ impl crate::SolveApp {
             self.shell.cards = cards;
             self.shell.status_bar = status_bar;
         }
+        // Home can open a document after the services tick. Bind the restored panel
+        // visibility to that document before the host delivers its lifecycle events.
+        let restoring = self.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|prefs| prefs.pending.is_some());
+        let refresh = if restoring { super::production::refresh_production(self) } else { Ok(()) };
         match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
+                    refresh?;
                     integration.sync_native_direction(direction)?;
                     integration.set_keyboard_shortcuts(shortcuts);
                     if let Some(host) = &mut integration.host {
@@ -1474,6 +1812,26 @@ impl crate::SolveApp {
                     self.panel_runtime = Some(integration);
                 }
             });
+        // Legacy drawing chrome needs the measured ribbon and Browser bounds.
+        if crate::drawing_workspace::active(self)
+            && self.preferences.drawing_sheets_visibility == "legacy"
+            && render_domain.is_positive()
+            && render_domain.is_finite()
+        {
+            let mut bounds = render_domain;
+            if let Some(bottom) = self.shell.cards.iter().map(egui::Rect::bottom).max_by(f32::total_cmp) {
+                bounds.min.y = bottom.clamp(bounds.top(), bounds.bottom());
+            }
+            if self.preferences.drawing_panel_side == "left"
+                && let Some(browser) = self.shell.browser
+            {
+                bounds.min.x = browser.right().clamp(bounds.left(), bounds.right());
+            }
+            let mut legacy = ui.new_child(egui::UiBuilder::new().id_salt("legacy_drawing_inspector").max_rect(bounds));
+            crate::drawing_workspace::panel(self, &mut legacy);
+            crate::drawing_workspace::chrome(self, ui, render_domain);
+        }
+        crate::drawing_workspace::show_add_sheet(self, ui.ctx());
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }
