@@ -160,6 +160,17 @@ pub trait FaceSolveCache<O> {
     ///
     /// Those of `SmFace::PointClassify`.
     fn point_test(&mut self, k: &Kernel, uv: Point2) -> Result<bool>;
+
+    /// The fast drop's trim test of the face's surface in a point solve the line solve
+    /// makes on it (`pFace->PointClassify(uv, src_tol, TRUE, FALSE, ..)` in
+    /// `SmSurface::GlobalPointSolve`, upstream through the surface's `GetFace`): whether
+    /// the solution at `uv` is kept (true when the test does not run: the cache is not
+    /// trimmed, point testing is off or the face was modified).
+    ///
+    /// # Errors
+    ///
+    /// Those of `SmFace::PointClassify` that upstream does not ignore.
+    fn fast_drop_test(&mut self, k: &Kernel, uv: Point2, src_tol: f64) -> Result<bool>;
 }
 
 const OP_KNOTS: &str = "surface::surface::p8::Surface::find_knots_by_max_continuity";
@@ -2198,7 +2209,10 @@ impl Surface {
         gs.surface_cache = Some(cache);
         gs.modes = modes;
         gs.face_queries = face_queries;
-        gs.face_cache = face_cache;
+        gs.face_cache = match face_cache.as_mut() {
+            Some(f) => Some(&mut **f),
+            None => None,
+        };
 
         // traverse curve and surface sub-division trees
         // for each sub-division leaf pair that has intersecting boundaries
@@ -2345,7 +2359,8 @@ impl Surface {
             let line = Curve::from(line);
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
-            // surface's face through the caller's context, when there is one)
+            // surface's face through the caller's context, when there is one, else
+            // through the caller holding the face: upstream's surface knows its face)
             // (its fast drop tests the face only when the solve's point testing is on)
             let found = if let Some(context) = context.as_deref_mut() {
                 self.simple_coincidence_checker_from::<O>(
@@ -2359,6 +2374,18 @@ impl Surface {
                     Some(cache),
                     Some(context),
                     modes.is_some_and(|m| !m.point_test_enabled),
+                    None,
+                )?
+            } else if let Some(face) = face_cache {
+                self.simple_coincidence_checker_face_tested::<O>(
+                    k,
+                    uv_domain,
+                    &line,
+                    &line_interval_used,
+                    distance_tolerance,
+                    true, // bAllowPartialCoinc [B122]
+                    [None, surface],
+                    &mut |k, uv, tol| face.fast_drop_test(k, uv, tol),
                 )?
             } else {
                 self.simple_coincidence_checker::<O>(
@@ -3121,6 +3148,7 @@ impl Surface {
                 cache,
                 Some(context),
                 point_test_off,
+                None,
             )?
         } else {
             self.simple_coincidence_checker::<O>(
