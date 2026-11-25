@@ -5532,7 +5532,6 @@
   "sketch_finish.edit": "Modifier l'esquisse",
   "sketch_finish.finished": "{name} terminée",
   "sketch_mode.announcement": "{view}, mode esquisse",
-  "sketch_mode.editing": "Modification",
   "sketch_mode.model_card_unavailable": "Ouvrez une vue Modèle avant de commencer une esquisse ici",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Attaché à {body} / {path}",
