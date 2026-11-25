@@ -114,6 +114,9 @@ pub enum PointDef {
     EdgeAndPlane { edge: GeoRef, plane: GeoRef },
     /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
     AlongPath { path: GeoRef, t: crate::Expr },
+    /// At the average (the centroid) of two or more points (vertices, sketch points or points),
+    /// whatever their order.
+    Average { points: Vec<GeoRef> },
 }
 
 /// Resolved construction geometry, kept in the model state by feature.
@@ -869,7 +872,8 @@ fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
 
 /// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
 /// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
-/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve's exact pieces, a 3D sketch curve's arc, spline (through its fit points or over its
+/// control points), line or linked exact curves. Only a
 /// curve that exists as points alone runs along them: an intersection edge (its record holds no
 /// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
 /// (projected onto a face, iso curves), a spline above the exact pieces' degree.
@@ -899,6 +903,9 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
                 if let Some(arc) = &wire.arc {
                     let angle = solidcraft_sketch::arc_sweep(arc);
                     return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if let Some(c) = wire.control_curve() {
+                    return Ok(kernel::curve_path(&c.curve, c.interval)?);
                 }
                 if wire.fit.len() >= 3 {
                     let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };
@@ -1123,6 +1130,16 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
         PointDef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             along(ctx, path, t).map(|(p, _)| p)
+        }
+        PointDef::Average { points } => {
+            if points.len() < 2 {
+                return Err(DocError::Invalid("a point at the average of points needs two or more points".into()));
+            }
+            let mut sum = Vec3::new(0.0, 0.0, 0.0);
+            for p in points {
+                sum += point(ctx, p)?;
+            }
+            Ok(sum * (1.0 / points.len() as f64))
         }
     }
 }
@@ -1376,6 +1393,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1387,6 +1405,7 @@ impl PointDef {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
             PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter_mut().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],

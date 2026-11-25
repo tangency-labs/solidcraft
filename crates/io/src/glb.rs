@@ -281,14 +281,36 @@ impl GlbOptions {
 /// Without `opts.hierarchy` every body is written in the world under the root, by its world
 /// name. `name` names the scene.
 pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies: &[String], name: &str, opts: &GlbOptions) -> Result<Vec<u8>> {
+    export_glb_with_mesh(doc, model, world, bodies, name, opts, display_mesh_at)
+}
+
+/// The export path with a mesher supplied, so tests can count and reorder tessellations.
+fn export_glb_with_mesh(
+    doc: &Document,
+    model: &ModelState,
+    world: &ModelState,
+    bodies: &[String],
+    name: &str,
+    opts: &GlbOptions,
+    mut mesh_at: impl FnMut(&solidcraft_kernel::Body, MeshQuality) -> Result<Mesh>,
+) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_glb");
     let sel = selected(world, bodies)?;
-    // Each placed body's occurrence path, by its world name.
-    let paths: BTreeMap<String, Vec<u64>> = if !opts.hierarchy || doc.occurrences.is_empty() {
+    // Each placed body's definition, owner and occurrence path, by its world name.
+    let frames: BTreeMap<_, _> = if !opts.hierarchy || doc.occurrences.is_empty() {
         BTreeMap::new()
     } else {
-        doc.body_frames(model).into_iter().map(|(n, _, path, _)| (n, path)).collect()
+        doc.body_frames_with_source(model).into_iter().map(|(world, source, component, path, _)| (world, (source, component, path))).collect()
     };
+    // A name only identifies a definition within its component. Ambiguous names cannot reuse it.
+    let mut definitions = BTreeMap::new();
+    if !frames.is_empty() {
+        for (id, (source, component)) in model.bodies.iter().zip(doc.model_body_components(model)).enumerate() {
+            definitions.entry((component, source.definition_name())).and_modify(|id| *id = None).or_insert(Some(id));
+        }
+    }
+    // Reuse the first output body's mesh; the cache itself keeps no extra mesh allocation.
+    let mut canonical: BTreeMap<usize, usize> = BTreeMap::new();
     let mut tree = Tree::default();
     let mut materials: Vec<GlbMaterial> = Vec::new();
     // Two materials are one when glTF writes them the same.
@@ -299,17 +321,43 @@ pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies
             materials.len() - 1
         })
     };
-    let mut out = Vec::with_capacity(sel.len());
+    let mut out: Vec<GlbBody> = Vec::with_capacity(sel.len());
     let mut total = 0;
     for b in sel {
-        let mesh = display_mesh_at(&b.body, opts.quality)?;
         // Under its occurrence, in the component's frame, named as the component names it; a body
         // not placed through an occurrence stays in the world under its world name.
-        let placed =
-            paths.get(&b.name).and_then(|path| tree.node(doc, path)).and_then(|(node, m)| solidcraft_doc::mat_inverse(&m).map(|inv| (node, inv)));
-        let (body_name, mesh, parent) = match placed {
-            Some((node, inv)) => (b.definition_name().to_string(), moved(mesh, &inv), Some(node)),
-            None => (b.name.clone(), mesh, None),
+        let placed = frames
+            .get(&b.name)
+            .and_then(|(_, _, path)| tree.node(doc, path))
+            .and_then(|(node, m)| solidcraft_doc::mat_inverse(&m).map(|inv| (node, inv)));
+        let (body_name, mesh, parent, source_id) = match placed {
+            Some((node, inv)) => {
+                let source = frames
+                    .get(&b.name)
+                    .and_then(|(name, component, _)| definitions.get(&(*component, name.as_str())).copied().flatten())
+                    .and_then(|id| model.bodies.get(id).map(|source| (id, source)))
+                    .filter(|(_, source)| {
+                        b.source_key() != 0
+                            && source.geometry_key() == Some(b.source_key())
+                            && source.definition_name() == b.definition_name()
+                            && doc.model_body_offset(source).is_none_or(solidcraft_doc::is_placement)
+                    });
+                let mesh = match source {
+                    Some((id, source)) => match canonical.get(&id).and_then(|&first| out.get(first)) {
+                        Some(first) => first.mesh.clone(),
+                        None => {
+                            let mesh = mesh_at(&source.body, opts.quality)?;
+                            match doc.model_body_offset(source) {
+                                Some(offset) => moved(mesh, offset),
+                                None => mesh,
+                            }
+                        }
+                    },
+                    None => moved(mesh_at(&b.body, opts.quality)?, &inv),
+                };
+                (b.definition_name().to_string(), mesh, Some(node), source.map(|(id, _)| id))
+            }
+            None => (b.name.clone(), mesh_at(&b.body, opts.quality)?, None, None),
         };
         let mut faces = BTreeMap::new();
         let material = match opts.glass.get(&b.name) {
@@ -350,7 +398,11 @@ pub fn export_glb(doc: &Document, model: &ModelState, world: &ModelState, bodies
         let body = GlbBody { name: body_name, mesh, material, faces, parent };
         // Refused as soon as the meshes kept so far are too large, not after meshing them all.
         total = add_to_budget(total, &body)?;
+        let body_index = out.len();
         out.push(body);
+        if let Some(id) = source_id {
+            canonical.entry(id).or_insert(body_index);
+        }
     }
     glb(name, &tree.nodes, &out, &materials)
 }

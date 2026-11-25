@@ -77,11 +77,12 @@ CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser",
     .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
     .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
-    .icon("fit").key("F6").noundo().doc_only().any_part()
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
-    .icon("home").noundo().doc_only().any_part()
+    .icon("home").key("Home").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
@@ -498,8 +499,8 @@ fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
 fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderSelect = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
     let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
-    if !s.selection.is_empty() {
-        s.selection.clear();
+    if s.has_selection() {
+        s.clear_selection();
         s.refresh_display();
     }
     Ok(result)

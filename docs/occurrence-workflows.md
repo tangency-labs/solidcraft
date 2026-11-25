@@ -60,6 +60,8 @@ Transfers preserve the body's world pose through rotated or translated parents. 
 
 When the bodies of a new-body Extrude or Revolve are transferred into their source sketch's component through the same frame, the profile uses that recorded frame. Moving the component and capturing its position then moves the bodies once, matching the preview, even when the source sketch was moved into the component separately. Other cross-component sketch references continue to follow their live placements.
 
+A constructor made in a component from a sketch of another one (an Extrude, a Revolve, a Sweep) captures its own component's frame when it is made. The body it builds then moves with that component when the component is moved and the position captured, while the sketch's own component still carries it and an edit of the sketch still changes it. A design made before this frame was captured keeps its previous behaviour.
+
 Older files without transfer features keep their saved assignment and offset behavior. No transfer timestamp is inferred from their final ownership map. Paste New freezes externally authored geometry after its successful entry transfer and remaps internal transfers, then replays later modifiers once. All transfer commands validate and evaluate on a scratch document before adoption.
 
 New face-attached sketches capture the selected body's producer, certified face and exact occurrence path, together with the sketch's authoring placement. A supported face follows source edits; a missing or incompatible source reports a lost attachment rather than choosing another nearby face. Opening Edit restores the saved authoring occurrence as view context without creating an undo entry. Older saved point-only face references retain their legacy behavior.
