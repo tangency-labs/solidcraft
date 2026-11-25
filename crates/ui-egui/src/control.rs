@@ -279,6 +279,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.ground_shadow"
             | "view.navigation_bar"
             | "view.browser"
+            | "view.parts_library"
             | "view.ribbon_tabs_only"
             | "view.toolbar_reset_all"
             | "view.next_tab"
@@ -773,6 +774,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => with(p, |q| ui_workspace(app, q)),
+        "ui.library" => match crate::parts_library::control(app, p) {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
+        },
         "engine.execute" | "command" => with(p, |q: params::Execute| {
             let id = q.command.clone();
             wrap(execute(app, &id, q.params()))
@@ -1030,6 +1035,7 @@ fn ui_edit_folder(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_selection(app: &SolveApp) -> Outcome {
     ok(json!({
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
         "hover": app.viewport.hover,
         "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
@@ -1100,6 +1106,7 @@ fn ui_browser(app: &SolveApp) -> Outcome {
         "occurrences": crate::browser::drawn_occurrences().iter().map(|(path, label, r, open)| json!({"path": path, "label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "rows": crate::browser::drawn_rows().iter().map(|(label, r, _, open)| json!({"label": label, "y": r.center().y, "open": open})).collect::<Vec<_>>(),
         "selection": app.session.selection,
+        "all_bodies": app.session.all_bodies_selected(),
         "picked_components": app.tree.picked_components,
     }))
 }
@@ -2943,7 +2950,7 @@ pub(crate) mod tests {
         h.frames(3);
         assert_eq!(h.app.cam, after);
         assert!(h.ctx.input(|i| i.modifiers.is_none()));
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
         assert!(h.app.viewport.boxsel.is_none());
     }
 

@@ -426,6 +426,9 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
     let mut beyond = Vec::new();
     let mut failures = Vec::new();
     for (case, old_mass, n, old_geometry) in SPHERE_DIFF_3CYLINDERS {
+        if WR459_MOVED.contains(&case) {
+            continue;
+        }
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
         // (#20179's five classified trims taken off, proved in
         // `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`)
@@ -499,14 +502,37 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
-    assert_eq!(beyond, BEYOND_ROUNDING.to_vec(), "{beyond:#?}");
+    let want: Vec<_> = BEYOND_ROUNDING
+        .iter()
+        .filter(|(case, _)| !WR459_MOVED.contains(case))
+        .copied()
+        .collect();
+    assert_eq!(beyond, want, "{beyond:#?}");
 }
+
+/// The [`SPHERE_DIFF_3CYLINDERS`] rows whose topology the retirement of
+/// `fillet_cleanup_keeps_target_faces` (WR-459) changes: the clean-up keeps the target's own
+/// faces, so their result geometry has more records than main's (1142 against 1044 in
+/// `e1-r0.1`) and main's blocks and mass here no longer describe the same body. They are
+/// skipped by [`sphere_diff_3cylinders_rows_are_their_sums`] (their `BEYOND_ROUNDING`
+/// entries with them) and checked in
+/// `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
+const WR459_MOVED: [&str; 4] = [
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+];
 
 /// The two `sphere_diff_3cylinders` cases whose result geometry moves beyond rounding,
 /// mirror images of each other, and the round edge (in `p1::edges` order) whose end moves
-/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]).
-const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 37);
-const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 36);
+/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]). WR-459's
+/// retirement keeps the target's own faces, which splits the round into two edges with the
+/// same start (4.000000000004889e-3) in both bodies: the moving one is now edge 41 in
+/// `e1-r0.5` (37 before) and edge 40 in `e4-r0.5` (36 before), found by that start and its
+/// two end values below; the other one (e1: 38, e4: 41) ends at the near value on both sides.
+const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 41);
+const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40);
 
 /// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
 /// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
@@ -530,8 +556,8 @@ fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
 /// each one round edge's interval end moves beyond rounding, between 70.64830969562033 and
 /// 70.6483087419461. At the first value the curve's end lies 2.11e-8 from its end vertex,
 /// at the second 9.85e-7. Main has the near end in `e1-r0.5` and the far end in `e4-r0.5`;
-/// this branch has them the other way round. So `e1-r0.5`'s edge 37 is FARTHER from its
-/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 36 CLOSER (2.11e-8 against
+/// this branch has them the other way round. So `e1-r0.5`'s edge 41 (37 before WR-459) is FARTHER from its
+/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 40 (36) CLOSER (2.11e-8 against
 /// 9.85e-7). Every gap is inside the edge's tolerance (4e-5) and the end vertex's
 /// (asserted on both sides). The gaps are evaluated in floating point, good to
 /// about 1e-13 here (argued from the curve's size, not derived), so each ranking holds with
@@ -700,9 +726,10 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 ///   309.8221903199704, 1.2e-5 (both CLOSER, by a margin far beyond the closed form's
 ///   rounding);
 /// - `Solids__revolution_mold.smb`: its committed line stays main's (the run agrees with
-///   it to the goldens' `1e-9`); the values the run gives are pinned here, and its moved
-///   entries are classified against certified enclosures in
-///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
+///   it to the goldens' `1e-9`); the values the run gives with the WR-450 retirement's
+///   seams at main's choices are pinned here (that retirement moves the row below the
+///   comparator as well: `wr450_rows::BELOW_COMPARATOR`), and its moved entries are
+///   classified against certified enclosures in `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
 ///   is 25, as main's committed row (unmoved); the sphere face's row,
 ///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is in the face
@@ -752,7 +779,12 @@ fn corpus_parity_rows_are_closer() {
     let same = |a: f64, b: f64| a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan());
     let mut moved = Vec::new();
     for (case, area, volume) in rows {
-        let out = run_in_process(&regression_case(&Runner, case)).unwrap();
+        // (`revolution_mold`, which the WR-450 retirement moves below the comparator too,
+        // with main's choices at its seams: the WR-493 values alone)
+        let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), case, || {
+            run_in_process(&regression_case(&Runner, case))
+        })
+        .unwrap();
         for (key, row) in [
             ("area", area),
             ("rt_area", area),
@@ -816,9 +848,17 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
         [96.1129828979684, 154.29581589814254, 11030.81247736941],
     ];
     let runner = blend_fillet_executive_p3::Runner;
-    let now = run(&runner, CASE).values["result_geometry"].clone();
-    let (main, replaced) =
-        crate::refit::with_fitted_spheres(|| run(&runner, CASE).values["result_geometry"].clone());
+    // (the WR-450 retirement moves this row too: every run here has main's choices at its
+    // seams, so this is the WR-493 move alone; `wr450_rows` replays the WR-450 move)
+    let unit = runner.id();
+    let now = crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+        ["result_geometry"]
+        .clone();
+    let (main, replaced) = crate::refit::with_fitted_spheres(|| {
+        crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+            ["result_geometry"]
+            .clone()
+    });
     assert!(replaced > 0, "{CASE}: no sphere refit");
     let blocks: Vec<[f64; 3]> = main
         .chunks(BLOCK)
@@ -835,7 +875,9 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
     assert_eq!(blocks, MAIN, "{CASE}: the refit build is not main's");
 
     let mut k = solidcore::Kernel::default();
-    let body = blend_fillet_executive_p3::result_body_of(&mut k, CASE);
+    let body = crate::wr450_rows::with_mains_choices_for(unit, CASE, || {
+        blend_fillet_executive_p3::result_body_of(&mut k, CASE)
+    });
     let (vertices, edges, faces) = (
         p1::vertices(&body, None).unwrap(),
         p1::edges(&body, None).unwrap(),
