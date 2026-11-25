@@ -40,6 +40,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let s: &Session = s;
     let mut ctx = Context::new(s)?;
+    let scoped = s.all_bodies_selected();
     let items: Vec<SelectionItem> = s
         .selection
         .iter()
@@ -53,7 +54,7 @@ fn selection_get(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let detail_limit = (detail && s.selection.len() > MAX_DETAIL).then_some(MAX_DETAIL);
-    let reply = SelectionGetResult { count: items.len(), items, detail_limit, param_warnings: Vec::new() };
+    let reply = SelectionGetResult { count: s.selected_count()?, all_bodies: scoped, items, detail_limit, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -148,6 +149,14 @@ impl<'a> Context<'a> {
             // The midpoint of a line (`id` names the line): its sketch and where it is.
             Sel::SketchMidpoint { id } => self.sketch_entity(None, id, Entity::Midpoint, v),
             Sel::ExternalSketchPoint { sketch, id } => self.sketch_entity(Some(*sketch), id, Entity::Point, v),
+            // On another copy of its part: where it is there, and that copy.
+            Sel::PlacedSketchPoint { sketch, id, path } => {
+                if let Some((at, _)) = self.st.placed_sketch_point(*sketch, path, id) {
+                    v.insert("position".into(), json!(at));
+                }
+                v.insert("occurrence_path".into(), json!(path));
+                self.sketch_entity(Some(*sketch), id, Entity::Point, v);
+            }
             Sel::SketchConstraint { id } => self.sketch_entity(None, id, Entity::Constraint, v),
             Sel::Profile { sketch, .. } => {
                 if let Some(ss) = self.st.sketch(*sketch) {
@@ -311,6 +320,7 @@ fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {
         // A sketch point: where it is in the world.
         Sel::SketchPoint { id } => sketch_point(s, None, id),
         Sel::ExternalSketchPoint { sketch, id } => sketch_point(s, Some(*sketch), id),
+        Sel::PlacedSketchPoint { sketch, id, path } => s.world_state().ok()?.placed_sketch_point(*sketch, path, id).map(|(at, _)| at),
         // A sketch line's midpoint.
         Sel::SketchMidpoint { id } => sketch_midpoint(s, id),
         // A sketch curve: its middle.

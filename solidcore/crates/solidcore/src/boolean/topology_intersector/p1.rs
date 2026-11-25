@@ -213,9 +213,9 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::{
     prepare_face_surface_cache, prepare_face_surface_cache_state, FaceQueries, PreparedFaceQueries,
 };
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::topology::proto_topology::p2::exactly_placed;
-use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
+use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager, VertexDefId};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use crate::EntityRef;
 
@@ -258,6 +258,12 @@ const OP_FACE_FACE: &str = "boolean::topology_intersector::p1::face_face_interse
 const OP_CERTIFIED_GAPS: &str = "boolean::topology_intersector::p1::certified_vertex_gaps";
 const OP_ABSORBED_PAIR: &str = "boolean::topology_intersector::p1::absorbed_pair_growths";
 
+/// How many times `imprint_body` imprints the vertex definitions added while vertex
+/// definitions were being imprinted (each pass imprints those the previous one added).
+/// A split adds at most one definition, at a point where an edge was already split, so
+/// a pass adds definitions only where the previous one split an edge.
+const LATE_VERTEX_PASSES: usize = 64;
+
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
 pub(super) const fn dangling(reason: &'static str) -> SolidError {
@@ -282,6 +288,7 @@ pub(super) fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, Soli
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -2390,8 +2397,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Err(refusal);
         }
 
-        // Resolve OverlappingPEs (SE_MSG: the status only warns)
-        if let Some(d) = ignore_soft(mgr.resolve_overlapping_proto_edges(k, brep, approx_tol))? {
+        // Resolve OverlappingPEs (SE_MSG: the status only warns). Not upstream (#18927): a
+        // group that failed part way through its replacement refuses the Boolean.
+        let resolved = mgr.resolve_overlapping_proto_edges(k, brep, approx_tol);
+        if let Some(refusal) = mgr.take_self_loop_refusal() {
+            return Err(refusal);
+        }
+        if let Some(d) = ignore_soft(resolved)? {
             deleted.extend(d);
         }
 
@@ -2489,6 +2501,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         };
 
+        // (#21801) every vertex definition imprinted so far
+        let mut imprinted: BTreeSet<VertexDefId> = BTreeSet::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
@@ -2502,7 +2516,47 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .to_vec();
             for vd in vds {
                 // (a vertex definition's first step is a B-rep merge)
+                imprinted.insert(vd);
                 if !record(mgr.imprint_vertex_definition(k, brep, vd), ret)? {
+                    *failure_edited = true;
+                }
+            }
+        }
+
+        // Not upstream (#21801): an imprinted vertex that splits an edge splits the edge
+        // definitions running across it as well (WR-533, `ProtoTopologyManager::update_edges`),
+        // and each split adds a vertex definition at the split point, on whatever each B-rep
+        // has there. When that definition joins a proto vertex whose definitions were already
+        // imprinted (the vertex being imprinted, or one earlier in the list), or a proto vertex
+        // made after the list above was read, it is never imprinted: it has no vertex in either
+        // B-rep, so neither part of the split definition finds a final vertex at the split
+        // point (`SM_ERR_NULL_POINTER` in `Imprint`) and the curve is missing from the face it
+        // lies in. Every definition left over is imprinted in the same way, in list order,
+        // until a pass adds none; past `LATE_VERTEX_PASSES` passes the remainder stays as
+        // before. It joined its proto vertex after the definitions there were combined, so when
+        // one of them is the same point and already imprinted, it is combined with that one
+        // and takes its vertices: imprinted as well, it would put a second vertex beside that
+        // one's (#20408's collars; `ProtoTopologyManager::combine_with_imprinted`).
+        for _ in 0..LATE_VERTEX_PASSES {
+            let late: Vec<VertexDefId> = mgr
+                .all_vertex_definitions()?
+                .into_iter()
+                .filter(|vd| !imprinted.contains(vd))
+                .collect();
+            if late.is_empty() {
+                break;
+            }
+            for vd in late {
+                k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
+                if !imprinted.insert(vd) {
+                    continue;
+                }
+                let imprint = match mgr.combine_with_imprinted(k, brep, vd) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => mgr.imprint_vertex_definition(k, brep, vd),
+                    Err(e) => Err(e),
+                };
+                if !record(imprint, ret)? {
                     *failure_edited = true;
                 }
             }
@@ -4259,19 +4313,7 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
                      handle was made for that surface's face",
             )
         })?;
-        match self.0.caches.built.get(&face) {
-            Some(Ok(cache)) => {
-                self.0.caches.tree_requested.borrow_mut().insert(face);
-                cache.map_handles(Ok)
-            }
-            Some(Err(e)) => Err(e.clone()),
-            None => {
-                self.0.caches.pending.set(Some((face, true)));
-                Err(SolidError::PreparationRequired {
-                    operation: OP_FACE_CACHES,
-                })
-            }
-        }
+        self.built_cache(face)?.map_handles(Ok)
     }
 
     fn surface_cache_without_get_tree(
@@ -4279,12 +4321,12 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         k: &Kernel,
         surface: &Surface,
         handle: Option<O>,
-    ) -> Result<SurfaceCache<O>> {
+    ) -> Result<SurfaceCacheState<O>> {
         let Some(handle) = handle else {
-            return self.build_surface_cache(k, surface, None);
+            return self.build_surface_cache(k, surface, None)?.state();
         };
         if surface.face()?.is_none() {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.build_surface_cache(k, surface, Some(handle))?.state();
         }
         let face = self.0.inner().surface_face(handle)?.ok_or_else(|| {
             SolidError::boolean_null_defect(
@@ -4297,10 +4339,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         // after the attempt's first GetTree of the face's cache, upstream's cache has
         // its tree
         if self.0.caches.tree_requested.borrow().contains(&face) {
-            return self.build_surface_cache(k, surface, Some(handle));
+            return self.built_cache(face)?.mapped_state(|o| o);
         }
         match self.0.caches.states.get(&face) {
-            Some(Ok(cache)) => cache.map_handles(Ok),
+            Some(Ok(cache)) => cache.mapped_state(|o| o),
             Some(Err(e)) => Err(e.clone()),
             None => {
                 self.0.caches.pending.set(Some((face, false)));
@@ -4319,6 +4361,24 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
 impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized>
     FaceCacheContext<'_, '_, O, G>
 {
+    /// The built cache of `face` a solve's `GetTree` gets (recording that the
+    /// attempt's tree of it was requested), or the request to build it.
+    fn built_cache(&self, face: O) -> Result<&SurfaceCache<O>> {
+        match self.0.caches.built.get(&face) {
+            Some(Ok(cache)) => {
+                self.0.caches.tree_requested.borrow_mut().insert(face);
+                Ok(cache)
+            }
+            Some(Err(e)) => Err(e.clone()),
+            None => {
+                self.0.caches.pending.set(Some((face, true)));
+                Err(SolidError::PreparationRequired {
+                    operation: OP_FACE_CACHES,
+                })
+            }
+        }
+    }
+
     /// `f` on the read-only queries of `face` (its B-rep holds the UV trim curves its
     /// cache build created).
     fn with_queries<R>(
@@ -4389,6 +4449,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
 {
     fn face_zone_tol_3d(&self, face: O) -> Result<f64> {
         self.with_queries(face, |q| q.face_zone_tol_3d(face))
+    }
+
+    fn face_has_loopuses(&self, face: O) -> Result<bool> {
+        self.with_queries(face, |q| q.face_has_loopuses(face))
     }
 
     fn face_point_classify(

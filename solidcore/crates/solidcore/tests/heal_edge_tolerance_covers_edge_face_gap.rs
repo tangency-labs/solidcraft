@@ -292,11 +292,24 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
         records: &mut records,
         next_key: 1 << 62,
     };
-    if REFIT.with(std::cell::Cell::get) {
-        // `read_from_file`'s two halves, with each found sphere's file NURB replaced
-        // between them ([`with_fitted_spheres`])
+    let (refit, analytics) = (
+        REFIT.with(std::cell::Cell::get),
+        ANALYTICS.with(std::cell::Cell::get),
+    );
+    if refit || analytics {
+        // `read_from_file`'s two halves, with each found sphere's file NURB
+        // ([`with_fitted_spheres`]) and each kept exact copy's ([`with_analytic_copies`])
+        // replaced between them
         let mut data = BrepData::read_from_file(k, bytes, FileType::Ascii).unwrap();
-        assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        if refit {
+            assert!(fit_spheres(k, &mut data) > 0, "{name}: no sphere found");
+        }
+        if analytics {
+            assert!(
+                analytic_copies(k, &mut data) > 0,
+                "{name}: no exact copy kept"
+            );
+        }
         read_from_data(k, &mut b, data, rebuild, &mut env).unwrap();
     } else {
         read_from_file(k, &mut b, bytes, FileType::Ascii, rebuild, &mut env).unwrap();
@@ -308,6 +321,49 @@ fn read_corpus(k: &mut Kernel, name: &str, rebuild: bool) -> Brep {
 thread_local! {
     /// Whether [`read_corpus`] puts back upstream's fitted sphere NURBs.
     static REFIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether [`read_corpus`] puts back upstream's analytic face copies.
+    static ANALYTICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with every [`read_corpus`] read copying each face surface whose shape
+/// `CopyAndAddAnalytics` recognises as that analytic, as upstream does, also where the
+/// analytic is not the B-spline's parameterisation: main's read before the WR-450
+/// retirement (#18923), which keeps an exact copy there (goldens' `wr450_rows`, whose
+/// replays show it is main's read bit for bit).
+fn with_analytic_copies<T>(f: impl FnOnce() -> T) -> T {
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            ANALYTICS.with(|r| r.set(false));
+        }
+    }
+    ANALYTICS.with(|r| r.set(true));
+    let _clear = Clear;
+    f()
+}
+
+/// Replaces each B-spline surface of `data` whose `CopyAndAddAnalytics` copy is kept
+/// exact although an analytic was recognised in it by that analytic, which the read then
+/// copies as is: upstream's copy. Returns how many.
+fn analytic_copies(k: &Kernel, data: &mut BrepData) -> usize {
+    use solidcore::surface::surface::SurfaceKind;
+    let mut replaced = 0;
+    for s in &mut data.surfaces {
+        let SurfaceKind::BSpline(srf) = s.object.kind() else {
+            continue;
+        };
+        let Some(analytic) = srf.recognised_analytic(k).unwrap() else {
+            continue;
+        };
+        if matches!(
+            srf.copy_and_add_analytics(k).unwrap().kind(),
+            SurfaceKind::BSpline(_)
+        ) {
+            s.object = analytic;
+            replaced += 1;
+        }
+    }
+    replaced
 }
 
 /// Runs `f` with every [`read_corpus`] read building each sphere found in a NURBS on the
@@ -334,7 +390,6 @@ fn fit_spheres(k: &Kernel, data: &mut BrepData) -> usize {
     use solidcore::surface::plane::Plane;
     use solidcore::surface::sphere::Sphere;
     use solidcore::surface::surface::{Surface, SurfaceKind};
-    assert!(!k.fixes.analytic_copy_keeps_parameterization);
     let mut replaced = 0;
     for s in &mut data.surfaces {
         let SurfaceKind::BSpline(srf) = s.object.kind() else {
@@ -438,11 +493,12 @@ fn digest_curve(d: &mut Digest, k: &Kernel, b: &Brep, e: solidcore::topology::Ed
     }
 }
 
-/// The largest edge/face gap of an edge's uses (0 with none).
+/// The largest edge/face gap of an edge's uses (0 with none), measured afresh
+/// (`force_calc`), never read from a use's cache.
 fn edge_gap(k: &Kernel, b: &mut Brep, e: solidcore::topology::EdgeId) -> f64 {
     let mut gap = 0.0f64;
     for eu in b.edge(e).unwrap().edgeuses.clone() {
-        if let Some(g) = max_edge_face_gap(k, b, eu, false).unwrap() {
+        if let Some(g) = max_edge_face_gap(k, b, eu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
     }
@@ -457,15 +513,16 @@ fn entries(table: &[(&str, &'static [(u32, u64)])], name: &str) -> &'static [(u3
         .map_or(&[], |(_, t)| *t)
 }
 
-/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one).
+/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one), measured
+/// afresh (`force_calc`), never read from a use's cache.
 fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64 {
     use solidcore::topology::{vertex, vertexuse};
     let mut gap = 0.0f64;
     for vu in vertex::vertexuses(b, v).unwrap() {
-        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, false).unwrap() {
+        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
-        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, false).unwrap() {
+        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, true).unwrap() {
             gap = gap.max(g.gap_3d);
         }
     }
@@ -482,9 +539,27 @@ fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64
 ///   is over that, to it (#17739), recorded in `floored`;
 /// - every edge covers its gap.
 ///
+/// The heal's tolerances are judged against the gaps the heal measured. Both reads build
+/// and heal the same body; the rebuilding read then rebuilds its UV trims, and a rebuilt
+/// trim can move its edge's interval (`create_uv_trim_curve`'s interval recovery; on
+/// `Fillet/open_shell.smb` edge 17 goes from `[0, 1]` to `[3.9e-6, 1]`), which moves the
+/// edge's gap (there from 3.02e-5 to 1.25e-5) and its start vertex's gap after the heal.
+/// So on the rebuilding read `g` and the vertices' gaps are measured on the plain read of
+/// the file, the healed body after the plain read's own trim check:
+/// - its edge/face gaps are the heal's by construction: they depend only on the edge's
+///   curve and interval and the face's surface, which nothing changes between the heal
+///   and the end of the plain read;
+/// - its vertex gaps are the heal's only as measured: the vertex/face gap starts its
+///   projection from the UV trim ends, which the plain read's trim check can change.
+///
+/// The rebuilt body's current gaps must still be covered by its tolerances. Every gap is
+/// measured afresh, never read from a cache (#20939).
+///
 /// Returns the digest of the read with main's tolerances put back on those entries:
 /// face, edge and vertex tolerances, edge/face gaps, edge curves and the file's UV trims
-/// with the surface points along them. With `lazy`, also the digest of the UV trims
+/// with the surface points along them. On the rebuilding read the hashed edge/face gaps
+/// are the heal's, taken from the plain read, so the digest does not pin the rebuilt
+/// body's gaps; the coverage checks do. With `lazy`, also the digest of the UV trims
 /// `GetOrCreateUVTrimCurve` makes afterwards on the read as it is (raised).
 fn replay(
     name: &str,
@@ -500,21 +575,35 @@ fn replay(
     use solidcore::topology::{vertex, EdgeId, VertexId};
     let mut k = Kernel::default();
     let mut b = read_corpus(&mut k, name, rebuild);
+    // the body the heal measured its gaps on: on the rebuilding read, the plain read
+    let mut healed_k = Kernel::default();
+    let mut healed = rebuild.then(|| read_corpus(&mut healed_k, name, false));
     let gain = gap_gain(&k);
     let mut d = Digest::new();
     for (_, f) in b.faces().iter() {
         d.f64(f.tolerance);
     }
     let edges: Vec<EdgeId> = b.edges().iter().map(|(id, _)| id).collect();
+    if let Some(h) = healed.as_ref() {
+        // (the gaps of the plain read are taken by id)
+        let vertex_ids = |b: &Brep| b.vertices().iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let healed_edges: Vec<EdgeId> = h.edges().iter().map(|(id, _)| id).collect();
+        assert_eq!(edges, healed_edges, "{name}: the reads' edges");
+        assert_eq!(vertex_ids(&b), vertex_ids(h), "{name}: the reads' vertices");
+    }
     let mut seen = 0;
     for &e in &edges {
         let tol = b.edge(e).unwrap().tolerance;
-        let g = edge_gap(&k, &mut b, e);
-        if tol < g {
+        let now = edge_gap(&k, &mut b, e);
+        if tol < now {
             failures.push(format!(
-                "{name}: {e:?} tolerance {tol:e} under its gap {g:e}"
+                "{name}: {e:?} tolerance {tol:e} under its gap {now:e}"
             ));
         }
+        let g = match healed.as_mut() {
+            Some(h) => edge_gap(&healed_k, h, e),
+            None => now,
+        };
         match raised.iter().find(|&&(i, _)| i == e.index()) {
             Some(&(_, main)) => {
                 seen += 1;
@@ -550,7 +639,11 @@ fn replay(
                     .fold(0.0f64, f64::max);
                 // (#17739: a vertex whose gap needs more than its largest edge tolerance
                 // rises to `zone_tol3d(gain * 2 * gap)`, so the check's half rule holds)
-                let gap = vertex_gap(&k, &mut b, v);
+                let now = vertex_gap(&k, &mut b, v);
+                let gap = match healed.as_mut() {
+                    Some(h) => vertex_gap(&healed_k, h, v),
+                    None => now,
+                };
                 let cover = zone_tol3d(&k, gain * 2.0 * gap);
                 let step = if cover > largest {
                     let read = if rebuild { "rebuilding read" } else { "read" };
@@ -559,17 +652,11 @@ fn replay(
                 } else {
                     largest
                 };
-                // (the rebuilding read measures the gap on the trims rebuilt after the heal,
-                // 6e-10 relative off the gap the heal saw on `open_shell` v14)
-                let held = if rebuild && step == cover {
-                    (tol - cover).abs() <= 1e-9 * cover
-                } else {
-                    tol.to_bits() == step.to_bits()
-                };
-                if !(main < tol && held) {
+                // (the check's half rule on the rebuilt body's current gap)
+                if !(main < tol && tol.to_bits() == step.to_bits() && 2.0 * now <= tol) {
                     failures.push(format!(
                         "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}, \
-                         gap {gap:e}, cover {cover:e}"
+                         gap {gap:e}, current gap {now:e}, cover {cover:e}"
                     ));
                 }
                 d.f64(main);
@@ -1014,10 +1101,17 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 /// ([`with_fitted_spheres`]) all of the above holds for them against main's values as for
 /// every other file; they are asserted to be those two files only. (`sphere_plane`'s
 /// volume is NaN in [`MAIN`], main's own value, and compared by its bits.)
+///
+/// With the WR-450 retirement (#18923), the seven files in [`WR450_READS`] keep an exact
+/// copy of each face B-spline whose recognised analytic is not its parameterisation, so
+/// their reads differ from main's by that too (asserted). With upstream's analytic copies
+/// put back ([`with_analytic_copies`]) all of the above holds for them against main's
+/// values as for every other file; they are asserted to be those seven files only.
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
     let mut wr493 = Vec::new();
+    let mut wr450 = Vec::new();
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
@@ -1031,10 +1125,13 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         let rebuild_edges = entries(REBUILD_RAISED_EDGES, name);
         let rebuild_vertices = entries(REBUILD_MOVED_VERTICES, name);
         let wr = WR493_READS.contains(&name);
-        if wr {
-            // the found spheres keep the file's NURB and trims, so these reads are not
-            // main's (asserted; the replays' own checks hold on them as on every file),
-            // and with upstream's fitted NURB put back they are, as every other file is
+        let wa = WR450_READS.contains(&name);
+        if wr || wa {
+            // the found spheres keep the file's NURB and trims, and the faces whose
+            // analytic is not their B-spline's parameterisation an exact copy, so these
+            // reads are not main's (asserted; the replays' own checks hold on them as on
+            // every file), and with upstream's fitted NURB and analytic copies put back
+            // they are, as every other file is
             let mut unfitted = Vec::new();
             let (read_digest, _) = replay(
                 name,
@@ -1057,14 +1154,18 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             if read_digest == read_main || rebuild_digest == rebuild_main {
                 failures.push(format!("{name}: read as main's"));
             }
-            wr493.push(name);
-        }
-        let fit = |f: &mut dyn FnMut()| {
             if wr {
-                with_fitted_spheres(f);
-            } else {
-                f();
+                wr493.push(name);
             }
+            if wa {
+                wr450.push(name);
+            }
+        }
+        let fit = |f: &mut dyn FnMut()| match (wr, wa) {
+            (true, true) => with_fitted_spheres(|| with_analytic_copies(f)),
+            (true, false) => with_fitted_spheres(f),
+            (false, true) => with_analytic_copies(f),
+            (false, false) => f(),
         };
         let (mut read_digest, mut lazy_digest, mut rebuild_digest) = (0, 0, 0);
         fit(&mut || {
@@ -1157,6 +1258,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     );
     assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
     assert_eq!(wr493, WR493_READS);
+    assert_eq!(wr450, WR450_READS);
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
@@ -1178,10 +1280,99 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// #20939 on a corpus file: the rebuilding read of `Fillet/open_shell.smb` rebuilds edge
+/// 17's UV trims after the heal, and the rebuilt trim moves the edge's interval from
+/// `[0, 1]` to `[3.9e-6, 1]` (`create_uv_trim_curve`'s interval recovery, through
+/// `edge::set_interval`). The edge/face gap and the start vertex's vertex/edge gap
+/// cached over the old interval no longer hold: each use's gap as read equals the gap
+/// measured afresh. (Before #20939 the cache kept the edge's 3.02e-5, measured over
+/// `[0, 1]`, against a gap of 1.25e-5 over the edge's interval, and vertex 14's 3.02e-5
+/// against 3.18e-5.)
+#[test]
+fn open_shell_rebuilt_trim_leaves_no_stale_gap() {
+    use solidcore::topology::{edge, vertexuse, EdgeId, VertexId};
+    let name = "Fillet/open_shell.smb";
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, true);
+    let e = EdgeId::from_index(17);
+    let ivl = b.edge(e).unwrap().interval;
+    assert!(
+        ivl.min() > 0.0 && ivl.min() < 1e-5,
+        "{name}: e17 interval {ivl:?}"
+    );
+    let plain = {
+        let mut k = Kernel::default();
+        let b = read_corpus(&mut k, name, false);
+        b.edge(e).unwrap().interval
+    };
+    assert_eq!(
+        (plain.min(), plain.max()),
+        (0.0, 1.0),
+        "{name}: e17 as healed"
+    );
+    let mut checked = 0;
+    for eu in edge::edgeuses(&b, e, None, None).unwrap() {
+        let read = max_edge_face_gap(&k, &mut b, eu, false)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        let fresh = max_edge_face_gap(&k, &mut b, eu, true)
+            .unwrap()
+            .unwrap()
+            .gap_3d;
+        assert_eq!(
+            read.to_bits(),
+            fresh.to_bits(),
+            "{name}: {eu:?} gap {read:e}, measured {fresh:e}"
+        );
+        checked += 1;
+    }
+    let v = VertexId::from_index(14);
+    for vu in solidcore::topology::vertex::vertexuses(&b, v).unwrap() {
+        let read = vertexuse::vertex_edge_gap(&k, &mut b, vu, false).unwrap();
+        let fresh = vertexuse::vertex_edge_gap(&k, &mut b, vu, true).unwrap();
+        let read_face = vertexuse::vertex_face_gap(&k, &mut b, vu, false).unwrap();
+        let fresh_face = vertexuse::vertex_face_gap(&k, &mut b, vu, true).unwrap();
+        for (what, read, fresh) in [
+            (
+                "vertex/edge",
+                read.map(|g| g.gap_3d),
+                fresh.map(|g| g.gap_3d),
+            ),
+            (
+                "vertex/face",
+                read_face.map(|g| g.gap_3d),
+                fresh_face.map(|g| g.gap_3d),
+            ),
+        ] {
+            assert_eq!(
+                read.map(f64::to_bits),
+                fresh.map(f64::to_bits),
+                "{name}: {vu:?} {what} gap {read:?}, measured {fresh:?}"
+            );
+            checked += usize::from(read.is_some());
+        }
+    }
+    assert!(checked > 2, "{name}: {checked} gaps checked");
+}
+
 /// The files of [`MAIN`] with a sphere found in a NURBS, whose reads the WR-493
 /// retirement changes too: they are replayed against main's with upstream's fitted
 /// sphere NURB put back ([`with_fitted_spheres`]).
 const WR493_READS: [&str; 2] = ["Fillet/sphere_plane.smb", "Solids/revolution_mold.smb"];
+
+/// The files here with a face whose recognised analytic is not its B-spline's
+/// parameterisation, so the read keeps an exact copy there (WR-450, #18923), in [`MAIN`]'s
+/// order.
+const WR450_READS: [&str; 7] = [
+    "Fillet/blade_hub_1.smb",
+    "Fillet/blade_hub_2.smb",
+    "Fillet/blade_hub_3.smb",
+    "Fillet/cliff_1.smb",
+    "Fillet/cliff_2.smb",
+    "Solids/fillet_ts.smb",
+    "Solids/revolution_mold.smb",
+];
 
 /// Edges whose tolerance the read raises: per file, (edge index, main's tolerance bits).
 const RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
@@ -1964,7 +2155,10 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// digest `0x6c4db4a115acc49e`). #18162's lazy UV trim raise moves it once more: the result's
 /// two edges at the fillet's end keep 4e-5 instead of main's raise to 8.05e-5, and one trim
 /// on face 16 is refit at that tolerance; that result is proved in
-/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`].
+/// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`]. WR-732's
+/// retirement (#18934: a B-rep ray classifies against the faces' current trims while the
+/// body is edited) moves it again (#18162's digest `0xa20e4479c358841c`), and the same
+/// proof holds on the new result.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1980,7 +2174,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
-    0xa20e4479c358841c,
+    0x58ea0b39ae78b510,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
@@ -2009,7 +2203,16 @@ const FILLET_MAIN: [u64; 29] = [
 /// integrator fits the trims it integrates over to the edges' tolerances);
 /// [`BOTTLE_E8_BEFORE`] holds main's bits and
 /// [`bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds`] proves both
-/// within the case's accuracy of a certified enclosure of the exact properties.
+/// within the case's accuracy of a certified enclosure of the exact properties. The round's
+/// exact box dividing at its net's knots (`query::face::p3::face_directed_max_with`) moves
+/// entry 14's centroid x, `Izz` and products zx and xy (3, 8, 10, 11) by at most 1e-15: the
+/// round's (face 17's) tight box no longer counts a point outside the face, so its least x
+/// is its edges' (-1.0899095252927, was -1.0899401372791), the body's exact box's least x is
+/// the side wall's and its middle, the integration's origin, moves 1.53e-5 in x; that test
+/// holds the new values within the accuracy of the enclosure too. WR-732's retirement
+/// (#18934) moves entry 14's area and its tenth value again (from `0x40408bcce08a27a7` and
+/// `0x3f6aed5192670b82`, 4.5e-9 of the area); that proof holds the new values within the
+/// accuracy as well.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -2065,18 +2268,18 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         14,
         [
-            0x40408bcce08a27a7,
+            0x40408bccdf46e312,
             0x402621896ddff26a,
             0x402621896ddff26a,
-            0x3f10d1d4e45e31cd,
+            0x3f10d1d4e45e2340,
             0x3f13efa0c2faa837,
             0x4000a10fe9b1ffdc,
             0x4050316570dd0323,
             0x4050a9c381d7a010,
-            0x40151aaab4b86a07,
-            0x3f6aed5192670b82,
-            0x3f66b6ad970f3f0b,
-            0xbf3c98793964744e,
+            0x40151aaab4b86a06,
+            0x3f6aed5192670ba2,
+            0x3f66b6ad970f3739,
+            0xbf3c987939646d0c,
         ],
     ),
 ];

@@ -8,7 +8,27 @@
 //! `own_reader_sphere_plane_uv_trim_f*_rebuild` rows of `topology.face_p3`, the 12
 //! `own_reader_sphere_plane_create_*` rows of `topology.edgeuse_p3`, `write_bytes0153`
 //! and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows (the last five
-//! recorded on Linux CI).
+//! recorded on Linux CI). The retirement of `fillet_cleanup_keeps_target_faces` (WR-459)
+//! changes those four rows' topology (the clean-up keeps the target's own faces), so they
+//! are no longer the refit run of main's line and their entries are deleted; their rows
+//! are checked in `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
+//!
+//! WR-732's retirement (#18934: while the body is edited, a B-rep ray builds each face's
+//! tree against its current trims) moves the mass of those four rows as well, through the
+//! fillet's own classifications (by up to 1.7e-10 of the area); their entries stay deleted.
+//! `tests/wr493_moved_rows_are_classified` classifies their moved mass entries against a
+//! certified enclosure.
+//!
+//! The `blend.fillet_executive_p3` hashes are of those lines without the
+//! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
+//! value is the line's.
+//!
+//! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
+//! the drop's tolerances is left out, #21353) moves the ten `sphere_diff_3cylinders` rows
+//! (`stubs4-delete-edge` `e1`, `e2`, `e4`, `e5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in
+//! their `mass_properties` only, so the hashes of the six listed here (WR-459's retirement
+//! took out the `e1`/`e4` rows) are of the refit run with that rule;
+//! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 use super::Row;
 
@@ -998,57 +1018,37 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x79640befc8538807,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x4b02077293d8103e,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0xc98940c884289f53,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x1295b489814557bb,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x61c95a6a9b40a870,
+        0x042f4b954681d6de,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x3f70a86476ec56c0,
+        0x04a26c663dfbcc8d,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xcc67810f9fe849ac,
+        0x43c338c0dde1e319,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-sphere_plane-e3-r0.5",
-        0xe44b1f429909a56e,
+        0x033ae0862895d2b3,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0xb117c614030b1b0c,
+        0x1255d42c108d8c67,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0xb80489008f84d5d4,
+        0xeabc32c0dc187d61,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0x60a68e03392d0843,
+        0xbb2bc2454dc10ff0,
     ),
 ];

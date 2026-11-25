@@ -1,7 +1,8 @@
 //! Canvases (reference images on planes) and decals (images on planar faces).
 
 use serde_json::{Value, json};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_doc::PlaneRef;
 use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, image_info};
 use solidcraft_geom::prelude::*;
 
@@ -122,7 +123,17 @@ pub(crate) fn place(s: &mut Session, p: &Value, cmd: &str, decal: bool, mut byte
         bytes = super::canvas_svg::rasterize(&bytes, side).map_err(|e| bad(cmd, e))?;
     }
     let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
-    let plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
+    let base = match &plane {
+        PlaneRef::Offset { base, .. } => base.as_ref(),
+        base => base,
+    };
+    if !decal && matches!(base, PlaneRef::Origin { name } if Plane::named(name) == Some(Plane::XZ)) {
+        // The sketch's XZ frame points down and away from Front view. Save the canvas's
+        // upright frame at insertion, leaving existing canvases and explicit frames alone.
+        // Flip the whole reference so an offset still moves along the original normal.
+        plane = PlaneRef::Flipped { base: Box::new(plane), about_y: false };
+    }
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     // A decal sits where the face was picked.
@@ -568,7 +579,7 @@ fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[V
 
 /// [`frame_in_sketch`]'s corners, or `None` when the image does not lie on the sketch's plane.
 fn corners_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<Option<[Vec2; 3]>> {
-    use solidcore_ops::affine;
+    use solidcraft_kernel::services::affine;
     let (vals, _) = s.doc.param_values();
     let state = s.model.state();
     let ss = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch being edited has not been solved; finish or repair it first"))?;
@@ -599,6 +610,8 @@ fn corners_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcore_record::Vec3;
+    use solidcraft_geom::PlaneGeom as _;
 
     use crate::Session;
     use crate::tests::image_file;
@@ -609,6 +622,91 @@ mod tests {
         b.extend(h.to_be_bytes());
         b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
         image_file(&b)
+    }
+
+    #[test]
+    fn origin_plane_canvases_read_upright_from_their_named_views() {
+        for (name, right, up, normal) in [
+            ("XY", Vec3::X, Vec3::Y, Vec3::Z),
+            ("YZ", Vec3::Y, Vec3::Z, Vec3::X),
+            ("XZ", Vec3::X, Vec3::Z, -Vec3::Y),
+            ("front", Vec3::X, Vec3::Z, -Vec3::Y),
+        ] {
+            let mut s = Session::default();
+            s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": name, "width": 40, "center": [3, 5]})).unwrap();
+            let check = |s: &Session| {
+                let canvas = &s.doc.canvases[0];
+                let (vals, _) = s.doc.param_values();
+                let plane = s.doc.canvas_plane(&vals, canvas, &s.model.state()).unwrap();
+                let [bl, br, tr, tl] = canvas.world_corners(&plane);
+                assert_eq!(br - bl, right * 40.0, "{name}: text reads left to right");
+                assert_eq!(tl - bl, up * 20.0, "{name}: the picture's top points up");
+                assert_eq!((bl + tr) * 0.5, right * 3.0 + up * 5.0, "{name}: centre follows the image axes");
+                assert_eq!(plane.normal(), normal, "{name}: the image faces its named view");
+            };
+            check(&s);
+            check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+        }
+    }
+
+    #[test]
+    fn front_canvases_keep_their_offset_pick_and_horizontal_flip_when_framed() {
+        for frame in [false, true] {
+            for flip in [false, true] {
+                let mut s = Session::default();
+                s.execute(
+                    "canvas.insert",
+                    &json!({
+                        "path": png(40, 20), "plane": "XZ", "offset": 7, "at": [3, 7, 5],
+                        "width": 40, "flip": flip, "frame": frame
+                    }),
+                )
+                .unwrap();
+                let check = |s: &Session| {
+                    let (vals, _) = s.doc.param_values();
+                    let canvas = &s.doc.canvases[0];
+                    assert_eq!(canvas.anchor.is_some(), frame);
+                    let [bl, br, tr, tl] = s.doc.canvas_corners(&vals, canvas, &s.model.state()).unwrap();
+                    assert_eq!((bl + tr) * 0.5, Vec3::new(3.0, 7.0, 5.0), "the picked centre and offset stay put");
+                    assert_eq!(br - bl, Vec3::X * if flip { -40.0 } else { 40.0 });
+                    assert_eq!(tl - bl, Vec3::Z * 20.0, "horizontal mirroring never turns the image upside down");
+                };
+                check(&s);
+                let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
+                check(&Session::new(reopened));
+                s.execute("edit.undo", &json!({})).unwrap();
+                assert!(s.doc.canvases.is_empty());
+                assert!(s.doc.features.is_empty(), "the frame is part of the same undo step");
+            }
+        }
+    }
+
+    #[test]
+    fn saved_and_explicit_canvas_planes_keep_their_orientation() {
+        use solidcraft_doc::PlaneRef;
+
+        let mut s = Session::default();
+        s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XZ", "width": 40})).unwrap();
+        // A canvas saved before the fix stores the original XZ plane, with its top along -Z.
+        s.doc_mut().canvases[0].plane = PlaneRef::Origin { name: "XZ".into() };
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
+        let mut s = Session::new(reopened);
+        s.execute(
+            "canvas.insert",
+            &json!({
+                "path": png(40, 20), "width": 40,
+                "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}
+            }),
+        )
+        .unwrap();
+        s.execute("construct.plane.offset", &json!({"base": "XZ", "offset": 2, "name": "Reference"})).unwrap();
+        s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "Reference", "width": 40})).unwrap();
+        let (vals, _) = s.doc.param_values();
+        for canvas in &s.doc.canvases {
+            let plane = s.doc.canvas_plane(&vals, canvas, &s.model.state()).unwrap();
+            let [bl, _, _, tl] = canvas.world_corners(&plane);
+            assert_eq!(tl - bl, -Vec3::Z * 20.0, "saved, explicit and construction frames are not reoriented");
+        }
     }
 
     /// #17922: an image file over the cap says its size, the limit and what to do, for a decal and

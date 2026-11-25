@@ -1,6 +1,8 @@
 //! #18162: a lazily built UV trim raises its edge's tolerance by the trim's proved distance
 //! from the edge curve, not by the drop's reported error, which counts the fit tolerance (the
 //! edge's own tolerance) and so nearly doubled the tolerance on every refit.
+//!
+//! #20940: the step that builds those trims for a whole body, `create_missing_uv_trim_curves`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -9,16 +11,24 @@
 )]
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
+use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::AttributeStore;
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::curve_surface_gap::trim_image_gap_bound;
+use solidcore::topology::brep::create_missing_uv_trim_curves;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
+use solidcore::topology::brep::p2::edgeuses;
+use solidcore::topology::brep::p5::create_wire_edge_from_curve;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::topology::{edge, edgeuse};
-use solidcore::{Brep, EdgeId, Kernel};
+use solidcore::topology::{edge, edgeuse, EdgeuseId};
+use solidcore::{Brep, EdgeId, Kernel, Vec3};
 
 fn fillet1019(k: &mut Kernel) -> Brep {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -135,4 +145,120 @@ fn a_lazy_trim_raises_its_edge_by_its_proved_distance() {
         tol <= 2.05 * bound,
         "tolerance {tol:e} past twice the proved distance {bound:e}"
     );
+}
+
+/// A 10 cube with an r 2 hole through it along z (planes and a cylinder), then every other
+/// UV trim curve removed, then one wire edge added beside it (a straight segment, whose two
+/// edge uses have no face use). Returns the body and the wire edge's uses.
+fn holed_cube_with_missing_trims_and_a_wire(k: &mut Kernel) -> (Brep, Vec<EdgeuseId>) {
+    let cube = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let tool = create_cylinder(k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
+    let mut b = boolean_difference(k, cube, tool).unwrap();
+    let holders: Vec<EdgeuseId> = edgeuses(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&eu| {
+            edgeuse::p1::uv_trim_curve_pointer(&b, eu)
+                .unwrap()
+                .is_some()
+        })
+        .collect();
+    for eu in holders.into_iter().step_by(2) {
+        edgeuse::p1::set_uv_trim_curve(
+            &mut b,
+            eu,
+            edgeuse::p1::UvTrimCurveArg::Null,
+            0.0,
+            true,
+            None,
+        )
+        .unwrap();
+    }
+    let segment = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 1,
+        control_points: &[Vec3::new(20.0, 0.0, 0.0), Vec3::new(20.0, 0.0, 5.0)],
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })
+    .unwrap();
+    let wire = create_wire_edge_from_curve(
+        k,
+        &mut b,
+        Curve::from(segment),
+        Extent1d::from_min_max(0.0, 1.0),
+    )
+    .unwrap();
+    let wire_uses = b.edge(wire).unwrap().edgeuses.clone();
+    (b, wire_uses)
+}
+
+/// The edge uses of `b` on a face, split into those with a UV trim curve (their own or their
+/// mate's) and those without.
+fn face_uses_by_trim(b: &Brep) -> (Vec<EdgeuseId>, Vec<EdgeuseId>) {
+    edgeuses(b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&eu| edgeuse::p1::faceuse(b, eu).unwrap().is_some())
+        .partition(|&eu| edgeuse::p1::uv_trim_curve(b, eu).unwrap().0.is_some())
+}
+
+/// #20940: `create_missing_uv_trim_curves` on a body where some edge uses on faces have a UV
+/// trim curve and some have none, with a wire edge beside them. Afterwards every edge use
+/// on a face has one, the ones that had one hold the same curve, the wire edge's uses are as
+/// they were, and a second call leaves the whole body as it was.
+#[test]
+fn every_edge_use_on_a_face_gets_its_missing_uv_trim_curve() {
+    let mut k = Kernel::default();
+    let (mut b, wire_uses) = holed_cube_with_missing_trims_and_a_wire(&mut k);
+    assert_eq!(wire_uses.len(), 2, "a wire edge has two uses");
+    for &eu in &wire_uses {
+        assert!(edgeuse::p1::faceuse(&b, eu).unwrap().is_none());
+    }
+    let (with, without) = face_uses_by_trim(&b);
+    assert!(!with.is_empty(), "some edge uses keep their trims");
+    assert!(!without.is_empty(), "some edge uses have no trim");
+    let trim_of = |b: &Brep, eu: EdgeuseId| {
+        format!(
+            "{:?}",
+            edgeuse::p1::uv_trim_curve(b, eu).unwrap().0.unwrap()
+        )
+    };
+    let kept_before: Vec<String> = with.iter().map(|&eu| trim_of(&b, eu)).collect();
+    let wire_before: Vec<String> = wire_uses
+        .iter()
+        .map(|&eu| format!("{:?}", b.edgeuse(eu).unwrap()))
+        .collect();
+
+    create_missing_uv_trim_curves(&k, &mut b).unwrap();
+
+    let (with_after, without_after) = face_uses_by_trim(&b);
+    assert_eq!(without_after, Vec::<EdgeuseId>::new());
+    assert_eq!(with_after.len(), with.len() + without.len());
+    let kept_after: Vec<String> = with.iter().map(|&eu| trim_of(&b, eu)).collect();
+    assert_eq!(
+        kept_after, kept_before,
+        "a trim that was there is not rebuilt"
+    );
+    let wire_after: Vec<String> = wire_uses
+        .iter()
+        .map(|&eu| format!("{:?}", b.edgeuse(eu).unwrap()))
+        .collect();
+    assert_eq!(
+        wire_after, wire_before,
+        "a wire edge's uses are not touched"
+    );
+    for &eu in &wire_uses {
+        assert!(edgeuse::p1::uv_trim_curve_pointer(&b, eu)
+            .unwrap()
+            .is_none());
+    }
+
+    let once = format!("{b:?}");
+    create_missing_uv_trim_curves(&k, &mut b).unwrap();
+    assert!(format!("{b:?}") == once, "a second call changed the body");
 }
