@@ -171,6 +171,7 @@ pub mod sketch_project;
 pub mod sketch_session;
 pub mod sketch_shapes;
 pub mod slicers;
+pub mod socket_reach;
 pub mod split;
 pub mod surface;
 pub mod surface_analysis;

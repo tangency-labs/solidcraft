@@ -681,3 +681,53 @@ fn unchecked_pairs_are_excluded_from_nearest() {
     let a_near_ok: Vec<(&str, f64)> = summary_ok.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
     assert_eq!(a_near_ok, vec![("B", 0.0), ("C", 5.0)]);
 }
+
+/// Socket Reach (#21884), on the issue's example: a 19 mm socket over a bolt head with a wall
+/// 12 mm from the axis has 2.5 mm to spare; a rib 3 mm out of the wall into its path blocks it.
+/// The socket comes from the side the edge has no material on; flipped, it runs into the plate.
+#[test]
+fn a_socket_is_blocked_by_a_rib_in_its_path_and_not_by_a_wall_beside_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 100, "width": 60, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 30, 5], "radius": 6.5, "height": 5, "operation": "new", "body_name": "Head"}));
+    run(&mut s, "solid.box", json!({"corner": [42, 0, 5], "length": 5, "width": 60, "height": 40, "operation": "new", "body_name": "Wall"}));
+    // The head's top edge: a circle of radius 6.5 about (30, 30) at z = 10.
+    let reach = |s: &mut Session, extra: Value| {
+        let mut p = json!({"edge": [36.5, 30, 10], "diameter": 19, "length": 30});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        run(s, "inspect.socket_reach", p)
+    };
+    let clear = reach(&mut s, json!({}));
+    assert_eq!(clear["clear"], json!(true), "{clear}");
+    assert_eq!(clear["origin"], json!([30.0, 30.0, 10.0]), "{clear}");
+    assert!((f(&clear["direction"][2]) - 1.0).abs() < 1e-9, "away from the head, up: {clear}");
+    assert_eq!(clear["blocked"], json!([]), "the wall is 2.5 mm clear");
+    // A rib 3 mm out of the wall reaches 0.5 mm into the socket's path.
+    run(&mut s, "solid.box", json!({"corner": [39, 26, 5], "length": 3, "width": 8, "height": 40, "operation": "new", "body_name": "Rib"}));
+    let bodies_before = s.model.state().bodies.len();
+    let blocked = reach(&mut s, json!({}));
+    assert_eq!(blocked["clear"], json!(false), "{blocked}");
+    let rows = blocked["blocked"].as_array().cloned().unwrap_or_default();
+    assert_eq!(rows.iter().map(|r| r["body"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["Rib"], "{blocked}");
+    assert!(f(&rows[0]["volume_mm3"]) > 0.0 && f(&rows[0]["from_mm"]).abs() < 1e-6, "{blocked}");
+    // Ignored, the rib leaves the socket clear.
+    assert_eq!(reach(&mut s, json!({"ignore": ["Rib"]}))["clear"], json!(true));
+    // Flipped, the socket's space runs down through the head and the plate.
+    let down = reach(&mut s, json!({"flip": true}));
+    assert!((f(&down["direction"][2]) + 1.0).abs() < 1e-9, "{down}");
+    let bodies: Vec<&str> = down["blocked"].as_array().into_iter().flatten().filter_map(|r| r["body"].as_str()).collect();
+    assert!(bodies.contains(&"Plate") && bodies.contains(&"Head"), "{down}");
+    // Nothing is added to the design.
+    assert_eq!(s.model.state().bodies.len(), bodies_before);
+    // Refused: a straight edge, a socket of no size, an unknown body to ignore.
+    for (bad, why) in [
+        (json!({"edge": [50, 0, 0], "diameter": 19, "length": 30}), "a straight edge"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 0, "length": 30}), "no diameter"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 19, "length": -1}), "a negative length"),
+        (json!({"edge": [36.5, 30, 10], "diameter": 19, "length": 30, "ignore": ["Nope"]}), "an unknown body"),
+    ] {
+        assert!(s.execute("inspect.socket_reach", &bad).is_err(), "{why}");
+    }
+}
