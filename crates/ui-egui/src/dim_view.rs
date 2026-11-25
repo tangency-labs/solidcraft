@@ -84,6 +84,10 @@ struct Edit {
     /// A driven dimension that nothing else fixes any more, which the value makes driving (its
     /// constraint id; `param` names the parameter it gets).
     driven: Option<String>,
+    /// The window's parameter rows (#16319): what was typed for each user parameter the value
+    /// names, by name. OK sets those the value still names with it, in one undo step; Cancel
+    /// drops them.
+    params: std::collections::BTreeMap<String, String>,
     /// A drawing's dimension or note, edited on its sheet with the same box: `expr` is its text
     /// and `param` what the box is headed. None: a sketch dimension's value.
     sheet: Option<SheetText>,
@@ -211,7 +215,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_command(id, crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
@@ -295,6 +299,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
             sheet: None,
         })
     });
@@ -337,6 +342,7 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
             sheet: None,
         })
     });
@@ -598,6 +604,7 @@ fn open_model(app: &mut SolveApp, d: ModelDim) -> bool {
             caret: None,
             sketch: Some(d.sketch),
             driven: None,
+            params: Default::default(),
             sheet: None,
         })
     });
@@ -702,6 +709,7 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
             caret: None,
             sketch: None,
             driven,
+            params: Default::default(),
             sheet: None,
         })
     });
@@ -729,6 +737,7 @@ pub(crate) fn edit_sheet_text(target: SheetText, title: &str, text: String, at: 
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
             sheet: Some(target),
         })
     });
@@ -819,6 +828,31 @@ fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<ser
                 .ok_or("The dimension value is unavailable")?;
             change_value(app, &param, typed)
         });
+    let forget = result.is_ok();
+    let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
+    if forget {
+        app.session.undo.truncate(depth + 1);
+    }
+    result
+}
+
+/// The window's value with its changed parameter rows (#16319): the parameters first, in one
+/// `parameters.change` (the command Change Parameters uses), then the value as OK applies it
+/// alone, unless it is the expression the dimension already has. One undo step takes both back;
+/// when either is refused the design goes back to the checkpoint taken first.
+fn with_parameters(app: &mut SolveApp, e: &Edit, changes: serde_json::Map<String, serde_json::Value>) -> Result<serde_json::Value, String> {
+    let depth = app.session.undo.len();
+    let checkpoint = app.run("edit.checkpoint", json!({}))?["checkpoint"].clone();
+    let unchanged = e.driven.is_none() && app.session.doc.param(&e.param).is_some_and(|p| p.expr.trim() == e.expr.trim());
+    let result = app.run("parameters.change", json!({"changes": changes})).map_err(|err| shown_error("parameters.change", &err)).and_then(|_| {
+        if unchanged {
+            Ok(json!({}))
+        } else if let Some(constraint) = &e.driven {
+            make_driving(app, constraint, &e.expr)
+        } else {
+            change_value(app, &e.param, &e.expr)
+        }
+    });
     let forget = result.is_ok();
     let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": checkpoint, "forget": forget}));
     if forget {
@@ -1020,7 +1054,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let model = EDIT.with(|e| {
             let mut e = e.borrow_mut();
             let keep = e.as_ref().and_then(|x| x.sketch).is_some_and(|s| app.session.active_sketch.is_none() && st.sketch(s).is_some());
-            if !keep {
+            // A box open on a drawing's sheet belongs to the sheet page, which paints beside a Model
+            // card in the same frame: this view neither closes it nor paints it.
+            let on_sheet = e.as_ref().is_some_and(|x| x.sheet.is_some());
+            if !keep && !on_sheet {
                 *e = None;
             } else if let Some(x) = e.as_mut()
                 && let Some(d) = MODEL.with(|m| m.borrow().iter().find(|d| d.param.as_deref() == Some(x.param.as_str())).cloned())
@@ -1125,17 +1162,24 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             lay = dim_layout_reaching(&frame, text, px, half, reach);
         }
         let stroke = Stroke::new(1.0, col);
+        let rim = app.preferences.dimension_rim.then_some(tk.sketch_halo);
         let mut segs = Vec::new();
         for line in &lay.lines {
             let pts: Vec<Pos2> = line.iter().filter_map(|q| to(*q)).collect();
             for w in pts.windows(2) {
                 segs.push([w[0], w[1]]);
             }
+            if let Some(rim) = rim {
+                crate::icons::markers::rounded_rim_line(painter, &pts, 3.0, rim);
+            }
             painter.add(Shape::line(pts, stroke));
         }
         for (tip, dir) in &lay.arrows {
             if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
-                crate::icons::markers::dimension_arrow(painter, t, back, col);
+                match rim {
+                    Some(rim) => crate::icons::markers::dimension_arrow_rimmed(painter, t, back, col, rim),
+                    None => crate::icons::markers::dimension_arrow(painter, t, back, col),
+                }
             }
         }
         let Some(tc) = to(lay.text) else { continue };
@@ -1222,6 +1266,7 @@ pub fn edit_param(app: &SolveApp, param: &str) {
             caret: None,
             sketch: None,
             driven: None,
+            params: Default::default(),
             sheet: None,
         })
     });
@@ -1551,6 +1596,8 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
+            } else if let Some(changes) = window::parameter_changes(&app.session.doc, &e.param, &e.expr, &e.params) {
+                with_parameters(app, &e, changes)
             } else if let Some(constraint) = &e.driven {
                 make_driving(app, constraint, &e.expr)
             } else {
@@ -1816,6 +1863,41 @@ mod tests {
             assert_ne!(c, tk.sketch, "{name}");
             assert_ne!(c, tk.sketch_fixed, "{name}");
         }
+        cancel();
+    }
+
+    /// #17575: a dimension's lines draw over a rim in the theme's halo colour, so they read on a
+    /// lit face in the Dark theme; the `dimension_rim` preference turns the rim off.
+    #[test]
+    fn dimension_lines_carry_a_rim_unless_the_preference_is_off() {
+        fn rims(s: &Shape, rim: egui::Color32, out: &mut usize) {
+            match s {
+                Shape::Path(p) if matches!(p.stroke.color, egui::epaint::ColorMode::Solid(c) if c == rim) => *out += 1,
+                Shape::Vec(v) => v.iter().for_each(|s| rims(s, rim, out)),
+                _ => {}
+            }
+        }
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let l = h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        h.app.run("sketch.dimension", json!({"entities":[l],"value":30})).unwrap();
+        h.app.session.selection.clear();
+        h.call("ui.view", json!({"view":"top"}));
+        let rim = Tokens::get().sketch_halo;
+        for (on, expect) in [(true, true), (false, false)] {
+            h.call("ui.prefs", json!({"dimension_rim": on}));
+            h.settle();
+            h.frames(2);
+            let mut n = 0;
+            h.shapes.iter().for_each(|s| rims(&s.shape, rim, &mut n));
+            assert_eq!(n > 0, expect, "dimension_rim {on}: {n} rim strokes");
+        }
+        assert!(crate::prefs::Prefs::default().dimension_rim, "the rim is on by default");
         cancel();
     }
 

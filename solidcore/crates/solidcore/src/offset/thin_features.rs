@@ -105,6 +105,8 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
 /// The features of `b`: each set of two or more faces, at most half of them, reached from a
 /// face across convex edges ([`feature_from`]), smallest first, each once.
 fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
+    // a measurement copy: it reads the topology and tangency of the body and its faces are
+    // only grouped, never built from, so its surfaces' definitions are not needed
     let mut probe = b.clone_standing_for_self()?;
     let mut seen: BTreeSet<FaceId> = BTreeSet::new();
     let mut found = Vec::new();
@@ -129,8 +131,9 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
 /// `b` with `faces` taken off as a feature: the base and the feature, each closed by a planar
 /// cap on the footprint. `None` when it does not come off, or has room for a cavity of `wall`.
 fn take_off(k: &mut Kernel, b: &Brep, faces: &[FaceId], wall: f64) -> Result<Option<(Brep, Brep)>> {
-    // the footprint capped with its plane (the module's claim holds over a planar one only)
-    let mut base = b.clone_standing_for_self()?;
+    // the footprint capped with its plane (the module's claim holds over a planar one only);
+    // the base is shelled and the feature joined back, so both keep the faces' definitions
+    let mut base = b.clone_standing_for_self_keeping_definitions()?;
     let mut feature = match defeature_and_rebuild(
         k,
         &mut base,
@@ -187,7 +190,8 @@ fn taking_off(k: &mut Kernel, b: &Brep, options: ShellOptions) -> Result<Option<
             ok => ok,
         }
     };
-    let mut current = b.clone_standing_for_self()?;
+    // the body each feature is taken off and shelled, so its definitions are kept
+    let mut current = b.clone_standing_for_self_keeping_definitions()?;
     let mut taken: Vec<Brep> = Vec::new();
     for faces in features(k, b)? {
         if taken.len() >= MAX_FEATURES {

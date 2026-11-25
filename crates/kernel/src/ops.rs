@@ -1,7 +1,6 @@
 //! Operations on bodies: booleans, placements and splits by a plane, through SMLib. Bodies apart
 //! from each other join without any intersection work, their records side by side.
 
-use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcore_record::brep::part;
 use solidcraft_geom::brep::placement::Rigid;
@@ -11,13 +10,7 @@ use crate::body::Body;
 use crate::history::{BodyHistory, History};
 use crate::{KernelError, Result, guard};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BoolOp {
-    Union,
-    Cut,
-    Intersect,
-}
+pub use solidcraft_kernel_api::BoolOp;
 
 /// Boolean of two bodies in SMLib. The result may be empty (`Ok(None)`) for a cut that removes
 /// everything or an intersection of disjoint bodies. A result SMLib's check refuses is an error.

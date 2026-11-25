@@ -128,6 +128,35 @@ fn a_long_mirrored_body_measures_as_its_source() {
     }
 }
 
+/// A cylinder mirrored in x = 0 keeps its two end circles as circles of the same radius, centred
+/// on the mirrored axis, not as the rational B-splines of their NURBs (WR-21139); its volume is
+/// the source's, pi * 10^2 * 100, and it reads back valid.
+#[test]
+fn a_mirrored_cylinder_keeps_its_circles() {
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let body = crate::cylinder(Vec3::new(50., 0., 0.), Vec3::Z, 10.0, 100.0).unwrap();
+    let mirrored = transform_matrix(&body, mirror).unwrap();
+    let mut circles = 0;
+    for e in &mirrored.record().edges {
+        match &e.curve {
+            solidcore_record::brep::Curve::Line { .. } => {}
+            solidcore_record::brep::Curve::Circle { frame, radius } => {
+                circles += 1;
+                assert!((radius - 10.).abs() < 1e-12, "radius {radius}");
+                let [x, y, _] = frame.origin;
+                assert!((x + 50.).abs() < 1e-12 && y.abs() < 1e-12, "centre {:?}", frame.origin);
+            }
+            other => panic!("a curved edge of the mirrored cylinder is not a circle: {other:?}"),
+        }
+    }
+    assert_eq!(circles, 2);
+    let want = std::f64::consts::PI * 100. * 100.;
+    let got = crate::measure(&mirrored).unwrap().volume;
+    assert!((got - want).abs() < 1e-9 * want, "volume {got}, expected {want}");
+    let read_back = Body::from_record(mirrored.record().clone()).unwrap();
+    assert!(matches!(crate::validity(&read_back).smlib, Some(crate::SmlibCheck::Valid)), "{:?}", crate::validity(&read_back).smlib);
+}
+
 /// A scaling or shear of a box maps its record as a rigid motion does: its faces stay planes, on
 /// the same parameters, and the volume is the determinant's (#14422). A reflection, or a body
 /// with a cylinder, still goes through SMLib and keeps the right volume.
@@ -351,7 +380,7 @@ fn a_translated_body_keeps_its_measured_box_moved() {
     let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]];
     let placed = crate::transform_matrix(&source, shift).unwrap();
     let carried = (*placed.bounds.lock().unwrap()).expect("the box moved with the body");
-    // `moved_box` rounds outward: the box moved holds the measured box shifted, within rounding.
+    // `transformed_box` rounds outward: the box moved holds the measured box shifted, within rounding.
     let (lo, hi) = (measured.min + t, measured.max + t);
     for (c, w) in [(carried.min.x, lo.x), (carried.min.y, lo.y), (carried.min.z, lo.z)] {
         assert!(c <= w && w - c < 1e-12, "{carried:?} against {lo:?}");
