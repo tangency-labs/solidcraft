@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_geom::drawing_centre_mark;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::drawing_centre_mark;
 
 use super::CMD;
 use crate::params::bad;

@@ -310,6 +310,7 @@ impl UnitDiff for Runner {
             }
         };
         // (a probe's measure, before the export strips the body: capture off, none)
+        crate::dump::body(&k, "result", &b);
         crate::soundness::measure(&mut b);
         strip_unrecorded(&mut b).map_err(herr)?;
         normalize_face_shells(&mut b).map_err(herr)?;
