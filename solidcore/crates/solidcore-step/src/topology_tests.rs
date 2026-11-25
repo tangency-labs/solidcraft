@@ -2407,6 +2407,84 @@ fn a_nearly_straight_rational_spline_far_from_the_origin_is_not_a_circle() {
     assert!(swept::spline_circle(&broken).is_none());
 }
 
+/// A straight edge of #20805's body, as SolidCraft's STEP export writes it: a rational cubic
+/// (weights 1 up to rounding) 3.2 mm long in the plane y = 9.5. It lies within 1e-9 of its size
+/// of a circle of radius about 8.8e8 mm through three of its points, but that arc bows out of
+/// its chord by less than a nanometre: read as that circle, the edge's NURBS form had a control
+/// point 1e9 mm out, and SMLib refused the face, so the body did not import. It stays a spline.
+/// A rational quadratic arc of 0.01 rad on a circle of radius 500 bows out by about 6 µm, and
+/// is still its circle.
+#[test]
+fn a_straight_rational_spline_within_reach_of_a_huge_circle_is_not_a_circle() {
+    let edge = crate::geom::BSplineCurve {
+        degree: 3,
+        points: vec![
+            [16.133668494811765, 9.5, 4.030554845216747],
+            [16.139917155358653, 9.5, 3.998557674207527],
+            [16.152412811677777, 9.5, 3.93457083163494],
+            [16.17115594164661, 9.5, 3.8385932073155997],
+            [16.18989959508731, 9.5, 3.742612681612636],
+            [16.214890770645724, 9.5, 3.6146405817892404],
+            [16.3648384186678, 9.499999999999998, 2.8468048370734045],
+            [16.521034038738428, 9.5, 2.04697515073184],
+            [16.677229505962494, 9.5, 1.2471462484944809],
+            [16.70846881885804, 9.5, 1.0871794216147013],
+            [16.733459628692405, 9.5, 0.9592089735993286],
+            [16.74595542658399, 9.5, 0.8952222206177156],
+            [16.75220388779743, 9.5, 0.8632255139657978],
+        ],
+        weights: Some(vec![
+            1.0,
+            1.0,
+            1.0000000000000002,
+            0.9999999999999999,
+            0.9999999999999998,
+            1.0000000000000002,
+            0.9999999999999982,
+            0.9999999999999997,
+            1.0,
+            0.9999999999999993,
+            1.0,
+            1.0,
+            1.0,
+        ]),
+        knots: vec![
+            1.0,
+            1.0303031031089829,
+            1.0606061639094815,
+            1.0909091782520413,
+            1.1212122050429691,
+            1.1818182528475165,
+            1.8181817601383314,
+            1.8787878080049896,
+            1.9393938500035603,
+            1.9696969063938021,
+            2.0,
+        ],
+        multiplicities: vec![4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    assert!(swept::spline_circle(&edge).is_none(), "{:?}", swept::spline_circle(&edge));
+    let (r, half) = (500.0, 0.005_f64);
+    let arc = crate::geom::BSplineCurve {
+        degree: 2,
+        points: vec![[r * half.cos(), -r * half.sin(), 0.0], [r / half.cos(), 0.0, 0.0], [r * half.cos(), r * half.sin(), 0.0]],
+        weights: Some(vec![1.0, half.cos(), 1.0]),
+        knots: vec![0.0, 1.0],
+        multiplicities: vec![3, 3],
+        form: crate::geom::CurveForm::Unspecified,
+        closed: crate::geom::Logical::False,
+        self_intersect: crate::geom::Logical::Unknown,
+        knot_spec: crate::geom::KnotSpec::Unspecified,
+    };
+    let Some((Curve::Circle { radius, .. }, swept)) = swept::spline_circle(&arc) else { panic!("a 0.01 rad arc is a circle") };
+    assert!((radius - r).abs() <= 1e-6 * r, "radius {radius}");
+    assert!((swept - 2.0 * half).abs() <= 1e-9, "swept {swept}");
+}
+
 /// A circle is accepted on the whole of the spline, not at sample points: a quarter circle with
 /// knots 0.1, 0.101, 0.102 and 0.103 inserted is still its circle, and with the one control
 /// point whose basis function lives on [0.1, 0.103] moved 1 mm out of the circle, or out of its
