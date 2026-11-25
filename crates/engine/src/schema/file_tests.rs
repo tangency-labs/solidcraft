@@ -66,6 +66,7 @@ fn schemas_and_the_key_check_agree() {
             "read_only",
             "reader",
             "reuse_import",
+            "tab",
             "units",
             "up",
             "verify",

@@ -808,7 +808,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bd = BrepData::from_brep(b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
+    let bd = BrepData::from_brep(k, b, &env, &mut Vec::new()).map_err(sc("SmBrepData::FromBrep"))?;
     let shell_ids = shells_in_order(b)?;
     let face_ids = bl::faces(b, None).map_err(sc("GetFaces"))?;
     let edge_ids = bl::edges(b, None).map_err(sc("GetEdges"))?;

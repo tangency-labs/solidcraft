@@ -293,18 +293,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("hole")
         .key("H")
         .params(concat!(
-            "position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
+            "position: [x,y,z] on a face of a body (numbers, or length expressions the hole follows; a position on no face is refused: the hole starts at that face, its depths are measured from it, and material above it (a body over it, a taller wall beside it) is left standing) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); ",
             "flip?: bool (sketch points: drill to the other side); ",
             "single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); ",
             "direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); ",
             "diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); ",
             "head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) | \"ISO 10642\" (countersunk head) (with clearance: the recess the screw's head sits in. A cap screw's: a counterbore, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value. A countersunk head's: a countersink, so type defaults to countersink; 90° unless cs_angle is given, its diameter the head's dk plus head_gap each side, so the head sits head_gap below the face; a cs_diameter given keeps its value); ",
             "head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); ",
-            "depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); ",
+            "depth? (default through all; from where the hole starts, not from `position`: the face it enters, or for a sketch point inside a body the sketch plane) | to?: [x,y,z] (To Object: drill to that face or point); ",
             "references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); ",
             "type?: simple|drilled|counterbore|countersink; ",
             "tip_angle?; ",
-            "cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
+            "cb_diameter?, cb_depth? (from where the hole starts, as depth), bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); ",
             "cs_diameter?, cs_angle?; ",
             "thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); ",
             "hand?: right|left (the tapped thread's hand; default right; needs thread); ",
@@ -362,8 +362,9 @@ pub static COMMANDS: &[CommandSpec] = &[
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
-            "form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
+            "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); ",
+            "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
             "acme \"1/2-10 ACME\" (ASME B1.5); ",
@@ -1606,7 +1607,7 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         }
         // STEP links remain editable import bases: downstream features rebuild when their
         // source updates. Linked designs keep their own editable history in the source file.
-        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
+        if s.doc.links.get(&c).is_some_and(|link| link.is_design()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,
@@ -5380,9 +5381,14 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     }
     use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    // Resolve and store the form at creation or redefinition, including an inferred Unified
+    // designation. Evaluation must not reinterpret an older Thread that saved no form.
     let form = match str_(p, "form") {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
-            bad(cmd, format!("unknown thread form `{f}` (metric, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"))
+            bad(
+                cmd,
+                format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
+            )
         })?,
         None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
     };
@@ -5534,7 +5540,9 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
     if let Some(w) = &wall {
-        check_expr(s, w, Kind::Length, cmd, "wall")?;
+        // A wall is a thickness. A word such as "hollow" is not one, and the message says so
+        // instead of naming an unknown parameter (#18344).
+        check_expr(s, w, Kind::Length, cmd, "wall").map_err(|_| bad(cmd, "the wall must be a thickness, such as 2 mm"))?;
     }
     add_feature(
         s,

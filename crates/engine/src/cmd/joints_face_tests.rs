@@ -1169,3 +1169,204 @@ fn planar_face_with_hole_locates_outline_centre_from_brep_loops() {
     // The plate outline is [-50, 50] in X and Y, centered at (0, 0), so outline centre is at (0, 0, 10).
     assert!((point.x).abs() < 1e-4 && (point.y).abs() < 1e-4 && (point.z - 10.0).abs() < 1e-4, "expected (0, 0, 10), got {point:?}");
 }
+
+/// Plate spanning x in [PX, PX + 5], y in [0, 100], z in [0, 100] with an X-axis Ø6 through-hole
+/// at (y = 50, z = 50), plus a washer component with an X-axis Ø6 bore (x in [0, 2]).
+fn plate_and_washer() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "PX", "expression": "1015 mm"}));
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": ["PX", 0, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": ["PX - 5 mm", 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    let plate = occ(&s, "Plate");
+    run(&mut s, "occurrence.ground", json!({"occurrence": plate, "grounded": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut s, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    s
+}
+
+/// Adding a chamfer to a through-hole entry keeps an existing `insert` joint on the plate's
+/// planar face instead of shifting inward to the recessed cylinder-cone rim, while still
+/// following the plate face when the plate translates (#22049).
+#[test]
+fn insert_joint_on_hole_rim_stays_on_plate_face_after_chamfer_and_follows_plate_translation() {
+    let mut s = plate_and_washer();
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    // Add a 0.5 x 45 deg chamfer to the hole entry on the plate.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer must stay on plate face x = 1015, not shift inward: {seat:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(0.0, 0.0, 0.0)), Vec3::new(1013.0, 50.0, 50.0)));
+
+    let inspected = run(&mut s, "joint.inspect", json!({"joint": "WasherSeat"}));
+    let oa = &inspected["joints"][0]["a"]["frame"]["origin"];
+    let za = &inspected["joints"][0]["a"]["frame"]["z"];
+    assert!(near(Vec3::new(oa[0].as_f64().unwrap(), oa[1].as_f64().unwrap(), oa[2].as_f64().unwrap()), Vec3::new(1015.0, 50.0, 50.0)), "{inspected}");
+    assert!(near(Vec3::new(za[0].as_f64().unwrap(), za[1].as_f64().unwrap(), za[2].as_f64().unwrap()), -Vec3::X), "{inspected}");
+
+    // Translating the plate still moves the washer with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1025 mm"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let moved = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(moved, Vec3::new(1025.0, 50.0, 50.0)), "washer must follow translated plate face to x = 1025: {moved:?}");
+
+    // Chamfering the opposite end of the hole as well leaves the origin on the x = 1025 face.
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1030, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let both_chamfered = place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(both_chamfered, Vec3::new(1025.0, 50.0, 50.0)), "{both_chamfered:?}");
+
+    // Explicit `circle` (cylinder wall) + `end` (planar plate face across the chamfer) is
+    // accepted by both `joint.origin` and `joint.edit`, while an unrelated side face is refused.
+    let wall = face_name(&mut s, "Plate", Vec3::new(1027.5, 53.0, 50.0));
+    let front = face_name(&mut s, "Plate", Vec3::new(1025.0, 10.0, 10.0));
+    let side = face_name(&mut s, "Plate", Vec3::new(1027.5, 0.0, 50.0));
+    assert!(!wall.is_empty() && !front.is_empty() && !side.is_empty());
+    run(&mut s, "joint.origin", json!({"name": "WallOnFront", "occurrence": "Plate", "circle": wall, "end": front}));
+    let (pt, z) = origin_frame(&s, "WallOnFront").unwrap();
+    assert!(near(pt, Vec3::new(1025.0, 50.0, 50.0)) && near(z, -Vec3::X), "{pt:?} {z:?}");
+    let edited = run(&mut s, "joint.edit", json!({"joint": "WasherSeat", "a": {"occurrence": "Plate", "circle": wall, "end": front}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1025.0, 50.0, 50.0)));
+    assert!(s.execute("joint.origin", &json!({"name": "BadEnd", "occurrence": "Plate", "circle": wall, "end": side})).is_err());
+}
+
+/// Picking `circle` on the outer circular rim (edge or centre) of a chamfered or countersunk
+/// hole succeeds and places the origin on the planar face along the cone's axis (#22049).
+#[test]
+fn circle_origin_accepts_chamfer_and_countersink_outer_rim() {
+    let mut s = plate_and_washer();
+    run(&mut s, "component.activate", json!({"component": "Plate"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Outer chamfer rim edge is at x = 1015, radius = 3.5 -> point [1015, 53.5, 50].
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "OnChamferRim",
+            "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    let snap = origin(&s, "OnChamferRim", true);
+    assert!(matches!(&snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "outer rim keeps cone face and planar end: {snap:?}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // joint.edit with `circle` on the chamfer outer rim also succeeds.
+    let edited = run(&mut s, "joint.edit", json!({"joint": "OnChamferRim", "a": {"occurrence": "Plate", "circle": [1015, 53.5, 50]}}));
+    assert_eq!(edited["errors"], json!([]), "{edited}");
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    // Picking the chamfer outer rim by its centre (with and without z, as the UI sends) keeps a
+    // persistent CircleCenter origin rather than falling back to a static Point.
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenter", "occurrence": "Plate", "circle": [1015, 50, 50]}));
+    run(&mut s, "joint.origin", json!({"name": "ChamferCenterZ", "occurrence": "Plate", "circle": [1015, 50, 50], "z": [-1, 0, 0]}));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let jo = s.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1015.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Translating the plate moves all chamfer-rim origins with the plate face.
+    run(&mut s, "parameters.change", json!({"name": "PX", "expression": "1030 mm"}));
+    assert!(near(place(&s, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1030.0, 50.0, 50.0)));
+    for name in ["ChamferCenter", "ChamferCenterZ"] {
+        let (pt, z) = origin_frame(&s, name).unwrap();
+        assert!(near(pt, Vec3::new(1030.0, 50.0, 50.0)) && near(z, -Vec3::X), "{name}: {pt:?} {z:?}");
+    }
+
+    // Countersunk hole outer rim (Ø10 countersink on Ø6 bore at z = 10 -> outer rim radius 5).
+    let mut cs = Session::default();
+    run(&mut cs, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(
+        &mut cs,
+        "solid.hole",
+        json!({"position": [20, 20, 10], "diameter": 6, "depth": 10, "type": "countersink", "cs_diameter": 10, "cs_angle": "90 deg"}),
+    );
+    run(&mut cs, "joint.origin", json!({"name": "CsRim", "occurrence": 0, "circle": [25, 20, 10]}));
+    run(&mut cs, "joint.origin", json!({"name": "CsCenter", "occurrence": 0, "circle": [20, 20, 10], "z": [0, 0, 1]}));
+    for name in ["CsRim", "CsCenter"] {
+        let jo = cs.doc.assembly.origins.iter().find(|o| o.name == name).unwrap();
+        assert!(matches!(&jo.origin.snap, Snap::CircleCenter { face: Some(_), end: Some(_), .. }), "{name}: {:?}", jo.origin.snap);
+        let (pt, z) = origin_frame(&cs, name).unwrap();
+        assert!(near(pt, Vec3::new(20.0, 20.0, 10.0)) && near(z, Vec3::Z), "{name}: {pt:?} {z:?}");
+    }
+}
+
+/// Adding a chamfer to a linked plate part and running `component.update_links` keeps an
+/// existing `insert` joint on the plate's planar face (#22049).
+#[test]
+fn linked_plate_chamfer_keeps_insert_joint_on_plate_face_through_update_links() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chamfer-link-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let plate_path = dir.join("plate.solidcraft");
+
+    let mut plate = Session::default();
+    run(&mut plate, "solid.box", json!({"length": 5, "width": 100, "height": 100, "corner": [1015, 0, 0], "body_name": "Plate"}));
+    run(&mut plate, "solid.cylinder", json!({"base": [1010, 50, 50], "axis": [1, 0, 0], "radius": 3, "height": 15, "operation": "cut"}));
+    run(&mut plate, "file.save", json!({"path": plate_path}));
+
+    let mut asm = Session::default();
+    run(&mut asm, "component.insert_design", json!({"path": plate_path, "name": "Plate"}));
+    let plate_occ = occ(&asm, "Plate");
+    run(&mut asm, "occurrence.ground", json!({"occurrence": plate_occ, "grounded": true}));
+    run(&mut asm, "component.create", json!({"name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [1, 0, 0], "radius": 6, "height": 2, "body_name": "Washer"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [-1, 0, 0], "axis": [1, 0, 0], "radius": 3, "height": 4, "operation": "cut"}));
+    run(&mut asm, "component.activate", json!({"component": "root"}));
+
+    let r = run(
+        &mut asm,
+        "assembly.constraint.create",
+        json!({
+            "type": "insert",
+            "name": "WasherSeat",
+            "a": {"occurrence": "Plate", "circle": [1015, 53, 50]},
+            "b": {"occurrence": "Washer", "circle": [2, 3, 0]},
+        }),
+    );
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0)), Vec3::new(1015.0, 50.0, 50.0)));
+
+    run(&mut plate, "solid.chamfer", json!({"edges": [[1015, 53, 50]], "distance": 0.5, "body": "Plate"}));
+    run(&mut plate, "file.save", json!({}));
+
+    let update = run(&mut asm, "component.update_links", json!({}));
+    assert_eq!(update["updated"], json!(["Plate"]), "{update}");
+    let solved = run(&mut asm, "joint.solve", json!({}));
+    assert_eq!(solved["errors"], json!([]), "{solved}");
+    let seat = place(&asm, "Washer", Vec3::new(2.0, 0.0, 0.0));
+    assert!(near(seat, Vec3::new(1015.0, 50.0, 50.0)), "washer shifted inward after linked chamfer update: {seat:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

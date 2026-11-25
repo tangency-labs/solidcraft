@@ -626,7 +626,9 @@ fn feature_row(
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
-    let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+    // The sketch button names the sketch it opens (#20405).
+    let sketch_tip = sketch.map(|s| crate::timeline::profile_sketch_tip(app, s.0).unwrap_or_else(|| "Edit Profile Sketch".to_string()));
+    let action = sketch_tip.as_deref().map(|tip| ("sketch", tip));
     // A sketch row has the eye its Sketches folder row has. A construction plane, axis or point has
     // its own visibility in the design Origin. A feature's eye shows and hides the bodies it made
     // (#5099); a component listed on its own stands for all of its placements.
@@ -644,6 +646,13 @@ fn feature_row(
         None => crate::timeline::feature_status(app, id),
     };
     let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
+    // A sketch row shows its solve state as its Sketches folder row does (#22185): the icon in
+    // the state's colour and the state in the tooltip. Read from the solves the model holds.
+    let sketch_state = (is_sketch && app.preferences.sketch_state_icons)
+        .then(|| app.session.model.state().sketch(id).map(crate::sketch_state::SketchState::of))
+        .flatten();
+    let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
+    let ink = sketch_state.and_then(|state| state.ink(&Tokens::get()));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -654,6 +663,8 @@ fn feature_row(
             fold,
             eye,
             icon,
+            icon_ink: ink,
+            tip: state_tip.as_deref(),
             label: &label,
             name: true,
             rename: true,
@@ -1793,6 +1804,41 @@ mod tests {
         for id in ["ui.findTimeline", "ui.editFeature"] {
             let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == id).unwrap();
             assert!(!item.enabled || item.params.as_ref().unwrap()["feature"] == json!(owner), "{id}: {item:?}");
+        }
+    }
+
+    /// #20405: a feature's sketch button and its Edit Profile Sketch entries say which sketch they
+    /// open, so finding it takes no opening; the entries keep their label for scripts and keys.
+    #[test]
+    fn edit_profile_sketch_names_the_sketch_it_opens() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Lid outline"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        let pad_name = h.app.session.doc.feature(pad).unwrap().name.clone();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let named = "Edit Profile Sketch: Lid outline";
+        assert_eq!(crate::timeline::profile_sketch_tip(&h.app, sketch).as_deref(), Some(named));
+
+        // The Browser button's tooltip.
+        let button = crate::scenario::handle_at(&format!("action:{pad_name}")).unwrap();
+        for _ in 0..40 {
+            h.frame_with(vec![egui::Event::PointerMoved(button)]);
+            if h.widget(named).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(h.widget(named).is_some(), "the sketch button's tooltip names the sketch");
+
+        // The feature's right-click menu and the History menu: same label, the name on hover.
+        let feature_menu = crate::context_menu::items(&h.app, &Target::Feature { id: pad });
+        let history_menu = crate::timeline::feature_items(&h.app, pad);
+        for (menu, items) in [("feature", feature_menu), ("history", history_menu)] {
+            let edit = items.into_iter().find(|item| item.id == "ui.editSketch").unwrap_or_else(|| panic!("{menu}: no Edit Profile Sketch"));
+            assert_eq!((edit.label.as_str(), edit.tip.as_deref(), edit.enabled), ("Edit Profile Sketch", Some(named), true), "{menu}");
         }
     }
 

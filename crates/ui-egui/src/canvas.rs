@@ -815,7 +815,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 .and_then(serde_json::Value::as_array)
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
-            solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()
+            let reach = solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()?;
+            // On the side the extrude goes: the kept Distance's sign picks it, as in the model.
+            let kept = match &d.kind {
+                Kind::Extrude { distance, .. } => crate::length_input::eval(&app.session.doc, distance, ValueKind::Length).ok(),
+                _ => None,
+            };
+            Some(solidcraft_engine::doc::through_all_side(reach, kept))
         })
     } else {
         None
@@ -893,9 +899,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Two sides: the second distance gets its own arrow, the other way from the first side.
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
     {
-        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. Only
-        // a reach computed from the model (To Object, Through All) sends it the other way.
-        let n2 = if sign < 0.0 { n } else { -n };
+        // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. With
+        // All the first side is the through-all reach, and the model sends the second side the
+        // other way from it. (To Object's side is already in `sign`, and All is off with it.)
+        let first = all_span.map_or(sign, |reach| sign * reach);
+        let n2 = n * solidcraft_engine::doc::second_side(first, sign < 0.0, all_span.is_some());
         let before = distance2.clone();
         // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
         // but the box stays below the base so the typing can be finished there.

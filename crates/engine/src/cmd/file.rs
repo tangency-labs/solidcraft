@@ -72,6 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
             "new_tab?: bool (true opens the file in a tab of its own after the active one and shows it, even when the active design is empty, so the design that was open stays open; default false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced; a design already open in a tab is shown instead; a person in the middle of a dialog or tool at the window gets the tab behind the active one, so check document.list; the desktop window only); ",
+            "tab?: whole number (the desktop app: open it as a design in a new tab at this place among the tabs, 0 the first, past the last at the end, never in place of the design shown; a design already open shows its tab instead; given with `new_tab`, the place wins; elsewhere ignored); ",
             "up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); ",
             "names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
@@ -1684,6 +1685,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("doc.open", NEW_TAB_NEEDS_TABS));
     }
     let path = path_arg(p, "doc.open")?;
+    if p.get("tab").is_some_and(|v| !v.is_null() && v.as_u64().is_none()) {
+        return Err(bad("doc.open", "`tab` must be a whole number, 0 or more"));
+    }
     // A file SolidCraft does not read itself opens with the installed importer that claims its
     // extension; `format` picks an importer even for a file SolidCraft reads.
     let format = str_(p, "format");
@@ -1831,6 +1835,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
 pub fn runs_plugin_importer(s: &Session, command: &str, params: &Value) -> bool {
     if command.eq_ignore_ascii_case("file.import") {
         return true;
+    }
+    if command.eq_ignore_ascii_case("component.insert_design") {
+        let Some(path) = params.get("path").and_then(Value::as_str) else { return false };
+        return !matches!(super::component_link::insert_importer(s, params, path), Ok(None));
+    }
+    if command.eq_ignore_ascii_case("component.update_links") {
+        // Update Links reads again with the importer a link recorded, so it runs that plugin.
+        return s.doc.links.values().any(|link| link.importer.is_some());
     }
     if !command.eq_ignore_ascii_case("doc.open") {
         return false;
@@ -2316,7 +2328,14 @@ fn write_bytes(
     // the write is and stops on Cancel until the file is replaced.
     let host_save = HOST_SAVE.with(|slot| slot.borrow().as_ref().is_some_and(|save| save.uid == s.uid));
     if !host_save {
-        solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| {
+            // A refused write already names the file.
+            if solidcraft_io::safe_write::is_write_denied(&e) {
+                EngineError::Other(e.to_string())
+            } else {
+                EngineError::Other(format!("{path}: {e}"))
+            }
+        })?;
     }
     super::component_link::forget_file_digests();
     s.path = Some(path.to_string());
@@ -5117,6 +5136,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A Save into a folder that refuses the write says "can't write <file>" once, keeps the
+    /// file as it was and keeps the design unsaved.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_into_a_folder_that_refuses_it_says_so() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("solidcraft-save-refused-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = dir.join("Bracket.solidcraft");
+        let a_str = a.to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("file.save_as", &json!({"path": a_str})).unwrap();
+        let saved = std::fs::read(&a).unwrap();
+        s.execute("solid.sphere", &json!({"diameter": 6})).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Someone who may write anywhere (root) cannot be refused, so there is nothing to test.
+        if std::fs::File::create(dir.join("probe")).is_ok() {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        }
+        let e = s.execute("file.save", &json!({"overwrite": true})).unwrap_err().to_string();
+        assert!(e.starts_with("can't write ") && e.contains("Bracket.solidcraft") && e.contains("permission"), "{e}");
+        assert_eq!(e.matches("Bracket.solidcraft").count(), 1, "the file is named once: {e}");
+        assert_eq!(std::fs::read(&a).unwrap(), saved);
+        assert!(s.is_dirty(), "nothing was saved");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        s.execute("file.save", &json!({"overwrite": true})).unwrap();
+        assert!(!s.is_dirty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #9736: a component moved and not captured yet is a change the file doesn't hold. The
     /// design reads as unsaved, and Save and Save As refuse, naming the component, until the move
     /// is captured (then the file has it) or reverted (then the design is as saved).
@@ -6136,6 +6188,27 @@ mod tests {
             assert_eq!(s.doc.name, stem);
             assert_eq!(r["name"], stem);
             assert!(!s.is_dirty(), "showing the file's name is not a change to save");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn open_takes_a_tab_place_and_refuses_anything_but_a_whole_number() {
+        let dir = name_dir("open-tab");
+        let path = dir.join("bracket.solidcraft");
+        std::fs::write(&path, solidcraft_io::write_design(&Document::new("Bracket")).unwrap()).unwrap();
+        // Headless there are no tabs: the place is checked and the design opens as without it.
+        for tab in [json!(0), json!(3), json!(u64::MAX), Value::Null] {
+            let mut s = Session::default();
+            let r = s.execute("doc.open", &json!({"path": path, "tab": tab})).unwrap();
+            assert_eq!(r["name"], "Bracket", "tab {tab}");
+        }
+        for tab in [json!(-1), json!(1.5), json!("2"), json!(f64::MAX), json!([0]), json!({"at": 0})] {
+            let mut s = Session::default();
+            let before = s.doc.clone();
+            let e = s.execute("doc.open", &json!({"path": path, "tab": tab})).unwrap_err().to_string();
+            assert!(e.contains("`tab`"), "tab {tab}: {e}");
+            assert_eq!(*s.doc, *before, "a refused open leaves the design");
         }
         std::fs::remove_dir_all(dir).unwrap();
     }

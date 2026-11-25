@@ -80,8 +80,8 @@
 //! - `sm_RmAndDel_OldLoopVertices` deletes two vertex uses: the port unlinks them from
 //!   their vertex and removes their records (finding
 //!   `plan/findings/topology.brep--deleted-records-leave-their-arenas-follow-up.md`).
-//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep an [`EntityRef`] `BTreeMap`
-//!   ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
+//! - `sm_SetObjectMap` / `sm_GetObjectMap` keep a slot per [`EntityRef`] by kind and arena
+//!   index ([`ObjectMap`]) instead of the pointer hash map (plan hazard `ptr-hash`: upstream
 //!   `SmMapPtrToPtr` iteration order is pointer order; only lookups are used here) and
 //!   the ported [`CopyBrepMap`] for the optional copy maps.
 //! - `SmPendingTopologyDelete`'s destructor work (detaching the pending object's
@@ -1042,8 +1042,76 @@ pub fn find_highest_vote(regions: &[Option<RegionId>], votes: &[u64]) -> Result<
 // ---- copy maps (sm_SetObjectMap, sm_GetObjectMap) ---------------------------------------
 
 /// The `SmMapPtrToPtr<SmTopology, SmTopology>` of the B-rep copy: original object to
-/// its copy (`None` is a null copy).
-pub type ObjectMap = BTreeMap<EntityRef, Option<EntityRef>>;
+/// its copy (`None` is a null copy). A slot per original, by kind and arena index: a copy
+/// records every object of the B-rep it copies and looks each up several times, which a
+/// tree of all of them made a search each.
+#[derive(Debug, Clone, Default)]
+pub struct ObjectMap {
+    slots: [Vec<Slot>; 11],
+}
+
+impl ObjectMap {
+    /// An empty map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The slot list of `e`'s kind and `e`'s index in it.
+    fn place(e: EntityRef) -> Option<(usize, usize)> {
+        let (kind, index) = match e {
+            EntityRef::Brep(x) => (0, x.index()),
+            EntityRef::Shell(x) => (1, x.index()),
+            EntityRef::Face(x) => (2, x.index()),
+            EntityRef::Loop(x) => (3, x.index()),
+            EntityRef::Edge(x) => (4, x.index()),
+            EntityRef::Vertex(x) => (5, x.index()),
+            EntityRef::Region(x) => (6, x.index()),
+            EntityRef::Faceuse(x) => (7, x.index()),
+            EntityRef::Loopuse(x) => (8, x.index()),
+            EntityRef::Edgeuse(x) => (9, x.index()),
+            EntityRef::Vertexuse(x) => (10, x.index()),
+        };
+        Some((kind, usize::try_from(index).ok()?))
+    }
+
+    /// Records `orig -> copy` (`None` a null copy).
+    pub fn insert(&mut self, orig: EntityRef, copy: Option<EntityRef>) {
+        let Some((kind, index)) = Self::place(orig) else {
+            return;
+        };
+        let Some(slots) = self.slots.get_mut(kind) else {
+            return;
+        };
+        if slots.len() <= index {
+            // an arena index of an object the copied B-rep holds
+            slots.resize(index + 1, Slot::Unset);
+        }
+        if let Some(slot) = slots.get_mut(index) {
+            *slot = Slot::Set(copy);
+        }
+    }
+
+    /// The copy recorded for `orig`: `None` when none was, or a null copy was.
+    #[must_use]
+    pub fn get(&self, orig: EntityRef) -> Option<EntityRef> {
+        let (kind, index) = Self::place(orig)?;
+        match self.slots.get(kind)?.get(index)? {
+            Slot::Set(copy) => *copy,
+            Slot::Unset => None,
+        }
+    }
+}
+
+/// What an [`ObjectMap`] holds for one original.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Slot {
+    /// Nothing recorded.
+    #[default]
+    Unset,
+    /// A copy, or a null copy (`None`).
+    Set(Option<EntityRef>),
+}
 
 /// `sm_SetObjectMap`: records `orig -> copy`, and in the optional `SmCopyBrepMap`s
 /// ([`CopyBrepMap`], unit `topology.proto_topology_p1`) `copy -> orig` and `orig ->
@@ -1069,7 +1137,7 @@ pub fn set_object_map(
 /// `sm_GetObjectMap`: the copy recorded for `from` (`None` when none, or a null copy).
 #[must_use]
 pub fn get_object_map(from: EntityRef, map: &ObjectMap) -> Option<EntityRef> {
-    map.get(&from).copied().flatten()
+    map.get(from)
 }
 
 // ---- attributes (sm_AddAttributes, SmPendingTopologyDelete) -----------------------------
@@ -1461,7 +1529,25 @@ fn trim_curve_off_end(at_end: bool, to_vertex: bool, distance: f64, tolerance: f
 /// dereferences null (no edge, curve, mate, vertex use, vertex, face or surface);
 /// those of the evaluations.
 pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
-    let _ = k;
+    check_uv_trim_curve_at(k, b, eu, &|e| edge::tolerance(b, e), &|v| {
+        vertex::tolerance(b, v)
+    })
+}
+
+/// [`check_uv_trim_curve`] with the edge and vertex tolerances given by `edge_tolerance`
+/// and `vertex_tolerance` in place of those `b` holds (not upstream: the `.smb` writer asks
+/// whether a read of what it writes keeps the trim, `topology::brep_data_write`).
+///
+/// # Errors
+///
+/// As [`check_uv_trim_curve`], and those of the two tolerance functions.
+pub(crate) fn check_uv_trim_curve_at(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    edge_tolerance: &dyn Fn(EdgeId) -> Result<f64>,
+    vertex_tolerance: &dyn Fn(VertexId) -> Result<f64>,
+) -> Result<()> {
     let Some(trim_crv) = eu1::uv_trim_curve_pointer(b, eu)? else {
         return Ok(());
     };
@@ -1505,8 +1591,8 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     let face_3d_start = surf.evaluate_point(k, Point2::new(start_uv.x, start_uv.y))?;
 
     let face_tol = face2::tolerance(b, face)?;
-    let edge_tol = edge::tolerance(b, e)?;
-    let mut vrtx_tol = vertex::tolerance(b, start_vtx)?;
+    let edge_tol = edge_tolerance(e)?;
+    let mut vrtx_tol = vertex_tolerance(start_vtx)?;
 
     let dist_face_vrtx_start = face_3d_start.distance(vrtx_3d_start);
     if dist_face_vrtx_start > face_tol + vrtx_tol {
@@ -1536,7 +1622,7 @@ pub fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<()> {
     };
     let vrtx_3d_end = vertex::point(b, end_vtx)?;
     let face_3d_end = surf.evaluate_point(k, Point2::new(end_uv.x, end_uv.y))?;
-    vrtx_tol = vertex::tolerance(b, end_vtx)?; // have to update this to End vtx.
+    vrtx_tol = vertex_tolerance(end_vtx)?; // have to update this to End vtx.
 
     let dist_face_vrtx_end = face_3d_end.distance(vrtx_3d_end);
     if dist_face_vrtx_end > face_tol + vrtx_tol {

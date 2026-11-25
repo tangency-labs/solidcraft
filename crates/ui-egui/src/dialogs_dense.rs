@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::CapturePosition(_) => Some("component.capture_position"),
         Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
@@ -542,7 +543,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
         }
-        Kind::SketchIntersect { bodies, projection_link } => {
+        Kind::SketchIntersect { bodies, projection_link, construction } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
                 ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
@@ -553,8 +554,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
-        Kind::SketchProject { bodies, projection_link } => {
+        Kind::SketchProject { bodies, projection_link, construction } => {
             let response =
                 ui_kit::row(ui, solidcraft_ui_text::tr("ui.project_link_tools"), |ui| ui_kit::checkbox(ui, "", &mut app.ui.project_link_tools));
             crate::scenario::publish_handle("project:link-tools", response.rect.center());
@@ -569,6 +571,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
+            ui_kit::row(ui, tr("ui.construction"), |ui| ui_kit::checkbox(ui, "", construction));
         }
         Kind::SketchModify(k) => {
             let two_parallel_lines = crate::sketch_modify_ui::picks_two_parallel_lines(app, &d.inputs);
@@ -989,6 +992,54 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
     }
 }
 
+/// Which two of a coil's revolutions, height and pitch the dialog takes: 0 revolutions and pitch
+/// (the default, kept out of the parameters), 1 height and pitch, 2 height and revolutions (#20674).
+fn coil_size_by(extra: &serde_json::Map<String, Value>) -> usize {
+    match extra.get("size_by").and_then(Value::as_str) {
+        Some("height_pitch") => 1,
+        Some("height_revolutions") => 2,
+        _ => 0,
+    }
+}
+
+/// The "Size by" choice of the Coil dialog. Choosing a height gives it a starting value.
+fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, default_height: &str) -> bool {
+    const KEYS: &[&str] = &["", "height_pitch", "height_revolutions"];
+    let current = coil_size_by(extra);
+    let mut selected = current;
+    choice_row(
+        ui,
+        "ui.coil_size_by",
+        "coil_size_by",
+        &mut selected,
+        &["ui.coil_by_revolutions_pitch", "ui.coil_by_height_pitch", "ui.coil_by_height_revolutions"],
+    );
+    if selected != current {
+        match KEYS.get(selected) {
+            Some(key) if !key.is_empty() => {
+                extra.insert("size_by".into(), json!(key));
+                extra.entry("coil_height").or_insert_with(|| json!(default_height));
+            }
+            _ => {
+                extra.remove("size_by");
+            }
+        }
+    }
+    false
+}
+
+/// The coil's Height row, its text kept with the dialog's other options.
+fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+    let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
+    let before = height.clone();
+    // The helix's own height, centre line to centre line; the coil's section reaches past it.
+    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
+    if height != before {
+        extra.insert("coil_height".into(), json!(height));
+    }
+    enter
+}
+
 /// The coil's axis, section, where the section sits on the diameter, the way it turns and where
 /// it starts. A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
 /// A sketch profile is the section, so the section rows are hidden then.
@@ -1323,9 +1374,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
-        Kind::Pipe { diameter, wall, operation } => {
+        Kind::Pipe { diameter, wall, hollow, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
-            enter |= hint_row(ui, "Wall", wall, tr("solid"));
+            // A pipe is a solid rod or a hollow tube (#18344). The Type row says which one, and the
+            // Wall row stays where it was: a thickness typed in it makes a tube, as it always did,
+            // so nothing the user typed is ever dropped. Choosing Solid does not empty the Wall row:
+            // the thickness the user typed stays there, and the command carries it.
+            choice_row(ui, "Type", "pipe_type", hollow, &PIPE_TYPES);
+            let was_wall = (*wall).clone();
+            enter |= hint_row(ui, "Wall", wall, if *hollow == 1 { tr("ui.thickness") } else { tr("solid") });
+            if *wall != was_wall {
+                // A thickness in the field is a tube; an empty field is a rod (#18344).
+                *hollow = usize::from(!wall.trim().is_empty());
+            }
             choice_row(ui, "Operation", "pp_op", operation, &OP_LABELS);
         }
         Kind::Stock { margin } => {
@@ -1405,8 +1466,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
+            let coil_by = if *cmd == "solid.coil" { coil_size_by(&d.extra) } else { 0 };
+            if *cmd == "solid.coil" {
+                enter |= coil_size_row(ui, &mut d.extra, &length_default(&app.session, "20"));
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
+                    continue;
+                }
+                // Sized by height: the Height row takes the slot of the field it replaces.
+                if (coil_by == 1 && *k == "revolutions") || (coil_by == 2 && *k == "pitch") {
+                    enter |= coil_height_row(ui, &mut d.extra);
                     continue;
                 }
                 // Revolutions steps by whole turns like the other counts (#7481).
@@ -1491,6 +1561,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
+        Kind::CapturePosition(k) => enter |= crate::dialogs_capture::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch, add, edit } => {
@@ -1503,6 +1574,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
+            saved_section_rows(app, d, ui);
         }
         Kind::Rename { name, .. } | Kind::RenameGroup { name, .. } => {
             form_row(ui, "Name", |ui| {
@@ -1522,6 +1594,90 @@ fn fmt_mm(app: &SolveApp, v: &Value) -> String {
 
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
 /// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
+/// What the saved-sections list keeps between frames: the name being typed, the saved section
+/// being renamed, and what the last action said when it failed.
+#[derive(Clone, Default)]
+struct SavedSectionDraft {
+    name: String,
+    renaming: Option<String>,
+    error: String,
+}
+
+/// The design's saved Section Analyses (#20649): pick one to show it, save the section on show
+/// under a name, rename or delete one. Each action is a command.
+fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    let id = ui.scope_id().with("saved_sections");
+    let mut draft: SavedSectionDraft = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let list = app.run("inspect.section.list", json!({})).unwrap_or(Value::Null);
+    let shown = list.get("shown").and_then(Value::as_str).map(str::to_string);
+    let names: Vec<String> = list
+        .get("sections")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    let live = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
+    if names.is_empty() && !live {
+        return;
+    }
+    ui_kit::text(ui, tr("section.saved_title"), ui_kit::Text::Hint("section_saved"));
+    let mut act: Option<(&'static str, Value)> = None;
+    for name in &names {
+        // A long name or a long translation wraps to the next line instead of widening the card.
+        ui.horizontal_wrapped(|ui| {
+            let on = shown.as_deref() == Some(name.as_str());
+            let look = if on { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
+            if ui_kit::button(ui, name.as_str(), look).clicked() {
+                act = Some(("inspect.section.show", json!({"section": name})));
+            }
+            if ui_kit::button(ui, tr("section.saved_rename"), ui_kit::Button::Small).clicked() {
+                draft.renaming = Some(name.clone());
+                draft.name = name.clone();
+            }
+            if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("section.saved_delete")).clicked() {
+                act = Some(("inspect.section.delete", json!({"section": name})));
+            }
+        });
+    }
+    // The button takes its own width first and the name field the rest of the row, so a long
+    // translation ("Speichern als…") cannot push the row, and with it the card, past the window.
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let renaming = draft.renaming.clone();
+            let label = tr(if renaming.is_some() { "section.saved_rename" } else { "section.saved_save" });
+            let ok = !draft.name.trim().is_empty() && (renaming.is_some() || live);
+            let clicked = ui_kit::button(ui, label, ui_kit::Button::Enabled(ok)).clicked();
+            let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr("section.saved_name"));
+            if (clicked || enter) && ok {
+                act = Some(match renaming {
+                    Some(old) => ("inspect.section.rename", json!({"section": old, "name": draft.name})),
+                    None => ("inspect.section.save", json!({"name": draft.name})),
+                });
+            }
+        });
+    });
+    if let Some((cmd, params)) = act {
+        match app.run(cmd, params) {
+            Ok(_) => {
+                draft.error.clear();
+                if cmd == "inspect.section.show" {
+                    // The dialog's preview and OK now stand for the section just shown.
+                    crate::dialogs::load_shown_section(app, d);
+                } else {
+                    draft.name.clear();
+                    draft.renaming = None;
+                }
+            }
+            Err(e) => draft.error = e,
+        }
+    }
+    if !draft.error.is_empty() {
+        ui_kit::text(ui, &draft.error, ui_kit::Text::Error("section_saved_error"));
+    }
+    ui.data_mut(|data| data.insert_temp(id, draft));
+}
+
 fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>) {
     let Some(r) = r else {
         ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
