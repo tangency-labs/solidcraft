@@ -3855,7 +3855,9 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
                 }
             }
             FileRow::Sub { label, rows } => {
-                crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
+                let sub = crate::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
+                // Named like a row, so a script or test opens the submenu by its label (#21980).
+                solidcraft_ui_registry::publish_target(&format!("menu:{label}"), sub.response.rect);
             }
             FileRow::Separator => {
                 crate::Menu::separator(ui);

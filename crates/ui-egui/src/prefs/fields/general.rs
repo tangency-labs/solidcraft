@@ -31,6 +31,9 @@ macro_rules! general_preferences {
             /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it
             /// has just one (#13098). Off: the list starts empty, as before.
             export_selects_only_body: bool = true, 0;
+            /// The File menu lists every Insert and Export entry at its top level, as before #21980. Off
+            /// (the default): they sit in an Insert and an Export submenu, so the menu fits on the screen.
+            file_menu_flat: bool = false, PAGE_GENERAL => check_id("prefs.file_menu_flat");
             /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
             /// its solids as one Import feature, as before.
             freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");

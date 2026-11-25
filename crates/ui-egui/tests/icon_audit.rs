@@ -477,8 +477,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     escape(&mut h);
     h.app.start("inspect.colored_components");
     click(&mut h, "appbar:file");
-    assert!(h.widget("Export Current View as DXF…").is_some(), "painted File rows retain accessible action labels");
     collect(&mut h, "File", &mut requested);
+    // Insert and Export are submenus (#21980): their rows' icons are drawn once they open.
+    h.step(&json!({"click":{"handle":"menu:Insert"}})).unwrap();
+    collect(&mut h, "File › Insert", &mut requested);
+    h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+    assert!(h.widget("Export Current View as DXF…").is_some(), "painted File rows retain accessible action labels");
+    collect(&mut h, "File › Export", &mut requested);
     escape(&mut h);
     click(&mut h, "appbar:help");
     collect(&mut h, "Help", &mut requested);

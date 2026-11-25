@@ -740,10 +740,23 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     recent.push(FileRow::Separator);
     recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
     rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
-    rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
-    rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
-    rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
-    rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
+    // Insert and Export each sit in a submenu, so the menu fits on the screen (#21980); the
+    // `file_menu_flat` preference lists them at the top level, as before.
+    let flat = app.preferences.file_menu_flat;
+    let group = |rows: &mut Vec<FileRow>, label: &str, items: Vec<FileRow>| {
+        if flat {
+            rows.extend(items);
+        } else {
+            rows.push(FileRow::Sub { label: label.to_string(), rows: items });
+        }
+    };
+    let insert = vec![
+        row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown),
+        row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown),
+        row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown),
+        row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown),
+    ];
+    group(&mut rows, app.tr("ui.file_menu.insert"), insert);
     rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
@@ -761,21 +774,24 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     // Each format's item runs its own command, so it shows that command's key.
     let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
-    rows.push(row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown));
-    rows.push(row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown));
-    rows.push(row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
-    rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
-    rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
-    rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
-    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
-    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
-    rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
-    rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
-    rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
+    let mut export = vec![
+        row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown),
+        row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown),
+        row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)),
+        row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown),
+        row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown),
+        row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown),
+        row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown),
+        row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown),
+        row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown),
+        row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown),
+        row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true),
+    ];
     // Each installed export slot is a format of its own, labelled with the plugin's name.
     for (format, label) in crate::plugin_slots::export_slots(app) {
-        rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
+        export.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
     }
+    group(&mut rows, app.tr("ui.file_menu.export"), export);
     // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
     if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
         rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
@@ -3827,6 +3843,7 @@ mod header_report_tests {
         h.app.session.doc_mut().name = "Exported copy".into();
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
         h.step(&json!({"widget":"Export Design as JSON…"})).unwrap();
         assert_eq!(h.app.session.path.as_deref(), Some(saved.as_str()));
         assert!(h.dir.join("Exported copy.json").is_file());
@@ -3844,6 +3861,7 @@ mod header_report_tests {
         for (item, format) in [("Export STL…", "stl"), ("Export 3MF…", "3mf")] {
             h.frames(3);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+            h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
             h.step(&json!({"widget": item})).unwrap();
             let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("{item}: no Save as mesh dialog") };
             assert_eq!(k.format_name(), format, "{item}");
@@ -3853,6 +3871,57 @@ mod header_report_tests {
             let found = crate::shortcut_box::search(&h.app, q);
             assert!(found.iter().any(|r| r.0 == "file.save_mesh"), "{q}: {:?}", found.iter().map(|r| r.0).collect::<Vec<_>>());
         }
+    }
+
+    /// #21980: the File menu keeps its Insert and Export rows in an Insert and an Export submenu, so
+    /// it fits on the screen; a row there still runs its command. `file_menu_flat` lists them at the
+    /// top level, as before.
+    #[test]
+    fn file_menu_groups_insert_and_export_rows_in_submenus_unless_flat() {
+        let ids = |rows: &[app_bar::FileRow]| {
+            rows.iter()
+                .filter_map(|row| match row {
+                    app_bar::FileRow::Item(item) => Some(item.id.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let sub = |rows: &[app_bar::FileRow], name: &str| {
+            rows.iter().find_map(|row| match row {
+                app_bar::FileRow::Sub { label, rows } if label == name => Some(ids(rows)),
+                _ => None,
+            })
+        };
+        let inserts = ["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design"];
+        let exports = ["file.export_stl", "file.export_3mf", "file.export_step", "file.export_urdf", "export_json"];
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        assert!(!h.app.preferences.file_menu_flat, "grouped by default");
+        let grouped = file_rows(&h.app);
+        let top = ids(&grouped);
+        assert!(inserts.iter().chain(&exports).all(|id| !top.contains(&id.to_string())), "{top:?}");
+        assert_eq!(sub(&grouped, "Insert").unwrap(), inserts);
+        let export = sub(&grouped, "Export").unwrap();
+        assert!(exports.iter().all(|id| export.contains(&id.to_string())), "{export:?}");
+        assert!(top.contains(&"save".to_string()) && top.contains(&"quit".to_string()));
+        // Through the menu: File, Export, then the row.
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        assert!(h.widget("Export STL…").is_none(), "the rows wait in the closed submenu");
+        h.step(&json!({"click":{"handle":"menu:Export"}})).unwrap();
+        h.step(&json!({"widget":"Export STL…"})).unwrap();
+        let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no Save as mesh dialog") };
+        assert_eq!(k.format_name(), "stl");
+        crate::dialogs::cancel(&mut h.app);
+        // Flat: every row at the top level, in the order it had, and no Insert or Export submenu.
+        h.app.preferences.file_menu_flat = true;
+        let flat = file_rows(&h.app);
+        let top = ids(&flat);
+        assert!(sub(&flat, "Insert").is_none() && sub(&flat, "Export").is_none());
+        let at = |id: &str| top.iter().position(|t| t == id).unwrap_or_else(|| panic!("{id}: {top:?}"));
+        assert!(at("open") < at("file.insert_step") && at("component.insert_design") < at("save"));
+        assert!(at("file.export_stl") < at("export_json") && at("export_json") < at("document.metadata"));
+        assert_eq!(flat.len(), grouped.len() - 2 + inserts.len() + export.len());
     }
 
     /// File › New Drawing draws the open design: it enters Drawing and shows the new drawing's first
@@ -4449,6 +4518,10 @@ mod home_tests {
                 Box::new(move |h| {
                     h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
                     click(h, "appbar:folder");
+                    // Insert… and Export… rows sit in their submenu (#21980).
+                    for sub in ["Insert", "Export"].into_iter().filter(|sub| item.starts_with(sub)) {
+                        h.step(&json!({"click":{"handle": format!("menu:{sub}")}})).unwrap();
+                    }
                     // A same-named File navigation action is now present: target the menu row explicitly.
                     if let Some(at) = crate::scenario::handle_at(&format!("menu:{item}")) {
                         h.call("ui.click", json!({"x":at.x,"y":at.y}));
@@ -4494,6 +4567,7 @@ mod home_tests {
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), false));
         let at = crate::scenario::handle_at("appbar:folder").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        let _ = h.step(&json!({"click":{"handle":"menu:Export"}}));
         let _ = h.step(&json!({"widget": "Export URDF…"}));
         h.settle();
         let files: Vec<String> = std::fs::read_dir(&h.dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();

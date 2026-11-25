@@ -1,0 +1,20 @@
+{
+  "en": {
+    "prefs.file_menu_flat": "Show every Insert and Export entry at the top of the File menu",
+    "prefs.file_menu_flat_help": "Off: the File menu groups them in an Insert and an Export submenu.",
+    "ui.file_menu.export": "Export",
+    "ui.file_menu.insert": "Insert"
+  },
+  "en-GB": {
+    "prefs.file_menu_flat": "Show every Insert and Export entry at the top of the File menu",
+    "prefs.file_menu_flat_help": "Off: the File menu groups them in an Insert and an Export submenu.",
+    "ui.file_menu.export": "Export",
+    "ui.file_menu.insert": "Insert"
+  },
+  "de": {
+    "prefs.file_menu_flat": "Alle Einträge zum Einfügen und Exportieren oben im Datei-Menü zeigen",
+    "prefs.file_menu_flat_help": "Aus: Das Datei-Menü fasst sie in den Untermenüs Einfügen und Exportieren zusammen.",
+    "ui.file_menu.export": "Exportieren",
+    "ui.file_menu.insert": "Einfügen"
+  }
+}
