@@ -4590,6 +4590,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Named Section Analyses: sets of cutting planes that can be shown again (#20649).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_sections: Vec<crate::saved_sections::SavedSection>,
     /// Construction planes dragged to a size of their own, by feature id: `[x0, y0, x1, y1]` in the
     /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -4946,6 +4949,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),

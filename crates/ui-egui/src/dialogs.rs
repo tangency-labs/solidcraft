@@ -6534,6 +6534,16 @@ fn section_from_geometry(d: &mut Dialog, plane: solidcraft_engine::SectionPlane,
     d.extra.insert("plane".into(), json!({"origin": base, "normal": canonical}));
 }
 
+/// Load the section on show into the open Section Analysis dialog (its last plane, as Edit does),
+/// so the dialog's preview and OK stand for it rather than for the plane it opened with.
+pub(crate) fn load_shown_section(app: &SolveApp, d: &mut Dialog) {
+    let mut planes: Vec<solidcraft_engine::SectionPlane> = app.session.section.iter().chain(&app.session.section_hidden).copied().collect();
+    planes.sort_by_key(|c| c.id);
+    let Some(plane) = planes.last().copied() else { return };
+    let edit = (planes.len() > 1).then_some(plane.id);
+    section_from_geometry(d, plane, app.session.section_hatch, edit);
+}
+
 /// What the Section Analysis dialog's OK made for one plane (its id): its distance, flip and
 /// plane pick, and the cut (origin, normal) they made, so Edit reopens the dialog where it was
 /// while that plane stands there.

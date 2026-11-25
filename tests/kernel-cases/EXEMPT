@@ -641,6 +641,11 @@ file.export_view_dxf              drawings: the projection of the model a view D
 inspect.draft                     inspect: the number or curves it reports
 inspect.parameter_sweep           inspect: results rebuilt over a parameter range
 inspect.section                   inspect: the number or curves it reports
+inspect.section.delete            display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.list              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.rename            display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.save              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
+inspect.section.show              display: saved Section Analyses; crates/engine/src/tests.rs saved sections
 motion.trace.edit                 assemblies: motion results
 motion.trace.keep                 assemblies: motion results
 parts.fastener                    standard parts: a fastener body

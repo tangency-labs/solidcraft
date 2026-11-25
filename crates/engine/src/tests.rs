@@ -2904,6 +2904,92 @@ fn section_planes_hide_and_show() {
     assert!(s.section.is_empty() && s.section_hidden.is_empty());
 }
 
+/// A design keeps several named sections and switches between them; they are saved with the
+/// design, and a design without any saves nothing for them (#20649).
+#[test]
+fn saved_sections_are_kept_switched_and_saved_with_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    assert!(s.execute("inspect.section.save", &json!({"name": "Nothing yet"})).is_err(), "no section to keep");
+    assert!(!serde_json::to_string(&*s.doc).unwrap().contains("saved_sections"), "nothing saved, nothing written");
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 15}));
+    assert_eq!(run(&mut s, "inspect.section.save", json!({"name": " Wall "}))["section"], "Wall");
+    run(&mut s, "inspect.section", json!({"plane": "YZ", "at": 20, "hatch": false}));
+    run(&mut s, "inspect.section.save", json!({"name": "End"}));
+    let listed = run(&mut s, "inspect.section.list", json!({}));
+    assert_eq!(listed["sections"].as_array().map(Vec::len), Some(2));
+    assert_eq!(listed["shown"], "End");
+
+    // Showing one puts its plane on show; undo brings the other back.
+    let shown = run(&mut s, "inspect.section.show", json!({"section": "Wall"}));
+    assert_eq!(shown["section"], "Wall");
+    assert!(s.section.len() == 1 && (s.section[0].origin.y - 15.0).abs() < 1e-9 && s.section_hatch);
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "Wall");
+    run(&mut s, "inspect.section.show", json!({"section": "End"}));
+    assert!(s.section.len() == 1 && (s.section[0].origin.x - 20.0).abs() < 1e-9 && !s.section_hatch);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((s.section[0].origin.y - 15.0).abs() < 1e-9, "undo shows the earlier section again");
+
+    // Bad names and unknown sections are refused and change nothing.
+    assert!(s.execute("inspect.section.show", &json!({"section": "Missing"})).is_err());
+    assert!(s.execute("inspect.section.save", &json!({"name": "  "})).is_err());
+    assert!(s.execute("inspect.section.rename", &json!({"section": "Wall", "name": "End"})).is_err());
+    run(&mut s, "inspect.section.rename", json!({"section": "Wall", "name": "Inner wall"}));
+
+    // Saved and reopened, both are there and still show.
+    let reopened: solidcraft_doc::Document = serde_json::from_str(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+    assert_eq!(reopened.saved_sections.iter().map(|x| x.name.as_str()).collect::<Vec<_>>(), ["Inner wall", "End"]);
+    let mut again = Session::new(reopened);
+    assert_eq!(run(&mut again, "inspect.section.list", json!({}))["shown"], Value::Null);
+    run(&mut again, "inspect.section.show", json!({"section": "End"}));
+    assert!((again.section[0].origin.x - 20.0).abs() < 1e-9);
+    run(&mut again, "inspect.section.delete", json!({"section": "End"}));
+    run(&mut again, "inspect.section.delete", json!({"section": "Inner wall"}));
+    assert!(again.doc.saved_sections.is_empty());
+    assert!(!serde_json::to_string(&*again.doc).unwrap().contains("saved_sections"));
+}
+
+/// Two cuts far from the origin that differ by 0.05 are told apart: only the one on show is shown.
+#[test]
+fn saved_sections_far_from_the_origin_are_told_apart() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "A"}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.05], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+    run(&mut s, "inspect.section.show", json!({"section": "A"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "A");
+    run(&mut s, "inspect.section.show", json!({"section": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+}
+
+/// A saved section from a damaged file is refused rather than shown.
+#[test]
+fn saved_section_with_a_bad_plane_is_not_shown() {
+    let mut doc = solidcraft_doc::Document::new("Damaged");
+    let plane = |id: u64, normal: solidcore_record::Vec3| solidcraft_doc::SavedSectionPlane {
+        id,
+        origin: solidcore_record::Vec3::ZERO,
+        normal,
+        hidden: false,
+    };
+    for (name, planes) in [
+        ("zero normal", vec![plane(1, solidcore_record::Vec3::ZERO)]),
+        ("id zero", vec![plane(0, solidcore_record::Vec3::X)]),
+        ("same id twice", vec![plane(1, solidcore_record::Vec3::X), plane(1, solidcore_record::Vec3::Y)]),
+        ("too many", (1..=9).map(|i| plane(i, solidcore_record::Vec3::X)).collect()),
+    ] {
+        doc.saved_sections.push(solidcraft_doc::SavedSection { name: name.into(), planes, hatch: true });
+    }
+    let mut s = Session::new(doc);
+    for name in ["zero normal", "id zero", "same id twice", "too many"] {
+        assert!(s.execute("inspect.section.show", &json!({"section": name})).is_err(), "{name}");
+        assert!(s.section.is_empty(), "{name}");
+    }
+}
+
 /// The Analysis folder's eye: hiding it hides the planes on show and remembers them; a plane's
 /// own eye meanwhile changes only whether it comes back; showing it, or a plane added or moved,
 /// brings them back.
