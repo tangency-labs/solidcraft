@@ -1385,6 +1385,12 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if edits {
         v.push(activate);
     }
+    // A component made in this design, or one linked to a file outside it, can be stored in the
+    // design as an internal component (#6892).
+    let internal = doc.links.get(&id).is_some_and(|link| link.step_names.is_some() || solidcraft_engine::doc::internal::linked(&link.path).is_some());
+    if id != 0 && !internal && crate::prefs::parts_and_assemblies(&app.preferences) && app.session.path.is_some() && !app.session.read_only {
+        v.push(cmd(app, "component.make_internal", "Make Internal").with(json!({ "component": id })));
+    }
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);

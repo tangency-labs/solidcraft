@@ -894,7 +894,7 @@ pub struct SolveApp {
     /// A design being picked from, for Insert from Design (#6892).
     pub insert_from_design: Option<insert_from_design::InsertFromDesign>,
     /// Components made by New inside a design, waiting to be stored as internal components (#6892).
-    pub new_internal: Vec<new_internal::Pending>,
+    pub new_internal: new_internal::State,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1226,7 +1226,7 @@ impl SolveApp {
             recovery_components: None,
             internal_file: None,
             insert_from_design: None,
-            new_internal: Vec::new(),
+            new_internal: new_internal::State::default(),
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -4741,6 +4741,7 @@ impl SolveApp {
         internal_file::show(self, ui.ctx());
         insert_from_design::show(self, ui.ctx());
         new_internal::settle(self);
+        new_internal::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

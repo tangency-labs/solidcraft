@@ -658,13 +658,28 @@ pub(crate) fn draw_context(app: &SolveApp, sc: &mut GpuScene) {
 /// Above the browser's rows while a part is edited in place: which assembly it is in (Finish
 /// Editing is on the MODEL tab).
 pub(crate) fn browser_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
+    // A new part being modelled in this design has the same band: Finish Edit goes back to the
+    // design, which asks for the part's name and stores it.
+    if crate::new_internal::active(app).is_some() {
+        let name = crate::documents::tab_name(app, &app.session);
+        if band(ui, &solidcraft_ui_text::format("ui.edit_in_place_banner", &[("name", &name)])) {
+            crate::new_internal::finish(app);
+        }
+        return;
+    }
     let Some(context) = app.edit_in_place.active.clone() else { return };
-    let t = Tokens::get();
     let refreshing = app.edit_in_place.refresh.as_ref().is_some_and(|r| crate::documents::same_path(&r.assembly, &context.assembly));
     let key = if refreshing { "ui.edit_in_place_refreshing" } else { "ui.edit_in_place_banner" };
     let text = solidcraft_ui_text::format(key, &[("name", &context.assembly_name)]);
-    // A notice band over the tree: where the part belongs on the left, and Finish Edit as a
-    // button at the right, so leaving the part is at hand where the tree is.
+    if band(ui, &text) {
+        finish(app);
+    }
+}
+
+/// A notice band over the tree: where the part belongs on the left, and Finish Edit as a button
+/// at the right, so leaving the part is at hand where the tree is. True when it was pressed.
+fn band(ui: &mut egui::Ui, text: &str) -> bool {
+    let t = Tokens::get();
     let mut finish_edit = false;
     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_6 as i8)).show(ui, |ui| {
         crate::ui_kit::banner(ui, crate::ui_kit::AssistantTone::Neutral, |ui| {
@@ -676,15 +691,13 @@ pub(crate) fn browser_strip(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_target("edit_in_place:finish", button.rect);
                     finish_edit = button.clicked();
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));
+                        crate::ui_kit::text(ui, text, crate::ui_kit::Text::Hint("edit_in_place"));
                     });
                 });
             });
         });
     });
-    if finish_edit {
-        finish(app);
-    }
+    finish_edit
 }
 
 #[cfg(test)]

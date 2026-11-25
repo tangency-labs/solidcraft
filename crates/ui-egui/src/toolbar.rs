@@ -905,6 +905,10 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    // A new part made in this design is named and stored first (#6892); the save follows.
+    if crate::new_internal::before_save(app) {
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
