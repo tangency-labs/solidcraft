@@ -103,9 +103,16 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
         return Err(Error::Internal("smlib_untrim_face: the body was left unfinished by an earlier panic".to_owned()));
     }
     const CALL: &str = "smlib_untrim_face";
+    // A pick that chose nothing is the call's refusal, its body left in the dump folder as a
+    // failed call leaves it.
+    let missed = || {
+        let e = Error::NoMatch { point: 0 };
+        super::dump::failed_ops(CALL, &e.to_string(), &[("brep", body)]);
+        e
+    };
     let order = body.own_order();
     let rows = ops_as(CALL, &[("brep", body)], refused, || body.face_distances_within(&order, &[point], tol))?;
-    let face = nearest_within(rows.iter().map(|row| row.first().copied().flatten()), tol).ok_or(Error::NoMatch { point: 0 })?;
+    let face = nearest_within(rows.iter().map(|row| row.first().copied().flatten()), tol).ok_or_else(missed)?;
     // The holes taken away: all of them, or the one nearest each point, named by an edge of it.
     let mut along: Vec<usize> = Vec::new();
     if let Some(points) = holes {
@@ -124,7 +131,7 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
                 }
                 distances.push(Some(d));
             }
-            let l = nearest_within(distances, tol).ok_or(Error::NoMatch { point: 0 })?;
+            let l = nearest_within(distances, tol).ok_or_else(missed)?;
             if !taken.contains(&l) {
                 taken.push(l);
                 along.extend(inner.get(l).and_then(|edges| edges.first()));
