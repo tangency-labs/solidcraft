@@ -5388,7 +5388,7 @@ mod tests {
         assert_eq!(focused(&h), before, "Shift+Tab reverses Tab");
 
         let mut reverse = crate::scenario::Harness::new();
-        reverse.app = four_tabs();
+        reverse.app = Box::new(four_tabs());
         reverse.app.home.open = false;
         control(&mut reverse.app, &json!({"action":"close_all"}));
         reverse.frames(3);
@@ -5978,7 +5978,7 @@ mod tests {
             ("reference-1400x757.png", 1400.0, 757.0, true, false, false, false),
         ] {
             let mut h = crate::scenario::Harness::new();
-            h.app = app();
+            h.app = Box::new(app());
             h.app.home.open = false;
             h.app.ui.dark = true;
             h.app.preferences.language = "en".into();
