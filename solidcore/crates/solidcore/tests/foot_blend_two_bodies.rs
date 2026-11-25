@@ -3,9 +3,9 @@
 //! `FootBlend::toes_on_bodies` checks each toe on its own body's face. A plate standing on a
 //! plate (T joint), a plate lapped on a plate and a rod standing on a plate, each two bodies,
 //! 6 mm legs: the flat bead's volume is the closed form, its edges lie in the joint's corner,
-//! and both bodies are the same after, in their file bytes and in memory. A leg past the base
-//! plate's end is refused with the leg that fits; two plates butted flush meet in no corner;
-//! a joint off one of the faces is refused.
+//! and both bodies are the same after, in their file bytes and in memory. A toe in a notch of
+//! the base is refused with the leg that fits; two plates butted flush meet in no corner; a
+//! joint off one of the faces is refused.
 
 #![allow(clippy::unwrap_used, clippy::panic)] // test
 
@@ -205,28 +205,29 @@ fn a_rod_standing_on_a_plate_gets_its_bead_round_its_foot() {
     assert!((v - pappus).abs() <= 1e-4 * pappus, "{v} against {pappus}");
 }
 
-/// The base runs 45 past the web's face: a leg of 50 along it is refused, naming the base's
-/// top, with the leg that fits (the halving's last bracket at 45, a toe held to the face's
-/// tolerance), which passes; both bodies unchanged.
+/// A notch cut through the base behind the web (x from 20 to 30, y from 40 to 60): a leg of
+/// 20 along the base puts the toes in it, off the base's top but on its plane. Refused,
+/// naming the base's top, with the largest leg whose toes stay on it, 15 (to the notch's
+/// side at x = 30), which passes; both bodies unchanged.
 #[test]
-fn a_leg_past_the_other_body_s_face_is_refused_with_the_leg_that_fits() {
+fn a_toe_in_a_notch_of_the_other_body_s_face_is_refused_with_the_leg_that_fits() {
+    use solidcore::boolean::api_brep::boolean_difference;
     let mut k = kernel();
-    let (web, side, base, top) = tee(&mut k);
+    let (web, side, base, _) = tee(&mut k);
+    let notch = block(&mut k, [20.0, 40.0, -1.0], [10.0, 20.0, 12.0]);
+    let base = boolean_difference(&mut k, base, notch).unwrap();
+    let top = face_at(&k, &base, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
     let joint = line([45.0, 0.0, 10.0], [45.0, 100.0, 10.0]);
     let before = state(&k, &web, &base);
     let blend = FootBlend::of_faces(&k, &web, side, &base, top, &joint).unwrap();
     let err = blend
-        .toes_on_bodies(&k, [&web, &base], [LEG, 50.0], &[])
+        .toes_on_bodies(&k, [&web, &base], [LEG, 20.0], &[])
         .unwrap_err();
     assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
     assert!(format!("{err:?}").contains("LegPastFace"), "{err:?}");
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
-    assert!(
-        (45.0 - 4.7e-6..=45.0 + 1e-4).contains(&fit.size),
-        "{}",
-        fit.size
-    );
+    assert!(fit.size > 14.9 && fit.size <= 15.0 + 1e-3, "{}", fit.size);
     blend
         .toes_on_bodies(&k, [&web, &base], [LEG, fit.size], &[])
         .unwrap();
