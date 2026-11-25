@@ -1502,6 +1502,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         _ => {}
     }
+    // A Cut with bodies in several components lists the ones it may cut (#20647).
+    crate::cut_bodies::rows(app, d, ui);
     enter
 }
 

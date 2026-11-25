@@ -6561,11 +6561,14 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
         *value = crate::length_input::expression(&app.session.doc, value, ValueKind::Length);
     }
     crate::length_input::extra(&mut normalized.extra, |e| crate::length_input::expression(&app.session.doc, e, ValueKind::Length));
+    // The unticked bodies of a Cut's list are the window's own, not a command parameter.
+    normalized.extra.remove(crate::cut_bodies::SKIPPED);
     let mut cmds = dialog_commands(app, &normalized)?;
     for (command, params) in &mut cmds {
         crate::sketch_tools::projection_policy(app, command, params);
     }
     exact_regions(d, &mut cmds);
+    crate::cut_bodies::scope(app, d, &mut cmds)?;
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
     if crate::hole_folder::active(d) {
         return crate::hole_folder::commands(app, d, cmds);

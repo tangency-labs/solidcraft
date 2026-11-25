@@ -46,6 +46,7 @@ mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
