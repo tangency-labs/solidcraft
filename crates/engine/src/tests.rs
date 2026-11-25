@@ -8688,6 +8688,26 @@ fn renaming_a_parameter_a_sketch_reads_recomputes_nothing() {
     assert!(rel(moved.0, shown) > 0.1, "{} vs {shown}", moved.0);
 }
 
+/// #611: an equation curve's variable hides a parameter of its name, so renaming the parameter a
+/// formula reads to the variable's name changes what the formula reads (`y = a * t` becomes
+/// `y = t * t`): the curve is placed where evaluating the renamed design places it.
+#[test]
+fn renaming_a_parameter_to_an_equation_curves_variable_places_the_curve_again() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "2"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "a * t", "start": 0, "end": 4}));
+    let curve = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let solved = |s: &Session| format!("{:?}", s.model.state().sketches);
+    let shown = solved(&s);
+    run(&mut s, "parameters.rename", json!({"name": "a", "new_name": "t"}));
+    let f = s.doc.find_feature("S").unwrap().id;
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&curve).unwrap().y, "t * t");
+    assert_eq!(solved(&s), solved(&Session::new((*s.doc).clone())), "the curve is the renamed design's");
+    assert_ne!(solved(&s), shown, "y = t * t is not y = 2 * t");
+}
+
 /// #3397: a new, empty component changes nothing a feature reads, so creating one recomputes
 /// nothing, the first component of a design included: not a targeted cut, a Combine, a To
 /// Object extrude or a sketch on a face without a construction certificate (a legacy face

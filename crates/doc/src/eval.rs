@@ -5492,6 +5492,12 @@ impl Model {
             .filter(|(a, b)| matches!(a.kind, FeatureKind::Sketch { .. }) && a != b)
             .map(|(a, _)| a.id)
             .collect();
+        // An equation curve's variable hides a parameter of its name: a formula that read `old`
+        // reads the variable now, and the curve moves (`y = a * t` becomes `y = t * t`).
+        let hides = |f: &Feature| matches!(&f.kind, FeatureKind::Sketch { sketch, .. } if sketch.equations.iter().any(|e| e.variable() == new));
+        if doc.features.iter().filter(|f| sketches.contains(&f.id)).any(hides) {
+            return false;
+        }
         // States, and solved sketches between them, are shared: each is renamed once and stays shared.
         let mut solved: std::collections::HashMap<*const SolvedSketch, (Arc<SolvedSketch>, u64)> = std::collections::HashMap::new();
         let mut renamed: std::collections::HashMap<*const ModelState, Arc<ModelState>> = std::collections::HashMap::new();
