@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 use solidcraft_doc::BomType;
 use solidcraft_doc::bom::{self, Bom, Group, ItemNumbers, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
-use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, DESCRIPTION, MAX_KEYS, Owner, PART_NUMBER, PART_ONLY, REVISION, check_text, key_list};
+use solidcraft_doc::metadata::{
+    BOM_KEYS, BOM_QUANTITY, DESCRIPTION, FINISH, MATERIAL, MAX_KEYS, Owner, PART_NUMBER, PART_ONLY, REVISION, check_text, key_list,
+};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -41,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ComponentMetadataResult>)
         .params(
             "component: id or name (0 or \"root\": the design's own properties) → component, name, part_number, description, revision, \
-         bom_type, material (its static material or null), bom_quantity (or null) and virtual (components only), metadata (as saved, other tools' keys too), \
+         material (its static material or null), finish (or null), bom_type, bom_quantity (or null) and virtual (components only), metadata (as saved, other tools' keys too), \
          properties: {name: text}",
         ),
     CommandSpec::new("component.metadata.set", "Change Part Properties", crate::checked!("component.metadata.set", set))
@@ -50,14 +52,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&METADATA_SET_CONTRACT)
         .output(output_schema_for::<ComponentMetadataSetResult>)
         .params(
-            "component: id or name (not the root: use document.metadata.set); part_number?, description?, revision?: text (empty or null \
-         removes); bom_type?: normal|phantom|reference|purchased|inseparable (empty or null: normal); material?: text, a static \
+            "component: id or name (not the root: use document.metadata.set, which takes material and finish too); part_number?, description?, revision?: text (empty or null \
+         removes); finish?: text, the part's finish, free (\"powder coat, RAL 9005, matt\", \"zinc plate, clear\", \"#4 brushed\"; empty or null removes it); bom_type?: normal|phantom|reference|purchased|inseparable (empty or null: normal); material?: text, a static \
          material: what its bill of materials rows say it is made of, in place of its bodies' materials (it doesn't change the \
          mass; empty or null clears it); bom_quantity?: an expression, what one placement means in a bill of materials: a \
          number of pieces (\"4\") or a length (\"2.5 m\", \"2 * span + 50 mm\"), evaluated with the design's parameters, above \
          0 (empty or null removes it: one piece); virtual?: true|false (a component with no geometry, such as grease or a \
          label: it can't be the active component or hold bodies, sketches or components); values?: {key: value} (SolidCraft's \
-         keys, as document.metadata's properties lists them, bom_type, material, bom_quantity, virtual, or a reverse-DNS key \
+         keys, as document.metadata's properties lists them (material and finish too), bom_type, bom_quantity, virtual, or a reverse-DNS key \
          holding an object); properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step → component, metadata, \
          properties, changed: [keys]",
         ),
@@ -92,12 +94,12 @@ pub static COMMANDS: &[CommandSpec] = &[
          their own beside it (in parts only a part's contents are rows of their own, but not a folded part's or a purchased one's, \
          and of an inseparable one's only its purchased parts are), so the rows add up to the assembly; a reference placement \
          adds nothing; null when nothing in it has a body, a body can't be measured or the row's definitions differ); path?: write \
-         a .csv (columns item, part_number, description, revision, count, definition, material, quantity) or .json file (children as \
+         a .csv (columns item, part_number, description, revision, count, definition, material, quantity, finish) or .json file (children as \
          items 1.1, 1.2…); format?: csv|json (default from the path). Each placement counts as \
          its occurrence's bom_type, else its component's: phantom has no row (what it holds counts here; its own bodies, \
          if it has any, are a row of their own), reference counts nowhere, purchased and inseparable are one row (in flat, an inseparable one's purchased parts are listed too, under it with group_children and a part number); placements \
          of one component that count as different types are different rows → rows: [{item, part_number, description, revision, \
-         bom_type, count, definition, material (the physical materials of the definitions' own bodies, \"; \" between them; a \
+         bom_type, count, definition, finish (the part's finish property, else a free property named finish), material (the physical materials of the definitions' own bodies, \"; \" between them; a \
          row that weighs what is placed inside it shows the one material all of that shares, else \"\"), mass_g?, quantity? \
          (when its definitions have a bom_quantity: what its placements add up to, a number with quantity_unit pieces or mm, a \
          placement without one counting 1 piece; null with quantity_unknown mixed (pieces and a length) or invalid (a quantity \
@@ -154,8 +156,8 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
         (&c.name, &c.metadata, c.properties.clone())
     };
     let text = |k: &str| m.text(k).map(str::to_string);
-    // A bill of materials type, static material, quantity and virtual flag are a component's;
-    // the design has none.
+    // A bill of materials type, quantity and virtual flag are a component's; the design has none.
+    // A material and a finish are a design's too: a single part has no component to hold them.
     let part = id != 0;
     let reply = ComponentMetadataResult {
         component: id,
@@ -164,7 +166,8 @@ fn read(s: &mut Session, p: &Value) -> Result<Value> {
         description: text(DESCRIPTION),
         revision: text(REVISION),
         bom_type: part.then(|| m.bom_type().as_str().to_string()),
-        material: part.then(|| m.material().map(str::to_string)),
+        material: Some(m.material().map(str::to_string)),
+        finish: Some(m.finish().map(str::to_string)),
         bom_quantity: part.then(|| m.bom_quantity().map(str::to_string)),
         r#virtual: part.then(|| m.is_virtual()),
         metadata: m.0.clone(),
@@ -208,7 +211,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Object(_)) => return Err(bad(cmd, format!("`values` can hold at most {MAX_KEYS} keys"))),
         Some(_) => return Err(bad(cmd, "`values` must be an object: {key: value, …}")),
     }
-    for k in BOM_KEYS.iter().chain(PART_ONLY.iter()) {
+    for k in BOM_KEYS.iter().chain([&MATERIAL, &FINISH]).chain(PART_ONLY.iter()) {
         if let Some(v) = p.get(*k) {
             entries.push((k.to_string(), v.clone()));
         }
@@ -222,7 +225,12 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     if entries.is_empty() && props.is_empty() {
         return Err(bad(
             cmd,
-            format!("give {}, {}, values or properties ({})", BOM_KEYS.join(", "), PART_ONLY.join(", "), key_list(Owner::Component)),
+            format!(
+                "give {}, {MATERIAL}, {FINISH}, {}, values or properties ({})",
+                BOM_KEYS.join(", "),
+                PART_ONLY.join(", "),
+                key_list(Owner::Component)
+            ),
         ));
     }
     let mut changed: Vec<String> = Vec::new();
@@ -379,7 +387,8 @@ fn rows_json(list: &Bom, view: View, mass: bool) -> Vec<Value> {
 /// provisional only in a `numbered` view (in one never numbered every number is).
 fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -> Value {
     let mut v = json!({"part_number": row.part_number, "description": row.description, "revision": row.revision,
-        "bom_type": row.bom_type.as_str(), "count": row.count, "definition": row.names.join("; "), "material": row.materials.join("; ")});
+        "bom_type": row.bom_type.as_str(), "count": row.count, "definition": row.names.join("; "), "material": row.materials.join("; "),
+        "finish": row.finish});
     if item.len() <= 1 {
         v["item"] = json!(row.item);
         v["components"] = json!(row.components);
@@ -433,7 +442,7 @@ fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -
 /// added later goes at the end, so the others keep their places.
 fn csv(list: &Bom) -> String {
     let quote = solidcraft_doc::csv::quoted;
-    let mut out = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity"].map(quote).join(",");
+    let mut out = ["item", "part_number", "description", "revision", "count", "definition", "material", "quantity", "finish"].map(quote).join(",");
     out.push('\n');
     for (item, r) in list.rows_deep() {
         let (item, count, definition, material) = (bom::item_text(&item), r.count.to_string(), r.names.join("; "), r.materials.join("; "));
@@ -442,7 +451,7 @@ fn csv(list: &Bom) -> String {
             Quantity::Length(mm) => format!("{mm} mm"),
             Quantity::Count | Quantity::Unknown(_) => String::new(),
         };
-        let fields: [&str; 8] = [&item, &r.part_number, &r.description, &r.revision, &count, &definition, &material, &quantity];
+        let fields: [&str; 9] = [&item, &r.part_number, &r.description, &r.revision, &count, &definition, &material, &quantity, &r.finish];
         out.push_str(&fields.map(quote).join(","));
         out.push('\n');
     }

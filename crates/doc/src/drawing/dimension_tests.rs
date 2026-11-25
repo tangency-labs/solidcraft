@@ -44,6 +44,7 @@ fn measured() -> (Drawing, [u64; 3]) {
         place: ViewPlace::At([150.0, 150.0]),
         settings,
         reference_shown_percent: 0.0,
+        centre_marks: None,
         label: None,
     })]);
     let kinds = [

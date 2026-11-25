@@ -259,7 +259,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
