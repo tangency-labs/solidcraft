@@ -4910,6 +4910,9 @@ impl Document {
         if let Some(c) = self.body_components.remove(old) {
             self.body_components.insert(new.to_string(), c);
         }
+        for target in self.notes.iter_mut().filter_map(|n| n.target.as_mut()).filter(|t| t.body == old) {
+            target.body = new.to_string();
+        }
         let rename = |e: &mut BrowserEntry| {
             if e.is_item(old) {
                 *e = BrowserEntry::item(new);

@@ -146,6 +146,7 @@ pub use joints::posed_joints;
 pub use joints::reach_from;
 pub use joints::reach_preview;
 pub use parts::part_length_label;
+pub use selection::target_from_selection as note_target_from_selection;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub(crate) use sketch::finish_model_edit;

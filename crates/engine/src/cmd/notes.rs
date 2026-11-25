@@ -1,6 +1,6 @@
 //! Note commands (#1631): personal notes anchored to points in model space, saved with the
 //! design and drawn in the viewport as screen-facing callouts. `note.add` anchors a note,
-//! `note.update` edits its text, anchor, or hidden flag, `note.delete` removes it, and
+//! `note.update` edits its text, anchor, hidden or done flag, `note.delete` removes it, and
 //! `note.list` reads them back. Everything lives in the document, so notes are saved and
 //! undone like any other design change.
 
@@ -10,14 +10,18 @@ use solidcraft_doc::Note;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, req_vec3, str_};
-use crate::schema::notes::{NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NoteUpdateParams, NotesList};
+use crate::schema::notes::{
+    NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NoteTargetItem, NoteUpdateParams, NotesList, NotesPanelParams,
+    NotesPanelResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::{Result, Session};
+use crate::{EngineError, Result, Session};
 
 const ADD: TypedContract<NoteAddParams> = TypedContract::new();
 const UPDATE: TypedContract<NoteUpdateParams> = TypedContract::new();
 const DELETE: TypedContract<NoteDeleteParams> = TypedContract::new();
 const LIST: TypedContract<NoteListParams> = TypedContract::new();
+const PANEL: TypedContract<NotesPanelParams> = TypedContract::new();
 
 /// Notes a design may hold.
 const MAX_NOTES: usize = 1000;
@@ -27,12 +31,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("text")
         .contract(&ADD)
         .output(output_schema_for::<NoteId>)
-        .params("anchor?: [x,y,z] (the point in model space, mm; without it, where the selection points, or the origin); text: the note (may span lines); hidden?: bool (saved but not drawn) → note: id"),
+        .params("anchor?: [x,y,z] (the point in model space, mm; without it, where the selection points, or the origin, and the note keeps the selected body, face or edge as its target); text: the note (may span lines); hidden?: bool (saved but not drawn) → note: id"),
     CommandSpec::new("note.update", "Edit Note", crate::checked!("note.update", note_update)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .contract(&UPDATE)
         .output(output_schema_for::<NoteId>)
-        .params("note: id; text?: the new text; anchor?: [x,y,z] (move the anchor); hidden?: bool (show or hide) → note: id"),
+        .params("note: id; text?: the new text; anchor?: [x,y,z] (move the anchor); hidden?: bool (show or hide); done?: bool (worked off, or open again) → note: id"),
     CommandSpec::new("note.delete", "Delete Note", crate::checked!("note.delete", note_delete))
         .icon("delete")
         .contract(&DELETE)
@@ -44,15 +48,28 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<NotesList>)
         .noundo()
         .doc_only()
-        .params("→ notes: [{id, anchor: [x,y,z], text, hidden}] in creation order"),
+        .params("→ notes: [{id, anchor: [x,y,z], text, hidden, done, target?: {kind: body|face|edge|vertex, body, index?}}] in creation order"),
+    CommandSpec::new("ui.notes", "Toggle Notes", crate::checked!("ui.notes", notes_panel))
+        .any_part()
+        .icon("text")
+        .key("Ctrl+Shift+N")
+        .noundo()
+        .doc_only()
+        .contract(&PANEL)
+        .output(output_schema_for::<NotesPanelResult>)
+        .params("Show or hide the Notes panel in the app. Headless calls are refused without changing the design"),
 ];
+
+fn notes_panel(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.notes shows or hides the Notes panel in the app; no panel exists in a headless session".into()))
+}
 
 fn note_add(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "note.add";
     // Without an anchor the note lands where the selection points, or at the origin (#16015).
-    let anchor = match p.get("anchor") {
-        Some(_) => req_vec3(CMD, p, "anchor")?,
-        None => super::selection::anchor_from_selection(s),
+    let (anchor, target) = match p.get("anchor") {
+        Some(_) => (req_vec3(CMD, p, "anchor")?, None),
+        None => (super::selection::anchor_from_selection(s), super::selection::target_from_selection(s)),
     };
     let text = str_(p, "text").ok_or_else(|| bad(CMD, "`text` is required"))?;
     if !Note::text_is_valid(text) {
@@ -63,7 +80,7 @@ fn note_add(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let id = s.doc_mut().allocate_id()?;
     let hidden = bool_(p, "hidden").unwrap_or(false);
-    s.doc_mut().notes.push(Note { id, anchor, text: text.to_string(), hidden });
+    s.doc_mut().notes.push(Note { id, anchor, text: text.to_string(), hidden, done: false, target });
     Ok(json!({ "note": id }))
 }
 
@@ -88,8 +105,9 @@ fn note_update(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let hidden = bool_(p, "hidden");
-    if text.is_none() && anchor.is_none() && hidden.is_none() {
-        return Err(bad(CMD, "give at least one of `text`, `anchor`, `hidden`"));
+    let done = bool_(p, "done");
+    if text.is_none() && anchor.is_none() && hidden.is_none() && done.is_none() {
+        return Err(bad(CMD, "give at least one of `text`, `anchor`, `hidden`, `done`"));
     }
     let id = {
         let n = &mut s.doc_mut().notes[i];
@@ -101,6 +119,9 @@ fn note_update(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(h) = hidden {
             n.hidden = h;
+        }
+        if let Some(d) = done {
+            n.done = d;
         }
         n.id
     };
@@ -118,7 +139,14 @@ fn note_list(s: &mut Session, _p: &Value) -> Result<Value> {
         .doc
         .notes
         .iter()
-        .map(|n| NoteItem { id: n.id, anchor: [n.anchor.x, n.anchor.y, n.anchor.z], text: n.text.clone(), hidden: n.hidden })
+        .map(|n| NoteItem {
+            id: n.id,
+            anchor: [n.anchor.x, n.anchor.y, n.anchor.z],
+            text: n.text.clone(),
+            hidden: n.hidden,
+            done: n.done,
+            target: n.target.as_ref().map(|t| NoteTargetItem { kind: t.kind.clone(), body: t.body.clone(), index: t.index }),
+        })
         .collect();
     Ok(json!({ "notes": notes }))
 }

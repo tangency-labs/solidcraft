@@ -3056,6 +3056,22 @@ fn note_callouts_are_screen_facing_and_follow_the_anchor() {
     assert!(shot(&h).is_empty());
 }
 
+/// Notes panel: a note ticked off is drawn muted, its text included (the galley is laid out
+/// in the normal text colour, so the muted colour must override it).
+#[test]
+fn a_done_note_is_drawn_muted() {
+    let mut h = Harness::new();
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": "Worked off."})).unwrap();
+    let id = h.app.session.doc.notes[0].id;
+    h.app.run("note.update", json!({"note": id, "done": true})).unwrap();
+    h.settle();
+    let proj = display_proj(&h.app);
+    let output = draw(&h.ctx, |ui| draw_notes(&h.app, ui.painter(), &proj));
+    let t = Tokens::get();
+    let text = output.shapes.iter().find_map(|s| if let Shape::Text(t) = &s.shape { Some(t) } else { None }).expect("the note's text");
+    assert_eq!(text.override_text_color, Some(t.text_dim));
+}
+
 /// Notes: a long note wraps inside its box. The box was sized from a layout wrapped at
 /// `NOTE_WRAP_WIDTH` while the text was drawn on one line, so a sentence ran out of its box.
 #[test]

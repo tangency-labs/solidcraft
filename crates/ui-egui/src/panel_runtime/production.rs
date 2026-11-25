@@ -35,6 +35,7 @@ enum Product {
     DrawingInspector,
     Timeline2d,
     PartsLibrary,
+    Notes,
 }
 impl Product {
     const ALL: &[Self] = &[
@@ -51,6 +52,7 @@ impl Product {
         Self::DrawingInspector,
         Self::Timeline2d,
         Self::PartsLibrary,
+        Self::Notes,
     ];
     const NEW_RENDER: [Self; 3] = [Self::RenderLibrary, Self::RenderInspector, Self::RenderShots];
 
@@ -74,6 +76,7 @@ impl Product {
             Self::DrawingInspector => 10,
             Self::Timeline2d => 11,
             Self::PartsLibrary => 12,
+            Self::Notes => 13,
         }
     }
     fn visible(self, app: &crate::SolveApp) -> bool {
@@ -92,6 +95,7 @@ impl Product {
             Self::DrawingSheets => crate::drawing_workspace::sheets_visible(app),
             Self::DrawingInspector => crate::drawing_workspace::inspector_visible(app),
             Self::PartsLibrary => app.preferences.library_open,
+            Self::Notes => app.ui.show_notes,
         }
     }
     fn set_visible(self, app: &mut crate::SolveApp, open: bool) {
@@ -103,6 +107,7 @@ impl Product {
             Self::Timeline2d if timeline_2d(app) => app.ui.show_timeline = open,
             Self::History | Self::Timeline2d => {}
             Self::Assistant => app.agent_chat.open = open,
+            Self::Notes => app.ui.show_notes = open,
             Self::RenderLibrary => {}
             Self::RenderInspector => crate::render_workspace::set_inspector_visible(app, open),
             Self::RenderShots => app.preferences.render_shots_strip = open,
@@ -132,6 +137,7 @@ impl Product {
             Self::DrawingInspector => "drawing-inspector",
             Self::Timeline2d => "timeline-2d",
             Self::PartsLibrary => "parts-library",
+            Self::Notes => "notes",
         }
     }
     fn kind(self) -> &'static str {
@@ -149,6 +155,7 @@ impl Product {
             Self::DrawingInspector => "solidcraft.drawing_inspector",
             Self::Timeline2d => "solidcraft.timeline_2d",
             Self::PartsLibrary => "solidcraft.parts_library",
+            Self::Notes => "solidcraft.notes",
         }
     }
     fn title_key(self) -> &'static str {
@@ -165,6 +172,7 @@ impl Product {
             Self::DrawingSheets => "ui.drawing_sheets.title",
             Self::DrawingInspector => "ui.drawing_sheets.settings",
             Self::PartsLibrary => "parts_library.title",
+            Self::Notes => "ui.notes_title",
         }
     }
     fn icon(self) -> &'static str {
@@ -174,6 +182,7 @@ impl Product {
             Self::DrawingSheets => "ws_drawing",
             Self::DrawingInspector => "settings",
             Self::PartsLibrary => "folder",
+            Self::Notes => "text",
             _ => "list",
         }
     }
@@ -198,6 +207,7 @@ impl Product {
             }
             Self::DrawingInspector => crate::drawing_workspace::inspector_visible(app),
             Self::PartsLibrary => !render && !crate::render_ui::focused(app),
+            Self::Notes => !render && !crate::render_ui::focused(app) && !crate::drawing_workspace::active(app),
         }
     }
     fn default_zone(self, placement: &crate::prefs::Prefs) -> Zone {
@@ -207,7 +217,7 @@ impl Product {
             Self::RenderBrowser | Self::RenderLibrary if placement.render_browser_side == "right" => Zone::Right,
             Self::RenderShots | Self::Timeline2d => Zone::Bottom,
             Self::RenderInspector if placement.render_inspector_side != "left" => Zone::Right,
-            Self::SketchOptions | Self::Bom => Zone::Right,
+            Self::SketchOptions | Self::Bom | Self::Notes => Zone::Right,
             Self::DrawingInspector if placement.drawing_panel_side != "left" => Zone::Right,
             _ => Zone::Left,
         }
@@ -259,6 +269,7 @@ impl Product {
                 ("choose-folder", "parts_library.choose_another", "folder"),
                 ("design-folder", "parts_library.design_folder", "open"),
             ],
+            Self::Notes => vec![("copy-for-agent", "ui.notes_copy_for_agent", "copy")],
             Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
@@ -383,6 +394,17 @@ impl Product {
                     enabled: true,
                     disabled_reason: None,
                     pressed: Some(crate::browser_search::bar_shown(app)),
+                }]
+            }
+            Self::Notes => {
+                let open = app.session.doc.notes.iter().filter(|note| !note.done).count();
+                presentation.status = Some(open.to_string());
+                vec![RuntimeAction {
+                    id: ControlId("copy-for-agent".into()),
+                    label: solidcraft_ui_text::tr("ui.notes_copy_for_agent").into(),
+                    enabled: open > 0,
+                    disabled_reason: (open == 0).then(|| solidcraft_ui_text::tr("ui.notes_none_open").into()),
+                    pressed: None,
                 }]
             }
             Self::PartsLibrary => {
@@ -703,6 +725,7 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
             }
             Product::Browser => crate::browser::magnifier(app),
             Product::PartsLibrary => crate::parts_library::header_action(app, &action.action.0),
+            Product::Notes => crate::notes_panel::copy_for_agent(app),
             Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
@@ -1009,8 +1032,53 @@ fn sync_bom(app: &mut crate::SolveApp) -> PanelResult<()> {
     Ok(())
 }
 
+/// Show the Notes panel and bring it to the front, or close it when it is already in front.
+/// A saved layout from before the panel existed gets it opened on its default side.
+pub(crate) fn toggle_notes(app: &mut crate::SolveApp, force_open: bool) -> PanelResult<()> {
+    let Some(integration) = app.panel_runtime.as_ref() else {
+        app.ui.show_notes = force_open || !app.ui.show_notes;
+        return Ok(());
+    };
+    let id = InstanceId::new(Product::Notes.id())?;
+    let layout = integration.runtime().layout().layout();
+    let mutations = match layout.instance(&id) {
+        Ok(panel) => {
+            let section = layout.containing(&id).ok();
+            let reveal =
+                force_open || !app.ui.show_notes || !panel.requested_open || section.is_some_and(|section| section.collapsed || section.active != id);
+            if reveal {
+                let section_id = section.map_or_else(|| panel.memory.section.clone(), |section| section.id.clone());
+                let mut mutations = Vec::new();
+                if !panel.requested_open {
+                    mutations.push(Mutation::Open { kind: panel.kind.clone(), instance: id.clone(), destination: None });
+                }
+                mutations.push(Mutation::Collapse { section: section_id, collapsed: false });
+                mutations.push(Mutation::Activate { instance: id.clone() });
+                mutations
+            } else {
+                vec![Mutation::Close { instance: id.clone() }]
+            }
+        }
+        Err(_) => vec![open_beside(integration, layout, Product::Notes, id)?],
+    };
+    let opening = !matches!(mutations.first(), Some(Mutation::Close { .. }));
+    let was = app.ui.show_notes;
+    app.ui.show_notes = opening;
+    if let Err(reason) = app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations }) {
+        app.ui.show_notes = was;
+        let _ = refresh_production(app);
+        return Err(reason);
+    }
+    Ok(())
+}
+
 fn open_bom(integration: &AppPanelRuntime, layout: &Layout, instance: InstanceId) -> PanelResult<Mutation> {
-    let kind = PanelKind::new(Product::Bom.kind())?;
+    open_beside(integration, layout, Product::Bom, instance)
+}
+
+/// Open a panel below the first section on its default side, or in a new section there.
+fn open_beside(integration: &AppPanelRuntime, layout: &Layout, product: Product, instance: InstanceId) -> PanelResult<Mutation> {
+    let kind = PanelKind::new(product.kind())?;
     let spec = integration.runtime().layout().registry().get(&kind)?;
     let zone = spec.default_zone;
     let size = spec.default_size;
@@ -1160,7 +1228,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             allowed_zones,
             default_zone: match product {
                 Product::History | Product::RenderShots | Product::Timeline2d => Zone::Bottom,
-                Product::RenderInspector | Product::SketchOptions | Product::Bom | Product::DrawingInspector => Zone::Right,
+                Product::RenderInspector | Product::SketchOptions | Product::Bom | Product::DrawingInspector | Product::Notes => Zone::Right,
                 _ => Zone::Left,
             },
             min_size: Size {
@@ -1193,7 +1261,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             // The 2D Timeline needs the full width and its own height; a tab beside the Browser cramps it.
             features: PanelFeatures {
                 popout: !library,
-                hot_closable: assistant || bom || library || product == Product::DrawingInspector,
+                hot_closable: assistant || bom || library || product == Product::DrawingInspector || product == Product::Notes,
                 closable: !sketch,
                 tabbable: !two_d,
                 collapse_keeps_bottom: two_d,
@@ -1202,7 +1270,7 @@ fn registry() -> PanelResult<PanelRegistry> {
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
             fixed_bottom_height: (history || shots).then_some(bottom_height),
             header_actions: product.header_actions(),
-            text_heavy: assistant || bom || sketch,
+            text_heavy: assistant || bom || sketch || product == Product::Notes,
         })?;
         if history {
             let strip = crate::ui_kit::history_width(false);
@@ -1696,6 +1764,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::SketchOptions => crate::sketch_palette::shared_body(self.app, ui),
             Product::Bom => crate::bom_panel::shared_content(self.app, ui),
             Product::PartsLibrary => crate::parts_library::shared_content(self.app, ui),
+            Product::Notes => crate::notes_panel::shared_content(self.app, ui),
             Product::RenderLibrary => crate::render_workspace::library::shared_library(self.app, ui),
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_body(self.app, ui),
             Product::RenderShots => crate::render_workspace::shots::shared_shots(self.app, ui, context.flow, slot == ContentSlot::Inline),

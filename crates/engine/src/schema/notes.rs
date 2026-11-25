@@ -22,7 +22,7 @@ pub struct NoteAddParams {
     pub hidden: bool,
 }
 
-/// Change a note's text, anchor, or hidden flag.
+/// Change a note's text, anchor, hidden or done flag.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct NoteUpdateParams {
@@ -37,6 +37,9 @@ pub struct NoteUpdateParams {
     /// Show or hide the note.
     #[serde(default)]
     pub hidden: Option<bool>,
+    /// Mark the note done (worked off) or open again.
+    #[serde(default)]
+    pub done: Option<bool>,
 }
 
 /// Delete a note.
@@ -72,6 +75,24 @@ pub struct NoteItem {
     pub anchor: [f64; 3],
     pub text: String,
     pub hidden: bool,
+    /// The comment has been worked off.
+    pub done: bool,
+    /// What was selected when the note was made, when it was a body or a face, edge or vertex.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<NoteTargetItem>,
+}
+
+/// The element a note refers to.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoteTargetItem {
+    /// `body`, `face`, `edge` or `vertex`.
+    pub kind: String,
+    /// The body's name.
+    pub body: String,
+    /// The face or edge index within the body, as `body_topology` lists them; it can change
+    /// when the design rebuilds, so check it against the anchor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
 }
 
 /// The result of `note.list`.
@@ -79,3 +100,12 @@ pub struct NoteItem {
 pub struct NotesList {
     pub notes: Vec<NoteItem>,
 }
+
+/// Show or hide the Notes panel in the app (takes nothing).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct NotesPanelParams {}
+
+/// Headless sessions refuse Notes panel requests and produce no result.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NotesPanelResult {}

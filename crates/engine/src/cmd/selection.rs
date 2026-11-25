@@ -278,6 +278,21 @@ pub(super) fn anchor_from_selection(s: &Session) -> Vec3 {
     s.selection.iter().rev().find_map(|sel| anchor_of(s, sel)).unwrap_or(Vec3::ZERO)
 }
 
+/// The element the item `anchor_from_selection` takes its point from refers to, when that item
+/// is a body or a face, edge or vertex of one: what a note made on the selection is about.
+pub fn target_from_selection(s: &Session) -> Option<solidcraft_doc::NoteTarget> {
+    let sel = s.selection.iter().rev().find(|sel| anchor_of(s, sel).is_some())?;
+    let (kind, body, index) = match sel {
+        Sel::Face { body, index, .. } => ("face", body, Some(*index)),
+        Sel::Edge { body, index, .. } => ("edge", body, Some(*index)),
+        Sel::Vertex { body, .. } => ("vertex", body, None),
+        Sel::Body { name } => ("body", name, None),
+        _ => return None,
+    };
+    let body: String = body.chars().take(solidcraft_doc::notes::MAX_TARGET_CHARS).collect();
+    Some(solidcraft_doc::NoteTarget { kind: kind.into(), body, index })
+}
+
 /// The point a selected item points at, when it names one. An item that names no point (a
 /// feature, a constraint, a profile) leaves the anchor to the next selected item.
 fn anchor_of(s: &Session, sel: &Sel) -> Option<Vec3> {

@@ -39,6 +39,7 @@ pub(crate) use production::report_content_composer_height;
 pub(crate) use production::report_content_extent;
 pub(crate) use production::shared_content_composer_height;
 pub(crate) use production::shared_content_measurement;
+pub(crate) use production::toggle_notes;
 pub use runtime::*;
 pub use specimen::*;
 pub use surfaces::*;

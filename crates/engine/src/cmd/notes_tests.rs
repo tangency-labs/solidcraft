@@ -87,6 +87,23 @@ fn note_add_without_an_anchor_lands_the_note_where_the_selection_points() {
     run(&mut s, "note.add", json!({"text": "On the top face."}));
     let listed = run(&mut s, "note.list", json!({}));
     assert_eq!(listed["notes"][0]["anchor"], json!([5.0, 10.0, 30.0]));
+    // The note keeps the picked face as its target, so an agent knows which element it means.
+    assert_eq!(listed["notes"][0]["target"]["kind"], json!("face"));
+    assert_eq!(listed["notes"][0]["target"]["body"], json!("Box"));
+    assert!(listed["notes"][0]["target"]["index"].is_u64());
+    assert_eq!(listed["notes"][0]["done"], json!(false));
+}
+
+/// A note is ticked off with `done` and opened again; a note given an explicit anchor has no target.
+#[test]
+fn a_note_is_marked_done_and_open_again() {
+    let mut s = Session::default();
+    let id = run(&mut s, "note.add", json!({"anchor": [1.0, 2.0, 3.0], "text": "Bore to 8.5"}))["note"].as_u64().unwrap();
+    assert!(run(&mut s, "note.list", json!({}))["notes"][0].get("target").is_none());
+    run(&mut s, "note.update", json!({"note": id, "done": true}));
+    assert_eq!(run(&mut s, "note.list", json!({}))["notes"][0]["done"], json!(true));
+    run(&mut s, "note.update", json!({"note": id, "done": false}));
+    assert_eq!(run(&mut s, "note.list", json!({}))["notes"][0]["done"], json!(false));
 }
 
 #[test]

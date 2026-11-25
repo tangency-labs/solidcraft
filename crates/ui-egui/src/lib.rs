@@ -260,6 +260,7 @@ pub mod navigation_slots;
 pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
+pub(crate) mod notes_panel;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
@@ -485,6 +486,8 @@ pub struct UiState {
     #[serde(skip)]
     pub ribbon_context: Option<String>,
     pub show_browser: bool,
+    /// The Notes panel: notes anchored to the model, made on the selection (`ui.notes`).
+    pub show_notes: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
     pub show_navigation_bar: bool,
@@ -538,6 +541,7 @@ impl Default for UiState {
             sketch_return_tab: None,
             ribbon_open: false,
             show_browser: true,
+            show_notes: false,
             show_timeline: true,
             show_grid: true,
             show_navigation_bar: true,
@@ -784,6 +788,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Notes panel's draft, edit and filter state.
+    pub(crate) notes: notes_panel::State,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -1198,6 +1204,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            notes: Default::default(),
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -2550,6 +2557,16 @@ impl SolveApp {
             if agent_chat::shown(self) {
                 agent_chat::toggle(self);
             }
+            return;
+        }
+        // The Notes panel; Add Note started from the palette or ribbon opens it with the
+        // text field focused, since a note needs its text (programmatic calls pass it).
+        if id == "ui.notes" {
+            notes_panel::toggle(self);
+            return;
+        }
+        if id == "note.add" {
+            notes_panel::open_for_new_note(self);
             return;
         }
         if id == "ui.palette" {
