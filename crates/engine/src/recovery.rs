@@ -706,6 +706,8 @@ mod tests {
         assert_eq!(s.revision, revision, "editing Form points leaves the document revision alone");
         assert!(a.save(&s).unwrap(), "the new cage must be written");
         assert!(!a.save(&s).unwrap());
+        s.linked_bodies = false;
+        assert!(a.save(&s).unwrap(), "the recovered design must remember how it saves linked bodies");
 
         s.execute("form.prototype.tool.begin", &json!({})).unwrap();
         let preview = s.execute("form.prototype.tool.preview", &json!({"topology":{"tool":"delete_faces","faces":[0]}})).unwrap();
@@ -716,6 +718,7 @@ mod tests {
         let mut recovered = Session::default();
         recovered.execute("doc.recover", &json!({"dir":d,"id":id})).unwrap();
         let draft = recovered.execute("form.prototype.inspect", &json!({})).unwrap();
+        assert!(!recovered.linked_bodies);
         assert!(recovered.is_dirty());
         assert_eq!(recovered.doc.features.len(), 0);
         assert_eq!(draft["points"], moved["points"]);

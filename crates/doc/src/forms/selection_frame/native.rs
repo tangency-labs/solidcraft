@@ -3,12 +3,10 @@ use super::*;
 use crate::kernel::{Body, DisplayGuidePoint};
 use solidcore_record::brep::{Brep, Curve, Curve2, Edge, Loop, OrientedEdge, Shell, Surface};
 use solidcraft_geom::{
-    brep::{
-        eval::{CurveEval, SurfaceEval},
-        pcurve,
-    },
+    brep::eval::{CurveEval, SurfaceEval},
     tess::EvalSurface,
 };
+use solidcraft_kernel::services::pcurve;
 
 const MAX_FACES: usize = 256;
 const MAX_GUIDES: usize = 544;

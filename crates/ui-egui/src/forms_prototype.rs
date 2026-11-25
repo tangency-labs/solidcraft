@@ -704,7 +704,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if insertion_active && !busy {
         tools::pointer(app, ui, &proj, &input);
     }
-    crate::viewport::axis_view(app, ui, rect);
+    crate::viewport::axis_view(app, ui, rect, true);
 }
 fn cancel_transform_gesture(app: &mut SolveApp, ctx: &egui::Context, id: egui::Id) {
     transform_feedback::clear(app);
@@ -1444,6 +1444,8 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        selection_all: false,
+        occlusion: false,
         hatch: Default::default(),
         sky: crate::viewport::sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
         moving: None,

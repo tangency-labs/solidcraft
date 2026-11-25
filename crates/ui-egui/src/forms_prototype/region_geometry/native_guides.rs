@@ -12,11 +12,12 @@ use solidcraft_engine::{
         kernel::{Body, DisplayGuidePoint},
     },
     geom::{
-        brep::{eval::SurfaceEval, pcurve},
+        brep::eval::SurfaceEval,
         bspline::{CurveN, HPoint, NurbsSurface},
         tess::{EvalSurface, from_kernel},
     },
 };
+use solidcraft_kernel::services::pcurve;
 use std::collections::{BTreeMap, btree_map::Entry};
 
 type Result<T> = std::result::Result<T, String>;

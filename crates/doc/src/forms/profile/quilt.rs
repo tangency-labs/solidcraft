@@ -3,9 +3,10 @@ use super::*;
 use kernel::history::{BodyHistory, EdgeOrigin, History};
 use solidcore_record::brep;
 use solidcraft_geom::{
-    brep::{eval::CurveEval, pcurve},
+    brep::eval::CurveEval,
     tess::{from_kernel, from_kernel3, to_kernel, uv},
 };
+use solidcraft_kernel::services::pcurve;
 
 fn unsupported(reason: &str) -> DocError {
     invalid(format!("not supported yet: co-sampled Surface quilt: {reason}"))

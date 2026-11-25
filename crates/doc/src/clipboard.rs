@@ -491,7 +491,7 @@ impl crate::Feature {
             K::FrameTrim { to, .. } => {
                 for target in to {
                     if let crate::frame::TrimTarget::Plane { plane } = target {
-                        remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
+                        remap_plane(plane, ids, bodies, 0, remap_datum)?;
                     }
                 }
             }
@@ -530,7 +530,7 @@ impl crate::Feature {
                     remap_geo(&mut p.b, ids, bodies, 0, remap_datum)?;
                 }
             }
-            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, occurrences, doc)?,
+            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, remap_datum)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {
