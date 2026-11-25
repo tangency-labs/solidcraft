@@ -8707,7 +8707,7 @@ fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
 /// Where a hole drills, and the sketch point it drills at (none for a hole at a position).
 pub(crate) struct HoleSpot<'a> {
     pub(crate) at: Vec3,
-    point: Option<&'a str>,
+    pub(crate) point: Option<&'a str>,
 }
 
 fn sketch_hole_spots<'a>(points: &'a crate::SketchPoints, sketch: &crate::SolvedSketch, limit: usize) -> Vec<HoleSpot<'a>> {
@@ -8730,7 +8730,7 @@ fn sketch_hole_spots<'a>(points: &'a crate::SketchPoints, sketch: &crate::Solved
 
 /// Point ids can come from a script or a saved sketch. Keep ordinary ids readable and encode
 /// ids that are long or could be read as part of a face name's grammar.
-fn hole_point_role(id: &str) -> String {
+pub(crate) fn hole_point_role(id: &str) -> String {
     if id.len() <= 64 && id.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.')) {
         format!("point:{id}")
     } else {

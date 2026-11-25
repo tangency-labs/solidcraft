@@ -13,8 +13,9 @@
 //! - The numbers (diameter, depth, thread, form) come from the feature record, evaluated with
 //!   the design's parameters as the model evaluates it, so the callout follows edits. Only
 //!   through or blind is read from the model as it is now, from the hole's own named faces
-//!   (`F<id>:bore:…`): a hole with a depth is blind while its bore keeps a floor on its axis, and
-//!   through when the depth reaches past the material. A hole whose bore is in the model the
+//!   (`F<id>:bore:…`, or `F<id>:point:<point>:bore:…` at a sketch point): a hole with a depth
+//!   is blind while its bore keeps a floor on its axis, and through when the depth reaches past
+//!   the material. A hole whose bore is in the model the
 //!   feature made but not in the model as it is now was removed by a later feature, and reads as
 //!   failed with that reason. A bore whose wall is no longer of the feature's diameter, or whose
 //!   flat floor is no longer at its depth, was changed by a later feature that kept its faces'
@@ -312,11 +313,13 @@ fn measure(
     let FeatureKind::Hole { diameter, depth, hole, thread, thread_depth, to, .. } = &f.kind else {
         return Err(DocError::Invalid("not a hole".into()));
     };
-    let (spots, dir) = crate::eval::hole_spots(doc, vals, before, f)?;
-    if spots.is_empty() || spots.len() > MAX_HOLES {
+    let (holes, dir) = crate::eval::hole_spots(doc, vals, before, f)?;
+    if holes.is_empty() || holes.len() > MAX_HOLES {
         return Err(DocError::Invalid(format!("a hole needs 1…{MAX_HOLES} points")));
     }
-    let at = spots.get(index).map(|spot| spot.at).ok_or_else(|| DocError::Invalid("the hole's point is not drilled".into()))?;
+    let spot = holes.get(index).ok_or_else(|| DocError::Invalid("the hole's point is not drilled".into()))?;
+    let (at, bore) = (spot.at, bore_prefix(f.id, spot.point));
+    let spots: Vec<Vec3> = holes.iter().map(|spot| spot.at).collect();
     if !(at.is_finite() && dir.is_finite()) {
         return Err(DocError::Invalid("the hole's place is out of range".into()));
     }
@@ -374,7 +377,7 @@ fn measure(
     let thread_depth = thread_depth.map(|t| t + recess).filter(|t| t.is_finite());
     // The face it starts on, named in the model before it (where the feature drilled it).
     let start_face = crate::naming::face_names_at(before, &[at]).into_iter().next().unwrap_or_default();
-    let Some(made) = bore_floor(own, f.id, at, dir, r, depth) else {
+    let Some(made) = bore_floor(own, &bore, at, dir, r, depth) else {
         // A sheet is rebuilt from its own record with the hole in it, so the hole's faces aren't
         // named after it.
         let reason = if in_sheet(before, at, dir, r) {
@@ -387,8 +390,8 @@ fn measure(
     // Where later moves of its body put it, and the feature's other holes with it.
     let m = motion(&made.body)?;
     let (start, direction) = (crate::apply_point(&m, at), crate::apply_vector(&m, dir));
-    let Some(now) = bore_floor(after, f.id, start, direction, r, depth) else {
-        let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, p.at)).collect();
+    let Some(now) = bore_floor(after, &bore, start, direction, r, depth) else {
+        let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, *p)).collect();
         let reason = if stray_bore(after, f.id, &holes, direction, r) {
             "a later feature removed or moved the hole (only a Move of its body is followed)"
         } else {
@@ -447,11 +450,32 @@ fn in_sheet(st: &ModelState, at: Vec3, dir: Vec3, r: f64) -> bool {
         .any(|b| !b.body.is_mesh() && matches!(b.body.classify_point(inside), Ok(PointClass::Inside)))
 }
 
+/// The start of the names of the faces of the bore of feature `id` drilled at `point` (none at a
+/// position): `F<id>:bore:`, or `F<id>:<point role>:bore:` at a sketch point, where each point's hole
+/// names its faces with its point's role (`F3:point:p2:bore:side:0`).
+fn bore_prefix(id: u64, point: Option<&str>) -> String {
+    match point {
+        Some(p) => format!("F{id}:{}:bore:", crate::eval::hole_point_role(p)),
+        None => format!("F{id}:bore:"),
+    }
+}
+
+/// Whether a face name, after its feature's `F<id>:`, is a bore's: `bore:…`, alone or after a point's
+/// role (`point:<id>:` or `point-digest:<hex>:`, which hold no `:` of their own).
+fn is_bore_role(role: &str) -> bool {
+    let role = match role.strip_prefix("point:").or_else(|| role.strip_prefix("point-digest:")) {
+        Some(after) => after.split_once(':').map_or("", |(_, rest)| rest),
+        None => role,
+    };
+    role.starts_with("bore:")
+}
+
 /// Whether a body of `st` has a face of a bore of feature `id` that lies on none of the axes of
 /// its holes at `holes` (drilled along `dir`, of radius `r`): one of them is somewhere else now.
 /// The feature's other holes, still in place, don't count.
 fn stray_bore(st: &ModelState, id: u64, holes: &[Vec3], dir: Vec3, r: f64) -> bool {
-    let prefix = format!("F{id}:bore:");
+    let feature = format!("F{id}:");
+    let is_bore = |name: &str| name.strip_prefix(feature.as_str()).is_some_and(is_bore_role);
     let on_an_axis = |p: Vec3| {
         holes.iter().any(|at| {
             let along = affine::distance_along((*at).into(), dir.into(), p.into());
@@ -460,11 +484,11 @@ fn stray_bore(st: &ModelState, id: u64, holes: &[Vec3], dir: Vec3, r: f64) -> bo
     };
     st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
         let names = crate::naming::face_names(b);
-        if !names.iter().any(|n| n.starts_with(&prefix)) {
+        if !names.iter().any(|n| is_bore(n)) {
             return false;
         }
         let spots = crate::naming::face_spots(b);
-        names.iter().zip(spots.iter()).any(|(name, spot)| name.starts_with(&prefix) && spot.is_some_and(|s| !on_an_axis(s.point)))
+        names.iter().zip(spots.iter()).any(|(name, spot)| is_bore(name) && spot.is_some_and(|s| !on_an_axis(s.point)))
     })
 }
 
@@ -474,24 +498,23 @@ fn cosine(a: Vec3, b: Vec3) -> f64 {
     affine::distance_along([0.0; 3], b.into(), a.into())
 }
 
-/// The bore of feature `id` at `at` (drilled along `dir`, of radius `r`, `depth` deep when blind)
-/// in `st`, and whether it keeps a floor: a face of the bore (`F<id>:bore:…`) across its axis
-/// below the start, the flat bottom or the drill point. `None` when no face of that bore is there
+/// The bore whose faces' names start with `prefix` ([`bore_prefix`]) at `at` (drilled along
+/// `dir`, of radius `r`, `depth` deep when blind) in `st`, and whether it keeps a floor: a face of
+/// the bore across its axis below the start, the flat bottom or the drill point. `None` when no face of that bore is there
 /// at all.
-fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Option<f64>) -> Option<Bore> {
+fn bore_floor(st: &ModelState, prefix: &str, at: Vec3, dir: Vec3, r: f64, depth: Option<f64>) -> Option<Bore> {
     use solidcraft_kernel::FaceSurface;
-    let prefix = format!("F{id}:bore:");
     let (mut wall, mut floor, mut changed) = (false, false, false);
     let mut body = None;
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let names = crate::naming::face_names(b);
-        if !names.iter().any(|n| n.starts_with(&prefix)) {
+        if !names.iter().any(|n| n.starts_with(prefix)) {
             continue;
         }
         // One pass over the body's triangles for all its faces, not one per bore face.
         let spots = crate::naming::face_spots(b);
         for (name, spot) in names.iter().zip(spots.iter()) {
-            let Some(spot) = spot.filter(|_| name.starts_with(&prefix)) else { continue };
+            let Some(spot) = spot.filter(|_| name.starts_with(prefix)) else { continue };
             let v = spot.point - at;
             let along = affine::distance_along(at.into(), dir.into(), spot.point.into());
             let off = (v - dir * along).len();
