@@ -1734,6 +1734,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
                 Err(e) => o.extend([status_of(e)?, 0.0]),
             }
+            crate::dump::body(&k, "uv_trims", b);
             put_curve(&mut o, uv_of(b, Some(cur))?.as_ref())?;
             put_curve(&mut o, uv_of(b, Some(p))?.as_ref())?;
         }
