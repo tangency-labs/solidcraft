@@ -34,6 +34,8 @@ pub fn dimension_roles(creator: &str) -> Option<&'static [&'static str]> {
         "sketch.arc.center_point" => &["radius", "sweep"],
         "sketch.ellipse" => &["major_radius", "minor_radius"],
         "sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point" => &["length", "width"],
+        // The first edge's whole length, and the width across from it (#4798).
+        "sketch.rectangle.edge_center" => &["length", "width"],
         "sketch.slot.arc_center" => &["radius", "sweep", "width"],
         "sketch.slot.arc_three_point" => &["width"],
         "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" => &["radius"],
@@ -41,6 +43,12 @@ pub fn dimension_roles(creator: &str) -> Option<&'static [&'static str]> {
         "sketch.polygon.edge" => &["radius", "length"],
         _ => return None,
     })
+}
+
+/// The sizes of a creator that takes typed values only: never placed as drawn or located, so a
+/// plain click draws what it did before. The 3-Point Arc's Radius and Sweep boxes (#20719).
+fn typed_roles(creator: &str) -> Option<&'static [&'static str]> {
+    (creator == "sketch.arc.three_point").then_some(&["radius", "sweep"][..])
 }
 
 /// Roles that measure the same size two ways: a shape takes one of each pair. Only the edge
@@ -65,16 +73,27 @@ fn wanted<'a>(roles: &[&'a str], given: &'a Map<String, Value>, as_drawn: bool) 
 
 pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
+    let on_sheet = s.sheet_sketching();
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
-    let roles = dimension_roles(create).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
-    let as_drawn = bool_(p, "as_drawn").unwrap_or(false);
-    let locate = bool_(p, "locate").unwrap_or(false);
+    let roles = dimension_roles(create).or_else(|| typed_roles(create)).ok_or_else(|| bad(cmd, "unsupported sketch creator"))?;
+    // A typed-only creator ignores both: it has no sizes as drawn to place.
+    let placeable = dimension_roles(create).is_some();
+    let asked_as_drawn = bool_(p, "as_drawn").unwrap_or(false);
+    let asked_locate = bool_(p, "locate").unwrap_or(false);
+    let as_drawn = placeable && asked_as_drawn;
+    let locate = placeable && asked_locate;
+    if on_sheet && (as_drawn || locate) {
+        return Err(bad(cmd, "not supported yet: automatic dimensions and origin location in a sheet sketch; provide explicit dimensions"));
+    }
     let mut params = p.get("params").filter(|v| v.is_object()).cloned().ok_or_else(|| bad(cmd, "`params` must be an object"))?;
     let none = Map::new();
     let dimensions = match p.get("dimensions") {
-        None if as_drawn || locate => &none,
+        None if asked_as_drawn || asked_locate => &none,
         given => given.and_then(Value::as_object).ok_or_else(|| bad(cmd, "`dimensions` must be an object"))?,
     };
+    if on_sheet {
+        super::super::sketch_store::sheet_target(s, &params, cmd)?;
+    }
     if dimensions.len() > roles.len() || dimensions.keys().any(|key| !roles.contains(&key.as_str())) {
         return Err(bad(cmd, "unsupported dimension role for this creator"));
     }
@@ -90,12 +109,15 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         let kind = if role == "angle" || role == "sweep" { Kind::Angle } else { Kind::Length };
         // `name = expression` is checked by its right-hand side, read as the user parameter
         // `sketch.dimension` defines will hold it (a bare number in the design's unit) (#7567).
+        if on_sheet && definition(&e).is_some() {
+            return Err(bad(cmd, "a sheet dimension cannot define source parameters; use a paper expression or a read-only source parameter"));
+        }
         let rhs = match definition(&e) {
             Some((name, "")) => return Err(bad(cmd, format!("{role}: `{name} =` needs a value after the `=`"))),
             Some((_, rhs)) => rhs,
             None => e.as_str(),
         };
-        let evaluated = s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)?;
+        let evaluated = if on_sheet { s.doc.eval(rhs, kind)? } else { s.doc.eval(&s.doc.with_design_unit(rhs, kind), kind)? };
         if role == "length" {
             overall_length = Some(evaluated);
         }
@@ -111,7 +133,11 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         if role == "sweep" && create == "sketch.slot.arc_center" && evaluated <= 0.0 {
             return Err(bad(cmd, "arc slot sweep must be greater than zero and less than a full turn"));
         }
-        if role == "sweep" {
+        if role == "sweep" && create == "sketch.arc.three_point" && evaluated <= 0.0 {
+            return Err(bad(cmd, "arc sweep must be greater than zero and less than a full turn"));
+        }
+        // A 3-Point Arc keeps its three points: the sweep is a dimension on the drawn arc.
+        if role == "sweep" && create != "sketch.arc.three_point" {
             params["sweep"] = json!(evaluated.to_degrees());
             if let Some(o) = params.as_object_mut() {
                 o.remove("end");
@@ -154,9 +180,12 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
                     |k: &str| out["sides"].get(k).filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "creator did not return its sides"));
                 (vec![side(a)?, side(b)?], "distance")
             }
+            // The anchored edge (whole length) and the side running out from it.
+            ("sketch.rectangle.edge_center", "length") => (vec![curve(0)?], "length"),
+            ("sketch.rectangle.edge_center", "width") => (vec![curve(1)?], "length"),
             (c, "width" | "height") if c.starts_with("sketch.rectangle.") => (vec![curve(usize::from(role == "height"))?], "length"),
             (c, "radius" | "diameter") if c.starts_with("sketch.circle.") => (vec![curve(0)?], role),
-            ("sketch.arc.center_point", "radius" | "sweep") => (vec![curve(0)?], role),
+            ("sketch.arc.center_point" | "sketch.arc.three_point", "radius" | "sweep") => (vec![curve(0)?], role),
             // `sketch.dimension` gives an ellipse its major radius as `major`, else its minor one.
             ("sketch.ellipse", "major_radius") => (vec![curve(0)?], "major"),
             ("sketch.ellipse", "minor_radius") => (vec![curve(0)?], "radius"),
@@ -186,7 +215,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             // typed `name = expression` defines the parameter `name` (the reply's `defined`).
             Some(value) => {
                 dimension["value"] = value.clone();
-                dimension["if_redundant"] = json!("driven");
+                if !on_sheet {
+                    dimension["if_redundant"] = json!("driven");
+                }
                 let result = scratch.execute("sketch.dimension", &dimension)?;
                 if let Some(name) = result.get("defined").and_then(Value::as_str) {
                     defined.push(name.to_string());
@@ -218,7 +249,7 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     let reply = DrawDimensionedResult::new(out, added, defined, locate.then_some(located));
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
@@ -233,8 +264,9 @@ fn solve_now(scratch: &Session, params: &Value) -> Option<SketchSolve> {
 }
 
 /// The sketch's degrees of freedom as a command reported them.
+/// The planar sketch's, where the reply gives it apart from its 3D curves' (#10608).
 fn dof_of(reply: &Value) -> Option<u64> {
-    reply.get("sketch").and_then(|s| s.get("dof")).and_then(Value::as_u64)
+    reply.get("sketch").and_then(|s| s.get("planar_dof").or_else(|| s.get("dof"))).and_then(Value::as_u64)
 }
 
 /// More points than any creator makes: a cap on the work `locate` does.

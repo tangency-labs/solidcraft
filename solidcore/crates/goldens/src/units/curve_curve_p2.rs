@@ -1272,7 +1272,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let mut kn = knots.clone();
             let mut poly: Vec<Vec3> = pts.iter().map(|&p| v3(p)).collect();
-            match flush_crv(*tol, &mut poly, &mut kn, *analytics, false) {
+            match flush_crv(*tol, &mut poly, &mut kn, *analytics) {
                 Ok(r) => {
                     o.extend([0.0, b(r.is_some())]);
                     if let Some(c) = r {

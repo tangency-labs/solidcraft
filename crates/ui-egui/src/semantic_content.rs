@@ -98,8 +98,48 @@ pub(crate) struct Frame {
     /// them: the timeline sets `hover_feature` earlier in the frame.
     last_feature: Option<u64>,
     last_joint: Option<u64>,
+    /// The Origin item a row named last frame (#15658), cleared as `last_joint` is.
+    last_origin: Option<String>,
     plane_underlay: Option<String>,
     finalized: bool,
+}
+
+/// A pop-out Browser has its own frame and pointer captures while sharing the design tree.
+#[derive(Default)]
+pub(crate) struct Detached {
+    frame: Frame,
+    eye: Option<EyeCapture>,
+    row: Option<RowCapture>,
+}
+
+impl Detached {
+    pub(crate) fn show(&mut self, app: &mut SolveApp, ui: &mut Ui, draw: impl FnOnce(&mut SolveApp, &mut Ui)) {
+        let ctx = ui.ctx().clone();
+        let published = PUBLISHED.with(|outputs| std::mem::take(&mut *outputs.borrow_mut()));
+        self.swap(app, &ctx);
+        begin(app, &ctx);
+        draw(app, ui);
+        finalize(app, &ctx);
+        self.swap(app, &ctx);
+        PUBLISHED.with(|outputs| *outputs.borrow_mut() = published);
+    }
+
+    fn swap(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        std::mem::swap(&mut self.frame, &mut app.tree.content);
+        ctx.data_mut(|data| {
+            exchange_capture(data, capture_id(), &mut self.eye);
+            exchange_capture(data, row_capture_id(), &mut self.row);
+        });
+    }
+}
+
+fn exchange_capture<T: Copy + Send + Sync + 'static>(data: &mut egui::util::IdTypeMap, id: egui::Id, retained: &mut Option<T>) {
+    let current = data.get_temp::<T>(id);
+    if let Some(retained) = std::mem::replace(retained, current) {
+        data.insert_temp(id, retained);
+    } else {
+        data.remove::<T>(id);
+    }
 }
 
 impl Frame {
@@ -110,6 +150,11 @@ impl Frame {
     pub(crate) fn current_mut(&mut self) -> &mut OwnerState {
         let owner = self.active.map_or(ContentOwner::BROWSER, |(owner, _)| owner);
         self.owners.entry(owner).or_default()
+    }
+
+    /// Whether the Browser panel holds the keyboard: its last click was on one of its rows (#17931).
+    pub(crate) fn browser_focused(&self) -> bool {
+        self.owners.get(&ContentOwner::BROWSER).is_some_and(|owner| owner.browser.focused())
     }
 
     /// The presentation being drawn (the Browser outside any).
@@ -225,13 +270,6 @@ pub(crate) fn ensure_session(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.content.context = Some(ctx.clone());
 }
 
-/// An external producer replaced this slot. Its ownership supersedes our previous write even
-/// when the new vector contains precisely the same names (Select Other is one such producer).
-pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
-    app.tree.content.last_bodies.clear();
-    app.viewport.hover_bodies = bodies;
-}
-
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
 /// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
 pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
@@ -266,6 +304,11 @@ fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
         && app.viewport.hover_joint == Some(joint)
     {
         app.viewport.hover_joint = None;
+    }
+    if let Some(origin) = app.tree.content.last_origin.take()
+        && app.viewport.hover_origin.as_ref() == Some(&origin)
+    {
+        app.viewport.hover_origin = None;
     }
     (old_bodies, old_plane)
 }
@@ -412,6 +455,24 @@ pub(crate) fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// The presentations drawn so far this frame.
+pub(crate) fn presented_owners(app: &SolveApp) -> Vec<ContentOwner> {
+    app.tree.content.owners.iter().filter(|(_, state)| state.presented).map(|(owner, _)| *owner).collect()
+}
+
+/// The menu a row asked for in a presentation drawn after `before` was taken: a panel in its own
+/// OS window, which is drawn after the frame's [`finalize`] has opened the other rows' menus
+/// (#19364). The next frame's [`begin`] would drop the request, so its window opens it.
+pub(crate) fn take_late_menu(app: &mut SolveApp, before: &[ContentOwner]) -> Option<(egui::Pos2, crate::context_menu::Target)> {
+    let session = app.session.uid;
+    app.tree
+        .content
+        .owners
+        .iter_mut()
+        .filter(|(owner, state)| state.presented && !before.contains(owner))
+        .find_map(|(_, state)| state.actions.as_mut().filter(|actions| actions.session == Some(session))?.take_menu())
+}
+
 /// Finalize content tree hover state, pointer ownership, and drag interactions across panels
 /// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
@@ -442,7 +503,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Keep the previous contribution until finalization: floating viewports paint before
     // their overlaid panels. Expire only our contribution, leaving other producers intact.
-    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint);
+    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint, app.viewport.hover_origin.clone());
     let (old_bodies, old_plane) = expire_hover(app);
     // Egui's response hit testing supplies pointer ownership, including occlusion and capture.
     // Stable owner iteration only breaks ties; submission order never decides the winner.
@@ -451,7 +512,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
         (state.presented
             && actions.session == Some(app.session.uid)
             && capture.is_none_or(|capture| capture.owner == *owner && capture.session == app.session.uid)
-            && (state.output.pointer_owned || actions.hovered || actions.hover_plane.is_some()))
+            && (state.output.pointer_owned || actions.hovered || actions.hover_plane.is_some() || actions.hover_origin.is_some()))
         .then_some(*owner)
     });
     let mut effect = None;
@@ -485,11 +546,15 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
             app.viewport.hover_joint = Some(joint);
             app.tree.content.last_joint = Some(joint);
         }
+        if let Some(origin) = &actions.hover_origin {
+            app.viewport.hover_origin = Some(origin.clone());
+            app.tree.content.last_origin = Some(origin.clone());
+        }
         crate::browser::apply_content_actions(app, actions);
     }
     if old_bodies != app.tree.content.last_bodies
         || old_plane != app.tree.content.last_plane
-        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint)
+        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint, app.viewport.hover_origin.clone())
     {
         ctx.request_repaint();
     }

@@ -23,12 +23,11 @@
 //! Deviations:
 //! - **Files.** [`BrepData::write_to_file`] returns the file's bytes (no filesystem on
 //!   wasm32); only a new file (`bNewFile = TRUE`) is supported.
-//! - **ASCII doubles (opt-in).** With
-//!   [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`],
-//!   [`write_brep_to_file`] (through [`BrepData::write_to_file_with_nurbs`]) writes
-//!   an ASCII file's doubles so that they read back unchanged
-//!   ([`BrepData::write_to_file_with`]; WR-655), where upstream's `%.16f` loses digits
-//!   below 1.
+//! - **ASCII doubles.** [`write_brep_to_file`] (through
+//!   [`BrepData::write_to_file_with_nurbs`]) writes an ASCII file's finite doubles so
+//!   that they read back unchanged ([`BrepData::write_to_file_with`]; WR-655), where
+//!   upstream's `%.16f` loses digits below 1. [`BrepData::write_to_file`] keeps
+//!   upstream's `%.16f` text.
 //! - **Native formats only.** `bWriteAsBSplines = TRUE` approximates every non-B-spline
 //!   curve and surface (`ApproximateCurve`, `ApproximateSurface`); it is not ported,
 //!   and the writers always write native formats (the upstream default). The kinds
@@ -62,7 +61,8 @@
 //!   silently short file.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{ids, AttributeHandle, AttributeStore, Behavior, ObjectKey};
 use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::Vec3;
@@ -604,7 +604,7 @@ pub fn write_curve_to_db(
             l.base_with_nurb()?.write_to_db(db, version)?;
         } else {
             let b = bspline_curve_part(curve).ok_or_else(|| {
-                SolidError::topology_missing(OP_CURVE, "the curve's B-spline part")
+                SolidError::topology(OP_CURVE, TopologyFailure::CurveNotBSpline { entity: None })
             })?;
             b.write_to_db(db, version)?;
         }
@@ -653,13 +653,19 @@ pub fn write_surface_to_db(
             .extended_base_surface()
             .unwrap_or_else(|| off.base_surface());
         let b = bspline_surface_part(base)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the offset surface's B-spline base")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     } else {
         db.write_type(B_SPLINE_SURFACE_TYPE, None);
         let b = bspline_surface_part(surface)?.ok_or_else(|| {
-            SolidError::topology_missing(OP_SURFACE, "the surface's B-spline part")
+            SolidError::topology(
+                OP_SURFACE,
+                TopologyFailure::SurfaceWithoutNurbs { entity: None },
+            )
         })?;
         b.write_to_db(db, version)?;
     }
@@ -792,8 +798,8 @@ impl BrepData {
     /// [`Self::write_to_file`] after [`make_missing_nurb`] on every surface: upstream's
     /// `SmBSplineSurface::WriteToDB` reaches the NURB through
     /// `GetOrCreateGwNurbPointer`, so a lazy surface is written with the NURB it makes.
-    /// With `k.fixes.ascii_doubles_round_trip` an ASCII file's doubles read back
-    /// unchanged ([`Self::write_to_file_with`]).
+    /// An ASCII file's finite doubles are written so that they read back unchanged
+    /// ([`Self::write_to_file_with`]; WR-655).
     ///
     /// # Errors
     ///
@@ -802,7 +808,7 @@ impl BrepData {
         for s in &mut self.surfaces {
             make_missing_nurb(k, &mut s.object)?;
         }
-        self.write_to_file_with(file_type, k.fixes.ascii_doubles_round_trip)
+        self.write_to_file_with(file_type, true)
     }
 
     /// `SmBrepData::WriteToFile(name, eType, TRUE)`: the `Version` and
@@ -818,8 +824,7 @@ impl BrepData {
     }
 
     /// [`Self::write_to_file`], an ASCII file's doubles written so that they read back
-    /// unchanged when `round_trip_doubles` (not upstream: WR-655's opt-in,
-    /// [`crate::kernel::UpstreamFixes::ascii_doubles_round_trip`];
+    /// unchanged when `round_trip_doubles` (not upstream: WR-655's fix,
     /// [`DatabaseWriter::with_round_trip_doubles`]).
     ///
     /// # Errors
@@ -1154,10 +1159,18 @@ impl BrepData {
 fn make_uv_curve_2d(c: &mut Curve) -> Result<()> {
     let b = bspline_curve_part_mut(c)
         .ok_or_else(|| SolidError::invalid_input(OP_UV, "UV curve is not a B-spline curve"))?;
-    let cur = b
-        .nurb
-        .as_mut()
-        .ok_or_else(|| SolidError::topology_missing(OP_UV, "the UV curve's NURBS data"))?;
+    let cur = b.nurb.as_mut().ok_or_else(|| {
+        Failure::new(
+            OP_UV,
+            TopologyFailure::Defect {
+                why: "the UV curve's B-spline part has no NURB built yet (a line made from two \
+                      points has none), and this conversion reads a built one without building \
+                      it, where the curve write builds a line's",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let cpts = cur.cpts_mut();
     let first_z = cpts.first().map_or(NOZ, |p| p.z);
     if first_z != NOZ && cpts.iter().all(|p| p.z == 0.0) {
@@ -1209,10 +1222,24 @@ pub fn write_brep_to_file(
     data.write_to_file_with_nurbs(k, file_type)
 }
 
-/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`].
-fn null() -> SolidError {
-    SolidError::topology_missing(OP_FROM, "a link of the B-rep's topology")
+/// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`] at a link the B-rep's edits always set
+/// (`why` names the link and the edit that sets it).
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP_FROM, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
+
+const NO_SECOND_LOOPUSE: &str =
+    "a face loop has no second loop use, though making a loop makes its two loop uses together";
+const NO_LOOPUSE_FACEUSE: &str =
+    "a face loop's loop use has no face use, though a loop use is made on its face use";
+const NO_EDGEUSE_NEXT: &str =
+    "an edge use has no successor, though linking an edge use into its loop or wire sets it";
+const NO_EDGEUSE_MATE: &str =
+    "an edge use has no mate, though making an edge use makes its mate with it";
+const NO_EDGEUSE_LOOPUSE: &str =
+    "a loop edge use has no loop use, though an edge use not on a wire is made on its loop use";
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or
 /// null).
@@ -1350,8 +1377,8 @@ impl BrepData {
         let mut all_edgeuses: Vec<EdgeuseId> = Vec::new();
         for (i, &e) in edges.iter().enumerate() {
             map.insert(EntityRef::Edge(e), i as u64);
-            if edge::is_wire(b, e)? {
-                let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+            // a wire edge has its primary edge use (`is_wire` reads it)
+            if let (true, Some(prim)) = (edge::is_wire(b, e)?, eu1::primary_edgeuse(b, e)?) {
                 let n = all_edgeuses.len() as u64;
                 map.insert(EntityRef::Edgeuse(prim), n);
                 if let Some(m) = eu1::mate(b, prim)? {
@@ -1415,7 +1442,10 @@ impl BrepData {
         };
         let mut surface_index: BTreeMap<FaceId, u64> = BTreeMap::new();
         for f in surface_owners(b, None, &face_ref)? {
-            let surface = b.face(f)?.surface.as_ref().ok_or_else(null)?;
+            // `surface_owners` returns only faces with a surface (it fails on one without)
+            let Some(surface) = b.face(f)?.surface.as_ref() else {
+                continue;
+            };
             surface_index.insert(f, bd.surfaces.len() as u64);
             bd.surfaces.push(Keyed {
                 key: (env.surface_key)(f),
@@ -1446,8 +1476,8 @@ impl BrepData {
 
             // set pLUT1 = topFU->loopuse (pLUT2 stays the other loop use)
             let (lu1, lu2) = loopuse::loop_loopuses(b, l)?;
-            let lu2 = lu2.ok_or_else(null)?;
-            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(null)?;
+            let lu2 = lu2.ok_or_else(|| broken_link(NO_SECOND_LOOPUSE))?;
+            let fu = loopuse::faceuse(b, lu1)?.ok_or_else(|| broken_link(NO_LOOPUSE_FACEUSE))?;
             let lut1 = if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
                 lu2
             } else {
@@ -1487,10 +1517,11 @@ impl BrepData {
         // Edgeuses (top face use edge uses and wire primary edge uses, not mates)
         for &eu in &all_edgeuses {
             let mut ed = EuData::zeroed();
-            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(null)?;
+            let next = eu1::edgeuse_next(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_NEXT))?;
             ed.next_eu = edgeuse_index(&map, &mate_map, next);
-            let mate = eu1::mate(b, eu)?.ok_or_else(null)?;
-            let mate_next = eu1::edgeuse_next(b, mate)?.ok_or_else(null)?;
+            let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_MATE))?;
+            let mate_next =
+                eu1::edgeuse_next(b, mate)?.ok_or_else(|| broken_link(NO_EDGEUSE_NEXT))?;
             ed.mate_next_eu = edgeuse_index(&map, &mate_map, mate_next);
             ed.edge = get_map(&map, eu1::edge(b, eu)?.map(EntityRef::Edge));
 
@@ -1501,7 +1532,7 @@ impl BrepData {
                 ed.shell = get_map(&map, eu1::shell(b, eu)?.map(EntityRef::Shell));
             } else {
                 // an edge in a loop connecting edges to a face
-                let lu = eu1::loopuse(b, eu)?.ok_or_else(null)?;
+                let lu = eu1::loopuse(b, eu)?.ok_or_else(|| broken_link(NO_EDGEUSE_LOOPUSE))?;
                 let l = loopuse::loop_(b, lu)?;
                 ed.eu_type = 0;
                 ed.loop_ = get_map(&map, l.map(EntityRef::Loop));
@@ -1536,7 +1567,9 @@ impl BrepData {
 
         // Edges - set EdgeData objects and store Curves
         for &e in &edges {
-            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(null)?;
+            let prim = eu1::primary_edgeuse(b, e)?.ok_or_else(|| {
+                SolidError::topology(OP_FROM, TopologyFailure::EdgeWithoutEdgeuses)
+            })?;
             let mut ed = EdgeData::zeroed();
             ed.prim_eu = edgeuse_index(&map, &mate_map, prim);
 
@@ -1552,7 +1585,10 @@ impl BrepData {
 
             // every edge owns its curve: a new 3D curve each
             let edge_rec = b.edge(e)?;
-            let curve = edge_rec.curve.as_ref().ok_or_else(null)?;
+            let curve = edge_rec
+                .curve
+                .as_ref()
+                .ok_or_else(|| SolidError::topology(OP_FROM, TopologyFailure::EdgeWithoutCurve))?;
             ed.curve = bd.curves_3d.len() as u64;
             bd.curves_3d.push(Keyed {
                 key: (env.curve_key)(e),
@@ -1593,6 +1629,60 @@ mod tests {
     /// written to a version 32 database (the B-spline part only) with the NURB its
     /// `MakeNurb` gives: the bytes equal those of the same line with its NURB made first
     /// (upstream's `pBSP->SmBSplineCurve::WriteToDB` on the line itself).
+    /// A swept surface made with `empty()` has no generator curve: its write names that,
+    /// with upstream's `SM_ERR_NULL_POINTER`, as the caller's input.
+    #[test]
+    fn a_swept_surface_without_generator_names_it() {
+        use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surf_of_revolution::SurfOfRevolution;
+        for s in [
+            Surface::from(SurfOfRevolution::empty()),
+            Surface::from(SurfOfExtrusion::empty()),
+        ] {
+            let e = surface_bytes(&s).unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::SurfaceWithoutGenerator),
+                "{e:?}"
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        }
+    }
+
+    /// An edge added and never linked has no edge use: flattening its B-rep names that,
+    /// with upstream's `SM_ERR_NULL_POINTER`, as the caller's input, not a defect.
+    #[test]
+    fn an_edge_without_edge_use_names_it() {
+        use crate::geom::object::ObjectRef;
+        use crate::math::Point3;
+        let mut b = Brep::new();
+        let v0 = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Point3::new(1.0, 0.0, 0.0)).unwrap();
+        b.add_edge(v0, v1).unwrap();
+        let attributes = AttributeStore::default();
+        let records = crate::topology::topology::NotifyRecords::default();
+        let env = FromBrepEnv {
+            attributes: &attributes,
+            key_of: &|_: EntityRef| ObjectRef {
+                type_code: 0,
+                key: ObjectKey(0),
+            },
+            records: &records,
+            curve_key: &|_: EdgeId| ObjectKey(0),
+            uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+            surface_key: &|_: FaceId| ObjectKey(0),
+        };
+        let e = BrepData::from_brep(&b, &env, &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::EdgeWithoutEdgeuses),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!e.is_defect());
+    }
+
     #[test]
     fn a_lazy_line_writes_the_nurb_it_makes_at_version_32() {
         use crate::curve::line::Line;

@@ -169,3 +169,127 @@ fn an_extended_set_draws_the_hosts_masters_first_in_the_sets_palette() {
     assert_eq!(TEST_SET.master_ids(), ["bar", "placeholder"]);
     assert_eq!(drawn(&TEST_SET, "warm_bar"), drawn(&TEST_SET, "bar"));
 }
+
+static ADDING: IconSet = IconSet::new(TEST_DATA);
+
+#[test]
+fn added_masters_draw_in_the_sets_roles_and_never_replace_its_own() {
+    let look = Look::themed(false, None, solidcraft_theme::ColorVision::Off);
+    // Drawn before it is added: the placeholder; added: its own artwork, in the theme's roles.
+    assert!(ADDING.resolve("plugin:a").placeholder);
+    let dot = "<svg viewBox='0 0 64 64'><circle cx='32' cy='32' r='20' fill='#236ead'/></svg>";
+    ADDING.add("plugin:a", dot).unwrap();
+    let added = ADDING.resolve("plugin:a");
+    assert_eq!((added.master, added.placeholder), ("plugin:a", false));
+    let doc = ADDING.doc_for("plugin:a", 32).unwrap();
+    let light = render(doc, look, 32).unwrap();
+    let dark = render(doc, Look::themed(true, None, solidcraft_theme::ColorVision::Off), 32).unwrap();
+    assert_ne!(light.data(), dark.data(), "the role follows the theme");
+    assert_ne!(Some(light.data()), render(ADDING.doc_for(PLACEHOLDER, 32).unwrap(), look, 32).as_ref().map(|p| p.data()));
+    // The set's own names, the placeholder and an empty name are not for adding.
+    for name in ["bar", "warm_bar", "placeholder", ""] {
+        assert!(ADDING.add(name, dot).is_err(), "{name}");
+    }
+    assert_eq!(ADDING.resolve("bar").accent, ADDING.accent_index("cool"), "bar is still the set's");
+    // The first artwork added under a name stays.
+    ADDING.add("plugin:a", "<svg><path d='M8 8L56 56' stroke='#34465b'/></svg>").unwrap();
+    assert!(std::ptr::eq(ADDING.doc_for("plugin:a", 32).unwrap(), doc));
+}
+
+#[test]
+fn added_artwork_outside_the_subset_is_refused() {
+    let big = format!("<svg>{}</svg>", "<path d='M8 8L9 9' stroke='#34465b'/>".repeat(2000));
+    for (name, src) in [
+        ("colour", "<svg><circle cx='32' cy='32' r='20' fill='#ff0000'/></svg>".to_owned()),
+        ("image", "<svg><image href='https://example.com/a.png' width='64' height='64'/></svg>".to_owned()),
+        ("use", "<svg><use href='other.svg#a'/></svg>".to_owned()),
+        ("script", "<svg><script>alert(1)</script></svg>".to_owned()),
+        ("style", "<svg><style>path{fill:red}</style></svg>".to_owned()),
+        ("text", "<svg><text x='1' y='1'>A</text></svg>".to_owned()),
+        ("relative", "<svg><path d='m8 8l40 40' stroke='#34465b'/></svg>".to_owned()),
+        ("deep", format!("<svg>{}{}</svg>", "<g>".repeat(40), "</g>".repeat(40))),
+        ("big", big),
+    ] {
+        assert!(ADDING.add(&format!("plugin:bad:{name}"), &src).is_err(), "{name}");
+        assert!(ADDING.resolve(&format!("plugin:bad:{name}")).placeholder, "{name}");
+    }
+}
+
+#[test]
+fn masks_and_clips_require_defined_local_references_when_present() {
+    let defs = "<defs><mask id='m'><path d='M8 8L56 8L56 56Z' fill='white'/></mask><clipPath id='c'><path d='M8 8L56 8L56 56Z'/></clipPath></defs>";
+    let svg = |clip: &str, mask: &str| format!("<svg>{defs}<g{clip}><path d='M8 8L56 56'{mask}/></g></svg>");
+    for (clip, mask, expected) in [("", "", None), (" clip-path='url(#c)'", " mask='url(#m)'", Some(0))] {
+        let doc = TEST_SET.parse(&svg(clip, mask)).unwrap();
+        let Item::Group { clip, items, .. } = &doc.items[0] else { panic!("a group") };
+        let Item::Node(node) = &items[0] else { panic!("a shape") };
+        assert_eq!(*clip, expected);
+        assert_eq!(node.mask, expected);
+    }
+    for value in ["", "none", "#c", "url(other.svg#c)", "url(https://example.com/icon.svg#c)", "url(#missing)", "url(#)", "url(#c"] {
+        assert!(TEST_SET.parse(&svg(&format!(" clip-path='{value}'"), "")).is_err(), "clip-path={value}");
+        assert!(TEST_SET.parse(&svg("", &format!(" mask='{value}'"))).is_err(), "mask={value}");
+    }
+}
+
+#[test]
+fn closing_tags_must_match_the_open_group_or_definition() {
+    let frames = [("g", "g"), ("defs", "defs"), ("mask id='m'", "mask"), ("clipPath id='c'", "clipPath")];
+    for (open, matching) in frames {
+        for close in ["g", "defs", "mask", "clipPath"] {
+            let svg = format!("<svg><{open}><path d='M8 8L56 56'/></{close}></svg>");
+            assert_eq!(TEST_SET.parse(&svg).is_ok(), close == matching, "{svg}");
+        }
+    }
+    let nested = "<svg><defs><mask id='m'><path d='M8 8L56 56' fill='white'/></mask></defs><g><g><path d='M8 8L56 56' mask='url(#m)'/></g></g></svg>";
+    assert!(TEST_SET.parse(nested).is_ok(), "matched nested groups and definitions stay valid");
+    assert!(TEST_SET.parse("<svg></g></svg>").is_err(), "a closing group needs an open frame");
+}
+
+#[test]
+fn closing_a_path_clears_the_command_before_the_next_token() {
+    for path in ["M8 8L56 8L56 56Z0", "M8 8L56 8L56 56Z 1 2", "M8 8L56 8L56 56Z,-1 .5"] {
+        assert!(TEST_SET.parse(&format!("<svg><path d='{path}'/></svg>")).is_err(), "{path}");
+    }
+    for path in ["M8 8L56 8L56 56Z", "M8 8L56 8L56 56ZM16 16L24 24", "M8 8L56 8L56 56ZL8 56"] {
+        let doc = TEST_SET.parse(&format!("<svg><path d='{path}'/></svg>")).unwrap();
+        assert_eq!(doc.items.len(), 1, "Z at the end or followed by a new command stays valid: {path}");
+    }
+}
+
+#[test]
+fn cyclic_masks_are_rejected_before_rendering_and_acyclic_reuse_still_draws() {
+    let shape = "<path d='M8 8L56 8L56 56Z' fill='white' mask='url(#a)'/>";
+    let self_ref = format!("<svg><defs><mask id='a'>{shape}</mask></defs></svg>");
+    assert!(TEST_SET.parse(&self_ref).unwrap_err().contains("cyclic"));
+    // The inner definition refers to its active parent; the parent then refers back to it.
+    let cycle = format!("<svg><defs><mask id='a'><mask id='b'>{shape}</mask><path d='M8 8L56 56' mask='url(#b)'/></mask></defs></svg>");
+    assert!(TEST_SET.parse(&cycle).unwrap_err().contains("cyclic"));
+    let valid = "<svg><defs><mask id='a'><path d='M8 8L56 8L56 56Z' fill='white'/></mask><mask id='b'><path d='M8 8L56 8L56 56Z' fill='white' mask='url(#a)'/></mask></defs><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#b)'/><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#a)'/></svg>";
+    let doc = TEST_SET.parse(valid).unwrap();
+    let image = render(&doc, Look::themed(false, None, solidcraft_theme::ColorVision::Off), 64).unwrap();
+    assert!(image.data().as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
+}
+
+#[test]
+fn acyclic_mask_expansion_and_dependency_depth_have_fixed_budgets() {
+    let icon = |levels: usize, copies: usize| {
+        let mut svg = String::from("<svg><defs><mask id='m0'><path d='M8 8L56 8L56 56Z' fill='white'/></mask>");
+        for level in 1..=levels {
+            svg.push_str(&format!("<mask id='m{level}'>"));
+            for _ in 0..copies {
+                svg.push_str(&format!("<path d='M8 8L56 8L56 56Z' fill='white' mask='url(#m{})'/>", level - 1));
+            }
+            svg.push_str("</mask>");
+        }
+        svg.push_str(&format!("</defs><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#m{levels})'/></svg>"));
+        svg
+    };
+    assert!(TEST_SET.parse(&icon(4, 2)).is_ok(), "ordinary repeated shared masks remain supported");
+    assert!(TEST_SET.parse(&icon(16, 2)).unwrap_err().contains("budget"), "small DAGs must not expand exponentially at draw time");
+    assert!(TEST_SET.parse(&icon(64, 1)).unwrap_err().contains("deeply"), "a flat XML list must not create unbounded renderer recursion");
+    let mut repeated = icon(4, 2);
+    let node = "<path d='M8 8L56 8L56 56Z' mask='url(#m4)'/>";
+    repeated = repeated.replace("</svg>", &format!("{}</svg>", node.repeat(32)));
+    assert!(TEST_SET.parse(&repeated).unwrap_err().contains("budget"), "charge each top-level visit, too");
+}

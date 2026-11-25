@@ -27,6 +27,7 @@
 //! Deviations: none (no upstream counterpart). A line is read as its segment from `start` to
 //! `end`. No recursion.
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::eval::Curve;
 use crate::math::{Point3, Vec3};
@@ -54,7 +55,8 @@ pub struct PlaneOf {
 ///
 /// `InvalidInput` for no curves, a tolerance not finite and positive, numbers not finite, or
 /// a rational spline with a weight not positive; `Unsupported` for a traced intersection
-/// curve; a query failure for curves so large their chords or normal overflow.
+/// curve; [`QueryFailure::BoundOverflows`] for curves so large their chords or normal
+/// overflow.
 pub fn plane_of(curves: &[Curve], tol: f64) -> Result<Option<PlaneOf>> {
     if curves.is_empty() {
         return Err(SolidError::invalid_input(OP, "no curves"));
@@ -108,7 +110,7 @@ pub fn plane_of(curves: &[Curve], tol: f64) -> Result<Option<PlaneOf>> {
     };
     // A size past the floating range (a chord or a cross product overflowing) leaves no
     // normal to bound with: refused, never read as a plane. `f64::max` would drop a NaN.
-    let overflow = || SolidError::query_failed(OP, "the curves' size overflows the bound");
+    let overflow = || SolidError::query(OP, QueryFailure::BoundOverflows);
     if !(reach.is_finite() && normal.x.is_finite() && normal.y.is_finite() && normal.z.is_finite())
     {
         return Err(overflow());
@@ -275,10 +277,9 @@ mod tests {
         let huge = Curve::Polyline {
             points: vec![[0.0; 3], [1e200, 0.0, 0.0], [0.0, 1e200, 0.0]],
         };
-        assert!(matches!(
-            plane_of(&[huge], 1e-6),
-            Err(SolidError::Failed(_))
-        ));
+        let e = plane_of(&[huge], 1e-6).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::BoundOverflows));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]

@@ -48,6 +48,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::ignored;
+use crate::error::query::QueryFailure;
 use crate::geom::certified::{above, gamma};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -641,6 +642,138 @@ pub fn calculate_bounding_box_in(
     Ok(face_box)
 }
 
+/// Not upstream: a box that provably holds every point of the face within its zone
+/// tolerance, or `None` when none is known; for ruling out pairs of faces that cannot meet
+/// (the boolean's face pairs). [`calculate_bounding_box`]'s box of a curved face is its
+/// surface's whole control net whatever the face's domain, so a sliver of a whole turn of a
+/// revolution is boxed as the whole ring.
+///
+/// The box is the certified box of the surface ([`Surface::certified_bounding_box`]) over
+/// the face's UV domain R, grown by the zone tolerance of the largest face, edge and vertex
+/// tolerance (a point within an edge's tolerance of the face is on it). R is narrowed to
+/// R ∩ D, D the certified box of the face's existing UV trim curves
+/// ([`crate::topology::face::p1::certified_uv_trim_domain`]), when that is proved to hold the
+/// face: every loop lies in D, so whether a point is on the face cannot change across a strip
+/// of R outside D (no loop crosses it), and each such strip whose centre classifies outside
+/// the face ([`super::p2::point_classify_prepared`]: `Unknown`) lies outside it. A face whose
+/// trims leave its UV domain or the surface's natural domain (a periodic trim past the seam),
+/// or whose strip classifies any other way, keeps R; so does a face an edge use of which has
+/// no UV trim curve. No trim is made; the surface's NURB is, where it is missing (as every
+/// evaluation of it makes it).
+///
+/// # Errors
+///
+/// Cancellation only: any other failure gives `None` or keeps R.
+pub fn proved_bounding_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Option<Extent3d>> {
+    // a box is only ever a saving: every failure but a cancellation gives none
+    fn probe<T>(r: Result<T>) -> Result<Option<T>> {
+        match r {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.is_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+    let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
+        return Ok(None);
+    };
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        // a plane has no certified box here; its loose box is its edges' already
+        return Ok(None);
+    }
+    let Some(stored) = probe(fp2::uv_domain(b, f))? else {
+        return Ok(None);
+    };
+    let mut domain = stored;
+    if let (Some(Some(trims)), Some(natural)) = (
+        probe(crate::topology::face::p1::certified_uv_trim_domain(k, b, f))?,
+        probe(surface.natural_uv_domain_with_nurb(k))?,
+    ) {
+        // a margin far below any face's size, so a strip a rounding wide is no strip
+        let margin = 1e-9 * natural.max_dimension().max(1.0);
+        let mut grown = trims;
+        grown.expand_absolute(margin);
+        if trims.is_contained_by(&natural, margin) && trims.is_contained_by(&stored, margin) {
+            if let Ok(narrowed) = grown.intersect(&stored) {
+                if trim_strips_outside(k, b, f, &stored, &narrowed)? {
+                    domain = narrowed;
+                }
+            }
+        }
+    }
+    let Some(Some(mut bx)) = probe(surface.certified_bounding_box(k, &domain))? else {
+        return Ok(None);
+    };
+    let Some(mut tol) = probe(fp2::tolerance(b, f))? else {
+        return Ok(None);
+    };
+    let Some(edges) = probe(topology_traverser::face_edges(b, f))? else {
+        return Ok(None);
+    };
+    for e in edges {
+        let Some(t) = probe(edge::tolerance(b, e))? else {
+            return Ok(None);
+        };
+        tol = tol.max(t);
+    }
+    let Some(vertices) = probe(super::p2::face_vertices(b, f, false, None))? else {
+        return Ok(None);
+    };
+    for v in vertices {
+        let Some(t) = probe(vertex::tolerance(b, v))? else {
+            return Ok(None);
+        };
+        tol = tol.max(t);
+    }
+    bx.expand_absolute(zone_tol3d(k, tol));
+    Ok(Some(bx))
+}
+
+/// Whether every strip of `stored` outside `inner` (left, right, below and above it, each a
+/// rectangle no loop of face `f` crosses when every loop lies in `inner`) classifies outside
+/// the face at its centre; `true` when there is no strip.
+fn trim_strips_outside(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    stored: &crate::geom::extent2d::Extent2d,
+    inner: &crate::geom::extent2d::Extent2d,
+) -> Result<bool> {
+    let (s0, s1, i0, i1) = (stored.min(), stored.max(), inner.min(), inner.max());
+    let mid_v = 0.5 * (s0.y + s1.y);
+    let mut centres = Vec::new();
+    if i0.x > s0.x {
+        centres.push(Point2::new(0.5 * (s0.x + i0.x), mid_v));
+    }
+    if i1.x < s1.x {
+        centres.push(Point2::new(0.5 * (i1.x + s1.x), mid_v));
+    }
+    // below and above, across the inner box's width (the side strips cover the rest)
+    let mid_u = 0.5 * (i0.x + i1.x);
+    if i0.y > s0.y {
+        centres.push(Point2::new(mid_u, 0.5 * (s0.y + i0.y)));
+    }
+    if i1.y < s1.y {
+        centres.push(Point2::new(mid_u, 0.5 * (i1.y + s1.y)));
+    }
+    for uv in centres {
+        let mut pc = PointClassification::new(0.0);
+        let r = super::p2::point_classify_prepared(
+            k,
+            b,
+            f,
+            uv,
+            &mut pc,
+            super::p2::PointClassifyOptions::default(),
+        );
+        match r {
+            Ok(()) if pc.point_class() == PointClassType::Unknown => {}
+            Err(e) if e.is_cancelled() => return Err(e),
+            _ => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 /// `pSurface->CalculateBoundingBox(GetUVDomain(), &box)` of a face's surface (expanded by
 /// the zone tolerance, the default): the B-spline override (also that of planes, cones,
 /// spheres, tori and surfaces of revolution) expands its normal box by the face tolerance as its last
@@ -752,7 +885,7 @@ pub fn calculate_shell_bounding_box(
 /// # Errors
 ///
 /// `SM_ERR`
-/// ([`QueryFailure::Failed`](crate::error::query::QueryFailure::Failed)) for a region without shells; those of the shell
+/// ([`QueryFailure::RegionWithoutShells`]) for a region without shells; those of the shell
 /// boxes. `output` then holds the union of the shells before the failing one.
 pub fn calculate_region_bounding_box_into(
     k: &mut Kernel,
@@ -765,9 +898,9 @@ pub fn calculate_region_bounding_box_into(
 
     let shells = b.region(id)?.get_shells(None, |_, _| Ok(false))?;
     if shells.is_empty() {
-        return Err(SolidError::query_failed(
+        return Err(SolidError::query(
             OP_REGION_BOX,
-            "the region has no shells",
+            QueryFailure::RegionWithoutShells,
         ));
     }
     let mut this_box = Extent3d::new();
@@ -918,6 +1051,36 @@ pub fn point_3d_classify(
     pc: &mut PointClassification<EntityRef>,
     opts: Point3dClassifyOptions<'_>,
 ) -> Result<()> {
+    point_3d_classify_at(
+        k,
+        b,
+        f,
+        point,
+        src_zone_tol_3d,
+        do_boundary_intersections,
+        pc,
+        opts,
+    )
+    .map(|_| ())
+}
+
+/// [`point_3d_classify`], also giving the face's (u, v) the point was dropped to and classified
+/// at: `None` where the drop found none or fell outside the UV domain (`pc` stays unknown).
+///
+/// # Errors
+///
+/// Those of [`point_3d_classify`].
+#[allow(clippy::too_many_arguments)]
+pub fn point_3d_classify_at(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    src_zone_tol_3d: f64,
+    do_boundary_intersections: bool,
+    pc: &mut PointClassification<EntityRef>,
+    opts: Point3dClassifyOptions<'_>,
+) -> Result<Option<Point2>> {
     let uv_domain = fp2::uv_domain(b, f)?;
     // HANG-29: refuse coordinates the point classification cannot handle
     crate::query::face::p3::check_face_coordinates(k, b, f, OP_POINT)?;
@@ -978,7 +1141,7 @@ pub fn point_3d_classify(
             )?;
             let Some(first) = solutions.as_slice().first() else {
                 // Point may not be inside of the boundary of the face.
-                return Ok(());
+                return Ok(None);
             };
             solution_uv(&first.start.parameters)?
         }
@@ -987,7 +1150,7 @@ pub fn point_3d_classify(
     // low work - UVPoint not contained by Face's domain
     let size = uv_domain.size().length();
     if !uv_domain.contains_point(uv, size / 1000.0) {
-        return Ok(());
+        return Ok(None);
     }
 
     // else pass the call along to PointClassify to classify the UVPoint
@@ -1030,7 +1193,51 @@ pub fn point_3d_classify(
         }
     }
 
-    Ok(())
+    Ok(Some(uv))
+}
+
+/// The point of face `f`'s surface nearest `point`, when `point` lies on the face itself within
+/// `tolerance` (on the face's trimmed area, its edges or its vertices), else `None`. The point
+/// is dropped onto the surface and classified against the face's own trim loops by
+/// [`point_3d_classify_at`], so a point on another face of the same surface does not pass; the
+/// drop must also lie within `tolerance` of `point`.
+///
+/// # Errors
+///
+/// Those of [`point_3d_classify_at`].
+pub fn point_on_face(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+) -> Result<Option<Point3>> {
+    let mut pc = PointClassification::new(zone_tol3d(k, tolerance));
+    let Some(uv) = point_3d_classify_at(
+        k,
+        b,
+        f,
+        point,
+        tolerance,
+        true,
+        &mut pc,
+        Point3dClassifyOptions::default(),
+    )?
+    else {
+        return Ok(None);
+    };
+    if !matches!(
+        pc.point_class(),
+        PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+    ) {
+        return Ok(None);
+    }
+    let surface = fp2::surface(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_POINT, "face without surface"))?;
+    let Some(nearest) = ignored(surface.evaluate_point(k, uv))? else {
+        return Ok(None);
+    };
+    Ok((point.distance(nearest) <= tolerance).then_some(nearest))
 }
 
 // ---- SmFace::EdgeCurveOnClassify -----------------------------------------------------------
@@ -1185,7 +1392,7 @@ pub fn edge_curve_on_classify(
     curve: &Curve,
     opts: &EdgeCurveOnOptions,
 ) -> Result<CurveOnClassification> {
-    let edge = edge.ok_or_else(|| SolidError::query_missing(OP_EDGE_CURVE, "the edge"))?;
+    let edge = edge.ok_or_else(|| SolidError::query(OP_EDGE_CURVE, QueryFailure::NoEdgeGiven))?;
 
     // init outputs
     let mut out = CurveOnClassification::default();
@@ -1327,6 +1534,7 @@ mod tests {
         let mut out = Extent3d::from_point(Vec3::new(1., 2., 3.));
         let e = calculate_region_bounding_box_into(&mut k, &b, r, false, &mut out).unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(e.query_failure(), Some(&QueryFailure::RegionWithoutShells));
         assert_eq!(out, Extent3d::new());
     }
 

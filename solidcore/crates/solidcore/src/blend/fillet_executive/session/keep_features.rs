@@ -56,12 +56,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::cliff_overflow::SOLVER_EDGE;
 use super::{invalid, FilletObject, FilletSession};
 use crate::blend::fillet_cliff_overflow::{distance_to_surface, edge_curve, plane_of, Refusal};
 use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, KeepStop, OverflowInput};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ids;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
@@ -87,6 +89,31 @@ use crate::topology::{edge, edgeuse::p1 as eu1, face, loopuse, Brep, EdgeId, Fac
 
 const OP: &str = "blend::fillet_executive::session::keep_features";
 
+/// A face or edge the step reads lacks `input` ([`BlendFailure::OverflowInputMissing`], the
+/// cause of the overflows' helpers, which read the same bodies): the faces and edges read are
+/// the caller's body's and the sheet's alike, so the failure names no entity.
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
+}
+
+/// A missing thing the executive built ([`BlendFailure::Defect`] keeping the upstream `NER`
+/// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// A kept round that is not built, for `stop` ([`BlendFailure::KeptFeatureNotBuilt`]).
+fn not_built(stop: KeepStop) -> SolidError {
+    SolidError::blend(OP, BlendFailure::KeptFeatureNotBuilt(stop))
+}
+
+/// Why the session's intermediate body is there when features are kept.
+const INTERMEDIATE: &str = "the session has no intermediate body when features in bands are \
+     kept: the step runs on the fillet body the executive has just made, before the merge \
+     takes it";
+
 fn smos_max(a: f64, b: f64) -> f64 {
     if a > b {
         a
@@ -105,8 +132,7 @@ fn edge_on_surface(
     f: FaceId,
     tol: f64,
 ) -> Result<bool> {
-    let curve =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let ivl = edge::interval(b, e)?;
     for i in 0..=4u32 {
         let p = curve.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0))?;
@@ -120,8 +146,7 @@ fn edge_on_surface(
 /// `kf_EdgeAlong`: whether the edge lies along one of `curves`: its ends and three points
 /// between within `tol`.
 fn edge_along(k: &Kernel, b: &Brep, e: EdgeId, curves: &[Curve], tol: f64) -> Result<bool> {
-    let curve =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let ivl = edge::interval(b, e)?;
     for c in curves {
         let mut on = true;
@@ -162,11 +187,11 @@ fn creases(
     // Copies without an owner: the pieces are classified in both faces below, so the
     // intersection needs no trimmed cache of the faces.
     let mut sheet_surface = face::p2::surface(sheet, sheet_face)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     sheet_surface.set_owner(None);
     let mut wall_surface = face::p2::surface(wall_body, wall)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     wall_surface.set_owner(None);
     let sheet_domain = face::p2::uv_domain(sheet, sheet_face)?;
@@ -262,8 +287,8 @@ fn pieces_in_face(
 /// `kf_Upright`: whether every normal of the face at a 5 x 5 grid over its domain is square to
 /// `up`: a wall made of lines along `up` (a prism's side, a cylinder about `up`).
 fn upright(k: &Kernel, b: &Brep, f: FaceId, up: Vec3, ang_tol: f64) -> Result<bool> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+    let surface =
+        face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     let domain = face::p2::uv_domain(b, f)?;
     let size = domain.size();
     let min = domain.min();
@@ -294,6 +319,9 @@ struct Feature {
     walls: Vec<FaceId>,
     /// Where its walls meet the round.
     creases: Vec<Curve>,
+    /// A boss whose walls are not upright: its own walls in the target, which the band
+    /// reaches only where the round crosses one of them (nothing is continued from it).
+    tilted_walls: Vec<FaceId>,
 }
 
 /// The edit-notification reference of a new edge's curve in `b`.
@@ -359,10 +387,7 @@ fn sweep_walls(
     sheet.set_editing_enabled(editing);
     let (made, all) = copied?;
     if !all || made.len() != faces.len() {
-        return Err(SolidError::blend_failed(
-            OP,
-            "not every wall face is copied",
-        ));
+        return Err(not_built(KeepStop::WallsNotAllCopied));
     }
     Ok(made)
 }
@@ -475,6 +500,12 @@ const NOT_SEWN: &str =
     "Fillet Error: a round kept round a feature does not sew into the body along its rails and creases";
 
 impl FilletSession<'_> {
+    /// The refusal of a kept boss whose walls lean over the band.
+    fn not_upright(&mut self) -> SolidError {
+        self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
+        not_built(KeepStop::WallsNotUpright)
+    }
+
     /// The fork's `SmFilletExecutive::KeepFeaturesInBands` (`eb883ad`): trim the rounds in place
     /// round the features their bands reach, and sew them into the target.
     ///
@@ -484,7 +515,9 @@ impl FilletSession<'_> {
     /// refusal leaves the target as it was.
     ///
     /// # Errors
-    /// The refusals as `SM_ERR`; those of the steps.
+    /// The refusals as `SM_ERR`, each a [`BlendFailure::KeptFeatureNotBuilt`] naming why
+    /// ([`KeepStop`]); a face or edge read without its geometry,
+    /// [`BlendFailure::OverflowInputMissing`]; those of the steps.
     pub(super) fn keep_features_in_bands(&mut self, k: &mut Kernel) -> Result<bool> {
         crate::profile::profile_scope!(k, "blend::session::keep_features");
         // a snapshot, not a clone: the target put back must still own its geometry
@@ -503,7 +536,7 @@ impl FilletSession<'_> {
             .objects
             .intermediate
             .as_ref()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?
+            .ok_or_else(|| null_defect(INTERMEDIATE))?
             .tolerance();
         let solvers = self.executive.solvers.clone();
 
@@ -520,13 +553,9 @@ impl FilletSession<'_> {
             let base = self.objects.solver(id)?.base();
             tol = smos_max(tol, base.approx_tol_3d);
             ang_tol = smos_max(ang_tol, base.ang_tol_rad);
-            let eu = base
-                .edgeuse(0)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
-            blended_edges.push(
-                eu1::edge(self.objects.target, eu)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?,
-            );
+            let eu = base.edgeuse(0)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
+            blended_edges
+                .push(eu1::edge(self.objects.target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?);
             for &g in &base.fillet_geoms {
                 let geom = self.objects.pseudo.geom(g)?;
                 if geom.fillet_geom_type() != FilletGeomType::Default {
@@ -552,7 +581,7 @@ impl FilletSession<'_> {
             .objects
             .intermediate
             .take()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the intermediate body"))?;
+            .ok_or_else(|| null_defect(INTERMEDIATE))?;
         // the owners of the sheet's geometry as built, given back when no feature is kept
         // (#2370)
         let built = geometry_owners(&sheet)?;
@@ -657,13 +686,14 @@ impl FilletSession<'_> {
                         boss,
                         walls,
                         creases: Vec::new(),
+                        tilted_walls: Vec::new(),
                     });
                     continue;
                 }
                 // A boss's walls continued down from its footprint: the footprint swept into
                 // the body, along the planar face's normal, past the whole sheet.
                 let support_surface = face::p2::surface(self.objects.target, support)?
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the face's surface"))?;
+                    .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
                 let frame = plane_of(k, support_surface)?;
                 let mut is_upright = frame.is_some();
                 let (at, normal) = frame.map_or((Point3::ZERO, Vec3::ZERO), |p| (p.origin, p.z));
@@ -672,9 +702,12 @@ impl FilletSession<'_> {
                         is_upright = upright(k, self.objects.target, wall, normal, ang_tol)?;
                     }
                 }
-                let first_wall = *walls
-                    .first()
-                    .ok_or_else(|| SolidError::blend_missing(OP, "the feature's first wall"))?;
+                let first_wall = *walls.first().ok_or_else(|| {
+                    null_defect(
+                        "a feature has no wall: its rim is not empty, and each rim edge \
+                             between two faces gives the wall across it from the support face",
+                    )
+                })?;
                 let in_wall =
                     face::p2::calculate_an_internal_point(k, self.objects.target, first_wall)?;
                 let up = if (in_wall - at).dot(normal) >= 0.0 {
@@ -682,16 +715,21 @@ impl FilletSession<'_> {
                 } else {
                     -normal
                 };
-                if !is_upright {
-                    // judged below, only if the band reaches it
+                if frame.is_none() {
+                    // no plane to continue the walls along: judged below, only if the band
+                    // reaches it
                     features.push(Feature {
                         rim_curves,
                         boss,
                         walls: Vec::new(),
                         creases: Vec::new(),
+                        tilted_walls: Vec::new(),
                     });
                     continue;
                 }
+                // leaning walls: the footprint is swept all the same, to find whether the band
+                // takes the ground under it; the walls themselves are judged after
+                let leaning = if is_upright { Vec::new() } else { walls };
                 let mut depth = 0.0;
                 for &corner in &corners {
                     depth = smos_max(depth, (at - corner).dot(up));
@@ -717,12 +755,13 @@ impl FilletSession<'_> {
                 }
                 // Not the fork's (#2404): the walls are swept in a body of their own and
                 // copied into the sheet with their own topology (`sweep_walls`).
-                let walls = sweep_walls(k, sheet, profile, -up, depth)?;
+                let swept = sweep_walls(k, sheet, profile, -up, depth)?;
                 features.push(Feature {
                     rim_curves,
                     boss,
-                    walls,
+                    walls: swept,
                     creases: Vec::new(),
+                    tilted_walls: leaning,
                 });
             }
         }
@@ -766,11 +805,7 @@ impl FilletSession<'_> {
                     .iter()
                     .any(|b| !b.are_disjoint(&rim_box, on_tol))
                 {
-                    self.note_keep_refusal(FilletErrorType::NotExact, NOT_UPRIGHT);
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "a kept boss's walls are not upright",
-                    ));
+                    return Err(self.not_upright());
                 }
                 continue;
             }
@@ -822,6 +857,46 @@ impl FilletSession<'_> {
                                 }
                             }
                             feature.creases.push(piece);
+                        }
+                    }
+                }
+            }
+            // A boss with leaning walls cannot be carried to the round. Where the band takes the
+            // ground under its footprint (the walls continued straight down meet the round) it
+            // is refused; clear of the band it is refused only if the round crosses one of its
+            // own walls, a crease piece lying in both faces.
+            if !feature.tilted_walls.is_empty() {
+                let refuse = |this: &mut Self| this.not_upright();
+                if !feature.creases.is_empty() {
+                    return Err(refuse(self));
+                }
+                for &wall in &feature.tilted_walls {
+                    let (copy, wall_cache) = (&mut target_copy, &mut target_copy_cache);
+                    let wall_body: &Brep = if let Some(copy) = copy {
+                        copy
+                    } else {
+                        k.work_counters.add_wall_body_copy();
+                        copy.insert(self.objects.target.clone_standing_for_self()?)
+                    };
+                    let wall_box =
+                        crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
+                    for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
+                        if sheet_box.are_disjoint(&wall_box, on_tol) {
+                            continue;
+                        }
+                        // the surfaces meet over both domains; the band reaches the wall only
+                        // where a piece of that crease lies in both faces
+                        let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
+                        for curve in &found {
+                            for piece in pieces_in_face(k, wall_body, wall, curve, tol, wall_cache)?
+                            {
+                                let mut fresh = CurveOnClassifyCache::default();
+                                if !pieces_in_face(k, sheet, sheet_face, &piece, tol, &mut fresh)?
+                                    .is_empty()
+                                {
+                                    return Err(refuse(self));
+                                }
+                            }
                         }
                     }
                 }
@@ -885,10 +960,7 @@ impl FilletSession<'_> {
             for wall in feature.walls.clone() {
                 let Some(curves) = wall_creases.get(&wall) else {
                     self.note_keep_refusal(FilletErrorType::BadMerge, NO_ROUND);
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "a kept boss's wall continued down meets no round",
-                    ));
+                    return Err(not_built(KeepStop::WallMeetsNoRound));
                 };
                 let through = match wall_round.get(&wall) {
                     Some(&Some(round)) if sheet.face(round).is_ok() => {
@@ -993,10 +1065,7 @@ impl FilletSession<'_> {
         let target_faces = crate::topology::brep::p1::faces(self.objects.target, None)?.len();
         if gone.is_empty() || gone.len() >= target_faces {
             self.note_keep_refusal(FilletErrorType::BadMerge, NOT_CLOSED);
-            return Err(SolidError::blend_failed(
-                OP,
-                "a round kept round a feature does not close on the body",
-            ));
+            return Err(not_built(KeepStop::RoundNotClosed));
         }
         for f in gone {
             delete(k, self.objects.target, f)?;
@@ -1054,10 +1123,7 @@ impl FilletSession<'_> {
             || !crate::topology::brep::p2::is_manifold_solid(self.objects.target)?
         {
             self.note_keep_refusal(FilletErrorType::BadMerge, NOT_SEWN);
-            return Err(SolidError::blend_failed(
-                OP,
-                "a round kept round a feature does not sew into the body",
-            ));
+            return Err(not_built(KeepStop::RoundNotSewn));
         }
         // each boss's wall and its continuation one face again: only the edges along its
         // footprint go

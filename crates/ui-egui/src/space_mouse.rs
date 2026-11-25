@@ -598,7 +598,10 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // A long gap (the first frame after a pause) moves as far as a 50 ms one.
     let step = if seconds.is_finite() { seconds.min(0.05) } else { 0.0 };
     let handed = DeviceMotion {
-        motion: mapping.with_user_axes(app.preferences.space_mouse_reverse, app.preferences.space_mouse_axis_speed).apply(axes),
+        motion: moved_as(
+            mapping.with_user_axes(app.preferences.space_mouse_reverse, app.preferences.space_mouse_axis_speed).apply(axes),
+            app.preferences.space_mouse_motion,
+        ),
         seconds: step * speed.clamp(0.1, 5.0),
     };
     app.space_mouse.motion = Some(handed);
@@ -675,6 +678,17 @@ pub fn bridge_frame(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotio
         viewed = true;
     }
     moved || viewed
+}
+
+/// The cap's `motion` as the chosen motion model moves the view. Object moves the model the way
+/// the cap goes. Target camera moves the camera that way instead, so the model goes the other way
+/// along every axis; the view still turns around the same point. The user's per-axis Invert is
+/// already in `motion`, so it still reverses its axis in either model.
+pub fn moved_as(motion: Motion, model: crate::prefs::SpaceMouseMotion) -> Motion {
+    match model {
+        crate::prefs::SpaceMouseMotion::Object => motion,
+        crate::prefs::SpaceMouseMotion::TargetCamera => Motion { translation: motion.translation.map(|v| -v), rotation: motion.rotation.map(|v| -v) },
+    }
 }
 
 /// A small dead zone avoids drift at rest. A full cap deflection takes roughly one viewport
@@ -848,6 +862,28 @@ mod tests {
         press(&mut app, &ctx, 0b10, vec![]);
         assert_eq!(app.ui.perspective, before);
         assert!(app.session.undo.is_empty(), "a view setting, not an edit");
+    }
+
+    /// #17912: a button set to Show/Hide (`browser.visibility`, as the Buttons list offers it) hides
+    /// and shows the selected body, as V does, where it used to say "`visible` must be true or
+    /// false".
+    #[test]
+    fn a_button_set_to_show_hide_toggles_the_selected_body() {
+        use solidcraft_engine::Sel;
+        let device = "hid 046d:c62b";
+        let mut app = app();
+        app.space_mouse.device = Some(device.into());
+        app.preferences.space_mouse_buttons.insert(device.into(), [(2, ButtonJob::Command("browser.visibility".into()))].into());
+        app.run("solid.box", serde_json::json!({"length": 10, "width": 10, "height": 10, "body_name": "Ball"})).unwrap();
+        app.run("select.set", serde_json::json!({"items": [Sel::Body { name: "Ball".into() }]})).unwrap();
+        let ctx = window(true);
+        assert!(app.session.body_visible("Ball"));
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert!(!app.status.as_ref().is_some_and(|s| s.2), "no error: {:?}", app.status);
+        assert!(!app.session.body_visible("Ball"), "the press hides the selected body");
+        press(&mut app, &ctx, 0, vec![]);
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert!(app.session.body_visible("Ball"), "the next press shows it again");
     }
 
     /// The keyboard and a button hold the same modifier: it stays down until both let go, whichever
@@ -1089,6 +1125,30 @@ mod tests {
         assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
         assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");
+    }
+
+    /// Target camera moves the camera the way the cap goes, so every axis moves the view the other
+    /// way from Object; the per-axis Invert still reverses its own axis on top.
+    #[test]
+    fn target_camera_moves_every_axis_the_other_way() {
+        let cap = Axes { translation: [300, -200, 150], rotation: [120, -250, 330] };
+        let handed = |model: crate::prefs::SpaceMouseMotion, reverse: [bool; 6]| {
+            let mut app = app();
+            app.preferences.space_mouse_motion = model;
+            app.preferences.space_mouse_reverse = reverse;
+            app.space_mouse.device = Some("hid 046d:c62b".into());
+            let ctx = window(true);
+            frame(&mut app, &ctx, DriverMapping::object_mode(), cap, 0.016);
+            app.space_mouse.motion.map(|m| m.motion)
+        };
+        let object = handed(crate::prefs::SpaceMouseMotion::Object, [false; 6]);
+        let camera = handed(crate::prefs::SpaceMouseMotion::TargetCamera, [false; 6]);
+        let object = object.unwrap_or_default();
+        assert!(object.translation.iter().chain(&object.rotation).all(|v| *v != 0.0), "every axis moves: {object:?}");
+        assert_eq!(camera, Some(Motion { translation: object.translation.map(|v| -v), rotation: object.rotation.map(|v| -v) }));
+        let inverted = handed(crate::prefs::SpaceMouseMotion::TargetCamera, [true, false, false, false, false, false]).unwrap_or_default();
+        assert_eq!(inverted.translation[0], object.translation[0], "Invert reverses its axis again");
+        assert_eq!(moved_as(Motion::default(), crate::prefs::SpaceMouseMotion::TargetCamera), Motion::default(), "a cap at rest stays at rest");
     }
 
     #[test]
@@ -1426,14 +1486,13 @@ mod tests {
     #[test]
     fn navigation_off_the_start_page_and_a_hostile_speed_leave_the_view_alone() {
         let ctx = window(true);
-        // The app is large: kept on the heap, three at once do not overflow a test thread's stack.
-        let mut off = Box::new(app());
-        off.preferences.space_mouse_enabled = false;
-        let mut home = Box::new(app());
-        home.home.open = true;
-        let mut nan = Box::new(app());
-        nan.preferences.space_mouse_speed = f32::NAN;
-        for mut app in [off, home, nan] {
+        for change in [
+            (|app: &mut SolveApp| app.preferences.space_mouse_enabled = false) as fn(&mut SolveApp),
+            |app| app.home.open = true,
+            |app| app.preferences.space_mouse_speed = f32::NAN,
+        ] {
+            let mut app = Box::new(app());
+            change(&mut app);
             let before = app.cam;
             assert!(!frame(&mut app, &ctx, DriverMapping::default(), PUSH, 0.02));
             assert_eq!(app.cam.distance, before.distance);

@@ -46,7 +46,8 @@ use super::p1::{MergeOptions, MergeState};
 use super::p2::MergeOperand;
 use super::p4::{BooleanKernels, KernelManifoldIntersector, ManifoldState};
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::boolean::{BooleanFailure, BooleanStage};
+use crate::error::{ignored, EntityRef, Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{with_mark_lock, MarkLock, ALL_MARKS};
@@ -398,9 +399,9 @@ pub fn boolean_trees<D: BooleanDriver>(
             stack.push(slot.take());
         } else {
             if stack.len() < 2 {
-                return Err(SolidError::stage_failed(
+                return Err(SolidError::boolean(
                     OP,
-                    "a Boolean operator has fewer than two operands",
+                    BooleanFailure::TreeOperatorWithoutOperands,
                 ));
             }
             let mut other = stack.pop().flatten();
@@ -419,10 +420,10 @@ pub fn boolean_trees<D: BooleanDriver>(
                 -4 => BooleanOperation::Merge,
                 -5 => BooleanOperation::ExclusiveOr,
                 -6 => BooleanOperation::Slice,
-                _ => {
-                    return Err(SolidError::stage_failed(
+                code => {
+                    return Err(SolidError::boolean(
                         OP,
-                        "a Boolean operator code is not one the tree knows",
+                        BooleanFailure::UnknownTreeOperator { code },
                     ))
                 }
             };
@@ -448,7 +449,9 @@ pub fn boolean_trees<D: BooleanDriver>(
                     {
                         e
                     } else {
-                        SolidError::failed_after(OP, "a Boolean of the tree failed", e)
+                        Failure::new(OP, BooleanFailure::TreeBooleanFailed)
+                            .caused_by(e)
+                            .into_error()
                     }
                 })?;
             stack.push(result);
@@ -497,15 +500,21 @@ pub fn merge_breps<D: BooleanDriver>(
     }
     boolean_trees(k, &mut ordered, &trees, options, driver)?;
     if ordered.len() != 1 {
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP,
-            "the Boolean tree does not reduce to one B-rep",
+            BooleanStage::Tree,
+            "the merge's tree did not reduce to one B-rep, though it was built with one \
+             operator for each B-rep after the first, which leaves one",
         ));
     }
-    ordered
-        .pop()
-        .flatten()
-        .ok_or_else(|| SolidError::stage_failed(OP, "the Boolean tree has no result"))
+    ordered.pop().flatten().ok_or_else(|| {
+        SolidError::boolean_defect(
+            OP,
+            BooleanStage::Tree,
+            "the merge's tree reduced to no B-rep, though each of its operators pushes the \
+             result of a Boolean, which returns its primary operand",
+        )
+    })
 }
 
 /// Temporarily disable manifold enforcement, set lamina intersection mode to 1,
@@ -598,9 +607,9 @@ where
     D::Surface: Ord,
 {
     let (final_result, original_other) = driver.operands();
-    final_result.ok_or_else(|| SolidError::entity_missing(OP, "the merge has no result B-rep"))?;
+    final_result.ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     let original_other = original_other
-        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no second B-rep"))?;
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     // The first surface query is observable even though upstream overwrites it.
     let _ = driver.surfaces(original_other)?;
     // SER: a failed IntersectInsertRelate (a failed imprint leaves both B-reps
@@ -637,9 +646,9 @@ where
 {
     let (final_result, original_other) = driver.operands();
     let final_result = final_result
-        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no result B-rep"))?;
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     let original_other = original_other
-        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no second B-rep"))?;
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))?;
     let surfaces = driver.surfaces(original_other)?;
     driver.clear_relationships()?;
     if let Some(pairs) = skip_pairs {
@@ -685,7 +694,12 @@ where
         if create_new_breps_for_faces {
             if let Some(pairs) = skip_pairs {
                 let users = driver.surface_map_users(surface)?.ok_or_else(|| {
-                    SolidError::entity_missing(OP, "the surface has no users in the surface map")
+                    SolidError::boolean_null_defect(
+                        OP,
+                        BooleanStage::Tree,
+                        "the merged surface has no entry in the surface map, though with skip \
+                         pairs every surface of the other B-rep was added to the map first",
+                    )
                 })?;
                 for user in users {
                     for skip in pairs.seconds(surface) {
@@ -804,11 +818,55 @@ pub(crate) fn combine_brep(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
+    let mut records = crate::topology::topology::NotifyRecords::new();
+    combine_brep_keeping(
+        k,
+        &mut records,
+        target,
+        source,
+        copy_map,
+        reverse_map,
+        add_analytics,
+    )
+}
+
+/// [`combine_brep`] for a caller that merges many B-reps into one `target` in a row
+/// ([`list_operand`]), keeping the record store of one merge for the next in `records`
+/// (empty before the first).
+///
+/// (not upstream) A merge notifies through a store that holds a default record for every
+/// object of `target` and for `target` itself, and no other, when the merge starts; an
+/// empty store gets them from the merge ([`combine_brep`]), which costs the size of
+/// `target`, so merging N B-reps one after another visited the square of N objects. A kept
+/// store is first left exactly so (`reseed_records`: what the last merge changed, added and
+/// removed is visited, nothing else), and the merge then gives a record only to the objects
+/// it has not seen. The store a merge starts from is the same either way.
+fn combine_brep_keeping(
+    k: &mut Kernel,
+    records: &mut crate::topology::topology::NotifyRecords,
+    target: &mut Brep,
+    source: &Brep,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
+) -> Result<()> {
+    use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+    if !records.is_empty() {
+        // the names the merge gives `target`'s objects and `target` (`ArenaNotifyState::env`
+        // and `brep_ref`), under the serial the merge reads
+        let scheme = crate::topology::brep::p3::KeyScheme {
+            key_of: &notify_ref,
+            entity_of: &entity_of_notify_key,
+            brep_key: crate::topology::brep::p2::brep_ref(target).key,
+            serial: k.context.issued_brep_serial(target.notify_identity()),
+        };
+        crate::topology::brep::p3::reseed_records(records, target, &scheme);
+    }
     // (not upstream) both B-reps' own attributes, the source's under `source_ref`; the
     // target keeps those its objects end with
     let mut state = crate::topology::brep::p2::ArenaNotifyState {
+        records: std::mem::take(records),
         attributes: target.take_attributes(),
-        ..Default::default()
     };
     let seeded = crate::topology::brep::p2::seed_brep_attributes(
         &mut state.attributes,
@@ -828,6 +886,9 @@ pub(crate) fn combine_brep(
         )
     });
     let restored = state.restore_attributes(target);
+    k.work_counters
+        .add_merge_record_visits(state.records.take_visits());
+    *records = state.records;
     r?;
     restored
 }
@@ -902,7 +963,7 @@ fn boolean_2d(
         )?;
     }
     // Upstream dereferences pBrep3 next, even when Boolean2D left it null.
-    result.ok_or_else(|| SolidError::entity_missing(OP, "the planar Boolean made no result B-rep"))
+    result.ok_or_else(|| SolidError::boolean(OP, BooleanFailure::OperandWithoutFaces))
 }
 
 fn remove_faces(k: &mut Kernel, brep: &mut Brep, faces: &[FaceId]) -> Result<()> {
@@ -913,20 +974,16 @@ fn remove_faces(k: &mut Kernel, brep: &mut Brep, faces: &[FaceId]) -> Result<()>
 fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<(Brep, bool)> {
     let (mut result, planar) = if let Some((first, rest)) = breps.split_first() {
         let mut result = copy_brep(k, first, None, None, true, true)?;
+        // (one record store for the merges: each costs its B-rep, not the operand so far)
+        let mut records = crate::topology::topology::NotifyRecords::new();
         for source in rest {
             // MergeBrep's ordinary status is ignored upstream.
-            ignored(crate::error::passed_on(
-                combine_brep(k, &mut result, source, None, None, true),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            combine_brep_keeping(k, &mut records, &mut result, source, None, None, true)?;
         }
         (result, false)
     } else {
         if surfaces.is_empty() {
-            return Err(SolidError::stage_failed(
-                OP,
-                "there are no surfaces to merge",
-            ));
+            return Err(SolidError::boolean(OP, BooleanFailure::NoSurfacesToMerge));
         }
         let mut result = empty_brep(
             k,
@@ -1099,7 +1156,14 @@ pub fn boolean_lists_with_notifications(
             &mut 0,
             kind,
         )?
-        .ok_or_else(|| SolidError::entity_missing(OP, "the Boolean made no result B-rep"))?
+        .ok_or_else(|| {
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Tree,
+                "the list Boolean returned no result B-rep, though the Boolean leaves the \
+                 result unset only for an extraction, which no list operation code maps to",
+            )
+        })?
     };
     shrink_geometry(k, &mut result)?;
     stitch_and_orient(k, &mut result, -0.1, false, None, None)?;
@@ -1110,16 +1174,16 @@ pub fn boolean_lists_with_notifications(
         }
     } else {
         let region = result.infinite_region().ok_or_else(|| {
-            SolidError::entity_missing(OP, "the result B-rep has no infinite region")
+            SolidError::boolean_null_defect(
+                OP,
+                BooleanStage::Tree,
+                "the list Boolean's result has no infinite region, though the kernel keeps an \
+                 infinite region in every B-rep",
+            )
         })?;
         let shells = result.region(region)?.get_shells(None, |_, _| Ok(false))?;
         match shells.len() {
-            0 => {
-                return Err(SolidError::stage_failed(
-                    OP,
-                    "the slice result has no shell",
-                ))
-            }
+            0 => return Err(SolidError::boolean(OP, BooleanFailure::EmptyResult)),
             1 => output.breps.push(result),
             _ => {
                 let mut faces = bp::faces(&result, None)?;
@@ -1191,16 +1255,10 @@ pub fn boolean_lists_with_notifications(
                             // reference attribute) and the result keeps its own.
                             copy_component(k, &mut result, &connected, &mut component, &face_ref)?;
                         }
-                        ignored(crate::error::passed_on(
-                            stitch_and_orient(k, &mut component, -0.1, false, None, None),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        stitch_and_orient(k, &mut component, -0.1, false, None, None)?;
                         output.breps.push(component);
                         result.set_editing_enabled(true);
-                        ignored(crate::error::passed_on(
-                            remove_faces(k, &mut result, &connected),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        remove_faces(k, &mut result, &connected)?;
                         let next = bp::faces(&result, None)?;
                         if next.len() >= faces.len() {
                             return Err(SolidError::invalid_input(
@@ -1383,12 +1441,26 @@ mod tests {
             );
             // IntersectInsertRelate runs (the edge-less fixture faces relate nothing);
             // copying an unrelated B face then needs its face use, which a bare face
-            // record lacks, so Union, ExclusiveOr and Merge stop there
+            // record lacks, so Union, ExclusiveOr and Merge stop there. Intersection
+            // deletes A's unrelated face, which a bare face record cannot do either: upstream
+            // went on without the delete, the fork returns its failure (c8f6a31,
+            // `Boolean2D`'s `SER( sTI.DeleteFaces(sDelFaces) )`)
             let copies = matches!(
                 operation,
                 BooleanOperation::Union | BooleanOperation::ExclusiveOr | BooleanOperation::Merge
             );
-            if copies {
+            if operation == BooleanOperation::Intersection {
+                assert!(
+                    matches!(
+                        result,
+                        Err(SolidError::InvalidInput {
+                            operation: "boolean::topology_intersector::p2::delete_faces",
+                            ..
+                        })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else if copies {
                 assert!(
                     matches!(
                         result,
@@ -1400,7 +1472,14 @@ mod tests {
                     "{operation:?}: {result:?}"
                 );
             } else {
-                assert!(result.is_ok(), "{operation:?}: {result:?}");
+                // Intersection and Difference delete faces instead, and deleting a bare
+                // face record needs its upward face use: upstream ignores that status and
+                // the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d)
+                assert!(
+                    matches!(&result, Err(e) if e.operation() == "topology::brep::p3"
+                        && e.sm_status() == Some(1006)),
+                    "{operation:?}: {result:?}"
+                );
             }
             assert!(kernel.context.doing_boolean());
         }
@@ -1415,10 +1494,11 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.operation(), OP);
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
             error.to_string(),
-            "boolean::merge::p3: the planar Boolean made no result B-rep"
+            "boolean::merge::p3: an operand of the planar Boolean has no faces, so it made no \
+             result B-rep"
         );
         assert!(!kernel.context.doing_boolean());
     }
@@ -1658,7 +1738,7 @@ mod tests {
         let (result, ..) = call(&mut driver, &mut k, None);
         let error = result.unwrap_err();
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         // The union of two empty operands completes: the primary becomes the result.
         let (result, primary, other) = call(&mut driver, &mut k, Some(Brep::new()));
         assert!(matches!(result, Ok(Some(ref b)) if b.faces().is_empty()));
@@ -1808,6 +1888,63 @@ mod tests {
             for f in bp::faces(b, None).unwrap() {
                 assert_eq!(b.entity_attributes(EntityRef::Face(f)).len(), 1);
             }
+        }
+    }
+
+    /// Keeping the record store from one merge to the next changes nothing: boxes and
+    /// cylinders (with an attribute on every face) merged one after another make the same
+    /// operand, object for object and attribute for attribute (its whole `Debug` dump), and
+    /// leave the same records after every merge, as with a store made for each merge. Both
+    /// ways with the fixes on and off.
+    #[test]
+    fn merges_that_keep_their_record_store_make_the_same_operand() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        use crate::kernel::UpstreamFixes;
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::topology::topology::NotifyRecords;
+        let operand = |fixes: UpstreamFixes, keep: bool| {
+            let mut k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let mut breps = Vec::new();
+            for i in 0..7_i64 {
+                let at = Point3::new(20.0 * i as f64, 0.0, 0.0);
+                let mut b = if i % 2 == 0 {
+                    create_cylinder(&mut k, at, 4.0, 14.0).unwrap()
+                } else {
+                    create_box(&mut k, at, 10.0, 10.0, 10.0).unwrap()
+                };
+                for f in bp::faces(&b, None).unwrap() {
+                    b.add_attribute(EntityRef::Face(f), Attribute::long(7, i, Behavior::Copy))
+                        .unwrap();
+                }
+                breps.push(b);
+            }
+            let (first, rest) = breps.split_first().unwrap();
+            let mut result = copy_brep(&mut k, first, None, None, true, true).unwrap();
+            let mut kept = NotifyRecords::new();
+            let mut after = Vec::new();
+            for source in rest {
+                let mut fresh = NotifyRecords::new();
+                let records = if keep { &mut kept } else { &mut fresh };
+                combine_brep_keeping(&mut k, records, &mut result, source, None, None, true)
+                    .unwrap();
+                after.push(records.clone());
+            }
+            assert_eq!(bp::faces(&result, None).unwrap().len(), 4 * 3 + 3 * 6);
+            // (a kept store names the value whose removals it follows, which gives the
+            // B-rep's removal log its tag, as any stitched B-rep has: named here both ways,
+            // so the dumps compare everything else)
+            let _ = result.removal_tag();
+            (format!("{result:?}"), after)
+        };
+        for fixes in [UpstreamFixes::default(), UpstreamFixes::all()] {
+            let (kept, kept_records) = operand(fixes, true);
+            let (fresh, fresh_records) = operand(fixes, false);
+            assert!(kept == fresh, "the operands differ");
+            assert_eq!(kept_records, fresh_records);
         }
     }
 }

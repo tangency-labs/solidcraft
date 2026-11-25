@@ -2,7 +2,8 @@
 //! field name with its value, in declaration order, and [`UpstreamFixes::NAMES`] the names
 //! alone, so a consumer that pins solidcore notices a new flag without parsing the derived
 //! `Debug` (SolidCraft's `every_upstream_fix_is_on` did). Both are generated from the
-//! struct definition, so a new field cannot be left out.
+//! struct definition, so a new field cannot be left out. The fields are declared sorted by
+//! name (one file each in `src/kernel/fixes/`, read in sorted order by `build.rs`).
 //!
 //! The issue's input and expected values: `UpstreamFixes::default().flags()` yields one
 //! entry per field, all `false` (207 at 9dde25e97), and setting one flag makes exactly
@@ -69,13 +70,15 @@ fn default_lists_every_field_off_in_declaration_order() {
 #[test]
 fn one_flag_on_is_exactly_that_entry() {
     let mut newest = UpstreamFixes::default();
-    newest.face_points_span_domain = true;
-    assert_eq!(turned_on(&newest), ["face_points_span_domain"]);
+    newest.uv_trim_corner_end_points_only = true;
+    assert_eq!(turned_on(&newest), ["uv_trim_corner_end_points_only"]);
     assert_eq!(listed(&newest), debug_fields(&newest));
 
+    // the first field by name, so retiring whichever flag is first needs no edit here
     let mut first = UpstreamFixes::default();
-    first.plane_recognition_origin_after_axes = true;
-    assert_eq!(turned_on(&first), ["plane_recognition_origin_after_axes"]);
+    let name = UpstreamFixes::NAMES[0];
+    *first.flag_mut(name).expect("a field name") = true;
+    assert_eq!(turned_on(&first), [name]);
     assert_eq!(listed(&first), debug_fields(&first));
 }
 
@@ -92,4 +95,11 @@ fn flag_mut_sets_exactly_the_named_field() {
     assert!(fixes.flag_mut("no_such_fix").is_none());
     assert!(fixes.flag_mut("").is_none());
     assert_eq!(fixes, UpstreamFixes::default());
+}
+
+/// The fields are declared sorted by name, each once: `build.rs` reads their files in sorted
+/// order, so `NAMES` and `flags()` come out sorted.
+#[test]
+fn names_are_sorted_and_unique() {
+    assert!(UpstreamFixes::NAMES.windows(2).all(|w| w[0] < w[1]));
 }

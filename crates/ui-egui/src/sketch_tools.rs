@@ -4,8 +4,7 @@
 //! these are UI state only: every action runs a command.
 
 use crate::i18n::tr_engine_error;
-use crate::icons::markers::glyph_icon;
-use crate::icons::markers::glyph_letter;
+use crate::icons::markers::{glyph_icon, snap_icon};
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_text::tr;
@@ -53,6 +52,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.construction_line.tangent_two", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.construction_line.bisector", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.repair_link", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.fit_curves_to_section", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -100,17 +100,22 @@ thread_local! {
     /// The side of the glyphs drawn this frame (screen pixels), for [`glyph_at`] (#10794).
     static GLYPH_PX: Cell<f32> = const { Cell::new(GLYPH) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The inference the cursor snapped to last (label, sketch point), for the hint.
-    static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
+    /// Active automatic constraint/snap badges and target entities at the cursor.
+    static SNAP: RefCell<Option<SnapState>> = const { RefCell::new(None) };
     /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
     static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The points that snap lined the cursor up with, and where it went (#7828).
     static LINED: RefCell<Option<(Vec2, Vec<Lined>)>> = const { RefCell::new(None) };
-    /// The drawing tool's points so far and whether it is the Line tool, from the last hover: a
-    /// click takes the tool out of the app while it runs, and must place what the hover showed.
-    static TOOL: RefCell<(Vec<Vec2>, bool)> = const { RefCell::new((Vec::new(), true)) };
+    /// The drawing tool's points so far, whether it is the Line tool, and whether it is the
+    /// 3-Point Arc waiting for its third point, from the last hover: a click takes the tool out of
+    /// the app while it runs, and must place what the hover showed.
+    static TOOL: RefCell<(Vec<Vec2>, bool, bool)> = const { RefCell::new((Vec::new(), true, false)) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The link the Repair Link tool gives a new source.
+    static REPAIR: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The tool finished its job with this click and ends.
+    static ENDED: Cell<bool> = const { Cell::new(false) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
@@ -130,6 +135,28 @@ fn on_sketch_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
     let ss = st.sketch(active_sketch(app)?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
+}
+
+/// A piece is selected on the side of its boundary under the cursor. Drawing snaps can move
+/// a click across that boundary, so both hover and click use the pointer's plane position.
+pub(super) fn tool_point_at(app: &SolveApp, proj: &Proj, pos: Pos2, cmd: Option<&str>) -> Option<(Vec2, Option<String>)> {
+    if matches!(cmd, Some("sketch.break" | "sketch.trim")) {
+        on_sketch_plane(app, proj, pos).map(|p| (p, None))
+    } else {
+        sketch_point_at(app, proj, pos)
+    }
+}
+
+/// Clicking the selected curve's endpoint with Break can detach it from its neighbour.
+fn picked_shared_end(app: &SolveApp, curve: &str, hits: &[Hit]) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let at = hits.iter().find_map(|hit| match hit {
+        Hit::SketchPoint { sketch, at, .. } if *sketch == sid => Some(*at),
+        _ => None,
+    })?;
+    let solve = solved_sketch(app, sid)?;
+    let sk = &solve.sketch;
+    solidcraft_engine::cmd::break_shared_end(sk, sk.curve_index(curve)?, at).map(|_| at)
 }
 
 /// A press and drag with Trim draws a path from `press`; true when it started one. Each piece
@@ -193,7 +220,7 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, center_label(app, c))),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {}", crate::prefs::show_mm(app, r, 1)))),
     };
     if let Some(m) = mark {
@@ -201,6 +228,14 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// Mass Center's marker label: the centre's coordinates in the design's units, written as
+/// Design Properties writes them.
+fn center_label(app: &SolveApp, c: Vec3) -> String {
+    let at = |v: f64| crate::prefs::show_mm_bare(app, v);
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    format!("Center of mass ({}, {}, {}) {unit}", at(c.x), at(c.y), at(c.z))
 }
 
 /// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
@@ -276,14 +311,14 @@ fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Commands that start with a step of their own: Canvas and Decal ask for the image first,
 /// Edit Canvas opens the canvas panel. False when the command should not go on.
 pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
-    if id == "inspect.section" && app.preferences.viewport_section_status && app.session.section.is_some() {
+    if id == "inspect.section" && app.preferences.viewport_section_status && !app.session.section.is_empty() {
         let _ = app.run(id, json!({"clear":true}));
         return false;
     }
     if id == "sketch.intersect"
         && let Some(dialog) = crate::dialogs::Dialog::for_command(app, id)
     {
-        if dialog.wants_picks() && !app.session.selection.is_empty() {
+        if dialog.wants_picks() && app.session.has_selection() {
             let _ = app.session.execute("select.clear", &json!({}));
         }
         app.dialog = Some(dialog);
@@ -364,9 +399,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if id == "canvas.edit" {
-        // The browser's canvas panel (one panel for canvases).
-        if let Some(first) = app.session.doc.canvases.first().map(|c| c.id) {
-            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, first, false));
+        // The browser's canvas panel (one panel for canvases). A canvas picked in the Browser
+        // is the one to edit, not just the first one (#16518).
+        let picked = app.tree.picked_canvases.last().copied();
+        let target = picked.or_else(|| app.session.doc.canvases.first().map(|c| c.id));
+        if let Some(c) = target {
+            app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, c, false));
         }
         return false;
     }
@@ -374,8 +412,9 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     let command = id.to_string();
-    // Offer the image types first: the default Open filter lists only designs and meshes.
-    app.pick_open_for(&["png", "jpg", "jpeg"], move |app, path| {
+    // Offer the image types first: the default Open filter lists only designs and meshes. An SVG
+    // is drawn into a PNG as the command inserts it.
+    app.pick_open_for(&["png", "jpg", "jpeg", "svg"], move |app, path| {
         if let Some(path) = path {
             start_image_placement(app, &command, path);
         }
@@ -602,6 +641,141 @@ fn nearest_on_polyline(poly: &[Vec2], p: Vec2) -> Option<Vec2> {
         .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum SnapTarget {
+    Curve(String),
+    Point(Vec2),
+}
+
+#[derive(Clone, Debug)]
+struct SnapState {
+    at: Vec2,
+    labels: Vec<&'static str>,
+    targets: Vec<SnapTarget>,
+}
+
+impl SnapState {
+    fn new(at: Vec2) -> Self {
+        Self { at, labels: Vec::new(), targets: Vec::new() }
+    }
+
+    fn push_label(&mut self, label: &'static str) {
+        if label == "H+V" {
+            self.push_label("H");
+            self.push_label("V");
+            return;
+        }
+        if !self.labels.contains(&label) {
+            self.labels.push(label);
+        }
+    }
+
+    fn push_curve(&mut self, id: impl Into<String>) {
+        let target = SnapTarget::Curve(id.into());
+        if !self.targets.contains(&target) {
+            self.targets.push(target);
+        }
+    }
+
+    fn push_point(&mut self, pt: Vec2) {
+        if !self.targets.iter().any(|t| matches!(t, SnapTarget::Point(p) if p.dist(pt) < 1e-9)) {
+            self.targets.push(SnapTarget::Point(pt));
+        }
+    }
+}
+
+/// Append compatible directional (`H`, `V`, `//`, `⊥`, `T`, `Ext`) and alignment constraints that
+/// hold at a locked snap point `p`.
+#[allow(clippy::too_many_arguments)]
+fn add_constraints_at_point(
+    sk: &solidcraft_engine::sketch::Sketch,
+    prev: Option<Vec2>,
+    targets: &[(Option<String>, Vec2)],
+    line_tool: bool,
+    mid_only: bool,
+    align_points: bool,
+    allow_lined: bool,
+    p: Vec2,
+    state: &mut SnapState,
+    lined: &mut Vec<Lined>,
+) {
+    if mid_only {
+        return;
+    }
+    let mut axis = false;
+    if line_tool && let Some(prev) = prev {
+        let d = p - prev;
+        let len = d.len();
+        if len > 1e-6 {
+            if d.y.abs() <= len * 1e-9 {
+                state.push_label("H");
+                axis = true;
+            } else if d.x.abs() <= len * 1e-9 {
+                state.push_label("V");
+                axis = true;
+            }
+            let saved = crate::inference::all();
+            let has_dir = saved.iter().any(|i| !matches!(i.kind, crate::inference::Kind::Extension));
+            let has_ext = saved.iter().any(|i| matches!(i.kind, crate::inference::Kind::Extension));
+            let dir_cand = if !has_dir {
+                crate::inference::tangent(sk, prev, p, 1e-4)
+                    .or_else(|| crate::inference::through_center(sk, prev, p, 1e-4))
+                    .or_else(|| (!axis).then(|| crate::inference::lines_directions(sk, prev, p, 1e-4)).flatten())
+            } else {
+                None
+            };
+            let ext_cand = (!has_ext).then(|| crate::inference::extension(sk, prev, p, 1e-4)).flatten();
+            crate::inference::clear();
+            for s in saved {
+                crate::inference::add_pending(s);
+            }
+            for mut inf in [dir_cand, ext_cand].into_iter().flatten() {
+                if inf.at.dist(p) <= 1e-4 {
+                    inf.at = p;
+                    inf.guide.1 = p;
+                    state.push_label(inf.label());
+                    state.push_curve(inf.curve.clone());
+                    crate::inference::add_pending(inf);
+                }
+            }
+        }
+    }
+    if align_points {
+        let other: Vec<_> = targets.iter().filter(|(_, q)| q.dist(p) > 1e-6 && prev.is_none_or(|pr| q.dist(pr) > 1e-6)).cloned().collect();
+        let (level, plumb) = line_up(&other, p, 1e-4);
+        if let Some(l) = level
+            && (p.y - l.at.y).abs() <= 1e-6
+        {
+            state.push_label("H");
+            state.push_point(l.at);
+            if allow_lined && !lined.iter().any(|existing| existing.horizontal) {
+                lined.push(l);
+            }
+        }
+        if let Some(pl) = plumb
+            && (p.x - pl.at.x).abs() <= 1e-6
+        {
+            state.push_label("V");
+            state.push_point(pl.at);
+            if allow_lined && !lined.iter().any(|existing| !existing.horizontal) {
+                lined.push(pl);
+            }
+        }
+    }
+}
+
+/// Forget any pending snap badge, alignment guide, and line-tool inference.
+pub(crate) fn clear_snap() {
+    crate::inference::clear();
+    SNAP.with(|s| *s.borrow_mut() = None);
+    LINED.with(|l| *l.borrow_mut() = None);
+}
+
+/// Whether `cmd` is an extra sketch constraint-picking tool (`Mode::Entities(_)`).
+pub(crate) fn is_entity_constraint_tool(cmd: &str) -> bool {
+    matches!(cmd, "sketch.constraint.curvature" | "sketch.constrainer" | "sketch.constraint.polygon")
+}
+
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
 /// two curves, a line's midpoint, or alignment (horizontal/vertical) with the previous point
 /// of the tool. None: nothing near, use the grid.
@@ -618,10 +792,49 @@ pub fn refine_snap(
     let (a, b) = (proj.to_screen(plane.to_world(lp))?, proj.to_screen(plane.to_world(lp + Vec2::X))?);
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
-    // A model vertex under the cursor: drawing on it projects it into the sketch.
-    // A snap point of a model edge or another sketch's curve (#11229) is one too: an end of a
-    // body's edge is a vertex, projected and linked like one; a centre or a middle (and a point
-    // of another sketch) is no vertex to link, so the point goes where it projects to.
+    // The tool's points and kind (a click takes the tool out of the app while it runs, so the
+    // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
+    let (own, line_tool, arc_tool) = match app.tool.as_ref() {
+        Some(t) => {
+            let own: (Vec<Vec2>, bool, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line", t.cmd == "sketch.arc.three_point");
+            TOOL.with(|c| *c.borrow_mut() = own.clone());
+            own
+        }
+        None => TOOL.with(|c| c.borrow().clone()),
+    };
+    // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
+    // The 3-Point Arc takes none of them, on hover or on click, when its tangent snap is on (#20719).
+    let arc_snap = arc_tool && app.preferences.sketch_arc_tangent_snap;
+    let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
+    let line_tool = line_tool && !arc_snap;
+    let prev = own.last().copied();
+    let mid_only = crate::tool_modifiers::target_midpoint();
+    // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
+    let mid_tol = if mid_only { tol * 1.5 } else { tol };
+    let align_points = app.preferences.sketch_align_points;
+    // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
+    // previous point, one axis at a time, as before.
+    // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
+    // command makes on that line (#13413). It comes first: `line_up` keeps the first of equally
+    // near points, so a free point that happens to share the coordinate does not take its place.
+    let mut targets: Vec<(Option<String>, Vec2)> = Vec::new();
+    if align_points {
+        targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+        targets.extend(align_targets(proj, sk, plane, &own));
+    }
+    let mut lined = Vec::new();
+
+    // Helper to finish any snap state + optional alignment lines.
+    let finish = |state: SnapState, lined: Vec<Lined>, arg: Option<String>| -> Option<(Vec2, Option<String>)> {
+        let p = state.at;
+        SNAP.with(|s| *s.borrow_mut() = (!state.labels.is_empty()).then_some(state));
+        LINED.with(|l| *l.borrow_mut() = (!lined.is_empty()).then_some((p, lined)));
+        Some((p, arg))
+    };
+
+    // 1. Locked positional snaps: model/sketch vertices, curve crossings, midpoints, recent tracking
+    // crossings, off-circle tangent points, and circle centers/rims.
+    let mut locked: Option<(Vec2, &'static str, Option<String>, Vec<SnapTarget>, Option<crate::inference::Inference>)> = None;
     for h in pick(app, proj, a) {
         if let Hit::Vertex { point, body } = h {
             use solidcraft_engine::snap::SnapKind;
@@ -633,98 +846,145 @@ pub fn refine_snap(
                 Some(SnapKind::End) => ("End", vertex),
                 Some(SnapKind::Vertex) | None => ("Pt", vertex),
             };
-            SNAP.with(|s| *s.borrow_mut() = Some((label, plane.to_local(point))));
-            return Some((plane.to_local(point), arg));
+            let local = plane.to_local(point);
+            locked = Some((local, label, arg, vec![SnapTarget::Point(local)], None));
+            break;
         }
     }
-    let mid_only = crate::tool_modifiers::target_midpoint();
-    // Shift midpoint mode: widen the midpoint capture a little and skip other inferences.
-    let mid_tol = if mid_only { tol * 1.5 } else { tol };
-    let mut best: Option<(f64, &'static str, Vec2)> = None;
-    let mut mid_of: Option<String> = None;
-    // A crossing of two curves, before a midpoint or a point on one curve.
-    if !mid_only
+    if locked.is_none()
+        && !mid_only
         && let Some((q, i, j)) = solidcraft_engine::sketch::nearest_curve_intersection(sk, lp, tol)
-        && let (Some(a), Some(b)) = (sk.curves.get(i), sk.curves.get(j))
+        && let (Some(ca), Some(cb)) = (sk.curves.get(i), sk.curves.get(j))
     {
-        best = Some((q.dist(lp), "X", q));
-        mid_of = Some(format!("{}+{}:{},{}", a.id, b.id, q.x, q.y));
+        let arg = Some(format!("x:{}+{}:{},{}", ca.id, cb.id, q.x, q.y));
+        locked = Some((q, "X", arg, vec![SnapTarget::Curve(ca.id.clone()), SnapTarget::Curve(cb.id.clone())], None));
     }
-    if best.is_none() {
+    if locked.is_none() {
+        let mut best_mid: Option<(f64, String, Vec2)> = None;
         for (i, c) in sk.curves.iter().enumerate() {
             if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
                 && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
             {
                 let m = (a + b) * 0.5;
                 let d = m.dist(lp);
-                if d < mid_tol && best.is_none_or(|x| d < x.0) {
-                    best = Some((d, "Mid", m));
-                    mid_of = Some(c.id.clone());
+                if d < mid_tol && best_mid.as_ref().is_none_or(|x| d < x.0) {
+                    best_mid = Some((d, c.id.clone(), m));
                 }
             }
         }
+        if let Some((_, id, m)) = best_mid {
+            locked = Some((m, "Mid", Some(format!("mid:{id}")), vec![SnapTarget::Curve(id)], None));
+        }
     }
-    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
-    // stays a visual guide. Shift skips this.
-    if !mid_only
+    // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch
+    // preferences ask for it. One reference stays a visual guide. Shift skips this. With
+    // `sketch_align_points` on, the point lines up with both references below, as it would
+    // without this snap (#20859); otherwise it is a free coordinate and adds no constraint.
+    let mut crossing = None;
+    if locked.is_none()
+        && !mid_only
         && app.preferences.sketch_recent_snap
-        && best.is_none()
-        && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
+        && let Some(meeting) = app.viewport.tracking.meeting_of(sk, plane, proj, a)
     {
-        best = Some((at.dist(lp), "+", at));
+        locked = Some((meeting.at, "+", None, Vec::new(), None));
+        crossing = Some(meeting);
     }
-    // The tool's points and kind (a click takes the tool out of the app while it runs, so the
-    // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
-    let (own, line_tool) = match app.tool.as_ref() {
-        Some(t) => {
-            let own: (Vec<Vec2>, bool) = (t.pts.iter().map(|p| p.0).collect(), t.cmd == "sketch.line");
-            TOOL.with(|c| *c.borrow_mut() = own.clone());
-            own
+    if locked.is_none()
+        && !mid_only
+        && line_tool
+        && let Some(pr) = prev
+    {
+        if let Some(i) = crate::inference::tangent(sk, pr, lp, tol) {
+            crate::inference::clear();
+            if crate::inference::direction_line(sk, pr, &i).is_none() {
+                let target = SnapTarget::Curve(i.curve.clone());
+                let arg = Some(format!("on:{}:{},{}", i.curve, i.at.x, i.at.y));
+                locked = Some((i.at, i.label(), arg, vec![target], Some(i)));
+            }
         }
-        None => TOOL.with(|c| c.borrow().clone()),
-    };
-    // With `sketch_align_points` off, a click takes the Line tool's inferences, as before.
-    let line_tool = if app.preferences.sketch_align_points { line_tool } else { app.tool.as_ref().is_none_or(|t| t.cmd == "sketch.line") };
-    let prev = own.last().copied();
-    // Line tool: the tangent point of a circle or arc, then a line through its centre
-    // (before plain "on the curve", which would leave a chord free to miss the centre).
-    if !mid_only
-        && best.is_none()
-        && line_tool
-        && let Some(prev) = prev
-        && let Some(i) = crate::inference::tangent(sk, prev, lp, tol)
-    {
-        best = Some((i.dist, i.label(), i.at));
-    }
-    if !mid_only
-        && best.is_none()
-        && line_tool
-        && let Some(prev) = prev
-        && let Some(i) = crate::inference::through_center(sk, prev, lp, tol)
-    {
-        best = Some((i.dist, i.label(), i.at));
-        mid_of = i.arg;
-    }
-    // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
-    // nearest point of the polyline it is drawn with, which the click's point-on-curve
-    // constraint then puts on the curve itself (#9321).
-    if !mid_only && best.is_none() {
-        for (i, c) in sk.curves.iter().enumerate() {
-            let (d, q) = match sk.shape(i) {
-                Some(sh) => (sh.dist(lp), sh.project(lp)),
-                None if c.kind.is_freeform() => {
-                    let Some(q) = nearest_on_polyline(&sk.polyline(i), lp) else { continue };
-                    (q.dist(lp), q)
-                }
-                None => continue,
-            };
-            if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
-                best = Some((d, "On", q));
-                mid_of = Some(format!("{}:{},{}", c.id, q.x, q.y));
+        if locked.is_none()
+            && let Some(i) = crate::inference::through_center(sk, pr, lp, tol)
+        {
+            crate::inference::clear();
+            if i.arg.is_some() {
+                let target = SnapTarget::Curve(i.curve.clone());
+                let arg = i.arg.clone();
+                locked = Some((i.at, i.label(), arg, vec![target], Some(i)));
             }
         }
     }
+    // 3-Point Arc: the third point that makes the arc tangent to a line or arc it starts or ends
+    // on (#20719), exact: the point of that tangent circle nearest the cursor. It and the centre
+    // snap below win over an earlier snap when their point is nearer the cursor.
+    let mut arc_locked = false;
+    if !mid_only
+        && arc_snap
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_tangent(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
+    // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
+    if !mid_only
+        && arc_snap
+        && !(arc_locked && locked.as_ref().is_some_and(|l| l.1 == "T"))
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+        && locked.as_ref().is_none_or(|l| i.at.dist(lp) < l.0.dist(lp))
+    {
+        locked = Some((i.at, i.label(), None, Vec::new(), None));
+        arc_locked = true;
+    }
+    if let Some((p, label, arg, lock_targets, inf)) = locked {
+        let mut state = SnapState::new(p);
+        state.push_label(label);
+        for t in lock_targets {
+            match t {
+                SnapTarget::Curve(id) => state.push_curve(id),
+                SnapTarget::Point(pt) => state.push_point(pt),
+            }
+        }
+        if let Some(inf) = inf {
+            if matches!(inf.kind, crate::inference::Kind::Tangent) && arg.as_deref().is_some_and(|a| a.starts_with("on:")) {
+                state.push_label("On");
+            }
+            crate::inference::set_pending(inf);
+        }
+        // Where two guides meet, the point lines up with the two references the guides come from:
+        // level with one and plumb with the other (#20859), never with another point that happens
+        // to share a coordinate.
+        let has_crossing = crossing.is_some();
+        if let Some(meeting) = crossing.filter(|_| align_points) {
+            if let Some((id, at)) = meeting.level {
+                state.push_label("H");
+                state.push_point(at);
+                lined.push(Lined { id: Some(id), at, horizontal: true });
+            }
+            if let Some((id, at)) = meeting.plumb {
+                state.push_label("V");
+                state.push_point(at);
+                lined.push(Lined { id: Some(id), at, horizontal: false });
+            }
+        }
+        let allow_lined = !matches!(label, "End" | "Pt");
+        add_constraints_at_point(
+            sk,
+            prev,
+            &targets,
+            line_tool,
+            mid_only,
+            align_points && !has_crossing && !arc_locked,
+            allow_lined,
+            p,
+            &mut state,
+            &mut lined,
+        );
+        return finish(state, lined, arg);
+    }
+
+    // 2. Non-locked candidates: curve "On", Line-tool H/V or directional inference, and point alignment.
     // The free coordinate still follows the grid: on a crossing of the drawn grid's lines when
     // the point can be on one, and on the finer lattice between the crossings otherwise (#7114).
     let (minor, fine) = solidcraft_engine::view::sketch_grid_step(app.cam.half_height());
@@ -737,78 +997,253 @@ pub fn refine_snap(
             solidcraft_engine::view::sketch_grid_free(free, fixed, minor, fine)
         }
     };
-    // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
-    // previous point, one axis at a time, as before.
-    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
-    // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
-    // command makes on that line (#13413).
-    if app.preferences.sketch_align_points {
-        targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+
+    let mut best_on: Option<(f64, usize, String, Vec2)> = None;
+    if !mid_only {
+        for (i, c) in sk.curves.iter().enumerate() {
+            let (d, q) = match sk.shape(i) {
+                Some(sh) => (sh.dist(lp), sh.project(lp)),
+                None if c.kind.is_freeform() => {
+                    let Some(q) = nearest_on_polyline(&sk.polyline(i), lp) else { continue };
+                    (q.dist(lp), q)
+                }
+                None => continue,
+            };
+            if d < tol * 0.8 && best_on.as_ref().is_none_or(|x| d < x.0) {
+                best_on = Some((d, i, c.id.clone(), q));
+            }
+        }
     }
-    let mut lined = Vec::new();
-    if !mid_only
-        && best.is_none()
-        && let Some(prev) = prev
-    {
-        let (dx, dy) = ((lp.x - prev.x).abs(), (lp.y - prev.y).abs());
-        // Level with (or plumb with) the previous point, and lined up across with another.
-        let (level, plumb) = line_up(&targets, lp, tol);
+
+    let axis_from_prev = (!mid_only && line_tool).then_some(prev).flatten().and_then(|pr| {
+        let (dx, dy) = ((lp.x - pr.x).abs(), (lp.y - pr.y).abs());
         if dy < tol && dx > tol {
-            best =
-                Some((dy, if plumb.is_some() { "H+V" } else { "H" }, Vec2::new(plumb.as_ref().map_or_else(|| g(lp.x, prev.y), |p| p.at.x), prev.y)));
-            lined.extend(plumb);
+            Some(("H", pr, Vec2::X))
         } else if dx < tol && dy > tol {
-            best =
-                Some((dx, if level.is_some() { "H+V" } else { "V" }, Vec2::new(prev.x, level.as_ref().map_or_else(|| g(lp.y, prev.x), |l| l.at.y))));
-            lined.extend(level);
+            Some(("V", pr, Vec2::Y))
+        } else {
+            None
         }
-    }
-    // Line tool: parallel or perpendicular to a line, or on a line's extension.
-    if !mid_only
-        && best.is_none()
+    });
+
+    let (dir_inf, ext_cand) = if !mid_only
         && line_tool
-        && let Some(prev) = prev
-        && let Some(i) = crate::inference::lines(sk, prev, lp, tol)
+        && let Some(pr) = prev
     {
-        best = Some((i.dist, i.label(), i.at));
-    }
-    // Lined up with other points, on one axis or on both at once (#7828).
-    if !mid_only && best.is_none() {
-        let (level, plumb) = line_up(&targets, lp, tol);
-        let off = |l: &Lined| if l.horizontal { (lp.y - l.at.y).abs() } else { (lp.x - l.at.x).abs() };
-        let label = match (&level, &plumb) {
-            (Some(_), Some(_)) => Some("H+V"),
-            (Some(_), None) => Some("H"),
-            (None, Some(_)) => Some("V"),
-            (None, None) => None,
-        };
-        if let Some(label) = label {
-            // The coordinate that lines up with another point keeps that point's coordinate; the
-            // free one follows the grid.
-            let at = Vec2::new(
-                plumb.as_ref().map_or_else(|| g(lp.x, level.as_ref().map_or(lp.y, |l| l.at.y)), |p| p.at.x),
-                level.as_ref().map_or_else(|| g(lp.y, plumb.as_ref().map_or(lp.x, |p| p.at.x)), |l| l.at.y),
-            );
-            best = Some((level.iter().chain(&plumb).map(off).fold(f64::INFINITY, f64::min), label, at));
-            lined.extend(level);
-            lined.extend(plumb);
+        let d = crate::inference::tangent(sk, pr, lp, tol)
+            .or_else(|| crate::inference::through_center(sk, pr, lp, tol))
+            .or_else(|| crate::inference::lines_directions(sk, pr, lp, tol));
+        let e = crate::inference::extension(sk, pr, lp, tol);
+        crate::inference::clear();
+        (d, e)
+    } else {
+        (None, None)
+    };
+    let dir_line = dir_inf.as_ref().and_then(|i| prev.and_then(|pr| crate::inference::direction_line(sk, pr, i)));
+    let ext_line = ext_cand.as_ref().and_then(|i| prev.and_then(|pr| crate::inference::direction_line(sk, pr, i)));
+    let (level, plumb) = if !mid_only && align_points { line_up(&targets, lp, tol) } else { (None, None) };
+    let align_with_line = |origin: Vec2, dir: Vec2, require_forward: bool| -> Option<(Vec2, Lined, &'static str)> {
+        [
+            level.as_ref().and_then(|l| solidcraft_engine::sketch::intersect_infinite_lines(origin, dir, l.at, Vec2::X).map(|q| (q, l.clone(), "H"))),
+            plumb
+                .as_ref()
+                .and_then(|pl| solidcraft_engine::sketch::intersect_infinite_lines(origin, dir, pl.at, Vec2::Y).map(|q| (q, pl.clone(), "V"))),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|(q, _, _)| (!require_forward || (*q - origin).dot(dir) > 1e-6) && q.dist(lp) <= tol * 1.2)
+        .min_by(|a, b| a.0.dist(lp).total_cmp(&b.0.dist(lp)))
+    };
+
+    if let Some((_, ci, cid, q_on)) = best_on {
+        if let Some((axis_label, origin, dir)) = axis_from_prev
+            && let Some(q) = solidcraft_engine::sketch::intersect_curve_with_line(sk, ci, origin, dir, lp, tol * 1.4)
+        {
+            let mut state = SnapState::new(q);
+            state.push_label(axis_label);
+            state.push_label("On");
+            state.push_curve(cid.clone());
+            add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q, &mut state, &mut lined);
+            return finish(state, lined, Some(format!("on:{cid}:{},{}", q.x, q.y)));
         }
+        if let (Some(mut inf), Some((origin, dir))) = (dir_inf.clone(), dir_line)
+            && inf.curve != cid
+            && let Some(q) = solidcraft_engine::sketch::intersect_curve_with_line(sk, ci, origin, dir, lp, tol * 1.4)
+        {
+            inf.at = q;
+            inf.guide.1 = q;
+            let mut state = SnapState::new(q);
+            state.push_label(inf.label());
+            state.push_curve(inf.curve.clone());
+            crate::inference::set_pending(inf);
+            state.push_label("On");
+            state.push_curve(cid.clone());
+            add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q, &mut state, &mut lined);
+            return finish(state, lined, Some(format!("on:{cid}:{},{}", q.x, q.y)));
+        }
+        if let (Some(mut ext), Some((origin, dir))) = (ext_cand.clone(), ext_line)
+            && ext.curve != cid
+            && let Some(q) = solidcraft_engine::sketch::intersect_curve_with_line(sk, ci, origin, dir, lp, tol * 1.4)
+            && (q - origin).dot(dir) > 1e-6
+        {
+            ext.at = q;
+            ext.guide.1 = q;
+            let mut state = SnapState::new(q);
+            state.push_label(ext.label());
+            state.push_curve(ext.curve.clone());
+            crate::inference::set_pending(ext);
+            state.push_label("On");
+            state.push_curve(cid.clone());
+            add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q, &mut state, &mut lined);
+            return finish(state, lined, Some(format!("on:{cid}:{},{}", q.x, q.y)));
+        }
+        let align_hit = [
+            level.as_ref().and_then(|l| {
+                solidcraft_engine::sketch::intersect_curve_with_line(sk, ci, l.at, Vec2::X, lp, tol * 1.4).map(|q| (q.dist(lp), q, l.clone(), "H"))
+            }),
+            plumb.as_ref().and_then(|pl| {
+                solidcraft_engine::sketch::intersect_curve_with_line(sk, ci, pl.at, Vec2::Y, lp, tol * 1.4).map(|q| (q.dist(lp), q, pl.clone(), "V"))
+            }),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, q, l, align_label)) = align_hit {
+            let mut state = SnapState::new(q);
+            state.push_label(align_label);
+            state.push_point(l.at);
+            lined.push(l);
+            state.push_label("On");
+            state.push_curve(cid.clone());
+            add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q, &mut state, &mut lined);
+            return finish(state, lined, Some(format!("on:{cid}:{},{}", q.x, q.y)));
+        }
+        let mut state = SnapState::new(q_on);
+        state.push_label("On");
+        state.push_curve(cid.clone());
+        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q_on, &mut state, &mut lined);
+        return finish(state, lined, Some(format!("on:{cid}:{},{}", q_on.x, q_on.y)));
     }
-    SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
-    LINED.with(|l| *l.borrow_mut() = best.filter(|_| !lined.is_empty()).map(|(_, _, at)| (at, lined)));
-    // A midpoint snap is a point argument the commands understand ("mid:<line>").
-    // "x:a+b:x,y" is a crossing of two curves; "on:<curve>:x,y" is a point on one curve.
-    best.map(|(_, l, p)| {
-        let arg = match l {
-            "X" => mid_of.map(|m| format!("x:{m}")),
-            "Mid" => mid_of.map(|m| format!("mid:{m}")),
-            "On" => mid_of.map(|m| format!("on:{m}")),
-            // Already a point argument (`<id>.center` or `on:<id>:x,y`), or none for a free point.
-            "Ctr" => mid_of,
-            _ => None,
+
+    if let Some((axis_label, pr, axis_dir)) = axis_from_prev {
+        if let (Some(mut ext), Some((ext_origin, ext_dir))) = (ext_cand.clone(), ext_line)
+            && let Some(q) = solidcraft_engine::sketch::intersect_extension_ray(pr, axis_dir, ext_origin, ext_dir, lp, tol * 1.4)
+        {
+            ext.at = q;
+            ext.guide.1 = q;
+            let mut state = SnapState::new(q);
+            state.push_label(axis_label);
+            state.push_label(ext.label());
+            state.push_curve(ext.curve.clone());
+            crate::inference::set_pending(ext);
+            add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, q, &mut state, &mut lined);
+            return finish(state, lined, None);
+        }
+        let p = match (axis_label, plumb.as_ref(), level.as_ref()) {
+            ("H", Some(pl), _) => Vec2::new(pl.at.x, pr.y),
+            ("H", None, _) => Vec2::new(g(lp.x, pr.y), pr.y),
+            ("V", _, Some(l)) => Vec2::new(pr.x, l.at.y),
+            _ => Vec2::new(pr.x, g(lp.y, pr.x)),
         };
-        (p, arg)
-    })
+        let mut state = SnapState::new(p);
+        state.push_label(axis_label);
+        if axis_label == "H"
+            && let Some(pl) = plumb
+        {
+            state.push_label("V");
+            state.push_point(pl.at);
+            lined.push(pl);
+        } else if axis_label == "V"
+            && let Some(l) = level
+        {
+            state.push_label("H");
+            state.push_point(l.at);
+            lined.push(l);
+        }
+        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, p, &mut state, &mut lined);
+        return finish(state, lined, None);
+    }
+
+    if let Some(mut inf) = dir_inf {
+        let arg = inf.arg.clone();
+        let (p, extra_ext, extra_align) = if let (Some((origin, dir)), Some(mut ext), Some((ext_origin, ext_dir))) = (dir_line, ext_cand, ext_line)
+            && ext.curve != inf.curve
+            && let Some(q) = solidcraft_engine::sketch::intersect_extension_ray(origin, dir, ext_origin, ext_dir, lp, tol * 1.4)
+        {
+            inf.at = q;
+            inf.guide.1 = q;
+            ext.at = q;
+            ext.guide.1 = q;
+            (q, Some(ext), None)
+        } else if let Some((q, l, align_label)) = dir_line.and_then(|(origin, dir)| align_with_line(origin, dir, false)) {
+            inf.at = q;
+            inf.guide.1 = q;
+            (q, None, Some((l, align_label)))
+        } else {
+            (inf.at, None, None)
+        };
+        let mut state = SnapState::new(p);
+        state.push_label(inf.label());
+        state.push_curve(inf.curve.clone());
+        crate::inference::set_pending(inf);
+        if let Some(ext) = extra_ext {
+            state.push_label(ext.label());
+            state.push_curve(ext.curve.clone());
+            crate::inference::add_pending(ext);
+        }
+        if let Some((l, align_label)) = extra_align {
+            state.push_label(align_label);
+            state.push_point(l.at);
+            lined.push(l);
+        }
+        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, p, &mut state, &mut lined);
+        return finish(state, lined, arg);
+    }
+
+    if let Some(mut ext) = ext_cand {
+        let (p, extra_align) = match ext_line.and_then(|(origin, dir)| align_with_line(origin, dir, true)) {
+            Some((q, l, align_label)) => {
+                ext.at = q;
+                ext.guide.1 = q;
+                (q, Some((l, align_label)))
+            }
+            None => (ext.at, None),
+        };
+        let arg = ext.arg.clone();
+        let mut state = SnapState::new(p);
+        state.push_label(ext.label());
+        state.push_curve(ext.curve.clone());
+        crate::inference::set_pending(ext);
+        if let Some((l, align_label)) = extra_align {
+            state.push_label(align_label);
+            state.push_point(l.at);
+            lined.push(l);
+        }
+        add_constraints_at_point(sk, prev, &targets, line_tool, mid_only, align_points, true, p, &mut state, &mut lined);
+        return finish(state, lined, arg);
+    }
+
+    if level.is_some() || plumb.is_some() {
+        let at = Vec2::new(
+            plumb.as_ref().map_or_else(|| g(lp.x, level.as_ref().map_or(lp.y, |l| l.at.y)), |pl| pl.at.x),
+            level.as_ref().map_or_else(|| g(lp.y, plumb.as_ref().map_or(lp.x, |pl| pl.at.x)), |l| l.at.y),
+        );
+        let mut state = SnapState::new(at);
+        if let Some(l) = level {
+            state.push_label("H");
+            state.push_point(l.at);
+            lined.push(l);
+        }
+        if let Some(pl) = plumb {
+            state.push_label("V");
+            state.push_point(pl.at);
+            lined.push(pl);
+        }
+        return finish(state, lined, None);
+    }
+
+    SNAP.with(|s| *s.borrow_mut() = None);
+    None
 }
 
 /// The constraints one glyph stands for. A point that is the midpoint of several lines (their
@@ -863,8 +1298,8 @@ pub fn glyph_at(pos: Pos2) -> Option<String> {
 
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
-/// pointer (#10794); hover and click both pick with this rule.
-fn nearest_glyph<'a>(glyphs: impl IntoIterator<Item = (&'a str, Pos2)>, pos: Pos2, reach: f32) -> Option<(&'a str, Pos2)> {
+/// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
+pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
 }
 
@@ -883,7 +1318,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
             _ => None,
         })
         .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities }));
+    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
     true
 }
 
@@ -928,6 +1363,7 @@ fn mode(id: &str) -> Option<Mode> {
     }
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.repair_link" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -948,6 +1384,11 @@ fn mode(id: &str) -> Option<Mode> {
     })
 }
 
+/// Whether an extra sketch tool draws new geometry from clicks rather than picking existing entities.
+pub fn is_drawing_tool(id: &str) -> bool {
+    matches!(mode(id), Some(Mode::Points(_) | Mode::Construction))
+}
+
 /// A tool for one of the extra sketch commands.
 pub fn tool_for(id: &str) -> Option<Tool> {
     mode(id)?;
@@ -966,7 +1407,11 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
-        normal: false,
+        line_type: crate::sketch_construction::last_line_type(),
+        classic: false,
+        arc_modes: false,
+        preselected: false,
+        finished: false,
     })
 }
 
@@ -982,6 +1427,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
+            "sketch.repair_link" => "Repair Link: click the edge, face, vertex or sketch curve the projection should follow now",
             "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
@@ -1029,7 +1475,115 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
 }
 
+/// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
+/// The centre of a hole is none of those — the opening has no triangles — so the ray is
+/// tested against hole openings and the rim's edges are projected. Anything else is said
+/// out loud: a miss used to return without running the command, so the click did nothing.
+fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
+    let picked = hits.iter().find_map(|h| match h {
+        Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. } => model_ref(app, h),
+        _ => None,
+    });
+    let refs = if let Some(r) = picked {
+        vec![r]
+    } else if let Some(rim) = hole_under_cursor(app, proj, pos) {
+        rim
+    } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
+        vec![r]
+    } else {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    };
+    if refs.is_empty() {
+        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        return;
+    }
+    // A command failure is already reported by `SolveApp::run`. A refusal that returns
+    // before that (a file operation in progress) is not, so surface it here.
+    if let Err(error) = app.run("sketch.project", json!({"refs": refs}))
+        && !app.status.as_ref().is_some_and(|(_, _, is_error)| *is_error)
+    {
+        app.set_status(error, true);
+    }
+}
+
+/// Edge references for the hole opening under the cursor, when the ray passes through one.
+fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
+    let (origin, dir) = proj.ray(pos);
+    let state = crate::open_meshing::shown_world(app);
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    (!refs.is_empty()).then_some(refs)
+}
+
 /// A model reference for a hit (for Project and friends).
+/// Did the last click end its tool (the job is done)? Reading it resets it.
+pub(crate) fn take_ended() -> bool {
+    ENDED.with(|e| e.replace(false))
+}
+
+/// Start Repair Link for `link` of the sketch being edited: the next model reference clicked
+/// becomes its source.
+pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
+    REPAIR.with(|l| *l.borrow_mut() = Some(link.to_string()));
+    app.start("sketch.repair_link");
+}
+
+/// Translate Project's default-off session choice into explicit command inputs. Shared by dialog preview,
+/// deferred requests and immediate commands; an explicit caller's choice is kept.
+pub(crate) fn projection_policy(app: &SolveApp, command: &str, params: &mut Value) {
+    if matches!(command, "sketch.project" | "sketch.intersect" | "sketch.include_3d") {
+        if let Some(object) = params.as_object_mut() {
+            object.entry("strict_occurrence_references").or_insert(json!(app.ui.project_link_tools));
+        }
+        if app.ui.project_link_tools && params.get("strict_occurrence_references").and_then(Value::as_bool) == Some(true) {
+            projection_paths(app, params);
+        }
+    }
+    if matches!(command, "sketch.delete" | "selection.delete")
+        && let Some(object) = params.as_object_mut()
+    {
+        object.entry("preserve_projection_link").or_insert(json!(app.ui.project_link_tools));
+    }
+}
+
+/// Put the placement actually displayed by the viewport into opt-in projection requests.
+/// Model bodies carry a world instance name; sketches are displayed at their first placement
+/// (`world_state`), so a repeated sketch pick must name that path rather than become ambiguous.
+pub(crate) fn projection_paths(app: &SolveApp, params: &mut Value) {
+    let doc = &app.session.doc;
+    let state = app.session.model.state();
+    let bodies = doc.body_frames_with_source(&state);
+    let one = |value: &mut Value| {
+        let Some(reference) = value.as_object_mut() else { return };
+        if reference.contains_key("path") {
+            return;
+        }
+        let path = if let Some(body) = reference.get("body").and_then(Value::as_str) {
+            bodies.iter().find(|(world, ..)| world == body).map(|(_, _, _, path, _)| path.clone())
+        } else if let Some(sketch) = reference.get("sketch") {
+            let key = sketch.as_str().map(str::to_string).or_else(|| sketch.as_u64().map(|id| id.to_string()));
+            key.and_then(|key| doc.find_feature(&key)).map(|feature| doc.first_path(feature.component))
+        } else {
+            None
+        };
+        if let Some(path) = path {
+            reference.insert("path".into(), json!(path));
+        }
+    };
+    if let Some(refs) = params.get_mut("refs") {
+        if let Some(refs) = refs.as_array_mut() {
+            for reference in refs.iter_mut().take(1000) {
+                one(reference);
+            }
+        } else {
+            one(refs);
+        }
+    } else if let Some(reference) = params.get_mut("ref") {
+        one(reference);
+    }
+}
+
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
     Some(match h {
@@ -1057,8 +1611,9 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
 /// side (the engine refuses it), and construction curves are ignored when more than two meet.
-/// Each side must be a line, or an arc for a fillet.
-pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
+/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open control
+/// point spline (#9178).
+pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, curves_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
         .curves
@@ -1072,7 +1627,12 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    let takes = |c: &solidcraft_engine::sketch::Curve| match c.kind {
+        CurveKind::Line { .. } => true,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => curves_ok,
+        _ => false,
+    };
+    if curves.iter().any(|(_, c)| !takes(c)) {
         return None;
     }
     match curves[..] {
@@ -1083,7 +1643,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
-pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
+pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, curves_ok: bool) -> Option<(Vec2, String)> {
     let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
@@ -1095,7 +1655,7 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, pi, arcs_ok)?;
+            corner_curves(sk, pi, curves_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1146,9 +1706,21 @@ pub(crate) fn two_tangent_default_radius(app: &SolveApp, tool: &Tool) -> f64 {
     }
 }
 
+/// The fewest distinct points a spline closed into a loop takes: 3 for a fit spline, and degree +
+/// 1 for a control spline (the engine's rule for a closed control spline).
+fn closed_loop_min_points(cmd: &str) -> Option<usize> {
+    match cmd {
+        "sketch.spline.fit_point" => Some(3),
+        "sketch.spline.control_point" => Some(4),
+        "sketch.spline.control_point_5" => Some(6),
+        _ => None,
+    }
+}
+
 /// A click with an extra tool.
 pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    if tool.cmd != "sketch.spline.fit_point" || tool.pts.len() < 3 || crate::drag_snap::suppressed() {
+    let least = closed_loop_min_points(tool.cmd)?;
+    if tool.pts.len() < least || crate::drag_snap::suppressed() {
         return None;
     }
     let first = tool.pts.first()?.0;
@@ -1157,11 +1729,11 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
         if !distinct.contains(&p.0) {
             distinct.push(p.0);
         }
-        if distinct.len() == 3 {
+        if distinct.len() == least {
             break;
         }
     }
-    if distinct.len() < 3 {
+    if distinct.len() < least {
         return None;
     }
     let state = crate::open_meshing::session_world(&app.session);
@@ -1170,11 +1742,13 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
     (screen.distance(pos) <= 8.0).then_some(first)
 }
 
+/// A viewport click while a sketch tool is running: picks under `pos` and dispatches on the
+/// tool's mode. Sketch Project goes through `project_click`.
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
-    let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
+    let at = tool_point_at(app, proj, pos, Some(cmd));
     match m {
         Mode::Construction => crate::sketch_construction::on_click(app, tool, &hits, at),
         Mode::ModelRef if cmd == "inspect.curvature_comb" => {
@@ -1251,19 +1825,30 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 ))
             });
             let Some((plane, at)) = target else { return };
-            let p = if decal {
+            // On the plane of the sketch being edited, the image follows a construction rectangle
+            // drawn around it in that sketch (#18405), when the tool's option in the Sketch Palette
+            // asks for it (`sketch_palette`, "Frame the image in the sketch"). The engine
+            // decides whether the image lies on that plane ("auto"); off it, the image is free.
+            // With no sketch open, the image is framed in a new sketch on its own plane (true).
+            let frame = app.preferences.frame_images_in_sketch.then(|| if app.session.active_sketch.is_some() { json!("auto") } else { json!(true) });
+            let mut p = if decal {
                 json!({"path": path, "face": if plane.get("face").is_some() { plane } else { Value::Null }})
             } else {
                 json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
             };
+            if let (Some(frame), Some(o)) = (frame, p.as_object_mut()) {
+                o.insert("frame".into(), frame);
+            }
             if let Ok(v) = app.run(cmd, p) {
                 IMAGE.with(|i| *i.borrow_mut() = None);
                 app.tool = None;
-                if let Some(id) = v["canvas"].as_u64() {
+                // A framed image is placed and sized by its rectangle's constraints, not the card.
+                if let Some(id) = v["canvas"].as_u64().filter(|_| v.get("frame").is_none()) {
                     app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, id, false));
                 }
             }
         }
+        Mode::ModelRef if cmd == "sketch.project" => project_click(app, proj, pos, &hits),
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
@@ -1277,6 +1862,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     if r.get("face").is_some() {
                         let along = SHIFT.with(Cell::get);
                         let _ = app.run(cmd, json!({"face": r["face"], "body": r["body"], "direction": if along { "v" } else { "u" }}));
+                    }
+                }
+                "sketch.repair_link" => {
+                    let Some(link) = REPAIR.with(|l| l.borrow().clone()) else { return };
+                    if app.run(cmd, json!({"link": link, "ref": r})).is_ok() {
+                        REPAIR.with(|l| *l.borrow_mut() = None);
+                        app.set_status(solidcraft_ui_text::tr("sketch.projection_repaired"), false);
+                        ENDED.with(|e| e.set(true));
                     }
                 }
                 _ => {
@@ -1301,7 +1894,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         None => {
                             tool.picks.push(id);
                             tool.point_picks.push(xy(p));
-                            app.set_status("Extend: Shift-click the second curve", false);
+                            app.set_tool_hint("Extend: Shift-click the second curve");
                         }
                         Some(first) if first != id => {
                             let first_pt = tool.point_picks.first().cloned();
@@ -1318,6 +1911,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 } else {
                     tool.picks.clear();
                     tool.point_picks.clear();
+                    let p = if cmd == "sketch.break" { picked_shared_end(app, &id, &hits).unwrap_or(p) } else { p };
                     let _ = app.run(cmd, json!({"curve": id, "at": xy(p)}));
                 }
             }
@@ -1368,9 +1962,19 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
             if n > 0 && tool.picks.len() >= n && cmd != "sketch.circle.two_tangent" {
-                run_entities(app, tool);
-                tool.picks.clear();
-                tool.pts.clear();
+                let applied = run_entities(app, tool);
+                if applied && tool.preselected {
+                    tool.finished = true;
+                }
+                if !applied && tool.preselected {
+                    tool.picks.pop();
+                    if tool.pts.len() > tool.picks.len() {
+                        tool.pts.pop();
+                    }
+                } else {
+                    tool.picks.clear();
+                    tool.pts.clear();
+                }
             }
         }
         Mode::Steps => match cmd {
@@ -1383,11 +1987,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
                         // Done: the hint asks for the next pair again (a failure keeps its error).
                         if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
-                            app.set_status(crate::tools::hint(cmd), false);
+                            app.set_tool_hint(crate::tools::hint(cmd));
                         }
                         tool.picks.clear();
                     } else {
-                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
+                        app.set_tool_hint(app.tr("ui.intersection_curve_second_pick").to_string());
                     }
                 }
             }
@@ -1552,15 +2156,15 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             true
         }
         Mode::Entities(0) if !tool.picks.is_empty() => {
-            run_entities(app, tool);
+            let applied = run_entities(app, tool);
             tool.picks.clear();
             tool.pts.clear();
-            true
+            !(applied && tool.preselected)
         }
         // Intersection Curve: the right-click starts the picks over (#11048).
         Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
             tool.picks.clear();
-            app.set_status(crate::tools::hint(tool.cmd), false);
+            app.set_tool_hint(crate::tools::hint(tool.cmd));
             true
         }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
@@ -1738,7 +2342,8 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         painter.add(egui::Shape::line(path, stroke));
         return;
     }
-    if let Some((hp, snap)) = &t.hover
+    if !crate::tools::is_constraint_pick_tool(t)
+        && let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
         painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
@@ -1781,11 +2386,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     {
         crate::tools::paint_preview_curve(curve, &ss.plane, painter, proj, stroke, crate::sketch_palette::mode(app));
     }
-    // Picked curves highlighted.
+    // Picked curves and points highlighted with normal selection styling.
     let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
     for id in t.picks.iter().filter(|x| *x != "|") {
         if let Some(ci) = ss.sketch.curve_index(id) {
-            crate::tools::paint_curve(&ss.sketch, ci, &ss.plane, painter, proj, Stroke::new(3.0, tk.accent.gamma_multiply(0.7)), &mut display_budget);
+            crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
+        } else if let Some(sp) = ss.sketch.resolve_point(id).and_then(|pi| ss.sketch.point(pi)).and_then(to) {
+            crate::tools::highlight_point(painter, sp);
         }
     }
 }
@@ -2056,17 +2663,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
                 "sketch_rect_pattern"
             }
         });
-        match pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
-            Some(icon) => crate::icons::paint_icon(painter, r.shrink(2.0 * scale), icon, f32::from(col.a()) / 255.0),
-            None => {
-                painter.text(
-                    *sp,
-                    egui::Align2::CENTER_CENTER,
-                    glyph_letter(c.kind.name()),
-                    egui::FontId::proportional(solidcraft_theme::Tokens::get().font_panel * scale),
-                    col,
-                );
-            }
+        if let Some(icon) = pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
+            crate::icons::paint_icon(painter, r.shrink(2.0 * scale), icon, f32::from(col.a()) / 255.0);
         }
         drawn.push((id.clone(), *sp));
     }
@@ -2156,28 +2754,156 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
     }
 }
 
-/// The inference label next to the snapped cursor (while a tool is active).
-fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.is_none() {
+/// Active snap/constraint labels at the cursor (in display order), for tests.
+#[cfg(test)]
+pub(crate) fn current_snap_labels() -> Vec<&'static str> {
+    SNAP.with(|s| s.borrow().as_ref().map(|snap| snap.labels.clone()).unwrap_or_default())
+}
+
+/// Place a snap/constraint preview badge row near `sp` without overlapping placed constraint glyphs
+/// or the tool-cursor badge.
+fn clear_snap_badge_rect(app: &SolveApp, painter: &egui::Painter, view_rect: egui::Rect, sp: egui::Pos2, size: egui::Vec2, glyph: f32) -> egui::Rect {
+    let default_rect = crate::tool_cursor::clear_of_badge(app, painter, view_rect, egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), size));
+    let glyph_rects: Vec<egui::Rect> =
+        GLYPHS.with(|g| g.borrow().iter().map(|(_, c)| egui::Rect::from_center_size(*c, egui::vec2(glyph, glyph)).expand(2.0)).collect());
+    let clear_of_glyphs = |cand: egui::Rect| !glyph_rects.iter().any(|g| g.intersects(cand));
+    if clear_of_glyphs(default_rect) {
+        return default_rect;
+    }
+    let step = glyph + 4.0;
+    let mut mins = Vec::with_capacity(28);
+    for k in 1..=4 {
+        let d = step * k as f32;
+        mins.push(default_rect.min + egui::vec2(0.0, -d));
+        mins.push(default_rect.min + egui::vec2(d, 0.0));
+    }
+    mins.push(egui::pos2(sp.x - 12.0 - size.x, sp.y - 24.0));
+    mins.push(egui::pos2(sp.x - 12.0 - size.x, sp.y + 10.0));
+    mins.push(egui::pos2(sp.x + 12.0, sp.y + 32.0));
+    for k in 1..=3 {
+        let d = step * k as f32;
+        mins.push(egui::pos2(sp.x - 12.0 - size.x, sp.y - 24.0 - d));
+        mins.push(egui::pos2(sp.x - 12.0 - size.x - d, sp.y - 24.0));
+        mins.push(egui::pos2(sp.x - 12.0 - size.x, sp.y + 10.0 + d));
+        mins.push(egui::pos2(sp.x + 12.0, sp.y + 32.0 + d));
+    }
+    for require_in_view in [true, false] {
+        for min in &mins {
+            let cand = crate::tool_cursor::clear_of_badge(app, painter, view_rect, egui::Rect::from_min_size(*min, size));
+            if clear_of_glyphs(cand) && (!require_in_view || view_rect.contains_rect(cand)) {
+                return cand;
+            }
+        }
+    }
+    default_rect
+}
+
+/// Paint one or more snap/constraint preview badges next to `sp`, scaled with `constraint_glyph_scale`.
+pub(crate) fn paint_snap_badges(
+    app: &SolveApp,
+    painter: &egui::Painter,
+    view_rect: egui::Rect,
+    sp: egui::Pos2,
+    labels: &[&'static str],
+    publish_hint: bool,
+) {
+    let items: Vec<(&'static str, Option<&'static str>)> = labels.iter().map(|&label| (label, snap_icon(label))).collect();
+    paint_badge_row(app, painter, view_rect, sp, &items, if publish_hint { "viewport:snap_hint" } else { "viewport:drag_snap_badge" });
+}
+
+/// Paint the active constraint/dimension operator icon beside the cursor using the exact same
+/// style and glyph-scale sizing as line placement's constraint previews.
+pub(crate) fn paint_constraint_cursor(app: &SolveApp, painter: &egui::Painter, proj: &Proj, at: Option<egui::Pos2>, shift: bool) {
+    let (Some(at), Some(tool)) = (at, app.tool.as_ref()) else { return };
+    let Some(icon) = crate::tools::constraint_cursor_icon(app, tool, proj, at, shift) else { return };
+    paint_badge_row(app, painter, proj.rect, at, &[("", Some(icon))], "viewport:constraint_cursor");
+}
+
+fn paint_badge_row(
+    app: &SolveApp,
+    painter: &egui::Painter,
+    view_rect: egui::Rect,
+    sp: egui::Pos2,
+    items: &[(&'static str, Option<&'static str>)],
+    target: &'static str,
+) {
+    if items.is_empty() {
         return;
     }
-    let Some((label, p)) = SNAP.with(|s| *s.borrow()) else { return };
+    let tk = solidcraft_theme::Tokens::get();
+    let glyph = glyph_px(app.preferences.constraint_glyph_scale);
+    let scale = glyph / GLYPH;
+    let gap = (3.0 * scale).round();
+    let badges: Vec<(&'static str, Option<&'static str>, f32)> = items
+        .iter()
+        .map(|&(label, icon)| {
+            let w = if icon.is_some() { glyph } else { (24.0 * scale).max(glyph) };
+            (label, icon, w)
+        })
+        .collect();
+    let total_w: f32 = badges.iter().map(|(_, _, w)| *w).sum::<f32>() + gap * badges.len().saturating_sub(1) as f32;
+    let r = clear_snap_badge_rect(app, painter, view_rect, sp, egui::vec2(total_w, glyph), glyph);
+    crate::scenario::publish_rect(target, r);
+    let rounding = tk.radius_sm.saturating_sub(1);
+    let mut x = r.left();
+    for (label, icon, w) in badges {
+        let badge = egui::Rect::from_min_size(egui::pos2(x, r.top()), egui::vec2(w, glyph));
+        painter.rect_filled(badge, rounding, tk.glyph_bg);
+        painter.rect_stroke(badge, rounding, Stroke::new(1.0, tk.accent), egui::StrokeKind::Inside);
+        match icon {
+            Some(icon) => crate::icons::paint_accented(painter, badge.shrink(2.0 * scale), icon, None, 1.0),
+            None => {
+                painter.text(badge.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(tk.font_micro * scale), tk.accent);
+            }
+        }
+        x += w + gap;
+    }
+}
+
+/// The inference badge(s) next to the snapped cursor (while a drawing tool is active), plus
+/// highlights on every affected curve or point.
+fn snap_hint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    if app.tool.as_ref().is_none_or(crate::tools::is_constraint_pick_tool) {
+        return;
+    }
+    let Some(snap) = SNAP.with(|s| s.borrow().clone()) else { return };
+    if snap.labels.is_empty() {
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
-    let Some(sp) = proj.to_screen(ss.plane.to_world(p)) else { return };
+    let Some(sp) = proj.to_screen(ss.plane.to_world(snap.at)) else { return };
+    // Avoid double-stroking curves already highlighted by `inference::show` (which runs on `sketch.line`).
+    let inf_curves: Vec<String> = (app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line"))
+        .then(crate::inference::all)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| i.curve)
+        .collect();
+    let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+    for target in &snap.targets {
+        match target {
+            SnapTarget::Curve(id) if !inf_curves.iter().any(|c| c == id) => {
+                if let Some(ci) = ss.sketch.curve_index(id) {
+                    crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
+                }
+            }
+            SnapTarget::Point(pt) => {
+                if let Some(pt_sp) = proj.to_screen(ss.plane.to_world(*pt)) {
+                    crate::tools::highlight_point(painter, pt_sp);
+                }
+            }
+            SnapTarget::Curve(_) => {}
+        }
+    }
     let tk = solidcraft_theme::Tokens::get();
     // A dotted guide from each point the snap lined the cursor up with (#7828).
-    let guides = LINED.with(|l| l.borrow().as_ref().filter(|(at, _)| at.dist(p) < 1e-9).map(|(_, lined)| lined.clone()).unwrap_or_default());
+    let guides = LINED.with(|l| l.borrow().as_ref().filter(|(at, _)| at.dist(snap.at) < 1e-9).map(|(_, lined)| lined.clone()).unwrap_or_default());
     for from in guides.iter().filter_map(|l| proj.to_screen(ss.plane.to_world(l.at))) {
         painter.add(egui::Shape::dashed_line(&[from, sp], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
     }
     crate::scenario::publish_count("sketch_align_guides", guides.len() as f64);
-    let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-    // The tool at the cursor sits in the same corner of the pointer (#15391).
-    let r = crate::tool_cursor::clear_of_badge(app, painter, proj.rect, r);
-    crate::scenario::publish_rect("viewport:snap_hint", r);
-    painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-    painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_micro), tk.text);
+    paint_snap_badges(app, painter, proj.rect, sp, &snap.labels, true);
 }
 
 /// Per frame, after the viewport is drawn: constraint glyphs, snap hints and analysis marks.
@@ -2381,6 +3107,258 @@ mod glyph_zoom_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn constraint_glyph_and_snap_icons_cover_every_kind_without_placeholders() {
+        for name in [
+            "Coincident",
+            "Collinear",
+            "Concentric",
+            "Equal",
+            "Fix",
+            "Horizontal",
+            "MidPoint",
+            "Parallel",
+            "Perpendicular",
+            "Pierce",
+            "PointAlong",
+            "Smooth",
+            "Symmetry",
+            "Tangent",
+            "Vertical",
+        ] {
+            let icon = crate::icons::markers::glyph_icon(name).unwrap_or_else(|| panic!("missing icon for {name}"));
+            assert!(!crate::icon_svg::resolve(icon).placeholder, "{name} -> {icon} fell back to placeholder");
+        }
+        for (snap, expected) in [
+            ("//", Some("c_parallel")),
+            ("\u{22a5}", Some("c_perpendicular")),
+            ("T", Some("c_tangent")),
+            ("Mid", Some("c_midpoint")),
+            ("H", Some("c_horizontal")),
+            ("V", Some("c_vertical")),
+            ("H+V", Some("c_hv")),
+            ("On", Some("c_coincident")),
+            ("End", Some("c_coincident")),
+            ("Pt", Some("c_coincident")),
+            ("X", None),
+            ("+", None),
+            ("Ext", None),
+            ("Ctr", None),
+        ] {
+            assert_eq!(crate::icons::markers::snap_icon(snap), expected, "snap label {snap}");
+            if let Some(icon) = expected {
+                assert!(!crate::icon_svg::resolve(icon).placeholder, "{snap} -> {icon} fell back to placeholder");
+            }
+        }
+    }
+
+    #[test]
+    fn is_constraint_pick_tool_matches_pick_hv_and_entity_constraint_tools() {
+        for cmd in [
+            "sketch.constraint.parallel",
+            "sketch.constraint.coincident",
+            "sketch.constraint.horizontal_vertical",
+            "sketch.constraint.curvature",
+            "sketch.constrainer",
+            "sketch.constraint.polygon",
+            "sketch.dimension",
+        ] {
+            let t = crate::tools::Tool::for_command(cmd).unwrap_or_else(|| panic!("tool for {cmd}"));
+            assert!(crate::tools::is_constraint_pick_tool(&t), "{cmd} should be classified as a constraint pick tool");
+        }
+        for cmd in ["sketch.line", "sketch.circle.center", "sketch.trim"] {
+            let t = crate::tools::Tool::for_command(cmd).unwrap_or_else(|| panic!("tool for {cmd}"));
+            assert!(!crate::tools::is_constraint_pick_tool(&t), "{cmd} should not be classified as a constraint pick tool");
+        }
+    }
+
+    #[test]
+    fn snap_hint_scales_with_constraint_glyph_scale_preference() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 0.0]}})).unwrap();
+        h.app.preferences.constraint_glyph_scale = 1.0;
+        h.step(&json!({"move": {"sketch": [20.0, 0.2]}})).unwrap();
+        h.frames(2);
+        let small = crate::scenario::rect_of("viewport:snap_hint").expect("snap_hint at 1x");
+        assert!((small.height() - glyph_px(1.0)).abs() < 0.01, "expected {}, got {}", glyph_px(1.0), small.height());
+        h.app.preferences.constraint_glyph_scale = 2.0;
+        h.frames(2);
+        let large = crate::scenario::rect_of("viewport:snap_hint").expect("snap_hint at 2x");
+        assert!((large.height() - glyph_px(2.0)).abs() < 0.01, "expected {}, got {}", glyph_px(2.0), large.height());
+        h.step(&json!({"key": "Escape"})).unwrap();
+    }
+
+    #[test]
+    fn multi_constraint_snap_shows_both_badges_and_applies_both_constraints() {
+        use serde_json::json;
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 10], [20, 20]], "infer": false})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[30, -10], [30, 30]], "infer": false})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        // Start a line at origin and move near [30, 15]: simultaneously Parallel to l1 and On l2.
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 0.0]}})).unwrap();
+        h.step(&json!({"move": {"sketch": [30.1, 15.1]}})).unwrap();
+        h.frames(2);
+        assert_eq!(super::current_snap_labels(), vec!["//", "On"]);
+        let hint = crate::scenario::rect_of("viewport:snap_hint").expect("multi snap_hint");
+        assert!(hint.width() > 2.0 * glyph_px(1.0), "expected two side-by-side badges, got {hint:?}");
+        h.step(&json!({"click": {"sketch": [30.1, 15.1]}})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { .. })), "Parallel missing");
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { .. })), "PointOnCurve missing");
+    }
+
+    #[test]
+    fn extension_coexists_with_horizontal_and_applies_both_constraints() {
+        use serde_json::json;
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [10, 10]], "infer": false})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        // Start at [0, 20] and move near [20, 20]: Horizontal + Extension of [0,0]->[10,10].
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 20.0]}})).unwrap();
+        h.step(&json!({"move": {"sketch": [20.1, 20.1]}})).unwrap();
+        h.frames(2);
+        assert_eq!(super::current_snap_labels(), vec!["H", "Ext"]);
+        h.step(&json!({"click": {"sketch": [20.1, 20.1]}})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Horizontal { .. })), "Horizontal missing");
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { .. })), "PointOnCurve missing");
+    }
+
+    #[test]
+    fn extension_coexists_with_perpendicular_and_applies_both_constraints() {
+        use serde_json::json;
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[20, 0], [30, 0]], "infer": false})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [10, 10]], "infer": false})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        // Start at [0, 10] and move near [10, 0]: Perpendicular to l2 + Extension of l1.
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 10.0]}})).unwrap();
+        h.step(&json!({"move": {"sketch": [10.1, 0.1]}})).unwrap();
+        h.frames(2);
+        assert_eq!(super::current_snap_labels(), vec!["⊥", "Ext"]);
+        h.step(&json!({"click": {"sketch": [10.1, 0.1]}})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Perpendicular { .. })), "Perpendicular missing");
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { .. })), "PointOnCurve missing");
+    }
+
+    #[test]
+    fn snap_badge_avoids_placed_constraint_glyphs() {
+        use serde_json::json;
+        use solidcore_record::Vec2;
+        use solidcraft_engine::geom::prelude::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        // A horizontal line along y = 0 places its Horizontal glyph directly above the midpoint.
+        h.app.run("sketch.line", json!({"points": [[0, 0], [30, 0]], "infer": true})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        h.frames(2);
+
+        let glyph = glyph_px(h.app.preferences.constraint_glyph_scale);
+        let placed = super::glyph_positions();
+        assert!(!placed.is_empty(), "expected placed Horizontal glyph");
+        let (_, glyph_center) = placed[0];
+
+        // Start a vertical line ending on [15, 0] (the midpoint where the Horizontal glyph sits),
+        // so its snap preview would naturally sit at sp + (12, -24) right over the placed glyph.
+        let mut t = crate::tools::Tool::for_command("sketch.line").unwrap();
+        t.pts.push((Vec2::new(15.0, -20.0), None));
+        h.app.tool = Some(t);
+        let view_rect = h.app.viewport.rect.unwrap();
+        let proj = crate::viewport::projection(&h.app, view_rect);
+        let target_world = {
+            let st = crate::open_meshing::session_world(&h.app.session);
+            let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+            ss.plane.to_world(Vec2::new(15.0, 0.0))
+        };
+        let sp = proj.to_screen(target_world).unwrap();
+        // Put the obstacle glyph right on top of the default badge position sp + (12, -24).
+        let default_center = sp + egui::vec2(12.0, -24.0) + egui::vec2(glyph * 0.5, glyph * 0.5);
+        super::GLYPHS.with(|g| g.borrow_mut().push((placed[0].0.clone(), default_center)));
+        let ctx = crate::fonts::test_context();
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(view_rect), ..Default::default() }, |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::background());
+            super::paint_snap_badges(&h.app, &painter, view_rect, sp, &["V", "Mid"], true);
+        });
+        let preview_rect = crate::scenario::rect_of("viewport:snap_hint").expect("snap_hint rect");
+        let obstacle = egui::Rect::from_center_size(default_center, egui::vec2(glyph, glyph));
+        assert!(!preview_rect.intersects(obstacle), "preview {preview_rect:?} overlaps obstacle glyph {obstacle:?} (orig {glyph_center:?})");
+        h.app.tool = None;
+    }
+
+    #[test]
+    fn line_tangent_to_circle_previews_and_commits_both_tangent_and_coincident() {
+        use serde_json::json;
+        use solidcore_record::Vec2;
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 0], "radius": 10})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+
+        // Start a line at (0, 0): the upper tangent point on circle(center=(20,0), r=10) is
+        // at (15, 5*sqrt(3)) = (15, 8.660254...).
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0.0, 0.0]}})).unwrap();
+        let tan = Vec2::new(15.0, 5.0 * 3.0_f64.sqrt());
+        h.step(&json!({"move": {"sketch": [tan.x, tan.y]}})).unwrap();
+        h.frames(2);
+
+        let snap = super::SNAP.with(|s| s.borrow().clone()).expect("tangent snap active");
+        assert!(snap.labels.contains(&"T"), "expected Tangent badge, got {:?}", snap.labels);
+        assert!(snap.labels.contains(&"On"), "expected Coincident/On badge alongside Tangent, got {:?}", snap.labels);
+
+        h.step(&json!({"click": {"sketch": [tan.x, tan.y]}})).unwrap();
+        h.frames(2);
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Tangent { .. })), "Tangent constraint missing: {:?}", sk.constraints);
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { .. })),
+            "PointOnCurve/Coincident constraint missing: {:?}",
+            sk.constraints
+        );
+        h.step(&json!({"key": "Escape"})).unwrap();
     }
 }
 

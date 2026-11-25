@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.rename_design_tab": "Rename"
+  },
+  "ar": {
+    "ui.rename_design_tab": "إعادة التسمية"
+  },
+  "de": {
+    "ui.rename_design_tab": "Umbenennen"
+  },
+  "he": {
+    "ui.rename_design_tab": "שינוי שם"
+  },
+  "ja": {
+    "ui.rename_design_tab": "名前を変更"
+  },
+  "ko": {
+    "ui.rename_design_tab": "이름 바꾸기"
+  },
+  "vi": {
+    "ui.rename_design_tab": "Đổi tên"
+  },
+  "zh": {
+    "ui.rename_design_tab": "重命名"
+  }
+}

@@ -512,6 +512,115 @@ pub fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::
     response
 }
 
+/// Package raster options: partial artwork stays in a dropdown; complete artwork gets a
+/// searchable grid. The host owns decoded textures and const values. Chrome uses control,
+/// hover, selected and typography tokens; the artwork itself is never tinted.
+pub struct SwatchPicker<'a> {
+    pub titles: &'a [String],
+    pub textures: &'a [Option<egui::load::SizedTexture>],
+    pub choose: &'a str,
+    pub search_hint: &'a str,
+    /// Show a larger picture of the highlighted (else the chosen) option above the list.
+    pub preview: bool,
+}
+
+pub fn swatch_picker(ui: &mut Ui, id: &str, chosen: &mut Option<usize>, options: SwatchPicker<'_>) -> egui::Response {
+    let SwatchPicker { titles, textures, choose, search_hint, preview } = options;
+    let t = Tokens::get();
+    let current = chosen.and_then(|index| titles.get(index)).map_or(choose, String::as_str);
+    let grid = !titles.is_empty() && titles.len() == textures.len() && textures.iter().all(Option::is_some);
+    let query_id = ui.make_persistent_id(("swatch_query", id));
+    super::dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+        if grid {
+            ui.set_min_width(t.form_card_width);
+        }
+        let mut query = ui.data_mut(|data| data.get_temp::<String>(query_id).unwrap_or_default());
+        if grid {
+            let response = super::text_field_reserving(ui, &mut query, search_hint, 0.0).1;
+            solidcraft_ui_registry::publish_target(&format!("swatch:{id}:search"), response.rect);
+            ui.data_mut(|data| data.insert_temp(query_id, query.clone()));
+        }
+        let hover_id = ui.make_persistent_id(("swatch_hover", id));
+        if preview {
+            // The highlighted option of the last frame, else the chosen one. The area is reserved
+            // whether or not a picture shows, so the tiles never move under the pointer.
+            let shown = ui.data(|data| data.get_temp::<usize>(hover_id)).or(*chosen);
+            let side = t.control_height * 6.0;
+            let (area, _) = ui.allocate_exact_size(vec2(ui.available_width().max(side), side), egui::Sense::hover());
+            if let Some(texture) = shown.and_then(|index| textures.get(index).copied().flatten()) {
+                let scale = (side / texture.size.x).min(side / texture.size.y);
+                let picture = egui::Rect::from_center_size(area.center(), texture.size * scale);
+                egui::Image::new(texture).paint_at(ui, picture);
+            }
+            solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:preview"), area);
+        }
+        let mut hovered = None;
+        let query = query.to_lowercase();
+        let visible: Vec<_> = titles.iter().enumerate().filter(|(_, title)| !grid || title.to_lowercase().contains(&query)).collect();
+        let side = if grid { t.control_height * 2.0 } else { t.control_height };
+        let width = side + t.space_16;
+        let columns = if grid { (ui.available_width() / width).floor().clamp(1.0, 8.0) as usize } else { 1 };
+        for row in visible.chunks(columns.max(1)) {
+            ui.horizontal(|ui| {
+                for (index, title) in row {
+                    let texture = textures.get(*index).copied().flatten();
+                    let size = if grid { vec2(width, side + t.control_height + t.space_8) } else { vec2(ui.available_width(), side + t.space_8) };
+                    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                    let selected = *chosen == Some(*index);
+                    if response.hovered() {
+                        hovered = Some(*index);
+                    }
+                    let fill = if selected {
+                        t.selected_bg
+                    } else if response.hovered() {
+                        t.hover
+                    } else {
+                        t.control_fill
+                    };
+                    ui.painter().rect(rect, t.control_radius, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
+                    let tile = egui::Rect::from_min_size(rect.min + vec2(t.space_4, t.space_4), vec2(side, side));
+                    if let Some(texture) = texture {
+                        let scale = (side / texture.size.x).min(side / texture.size.y);
+                        let artwork = egui::Rect::from_center_size(tile.center(), texture.size * scale);
+                        egui::Image::new(texture).paint_at(ui, artwork);
+                        solidcraft_ui_registry::publish_rect(&format!("swatch:{id}:tile:{index}"), tile);
+                    }
+                    let text_rect = if grid {
+                        egui::Rect::from_min_max(egui::pos2(rect.left() + t.space_4, tile.bottom()), rect.max - vec2(t.space_4, 0.0))
+                    } else {
+                        egui::Rect::from_min_max(egui::pos2(tile.right() + t.space_8, rect.top()), rect.max - vec2(t.space_4, 0.0))
+                    };
+                    paint_text(
+                        ui,
+                        text_rect,
+                        title,
+                        egui::FontId::proportional(t.font_small),
+                        if selected { t.selected_ink } else { t.form_ink },
+                        false,
+                    );
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, title.as_str()));
+                    solidcraft_ui_registry::publish_target(&format!("swatch:{id}:option:{index}"), response.rect);
+                    let response = response.backing_on_hover_text(title.as_str());
+                    if response.clicked() {
+                        *chosen = Some(*index);
+                        ui.close();
+                    }
+                }
+            });
+        }
+        if preview {
+            ui.data_mut(|data| match hovered {
+                Some(index) => {
+                    data.insert_temp(hover_id, index);
+                }
+                None => {
+                    data.remove::<usize>(hover_id);
+                }
+            });
+        }
+    })
+}
+
 /// An independently indexed toolbar visibility chip using the standard icon segments.
 pub fn settings_tab_chip(ui: &mut Ui, key: &str, text: &str, icon: &str, on: bool) -> bool {
     let t = Tokens::get();
@@ -766,7 +875,14 @@ pub fn popup_list(
                             inner.min,
                             egui::pos2((inner.right() - kind_width - t.space_8).max(inner.left()), inner.bottom()),
                         );
-                        super::text::paint_text(ui, text_rect, option.text, mono.clone(), if picked { t.form_primary } else { option.color }, false);
+                        super::text::paint_text(
+                            ui,
+                            text_rect,
+                            option.text,
+                            mono.clone(),
+                            if picked { crate::layout::ink_on(&t, t.selected_bg, t.form_primary, 4.5) } else { option.color },
+                            false,
+                        );
                         ui.painter().text(inner.right_center(), egui::Align2::RIGHT_CENTER, kind, kind_font.clone(), t.form_dim);
                         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), picked, option.text));
                         // Tip the full name first: long identifiers still clip inside a capped popup.

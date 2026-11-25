@@ -78,6 +78,10 @@ fn shown_features(app: &SolveApp, compact: bool) -> usize {
 }
 
 pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
+    // A search lists only what it finds, and it doesn't look for features.
+    if app.tree.search.on() {
+        return;
+    }
     // Compact history: every feature of the component, sketches too, in history order with the
     // marker, in place of the timeline.
     let compact = app.preferences.history_in_browser;
@@ -113,7 +117,7 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
         match current_model(app) {
             Some(model) => {
                 let worst = model.folder_status(app, component, compact);
-                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)))
+                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_tip(app, id)))
             }
             None => {
                 let ids: Vec<u64> = app
@@ -131,7 +135,7 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
     let r = node_row(
         rows,
         Spec { key: &key, ..Default::default() },
-        Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
@@ -454,6 +458,7 @@ fn feature_row(
     let (component, path) = (here.component, here.path);
     let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
     let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
+    let is_construction = feature.kind.is_construction();
     let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
     // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
     let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
@@ -461,22 +466,30 @@ fn feature_row(
     // selected in the tree, as NX marks the feature of a picked face; the session's selection
     // stays the face or edge.
     let [_, picked] = acts.lit.features_from_view(app);
-    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && picked == Some(id);
-    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
+    let chosen = app.session.selection.iter().any(|s| crate::timeline::feature_of_sel(&app.session.doc, s) == Some(id));
+    let by_geometry = !chosen && picked == Some(id);
+    let selected = chosen || by_geometry;
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
-    // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
-    // bodies it made (#5099); a component listed on its own stands for all of its placements.
+    // A sketch row has the eye its Sketches folder row has. A construction plane, axis or point has
+    // its own visibility in the design Origin. A feature's eye shows and hides the bodies it made
+    // (#5099); a component listed on its own stands for all of its placements.
     let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-    let (has_bodies, visible) = if is_sketch { (false, crate::browser::sketch_visible(app, id)) } else { made_bodies_shown(app, id, placement) };
-    let eye = (is_sketch || has_bodies).then_some(visible);
+    let (has_bodies, visible) = if is_sketch {
+        (false, crate::browser::sketch_visible(app, id))
+    } else if is_construction {
+        (false, !app.session.visibility.hidden_origin.contains(&label))
+    } else {
+        made_bodies_shown(app, id, placement)
+    };
+    let eye = (is_sketch || is_construction || has_bodies).then_some(visible);
     let status = match current_model(app) {
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
     };
-    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
+    let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
     let r = node_row(
@@ -496,12 +509,14 @@ fn feature_row(
             action,
             mark,
             status,
-            tip: tip.as_deref(),
+            status_tip: tip.as_ref(),
             ..Default::default()
         },
     );
     if r.eye && is_sketch {
         crate::browser::set_sketch_visible(app, id, !visible);
+    } else if r.eye && is_construction {
+        let _ = app.run("browser.visibility", json!({ "items": [&label], "visible": !visible }));
     } else if r.eye {
         let mut p = json!({"visible": !visible, "features": [id]});
         if !path.is_empty() {
@@ -538,6 +553,11 @@ fn feature_row(
         acts.hovered = true;
     }
     if let Some(at) = r.secondary {
+        // A right-click on a feature or sketch outside the selection selects it first, as in
+        // both History layouts, so the menu's Copy and Delete act on the same features.
+        if !app.session.selection.contains(&Sel::Feature { id }) {
+            click_select(app, None, Some(Sel::Feature { id }));
+        }
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
     // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
@@ -759,6 +779,41 @@ mod tests {
         assert!(h.app.session.visibility.hidden_bodies.is_empty());
     }
 
+    /// A construction plane feature row has an eye to show and hide it in the viewport.
+    #[test]
+    fn a_construction_plane_feature_row_has_an_eye_to_show_and_hide_it() {
+        let mut h = Harness::new();
+        let made = h.app.run("construct.plane.offset", json!({"base":"XY","offset":10,"name":"WorkPlane"})).unwrap();
+        let row = format!("row:browser-feature:c0:{}", made["feature"].as_u64().unwrap());
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        assert!(crate::scenario::handle_at("eye:WorkPlane").is_some(), "plane row has an eye handle");
+        h.step(&json!({"click":{"handle":"eye:WorkPlane"}})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_origin, ["WorkPlane"]);
+        h.step(&json!({"click":{"handle":"eye:WorkPlane"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.is_empty());
+
+        // Pressing V on a selected plane row also toggles visibility.
+        h.step(&json!({"click":{"handle": row}})).unwrap();
+        h.step(&json!({"key":"V"})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_origin, ["WorkPlane"]);
+        h.step(&json!({"key":"V"})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.is_empty());
+    }
+
+    /// A construction plane's Features row has the eye its Construction folder row has, on that
+    /// row (#15843).
+    #[test]
+    fn a_construction_feature_rows_eye_is_on_its_row() {
+        let mut h = Harness::new();
+        let id = h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Lid").expect("the plane's Features row has an eye");
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the plane's Features row");
+    }
+
     #[test]
     fn browser_feature_rows_stay_listed_after_manual_rollback() {
         let mut h = Harness::new();
@@ -844,6 +899,113 @@ mod tests {
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
         assert_eq!(h.app.session.undo.len(), undo);
+    }
+
+    /// A right-click on a feature row outside the selection selects that feature alone, so its
+    /// menu acts on it; inside the selection it keeps the selection, and the menu's Copy and
+    /// Delete both take every selected feature.
+    #[test]
+    fn browser_feature_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..4)
+            .map(|i| {
+                h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":format!("B{i}")})).unwrap()["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        for id in &ids[..3] {
+            h.step(&json!({"click": row(*id), "ctrl": true})).unwrap();
+            h.frames(2);
+        }
+        h.step(&json!({"click": row(ids[3]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[3] }], "outside: the clicked feature alone");
+        h.step(&json!({"widget": "Suppress"})).unwrap();
+        h.settle();
+        let suppressed: Vec<u64> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.id).collect();
+        assert_eq!(suppressed, [ids[3]]);
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        let copied: Vec<&str> = h.app.session.clipboard.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(copied.len(), 2, "Copy takes both: {copied:?}");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A row lit only by a picked face of its body counts as outside: the right-click
+        // selects the feature itself.
+        h.app.run("select.set", json!({"items": [{"type": "face", "body": "B2", "index": 0, "point": [0, 0, 0]}]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "a picked face is not the feature");
+    }
+
+    /// The same for sketch rows, whose menu is the sketch's own: outside the selection a
+    /// right-click selects the sketch alone; inside it Copy and Delete take every selected sketch.
+    #[test]
+    fn browser_sketch_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..3)
+            .map(|i| {
+                let id = h.app.run("sketch.create", json!({"plane":"XY","name":format!("S{i}")})).unwrap()["sketch"].as_u64().unwrap();
+                h.app.run("sketch.circle.center", json!({"center":[i * 20, 0],"radius":3})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                id
+            })
+            .collect();
+        // The History in the browser lists each sketch as a row of its own.
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "outside: the clicked sketch alone");
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes both");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A sketch and another feature selected: the sketch's Copy and Delete take both.
+        let block = h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2])})).unwrap();
+        h.step(&json!({"click": row(block), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes the sketch and the box");
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.features.is_empty(), "Delete takes the same two");
     }
 
     #[test]
@@ -936,7 +1098,7 @@ mod tests {
         let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row.x,row.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5,5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
         // The timeline's own hover still lights it: the browser clears only what it set.
@@ -1002,6 +1164,26 @@ mod tests {
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
         assert_eq!(app.session.selection, [Sel::Feature { id: feature }]);
+    }
+
+    #[test]
+    fn an_offset_plane_is_one_selection_in_the_features_the_history_and_the_view() {
+        let mut h = Harness::new();
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":31,"name":"Shelf"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        let doc = h.app.session.doc.clone();
+        // A Features row or History icon picks the feature: the view lights the plane by name.
+        assert_eq!(crate::viewport::displayed_selection(&h.app, &Sel::Feature { id: plane }), [Sel::Plane { name: "Shelf".into() }]);
+        // The plane picked in the view (or the Construction row) is that same feature in the lists.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "Shelf".into() }), Some(plane));
+        h.app.session.selection = vec![Sel::Plane { name: "Shelf".into() }];
+        h.frames(2);
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &h.app.session.selection[0]), Some(plane));
+        // The plane picked in the view is also what a drag, Copy or Delete from its row acts on.
+        assert_eq!(crate::timeline::selected_feature_ids(&h.app), [plane]);
+        assert_eq!(crate::timeline_left::drag_features(&mut h.app, plane, true), [plane]);
+        // An origin plane is no feature, and an unknown name maps to nothing.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "XY".into() }), None);
     }
 
     #[test]
@@ -1309,7 +1491,7 @@ mod tests {
         let path = [assembly, part];
         let rows = [occurrence_key(&path[..1]), occurrence_key(&path), format!("{}/bodies", occurrence_key(&path))];
         h.app.ui.show_browser = false;
-        crate::timeline::find_in_browser(&mut h.app, feature);
+        crate::timeline::find_in_browser(&mut h.app, &[feature]);
         assert!(h.app.ui.show_browser);
         assert!(rows.iter().all(|key| row_open(&h.app, key)), "{rows:?}");
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);
@@ -1379,6 +1561,60 @@ mod tests {
 
     /// A feature's browser row has the timeline's actions: its sketch button and menu edit the
     /// profile sketch, and the menu suppresses and rolls back; rolled-back rows stay listed.
+    #[test]
+    fn coil_and_revolve_share_the_browser_profile_sketch_reference() {
+        for history in [false, true] {
+            for command in ["solid.revolve", "solid.coil"] {
+                let mut h = Harness::new();
+                let sketch = h.app.run("sketch.create", json!({"plane":"XZ","name":"Section"})).unwrap()["sketch"].as_u64().unwrap();
+                h.app.run("sketch.rectangle.two_point", json!({"p0":[10,-0.5],"p1":[11,0.5]})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                let params = if command == "solid.coil" {
+                    json!({"sketch":sketch,"axis":"Z","pitch":8,"revolutions":1,"name":"Turn"})
+                } else {
+                    json!({"sketch":sketch,"axis":"Z","angle":90,"name":"Turn"})
+                };
+                let feature = h.app.run(command, params).unwrap()["feature"].as_u64().unwrap();
+                h.app.tree.expanded.insert("c0/features".into());
+                if history {
+                    h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+                    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+                }
+                h.frames(4);
+                for target in [Target::Feature { id: feature }, Target::Timeline { feature }] {
+                    let items = crate::context_menu::items(&h.app, &target);
+                    let edit = items.iter().find(|item| item.id == "ui.editSketch").unwrap();
+                    assert!(edit.enabled, "{command}, history={history}");
+                    assert_eq!(edit.params.as_ref().unwrap()["sketch"], json!(sketch));
+                }
+                if history {
+                    assert_eq!(fold_of("Turn"), Some(false));
+                    h.step(&json!({"click":{"handle":"fold:Turn"}})).unwrap();
+                    h.frames(2);
+                    assert_eq!(count("Section"), 1, "the source sketch is listed under {command}");
+                }
+                h.step(&json!({"click":{"handle":"action:Turn"}})).unwrap();
+                h.frames(2);
+                assert_eq!(h.app.session.active_sketch, Some(sketch), "{command}, history={history}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_primitive_coil_has_no_profile_sketch_reference() {
+        let mut h = Harness::new();
+        let feature = h.app.run("solid.coil", json!({"diameter":20,"section_size":1,"pitch":8,"revolutions":1,"name":"Spring"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(3);
+        assert!(crate::scenario::handle_at("action:Spring").is_none());
+        let menu = crate::context_menu::items(&h.app, &Target::Feature { id: feature });
+        assert!(!menu.iter().find(|item| item.id == "ui.editSketch").unwrap().enabled);
+        let timeline = crate::timeline::feature_items(&h.app, feature);
+        assert!(timeline.iter().all(|item| item.id != "ui.editSketch"));
+    }
+
     #[test]
     fn browser_feature_row_edits_its_sketch_suppresses_and_rolls_back() {
         let mut h = Harness::new();
@@ -1907,7 +2143,7 @@ mod tests {
         h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
         let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
         assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
@@ -1929,7 +2165,7 @@ mod tests {
         let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
 
@@ -1937,8 +2173,49 @@ mod tests {
         let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
         h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(sketch));
-        assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering sketch doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
+    }
+
+    #[test]
+    fn timeline_hover_marks_feature_and_sketch_in_browser() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.ui.show_timeline = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.tree.expanded.insert("c0/sketches".into());
+        h.frames(2);
+
+        // Hovering a feature on the timeline sets hover_feature and marks the feature in the browser.
+        let item_feature = crate::scenario::handle_at("timeline:Round").unwrap();
+        h.step(&json!({"move":[item_feature.x, item_feature.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(round), None]);
+
+        // Hovering a sketch on the timeline sets hover_feature and marks the sketch in the browser.
+        let item_sketch = crate::scenario::handle_at("timeline:MySketch").unwrap();
+        h.step(&json!({"move":[item_sketch.x, item_sketch.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(sketch));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(sketch), None]);
+        let sketches = entries(&h.app, 0, "sketches");
+        let sketch_entry = sketches.iter().find(|e| e.key == sketch.to_string()).unwrap();
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::Here));
+
+        // Moving the cursor away clears the hover and the browser marks.
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [None, None]);
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::None));
     }
 }

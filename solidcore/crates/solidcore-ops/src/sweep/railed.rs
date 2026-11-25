@@ -4,7 +4,7 @@
 
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, RailLoftOptions, RailSection as KernelSection,
+    loft_rails as kernel_loft_rails, polyline, RailLoftOptions, RailSection as KernelSection,
     DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
@@ -16,6 +16,7 @@ use super::{making, parse, Curve};
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::{Error, Result};
+pub use solidcore::sweep::loft_rails::Tolerance;
 
 /// How guide rails size a station (the kernel's [`KernelRailFit`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,9 +45,9 @@ pub struct RailSection {
 pub struct RailLoft {
     /// How the rails size a station.
     pub fit: RailFit,
-    /// The most a guided edge may stray from its rail (finite and positive): the kernel
-    /// certifies every guided edge within it.
-    pub tolerance: f64,
+    /// The most a guided edge may stray from its rail (finite and positive), a length or a
+    /// fraction of the loft's size: the kernel certifies every guided edge within it.
+    pub tolerance: Tolerance,
     /// The most wires (sections and stations together) the loft is skinned through: a
     /// resource bound, the kernel's default [`DEFAULT_MAX_WIRES`].
     pub max_wires: usize,
@@ -61,24 +62,34 @@ impl RailLoft {
     pub const fn new(tolerance: f64) -> Self {
         Self {
             fit: RailFit::Scale,
-            tolerance,
+            tolerance: Tolerance::Absolute(tolerance),
             max_wires: DEFAULT_MAX_WIRES,
             cap: true,
         }
     }
+
+    /// A capped loft scaled by its rails, certified within `fraction` of the loft's size.
+    #[must_use]
+    pub const fn relative(fraction: f64) -> Self {
+        Self {
+            tolerance: Tolerance::Relative(fraction),
+            ..Self::new(0.0)
+        }
+    }
 }
 
-/// The loft through `sections` guided by one or two `rails`, skinned cubic, each guided edge
+/// The loft through `sections` guided by one to sixteen `rails`, skinned cubic, each guided edge
 /// certified within `how.tolerance` of its rail ([`solidcore::sweep::loft_rails`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for a curve list refused or a count out of range;
 /// [`Error::RailPastTolerance`] where the kernel's certificate is not met within
-/// `how.max_wires`; the kernel's other refusals by their status; [`Error::Empty`],
+/// `how.max_wires`; the kernel's other refusals ([`Error::Refused`] in its words for input it
+/// refuses, else by their status); [`Error::Empty`],
 /// [`Error::NotSolid`].
 pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> Result<Body> {
     if !(2..=solidcore::sweep::loft_rails::MAX_SECTIONS).contains(&sections.len())
-        || !(1..=2).contains(&rails.len())
+        || !(1..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
     {
         return Err(Error::Argument);
     }
@@ -136,6 +147,35 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
     })
 }
 
+/// A guide rail through `points` in order: solidcore's [`polyline`] (a degree-1 curve through
+/// them, its knots spaced as the points are in order), as ops' [`Curve::Nurbs`] with unit weights.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than two points or one not finite (solidcore's refusal).
+pub fn polyline_rail(points: &[[f64; 3]]) -> Result<Curve> {
+    let v: Vec<Vec3> = points.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect();
+    let rail = polyline(&v).map_err(refused)?;
+    let base = rail.b_spline_base().ok_or(Error::Argument)?;
+    let degree = base.degree().map_err(refused)?;
+    let (unique, mult) = base.knots(None).map_err(refused)?;
+    let knots: Vec<f64> = unique
+        .iter()
+        .zip(&mult)
+        .flat_map(|(u, m)| std::iter::repeat_n(*u, *m))
+        .collect();
+    let (cp, weights) = base.control_polygon().map_err(refused)?;
+    let points = cp
+        .iter()
+        .enumerate()
+        .map(|(i, q)| [q.x, q.y, q.z, weights.get(i).copied().unwrap_or(1.0)])
+        .collect();
+    Ok(Curve::Nurbs {
+        degree,
+        points,
+        knots,
+    })
+}
+
 /// The continuity a blend holds at an end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Continuity {
@@ -170,7 +210,8 @@ pub struct BlendFrame {
 /// definition.
 ///
 /// # Errors
-/// [`Error::Argument`] for a frame not finite; the kernel's refusals by their status;
+/// [`Error::Argument`] for a frame not finite; the kernel's refusals ([`Error::Refused`] in its
+/// words for input it refuses, else by their status);
 /// [`Error::Empty`].
 pub fn loft_blend(
     sections: &[Vec<BlendFrame>],
@@ -242,7 +283,8 @@ pub(super) fn refused(e: solidcore::SolidError) -> Error {
 /// face's tangent plane keeps (SolidCraft's is 0.2).
 ///
 /// # Errors
-/// [`Error::Argument`] for an edge index not in the body; the kernel's refusals by their status.
+/// [`Error::Argument`] for an edge index not in the body; the kernel's refusals
+/// ([`Error::Refused`] in its words for input it refuses, else by their status).
 pub fn section_frames(
     body: &Body,
     edges: &[usize],
@@ -252,7 +294,7 @@ pub fn section_frames(
 ) -> Result<Vec<BlendFrame>> {
     use solidcore::sweep::section_blend::{section_frames as kernel_frames, FrameOptions};
     let arr = |v: Vec3| [v.x, v.y, v.z];
-    crate::session::with_body("section_frames", body, |k, b| {
+    crate::session::read_body("section_frames", body, |k, b| {
         let list = b.edge_list();
         let mut chain = Vec::with_capacity(edges.len());
         for &i in edges {
@@ -279,5 +321,56 @@ pub fn section_frames(
                 Err(e) => Err(status(e)),
             },
         )
+    })?
+}
+
+/// The frames of a cross-section given by its points in order (the polyline through them), at
+/// `stations` stations of even arc length, leaving along `leave` with no bend
+/// ([`solidcore::sweep::section_blend::point_frames`]): a section for [`loft_blend`] with no
+/// face behind it, such as a sketch's chain.
+///
+/// # Errors
+/// The kernel's refusals ([`Error::Refused`] in its words: stations out of range, a point or
+/// `leave` not finite, a chain of no length).
+pub fn point_frames(
+    points: &[[f64; 3]],
+    leave: [f64; 3],
+    stations: usize,
+) -> Result<Vec<BlendFrame>> {
+    use solidcore::sweep::section_blend::point_frames as kernel_frames;
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let points: Vec<Vec3> = points.iter().map(|&p| v(p)).collect();
+    match kernel_frames(&points, v(leave), stations) {
+        Ok(frames) => Ok(frames
+            .into_iter()
+            .map(|f| BlendFrame {
+                p: arr(f.p),
+                leave: arr(f.leave),
+                bend: arr(f.bend),
+                bend_change: arr(f.bend_change),
+            })
+            .collect()),
+        Err(e) => Err(status(e)),
+    }
+}
+
+/// Which open cross-sections of a blend to turn round so that each runs the way the one before
+/// it does, given each one's first and last point in the blend's order
+/// ([`solidcore::sweep::section_blend::open_section_turns`]): `true` for a section whose frames
+/// the caller reverses before [`loft_blend`].
+///
+/// # Errors
+/// [`Error::Argument`] for an end not finite; [`Error::Unsupported`] for a closed section (its
+/// ends within the kernel's zone tolerance), whose winding and seam a turn does not match.
+pub fn open_section_turns(ends: &[[[f64; 3]; 2]]) -> Result<Vec<bool>> {
+    use solidcore::sweep::section_blend::open_section_turns as kernel_turns;
+    if !ends.iter().flatten().flatten().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let ends: Vec<[Vec3; 2]> = ends.iter().map(|&[s, e]| [v(s), v(e)]).collect();
+    crate::session::run("open_section_turns", |k| {
+        Ok(kernel_turns(k, &ends).map_err(status))
     })?
 }

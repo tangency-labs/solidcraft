@@ -290,7 +290,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     };
     *plane = PlaneRef::AtAngle {
         base: Box::new(PlaneRef::Offset { base: Box::new(plane.clone()), distance: "2 mm".into() }),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_engine::doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "15 deg".into(),
         line: None,
@@ -480,6 +480,35 @@ fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() 
     }
 }
 
+/// #14675: a construction plane built from a sketch made after this one. The panel says the
+/// sketch moves after the plane, the preview has no error, and OK moves it there and redefines it.
+#[test]
+fn redefine_panel_moves_the_sketch_after_a_later_plane_and_says_so() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch4"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"Sketch5"})).unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[0,40]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.finish_sketch();
+    h.app.run("construct.plane.along_path", json!({"path":{"sketch":"Sketch5","curve":line},"t":0.5,"name":"Plane5"})).unwrap();
+    let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"]);
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_none(), "no hint before a plane is chosen");
+    h.step(&json!({"widget":"Plane5"})).unwrap();
+    h.settle();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_some(), "the panel says the sketch moves");
+    assert_eq!(h.app.preview.error, None);
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"], "the preview moves nothing");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none(), "applied");
+    assert_eq!(order(&h), ["Sketch5", "Plane5", "Sketch4"]);
+}
+
 /// #5103: Redefine Sketch Plane names the plane a sketch is on now, not only "no body-face
 /// attachment": an origin plane, a construction plane, and planes built from them.
 #[test]
@@ -548,4 +577,84 @@ fn face_pick_makes_its_part_active_only_with_the_preference() {
         h.app.finish_sketch();
         assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
     }
+}
+
+/// #12540: a plane or a flat face picked in the view while Redefine Sketch Plane is open fills
+/// its Plane field; a pick that was already there when the panel opened does not.
+#[test]
+fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.session.auto_project = false;
+    h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[-10,-10,0],"body_name":"Block"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Front30"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,20],"p1":[30,25]})).unwrap();
+    h.app.finish_sketch();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "YZ".into() }];
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "a selection from before the panel opened is not a pick");
+
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap(), vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"Front30"}))]);
+
+    // Only the open panel reveals the hidden origin. Its XY plane is under the box's top face.
+    let origin = crate::viewport::origin_planes(&h.app);
+    assert_eq!(origin.len(), 3);
+    let (_, _, quad) = origin.into_iter().find(|(name, _, _)| *name == "XY").unwrap();
+    let at = (quad[2].x * 0.5).min(5.0);
+    h.step(&json!({"click":{"world":[at,at,0]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Plane { name }) if name == "XY"));
+    let draft = h.app.tree.redefine_draft.as_ref().unwrap();
+    assert_eq!(draft.label, "Top");
+    assert_eq!(draft.commands().unwrap()[0].1["plane"], "XY");
+
+    h.app.session.selection.clear();
+    h.frames(2);
+    h.step(&json!({"click":{"world":[-7,-6,10]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Block"));
+    let commands = crate::sketch_attachment_ui::commands(&h.app).expect("the picked face fills the Plane field");
+    assert_eq!(commands[0].1["plane"]["body"], "Block", "{commands:?}");
+    // A plane selected ahead of the face does not take the field from the face.
+    let face = h.app.session.selection.first().cloned().unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }, face];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"]["body"], "Block");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none());
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
+    assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
+}
+
+#[test]
+fn redefine_panel_takes_repeated_explicit_plane_picks() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(3);
+    assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "opening the panel does not consume its preselection");
+
+    // Viewport clicks use select.set even when the selected plane has not changed.
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ");
+
+    h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "XZ");
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ", "a repeated pick replaces the panel button's candidate");
 }

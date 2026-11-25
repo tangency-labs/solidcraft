@@ -84,6 +84,51 @@ fn scratch_dir() -> PathBuf {
     d
 }
 
+fn widget_centre(n: &egui::accesskit::Node) -> Option<[f64; 2]> {
+    n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0])
+}
+
+fn widget_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str) -> Vec<[f64; 2]> {
+    let mut exact: Vec<_> = nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text))
+        .filter_map(|(_, n)| widget_centre(n).map(|at| (!n.supports_action(egui::accesskit::Action::Click), at)))
+        .collect();
+    if !exact.is_empty() {
+        // AccessKit node order is not paint order. A tooltip can repeat its button's text;
+        // prefer the click target, but retain plain labels for row and visibility lookups.
+        exact.sort_by_key(|(passive, _)| *passive);
+        return exact.into_iter().map(|(_, at)| at).collect();
+    }
+    // A menu button's label ends with its shortcut ("Save Ctrl+S").
+    nodes
+        .iter()
+        .rev()
+        .filter(|(_, n)| {
+            n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
+        })
+        .filter_map(|(_, n)| widget_centre(n))
+        .collect()
+}
+
+fn widget_near_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], text: &str, near: &str) -> Option<[f64; 2]> {
+    // A named combo exposes its label and selected value on one node. It is the
+    // exact field requested, even though its value is not to the label's right.
+    if let Some(point) = nodes.iter().rev().filter(|(_, n)| n.label() == Some(near) && n.value() == Some(text)).find_map(|(_, n)| widget_centre(n)) {
+        return Some(point);
+    }
+    let labels = widget_centres(nodes, near);
+    let &[_, ly] = labels.first()?;
+    // A field can carry its row's label too, and the accessibility tree's order doesn't say
+    // which of the two comes first: the label is the leftmost in its row.
+    let lx = labels.iter().filter(|[_, y]| (y - ly).abs() < 1.0).map(|[x, _]| *x).fold(f64::INFINITY, f64::min);
+    widget_centres(nodes, text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
+        let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
+        d(a).total_cmp(&d(b))
+    })
+}
+
 /// The app in a headless egui context.
 pub struct Harness {
     pub app: SolveApp,
@@ -91,6 +136,8 @@ pub struct Harness {
     /// The last frame's platform output (with its accessibility tree: dialog widgets are found
     /// by their text there).
     pub output: egui::PlatformOutput,
+    /// Every URL a frame asked the platform to open, until [`Harness::take_opened`].
+    pub opened: Vec<String>,
     /// The last frame's painted shapes.
     pub shapes: Vec<egui::epaint::ClippedShape>,
     /// Files the scenario saves and opens live here; file pickers answer from it.
@@ -101,6 +148,9 @@ pub struct Harness {
     queue: Option<std::sync::mpsc::Sender<ControlRequest>>,
     time: f64,
     size: egui::Vec2,
+    /// The pixels per point of the screen the window is on, as the platform reports it for each
+    /// screen (none: not reported, and egui takes 1).
+    pub screen_scale: Option<f32>,
     /// The camera as the last `camera` step left it.
     cam_mark: Option<solidcraft_viewport::Camera>,
 }
@@ -133,12 +183,14 @@ impl Harness {
                 ctx
             },
             output: Default::default(),
+            opened: Vec::new(),
             shapes: Vec::new(),
             dir: scratch_dir(),
             next_file: Rc::new(RefCell::new(None)),
             queue: None,
             time: 0.0,
             size: egui::vec2(1600.0, 1000.0),
+            screen_scale: None,
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
@@ -177,6 +229,46 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
+        self.frame_with_pen(events, None);
+    }
+
+    /// One frame with these keys held (Shift, Ctrl, Alt) while `events` come in.
+    pub fn frame_with_modifiers(&mut self, mut events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        self.frame_with(events);
+    }
+
+    /// One frame with a release identified as a pen tip by the platform.
+    pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
+        self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
+    }
+
+    /// One frame with what the platform says about its taps (a pen tip lifted, a finger down).
+    pub fn frame_with_taps(&mut self, events: Vec<egui::Event>, taps: crate::pencil::PlatformTaps) {
+        let mut raw = self.input(events);
+        self.app.raw_input_hook_with_taps(&self.ctx, &mut raw, taps);
+        let app = &mut self.app;
+        let mut out = self.ctx.run_ui(raw, |ui| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        });
+        // Nothing is painted: drop the frame's texture changes.
+        out.textures_delta.clear();
+        self.opened.extend(out.platform_output.commands.iter().filter_map(|c| match c {
+            egui::OutputCommand::OpenUrl(u) => Some(u.url.clone()),
+            _ => None,
+        }));
+        self.output = out.platform_output;
+        self.shapes = out.shapes;
+    }
+
+    /// The URLs opened since the last call.
+    pub fn take_opened(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.opened)
+    }
+
+    /// The next frame's input: the window's size on its screen, `events`, and the time a frame on.
+    fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
         self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
@@ -185,20 +277,41 @@ impl Harness {
             events,
             ..Default::default()
         };
-        self.app.raw_input_hook(&mut raw);
-        let app = &mut self.app;
-        let mut out = self.ctx.run_ui(raw, |ui| {
-            app.logic(ui.ctx());
-            app.ui(ui);
-        });
-        // Nothing is painted: drop the frame's texture changes.
-        out.textures_delta.clear();
-        self.output = out.platform_output;
-        self.shapes = out.shapes;
+        if let Some(scale) = self.screen_scale {
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(scale);
+        }
+        raw
     }
 
     pub fn frames(&mut self, n: usize) {
         for _ in 0..n {
+            self.frame();
+        }
+    }
+
+    /// `n` frames, each drawn once the dialog's preview worker has answered: what they show does
+    /// not depend on how fast the worker ran. On a loaded machine a preview's result (an error
+    /// row, say) can otherwise land a frame later than on an idle one.
+    #[cfg(test)]
+    pub fn frames_after_preview(&mut self, n: usize) {
+        for _ in 0..n {
+            self.app.preview.wait_for_worker();
+            self.frame();
+        }
+    }
+
+    /// `n` frames, each drawn once the model behind a finished sketch has been worked out on its
+    /// worker: a command waiting for that model (started while the marker rolls back) opens on
+    /// the same frame however fast the worker ran.
+    #[cfg(test)]
+    pub fn frames_after_sketch_refresh(&mut self, n: usize) {
+        for _ in 0..n {
+            let uids: Vec<u64> = self.app.sketch_refreshes.keys().copied().collect();
+            for uid in uids {
+                if let Some(job) = self.app.sketch_refreshes.remove(&uid) {
+                    self.app.sketch_refreshes.insert(uid, job.completed());
+                }
+            }
             self.frame();
         }
     }
@@ -212,16 +325,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.tick();
-        let raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
-            time: Some(self.time),
-            focused: true,
-            events: vec![egui::Event::PointerMoved(at)],
-            hovered_files: hovered,
-            dropped_files: dropped,
-            ..Default::default()
-        };
+        let raw = egui::RawInput { hovered_files: hovered, dropped_files: dropped, ..self.input(vec![egui::Event::PointerMoved(at)]) };
         let app = &mut self.app;
         let mut out = self.ctx.run_ui(raw, |ui| {
             app.logic(ui.ctx());
@@ -240,10 +344,16 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background, or a window checking what its
-        // material does: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, the offer to stand it up being
+        // worked out (its estimate can end frames after the meshing), a view being drawn on a
+        // worker, or a window checking what its material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
+        while (!self.app.file_load.idle()
+            || self.app.saving.is_some()
+            || crate::open_meshing::active(&self.app)
+            || self.app.stand_up_later.is_some()
+            || self.app.op_check.busy()
+            || !crate::drawing_jobs::idle(&self.app))
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();
@@ -294,19 +404,15 @@ impl Harness {
         out
     }
 
-    /// The centre of the visible widget whose label or value is `text` (the last one drawn wins:
-    /// popups are drawn after what opened them).
+    /// The centre of the visible widget whose label or value is `text`, preferring click targets
+    /// over matching text labels such as tooltips.
     pub fn widget(&self, text: &str) -> Option<[f64; 2]> {
         self.widgets(text).into_iter().next()
     }
 
     /// The widget showing `text` nearest the label `near` (the field in a label's row).
     pub fn widget_near(&self, text: &str, near: &str) -> Option<[f64; 2]> {
-        let [lx, ly] = self.widgets(near).into_iter().next()?;
-        self.widgets(text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
-            let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
-            d(a).total_cmp(&d(b))
-        })
+        widget_near_centres(&self.output.accesskit_update.as_ref()?.nodes, text, near)
     }
 
     /// Accessibility bounds include scrolled-out page content. Reveal that content with
@@ -337,25 +443,10 @@ impl Harness {
         Err(format!("widget `{text}` could not be revealed in its page"))
     }
 
-    /// Centres of the visible widgets whose label or value is `text`, last drawn first.
+    /// Centres of the visible widgets whose label or value is `text`, with click targets first.
     pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
-        let centre =
-            |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
-        let exact: Vec<[f64; 2]> =
-            tree.nodes.iter().rev().filter(|(_, n)| n.label() == Some(text) || n.value() == Some(text)).filter_map(|(_, n)| centre(n)).collect();
-        if !exact.is_empty() {
-            return exact;
-        }
-        // A menu button's label ends with its shortcut ("Save Ctrl+S").
-        tree.nodes
-            .iter()
-            .rev()
-            .filter(|(_, n)| {
-                n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.strip_prefix(text).is_some_and(|r| r.starts_with(' ')))
-            })
-            .filter_map(|(_, n)| centre(n))
-            .collect()
+        widget_centres(&tree.nodes, text)
     }
 
     /// A step's point on screen.
@@ -417,6 +508,9 @@ impl Harness {
     }
 
     /// Run one step.
+    // The harness runs only under tests, where libtest captures `eprintln!`; `note!` would write
+    // past the capture and fill the logs of passing tests.
+    #[allow(clippy::print_stderr)]
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
@@ -967,7 +1061,7 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 approx(w, v, "canvas width")?;
             }
             "section" => {
-                if h.app.session.section.is_some() != v.as_bool().unwrap_or(false) {
+                if h.app.session.section.is_empty() == v.as_bool().unwrap_or(false) {
                     return Err(format!("section view: want {v}"));
                 }
             }
@@ -1166,3 +1260,15 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
 #[cfg(test)]
 #[path = "scenario_publication_tests.rs"]
 mod publication_tests;
+
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+#[cfg(test)]
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-ui-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}

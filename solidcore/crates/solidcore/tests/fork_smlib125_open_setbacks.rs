@@ -40,14 +40,12 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     // (the log changes no result: issue_2489_blend_faces_are_definitions)
@@ -383,15 +381,15 @@ fn setback_set_on_a_corner_that_builds_none_is_refused() {
 
 /// The box [0, 40]^2 x [0, 20] less the cylinder r 20 about (40, 40): at (20, 40, 20) a top
 /// edge, the top arc and the vertical edge, all convex, one curved, rounded 2, set back 4.
-/// Without `fillet_setback_beside_curved_faces` it is no Setback but the `NxN` corner,
-/// whose setback path builds the setback set on it (`SetSetBackDist`): the pinned setback
-/// corner (16, 39, 25). The fork's dc757a6 deletes that path
-/// (its SMLib at 18e96f1 builds the corner without the setback, 11 faces); solidcore keeps
-/// it (solidcore#2365). A `SetSetBackFill` request there (which only the Setback reads) is
-/// ignored, as before the port: the corner without a setback (11, 24, 15, as the fork's
-/// SMLib builds it) when none is set on it.
+/// Beside the cylinder it is the Setback, through either door (`SetSetBackFill`, or
+/// `AddSetBackVertex` with `SetSetBackDist` on the made corner), and refused alike: no setback
+/// up to twice 4 certifies its fill no more concave than its faces (`NoRoom`). Before the
+/// Setback beside curved faces was the default, the made corner's door kept the `NxN`
+/// corner's setback path here, which built the pinned setback corner (16, 39, 25) unsound:
+/// `check_brep` level 2 found its patch edges and vertices 0.045 to 0.059 off their faces
+/// against the body's tolerance 0.01, and its seams turned up to 0.119 rad.
 #[test]
-fn nxn_corner_builds_the_setback_set_on_it() {
+fn setback_beside_a_curved_face_is_the_setback_through_either_door() {
     use solidcore::primitive::api_primitives::create_cylinder;
     let at = [
         [10.0, 40.0, 20.0],
@@ -400,7 +398,6 @@ fn nxn_corner_builds_the_setback_set_on_it() {
     ];
     for (fill, dist) in [(false, true), (true, true), (true, false)] {
         let mut k = all_fixes();
-        k.fixes.fillet_setback_beside_curved_faces = false;
         let bx = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 20.0).unwrap();
         let cyl = create_cylinder(&mut k, Point3::new(40.0, 40.0, -5.0), 20.0, 30.0).unwrap();
         let b = boolean_difference(&mut k, bx, cyl).unwrap();
@@ -415,12 +412,13 @@ fn nxn_corner_builds_the_setback_set_on_it() {
             fill,
             dist,
         );
-        assert_eq!(r.event, Some(None), "{fill} {dist}");
-        assert_eq!(r.code, 0, "{}", r.comment);
-        let mut b = r.body.expect("a body");
-        stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
-        let want = if dist { (16, 39, 25) } else { (11, 24, 15) };
-        assert_eq!(counts(&b), want, "{fill} {dist}");
+        assert!(r.body.is_none(), "{fill} {dist}");
+        assert_eq!(r.code, 8, "{fill} {dist}: {}", r.comment); // NoRoom
+        assert!(
+            r.comment.contains("no setback up to twice 4 keeps the setback corner's fill no more concave than its faces"),
+            "{fill} {dist}: {}",
+            r.comment
+        );
     }
 }
 
@@ -444,8 +442,8 @@ fn bar_into_post(k: &mut Kernel, open: bool) -> Blended {
 /// builds the sheet of 10 faces, 30 edges and 21 vertices, 9 of them free. In solidcore
 /// the trim classified the bar's inside as outside (the B-rep ray built its face caches
 /// afresh while the target was being edited, without their trims) and refused the blend
-/// as `NoRoom`, until #2503 (`brep_ray_classifies_current_trims`, WR-732, which `all_fixes`
-/// turns on): the trim classifies against the faces' current trims.
+/// as `NoRoom`, until #2503 (WR-732): the trim classifies against the faces' current
+/// trims.
 #[test]
 fn open_hole_on_a_body_with_a_closed_face_is_the_corner_nine_edges() {
     let mut k = all_fixes();

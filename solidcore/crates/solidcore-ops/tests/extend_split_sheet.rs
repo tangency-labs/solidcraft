@@ -148,6 +148,6 @@ fn a_sheet_whose_faces_are_not_one_surfaces_pieces_is_refused() {
     let edge = edge_through(&body, &order, [2.0, 0.0, 0.0]);
     assert_eq!(
         extend_sheet(&body, &order, edge, DISTANCE, Continuation::Natural).err(),
-        Some(Error::Unsupported("a sheet of more than one face"))
+        Some(Error::Unsupported("plane faces that do not merge into one"))
     );
 }

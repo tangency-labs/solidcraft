@@ -3,21 +3,26 @@
 //! ([`face_on`]), a sheet with its faces merged where they are one face ([`merged_faces`]),
 //! a sheet turned over ([`turn_over_shell`], [`turn_over_sheet`]), a sheet of several faces
 //! taken as the pieces of one surface and made again from it ([`one_surface`], [`sheet_of`]),
-//! and a planar face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]).
+//! a planar face rebuilt as the Coons spline of its edges ([`face_spline_sheet`]), and any face
+//! made a sheet with a control net ([`editable_sheet`]: an analytic face as its exact NURBS form),
+//! and a sheet's loop started at a side of its box ([`start_at_side`], [`first_side`]), so a sheet
+//! made again on an edited surface lists its edges as before.
 //!
 //! Not upstream: the composition an operation that rebuilds a face on a new surface (a sheet
 //! extended past a side) makes of `new_brep` and `SmBrep::CreateFaceFromSurface`, kept in the
 //! kernel so the modelling layer holds no notification plumbing; the turn-over of every
 //! face of an open shell ([`crate::topology::face::p1::turn_over`]); the pieces a split
 //! leaves joined back into their surface, so an operation on the surface (an extension past a
-//! side) can make the pieces again, cut where they were; and a planar face's spline sheet, so
-//! the control-net edits of the modelling layer have a net on a flat face.
+//! side) can make the pieces again, cut where they were; a planar face's spline sheet, so the
+//! control-net edits of the modelling layer have a net on a flat face; and an analytic face's
+//! exact-form sheet, so they have one on a cylinder, a sphere or a torus.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use std::collections::BTreeSet;
 
 use crate::curve::curve::CurveKind;
+use crate::error::topology::TopologyFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::USE_DEFAULT;
@@ -89,6 +94,105 @@ pub fn face_on(k: &mut Kernel, b: &mut Brep, surface: Surface, bx: &Extent2d) ->
     create_face_from_surface(k, b, Some(surface), bx, &mut fenv)
 }
 
+const OP_SIDE: &str = "topology::brep::sheet::first_side";
+
+/// [`sheet_on`] with its face's loop starting at the side `first` of the box
+/// ([`start_at_side`]).
+///
+/// # Errors
+///
+/// Those of [`sheet_on`] and [`start_at_side`].
+pub fn sheet_on_from(
+    k: &mut Kernel,
+    surface: Surface,
+    tolerance: f64,
+    first: BoxSide,
+) -> Result<(Brep, FaceId)> {
+    let (mut b, f) = sheet_on(k, surface, tolerance)?;
+    start_at_side(k, &mut b, f, first)?;
+    Ok((b, f))
+}
+
+/// Face `f`'s loop made to start at the edge on side `first` of its box, the others following
+/// round the loop as before (its upward use's first loop use, and its mate from the mate of
+/// that edge use): a sheet made again on an edited surface then lists its edges in the order the
+/// sheet it replaces did ([`first_side`]). Unchanged where no edge lies on `first` (a side
+/// collapsed to a point).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without its upward use, loop or surface; those of
+/// the UV ends and of `SetEdgeuse`.
+pub fn start_at_side(k: &Kernel, b: &mut Brep, f: FaceId, first: BoxSide) -> Result<()> {
+    let (lu, uses) = outer_loop_uses(b, f)?;
+    for eu in uses {
+        if side_of_use(k, b, f, eu)? == Some(first) {
+            loopuse::set_edgeuse(b, lu, Some(eu))?;
+            if let (Some(mate_eu), Some(mate_lu)) = (eu1::mate(b, eu)?, b.loopuse(lu)?.mate) {
+                loopuse::set_edgeuse(b, mate_lu, Some(mate_eu))?;
+            }
+            b.refresh_cached_topology();
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The side of face `f`'s parameter box its loop's first edge use runs along (its upward use's
+/// first loop, as the loop is listed), the side both its UV ends lie on; `None` where they lie
+/// on no one side (an edge inside the box).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face without its upward use, loop or surface; those of the
+/// UV ends.
+pub fn first_side(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Option<BoxSide>> {
+    let (_, uses) = outer_loop_uses(b, f)?;
+    let Some(&eu) = uses.first() else {
+        return Ok(None);
+    };
+    side_of_use(k, b, f, eu)
+}
+
+/// The face's upward use's first loop use and its edge uses, as it lists them.
+fn outer_loop_uses(
+    b: &Brep,
+    f: FaceId,
+) -> Result<(crate::topology::LoopuseId, Vec<crate::topology::EdgeuseId>)> {
+    let fu = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without its upward use"))?;
+    let lu = eu1::faceuse_loopuses(b, fu, false, None)?
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without its loop"))?;
+    Ok((lu, loopuse::edgeuses(b, lu, None, None)?))
+}
+
+/// The side of face `f`'s box edge use `eu` runs along: the one side both its UV ends lie on,
+/// within a millionth of the box's size.
+fn side_of_use(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    eu: crate::topology::EdgeuseId,
+) -> Result<Option<BoxSide>> {
+    use crate::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+    let dom = face_surface(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP_SIDE, "a face without a surface"))?
+        .natural_uv_domain_with_nurb(k)?;
+    let (start, end) = crate::topology::trimming_tools::edge_uv_ends(k, b, eu)?;
+    let size = dom.x_length().max(dom.y_length());
+    let tol = crate::math::EFF_ZERO_SQRT * (1.0 + size);
+    let on = dom.point_boundaries(start, tol) & dom.point_boundaries(end, tol);
+    Ok(match on {
+        SS_UMIN => Some(BoxSide::UMin),
+        SS_UMAX => Some(BoxSide::UMax),
+        SS_VMIN => Some(BoxSide::VMin),
+        SS_VMAX => Some(BoxSide::VMax),
+        _ => None,
+    })
+}
+
 const OP_MERGED: &str = "topology::brep::sheet::merged_faces";
 
 /// A sheet with its faces merged where they are one face ([`merged_faces`]), and where each of
@@ -115,8 +219,9 @@ pub struct Merged {
 ///
 /// # Errors
 ///
-/// Those of the copy, the merge and the edge queries; [`SolidError::topology_failed`] for a
-/// group of merged faces that does not leave exactly one face.
+/// Those of the copy, the merge and the edge queries;
+/// [`TopologyFailure::MergedGroupNotOneFace`] for a group of merged faces that does not
+/// leave exactly one face.
 pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     use crate::topology::brep::p1::{edges, faces};
     use crate::topology::EdgeId;
@@ -129,16 +234,19 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_edges = Vec::new();
     for oe in edges(b, None)? {
         let Some(EntityRef::Edge(ce)) = copy_of(EntityRef::Edge(oe))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "an edge without its copy",
+                TopologyFailure::Defect {
+                    why: "an edge has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         let record = c.edge(ce)?;
         let curve = record
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP_MERGED, "an edge's curve"))?;
+            .ok_or_else(|| SolidError::topology(OP_MERGED, TopologyFailure::EdgeWithoutCurve))?;
         let middle = curve.evaluate_point(k, record.interval.mid())?;
         let mut on = Vec::new();
         for eu in crate::topology::edge::edgeuses(&c, ce, None, None)? {
@@ -153,9 +261,12 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
     let mut copied_faces = Vec::new();
     for of in faces(b, None)? {
         let Some(EntityRef::Face(cf)) = copy_of(EntityRef::Face(of))? else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "a face without its copy",
+                TopologyFailure::Defect {
+                    why: "a face has no copy in the copy's map, though the copy maps every \
+                          entity it copies",
+                },
             ));
         };
         copied_faces.push((of, cf));
@@ -166,7 +277,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
 
     let live_edges = edges(&c, None)?;
     let live_faces = faces(&c, None)?;
-    let near = 10.0 * c.tolerance().max(1e-9);
+    // A removed edge is the live edge it was joined to only within the body's tolerance. A seam
+    // between two faces can lie inside the old ten-tolerance window and is not that edge (#16634).
+    let near = c.tolerance().max(1e-9);
     // each edge: itself, else the edge through its middle, else gone
     let mut edge_map = Vec::new();
     let mut removed: Vec<&[FaceId]> = Vec::new();
@@ -217,9 +330,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
             .iter()
             .filter(|&f| label.get(f).copied() == group);
         let (Some(&now), None) = (survivors.next(), survivors.next()) else {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MERGED,
-                "merged faces that do not leave exactly one face",
+                TopologyFailure::MergedGroupNotOneFace,
             ));
         };
         face_map.push((of, now));
@@ -450,8 +563,94 @@ pub fn face_spline_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<B
             }
         }
     }
-    let (sheet, _) = sheet_on(k, patch, b.tolerance())?;
+    // the patch's v min side is the loop's first edge (`coons_patch_of_loop`): the sheet lists
+    // its edges in the face's order
+    let (sheet, _) = sheet_on_from(k, patch, b.tolerance(), BoxSide::VMin)?;
     Ok(Some(sheet))
+}
+
+const OP_EDITABLE: &str = "topology::brep::sheet::editable_sheet";
+
+/// Face `f` of `b` as a one-face sheet whose surface has a control net to edit, its whole box
+/// the face; `None` for a face on a B-spline surface (it has one already).
+/// - A plane: [`face_spline_sheet`], the Coons spline of its edges.
+/// - A cone (a cylinder too), a sphere, a torus, a surface of revolution or of extrusion: its
+///   surface's exact NURBS form, the B-spline the kernel keeps for it (its circles rational
+///   quadratics), on a sheet over its whole box. Only for a face that is its surface's whole box,
+///   bounded by the box's sides (the natural trim of
+///   [`crate::topology::face::p1::trim_boundary_rectangle`], a pole a point or an edge): a face
+///   trimmed inside it would lose its trims to a whole-box sheet. A closed surface's two seam
+///   sides are one edge used twice and a pole is a point (`CreateFaceFromSurface` shares
+///   coincident sides and drops degenerate ones).
+///
+/// `b` is unchanged.
+///
+/// # Errors
+///
+/// `Unsupported` for a surface of another kind (an offset, a blend, a ball patch: no exact
+/// NURBS form here) and for a face that is not its surface's whole box; those of
+/// [`face_spline_sheet`], the copy, the trim query and the sheet.
+pub fn editable_sheet(k: &mut Kernel, b: &Brep, f: FaceId) -> Result<Option<Brep>> {
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a face without a surface"))?;
+    match surface.kind() {
+        SurfaceKind::BSpline(_) => Ok(None),
+        SurfaceKind::Plane(_) => face_spline_sheet(k, b, f),
+        SurfaceKind::Cone(_)
+        | SurfaceKind::Sphere(_)
+        | SurfaceKind::Torus(_)
+        | SurfaceKind::SurfOfRevolution(_)
+        | SurfaceKind::SurfOfExtrusion(_) => exact_form_sheet(k, b, f, surface).map(Some),
+        _ => Err(SolidError::Unsupported {
+            operation: OP_EDITABLE,
+            reason: "a face with no exact NURBS form",
+        }),
+    }
+}
+
+/// The sheet on `surface`'s exact NURBS form over its whole box, when face `f` of `b` is that
+/// whole box ([`editable_sheet`]).
+fn exact_form_sheet(k: &mut Kernel, b: &Brep, f: FaceId, surface: &Surface) -> Result<Brep> {
+    use crate::geom::attribute::ObjectKey;
+    use crate::geom::object::ObjectRef;
+    use crate::topology::brep::p3::{brep_copy_mapped, with_nurb};
+    use crate::topology::face::p1::trim_boundary_rectangle;
+
+    // the trim query builds the face's trim boundary: on a copy, so `b` is only read
+    let (mut c, map) = brep_copy_mapped(k, b)?;
+    let Some(EntityRef::Face(cf)) = map.get_at(Some(EntityRef::Face(f)))? else {
+        return Err(SolidError::invalid_input(
+            OP_EDITABLE,
+            "a face without its copy",
+        ));
+    };
+    let key_of = |e: EntityRef| ObjectRef {
+        type_code: 0,
+        key: ObjectKey(match e {
+            EntityRef::Edgeuse(eu) => u64::from(eu.index()),
+            _ => 0,
+        }),
+    };
+    if !trim_boundary_rectangle(k, &mut c, cf, &key_of)?.natural {
+        return Err(SolidError::Unsupported {
+            operation: OP_EDITABLE,
+            reason: "a face that is not its surface's whole box",
+        });
+    }
+    let form = with_nurb(k, surface)?
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a surface with no NURBS form"))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::invalid_input(OP_EDITABLE, "a surface with no NURBS form"))?;
+    let (sheet, _) = sheet_on(
+        k,
+        Surface::from(BSplineSurface::from_gw_nurb(nurb)),
+        b.tolerance(),
+    )?;
+    Ok(sheet)
 }
 
 const OP_PIECES: &str = "topology::brep::sheet::one_surface";
@@ -832,6 +1031,38 @@ mod tests {
 
     fn mapped(m: &Merged, e: EdgeId) -> Option<EdgeId> {
         m.edges.iter().find(|(o, _)| *o == e).unwrap().1
+    }
+
+    /// tangency-labs/solidcraft#16634: a seam 5e-6 mm from the sheet's boundary, on a body with a
+    /// 1e-6 tolerance, is not the boundary edge. It is gone, so the two faces it joined merge.
+    #[test]
+    fn a_seam_within_ten_tolerances_of_a_boundary_edge_is_gone_and_its_faces_merge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[5e-7], &[], 1e-6).unwrap();
+        assert_eq!(b.face_list().len(), 2);
+        let m = merged_faces(&mut k, &b).expect("the seam is gone, so the two faces merge");
+        assert_eq!(faces(&m.brep, None).unwrap().len(), 1);
+    }
+
+    /// A real join still maps after the ten-tolerance window is narrowed (#16634). The tiny
+    /// boundary pieces of a sheet cut ten tolerances from its edge are five tolerances from that
+    /// edge's start; they lie on the joined edge, so they map to it. Only the parallel seam, ten
+    /// tolerances from the boundary, is gone.
+    #[test]
+    fn a_joined_boundary_piece_at_five_tolerances_still_maps_to_its_joined_edge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[1e-6], &[], 1e-6).unwrap();
+        let tiny_bottom = edge_through(&k, &b, [5e-6, 0.0, 0.0]);
+        let tiny_top = edge_through(&k, &b, [5e-6, 4.0, 0.0]);
+        let seam = edge_through(&k, &b, [1e-5, 2.0, 0.0]);
+        let m = merged_faces(&mut k, &b).unwrap();
+        let bottom = edge_through(&k, &m.brep, [5.0, 0.0, 0.0]);
+        let top = edge_through(&k, &m.brep, [5.0, 4.0, 0.0]);
+        assert_eq!(mapped(&m, tiny_bottom), Some(bottom));
+        assert_eq!(mapped(&m, tiny_top), Some(top));
+        assert_eq!(mapped(&m, seam), None);
     }
 
     #[test]

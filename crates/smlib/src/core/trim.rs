@@ -1,16 +1,13 @@
-//! Untrim and extend on solidcore: the C API's `smlib_untrim_face` and `smlib_extend_sheet`,
-//! ported from the fork's `capi/src/smlib_untrim.cpp` (`face_at`, `loop_distance`,
-//! `copy_attributes`, `analytic`, `span_of`, `pieces_of`, `is_disc`, `rebuild_hole`) and
-//! `capi/src/smlib_extend.cpp` (`on_side`, `eval`, `nearest_edge`, `is_boundary`, `side_edge`,
-//! `across`, `cone_continued`, `same_patch`).
+//! Untrim and extend: the C API's `smlib_untrim_face` and `smlib_extend_sheet`.
 //!
-//! A face restored towards its surface. Picked inner loops (holes) are taken away with
-//! `SmFace::DeleteInnerLoop` on a copy where they are lamina; the outer boundary goes back to a
-//! parameter box of the surface (`SmBrep::CreateFaceFromSurface`), and the holes kept are rebuilt
-//! in that face from their own edges' curves and intervals (`MakeVertexLoop`, `MakeEdgeInFace`:
-//! closing a loop splits off the face inside it, which is deleted). The new face and the rebuilt
-//! edges take the attributes of the face and edges they stand for, so the history tags carry
-//! through.
+//! Untrim is solidcore-ops' ([`solidcore_ops::untrim::untrim_face`]): the face and the holes are
+//! picked here as the capi's `smlib_untrim.cpp` picked them (the face nearest the point, the
+//! inner loop nearest each hole point), and ops restores the face towards its surface.
+//!
+//! Extend stays on the kernel here, a port of `capi/src/smlib_extend.cpp` (`on_side`, `eval`,
+//! `nearest_edge`, `is_boundary`, `side_edge`, `across`, `cone_continued`, `same_patch`):
+//! solidcore-ops' `extend::extend_sheet` gives other results (a plane grows its trim, an
+//! extension gets no analytic kind back), so it moves when ops gives these.
 //!
 //! A sheet is extended by SMLib's extension of its surface (`CreateExtendedSurface`: its end
 //! spans continued, or a G1 or G2 run-off), the distance asked of it corrected until the
@@ -18,100 +15,37 @@
 //! result back its analytic kind, and a cone or cylinder continued naturally stays the analytic
 //! widened. The new face and each of its sides take the attributes of the face and side they
 //! continue.
-//!
-//! An untrim of a face out of its body (`in_place` false) copies the face into a body of its own
-//! through `SmBrep::CopyFaces` with the merge (solidcore#1872), which keeps its attributes.
 
-use std::sync::PoisonError;
-
-use solidcore::curve::curve::Curve;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::object::Shape;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector2d::Point2;
-use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::query::api_queries::{edge_closest_point, face_closest_point_in_shape, face_internal_point};
-use solidcore::query::brep::{BrepQuery, LiveBrepObjects};
+use solidcore::query::api_queries::{edge_closest_point, face_internal_point};
 use solidcore::surface::cone::p1::Cone;
 use solidcore::surface::extend::Continuity;
 use solidcore::surface::side::BoxSide;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::p2::{CopyNotifyState, copy_source_ref};
-use solidcore::topology::brep::p3::{DeleteFaceOptions, delete_face, new_brep, with_kernel_callbacks};
-use solidcore::topology::brep::p5::{EdgeInFace, make_edge_in_face};
-use solidcore::topology::brep::p7::copy_faces_from;
+use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p8::create_face_from_surface;
-use solidcore::topology::brep::p9::make_vertex_loop;
-use solidcore::topology::edgeuse::p1 as eu_p1;
-use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
-use solidcore::topology::loopuse::{loop_edges, loop_loopuses, notify_ref};
-use solidcore::topology::topology_traverser::Marks;
-use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, LoopId, edge};
+use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::{EntityRef, SolidError};
 
-use super::blend::{p3, status};
+use super::Body;
+use super::blend::{p3, refused, status};
+use super::call::ops_as;
 use super::sweep::build_faces;
-use super::{Body, answer};
 use crate::trim::Continuation;
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
 
 /// `MAX_HOLE_POINTS`.
 const MAX_HOLE_POINTS: usize = 10_000;
-
-/// `SMLIB_ERR_EXCEPTION`'s stand-in: a rebuilt hole that did not close as the capi expects.
-fn hole_refused() -> Error {
-    Error::Exception
-}
-
-/// The capi's statuses as SolidCraft errors: an operation's own result.
-type Out<T> = std::result::Result<T, Error>;
-
-const ONE: BrepId = BrepId::from_index(0);
-
-/// `face_at`: the face of `b` nearest `p`, within `tol` (`SmApiFaceClosestPoint`; a face whose
-/// query fails is skipped).
-pub(super) fn face_at(k: &mut Kernel, b: &mut Brep, p: Point3, tol: f64) -> solidcore::Result<Option<FaceId>> {
-    let all = brep_p1::faces(b, None)?;
-    let mut shapes = Vec::with_capacity(all.len());
-    for &f in &all {
-        shapes.push(answer(Shape::new(k, &(ONE, &*b), &[], &[(ONE, f)], &[], &[]))?);
-    }
-    let query = BrepQuery::of_brep(b);
-    let identity = query.effective_identity();
-    let objects = LiveBrepObjects::new(b, &identity, None)?;
-    let (mut best, mut d0) = (None, f64::INFINITY);
-    for (&f, shape) in all.iter().zip(&shapes) {
-        let Some(shape) = shape else { continue };
-        if let Some(c) = answer(face_closest_point_in_shape(k, shape, &objects, (ONE, f), p))?
-            && c.distance.is_finite()
-            && c.distance < d0
-        {
-            d0 = c.distance;
-            best = Some(f);
-        }
-    }
-    Ok(best.filter(|_| d0 <= tol))
-}
-
-/// `loop_distance`: the distance from `p` to the nearest edge of loop `l`.
-fn loop_distance(k: &Kernel, b: &Brep, l: LoopId, p: Point3) -> solidcore::Result<f64> {
-    let mut best = f64::INFINITY;
-    for e in loop_edges(b, l)?.into_iter().flatten() {
-        if let Some(c) = answer(edge_closest_point(k, b, e, p))?
-            && c.closest.distance.is_finite()
-        {
-            best = best.min(c.closest.distance);
-        }
-    }
-    Ok(best)
-}
 
 /// `copy_attributes`: `to` (in `into`) takes a copy of each attribute of `from` (in `src`).
 fn copy_attributes(src: &Brep, from: EntityRef, into: &mut Brep, to: EntityRef) -> solidcore::Result<()> {
@@ -122,152 +56,6 @@ fn copy_attributes(src: &Brep, from: EntityRef, into: &mut Brep, to: EntityRef) 
     Ok(())
 }
 
-/// [`copy_attributes`] within one body.
-fn copy_attributes_within(b: &mut Brep, from: EntityRef, to: EntityRef) -> solidcore::Result<()> {
-    let copies: Vec<_> = b.entity_attributes(from).into_iter().map(|(_, a)| a.make_copy()).collect();
-    for a in copies {
-        b.add_attribute(to, a)?;
-    }
-    Ok(())
-}
-
-/// `span_of`: the box of the face's outer loop in the surface's parameters, the union of the
-/// tight boxes of its edgeuses' UV trim curves (made where the face has none attached yet).
-fn span_of(k: &Kernel, b: &mut Brep, outer: LoopId) -> solidcore::Result<Option<Extent2d>> {
-    let (lu, _) = loop_loopuses(b, outer)?;
-    let eus = eu_p1::loopuse_edgeuses(b, lu)?;
-    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-    let mut any = false;
-    for eu in eus {
-        let fetched = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-        if fetched.status.is_err() {
-            return Ok(None);
-        }
-        let (Some(uv), _) = eu_p1::uv_trim_curve(b, eu)? else { return Ok(None) };
-        let Some(e) = answer(uv.calculate_tight_bounding_box(k, &uv.natural_interval()))? else { return Ok(None) };
-        let (mn, mx) = (e.min(), e.max());
-        lo = [lo[0].min(mn.x), lo[1].min(mn.y)];
-        hi = [hi[0].max(mx.x), hi[1].max(mx.y)];
-        any = true;
-    }
-    if !any || !(hi[0] > lo[0]) || !(hi[1] > lo[1]) || !(lo[0] + lo[1] + hi[0] + hi[1]).is_finite() {
-        return Ok(None);
-    }
-    Ok(Some(Extent2d::from_bounds(lo[0], lo[1], hi[0], hi[1])))
-}
-
-/// One edge of a hole to rebuild: its edge, how the loop runs along it, its ends as the loop
-/// runs, its curve and interval (`Piece`).
-struct Piece {
-    edge: EdgeId,
-    orient: OrientType,
-    from: Point3,
-    to: Point3,
-    curve: Curve,
-    interval: solidcore::geom::extent1d::Extent1d,
-}
-
-/// `pieces_of`; `None` where the capi gives up.
-fn pieces_of(b: &Brep, l: LoopId) -> solidcore::Result<Option<Vec<Piece>>> {
-    let (lu, _) = loop_loopuses(b, l)?;
-    let mut out = Vec::new();
-    for eu in eu_p1::loopuse_edgeuses(b, lu)? {
-        let Some(e) = eu_p1::edge(b, eu)? else { return Ok(None) };
-        let ed = b.edge(e)?;
-        let Some(curve) = ed.curve.clone() else { return Ok(None) };
-        let (Some(v0), Some(v1)) = edge::start_end_vertices(b, e)? else { return Ok(None) };
-        let same = eu_p1::orientation(b, eu)? == OrientType::Same;
-        let (p0, p1) = (b.vertex(v0)?.point, b.vertex(v1)?.point);
-        let (from, to) = if same { (p0, p1) } else { (p1, p0) };
-        out.push(Piece { edge: e, orient: if same { OrientType::Same } else { OrientType::Opposite }, from, to, curve, interval: ed.interval });
-    }
-    Ok((!out.is_empty()).then_some(out))
-}
-
-/// `is_disc`: whether `f` is bounded by one loop of exactly the edges `made`.
-fn is_disc(b: &Brep, f: FaceId, made: &[EdgeId]) -> solidcore::Result<bool> {
-    let loops = face_p2::loops(b, f, false, None)?;
-    let [l] = loops.as_slice() else { return Ok(false) };
-    let edges: Vec<EdgeId> = loop_edges(b, *l)?.into_iter().flatten().collect();
-    Ok(edges.len() == made.len() && edges.iter().all(|e| made.contains(e)))
-}
-
-/// `rebuild_hole`: the hole `pieces` (edges of `src`) rebuilt in `face` of `r`: vertices and
-/// edges made in the face, the face the closed loop splits off inside it deleted. `face` is the
-/// face that keeps the rest.
-fn rebuild_hole(k: &mut Kernel, src: Option<&Brep>, r: &mut Brep, face: &mut FaceId, pieces: &[Piece]) -> solidcore::Result<Out<()>> {
-    let Some(first_piece) = pieces.first() else { return Ok(Err(hole_refused())) };
-    let editing = r.editing_enabled();
-    r.set_editing_enabled(true);
-    let tol = r.tolerance();
-    // Each edit notifies through the kernel's callbacks with the body's own attributes
-    // (`MakeEdgeInFace` does so itself), so the history tags follow.
-    let vertex_loop = |k: &mut Kernel, r: &mut Brep, face: FaceId, at: Point3| {
-        with_kernel_callbacks(k, r, |_, r, env| make_vertex_loop(r, face, at, OrientType::Opposite, env))
-    };
-    let done = (|| -> solidcore::Result<Out<()>> {
-        let (_, first) = match vertex_loop(k, r, *face, first_piece.from) {
-            Ok(v) => v,
-            Err(e) => return Ok(Err(status(e))),
-        };
-        let mut at = first;
-        let mut made = Vec::with_capacity(pieces.len());
-        let mut split = None;
-        for (i, p) in pieces.iter().enumerate() {
-            let last = i + 1 == pieces.len();
-            let next = if last {
-                first
-            } else {
-                match vertex_loop(k, r, *face, p.to) {
-                    Ok((_, v)) => v,
-                    Err(e) => return Ok(Err(status(e))),
-                }
-            };
-            let curve = p.curve.copy(k)?;
-            let mut out = EdgeInFace::default();
-            if let Err(e) = make_edge_in_face(k, r, true, Some(*face), Some(at), Some(next), curve, None, p.interval, p.orient, tol, &mut out, None) {
-                return Ok(Err(status(e)));
-            }
-            let Some(e) = out.edge else { return Ok(Err(Error::Empty)) };
-            match src {
-                Some(s) => copy_attributes(s, EntityRef::Edge(p.edge), r, EntityRef::Edge(e))?,
-                None => copy_attributes_within(r, EntityRef::Edge(p.edge), EntityRef::Edge(e))?,
-            }
-            made.push(e);
-            if let Some(nf) = out.face {
-                if !last || split.is_some() {
-                    return Ok(Err(hole_refused()));
-                }
-                split = Some(nf);
-            }
-            at = next;
-        }
-        let Some(split) = split else { return Ok(Err(hole_refused())) };
-        // One of the two faces is the disc inside the hole: it goes, its edges stay on the other.
-        let disc = if is_disc(r, split, &made)? {
-            split
-        } else if is_disc(r, *face, &made)? {
-            *face
-        } else {
-            return Ok(Err(hole_refused()));
-        };
-        let rest = if disc == split { *face } else { split };
-        let deleted = with_kernel_callbacks(k, r, |k, r, env| {
-            let mut marks = Marks::default();
-            let options = DeleteFaceOptions { delete_edges_vertices: false, ..DeleteFaceOptions::default() };
-            delete_face(k, r, env, &mut marks, disc, options)
-        });
-        if let Err(e) = deleted {
-            return Ok(Err(status(e)));
-        }
-        *face = rest;
-        Ok(Ok(()))
-    })();
-    r.set_editing_enabled(editing);
-    r.refresh_cached_topology();
-    done
-}
-
 /// The orientation of `f`'s upward faceuse.
 fn upward(b: &Brep, f: FaceId) -> solidcore::Result<Option<OrientType>> {
     Ok(match face_p2::upward_faceuse(b, f)? {
@@ -276,10 +64,30 @@ fn upward(b: &Brep, f: FaceId) -> solidcore::Result<Option<OrientType>> {
     })
 }
 
+/// The index of the least of `distances` within `tol`, the first of equal ones; an entry that
+/// is `None` or not finite is passed over (`face_at` and the nearest hole, as the capi picked).
+pub(super) fn nearest_within(distances: impl IntoIterator<Item = Option<f64>>, tol: f64) -> Option<usize> {
+    let (mut best, mut d0) = (None, f64::INFINITY);
+    for (i, d) in distances.into_iter().enumerate() {
+        if let Some(d) = d.filter(|d| d.is_finite())
+            && d < d0
+        {
+            d0 = d;
+            best = Some(i);
+        }
+    }
+    best.filter(|_| d0 <= tol)
+}
+
 /// `smlib_untrim_face`: the face of `body` nearest `point` (within `tol`) restored towards its
 /// surface: the holes nearest `holes` (all of them for `None`) taken away and, with `outer`, its
 /// outer boundary back on the surface's parameter box. The face alone, or with `in_place` the
-/// whole body with it replaced.
+/// whole body with it replaced ([`solidcore_ops::untrim::untrim_face`]).
+///
+/// The picks are the capi's: the face nearest `point` as it is trimmed
+/// ([`solidcore_ops::Body::face_distances_within`]), and per hole point the inner loop of that
+/// face whose nearest edge is nearest it ([`solidcore_ops::Body::face_loops`],
+/// [`solidcore_ops::Body::edge_closest_point`]), each within `tol`, the first of equal ones.
 pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<&[[f64; 3]]>, outer: bool, in_place: bool) -> Result<Body> {
     let n_holes = holes.map(<[_]>::len);
     if !point.iter().all(|x| x.is_finite())
@@ -291,163 +99,47 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
     {
         return Err(Error::Argument);
     }
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_untrim_face: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let at = p3(point);
-    super::run_on("smlib_untrim_face", &[("brep", body)], |k| {
-        let mut whole = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
-        // The face to untrim, in a body of its own (its hole edges lamina there) or in the copy
-        // of the whole body.
-        let (mut w, f) = if in_place {
-            let f = face_at(k, &mut whole, at, tol)?;
-            (whole, f)
-        } else {
-            let Some(src) = face_at(k, &mut whole, at, tol)? else { return Ok(Err(Error::NoMatch { point: 0 })) };
-            let mut w = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-            w.set_tolerance(whole.tolerance());
-            // Through SmMerge, with both bodies' attributes in the notifications, so the copy
-            // carries its source's history tags (`SM_NO_COPY`).
-            let copied = {
-                let mut state = CopyNotifyState::with_attributes_of(&mut whole, &mut w)?;
-                let this_face = |f: FaceId| notify_ref(EntityRef::Face(f));
-                let copied = copy_faces_from(k, &mut whole, &[src], &mut w, true, &copy_source_ref, &this_face, &mut state.env(None));
-                state.restore_attributes(&mut whole, &mut w)?;
-                copied
-            };
-            let copied = match copied {
-                Ok((c, _)) => c,
-                Err(e) => return Ok(Err(status(e))),
-            };
-            // The capi's `copied.GetSize() != 1`: `SMLIB_ERR_EMPTY`.
-            let [f] = copied.as_slice() else { return Ok(Err(Error::Empty)) };
-            w.refresh_cached_topology();
-            (w, Some(*f))
-        };
-        let Some(f) = f else { return Ok(Err(Error::NoMatch { point: 0 })) };
-        let loops = face_p2::loops(&w, f, false, None)?;
-        if loops.is_empty() {
-            return Ok(Err(Error::Unsupported));
-        }
+    const CALL: &str = "smlib_untrim_face";
+    // A pick that chose nothing is the call's refusal, its body left in the dump folder as a
+    // failed call leaves it.
+    let missed = || {
+        let e = Error::NoMatch { point: 0 };
+        super::dump::failed_ops(CALL, &e.to_string(), &[("brep", body)]);
+        e
+    };
+    let order = body.own_order();
+    let rows = ops_as(CALL, &[("brep", body)], refused, || body.face_distances_within(&order, &[point], tol))?;
+    let face = nearest_within(rows.iter().map(|row| row.first().copied().flatten()), tol).ok_or_else(missed)?;
+    // The holes taken away: all of them, or the one nearest each point, named by an edge of it.
+    let mut along: Vec<usize> = Vec::new();
+    if let Some(points) = holes {
+        let loops = ops_as(CALL, &[("brep", body)], refused, || body.face_loops(&order, face))?;
         let inner = loops.get(1..).unwrap_or_default();
-        // The holes taken away: all of them, or the one nearest each point.
-        let mut removed: Vec<LoopId> = Vec::new();
-        match holes {
-            None => removed.extend_from_slice(inner),
-            Some(points) => {
-                for p in points {
-                    let p = p3(*p);
-                    let (mut best, mut d0) = (None, f64::INFINITY);
-                    for &l in inner {
-                        let d = loop_distance(k, &w, l, p)?;
-                        if d < d0 {
-                            d0 = d;
-                            best = Some(l);
-                        }
-                    }
-                    let Some(best) = best.filter(|_| d0 <= tol) else { return Ok(Err(Error::NoMatch { point: 0 })) };
-                    if !removed.contains(&best) {
-                        removed.push(best);
+        let mut taken: Vec<usize> = Vec::new();
+        for &p in points {
+            let mut distances = Vec::with_capacity(inner.len());
+            for edges in inner {
+                let mut d = f64::INFINITY;
+                for &e in edges {
+                    let hit = ops_as(CALL, &[("brep", body)], refused, || body.edge_closest_point(&order, e, p))?;
+                    if let Some(hit) = hit.filter(|h| h.distance.is_finite()) {
+                        d = d.min(hit.distance);
                     }
                 }
+                distances.push(Some(d));
+            }
+            let l = nearest_within(distances, tol).ok_or_else(missed)?;
+            if !taken.contains(&l) {
+                taken.push(l);
+                along.extend(inner.get(l).and_then(|edges| edges.first()));
             }
         }
-        if !outer {
-            for &l in &removed {
-                // A hole whose edges another face of the body uses is no hole of a sheet.
-                let deleted = face_p1::delete_inner_loop_with_kernel_callbacks(k, &mut w, f, l);
-                if deleted.is_err() {
-                    return Ok(Err(Error::Unsupported));
-                }
-            }
-            w.refresh_cached_topology();
-            return Ok(Ok(w));
-        }
-        // The outer boundary: the surface's parameter box (a free-form surface's own, an
-        // analytic one's the span of the face).
-        let Some(surf) = face_p2::surface(&w, f)?.cloned() else { return Ok(Err(Error::Unsupported)) };
-        let mut bx = surf.natural_uv_domain_with_nurb(k)?;
-        if !matches!(surf.kind(), SurfaceKind::BSpline(_)) {
-            let Some(outer_loop) = loops.first() else { return Ok(Err(Error::Unsupported)) };
-            match span_of(k, &mut w, *outer_loop)? {
-                Some(s) => bx = s,
-                None => return Ok(Err(Error::Unsupported)),
-            }
-        }
-        let mut kept = Vec::new();
-        for &l in inner {
-            if removed.contains(&l) {
-                continue;
-            }
-            match pieces_of(&w, l)? {
-                Some(p) => kept.push(p),
-                None => return Ok(Err(Error::Unsupported)),
-            }
-        }
-        let copy = surf.copy(k)?;
-        let was = upward(&w, f)?;
-        let mut r = if in_place {
-            None
-        } else {
-            let mut r = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-            r.set_tolerance(w.tolerance());
-            Some(r)
-        };
-        let target: &mut Brep = match r.as_mut() {
-            Some(r) => r,
-            None => &mut w,
-        };
-        let mut nf = match build_faces(target, |t, fenv| create_face_from_surface(k, t, Some(copy), &bx, fenv)) {
-            Ok(nf) => nf,
-            Err(e) => return Ok(Err(status(e))),
-        };
-        target.refresh_cached_topology();
-        let _ = target;
-        for hole in &kept {
-            let done = match r.as_mut() {
-                Some(r) => rebuild_hole(k, Some(&w), r, &mut nf, hole)?,
-                None => rebuild_hole(k, None, &mut w, &mut nf, hole)?,
-            };
-            if let Err(e) = done {
-                return Ok(Err(e));
-            }
-        }
-        match r.as_mut() {
-            Some(r) => copy_attributes(&w, EntityRef::Face(f), r, EntityRef::Face(nf))?,
-            None => copy_attributes_within(&mut w, EntityRef::Face(f), EntityRef::Face(nf))?,
-        }
-        // The face faces the way the old one did.
-        let target: &mut Brep = match r.as_mut() {
-            Some(r) => r,
-            None => &mut w,
-        };
-        let now = upward(target, nf)?;
-        if let (Some(a), Some(b)) = (was, now)
-            && a != b
-            && let Err(e) = face_p1::flip_face_orientation(target, nf)
-        {
-            return Ok(Err(status(e)));
-        }
-        if let Some(r) = r {
-            return Ok(Ok(r));
-        }
-        // The old face goes, with the edges and vertices only it used: an edit of the brep,
-        // which SMLib allows only in edit mode.
-        let editing = w.editing_enabled();
-        w.set_editing_enabled(true);
-        let deleted = with_kernel_callbacks(k, &mut w, |k, w, env| {
-            let mut marks = Marks::default();
-            let options = DeleteFaceOptions { delete_edges_vertices: true, ..DeleteFaceOptions::default() };
-            delete_face(k, w, env, &mut marks, f, options)
-        });
-        w.set_editing_enabled(editing);
-        w.refresh_cached_topology();
-        if let Err(e) = deleted {
-            return Ok(Err(status(e)));
-        }
-        Ok(Ok(w))
-    })?
-    .map(Body::new)
+    }
+    let which = if holes.is_some() { solidcore_ops::untrim::Holes::Along(&along) } else { solidcore_ops::untrim::Holes::All };
+    ops_as(CALL, &[("brep", body)], refused, || solidcore_ops::untrim::untrim_face(body, &order, face, which, outer, in_place))
 }
 
 /// One side of a face's parameter box (`Side`): which, whether it is a u = const line (the face
@@ -503,7 +195,7 @@ fn edge_distance(k: &Kernel, b: &Brep, e: EdgeId, p: Vec3) -> f64 {
 }
 
 /// `nearest_edge`: the distance to the nearest of `edges`, with that edge.
-pub(super) fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
+fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
     let (mut best, mut which) = (f64::INFINITY, None);
     for &e in edges {
         let d = edge_distance(k, b, e, p);
@@ -628,11 +320,11 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
     if !point.iter().all(|x| x.is_finite()) || !tol.is_finite() || !(tol > 0.0) || !distance.is_finite() || !(distance > 0.0) {
         return Err(Error::Argument);
     }
-    if sheet.0.is_poisoned() {
+    if sheet.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_extend_sheet: the body was left unfinished by an earlier panic".to_owned()));
     }
     super::run_on("smlib_extend_sheet", &[("sheet", sheet)], |k| {
-        let b = brep_copy(k, &sheet.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let b = brep_copy(k, &sheet.kernel())?;
         let faces = brep_p1::faces(&b, None)?;
         let [f] = faces.as_slice() else { return Ok(Err(Error::Unsupported)) };
         let f = *f;
@@ -725,7 +417,7 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
         }
         Ok(Ok(r))
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// A point inside each face, in the body's face order (`smlib_brep_face_points`:

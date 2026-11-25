@@ -14,6 +14,9 @@
 //!    box (`70 x 50 x 30`, vertical `R = 6` rounds, shelled `2 mm` open on top, then shelled
 //!    `0.5 mm` open at a flat inner cavity wall), checking manifoldness, closed-form volume, and
 //!    every shared vertex's distance to all incident edge endpoints against `tau_e + tau_v`.
+//! 3. `shelled_ring_floor_grazing_its_round_ends_the_seam_at_the_floor` (#17514): a ring whose
+//!    flat floor cuts its round 2 degrees off the round's bottom circle, shelled open on top;
+//!    the round's seam ends where the floor's offset cuts it, so the check finds no seam missing.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -33,7 +36,7 @@ use solidcore::primitive::api_primitives::{create_box, create_partial_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::topology::brep::p1;
 use solidcore::topology::edge as tedge;
-use solidcore::{Brep, FaceId, Kernel, Point3};
+use solidcore::{Brep, FaceId, Kernel, Point3, Vec3};
 
 fn shell_solid(
     k: &mut Kernel,
@@ -245,16 +248,15 @@ fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Resul
     // `CloseLoopGaps` — including `reconcile_shell_tangent_rails` — runs on the default
     // path before `do_extended_offset` merges the shell (WR-578, the split flags are the
     // only path since #2981).
-    // 1. Default surface representations (`SmBSplineSurface` revolved wall and
-    //    `SmOffsetSurface` over the B-spline top-rim round).
-    let k_bspline = Kernel::default();
-    check_quarter_torus_seam_case(k_bspline)?;
+    // 1. Default surface representations (the revolved wall's `SmCone`, the only path
+    //    since tangency-labs/solidcraft#14425, and `SmOffsetSurface` over the B-spline
+    //    top-rim round).
+    let k_default = Kernel::default();
+    check_quarter_torus_seam_case(k_default)?;
 
-    // 2. Analytic wall and round (`revolve_analytic_profile_faces` produces `SmCone`
-    //    for the cylindrical wall, and `fillet_exact_round_classes` produces `SmTorus`
-    //    for the circular top-rim round).
+    // 2. Analytic round as well (`fillet_exact_round_classes` produces `SmTorus` for
+    //    the circular top-rim round).
     let mut k_analytic = Kernel::default();
-    k_analytic.fixes.revolve_analytic_profile_faces = true;
     k_analytic.fixes.fillet_exact_round_classes = true;
     check_quarter_torus_seam_case(k_analytic)
 }
@@ -301,6 +303,105 @@ fn shelled_box_open_inner_wall_shared_vertex_consistency() -> solidcore::Result<
     assert!(
         (9017.6..=9038.3).contains(&vol),
         "second shell volume {vol} outside closed-form enclosure [9017.6, 9038.3]"
+    );
+    Ok(())
+}
+
+/// 2 pi times the integral of x over the ring's profile (Pappus), by Green's theorem the
+/// integral of x^2 / 2 dz round it: the inner wall x = `x0`, the floor z = `z0` out to where
+/// it cuts the round (the circle of radius `r` about (18, 0), on its inner side), the round
+/// on to its outer side at z = 0, the wall x = 18 + `r` up to z = 33 and the top back in.
+fn ring_volume(x0: f64, z0: f64, r: f64) -> f64 {
+    let (c, top) = (18.0, 33.0);
+    let start = z0.atan2(-(r * r - z0 * z0).sqrt());
+    // the round's integral of (c + r cos t)^2 r cos t / 2 dt
+    let arc = |t: f64| {
+        let (s, co) = (t.sin(), t.cos());
+        r / 2.0 * (c * c * s + c * r * (t + s * co) + r * r * (s - s * s * s / 3.0))
+    };
+    let walls = (c + r) * (c + r) / 2.0 * top - x0 * x0 / 2.0 * (top - z0);
+    2.0 * std::f64::consts::PI * (walls + arc(0.0) - arc(start))
+}
+
+/// #17514: a ring turned whole about Z from the profile inner wall x = 2, top z = 33, outer
+/// wall x = 24 down to z = 0, then a round of radius 6 about (18, 0) down past its bottom
+/// circle to the floor z = -5.996, which cuts the round 2.09 degrees off the bottom circle and
+/// back to the inner wall. Read with a tolerance of 0.005 (a part from a STEP file), the round
+/// dips under the floor by 0.004, less than that. Shelled 3 inward open on top, the floor's
+/// offset cuts the offset round's seam just as shallowly: that cut was read as a touch, the
+/// seam ended at the offset of its old vertex, and the floor's edge then moved the vertex
+/// along the seam (SMLib's check: a seam missing at the vertex). The seam now ends at
+/// the cut, and the shell is the profile's closed form less its cavity's (the same profile
+/// moved in by 3), to the tolerance over the shell's area.
+#[test]
+fn shelled_ring_floor_grazing_its_round_ends_the_seam_at_the_floor() -> solidcore::Result<()> {
+    use solidcore::curve::curve::Curve;
+    use solidcore::curve::ellipse::Ellipse;
+    use solidcore::curve::line::Line;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::mass::integrator::properties::brep_area;
+    use solidcore::sweep::api_brep::create_rotational_sweep;
+    use solidcore::topology::brep::p2::set_tolerance;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    let mut k = Kernel::default();
+    // the round a torus, the walls cylinders, as a STEP part's are
+    let floor = -5.996_f64;
+    let inset = (36.0 - floor * floor).sqrt();
+    let p = |x: f64, z: f64| Point3::new(x, 0.0, z);
+    let line =
+        |a: Point3, b: Point3| Curve::from(Line::create_line_segment(3, a, b, None).unwrap());
+    // the round from its outer side (angle 0) down to the floor, turning towards -Z
+    let frame = Axis2Placement::new(
+        p(18.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, -1.0),
+    );
+    let to_floor = (-floor).atan2(-inset).to_degrees();
+    let round = Ellipse::create_canonical_circle(
+        &k,
+        &frame,
+        6.0,
+        Some(&Extent1d::from_min_max(0.0, to_floor)),
+        None,
+    )?;
+    let profile = [
+        line(p(2.0, floor), p(2.0, 33.0)),
+        line(p(2.0, 33.0), p(24.0, 33.0)),
+        line(p(24.0, 33.0), p(24.0, 0.0)),
+        Curve::from(round),
+        line(p(18.0 - inset, floor), p(2.0, floor)),
+    ];
+    let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let mut part = create_rotational_sweep(
+        &mut k,
+        &curves,
+        p(0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        360.0,
+        false,
+    )?;
+    part.refresh_cached_topology();
+    set_tolerance(&k, &mut part, 0.005, true, true)?;
+
+    let top = planar_faces_at(&k, &part, 2, 33.0);
+    assert_eq!(top.len(), 1, "the top face");
+    let mut shelled = shell_solid(&mut k, &part, -3.0, &top)?;
+    let check = check_brep(&mut k, &mut shelled, CheckLevel::Level2)?;
+    let failures: Vec<_> = check
+        .failures()
+        .map(|r| (r.reporting_type, r.test_index))
+        .collect();
+    assert!(check.is_valid(), "the shell fails the check: {failures:?}");
+    assert!(brep_is_manifold_solid(&shelled)?);
+
+    let want = ring_volume(2.0, floor, 6.0) - ring_volume(5.0, floor + 3.0, 3.0);
+    let got = volume(&k, &mut shelled)?;
+    let bound = shelled.tolerance() * brep_area(&k, &mut shelled, 1e-3)?;
+    assert!(
+        (got - want).abs() <= bound,
+        "volume {got}, closed form {want}, bound {bound}"
     );
     Ok(())
 }

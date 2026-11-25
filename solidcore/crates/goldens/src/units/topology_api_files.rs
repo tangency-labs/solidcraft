@@ -35,7 +35,6 @@ use solidcore::topology::api_files;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::topology_ref;
-use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep_data::{BrepData, Keyed};
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::FileType;
@@ -199,6 +198,9 @@ fn finish(r: SolidResult<Vec<f64>>) -> Result<Output, HarnessError> {
 
 /// The shim's B-rep record.
 fn put_brep(k: &mut Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
+    // the recorded body, for the tolerance certificate (`certify::trim_tolerance`)
+    #[cfg(test)]
+    crate::certify::written(b);
     let faces = bl::faces(b, None)?;
     let edges = bl::edges(b, None)?;
     let vertices = bl::vertices(b, None)?;
@@ -495,7 +497,7 @@ fn write_bytes(
 }
 
 fn rust(op: &Op) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match op {
         Op::ReadBrep {
             file,
@@ -750,7 +752,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
     if let Some(why) = write_rejection(s) {
         return Ok(Output::rejected(why));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let made = match s {
         WriteSrc::File { file, rebuild } => {
             let bytes = read_bytes(file)?;
@@ -765,10 +767,20 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                     records: &mut records,
                     next_key: WRITE_GEOMETRY_KEYS,
                 };
-                read_from_file(&mut k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env)
+                crate::refit::read_from_file(
+                    &mut k,
+                    &mut b,
+                    bytes,
+                    FileType::Ascii,
+                    *rebuild,
+                    &mut env,
+                )
             };
             return Ok(match read {
-                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
+                Ok(()) => {
+                    crate::tolsub::after_read(&mut b);
+                    write_rec(&k, &b, &write_file_key, &records, &attributes, ascii)
+                }
                 Err(e) => Output::unported(&e)
                     .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
             });
@@ -996,5 +1008,271 @@ impl UnitDiff for Runner {
             },
         };
         serde_json::to_value(op).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::brep::p7::read_from_file;
+    use solidcore::topology::database_io::{fixed16, round_trip};
+
+    /// The file a `write_bytes` output records (`rec`: `0, 0, n, bytes...`).
+    fn file_of(out: &Output) -> Option<Vec<u8>> {
+        let rec = out.ints.get("rec")?;
+        if rec.first() != Some(&0) || rec.get(1) != Some(&0) {
+            return None;
+        }
+        Some(rec.get(3..)?.iter().map(|&c| c as u8).collect())
+    }
+
+    /// `bytes` read with the Rust reader under the write cases' file identities, then
+    /// written as a binary file under the same identities (binary doubles are exact).
+    fn binary_after_reading(bytes: Vec<u8>, file_type: FileType) -> Vec<u8> {
+        let mut k = crate::runner_kernel();
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        {
+            let mut env = TopologyEnv {
+                all_attributes: &[],
+                attributes: &mut attributes,
+                key_of: &write_file_key,
+                records: &mut records,
+                next_key: WRITE_GEOMETRY_KEYS,
+            };
+            read_from_file(&mut k, &mut b, bytes, file_type, false, &mut env).unwrap();
+        }
+        let out = write_rec(&k, &b, &write_file_key, &records, &attributes, false);
+        file_of(&out).unwrap()
+    }
+
+    /// The ASCII `write_bytes` cases that write a file: all 114 moved with the WR-655 fix
+    /// (the expectations commit of the flag's retirement), and every one is certified
+    /// below.
+    const ASCII_FILES: usize = 114;
+
+    /// Certificate for the ASCII `write_bytes` rows (WR-655): every finite double in each
+    /// ASCII file is written as the shortest text that reads back as itself (`round_trip`,
+    /// no `%.16f` text left), and the file carries every double exactly: read back and
+    /// written as a binary file, it gives the same bytes as the case's own binary file read
+    /// back and written the same way. The certified cases must be exactly the
+    /// [`ASCII_FILES`] ASCII write cases that write a file, each with a committed golden
+    /// row.
+    #[test]
+    fn ascii_files_carry_every_double_exactly() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let golden = std::fs::read_to_string(
+            crate::case::repo_root().join("crates/goldens/expected/topology.api_files.jsonl"),
+        )
+        .unwrap();
+        let golden: std::collections::BTreeSet<String> = golden
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|v| v.get("case")?.as_str().map(str::to_string))
+            .collect();
+        let mut covered = Vec::new();
+        let mut lossy = Vec::new();
+        for case in &cases {
+            let op: Op = case
+                .parse()
+                .unwrap_or_else(|e| panic!("{}: {e:?}", case.name));
+            // the ASCII writes only: the other ops and the binary writes do not move
+            let Op::WriteBytes { brep, ascii: true } = op else {
+                continue;
+            };
+            let ascii = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: true,
+            })
+            .unwrap();
+            let binary = rust(&Op::WriteBytes {
+                brep: brep.clone(),
+                ascii: false,
+            })
+            .unwrap();
+            let name = &case.name;
+            let Some(text) = file_of(&ascii) else {
+                // a refused source or write: the binary case is refused the same way
+                assert_eq!(file_of(&binary), None, "{name}");
+                continue;
+            };
+            let bin = file_of(&binary).unwrap_or_else(|| panic!("{name}: no binary file"));
+            let s = String::from_utf8(text.clone()).unwrap();
+            let mut loses = false;
+            for token in s.split_whitespace() {
+                let Ok(v) = token.parse::<f64>() else {
+                    continue;
+                };
+                if token.contains(['.', 'e', 'n', 'i']) {
+                    assert_eq!(round_trip(v), token, "{name}: double {token}");
+                    // upstream's `%.16f` text of the same double
+                    loses |= !v.is_nan()
+                        && fixed16(v).parse::<f64>().map_or(true, |w| w.to_bits() != v.to_bits());
+                }
+            }
+            assert_eq!(
+                binary_after_reading(text, FileType::Ascii),
+                binary_after_reading(bin, FileType::Binary),
+                "{name}: the ASCII file does not carry the binary file's doubles"
+            );
+            if loses {
+                lossy.push(name.clone());
+            }
+            assert!(golden.contains(name), "{name}: no committed golden row");
+            covered.push(name.clone());
+        }
+        println!("ASCII_EXACT covered {}: {covered:?}", covered.len());
+        println!("ASCII_EXACT %.16f loses a double in {}: {lossy:?}", lossy.len());
+        assert_eq!(covered.len(), ASCII_FILES);
+    }
+
+    /// The surface part of a found sphere or torus, or of a B-spline surface.
+    fn nurb_part(s: &Surface) -> Option<&BSplineSurface> {
+        use solidcore::surface::surface::SurfaceKind;
+        match s.kind() {
+            SurfaceKind::BSpline(b) => Some(b),
+            SurfaceKind::Sphere(sp) => Some(sp.base().base()),
+            SurfaceKind::Torus(t) => Some(t.base().base()),
+            _ => None,
+        }
+    }
+
+    /// A NURB surface's control points and knots as bits.
+    fn surface_bits(s: &BSplineSurface) -> Vec<u64> {
+        let n = s.gw_nurb().expect("a NURB");
+        let mut out: Vec<u64> = n
+            .rows()
+            .flat_map(|r| r.iter().flat_map(|p| [p.x, p.y, p.z, p.w]))
+            .map(f64::to_bits)
+            .collect();
+        out.extend(n.u_knots().iter().chain(n.v_knots()).map(|x| x.to_bits()));
+        out
+    }
+
+    /// A UV curve's NURB as written (`Debug` writes every double as the shortest text
+    /// that reads back as itself, so equal text is equal bits). A line's record is its
+    /// NURB: the written file can hold a source polyline trim as the `Line` over that same
+    /// NURB (`Solids/sphere.smb`), so the NURB is what must be the source's. Any other kind is
+    /// compared by its whole record.
+    fn curve_text(c: &Curve) -> String {
+        use solidcore::curve::curve::CurveKind;
+        match c.kind() {
+            CurveKind::BSpline(b) => format!("{:?}", b.gw_nurb()),
+            CurveKind::Line(l) => format!("{:?}", l.base().gw_nurb()),
+            k => format!("{k:?}"),
+        }
+    }
+
+    /// The UV curves of the edge uses on `face`'s loops (sorted).
+    fn face_trims(d: &BrepData, face: usize) -> Vec<String> {
+        let f = &d.faces[face];
+        let loops = f.start_loop..f.start_loop + f.num_loops;
+        let mut out: Vec<String> = d
+            .edgeuses
+            .iter()
+            .filter(|eu| loops.contains(&eu.loop_))
+            .map(|eu| curve_text(&d.uv_curves[eu.uv_curve as usize].object))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// WR-493 (#18195): the `write_bytes` rows the retirement moved. Each writes a file
+    /// with a sphere or torus found in a NURB, and the file written holds, for every such
+    /// face, the source file's own surface (its NURB, bit for bit), and on it the source's own
+    /// UV trims (the same NURBs, bit for bit; a polyline trim can be written as the line over
+    /// that NURB) but those the read remade (counted; as on any surface, the healer remakes
+    /// a trim that misses its edge, see `wr493_class_proofs`): the retirement moved these rows only
+    /// by writing the file's own surface and trims where main wrote the NURB
+    /// made from the fitted circles and the trims rebuilt on it.
+    #[test]
+    fn wr493_written_found_faces_are_the_source_files() {
+        use solidcore::surface::surface::SurfaceKind;
+        // (case, found faces, trims on them written as the source's, trims the read remade)
+        const MOVED: [(&str, usize, usize, usize); 14] = [
+            ("write_bytes0004", 1, 2, 0),
+            ("write_bytes0026", 1, 2, 0),
+            ("write_bytes0061", 1, 2, 0),
+            ("write_bytes0085", 1, 12, 2),
+            ("write_bytes0094", 1, 2, 0),
+            ("write_bytes0106", 1, 2, 0),
+            ("write_bytes0115", 1, 12, 2),
+            ("write_bytes0153", 1, 4, 10),
+            ("write_bytes0179", 1, 12, 2),
+            ("write_bytes0180", 1, 2, 0),
+            ("write_bytes_file_nurb_fillet_ascii", 1, 12, 2),
+            ("write_bytes_file_nurb_fillet_binary", 1, 12, 2),
+            ("write_bytes_file_sphere_ascii", 1, 2, 0),
+            ("write_bytes_file_sphere_binary", 1, 2, 0),
+        ];
+        let mut measured = Vec::new();
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = crate::runner_kernel();
+        for (name, ..) in MOVED {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: Op = case.parse().unwrap();
+            let Op::WriteBytes {
+                brep: WriteSrc::File { file, .. },
+                ascii,
+            } = &op
+            else {
+                panic!("{name}: not a file write");
+            };
+            let written = file_of(&rust(&op).unwrap()).unwrap_or_else(|| panic!("{name}"));
+            let file_type = if *ascii {
+                FileType::Ascii
+            } else {
+                FileType::Binary
+            };
+            let w = BrepData::read_from_file(&k, written, file_type).unwrap();
+            let src = BrepData::read_from_file(&k, read_bytes(file).unwrap(), FileType::Ascii)
+                .unwrap();
+            assert_eq!(w.faces.len(), src.faces.len(), "{name}");
+            let (mut found, mut kept, mut remade) = (0, 0, 0);
+            for (i, (wf, sf)) in w.faces.iter().zip(&src.faces).enumerate() {
+                let ws = &w.surfaces[wf.surface as usize].object;
+                if !matches!(ws.kind(), SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)) {
+                    continue;
+                }
+                found += 1;
+                let ss = &src.surfaces[sf.surface as usize].object;
+                assert!(
+                    matches!(ss.kind(), SurfaceKind::BSpline(_)),
+                    "{name}: face {i}: the source's surface is not a NURB"
+                );
+                assert_eq!(
+                    surface_bits(nurb_part(ws).unwrap()),
+                    surface_bits(nurb_part(ss).unwrap()),
+                    "{name} ({file}): face {i}: the written surface is not the source's"
+                );
+                let (wt, st) = (face_trims(&w, i), face_trims(&src, i));
+                assert!(!wt.is_empty(), "{name}: face {i}: no trims");
+                // one-to-one: each written trim uses up one matching source trim
+                let mut left = st.clone();
+                let same = wt
+                    .iter()
+                    .filter(|t| {
+                        left.iter()
+                            .position(|s| s == *t)
+                            .map(|at| left.swap_remove(at))
+                            .is_some()
+                    })
+                    .count();
+                kept += same;
+                remade += wt.len() - same;
+            }
+            assert!(found > 0, "{name} ({file}): no sphere or torus found");
+            measured.push((name, found, kept, remade));
+        }
+        assert_eq!(measured, MOVED, "{measured:#?}");
     }
 }

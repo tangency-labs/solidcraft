@@ -2,8 +2,8 @@
 //! one line revolved a full turn makes one face whose edge uses have no UV trims, so
 //! `SmTrimmingTools::CheckLoop` takes their ends from vertex projections. On the closed
 //! direction those are known only modulo the period, and upstream reports the seam as a
-//! UV gap of one whole turn. With `Kernel::fixes.check_loop_projected_seam_ends` a
-//! projected end is compared on the period nearest its neighbour, and the face is valid.
+//! UV gap of one whole turn. The port compares a projected end on the period nearest its
+//! neighbour, and the face is valid.
 
 #![allow(
     clippy::unwrap_used,
@@ -28,48 +28,29 @@ const LINES: [([f64; 3], [f64; 3]); 3] = [
 ];
 
 #[test]
-fn wr_440_revolved_line_passes_the_body_check_only_with_the_fix() {
+fn wr_440_revolved_line_passes_the_body_check() {
     for (start, end) in LINES {
-        for fix in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.check_loop_projected_seam_ends = fix;
-            let line =
-                Curve::from(create_line_segment(Point3::from(start), Point3::from(end)).unwrap());
-            let mut b = create_rotational_sweep(
-                &mut k,
-                &[Some(&line)],
-                Point3::ZERO,
-                Vec3::Z,
-                360.0,
-                false,
-            )
-            .unwrap();
-            assert_eq!(b.face_list().len(), 1, "{start:?} {end:?}");
+        let mut k = Kernel::default();
+        let line =
+            Curve::from(create_line_segment(Point3::from(start), Point3::from(end)).unwrap());
+        let mut b =
+            create_rotational_sweep(&mut k, &[Some(&line)], Point3::ZERO, Vec3::Z, 360.0, false)
+                .unwrap();
+        assert_eq!(b.face_list().len(), 1, "{start:?} {end:?}");
 
-            let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-            let failures: Vec<_> = check
-                .failures()
-                .map(|r| (r.reporting_type, r.test_index))
-                .collect();
-            eprintln!("{start:?} to {end:?}, fix {fix}: {:?}", check.lines());
-            assert!(check.pointer_reports.is_empty(), "{:?}", check.lines());
-            if fix {
-                assert!(check.is_valid(), "{start:?} {end:?}: {:?}", check.lines());
-                assert_eq!(check.assert_valid, Some(true));
-            } else {
-                // upstream: the seam's two uses project to the same side, a gap of one
-                // period of the face's natural domain. `AssertValid` still returns true
-                // (the face test does not fail on `CheckLoop`'s report), but the check
-                // lists the report and is not valid.
-                assert!(!check.is_valid());
-                assert_eq!(check.assert_valid, Some(true));
-                assert_eq!(
-                    failures,
-                    [(labels::TRIMMING_TOOLS_TYPE, 1)],
-                    "{start:?} {end:?}: {:?}",
-                    check.lines()
-                );
-            }
-        }
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.pointer_reports.is_empty(), "{:?}", check.lines());
+        assert!(check.is_valid(), "{start:?} {end:?}: {:?}", check.lines());
+        assert_eq!(check.assert_valid, Some(true));
+        let trimming_failures = check
+            .failures()
+            .filter(|r| r.reporting_type == labels::TRIMMING_TOOLS_TYPE)
+            .count();
+        assert_eq!(
+            trimming_failures,
+            0,
+            "{start:?} {end:?}: {:?}",
+            check.lines()
+        );
     }
 }

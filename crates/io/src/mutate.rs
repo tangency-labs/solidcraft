@@ -220,6 +220,20 @@ fn gltf_survives_mutation() {
     survives("glTF (.gltf)", &mutations(&gltf, true, 0x917), usize::MAX, |b| crate::read_gltf(b, "fuzz.gltf", &mut no_files).ok().map(|_| 1));
 }
 
+/// An IGES file read with "Import with cadmpeg" (cadmpeg's IGES decoder, then the records): a
+/// cylinder as a manifold solid B-rep (186), as SolidCraft's IGES export writes it.
+#[test]
+fn iges_read_by_cadmpeg_survives_mutation() {
+    let pin = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 12.0).unwrap();
+    let body = solidcraft_kernel::ExportBody { name: "Pin".into(), body: &pin, color: None };
+    let good = solidcraft_kernel::iges_export_bodies(&[body], &Default::default()).unwrap().into_bytes();
+    let read = |b: &[u8]| {
+        crate::step_import_feature_read(b, "fuzz.igs", crate::StepNames::default(), crate::StepReader::Cadmpeg).ok().map(|f| f.import.bodies.len())
+    };
+    assert_eq!(read(&good), Some(1));
+    survives("IGES (cadmpeg)", &mutations(&good, true, 0x1635), usize::MAX, read);
+}
+
 #[test]
 fn designs_survive_mutation() {
     let mut doc = solidcraft_doc::Document::new("Fuzz");
@@ -237,60 +251,194 @@ fn designs_survive_mutation() {
     survives("design container", &mutations(&container, false, 0xde5), usize::MAX, |b| {
         let _ = crate::read_design_preview(b);
         let _ = crate::read_design_thumbnail(b);
+        let _ = crate::design_text(b);
         crate::read_design(b).ok().map(|d| d.features.len())
     });
-    let json = crate::write_design(&doc);
+    let json = crate::write_design(&doc).unwrap();
     assert!(crate::read_design(&json).is_ok());
-    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
+    survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| {
+        let _ = crate::design_text(b);
+        crate::read_design(b).ok().map(|d| d.features.len())
+    });
 }
 
-/// A drawing, as a container and as plain JSON: every mutation gives an error or a drawing,
-/// never a panic, and `file_kind` always answers.
+/// A design with two drawings, each drawing it and another design's file, as a container and as
+/// plain JSON: every mutation (of the path too: another type, odd bytes, a copy of the source)
+/// gives an error or a design, never a panic, and never more drawings than a design may hold.
 #[test]
-fn drawings_survive_mutation() {
+fn designs_with_drawings_survive_mutation() {
+    use solidcraft_doc::drawing::{Drawing, MAX_DRAWINGS, Source};
     use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
     let mut ids = solidcraft_doc::ids::IdSource::seeded(0xd4a);
-    let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
-    let mut drawing = solidcraft_doc::drawing::Drawing::new("Fuzz", "en", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &mut ids).unwrap();
-    let id = drawing.allocate_id(&mut ids).unwrap();
-    drawing.sources.push(solidcraft_doc::drawing::Source { id, path: "plate.sc".into() });
-    let container = crate::write_drawing_container(&drawing).unwrap();
-    assert!(crate::read_drawing(&container).is_ok());
-    survives("drawing container", &mutations(&container, false, 0xd4b), usize::MAX, |b| {
-        let _ = crate::file_kind(b);
-        let _ = crate::read_design(b);
-        crate::read_drawing(b).ok().map(|d| d.sheets.len())
+    let mut doc = solidcraft_doc::Document::new("Fuzz");
+    for name in ["Assembly", "Details"] {
+        let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+        let taken = doc.drawings.iter().map(|d| d.id).collect();
+        let mut drawing = Drawing::new(name, "en", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &taken, &mut ids).unwrap();
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(Source { id, path: None });
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(Source { id, path: Some("../parts/plate.sc".into()) });
+        drawing.sources.sort_by_key(|s| s.id);
+        doc.drawings.push(drawing.into());
+    }
+    let container = crate::write_design_container(&doc).unwrap();
+    assert_eq!(crate::read_design(&container).unwrap().drawings, doc.drawings);
+    survives("design container with drawings", &mutations(&container, false, 0xd4b), MAX_DRAWINGS, |b| {
+        crate::read_design(b).ok().map(|d| d.drawings.len())
     });
-    let json = drawing.to_json().unwrap().into_bytes();
-    assert!(crate::read_drawing(&json).is_ok());
-    survives("drawing JSON", &mutations(&json, true, 0xd4c), usize::MAX, |b| {
-        let _ = crate::file_kind(b);
-        crate::read_drawing(b).ok().map(|d| d.sheets.len())
-    });
+    let json = crate::write_design(&doc).unwrap();
+    assert_eq!(crate::read_design(&json).unwrap().drawings, doc.drawings);
+    survives("design JSON with drawings", &mutations(&json, true, 0xd4c), MAX_DRAWINGS, |b| crate::read_design(b).ok().map(|d| d.drawings.len()));
 }
 
-/// A paper scene's JSON, mutated, read, prepared and written as SVG: an error or a document,
-/// never a panic.
+/// Mid grey at half alpha, the size asked for: the paper fuzz cases' pictures.
+struct Grey;
+
+impl solidcraft_geom::paper::Pictures for Grey {
+    fn rows(
+        &self,
+        _: u64,
+        _: &solidcraft_geom::pixel_grid::PixelGrid,
+        w: solidcraft_geom::pixel_grid::GridWindow,
+    ) -> std::result::Result<Vec<u8>, String> {
+        Ok([128, 128, 128, 128].repeat(w.x1.saturating_sub(w.x0) as usize * w.y1.saturating_sub(w.y0) as usize))
+    }
+}
+
+/// A paper scene's JSON with a picture, mutated, read, prepared and written as SVG with its
+/// pictures at 25 dpi: an error or a document, never a panic.
 #[test]
 fn paper_scenes_survive_mutation_into_svg() {
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
-    use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
     let p = Vec2::new;
     let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+    let dashes = || Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
     let items = vec![
-        Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
-        Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
+        Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+        Item::Stroke {
+            path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+            closed: false,
+            width_mm: 0.35,
+            pattern: Some(dashes()),
+        },
         Item::Fill { region: Region2 { outer: border, holes: vec![] } },
+        Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
     ];
-    let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
     let json = serde_json::to_vec(&scene).unwrap();
     let write = |b: &[u8]| -> Option<usize> {
         let scene: Scene = serde_json::from_slice(b).ok()?;
         let prepared = scene.prepare().ok()?;
-        crate::paper::paper_svg(&prepared).ok().map(|(bytes, _)| bytes.len())
+        crate::paper::paper_svg(&prepared, &Grey, 25.0).ok().map(|(bytes, _)| bytes.len())
     };
     assert!(write(&json).is_some());
     survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
+}
+
+/// A clipped object's JSON, a line and a picture crossing its rectangle or circle, mutated, read,
+/// prepared and written by both writers: an error or a file, never a panic.
+#[test]
+fn paper_scenes_with_clips_survive_mutation() {
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Clip, Group, Item, ObjectKind, Picture, Scene};
+    let p = Vec2::new;
+    let clips = [(0x5a5, Clip::Rect { min: p(180.0, 90.0), max: p(220.0, 130.0) }), (0x5a6, Clip::Circle { center: p(200.0, 110.0), radius: 25.0 })];
+    for (seed, clip) in clips {
+        let items = vec![
+            Item::Stroke { path: vec![Seg2::Line { a: p(150.0, 110.0), b: p(250.0, 110.0) }], closed: false, width_mm: 0.35, pattern: None },
+            Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
+        ];
+        let scene = Scene { clips: vec![(7, clip)], ..Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::View, items }]) };
+        let json = serde_json::to_vec(&scene).unwrap();
+        let options = crate::paper::PngOptions { dpi: 25.0, colour: crate::paper::PngColour::Grey };
+        let write = |b: &[u8]| -> Option<usize> {
+            let scene: Scene = serde_json::from_slice(b).ok()?;
+            let prepared = scene.prepare().ok()?;
+            let svg = crate::paper::paper_svg(&prepared, &Grey, 25.0).ok()?.0.len();
+            let mut out = Vec::new();
+            crate::paper::paper_png(&prepared, options, &Grey, &mut out).ok()?;
+            Some(svg + out.len())
+        };
+        assert!(write(&json).is_some());
+        survives("clipped paper scene", &mutations(&json, true, seed), usize::MAX, write);
+    }
+}
+
+/// The same scene's JSON with a picture, mutated, read, prepared and written as a 25 dpi sheet
+/// PNG: an error or an image, never a panic.
+#[test]
+fn paper_scenes_survive_mutation_into_png() {
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
+    let p = Vec2::new;
+    let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+    let dashes = || Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
+    let items = vec![
+        Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+        Item::Stroke {
+            path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+            closed: false,
+            width_mm: 0.35,
+            pattern: Some(dashes()),
+        },
+        Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
+        Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
+    ];
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
+    let json = serde_json::to_vec(&scene).unwrap();
+    let options = crate::paper::PngOptions { dpi: 25.0, colour: crate::paper::PngColour::Grey };
+    let write = |b: &[u8]| -> Option<usize> {
+        let scene: Scene = serde_json::from_slice(b).ok()?;
+        let prepared = scene.prepare().ok()?;
+        let mut out = Vec::new();
+        crate::paper::paper_png(&prepared, options, &Grey, &mut out).ok().map(|_| out.len())
+    };
+    assert!(write(&json).is_some());
+    survives("paper scene to PNG", &mutations(&json, true, 0x5a4), usize::MAX, write);
+}
+
+/// The same scene's JSON with a picture, mutated, read, prepared and written as a PDF with a title
+/// and a date: an error or a document, never a panic. The writer draws geometry only, so the
+/// picture is passed over.
+#[test]
+fn paper_scenes_survive_mutation_into_pdf() {
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
+    let p = Vec2::new;
+    let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+    let dashes = Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
+    let items = vec![
+        Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+        Item::Stroke {
+            path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+            closed: false,
+            width_mm: 0.35,
+            pattern: Some(dashes),
+        },
+        Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
+        Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
+    ];
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
+    let json = serde_json::to_vec(&scene).unwrap();
+    let options = crate::paper::PdfOptions {
+        layers: true,
+        title: Some("Sheet 1".into()),
+        output_time: Some(1_761_436_800),
+        actual_size: false,
+        text: crate::paper::PdfText::Outlines,
+    };
+    let write = |b: &[u8]| -> Option<usize> {
+        let scene: Scene = serde_json::from_slice(b).ok()?;
+        crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())
+    };
+    assert!(write(&json).is_some());
+    survives("paper scene to PDF", &mutations(&json, true, 0x5a7), usize::MAX, write);
 }
 
 /// Standard base64 (RFC 4648) of `bytes`, for a data URI.

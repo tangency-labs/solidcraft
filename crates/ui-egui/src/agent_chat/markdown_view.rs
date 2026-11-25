@@ -94,9 +94,18 @@ pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label, selected: bool) 
 
 /// A paragraph's text, then its links as buttons (a laid-out text cannot be clicked in parts).
 fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32, selected: bool) {
+    spans_in(ui, spans, size, color, selected, true);
+}
+
+/// [`spans`]; `wrap` false keeps the text on one line however narrow the panel (a table cell: the
+/// table scrolls sideways instead of breaking words).
+fn spans_in(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32, selected: bool, wrap: bool) {
     let t = Tokens::get();
-    let text = job(ui, spans, size, color);
-    selectable(ui, egui::Label::new(text).wrap(), selected);
+    let mut text = job(ui, spans, size, color);
+    if !wrap {
+        text.wrap.max_width = f32::INFINITY;
+    }
+    selectable(ui, egui::Label::new(text).wrap_mode(if wrap { egui::TextWrapMode::Wrap } else { egui::TextWrapMode::Extend }), selected);
     let links: Vec<(&str, &str)> =
         spans.iter().filter_map(|s| if let Span::Link { label, url } = s { Some((label.as_str(), url.as_str())) } else { None }).collect();
     if !links.is_empty() {
@@ -117,7 +126,7 @@ pub(super) fn plain_text(blocks: &[Block]) -> String {
     for block in blocks {
         out.push(match block {
             Block::Paragraph(s) | Block::Heading { spans: s, .. } => markdown::plain(s),
-            Block::Code { text, .. } | Block::Pre(text) => text.trim_end_matches('\n').to_owned(),
+            Block::Code { text, .. } | Block::Pre(text) | Block::Table { source: text, .. } => text.trim_end_matches('\n').to_owned(),
             Block::List { ordered, start, items } => items
                 .iter()
                 .enumerate()
@@ -140,7 +149,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
     let t = Tokens::get();
     let size = t.font_button;
     let parsed = blocks(ui.ctx(), slot, src);
-    for block in parsed.iter() {
+    for (n, block) in parsed.iter().enumerate() {
         match block {
             Block::Paragraph(s) => spans(ui, s, size, t.text, selected),
             Block::Heading { level, spans: s } => {
@@ -183,6 +192,24 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
                     let (bar, _) = ui.allocate_exact_size(vec2(3.0, 16.0), egui::Sense::hover());
                     ui.painter().rect_filled(bar, t.radius_sm / 4, t.border);
                     ui.vertical(|ui| spans(ui, s, size, t.text_dim, selected));
+                });
+            }
+            Block::Table { header, rows, .. } => {
+                egui::ScrollArea::horizontal().id_salt(("agent_chat_table", slot, n)).show(ui, |ui| {
+                    egui::Grid::new(("agent_chat_table_grid", slot, n)).striped(true).spacing(vec2(14.0, 4.0)).show(ui, |ui| {
+                        for cell in header {
+                            let head = RichText::new(markdown::plain(cell)).size(size).semibold().color(t.text);
+                            selectable(ui, egui::Label::new(head).extend(), selected);
+                        }
+                        ui.end_row();
+                        for row in rows {
+                            for cell in row {
+                                // One grid item per cell: the text and its link buttons share it.
+                                ui.vertical(|ui| spans_in(ui, cell, size, t.text, selected, false));
+                            }
+                            ui.end_row();
+                        }
+                    });
                 });
             }
             Block::Pre(text) => {

@@ -1,11 +1,14 @@
 //! Contact between bodies: whether two bodies meet (share material or touch within a
 //! tolerance) and the distance between their boundaries, each decided by the kernel's
-//! certified bracket ([`solidcore::query::contact`]). Ops passes the tolerance on as the
-//! caller gives it and reads the kernel's verdict; it computes no distance of its own.
+//! certified bracket ([`solidcore::query::contact`]), and the flush-join contact points
+//! ([`flush_contact_points`], [`solidcore::query::flush_contact`]). Ops passes the
+//! tolerance on as the caller gives it and reads the kernel's verdict; it computes no
+//! distance or plane test of its own.
 
 use solidcore::geom::certified::Verdict;
 use solidcore::kernel::Kernel;
 use solidcore::query::contact::{self as c, Contact, Prepared};
+use solidcore::query::flush_contact;
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::Brep;
 use solidcore::Point3;
@@ -16,6 +19,7 @@ use crate::{Error, Result};
 
 impl Answer for Contact {}
 impl Answer for Vec<Contact> {}
+impl Answer for Vec<Point3> {}
 
 /// The bracket of the distance between two bodies' boundaries, at most the width asked.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,7 +74,7 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::ContactUndecided`] when the kernel's bracket does not decide it (`other` 0):
-    /// the bracket, never read as either answer; [`Error::Status`] `SM_ERR_INVALID_INPUT` for a
+    /// the bracket, never read as either answer; [`Error::Refused`], in the kernel's words, for a
     /// tolerance not finite and positive or a body without faces; those of the session.
     pub fn meets(&self, other: &Body, tol: f64) -> Result<bool> {
         poisoned(&[self, other])?;
@@ -117,7 +121,7 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::ContactUndecided`] (`other` 0) with the narrowest bracket reached, when the
-    /// kernel's work runs out before `width`; [`Error::Status`] `SM_ERR_INVALID_INPUT` for a
+    /// kernel's work runs out before `width`; [`Error::Refused`], in the kernel's words, for a
     /// width not finite and positive or a body without faces; those of the session.
     pub fn boundary_distance(&self, other: &Body, width: f64) -> Result<Gap> {
         poisoned(&[self, other])?;
@@ -136,5 +140,56 @@ impl Body {
             upper: contact.upper,
             witness: contact.witness.map(|[p, q]| [array(p), array(q)]),
         })
+    }
+}
+
+/// Centroids of `tool`'s planar faces that lie back-to-back on a planar face of
+/// `target` ([`solidcore::query::flush_contact::flush_contact_points`]). Neither body
+/// changes. An empty list means there is no such contact, not a failure.
+///
+/// # Errors
+/// Those of the session.
+pub fn flush_contact_points(target: &Body, tool: &Body) -> Result<Vec<[f64; 3]>> {
+    poisoned(&[target, tool])?;
+    let points = run_on(
+        "contact::flush_contact_points",
+        &[("target", target), ("tool", tool)],
+        |k| {
+            let mut a = copy_of(k, target)?;
+            let mut b = copy_of(k, tool)?;
+            flush_contact::flush_contact_points(k, &mut a, &mut b)
+        },
+    )?;
+    Ok(points.into_iter().map(array).collect())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+    use crate::body::make_box;
+
+    /// Two 10 mm cubes that share the plane y = 10: the tool's bottom face is
+    /// back-to-back on the target's top, and the contact is that face's centroid.
+    #[test]
+    fn a_box_sitting_on_another_has_one_flush_contact() {
+        let target = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let tool = make_box([0.0, 10.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let pts = flush_contact_points(&target, &tool).unwrap();
+        assert_eq!(pts.len(), 1, "{pts:?}");
+        let [x, y, z] = *pts.first().unwrap();
+        assert!(
+            (x - 5.0).abs() < 1e-6 && (y - 10.0).abs() < 1e-6 && (z - 5.0).abs() < 1e-6,
+            "{pts:?}"
+        );
+    }
+
+    /// Two boxes that already overlap share no back-to-back flush face.
+    #[test]
+    fn overlapping_boxes_have_no_flush_contact() {
+        let a = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let b = make_box([5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let pts = flush_contact_points(&a, &b).unwrap();
+        assert!(pts.is_empty(), "{pts:?}");
     }
 }

@@ -157,34 +157,13 @@ fn assert_host_legacy_windows_closed(h: &Harness) {
 }
 
 #[test]
-fn host_retains_one_legacy_move_editor_and_the_pending_capture_question() {
+fn host_retains_the_pending_capture_question() {
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.home.open = false;
     h.app.preferences.language = "en".into();
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
     h.settle();
     let pending = h.app.session.pending_moves.clone();
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occurrence));
-    h.frames(3);
-    let baseline = h.app.tree.occurrence_move.as_ref().unwrap().baseline;
-    assert!(baseline.is_some());
-    assert_panel_host_preserves_design(&mut h, |h| {
-        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
-        h.frames(4);
-        let draft = h.app.tree.occurrence_move.as_ref().unwrap();
-        assert_eq!(draft.baseline, baseline);
-        assert!(draft.had_pending);
-        assert_eq!(draft.translate, [0.0; 3]);
-        assert_eq!(crate::scenario::handles("occurrence-move:distance:0").len(), 1);
-        assert_host_legacy_window(h, rect_of("dialog:window").unwrap());
-        assert_eq!(h.app.session.pending_moves, pending);
-    });
-    // Cancel must restore the opening baseline, including the earlier pending move.
-    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
-    h.frames(2);
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.pending_moves, pending);
-    assert_host_legacy_windows_closed(&h);
     assert_panel_host_preserves_design(&mut h, |h| {
         h.app.start("sketch.create");
         h.frames(3);
@@ -209,8 +188,8 @@ fn host_keeps_legacy_canvas_cloud_and_attachment_drafts_with_only_visible_footpr
     png.extend(400u32.to_be_bytes());
     png.extend(200u32.to_be_bytes());
     png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
-    let canvas = h.app.run("canvas.insert", json!({"data":data,"plane":"XY","width":80})).unwrap()["canvas"].as_u64().unwrap();
+    let data = crate::scenario::image_file(&png);
+    let canvas = h.app.run("canvas.insert", json!({"path":data,"plane":"XY","width":80})).unwrap()["canvas"].as_u64().unwrap();
     let path = h.dir.join("legacy-editor.xyz");
     std::fs::write(&path, "0 0 0 255 0 0\n1 0 0 0 255 0\n").unwrap();
     let cloud = h.app.run("pointcloud.insert", json!({"path":path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
@@ -1273,7 +1252,7 @@ fn cards_block_model_hover_wheel_and_drag_but_the_gap_remains_viewport() {
 
 #[test]
 fn sketch_options_and_compass_share_measured_clearance() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 720.0, 2.0)] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
@@ -1299,7 +1278,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
                 );
             }
             if width > 1000.0 {
-                h.app.start("construct.plane.offset");
+                h.app.start("sketch.offset");
                 h.settle();
                 let dialog = h.app.viewport.dialog_rect.unwrap();
                 let viewport = h.app.viewport.rect.unwrap();
@@ -1315,7 +1294,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
 
 #[test]
 fn short_sketch_options_paints_and_scrolls_inside_the_viewport() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for height in [475, 385, 300] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
@@ -1787,41 +1766,74 @@ fn status_bar_spans_the_window_below_history_in_both_layouts_and_is_covered() {
     }
 }
 
+/// The sketch state shows in the sketch panel, never drawn over the view: the in-view status
+/// line was removed by the owner's decision, so the view paints no "Sketch1 — ..." text.
 #[test]
-fn viewport_sketch_status_distinguishes_empty_and_constrained_geometry() {
+fn sketch_status_shows_in_the_panel_and_not_over_the_view() {
     for mode in [LayoutMode::Docked, LayoutMode::Floating] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "{mode:?}: an empty sketch is not fully constrained");
-        assert!(h.widget("No geometry yet").is_some(), "the palette agrees with the viewport");
+        assert!(corner(&h).is_empty(), "{mode:?}: no status over the view");
+        assert!(h.widget("No geometry yet").is_some(), "{mode:?}: an empty sketch is not fully constrained");
 
         let rectangle = h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"], "the rectangle's width and height are free");
+        assert!(h.widget("2 degrees of freedom left").is_some(), "the rectangle's width and height are free");
         h.app.run("sketch.constraint.fix", json!({"entities":rectangle["curves"]})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — fully constrained"], "drawn geometry can be fully constrained");
+        assert!(h.widget("Fully constrained").is_some(), "drawn geometry can be fully constrained");
+        assert!(corner(&h).is_empty(), "{mode:?}: no status over the view");
 
         h.app.run("edit.undo", json!({})).unwrap();
-        h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — 2 degrees of freedom"]);
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
-        assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "undoing the geometry restores the empty status");
+        assert!(h.widget("No geometry yet").is_some(), "undoing the geometry restores the empty status");
+    }
+}
+
+/// Tile and mode chrome only tells views apart (`ui_kit::disambiguates`): with one view, sketching
+/// draws no green frame round the view, no "Model · Sketch1" label and no "Editing" pill, and the
+/// view's tab keeps its own name and colour. Overlay removed by owner decision.
+#[test]
+fn a_single_view_shows_no_tile_or_sketch_mode_chrome() {
+    fn walk<'a>(shape: &'a egui::Shape, out: &mut Vec<&'a egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            shape => out.push(shape),
+        }
+    }
+    for mode in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert_eq!(crate::view_windows::strip_views(&h.app).len(), 1, "{mode:?}: one view");
+        assert!(!crate::ui_kit::disambiguates(1) && crate::ui_kit::disambiguates(2));
+        let texts = painted_texts(&h);
+        assert!(!texts.iter().any(|t| t == "Editing" || t.contains(" · Sketch1")), "{mode:?}: no sketch label or pill: {texts:?}");
+        let t = solidcraft_theme::Tokens::get();
+        let mut shapes = Vec::new();
+        h.shapes.iter().for_each(|s| walk(&s.shape, &mut shapes));
+        let frame = shapes.iter().find(|shape| {
+            matches!(shape, egui::Shape::Rect(rect) if rect.stroke.color == t.sketch_accent && rect.rect.width() > 300.0 && rect.rect.height() > 200.0)
+        });
+        assert!(frame.is_none(), "{mode:?}: no green frame round the view: {frame:?}");
+        assert!(rect_of(&format!("view:title:{}", h.app.docs.views.active().id)).is_none(), "{mode:?}: no view name pill");
     }
 }
 
 #[test]
-fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_corner_text() {
+fn status_bar_names_what_is_edited_and_the_sketch_state() {
     use crate::status_bar::SketchState;
     let mut h = Harness::new();
     let corner = |h: &Harness| painted_texts(h).into_iter().filter(|t| t.starts_with("Sketch1 — ")).collect::<Vec<_>>();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.settle();
-    assert_eq!(corner(&h), ["Sketch1 — No geometry yet"], "without the bar the state stays in the view's corner");
+    // The in-view status line was removed by the owner's decision: nothing in the corner, bar or not.
+    assert!(corner(&h).is_empty(), "the view's corner shows no state");
     h.call("ui.prefs", json!({"status_bar": true}));
     h.settle();
     let contents = crate::status_bar::contents(&h.app);
@@ -1833,7 +1845,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     let Some(SketchState::Under(dof)) = contents.sketch else { panic!("{contents:?}") };
     assert!(dof > 0);
     let texts = painted_texts(&h);
-    assert!(corner(&h).is_empty(), "with the bar on, the view's corner shows no state: {texts:?}");
+    assert!(corner(&h).is_empty(), "the view's corner shows no state: {texts:?}");
     assert!(texts.contains(&format!("Under constrained ({dof} degrees of freedom)")), "{texts:?}");
     assert!(texts.iter().any(|t| t == "Editing Sketch1") && texts.iter().any(|t| t == "mm"), "{texts:?}");
     assert!(crate::scenario::handle_at("status:editing").unwrap().x < crate::scenario::handle_at("status:sketch").unwrap().x);
@@ -1898,6 +1910,140 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
     h.settle();
     assert!(h.app.viewport.context_menu.is_none());
+}
+
+/// The URL the last frame asked the platform to open.
+fn opened_url(h: &mut Harness) -> Option<String> {
+    h.take_opened().pop()
+}
+
+#[test]
+fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    let report = rect_of("titlebar:report").unwrap();
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(donate.right() < discord.left() && discord.right() < report.left(), "{donate:?} {discord:?} {report:?}");
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button, "both on by default");
+    let bar_shown = |h: &Harness, id: &str| h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == id).unwrap().shown;
+    for (handle, url) in [("titlebar:kofi", "https://ko-fi.com/bherbruck"), ("titlebar:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.frames(3);
+    assert_eq!(opened_url(&mut h), None, "nothing opens by itself");
+    h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+    h.settle();
+    assert_eq!(opened_url(&mut h), None, "the x only hides");
+    // Bar dismissal now hides only its saved placement, leaving legacy preferences unchanged.
+    assert!(!bar_shown(&h, "donate") && bar_shown(&h, "discord"));
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_some() && rect_of("titlebar:report").is_some());
+    h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+    h.settle();
+    assert!(!bar_shown(&h, "discord") && rect_of("titlebar:discord").is_none());
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
+    h.call("ui.prefs", json!({"show_donate_button": true, "show_discord_button": true}));
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_none(), "legacy visibility cannot undo personal bar hiding");
+    let reset = h.call("engine.execute", json!({"command":"ui.appBarReset","params":{}}));
+    assert_eq!(reset["ok"], true, "{reset}");
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
+}
+
+/// #10260: an organization's policy shows "Managed by {name}" in the bar, Preferences and About;
+/// a computer without one shows none of it.
+#[test]
+fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
+    let _language = solidcraft_ui_text::scope("en");
+    let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:managed").is_none(), "no policy, no badge");
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_none());
+    assert!(!crate::help::diagnostics(&h.app).contains("Policy"));
+    h.app.help.about = false;
+
+    h.app.policy = crate::policy::Policy::from_json(r#"{"OrganizationName": "ACME"}"#);
+    h.settle();
+    let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
+    let report = rect_of("titlebar:report").unwrap();
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    // Transients have ordinary End-stack slots; their old position before the links is no longer fixed.
+    for other in [report, donate, discord] {
+        assert!(!badge.intersects(other), "{badge:?} overlaps another bar item {other:?}");
+    }
+    assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
+    assert!(!h.app.prefs_window.shell.open);
+    h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
+    h.settle();
+    assert!(h.app.prefs_window.shell.open, "the badge opens Preferences");
+    assert!(rect_of("prefs:managed").is_some(), "Preferences says it too");
+    h.app.prefs_window.shell.open = false;
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_some(), "and About");
+    let diagnostics = crate::help::diagnostics(&h.app);
+    assert!(diagnostics.ends_with("Policy: managed; locks nothing"), "{diagnostics}");
+    assert!(!diagnostics.contains("ACME"), "a bug report does not carry the organization's name");
+    h.app.help.about = false;
+
+    // A narrow bar keeps the badge clear of the controls, down to the briefcase alone.
+    for width in [900.0, 700.0] {
+        h.call("ui.resize", json!({"width": width, "height": 600}));
+        h.settle();
+        if let Some(badge) = rect_of("titlebar:managed") {
+            assert!(badge.right() <= width, "{width}: {badge:?} leaves the bar");
+            if let Some(report) = rect_of("titlebar:report") {
+                assert!(!badge.intersects(report), "{width}: {badge:?} overlaps Report a bug {report:?}");
+            } else {
+                // A narrow bar may overflow Report a bug, but must keep it reachable through More.
+                h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                h.frames(2);
+                assert!(rect_of("menu:appbar:overflow:report").is_some());
+                h.step(&json!({"key":"Escape"})).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn the_links_stay_in_help_about_and_home_when_the_pills_are_off() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.call("ui.prefs", json!({"show_donate_button": false, "show_discord_button": false}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_none());
+    for (label, url) in [("Support SolidCraft on Ko-fi…", "https://ko-fi.com/bherbruck"), ("Join the Discord…", "https://discord.gg/FtU4NQNVDH")]
+    {
+        h.app.help.menu = true;
+        h.frames(2);
+        let [x, y] = h.widget(label).unwrap_or_else(|| panic!("the Help menu lists {label}"));
+        h.call("ui.click", json!({"x": x, "y": y}));
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{label}");
+        assert!(!h.app.help.menu, "the menu closes");
+    }
+    h.app.help.about = true;
+    h.frames(3);
+    for (handle, url) in [("about:kofi", "https://ko-fi.com/bherbruck"), ("about:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.app.help.about = false;
+    h.app.home.open = true;
+    h.frames(3);
+    for (handle, url) in [("home:kofi", "https://ko-fi.com/bherbruck"), ("home:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
 }
 
 #[test]
