@@ -11,7 +11,7 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
@@ -1649,42 +1649,35 @@ impl AnalyticSupport {
     /// what proves the support and the form agree: [`lies_on`] proves the point set, and
     /// the evaluation proves the parametrisation, including the frame the placement imposes
     /// about the axis and, for a sphere, the whole orientation, none of which the implicit
-    /// equation constrains (#2588). The surface takes `form` as its NURB.
+    /// equation constrains (#2588). The surface takes `form` as its NURB. A short arc fails
+    /// the evaluation: a centre rebuilt from it is good only to about the radius over the
+    /// square of the sweep. [`Self::place_on`] carries a cone or cylinder whose own axis the
+    /// form lies on.
     ///
     /// # Errors
     ///
     /// `InvalidInput` where `form` is off the analytic surface or is not its
     /// parametrisation; those of the recognisers, the evaluations and [`lies_on`].
     pub fn build(&self, k: &Kernel, form: BSplineSurface) -> Result<Surface> {
-        // the placement's axes as stored: unit and square to rounding (8 ulps)
-        let p = match self {
-            Self::Plane { placement, .. }
-            | Self::Cylinder { placement, .. }
-            | Self::Cone { placement, .. }
-            | Self::Sphere { placement, .. }
-            | Self::Torus { placement, .. } => placement,
-        };
-        let ulps = 8.0 * f64::EPSILON;
-        let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-        let square = p.x_axis().dot(p.y_axis()).abs() <= ulps;
-        if !(unit(p.x_axis()) && unit(p.y_axis()) && square) {
+        if !self.placement_is_square() {
             return Err(SolidError::invalid_input(
                 OP_BUILD,
                 "a support's placement is not orthonormal",
             ));
         }
-        if !lies_on(&form, &self.implicit())? {
-            return Err(SolidError::invalid_input(
-                OP_BUILD,
-                "a support's analytic kind disagrees with its NURBS form",
-            ));
-        }
+        let implicit_ok = lies_on(&form, &self.implicit())?;
         if let Self::Plane {
             placement,
             uv_scale,
             domain,
         } = *self
         {
+            if !implicit_ok {
+                return Err(SolidError::invalid_input(
+                    OP_BUILD,
+                    "a support's analytic kind disagrees with its NURBS form",
+                ));
+            }
             return Ok(Surface::from(Plane::from_stored(
                 placement, uv_scale, domain, form,
             )));
@@ -1693,10 +1686,55 @@ impl AnalyticSupport {
         // this one, take the form as its NURB and evaluate as the form at the form's own
         // parameters
         let surface = self.on_form(k, &form)?;
-        if !evaluates_as(k, &surface, &form)? {
+        if implicit_ok && evaluates_as(k, &surface, &form)? {
+            return Ok(surface);
+        }
+        if !implicit_ok {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's analytic kind disagrees with its NURBS form",
+            ));
+        }
+        Err(not_form())
+    }
+
+    /// This cone or cylinder on `form`: the form's sweep and generator, and this support's
+    /// axis, radius and semi-angle. The form lies on this support. A short sweep, whose
+    /// trigonometric point is a few ulps off its Bézier, keeps these numbers.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` where the placement is not orthonormal, `form` is off this support,
+    /// or the kernel recognises no cone in `form`; those of the recogniser and [`lies_on`].
+    pub(crate) fn place_on(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
+        if !matches!(self, Self::Cylinder { .. } | Self::Cone { .. }) {
             return Err(not_form());
         }
-        Ok(surface)
+        if !self.placement_is_square() {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's placement is not orthonormal",
+            ));
+        }
+        if !lies_on(form, &self.implicit())? {
+            return Err(SolidError::invalid_input(
+                OP_BUILD,
+                "a support's analytic kind disagrees with its NURBS form",
+            ));
+        }
+        self.on_form(k, form)
+    }
+
+    /// The placement's axes as stored: unit and square to rounding (8 ulps).
+    fn placement_is_square(&self) -> bool {
+        let p = match self {
+            Self::Plane { placement, .. }
+            | Self::Cylinder { placement, .. }
+            | Self::Cone { placement, .. }
+            | Self::Sphere { placement, .. }
+            | Self::Torus { placement, .. } => placement,
+        };
+        axes_are_orthonormal(p.x_axis(), p.y_axis())
     }
 
     /// The largest ratio, over the form's Greville points, of this support's analytic
@@ -1875,7 +1913,11 @@ fn on_axis_from(
 /// [`SolidError::Unported`] and cancellation from the recognisers.
 fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Option<Surface>> {
     let none_on_status = |r: Result<Option<Surface>>| match r {
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
         Ok(s) => Ok(s),
     };
@@ -2497,7 +2539,8 @@ impl AnalyticSupport {
 
     /// A cylinder's or cone's numbers read straight off its NURBS form's control structure
     /// (#15010): the form's circles are its rows across the generator, each a rational arc
-    /// whose endpoint tangent and chord recover its centre and radius together. A cylinder
+    /// whose chord and middle weight recover its centre and radius together (The NURBS Book,
+    /// §7.3 and §7.5: the weight is the cosine of the half sweep). A cylinder
     /// keeps that pair from the first row; averaging independently recovered radii breaks
     /// their correlated rounding on shallow arcs. The axis is a cylinder's columns' direction
     /// (its generators) through the first row's centre, or a cone's circular-row normal. The
@@ -2547,10 +2590,14 @@ impl AnalyticSupport {
         let along_v = spread(true) <= spread(false);
         let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
         // Each row's circle from its first rational quadratic arc, control points p0, p1,
-        // p2 (The NURBS Book, sections 7.3 and 7.5): the angle between its first tangent
-        // leg and chord is half the sweep, so r = |leg| cot(half sweep). Build the centre
-        // from p0 along the inward normal by r: the radius and centre then reproduce p0
-        // together, without a shallow arc's circumcentre rounding shifting it off its frame.
+        // p2 (The NURBS Book, sections 7.3 and 7.5). The angle α between the tangent leg
+        // and the chord is the half sweep. A wide span recovers the centre from that leg,
+        // which is exact for a circle of an exactly representable radius (a line at radius
+        // 5 revolved about the axis). A short span's leg is nearly parallel to the chord,
+        // and the centre built from the leg sits off the axis: 6.8×10⁻¹³ mm on the 12° rib,
+        // 1.06 times the rounding `build` allows. There the middle weight w1/√(w0 w2) is
+        // cos α, the radius is the chord over 2 sin α, and the centre lies r |cos α| from
+        // the chord's midpoint. That puts the 12° rib 2.7×10⁻¹⁴ mm off.
         let degree = form.degree(if along_v {
             crate::nurbs::b_spline_surface::SurfParamType::V
         } else {
@@ -2559,6 +2606,7 @@ impl AnalyticSupport {
         if degree != 2 || len < 3 {
             return None;
         }
+        let (_, nv_cp, cps) = form.control_points().ok()?;
         let circle = |r: usize| -> Option<(Vec3, f64, Vec3)> {
             let point = |c: usize| if along_v { at(r, c) } else { at(c, r) };
             let (p0, p1, p2) = (point(0)?, point(1)?, point(2)?);
@@ -2584,9 +2632,42 @@ impl AnalyticSupport {
             };
             let tangent = unit(leg)?;
             let across = unit(chord)?;
-            let inward = unit(normal)?.cross(tangent);
-            let radius = leg.length() * tangent.dot(across) / tangent.cross(across).length();
-            let centre = p0 + inward * radius;
+            // sin α. At about 15° and above the leg is a stable reading of the circle.
+            // Below that the chord and the weight are.
+            let sine = tangent.cross(across).length();
+            let (centre, radius) = if sine >= 0.25 {
+                let inward = unit(normal)?.cross(tangent);
+                let radius = leg.length() * tangent.dot(across) / sine;
+                (p0 + inward * radius, radius)
+            } else {
+                let plane = unit(normal)?;
+                let at_cp = |c: usize| {
+                    let (i, j) = if along_v { (r, c) } else { (c, r) };
+                    let index = i.checked_mul(nv_cp)?.checked_add(j)?;
+                    cps.get(index)
+                };
+                let weight_of = |c: &crate::nurbs::math::CPoint| if c.w == NOW { 1.0 } else { c.w };
+                let (w0, w1, w2) = (
+                    weight_of(at_cp(0)?),
+                    weight_of(at_cp(1)?),
+                    weight_of(at_cp(2)?),
+                );
+                // The end weights share a sign and the middle one is not zero. cos α is
+                // w1/√(w0 w2), negative for a span past 180° and for a row whose weights
+                // are all negated. Both are the same circle. The control triangle's normal
+                // turns over with that row, and the centre offset uses |cos α|.
+                if !(w0 * w2 > 0.0 && w1.is_finite() && w1 != 0.0) {
+                    return None;
+                }
+                let cos_half = w1 / (w0 * w2).sqrt();
+                let sin_half = ((1.0 - cos_half) * (1.0 + cos_half)).sqrt();
+                if !(sin_half.is_finite() && sin_half > 0.0) {
+                    return None;
+                }
+                let radius = chord.length() / (2.0 * sin_half);
+                let centre = p0 + chord * 0.5 + plane.cross(across) * (radius * cos_half.abs());
+                (centre, radius)
+            };
             (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
                 .then_some((centre, radius, normal))
         };
@@ -2681,7 +2762,11 @@ impl AnalyticSupport {
         let test = Surface::from(form.copy());
         let recognised = match SurfOfRevolution::is_nurb_surface_surf_of_revolution(k, &test, 1.0) {
             Ok(Some(rev)) => rev,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Ok(None) | Err(_) => return Err(not_kind()),
         };
         let surface = Self::revolution_from_rows(k, &recognised, form)?.ok_or_else(not_kind)?;

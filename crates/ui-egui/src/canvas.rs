@@ -138,10 +138,10 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
-        // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
-        // on an outside edge, into the open corner on an inside one); shell thickness grows into
-        // the body.
-        // A chamfer of two distances measures Distance 1 along its own face, not along the bisector.
+        // Fillet radii grow the way `blend_grow_dir` gives (into the body on an outside edge,
+        // into the open corner on an inside one); shell thickness grows into the body.
+        // A chamfer's distance is the setback along each of the two faces at the edge, so its
+        // arrow runs along one of those faces, where the edge the distance sets is (#13527).
         Kind::Fillet { .. } if matches!(first, Sel::Edge { .. }) => {
             let Sel::Edge { body, index, .. } = first else { return None };
             let along_face = chamfer_face_dirs(app, d, at).map(|(first_face, _)| first_face);
@@ -298,6 +298,22 @@ fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 
+/// The directions into the two faces at an edge, at `p`: square to the edge, one along each
+/// face, and into that face's own material. The faces' normals give the directions, and the
+/// triangle beside the edge says which way each one goes, so a round edge (a hole's rim) is
+/// answered as well as a straight one.
+fn edge_face_dirs(sides: &[(Vec3, Vec3)], at: Vec3) -> Option<(Vec3, Vec3)> {
+    let [(n1, c1), (n2, c2)] = sides else { return None };
+    let along = n1.cross(*n2).normalized()?;
+    // Into a face: square to the edge and in the face's plane. The triangle beside the edge
+    // says which way that face's own material lies.
+    let into = |n: Vec3, c: Vec3| {
+        let d = n.cross(along).normalized()?;
+        Some(if d.dot(c - at) >= 0.0 { d } else { -d })
+    };
+    Some((into(*n1, *c1)?, into(*n2, *c2)?))
+}
+
 /// Whether the edge is an inside (concave) one: each face near it lies in front of the other's
 /// plane, where on an outside edge it lies behind. Only the offset across the edge counts, since
 /// each normal is square to the edge.
@@ -414,25 +430,21 @@ fn chamfer_look(d: &Dialog, distance: usize) -> ArrowLook {
     chamfer_arrow_looks(chamfer_editing(d))[distance.min(1)]
 }
 
-/// The directions Distance 1 and Distance 2 of a chamfer of two distances run from its edge at
-/// `at`: along the face that faces up most, or the other one with Flip, and along the remaining
-/// face (the kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
+/// The directions Distance 1 and Distance 2 of a chamfer run from its edge at `at`: along the
+/// face that faces up most, or the other one with Flip, and along the remaining face (the
+/// kernel's `chamfer_tool_sides` picks them the same way). None for any other dialog.
 pub(crate) fn chamfer_face_dirs(app: &SolveApp, d: &Dialog, at: Vec3) -> Option<(Vec3, Vec3)> {
-    let Kind::Fillet { chamfer: true, ctype: 1, flip, .. } = &d.kind else { return None };
+    let Kind::Fillet { chamfer: true, ctype, flip, .. } = &d.kind else { return None };
     let Some(Sel::Edge { body, index, .. }) = &anchor_item(app, d) else { return None };
     let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body(body)?.mesh();
     let sides = edge_sides(&mesh, *index, at)?;
-    let [(n1, c1), (n2, c2)] = sides.as_slice() else { return None };
-    let along = n1.cross(*n2).normalized()?;
-    // From the edge into each face: the way to its centroid, square to the edge.
-    let into = |c: Vec3| {
-        let v = c - at;
-        (v - along * v.dot(along)).normalized()
-    };
-    let (t1, t2) = (into(*c1)?, into(*c2)?);
+    let [(n1, _), (n2, _)] = sides.as_slice() else { return None };
+    let (t1, t2) = edge_face_dirs(&sides, at)?;
+    // A chamfer with one distance measures it along both faces, so Flip does not move its arrow.
+    let flip = if *ctype == 0 { false } else { *flip };
     let up = Vec3::new(1e-6, 1e-3, 1.0);
-    Some(if (n2.dot(up) > n1.dot(up)) != *flip { (t2, t1) } else { (t1, t2) })
+    Some(if (n2.dot(up) > n1.dot(up)) != flip { (t2, t1) } else { (t1, t2) })
 }
 
 /// Whether a dynamically registered canvas handle owns this point before navigation.
@@ -449,6 +461,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
         || crate::place_gizmo::contains_pointer(app, p)
+        || crate::place_gizmo::frame_anchor::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
 
@@ -590,6 +603,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
     // on a marker moves the feature.
     crate::place_gizmo::show(app, ui, painter, proj);
+    // Frame Member's section and its hot points at the first line's start.
+    crate::place_gizmo::frame_anchor::show(app, ui, painter, proj);
     crate::hole_place::marks(app, painter, proj);
 }
 
@@ -918,7 +933,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let look2 = chamfer_look(d, 1);
     let mut dragged2 = false;
     let mut tip2 = None;
-    if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
+    if let (Kind::Fillet { chamfer: true, ctype: 1, distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();

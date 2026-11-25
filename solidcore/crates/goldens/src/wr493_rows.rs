@@ -426,6 +426,9 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
     let mut beyond = Vec::new();
     let mut failures = Vec::new();
     for (case, old_mass, n, old_geometry) in SPHERE_DIFF_3CYLINDERS {
+        if WR459_MOVED.contains(&case) {
+            continue;
+        }
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
         // (#20179's five classified trims taken off, proved in
         // `sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`)
@@ -499,14 +502,37 @@ fn sphere_diff_3cylinders_rows_are_their_sums() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
-    assert_eq!(beyond, BEYOND_ROUNDING.to_vec(), "{beyond:#?}");
+    let want: Vec<_> = BEYOND_ROUNDING
+        .iter()
+        .filter(|(case, _)| !WR459_MOVED.contains(case))
+        .copied()
+        .collect();
+    assert_eq!(beyond, want, "{beyond:#?}");
 }
+
+/// The [`SPHERE_DIFF_3CYLINDERS`] rows whose topology the retirement of
+/// `fillet_cleanup_keeps_target_faces` (WR-459) changes: the clean-up keeps the target's own
+/// faces, so their result geometry has more records than main's (1142 against 1044 in
+/// `e1-r0.1`) and main's blocks and mass here no longer describe the same body. They are
+/// skipped by [`sphere_diff_3cylinders_rows_are_their_sums`] (their `BEYOND_ROUNDING`
+/// entries with them) and checked in
+/// `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
+const WR459_MOVED: [&str; 4] = [
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+    "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+];
 
 /// The two `sphere_diff_3cylinders` cases whose result geometry moves beyond rounding,
 /// mirror images of each other, and the round edge (in `p1::edges` order) whose end moves
-/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]).
-const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 37);
-const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 36);
+/// (see [`sphere_diff_r05_round_end_gaps_swap_between_the_mirror_cases`]). WR-459's
+/// retirement keeps the target's own faces, which splits the round into two edges with the
+/// same start (4.000000000004889e-3) in both bodies: the moving one is now edge 41 in
+/// `e1-r0.5` (37 before) and edge 40 in `e4-r0.5` (36 before), found by that start and its
+/// two end values below; the other one (e1: 38, e4: 41) ends at the near value on both sides.
+const E1_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", 41);
+const E4_R05: (&str, usize) = ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", 40);
 
 /// The result-geometry blocks of `case` that move beyond their sums' rounding bounds: the
 /// blocks holding the moved round edge (`e1-r0.5` block 3; `e4-r0.5` blocks 2 and 3) and,
@@ -530,8 +556,8 @@ fn geometry_beyond_rounding(case: &str) -> &'static [usize] {
 /// each one round edge's interval end moves beyond rounding, between 70.64830969562033 and
 /// 70.6483087419461. At the first value the curve's end lies 2.11e-8 from its end vertex,
 /// at the second 9.85e-7. Main has the near end in `e1-r0.5` and the far end in `e4-r0.5`;
-/// this branch has them the other way round. So `e1-r0.5`'s edge 37 is FARTHER from its
-/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 36 CLOSER (2.11e-8 against
+/// this branch has them the other way round. So `e1-r0.5`'s edge 41 (37 before WR-459) is FARTHER from its
+/// vertex (9.85e-7 against 2.11e-8) and `e4-r0.5`'s edge 40 (36) CLOSER (2.11e-8 against
 /// 9.85e-7). Every gap is inside the edge's tolerance (4e-5) and the end vertex's
 /// (asserted on both sides). The gaps are evaluated in floating point, good to
 /// about 1e-13 here (argued from the curve's size, not derived), so each ranking holds with
@@ -700,9 +726,10 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 ///   309.8221903199704, 1.2e-5 (both CLOSER, by a margin far beyond the closed form's
 ///   rounding);
 /// - `Solids__revolution_mold.smb`: its committed line stays main's (the run agrees with
-///   it to the goldens' `1e-9`); the values the run gives are pinned here, and its moved
-///   entries are classified against certified enclosures in
-///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
+///   it to the goldens' `1e-9`); the values the run gives with the WR-450 retirement's
+///   seams at main's choices are pinned here (that retirement moves the row below the
+///   comparator as well: `wr450_rows::BELOW_COMPARATOR`), and its moved entries are
+///   classified against certified enclosures in `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
 ///   is 25, as main's committed row (unmoved); the sphere face's row,
 ///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is in the face
@@ -752,7 +779,12 @@ fn corpus_parity_rows_are_closer() {
     let same = |a: f64, b: f64| a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan());
     let mut moved = Vec::new();
     for (case, area, volume) in rows {
-        let out = run_in_process(&regression_case(&Runner, case)).unwrap();
+        // (`revolution_mold`, which the WR-450 retirement moves below the comparator too,
+        // with main's choices at its seams: the WR-493 values alone)
+        let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), case, || {
+            run_in_process(&regression_case(&Runner, case))
+        })
+        .unwrap();
         for (key, row) in [
             ("area", area),
             ("rt_area", area),
@@ -816,9 +848,17 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
         [96.1129828979684, 154.29581589814254, 11030.81247736941],
     ];
     let runner = blend_fillet_executive_p3::Runner;
-    let now = run(&runner, CASE).values["result_geometry"].clone();
-    let (main, replaced) =
-        crate::refit::with_fitted_spheres(|| run(&runner, CASE).values["result_geometry"].clone());
+    // (the WR-450 retirement moves this row too: every run here has main's choices at its
+    // seams, so this is the WR-493 move alone; `wr450_rows` replays the WR-450 move)
+    let unit = runner.id();
+    let now = crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+        ["result_geometry"]
+        .clone();
+    let (main, replaced) = crate::refit::with_fitted_spheres(|| {
+        crate::wr450_rows::with_mains_choices_for(unit, CASE, || run(&runner, CASE)).values
+            ["result_geometry"]
+            .clone()
+    });
     assert!(replaced > 0, "{CASE}: no sphere refit");
     let blocks: Vec<[f64; 3]> = main
         .chunks(BLOCK)
@@ -835,7 +875,9 @@ fn box_w_slot_geometry_moves_only_on_the_found_spheres() {
     assert_eq!(blocks, MAIN, "{CASE}: the refit build is not main's");
 
     let mut k = solidcore::Kernel::default();
-    let body = blend_fillet_executive_p3::result_body_of(&mut k, CASE);
+    let body = crate::wr450_rows::with_mains_choices_for(unit, CASE, || {
+        blend_fillet_executive_p3::result_body_of(&mut k, CASE)
+    });
     let (vertices, edges, faces) = (
         p1::vertices(&body, None).unwrap(),
         p1::edges(&body, None).unwrap(),
@@ -1089,7 +1131,11 @@ fn wr493_moved_bodies_pass_level_2() {
 /// the cone face [`CLASSIFIED_TRIM_FACE`] (it has loop uses; main's cache, built in editing
 /// mode, stored point testing off), the face classification makes the face's missing trims
 /// (`CreateUVTrimCurves`) on the read (`tolsub::state::CLASSIFIED_READ_TRIMS`, the same
-/// edge uses), and the fillet keeps them.
+/// edge uses), and the fillet keeps them. Since WR-732's retirement (#18934) the read's
+/// B-rep ray builds the face's tree against its current trims while the body is edited,
+/// so the implant makes the same five trims first (edge 20's control points differ from the
+/// classification's by up to 2.7e-9 in UV, measured; the mass integrated over them moves,
+/// and the sums test pins it).
 pub(crate) const CLASSIFIED_TRIM_ROWS: [&str; 6] = [
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
     "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
@@ -1112,8 +1158,10 @@ const TRIM_COUNT: usize = 17;
 /// [`CLASSIFIED_TRIM_ROWS`] row of `blend.fillet_executive_p3` (any other row is left as
 /// is): the row the result body records without the trims the classification made
 /// ([`sphere_diff_3cylinders_rows_move_only_by_the_classified_trims`] proves it entry for
-/// entry). The replays that hold these rows to main's (`refit::replay`, `tolsub::replay`)
-/// hash it.
+/// entry). The sums test ([`sphere_diff_3cylinders_rows_are_their_sums`]) compares it with
+/// main's committed blocks. (The replays that hold these rows to main's, `refit::replay` and
+/// `tolsub::replay`, run them on main's read instead, `tolsub::state::strip_classified_trims`,
+/// which gives main's row to the bit.)
 pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crate::output::Output) {
     if unit != "blend.fillet_executive_p3" || !CLASSIFIED_TRIM_ROWS.contains(&case) {
         return;
@@ -1137,20 +1185,25 @@ pub(crate) fn without_classified_trims(unit: &str, case: &str, output: &mut crat
 ///   its use on the face;
 /// * with those five trims taken off, the body's record is the run's with exactly those
 ///   five trim counts lowered from 2 to 1 ([`without_classified_trims`]) and nothing else
-///   changed, bit for bit; that row hashes to main's row (`refit::replay`'s and
-///   `tolsub::replay`'s put-back runs) and digests to main's committed blocks within
-///   rounding ([`sphere_diff_3cylinders_rows_are_their_sums`]);
-/// * one face classification (`point_classify` at the face's middle) makes the five again,
-///   bit for bit the same, and the record is the run's again: they are what the
-///   classification makes, not another change;
+///   changed, bit for bit; that row's result geometry digests to main's committed blocks
+///   within rounding ([`sphere_diff_3cylinders_rows_are_their_sums`]), and the row run on
+///   main's read is main's row to the bit (`refit::replay`'s and `tolsub::replay`'s
+///   put-back runs);
+/// * the five are bit for bit the trims the file's read holds on the same edge uses, so the
+///   fillet keeps them as the read makes them; and with them taken off the read, one B-rep
+///   ray classification while it is edited makes them again, bit for bit (since WR-732's
+///   retirement, #18934, the ray builds the cone face's tree against its current trims, and
+///   the implant makes them): they are what the implant makes, not another change;
 /// * each trim's same-parameter gap to its edge is certified (`curve_uv_gap_bound`,
 ///   interval Taylor models, every rounding included) within the edge's tolerance.
 ///
-/// The mass properties do not move (the sums test holds them to main's).
+/// The mass properties move with the trims' bits since #18934 (entry 0 by up to 1.7e-10 of
+/// the area); the sums test pins the entries beyond its rounding bands, and
+/// `tests/wr493_moved_rows_are_classified` classifies them EQUAL against a certified
+/// enclosure.
 #[test]
 fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
     use solidcore::curve::curve::CurveKind;
-    use solidcore::geom::vector2d::Point2;
     use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::p1;
@@ -1165,6 +1218,49 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
         let mut enc = Vec::new();
         crate::util::trim_curve::put_trim_curve(k, &mut enc, Some(c)).unwrap();
         enc.iter().map(|x| x.to_bits()).collect::<Vec<u64>>()
+    };
+    // the file's read, as the runner reads it
+    let read = {
+        let path = crate::case::repo_root()
+            .join(crate::fixtures::UPSTREAM_TEST_FILES)
+            .join("Fillet/sphere_diff_3cylinders.smb");
+        let mut k = crate::runner_kernel();
+        crate::own_reader::read_file(&mut k, path.to_str().unwrap())
+            .unwrap()
+            .unwrap()
+    };
+    // the read with its five classified trims taken off, and one B-rep ray classification
+    // while it is edited: the ray builds the cone face's tree against its current trims,
+    // and the implant makes the five (from 20 off the read's box middle along y, whose rays
+    // cross the cone face; from the middle itself they do not reach it)
+    let remade = {
+        use solidcore::query::brep::BrepQuery;
+        let k = crate::runner_kernel();
+        // (the box on a copy of the read: building it leaves caches on the B-rep it measures)
+        let mid = {
+            let mut c = read.clone_standing_for_self().unwrap();
+            solidcore::query::brep::calculate_tight_bounding_box(&k, &mut c)
+                .unwrap()
+                .mid()
+        };
+        let mut b = read.clone_standing_for_self().unwrap();
+        let ids: Vec<_> = b
+            .edgeuses()
+            .iter()
+            .filter(|(id, _)| crate::tolsub::state::CLASSIFIED_READ_TRIMS.contains(&id.index()))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(ids.len(), 5, "the read's classified edge uses");
+        for id in ids {
+            assert!(b.edgeuse_mut(id).unwrap().uv_trim_curve.take().is_some());
+        }
+        let p = solidcore::math::Point3::new(mid.x, mid.y + 20.0, mid.z);
+        b.set_editing_enabled(true);
+        BrepQuery::of_brep(&b)
+            .point_3d_classify(&k, &mut b, p, 1e-6, false)
+            .unwrap();
+        b.set_editing_enabled(false);
+        b
     };
     for case in CLASSIFIED_TRIM_ROWS {
         let mut output = run(&blend_fillet_executive_p3::Runner, case);
@@ -1261,29 +1357,19 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
             crate::tolsub::state::CLASSIFIED_READ_TRIMS,
             "{case}: not the read's classified trims"
         );
-        // one classification on the face makes them again, bit for bit
-        let d = body.face(f).unwrap().uv_domain;
-        let uv = Point2::new(0.5 * (d.min().x + d.max().x), 0.5 * (d.min().y + d.max().y));
-        let mut pc = solidcore::intersect::point_class::PointClassification::new(0.0);
-        solidcore::query::face::p2::point_classify(
-            &k,
-            &mut body,
-            f,
-            uv,
-            &mut pc,
-            solidcore::query::face::p2::PointClassifyOptions::default(),
-        )
-        .unwrap();
+        // the five are the read's own trims, bit for bit: the fillet keeps them as the read
+        // of the file makes them (`read`), and the ray's implant makes them (`remade`)
         for (i, eu, bits) in &taken {
-            let again = body.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
-            let again = again.unwrap_or_else(|| panic!("{case}: edge {i}: not made again"));
-            assert_eq!(&encoding(&k, again), bits, "{case}: edge {i}: another trim");
+            for (what, b) in [("the read", &read), ("the ray's implant", &remade)] {
+                let made = b.edgeuse(*eu).unwrap().uv_trim_curve.as_ref();
+                let made = made.unwrap_or_else(|| panic!("{case}: edge {i}: not on {what}"));
+                assert_eq!(
+                    &encoding(&k, made),
+                    bits,
+                    "{case}: edge {i}: another trim on {what}"
+                );
+            }
         }
-        assert_eq!(
-            record(&k, &body),
-            now,
-            "{case}: the record after the classification"
-        );
     }
 }
 
@@ -1293,10 +1379,12 @@ fn sphere_diff_3cylinders_rows_move_only_by_the_classified_trims() {
 /// integrated over those trims (with main's read put back the row is main's to the bit,
 /// `tolsub::replay::classified_read_rows_are_mains_without_the_trims`): it moves by 1.3e-9 of
 /// itself (`area` 38235.9926466384 to 38235.99269705083, `rt_area` 38235.99654566674 to
-/// 38235.996596079174). The record asks the area to `ACCURACY` (`1e-6`) relative. A
-/// certified enclosure of the read's total face area (`enclose_face_area_relative`, every
-/// rounding included, asked `1e-8` wide) holds main's and this branch's values, both sides,
-/// each within that accuracy of it: the move is a re-integration within the requested
+/// 38235.996596079174). The record asks the area to `ACCURACY` (`1e-6`) relative. Since
+/// WR-732's retirement (#18934) the read makes the five trims by implanting the face's
+/// current trims while it is edited, and the area is main's value before #20179 to the
+/// bit again (asserted). A certified enclosure of the read's total face area
+/// (`enclose_face_area_relative`, every rounding included, asked `1e-8` wide) holds both
+/// values, each within that accuracy of it: either is a re-integration within the requested
 /// accuracy, not a change of the body.
 #[test]
 fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
@@ -1304,14 +1392,15 @@ fn sphere_diff_3cylinders_corpus_area_is_within_its_accuracy() {
     use solidcore::mass::enclosure::enclose_face_area_relative;
     use solidcore::topology::brep::p1;
     const CASE: &str = "Fillet__sphere_diff_3cylinders.smb";
-    // (key, main's committed value, this branch's)
+    // (key, main's committed value before #20179, its value with #20179's trims; since
+    // #18934 the read's trims are the implant's, and the area is the first value again)
     const VALUES: [(&str, f64, f64); 2] = [
         ("area", 38_235.992_646_638_4, 38_235.992_697_050_83),
         ("rt_area", 38_235.996_545_666_74, 38_235.996_596_079_174),
     ];
     let out = run_in_process(&regression_case(&Runner, CASE)).unwrap();
-    for (key, _, now) in VALUES {
-        assert_eq!(out.values[key], [now], "{CASE}: {key}");
+    for (key, main, _) in VALUES {
+        assert_eq!(out.values[key], [main], "{CASE}: {key}");
     }
     let path = crate::case::repo_root()
         .join(crate::fixtures::UPSTREAM_TEST_FILES)

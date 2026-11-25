@@ -43,6 +43,12 @@ pub struct Limits {
     pub cancelled: Option<fn() -> bool>,
 }
 
+impl Limits {
+    fn exceeds_expanded(&self, name: &str, size: u64, total: u64) -> bool {
+        size > (self.part_limit)(name) as u64 || total > (self.max_expanded)() as u64
+    }
+}
+
 fn invalid(message: impl std::fmt::Display) -> FormatError {
     FormatError::Invalid(message.to_string())
 }
@@ -106,13 +112,28 @@ pub struct Writer {
     expanded: usize,
     resolved: usize,
     limits: Limits,
+    open_expanded_limit: fn() -> usize,
     /// Which written parts to record for a signature, and the records so far.
     tracked: Option<(fn(&str) -> bool, Vec<PartDigest>)>,
 }
 
 impl Writer {
     pub fn new(limits: Limits) -> Writer {
-        Writer { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0, limits, tracked: None }
+        Writer {
+            zip: zip::ZipWriter::new(Cursor::new(Vec::new())),
+            names: BTreeSet::new(),
+            expanded: 0,
+            resolved: 0,
+            open_expanded_limit: limits.max_expanded,
+            limits,
+            tracked: None,
+        }
+    }
+
+    /// Save required data even when reopening it will need a higher size limit.
+    /// Optional parts still share the reader's expanded budget through `space` and `room`.
+    pub fn for_save(save_limits: Limits, open_expanded_limit: fn() -> usize) -> Writer {
+        Writer { open_expanded_limit, ..Self::new(save_limits) }
     }
 
     /// Record the parts written from now on whose name `include` accepts, with their SHA-256, for
@@ -188,12 +209,30 @@ impl Writer {
         // The bytes written so far, plus what the open compressed part may still hold back.
         let written = self.zip.get_ref().map_or(usize::MAX, |c| c.get_ref().len()).saturating_add(1 << 20);
         let directory = self.names.len().saturating_add(entries).saturating_mul(256).saturating_add(65_536);
-        budget.saturating_sub(written.saturating_add(directory)).min((self.limits.max_expanded)().saturating_sub(self.expanded))
+        budget.saturating_sub(written.saturating_add(directory)).min((self.open_expanded_limit)().saturating_sub(self.expanded))
     }
 
     /// Add a payload as a blob, `blobs/<sha256>.<extension>`, and say its name, for the JSON that
     /// refers to it.
     pub fn blob(&mut self, bytes: &[u8], extension: &str, compressed: bool) -> Result<Value, FormatError> {
+        self.blob_reusing::<Cursor<&[u8]>>(bytes, extension, compressed, None)
+    }
+
+    /// [`Writer::blob`], copying the part from `reuse` (the container being saved over) exactly as
+    /// it is stored there, its deflated bytes and all, when that holds this content stored the
+    /// way this writer stores it, instead of encoding it again. A part is only copied when it
+    /// holds `bytes`: its entry's name (the content's SHA-256), length, CRC-32 and compression
+    /// match, it is not encrypted, and its stored bytes inflate to exactly `bytes`. So a container
+    /// that changed on disk since it was read, or whose part is damaged or does not hold what its
+    /// name says, is never copied from: that content is encoded instead. Inflating to check costs a
+    /// fraction of deflating again.
+    pub fn blob_reusing<R: Read + Seek>(
+        &mut self,
+        bytes: &[u8],
+        extension: &str,
+        compressed: bool,
+        reuse: Option<&mut Reader<R>>,
+    ) -> Result<Value, FormatError> {
         self.resolved = self
             .resolved
             .checked_add(bytes.len())
@@ -201,8 +240,77 @@ impl Writer {
             .ok_or_else(|| invalid("resolved payloads too large"))?;
         let digest = sha256(bytes);
         let name = format!("blobs/{}.{extension}", hex(&digest));
+        if let Some(reader) = reuse
+            && self.copy_part(reader, &name, bytes, compressed, digest)?
+        {
+            return Ok(Value::String(name));
+        }
         self.part_with_digest(&name, bytes, compressed, Some(digest))?;
         Ok(Value::String(name))
+    }
+
+    /// Copy `name` from `reader` as it is stored there when its entry holds `bytes` stored as
+    /// [`Writer::part_with_digest`] would store them (see [`Writer::blob_reusing`]); `false` when
+    /// it does not, and nothing is written.
+    fn copy_part<R: Read + Seek>(
+        &mut self,
+        reader: &mut Reader<R>,
+        name: &str,
+        bytes: &[u8],
+        compressed: bool,
+        digest: [u8; 32],
+    ) -> Result<bool, FormatError> {
+        if bytes.len() > (self.limits.part_limit)(name) {
+            return Err(invalid("part too large"));
+        }
+        if self.names.contains(name) {
+            return Ok(true);
+        }
+        let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
+        let crc = crc32fast::hash(bytes);
+        {
+            let Ok(mut file) = reader.zip.by_name(name) else { return Ok(false) };
+            if file.encrypted() || file.compression() != method || file.size() != bytes.len() as u64 || file.crc32() != crc {
+                return Ok(false);
+            }
+            if !holds(&mut file, bytes, self.limits.cancelled)? {
+                return Ok(false);
+            }
+        }
+        let Ok(file) = reader.zip.by_name(name) else { return Ok(false) };
+        self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
+        if self.expanded > (self.limits.max_expanded)() || self.names.len() >= self.limits.max_entries {
+            return Err(invalid("package too large"));
+        }
+        if let Some((include, parts)) = &mut self.tracked
+            && include(name)
+        {
+            parts.push(PartDigest { name: name.to_owned(), len: bytes.len() as u64, digest });
+        }
+        self.names.insert(name.to_owned());
+        self.zip.raw_copy_file(file).map_err(invalid)?;
+        Ok(true)
+    }
+}
+
+/// Whether `part` reads back as exactly `bytes`, to its end, which is where its CRC-32 is checked:
+/// a read error or a difference is `false`. Stops on cancel a piece at a time.
+fn holds(part: &mut impl Read, bytes: &[u8], cancelled: Option<fn() -> bool>) -> Result<bool, FormatError> {
+    let mut piece = vec![0u8; 1 << 20];
+    let mut at = 0;
+    loop {
+        if cancelled.is_some_and(|cancelled| cancelled()) {
+            return Err(FormatError::Cancelled);
+        }
+        let Ok(n) = part.read(&mut piece) else { return Ok(false) };
+        if n == 0 {
+            return Ok(at == bytes.len());
+        }
+        let (Some(read), Some(expected)) = (piece.get(..n), bytes.get(at..at + n)) else { return Ok(false) };
+        if read != expected {
+            return Ok(false);
+        }
+        at += n;
     }
 }
 
@@ -214,11 +322,19 @@ pub struct Reader<R: Read + Seek> {
     /// The bytes of payloads resolved so far, repeats counted: bounded by the expanded budget.
     pub hydrated: usize,
     document: Option<Arc<[u8]>>,
+    /// Whether an entry or the total exceeds the optional opening budgets supplied at construction.
+    pub exceeds_expanded_open_limit: bool,
     limits: Limits,
 }
 
 impl<R: Read + Seek> Reader<R> {
-    pub fn new(mut source: R, limits: Limits) -> Result<Self, FormatError> {
+    pub fn new(source: R, limits: Limits) -> Result<Self, FormatError> {
+        Self::with_open_limits(source, limits, None)
+    }
+
+    /// Enforce `limits`. When inspecting a save, also record whether its expanded contents exceed
+    /// the limits for opening a file. Both checks use the same directory entries.
+    pub fn with_open_limits(mut source: R, limits: Limits, open_limits: Option<Limits>) -> Result<Self, FormatError> {
         let length = source.seek(SeekFrom::End(0)).map_err(invalid)?;
         (limits.check_size)(length).map_err(invalid)?;
         let tail_length = length.min(65_557) as usize;
@@ -258,6 +374,7 @@ impl<R: Read + Seek> Reader<R> {
         }
         let mut names = BTreeSet::new();
         let mut total = 0u64;
+        let mut exceeds_expanded_open_limit = false;
         for i in 0..zip.len() {
             let part = zip.by_index_raw(i).map_err(invalid)?;
             let name = part.name().map_err(invalid)?.into_owned();
@@ -269,12 +386,12 @@ impl<R: Read + Seek> Reader<R> {
                 return Err(invalid("duplicate or invalid archive entry"));
             }
             total = total.checked_add(part.size()).ok_or_else(|| invalid("expanded size overflow"))?;
-            let limit = (limits.part_limit)(&name);
-            if part.size() > limit as u64 || total > (limits.max_expanded)() as u64 {
+            if limits.exceeds_expanded(&name, part.size(), total) {
                 return Err(invalid("expanded package too large"));
             }
+            exceeds_expanded_open_limit |= open_limits.is_some_and(|open| open.exceeds_expanded(&name, part.size(), total));
         }
-        Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None, limits })
+        Ok(Self { zip, blobs: BTreeMap::new(), hydrated: 0, document: None, exceeds_expanded_open_limit, limits })
     }
 
     /// The file's own part, `document.json`, read once and kept: provisional caches and the

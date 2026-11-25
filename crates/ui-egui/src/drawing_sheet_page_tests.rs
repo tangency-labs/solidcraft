@@ -6,6 +6,14 @@ use solidcraft_engine::{Sel, geom::Loop2Geom};
 use super::*;
 use crate::scenario::Harness;
 
+/// One frame of `ctx` outside the harness. Its texture changes (glyphs, sheet pictures) have no
+/// renderer here, so they are taken as applied: egui checks that none are dropped unhandled.
+fn frame_on(ctx: &egui::Context, input: egui::RawInput, ui: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+    let mut out = ctx.run_ui(input, ui);
+    out.textures_delta.clear();
+    out
+}
+
 #[test]
 fn cell_fit_keeps_paper_inside_tiny_and_odd_cells_and_preserves_manual_framing() {
     let paper = Vec2::new(420.0, 297.0);
@@ -60,7 +68,7 @@ fn sheet_page_cameras_are_independent_and_passive_paint_restores_the_command_rec
     let doc = h.app.session.doc.clone();
     let undo = h.app.session.undo.len();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
         for id in [first, second] {
             ui.push_id(id, |ui| {
                 crate::documents::with_view_look(&mut h.app, id, |app| {
@@ -136,7 +144,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
     let ctx = h.ctx.clone();
     let canvas = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0));
     let mut frame = |time, events| {
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
         });
         assert_eq!(h.app.session.selection, selection, "a passive drawing cannot prune the focused drawing's pick");
@@ -153,7 +161,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
             phase: egui::TouchPhase::Move,
         },
     ];
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
         ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
     });
     assert_ne!(h.app.drawing_workspace.pages.get(&second).unwrap().scale, before, "the passive wheel actually runs camera navigation");
@@ -269,7 +277,8 @@ fn inactive_child_sheet_scope_restores_picks_focus_and_history_but_targeted_comm
     let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.session.history_part());
     let focus = h.app.session.view_context.clone();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(
+    let _ = frame_on(
+        &ctx,
         egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), focused: false, ..Default::default() },
         |ui| {
             crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
@@ -805,6 +814,42 @@ fn double_click_edits_a_title_block_cells_text_in_place() {
     assert!(!crate::dim_view::editing(), "the projection symbol has no text");
 }
 
+/// ISO 7200's cells (#20121) are edited where the others are: a double-click on each of the six opens
+/// the box, and Enter types the text over the cell, which shows it on the sheet.
+#[test]
+fn double_click_edits_each_iso_7200_cell_in_place() {
+    let (mut h, _) = plate_sheet();
+    for (name, text) in [
+        ("scale", "NTS"),
+        ("document_type", "Fabrication drawing"),
+        ("document_status", "Released"),
+        ("language", "DE"),
+        ("revision", "C"),
+        ("department", "Sheet metal"),
+    ] {
+        let at = {
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+            let record = &drawing.sheets[0];
+            let (block, placed) = (record.title_block.as_ref().unwrap(), record.title_block_layout().unwrap().unwrap());
+            let i = block.cells.iter().position(|cell| cell.name == name).unwrap();
+            let rect = placed.cells[i].rect;
+            let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+            let (x, y) = ((rect.min.x + rect.max.x) / 2.0, (rect.min.y + rect.max.y) / 2.0);
+            [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+        };
+        h.step(&json!({"click": at, "double": true})).unwrap();
+        h.frames(4);
+        assert!(crate::dim_view::editing(), "the double-click opens the box on the {name} cell");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": text})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+        assert!(!crate::dim_view::editing());
+        let typed = h.app.session.drawing("drawing.inspect").unwrap().sheets[0].title_block_overrides.get(name).cloned();
+        assert_eq!(typed.as_deref(), Some(text), "{name}");
+    }
+}
+
 /// A view just placed says so before its lines arrive: it is listed as waiting and shows its box
 /// with Projecting…, and that goes once it is drawn. Placing the standard views and drawing them
 /// evaluates the model no more times than it was evaluated before.
@@ -1047,6 +1092,36 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     let read = added_dimension(&mut h, &before);
     assert!(read["record"]["kind"]["radial"].is_object(), "{read}");
     assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// #21034: the curve where two corner fillets meet is neither a line nor a face-on circle, and the
+/// engine measures neither a length nor a size for it. The tool says so and picks nothing, rather
+/// than sending a length the engine refuses. A 30×20×10 box, 1:1 front view centred at (140, 180):
+/// the curve's point (0.586, 0.586, 9.414) is on paper at (125.586, 184.414).
+#[test]
+fn dimension_tool_refuses_a_curve_it_cannot_dimension_with_a_reason() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[15, 0, 10], [0, 10, 10]], "radius": 2, "tangent_chain": false})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [125.586, 184.414], "band_mm": 0.3})).unwrap();
+    assert_eq!(line["line"]["source"]["kind"], "edge", "{line}");
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 125.586, 184.414);
+    use crate::drawing_workspace::dimension::picked_shapes;
+    assert!(picked_shapes(&h.app).is_empty(), "{:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("can't be dimensioned"), "{status}");
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
 }
 
 /// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
@@ -1885,7 +1960,7 @@ fn panning_a_tiny_fitted_sheet_keeps_its_zoom_on_the_next_frame() {
     let mut time = 0.0;
     let mut frame = |app: &mut crate::SolveApp, events| {
         time += 1.0 / 60.0;
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             assert!(show_view(app, ui, id));
         });
     };
@@ -2208,7 +2283,7 @@ fn picture_scene(source: u64, rect: Aabb2, opacity: f64, clip: Option<Clip>) -> 
 fn painted(ctx: &egui::Context, marks: &Marks, pictures: &PictureTextures) -> Vec<egui::epaint::ClippedShape> {
     let at = OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 10.0 };
     let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
-    ctx.run_ui(egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
+    frame_on(ctx, egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
 }
 
 /// Each text shape's words in `shapes`.
@@ -2392,7 +2467,7 @@ fn fills_and_pictures_paint_in_the_scenes_order() {
 fn picture_upload_timing() {
     let ctx = egui::Context::default();
     // A desktop GPU's largest side, so the 16 Mpx picture is one texture, as `sync` is told.
-    let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
+    let _ = frame_on(&ctx, egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
     for (w, h) in [(4096u32, 4096u32), (1181, 945)] {
         let p = hand_picture(1, w, h, true, None);
         let start = std::time::Instant::now();
@@ -2417,6 +2492,7 @@ fn picture_upload_timing() {
             }
             println!("  meshes, clip {clip:?}: {:.2} us a frame", start.elapsed().as_secs_f64() * 1e4);
         }
+        let _ = frame_on(&ctx, egui::RawInput::default(), |_| {});
     }
 }
 
@@ -2555,11 +2631,7 @@ fn a_drags_preview_leaves_a_details_callout_where_it_is() {
     let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
     // The preview's camera: the view 30 mm to the right, as the drag's offset shifts the paper.
     let shifted = OnScreen { centre: Pos2::ZERO, target: Vec2::new(-30.0, 0.0), scale: 10.0 };
-    let run = |paint: &dyn Fn(&egui::Painter)| {
-        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| paint(ui.painter()));
-        out.textures_delta.clear();
-        out.shapes
-    };
+    let run = |paint: &dyn Fn(&egui::Painter)| frame_on(&ctx, egui::RawInput::default(), |ui| paint(ui.painter())).shapes;
     let moving = run(&|painter| marks.paint_moving(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
     let drawn = paths(&moving);
     assert_eq!(drawn.len(), 1, "only the view's own line moves, not the callout: {drawn:?}");
