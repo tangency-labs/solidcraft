@@ -1,1 +1,0 @@
-names the faces holding points by the display mesh

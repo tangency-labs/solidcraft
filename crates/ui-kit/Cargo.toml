@@ -14,6 +14,8 @@ workspace = true
 test-support = ["dep:image"]
 
 [dependencies]
+# The same palette-role SVG parser used by plugin validation.
+solidcraft-icon-svg = { workspace = true }
 # The token contract every control draws with.
 solidcraft-theme = { workspace = true }
 # The widget registry (handles, rects, counts) every control publishes into.

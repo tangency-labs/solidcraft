@@ -237,6 +237,33 @@ fn notched_block(depth: f64, tols: Tols) -> Record {
     polyhedron(&corners, &cycles, tols)
 }
 
+/// A U 50 mm wide and 20 high, 50 deep (z = 0 to 50): two prongs 5 wide (x = 0 to 5 and 45
+/// to 50) standing on a base `base` thick, so the U's floor lies at y = `base` from x = 5 to 45.
+fn thin_based_u(base: f64, tols: Tols) -> Record {
+    let outline = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0, 20.0],
+        [45.0, 20.0],
+        [45.0, base],
+        [5.0, base],
+        [5.0, 20.0],
+        [0.0, 20.0],
+    ];
+    // the outline at z = 0 (corners 0 to 7) and at z = 50 (8 to 15)
+    let corners: Vec<[f64; 3]> = [0.0, 50.0]
+        .iter()
+        .flat_map(|&z| outline.iter().map(move |&[x, y]| [x, y, z]))
+        .collect();
+    let walls: Vec<[usize; 4]> = (0..8)
+        .map(|i| [i, (i + 1) % 8, (i + 1) % 8 + 8, i + 8])
+        .collect();
+    let mut cycles: Vec<&[usize]> =
+        vec![&[0, 7, 6, 5, 4, 3, 2, 1], &[8, 9, 10, 11, 12, 13, 14, 15]];
+    cycles.extend(walls.iter().map(|w| &w[..]));
+    polyhedron(&corners, &cycles, tols)
+}
+
 /// [`hair_step_box`] whose step ends at the right face in a 45° triangular cap: the corner where
 /// the riser, the back half of the top and the right face would meet is cut by a triangle whose
 /// three sides, `step / 2` long or less, are all shorter than their tolerance, and whose area is
@@ -706,6 +733,54 @@ fn a_block_notched_twice_the_tolerance_deep_is_valid() {
                 "{case}: {notch} vs {want}"
             );
         }
+    }
+}
+
+/// #17689: a U held to 1e-7 (a STEP file's uncertainty) whose base is 1.17e-6 thick, far past
+/// its tolerance, is valid. On the U's two end faces the floor edge lies 1.17e-6 inside the
+/// side of the face's domain that the base's outer edge runs along, and runs along it the
+/// other way. The side test read it within the contact tolerance (1e-5), so on that side and
+/// running the wrong way, and the check refused the body (Loop test 2, once on each end face),
+/// while the surface's own tolerance holds the two places apart. The thickest base here is the
+/// contact tolerance itself; the thinnest is the reporter's. The body is taken as SolidCraft
+/// takes an imported one, trusted, so the check sees it as built. With its edges held to the
+/// contact tolerance, the floor edge lies on the side within its own tolerance, and the body
+/// is refused as before.
+#[test]
+fn a_u_whose_base_is_well_past_a_tight_tolerance_thick_is_valid() {
+    let tols = Tols {
+        body: 1e-7,
+        edge: 1e-7,
+        vertex: 1e-7,
+    };
+    for base in [1.17e-6, 2e-6, 1e-5] {
+        let case = format!("base {base:e}");
+        let (body, _) = Body::from_record(&thin_based_u(base, tols), true)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert_eq!(failed(&body), [0_u32; 0], "{case}");
+        // the U's two end faces and its eight sides
+        assert_eq!(body.counts().unwrap(), [10, 24, 16], "{case}");
+        let want = 50.0 * 20.0 * 50.0 - 40.0 * (20.0 - base) * 50.0;
+        let volume = body.volume(1e-9).unwrap();
+        assert!(
+            (volume - want).abs() <= 1e-9 * want,
+            "{case}: {volume} vs {want}"
+        );
+    }
+    // edges held to 1e-5 may lie on the side: the floor edge, within its own tolerance of it
+    // and running the wrong way, still fails Loop test 2 on each end face, and within that
+    // tolerance it coincides with the base's outer edge (Face test 34, which the side band
+    // does not reach)
+    let loose_edges = Tols {
+        body: 1e-7,
+        edge: 1e-5,
+        vertex: 1e-5,
+    };
+    for base in [1.17e-6, 2e-6] {
+        let case = format!("edges at 1e-5, base {base:e}");
+        let (body, _) = Body::from_record(&thin_based_u(base, loose_edges), true)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert_eq!(failed(&body), [2, 2, 34, 34], "{case}");
     }
 }
 
