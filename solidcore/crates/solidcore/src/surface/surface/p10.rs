@@ -685,6 +685,33 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 t_guess,
             )?
             else {
+                // Not upstream. The first guess is the line point dropped to the tangent
+                // plane at the middle of the leaf, which can land well short of a root far
+                // from there (0.036 in u at the end of a span of the radius-5 cylinder's
+                // rational circle, #21621). Off the root sideways, a curved surface lies off
+                // the line by about the square of that over twice its radius, and a line
+                // crossing the surface at a shallow slope only gets there by moving that
+                // over the slope along itself, beyond the leaf's interval: the clamped solve
+                // failed and the crossing was missed. Dropped again from where it landed,
+                // the guess is near enough the root for the solve.
+                if index == 0 && uv_guesses.len() < MAX_GUESSES {
+                    let point = self.line_point + t_guess * self.line_vector;
+                    let again = super::p7::drop_points_to_tangent_plane(
+                        k,
+                        leaf.eval,
+                        uv_guess,
+                        Side::Left,
+                        Side::Left,
+                        &[point],
+                    )?;
+                    if let Some(&again) = again.first() {
+                        let again = leaf.domain.clamp_point(again);
+                        if again.distance(uv_guess) > uv_eps {
+                            uv_guesses.push(again);
+                            t_guesses.push(t_guess);
+                        }
+                    }
+                }
                 continue;
             };
 
