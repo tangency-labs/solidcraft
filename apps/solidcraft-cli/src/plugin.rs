@@ -135,6 +135,8 @@ struct CaseGrants {
     input_folder: bool,
     #[serde(default)]
     memory_mib: Option<usize>,
+    #[serde(default)]
+    fuel: Option<u64>,
 }
 
 /// A folder the plugin may read or write: a fresh, empty one, or a copy of `from` in the tests
@@ -339,7 +341,7 @@ fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, Strin
         }
     }
     files.sort();
-    Ok(files
+    let read: Vec<(String, Result<Case, String>)> = files
         .into_iter()
         .map(|file| {
             let name = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -348,7 +350,21 @@ fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, Strin
                 .and_then(|bytes| serde_json::from_slice::<Case>(&bytes).map_err(|e| format!("tests/{name}.json: {e}")));
             (name, case)
         })
-        .collect())
+        .collect();
+    // A design or file a case runs on lives in the tests folder too: a JSON design there is that
+    // case's input, not a case of its own.
+    let inputs: Vec<String> = read
+        .iter()
+        .filter_map(|(_, case)| case.as_ref().ok())
+        .flat_map(|case| [case.design.as_deref(), case.file.as_deref()])
+        .flatten()
+        .map(|input| input.trim_start_matches("./").to_owned())
+        .collect();
+    let is_input = |name: &str| {
+        let file = format!("{name}.json");
+        inputs.iter().any(|input| if cfg!(windows) { input.eq_ignore_ascii_case(&file) } else { *input == file })
+    };
+    Ok(read.into_iter().filter(|(name, _)| !is_input(name)).collect())
 }
 
 /// The parameters a command's or exporter's dialog would start with: each field's default. `None`
@@ -394,6 +410,7 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         command_groups: runtime.permissions.command_groups.clone(),
         folders: runtime.permissions.files.iter().map(|f| CaseFolder { name: f.name.clone(), read: f.read, write: f.write, from: None }).collect(),
         input_folder: runtime.permissions.input_folder,
+        fuel: Some(runtime.limits.fuel),
         memory_mib: Some(runtime.limits.memory_mib),
     };
     let wanted = case.grants.as_ref().unwrap_or(&asked);
@@ -415,6 +432,7 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         package_hash: Some(approval.to_string()),
         command_groups: wanted.command_groups.clone(),
         folders,
+        fuel: wanted.fuel,
         memory_mib: wanted.memory_mib,
         input_folder: wanted.input_folder,
     };
@@ -495,6 +513,10 @@ fn run_case(
             (None, _) => Session::default(),
         };
         s.plugin_state.plugins_dir = Some(plugins.to_path_buf());
+        // Cases never read or overwrite the user's settings, including an environment override.
+        let settings = work.join("settings");
+        std::fs::create_dir_all(&settings).map_err(|e| format!("{}: {e}", settings.display()))?;
+        s.plugin_state.user.user_settings_dir = Some(settings);
         let installed_path = installed.to_string_lossy().into_owned();
         let approval = s.execute("plugin.inspect", &json!({"path": installed_path})).map_err(|e| e.to_string())?["approval"]
             .as_str()

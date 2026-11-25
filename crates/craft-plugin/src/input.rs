@@ -7,6 +7,18 @@
 use crate::{HostError, Result};
 use serde_json::{Map, Value};
 
+/// Dialog hint for choosing an installed font family; programmatic values remain strings.
+pub const FONT_KEY: &str = "x-solidcraft-font";
+
+/// Validate the optional font hint without looking at installed fonts or limiting values.
+pub fn font_field(schema: &Value) -> Result<bool> {
+    match schema.get(FONT_KEY) {
+        None => Ok(false),
+        Some(Value::Bool(true)) if schema.get("type").and_then(Value::as_str) == Some("string") => Ok(true),
+        Some(_) => Err(bad(FONT_KEY, "must be true on a string property")),
+    }
+}
+
 /// How deep a schema and value are followed.
 const MAX_DEPTH: usize = 32;
 /// The most schema nodes one check visits (`oneOf` inside `oneOf` multiplies).
@@ -29,6 +41,12 @@ pub fn check_input(schema: &Value, value: &Value) -> Result<()> {
     crate::conditions::validate_conditions(schema)?;
     let mut steps = 0;
     check(schema, value, "params", 0, &mut steps, true, CheckContext::new(Conditions::Evaluate))
+}
+
+/// Check an individual input property while retaining its field name's selection context.
+pub fn check_input_field(name: &str, schema: &Value, value: &Value) -> Result<()> {
+    crate::conditions::validate_conditions(schema)?;
+    check(schema, value, &format!("params.{name}"), 0, &mut 0, true, CheckContext::new(Conditions::Evaluate))
 }
 
 /// Validate and omit hidden fields before passing input to plugin code.
@@ -400,6 +418,7 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             let child = CheckContext::new(child_conditions);
             match (properties.and_then(|p| p.get(name)), additional) {
                 (Some(property), _) => {
+                    let child = CheckContext { selection: property.get("x-solidcraft-selection").is_some(), ..child };
                     if let (Some(rules), Some(options)) = (rules.fields.get(name), property.get("oneOf").and_then(Value::as_array))
                         && rules.has_choice_filter()
                         && options.iter().take(256).enumerate().all(|(i, option)| {

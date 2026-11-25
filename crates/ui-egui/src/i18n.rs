@@ -4,45 +4,48 @@
 
 use solidcraft_ui_text::{Catalog, Locale};
 
-static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
-static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
-static BULGARIAN: Catalog = Catalog::new("bg", "Български", include_str!(concat!(env!("OUT_DIR"), "/locales/bg.json")));
-static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
-static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
-static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
-static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
-static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
+static ENGLISH: Catalog = Catalog::packed("en", "English", include_bytes!(concat!(env!("OUT_DIR"), "/locales/en.json.z")));
+static ARABIC: Catalog = Catalog::packed("ar", "العربية", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.json.z")));
+static BULGARIAN: Catalog = Catalog::packed("bg", "Български", include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.json.z")));
+static BOSNIAN: Catalog = Catalog::packed("bs", "Bosanski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.json.z")));
+static CATALAN: Catalog = Catalog::packed("ca", "Català", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.json.z")));
+static CZECH: Catalog = Catalog::packed("cs", "Čeština", include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.json.z")));
+static DANISH: Catalog = Catalog::packed("da", "Dansk", include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.json.z")));
+static GERMAN: Catalog = Catalog::packed("de", "Deutsch", include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.json.z")));
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
-static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
-static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
-static BASQUE: Catalog = Catalog::new("eu", "Euskara", include_str!(concat!(env!("OUT_DIR"), "/locales/eu.json")));
-static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
-static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
-static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
-static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
-static CROATIAN: Catalog = Catalog::new("hr", "Hrvatski", include_str!(concat!(env!("OUT_DIR"), "/locales/hr.json")));
-static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")));
-static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
-static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
-static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
-static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
-static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
-static LATVIAN: Catalog = Catalog::new("lv", "Latviešu", include_str!(concat!(env!("OUT_DIR"), "/locales/lv.json")));
-static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
-static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
-static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
-static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")));
-static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
-static PORTUGUESE_PT: Catalog = Catalog::new("pt-PT", "Português (Portugal)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-PT.json")));
-static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
-static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
-static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
-static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")));
-static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")));
-static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")));
-static VIETNAMESE: Catalog = Catalog::new("vi", "Tiếng Việt", include_str!(concat!(env!("OUT_DIR"), "/locales/vi.json")));
-static CHINESE: Catalog = Catalog::new("zh", "中文", include_str!(concat!(env!("OUT_DIR"), "/locales/zh.json")));
-static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", include_str!(concat!(env!("OUT_DIR"), "/locales/zh-TW.json")));
+static ENGLISH_UK: Catalog = Catalog::packed("en-GB", "English (UK)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.json.z")));
+static SPANISH: Catalog = Catalog::packed("es", "Español (España)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.json.z")));
+static BASQUE: Catalog = Catalog::packed("eu", "Euskara", include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.json.z")));
+static FINNISH: Catalog = Catalog::packed("fi", "Suomi", include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.json.z")));
+static FRENCH: Catalog = Catalog::packed("fr", "Français", include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.json.z")));
+static GALICIAN: Catalog = Catalog::packed("gl", "Galego", include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.json.z")));
+static HEBREW: Catalog = Catalog::packed("he", "עברית", include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.json.z")));
+static CROATIAN: Catalog = Catalog::packed("hr", "Hrvatski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.json.z")));
+static HUNGARIAN: Catalog = Catalog::packed("hu", "Magyar", include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.json.z")));
+static INDONESIAN: Catalog = Catalog::packed("id", "Bahasa Indonesia", include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.json.z")));
+static ITALIAN: Catalog = Catalog::packed("it", "Italiano", include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.json.z")));
+static JAPANESE: Catalog = Catalog::packed("ja", "日本語", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.json.z")));
+static GEORGIAN: Catalog = Catalog::packed("ka", "ქართული", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.json.z")));
+static KOREAN: Catalog = Catalog::packed("ko", "한국어", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.json.z")));
+static LAO: Catalog = Catalog::packed("lo", "ພາສາລາວ", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lo.json.z")));
+static LATVIAN: Catalog = Catalog::packed("lv", "Latviešu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.json.z")));
+static MALAY: Catalog = Catalog::packed("ms", "Bahasa Melayu", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.json.z")));
+static NORWEGIAN: Catalog = Catalog::packed("nb", "Norsk bokmål", include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.json.z")));
+static DUTCH: Catalog = Catalog::packed("nl", "Nederlands", include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.json.z")));
+static POLISH: Catalog = Catalog::packed("pl", "Polski", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.json.z")));
+static PORTUGUESE_BR: Catalog = Catalog::packed("pt-BR", "Português (Brasil)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json.z")));
+static PORTUGUESE_PT: Catalog = Catalog::packed("pt-PT", "Português (Portugal)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-PT.json.z")));
+static ROMANIAN: Catalog = Catalog::packed("ro", "Română", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.json.z")));
+static RUSSIAN: Catalog = Catalog::packed("ru", "Русский", include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.json.z")));
+static SERBIAN: Catalog = Catalog::packed("sr", "Српски", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.json.z")));
+/// Serbian in Latin script: the Cyrillic catalog transliterated at build time (`build.rs`).
+static SERBIAN_LATIN: Catalog = Catalog::packed("sr-Latn", "Srpski (latinica)", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr-Latn.json.z")));
+static SWEDISH: Catalog = Catalog::packed("sv", "Svenska", include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.json.z")));
+static TURKISH: Catalog = Catalog::packed("tr", "Türkçe", include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.json.z")));
+static UKRAINIAN: Catalog = Catalog::packed("uk", "Українська", include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.json.z")));
+static VIETNAMESE: Catalog = Catalog::packed("vi", "Tiếng Việt", include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.json.z")));
+static CHINESE: Catalog = Catalog::packed("zh", "中文", include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.json.z")));
+static CHINESE_TRADITIONAL: Catalog = Catalog::packed("zh-TW", "繁體中文", include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.json.z")));
 /// English first (the fallback), then by language id, one per line so that adding a language
 /// doesn't edit a line another addition edits.
 #[rustfmt::skip]
@@ -69,6 +72,7 @@ pub const LOCALES: &[&Catalog] = &[
     &JAPANESE,
     &GEORGIAN,
     &KOREAN,
+    &LAO,
     &LATVIAN,
     &MALAY,
     &NORWEGIAN,
@@ -79,6 +83,7 @@ pub const LOCALES: &[&Catalog] = &[
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
+    &SERBIAN_LATIN,
     &SWEDISH,
     &TURKISH,
     &UKRAINIAN,
@@ -475,7 +480,11 @@ mod tests {
             assert_eq!(match_system_tags(&tags(&[tag])), want, "{tag}");
         }
         // Other languages keep the exact tag, then the base language.
-        assert_eq!(match_system_tags(&tags(&["sr-Latn-RS"])), "sr");
+        // Serbian in Latin script is only used when chosen by hand: every Serbian system tag,
+        // with or without a script, keeps Cyrillic, as before sr-Latn existed.
+        for tag in ["sr-Latn-RS", "sr_Latn", "sr-Latn", "sr-Cyrl-RS", "sr-RS"] {
+            assert_eq!(match_system_tags(&tags(&[tag])), "sr", "{tag}");
+        }
         assert_eq!(match_system_tags(&tags(&["zhx-TW", "de"])), "de", "only zh itself is Chinese");
     }
 
@@ -842,9 +851,9 @@ mod tests {
     #[test]
     fn every_complete_catalog_carries_every_english_message() {
         install();
-        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
         for catalog in LOCALES.iter().filter(|c| COMPLETE.contains(&c.id)) {
-            let messages: Messages = serde_json::from_str(catalog.source).unwrap();
+            let messages: Messages = serde_json::from_str(&catalog.json()).unwrap();
             let missing: Vec<&str> = english.keys().filter(|id| !messages.contains_key(*id)).map(String::as_str).collect();
             assert!(missing.is_empty(), "{} is missing {} English message(s): {}", catalog.id, missing.len(), missing.join(", "));
         }
@@ -938,11 +947,11 @@ mod tests {
     #[test]
     fn catalogs_have_valid_ids_and_matching_placeholders() {
         install();
-        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
         let mut ids = BTreeSet::new();
         for catalog in LOCALES {
             assert!(ids.insert(catalog.id), "duplicate locale");
-            let messages: Messages = serde_json::from_str(catalog.source).unwrap();
+            let messages: Messages = serde_json::from_str(&catalog.json()).unwrap();
             assert!(!messages.is_empty());
             for (id, text) in messages {
                 let original = english.get(&id).expect("unknown message ID");
@@ -1068,7 +1077,7 @@ mod tests {
     #[test]
     fn every_ui_label_literal_reaches_an_english_catalog_entry() {
         install();
-        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
         let ids: BTreeSet<&str> = english.keys().map(String::as_str).collect();
         let texts: BTreeSet<&str> = english.values().filter(|text| !text.contains('{')).map(String::as_str).collect();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -1139,7 +1148,7 @@ mod tests {
             // rather than requiring its spelling to differ from English.
             assert!(locale.catalog().messages().contains_key("toolbar.render_studio"));
             assert_eq!(locale.label("STUDIO"), locale.text("toolbar.render_studio"));
-            let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+            let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
             for id in english.keys().filter(|id| id.starts_with("render.inspector_")) {
                 assert!(locale.catalog().messages().contains_key(id), "{language}: {id}");
             }
@@ -1566,7 +1575,7 @@ mod tests {
         assert_eq!(ar.dynamic("Sketch1"), "1 رسم");
         let saved = ar.format("document.save_changes", &[("name", "Bracket")]);
         assert!(saved.starts_with("؟Bracket "), "{saved}");
-        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
         for id in english.keys() {
             let text = ar.text(id);
             assert!(
@@ -1592,7 +1601,7 @@ mod tests {
         assert_eq!(he.given_name("Sketch of bracket"), "Sketch of bracket");
         assert_eq!(he.label("NonExistentKey"), "NonExistentKey");
         // No directional control characters reach egui, which would draw them as boxes.
-        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let english: Messages = serde_json::from_str(&ENGLISH.json()).unwrap();
         for id in english.keys() {
             let text = he.text(id);
             assert!(
@@ -1672,6 +1681,22 @@ mod tests {
         assert_eq!(vi.dynamic("Sketch of bracket"), "Sketch of bracket");
     }
 
+    /// Serbian in Latin script is built from the Cyrillic catalog, so it has every message the
+    /// Cyrillic one has, in Latin letters only, with Lj, Nj and Dž in capitals inside capitals.
+    #[test]
+    fn serbian_latin_is_the_cyrillic_catalog_transliterated() {
+        install();
+        let cyrillic: Messages = serde_json::from_str(&SERBIAN.json()).unwrap();
+        let latin: Messages = serde_json::from_str(&SERBIAN_LATIN.json()).unwrap();
+        assert_eq!(cyrillic.keys().collect::<Vec<_>>(), latin.keys().collect::<Vec<_>>());
+        let cyrillic_left: Vec<&String> = latin.values().filter(|text| text.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c))).collect();
+        assert!(cyrillic_left.is_empty(), "Cyrillic left in sr-Latn: {cyrillic_left:?}");
+        let sr = Locale::for_language("sr-Latn");
+        assert_eq!(sr.text("ui.shell"), "Ljuska");
+        assert_eq!(sr.text("ui.heading_shell"), "LJUSKA");
+        assert_eq!(sr.text("ui.tab_manage"), "Upravljanje");
+    }
+
     #[test]
     fn new_languages_translate_keys_labels_and_default_names() {
         install();
@@ -1679,6 +1704,7 @@ mod tests {
             ("bs", "Bosanski", "Postavke", "Ekstrudiraj", "Skica1", "Sačuvati promjene u My {design}?"),
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
+            ("sr-Latn", "Srpski (latinica)", "Podešavanja", "Ekstrudiraj", "Skica1", "Sačuvati promene u My {design}?"),
             ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
             ("lv", "Latviešu", "Iestatījumi", "Izspiešana", "Skice1", "Saglabāt izmaiņas failā My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
@@ -1781,6 +1807,7 @@ mod tests {
         KitCall { name: "wide_primary_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "action_menu", args: &[1], id: false, trim: &[] },
         KitCall { name: "compact_button", args: &[2], id: false, trim: &[] },
+        KitCall { name: "compact_toggle", args: &[2], id: false, trim: &[] },
         KitCall { name: "icon_label_button", args: &[1], id: false, trim: &[] },
         KitCall { name: "command_menu_button", args: &[2], id: false, trim: &[] },
         // choice.rs
@@ -2438,7 +2465,7 @@ mod tests {
         "use crate::ui_kit::{row, status_line, expr_row, hint_row, text_row, choice_row, section, section_count, ",
         "multiline_text_field, dropdown, cell_editor, bounded_cell_editor, search_field, menu_filter, placement_field, ",
         "library_cell, icon_button_at, icon_button_colored, footer, button, primary_button, ",
-        "wide_primary_button, action_menu, compact_button, icon_label_button, command_menu_button, ",
+        "wide_primary_button, action_menu, compact_button, compact_toggle, icon_label_button, command_menu_button, ",
         "checkbox_grid, options, checkbox_row, action_row, toggle_icon, removable_header, bin_button, ",
         "Column, Menu, MenuItem, CommandSearch};"
     );
@@ -2486,6 +2513,7 @@ mod tests {
             ("wide_primary_button(ui, \"wide_primary_button\")", &["wide_primary_button"]),
             ("action_menu(ui, \"action_menu\", |ui| {})", &["action_menu"]),
             ("compact_button(ui, glyph, \"compact_button\", true, false)", &["compact_button"]),
+            ("compact_toggle(ui, glyph, \"compact_toggle\", true, false)", &["compact_toggle"]),
             ("icon_label_button(ui, \"icon_label_button\", icon, true, false)", &["icon_label_button"]),
             ("command_menu_button(ui, id, \"command_menu_button\", icon, shortcut, true)", &["command_menu_button"]),
             ("checkbox_grid(ui, &mut [(\"checkbox_grid\", value)], 1)", &["checkbox_grid"]),
@@ -2811,5 +2839,13 @@ mod tests {
         assert_eq!(literals("use crate :: i18n :: tr;\nfn live() { tr(\"Preferences\"); }"), id);
         assert_eq!(literals("use crate::i18n::{format, tr};\nfn live() { tr(\"Preferences\"); }"), id);
         assert_eq!(literals("fn live() { let tr = crate::i18n::tr; tr(\"Preferences\"); }"), id);
+    }
+
+    #[test]
+    fn lao_catalog_is_registered_and_translates_keys() {
+        install();
+        let lo = Locale::for_language("lo");
+        assert_eq!(lo.name(), "ພາສາລາວ");
+        assert!(is_supported("lo"));
     }
 }

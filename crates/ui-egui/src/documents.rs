@@ -80,6 +80,8 @@ struct DocWork {
     params: Option<crate::params_dialog::ParamsDialog>,
     design_properties: Option<crate::design_properties::DesignProperties>,
     dialog: Option<crate::dialogs::Dialog>,
+    /// A New Sketch of that dialog (#6383): its checkpoint is in this design's session.
+    inline_sketch: Option<crate::command_sketch::InlineSketch>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
     /// The toolbar tab shown, its contextual tab and the tab a sketch returns to (`None`: the
@@ -95,6 +97,8 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
     let bom = app.bom.take();
     if !presenting && (!app.preferences.keep_work_on_tab_switch || app.applying.is_some()) {
         crate::dialogs::cancel(app);
+        // A sketch still open for a New Sketch stays, as any open sketch does.
+        crate::command_sketch::forget(app);
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
@@ -105,6 +109,7 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
         params: presenting.then(|| app.params.take()).flatten(),
         design_properties: presenting.then(|| app.design_properties.take()).flatten(),
         dialog: app.dialog.take(),
+        inline_sketch: app.inline_sketch.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
         tab: Some((app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone())),
@@ -126,6 +131,7 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
         state.source.revision = state.source.revision.saturating_add(app.session.revision.saturating_sub(before));
     }
     app.dialog = work.dialog;
+    app.inline_sketch = work.inline_sketch;
     app.editing_state = work.editing_state;
     app.tool = work.tool;
     match work.tab {
@@ -235,6 +241,8 @@ pub struct Documents {
     pub active: usize,
     /// A tab waiting for the answer to "save changes?".
     pub closing: Option<usize>,
+    /// File > Revert to Saved is asking whether to drop the active design's unsaved changes.
+    pub reverting: bool,
     /// Quitting: the tabs answered so far with Don't Save (`None`: not quitting).
     pub quitting: Option<Vec<usize>>,
     /// The "save changes?" button the arrow keys have picked; Enter gives it.
@@ -268,6 +276,10 @@ pub struct Documents {
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
     pub(crate) view_placement: Option<(u64, u64)>,
+    /// The active tab's own parked conversation while `agent_shared_session` is enabled, so
+    /// switching tabs never hands one tab's parked chat to another tab's slot. Boxed so
+    /// `Documents` / `SolveApp` does not double its inline stack footprint with a second `AgentChat`.
+    parked_agent_chat: Option<Box<crate::agent_chat::AgentChat>>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -501,6 +513,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     if !presenting {
         crate::select_other::close(app);
     }
+    let shared_chat = app.preferences.agent_shared_session;
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
         crate::select_other::close(app);
@@ -517,7 +530,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.viewport.hover = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
-        crate::agent_chat::leave_document(app);
+        if shared_chat && app.agent_chat.following_document {
+            crate::agent_chat::merge_active_turn_for_switch(app);
+        } else {
+            crate::agent_chat::leave_document(app);
+        }
         app.edit_anchor_hint = None;
     }
     if !presenting {
@@ -541,7 +558,13 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.agent_chat.swap_document(&mut slot.agent_chat);
+    let outgoing_chat = if shared_chat {
+        app.docs.parked_agent_chat.replace(Box::new(slot.agent_chat)).map_or_else(Default::default, |chat| *chat)
+    } else {
+        app.docs.parked_agent_chat = None;
+        app.agent_chat.swap_document(&mut slot.agent_chat);
+        slot.agent_chat
+    };
     let out_rev = app.session.revision;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
@@ -554,7 +577,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         reveals,
-        agent_chat: slot.agent_chat,
+        agent_chat: outgoing_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
         edit_in_place: std::mem::replace(&mut app.edit_in_place.active, slot.edit_in_place),
         work,
@@ -581,6 +604,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
+    // every frame, so it no longer syncs them when the design comes to the front (#21594).
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     if !presenting {
@@ -589,6 +615,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
             pending.view_changed(before, app.session.revision);
         }
         app.jobs_view_changed(before, app.session.revision);
+    }
+    if !presenting && shared_chat {
+        crate::agent_chat::continue_in_document(app);
     }
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
@@ -865,6 +894,8 @@ struct ViewMotion {
     primary_nav: Option<crate::viewport::NavMode>,
     zoom_shortcut_drag: bool,
     modifier_nav: Option<(crate::viewport::NavMode, egui::Pos2)>,
+    nav_toggle: Option<crate::viewport::NavMode>,
+    nav_toggle_at: Option<egui::Pos2>,
     button_nav: Option<(crate::prefs::NavButton, Option<crate::viewport::NavMode>)>,
     right_drag: bool,
     orbit_pivot: Option<solidcore_record::Vec3>,
@@ -901,6 +932,8 @@ impl ViewMotion {
         std::mem::swap(&mut self.primary_nav, &mut app.viewport.primary_nav);
         std::mem::swap(&mut self.zoom_shortcut_drag, &mut app.viewport.zoom_shortcut_drag);
         std::mem::swap(&mut self.modifier_nav, &mut app.viewport.modifier_nav);
+        std::mem::swap(&mut self.nav_toggle, &mut app.viewport.nav_toggle);
+        std::mem::swap(&mut self.nav_toggle_at, &mut app.viewport.nav_toggle_at);
         std::mem::swap(&mut self.button_nav, &mut app.viewport.button_nav);
         std::mem::swap(&mut self.right_drag, &mut app.viewport.right_drag);
         std::mem::swap(&mut self.orbit_pivot, &mut app.viewport.orbit_pivot);
@@ -1855,7 +1888,7 @@ pub(crate) fn reuse_path(app: &mut SolveApp, path: &str) -> Result<bool, String>
         app.docs.slots.iter().position(|s| s.as_ref().is_some_and(|s| matches(&s.session)))
     };
     let Some(index) = index else { return Ok(false) };
-    if app.agent_chat.following_document && index != app.docs.active {
+    if app.agent_chat.following_document && index != app.docs.active && !app.preferences.agent_shared_session {
         return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
     }
     if app.file_picker_busy() {
@@ -1895,7 +1928,7 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
 /// opened while the person is busy in another design). Its view is framed when it is shown.
-pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub(crate) fn open_tab_behind(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -1903,6 +1936,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let mut slot = DocSlot::new(session);
     slot.fit = true;
     app.docs.slots.insert(app.docs.active + 1, Some(slot));
@@ -1910,7 +1944,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -1921,6 +1955,7 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
@@ -1937,8 +1972,12 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
 /// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
-pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
+pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
     if active_is_blank(app) {
+        if let Err(error) = session.plugin_state.publish_user_settings() {
+            app.set_status(error.to_string(), true);
+            return false;
+        }
         let rev = app.session.revision;
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
@@ -1973,6 +2012,133 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     } else {
         true
     }
+}
+
+/// Show `session` in a new tab after the active one, even when the active design is blank
+/// ([`adopt`] replaces a blank one). Whether it is shown (no tab left for it: the status says so).
+pub fn adopt_in_new_tab(app: &mut SolveApp, session: Session) -> bool {
+    match open_tab(app, session) {
+        Ok(()) => true,
+        Err(e) => {
+            app.set_status(e, true);
+            false
+        }
+    }
+}
+
+/// Run `id` (`file.new` or `doc.open`, given `new_tab`) in a tab of its own: a blank tab opens
+/// after the active one and is shown, then the command runs in it as it would in any tab. When the
+/// command fails the tab closes again and the design that was shown comes back, as nothing had
+/// happened. `new_tab` is taken off the parameters: the engine has no tabs.
+pub(crate) fn run_in_new_tab(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    // A design already open in a tab is shown, as the control channel's loader shows it: opening
+    // it again would make a second copy and could lose the unsaved edits of the first.
+    if id == "doc.open"
+        && let Some(path) = params.get("path").and_then(Value::as_str)
+        && params.as_object().is_some_and(|p| p.iter().all(|(key, value)| key == "path" || value.is_null()))
+        && reuse_path(app, path)?
+    {
+        let s = &app.session;
+        return Ok(json!({"path": path, "features": s.doc.features.len(),
+            "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name}));
+    }
+    let before = app.docs.active;
+    open_tab(app, Session::default())?;
+    crate::prefs::apply_new_design(app);
+    let at = app.docs.active;
+    match app.run(id, params) {
+        Ok(mut reply) => {
+            if id == "file.new"
+                && let Some(reply) = reply.as_object_mut()
+            {
+                reply.insert("document_id".into(), json!(app.session.document_id));
+            }
+            Ok(reply)
+        }
+        Err(e) => {
+            // Back to the design that was shown, then the tab that was opened for this goes.
+            switch(app, before);
+            close(app, at, true);
+            Err(e)
+        }
+    }
+}
+
+/// `new_tab` of a `file.new` or `doc.open`: whether it is true, taken off `params` (the engine
+/// refuses it, as it has one design and no tabs). Left out, null or false it changes nothing. A
+/// value that is no boolean stays in `params`, so the engine's own contract check sees it.
+pub(crate) fn take_new_tab(params: &mut Value) -> bool {
+    let Some(p) = params.as_object_mut() else { return false };
+    match p.get("new_tab") {
+        Some(Value::Bool(_) | Value::Null) => p.remove("new_tab") == Some(Value::Bool(true)),
+        _ => false,
+    }
+}
+
+/// `p` as the contract type `T`; no parameters at all (`null`) is the empty object.
+fn read_params<T: serde::de::DeserializeOwned>(command: &str, p: &Value) -> Result<T, String> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    serde_json::from_value(p).map_err(|e| format!("{command}: {e}"))
+}
+
+/// `document.list` and `document.activate`: the window answers them for every design tab, as the
+/// engine, with one design, cannot. Ids are the ones `document.revision` gives.
+pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, String> {
+    use solidcraft_engine::schema::documents::{
+        DocumentActivateParams, DocumentActivateResult, DocumentListParams, DocumentListResult, OpenDocument,
+    };
+    let reply = |value: Result<Value, serde_json::Error>| value.map_err(|e| format!("{id}: {e}"));
+    if id == "document.list" {
+        let DocumentListParams {} = read_params(id, p)?;
+        let documents: Vec<OpenDocument> = open_sessions(app)
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| OpenDocument {
+                document_id: s.document_id.clone(),
+                name: tab_name(app, s),
+                // A caller kept to some folders is not told where a design outside them lives.
+                path: s.path.clone().filter(|p| solidcraft_engine::io::vfs::check(p).is_ok()),
+                active: i == app.docs.active,
+                dirty: s.is_dirty(),
+            })
+            .collect();
+        return reply(serde_json::to_value(DocumentListResult {
+            active_document_id: app.session.document_id.clone(),
+            documents,
+            param_warnings: Vec::new(),
+        }));
+    }
+    let request: DocumentActivateParams = read_params(id, p)?;
+    let at = open_sessions(app)
+        .iter()
+        .position(|s| s.document_id == request.document_id)
+        .ok_or("document.activate: no open design has that document_id (document.list names the open designs)")?;
+    // The folder limits that opening the file would meet, as `reuse_path` applies them.
+    if let Some(path) = open_sessions(app)[at].path.as_deref() {
+        // A fixed message: `vfs::check`'s names the path, which `document.list` leaves out.
+        if solidcraft_engine::io::vfs::check(path).is_err() {
+            return Err("document.activate: that design is outside the folders this caller may use".into());
+        }
+    }
+    if app.agent_chat.following_document && at != app.docs.active {
+        return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
+    }
+    if at != app.docs.active {
+        if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+            return Err("finish the save prompt before showing another design".into());
+        }
+        switch(app, at);
+        if app.docs.active != at {
+            return Err("document.activate: the design could not be shown".into());
+        }
+    }
+    let s = &app.session;
+    reply(serde_json::to_value(DocumentActivateResult {
+        document_id: s.document_id.clone(),
+        name: tab_name(app, s),
+        path: s.path.clone(),
+        param_warnings: Vec::new(),
+    }))
 }
 
 /// The active design as its file holds it (`document.export`): what a host that keeps the files
@@ -2191,6 +2357,12 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
         crate::agent_chat::continue_in_document(app);
         return;
     }
+    if app.preferences.agent_shared_session {
+        crate::agent_chat::leave_document(app);
+        app.docs.parked_agent_chat = None;
+        crate::agent_chat::continue_in_document(app);
+        return;
+    }
     // A chat not asked anything yet (an agent connected at start, say) holds nothing of the old
     // design: it starts over in place, and its agent stays connected.
     if !app.agent_chat.items.iter().any(|i| matches!(i, crate::agent_chat::Item::User { .. })) {
@@ -2204,6 +2376,9 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
 
 /// Hidden conversations must also stop when AI is disabled or the application quits.
 pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_document(&mut app.session, wait);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_document(&mut slot.session, wait);
     }
@@ -2211,6 +2386,9 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
 
 /// Stop only the hidden conversations whose endpoint permission was revoked.
 pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    if let Some(chat) = app.docs.parked_agent_chat.as_mut() {
+        chat.disconnect_endpoint(&mut app.session, id);
+    }
     for slot in app.docs.background_mut() {
         slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
     }
@@ -2602,6 +2780,41 @@ pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String
     (reopen, Vec::new())
 }
 
+/// Refuse a noninteractive close before changing tabs or creating a save prompt.
+pub(crate) fn check_close_without_prompt(app: &SolveApp, index: Option<&Value>, force: bool) -> Result<(), String> {
+    check_noninteractive_idle(app)?;
+    let index = match index {
+        None | Some(Value::Null) => app.docs.active,
+        Some(value) => value.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or("index must be a nonnegative tab index")?,
+    };
+    let tabs = tabs_info(app);
+    let (name, dirty) = tabs.get(index).ok_or_else(|| format!("no design tab at index {index}"))?;
+    if *dirty && !force {
+        return Err(format!("design `{name}` has unsaved changes; save it first or use force: true to discard them"));
+    }
+    Ok(())
+}
+
+/// Refuse a noninteractive quit before changing the active tab or creating a save prompt.
+pub(crate) fn check_quit_without_prompt(app: &SolveApp, force: bool) -> Result<(), String> {
+    check_noninteractive_idle(app)?;
+    if !force {
+        let names: Vec<String> = tabs_info(app).into_iter().filter(|(_, dirty)| *dirty).map(|(name, _)| format!("`{name}`")).collect();
+        if !names.is_empty() {
+            return Err(format!("designs with unsaved changes: {}; save them first or use force: true to discard them", names.join(", ")));
+        }
+    }
+    Ok(())
+}
+
+/// A programmatic close must not interrupt an in-flight file operation or a person's save prompt.
+fn check_noninteractive_idle(app: &SolveApp) -> Result<(), String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
+    }
+    Ok(())
+}
+
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all`, `move` (`from`, `to`)
 /// or `quit`; `answer`: save | dont_save | cancel answers "save changes?". `save_indices`
@@ -2757,19 +2970,18 @@ fn view_tip(view: &DesignView, place: usize) -> String {
 /// and the same colour under it while it is shown.
 fn view_tab<'a>(
     view: &'a DesignView,
+    sketch_mark: bool,
     active: bool,
     on_screen: bool,
     tip: &'a str,
     to_window: Option<u32>,
     window: Option<&'a crate::view_windows::WindowChoice>,
 ) -> crate::app_bar::ViewTab<'a> {
-    let colour = if view.editing.is_some() {
-        solidcraft_theme::Tokens::get().sketch_accent
-    } else {
-        crate::workspace::view_icon_colour(kind_word(view.kind), true)
-    };
+    let sketch_mode = sketch_mark && view.editing.is_some();
+    let colour =
+        if sketch_mode { solidcraft_theme::Tokens::get().sketch_accent } else { crate::workspace::view_icon_colour(kind_word(view.kind), true) };
     crate::app_bar::ViewTab {
-        sketch_mode: view.editing.is_some(),
+        sketch_mode,
         compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
@@ -2785,12 +2997,26 @@ fn view_tab<'a>(
     }
 }
 
-/// A tab's menu: close it, the others, or all of them.
-const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
-    crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
-    crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
-    crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
-];
+/// The translated labels of a tab's Rename and Save rows, and the Save As shortcut shown beside it.
+struct TabMenuText {
+    rename: String,
+    save: String,
+    save_as: String,
+    save_as_key: String,
+}
+
+/// A tab's menu: rename its design, save it, save it under another name, close it, the others, or
+/// all of them. Save and Save As show their shortcuts on the shown design's tab, where they apply.
+fn tab_menu(text: &TabMenuText) -> [crate::app_bar::TabMenuRow<'_>; 6] {
+    [
+        crate::app_bar::TabMenuRow::new("ui.renameTab", &text.rename, ""),
+        crate::app_bar::TabMenuRow::new("ui.saveTab", &text.save, "Ctrl+S"),
+        crate::app_bar::TabMenuRow::new("ui.saveTabAs", &text.save_as, &text.save_as_key),
+        crate::app_bar::TabMenuRow::new("ui.closeTab", "Close", "Ctrl+W"),
+        crate::app_bar::TabMenuRow::new("ui.closeOtherTabs", "Close Other Tabs", "").needing_others(),
+        crate::app_bar::TabMenuRow::new("ui.closeAllTabs", "Close All Tabs", ""),
+    ]
+}
 
 pub(crate) fn strip_view_id(app: &SolveApp, index: usize) -> Option<u64> {
     crate::view_windows::strip_views(app).get(index).map(|(_, view)| view.id)
@@ -2828,6 +3054,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
     let new_tip = app.tr("ui.start_page").to_string();
+    let menu_text = TabMenuText {
+        rename: app.tr("ui.rename_design_tab").to_string(),
+        save: app.tr("ui.save").to_string(),
+        save_as: format!("{}…", app.tr("ui.save_as")),
+        save_as_key: crate::keymap::effective(app, "file.save_as").unwrap_or_default(),
+    };
+    let menu = tab_menu(&menu_text);
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
     let current_window = app.view_windows.current_window();
     let design_views: Vec<Vec<_>> = (0..n)
@@ -2835,7 +3068,10 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             if design == selected {
                 let set = &app.docs.views;
                 let tiles = set.tiles().filter(|_| set.is_tiled());
-                crate::view_windows::strip_views(app)
+                let strip = crate::view_windows::strip_views(app);
+                // The sketch mark on a view tab only tells views apart: with one view, none.
+                let sketch_mark = crate::ui_kit::disambiguates(strip.len());
+                strip
                     .into_iter()
                     .map(|(window, view)| {
                         let elsewhere = (window != current_window).then_some(window);
@@ -2844,7 +3080,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                         (
                             {
                                 let mut view = view.clone();
-                                if view.editing.is_some()
+                                if sketch_mark
+                                    && view.editing.is_some()
                                     && let Some(name) = crate::sketch_view::name(app, view.id)
                                 {
                                     view.name = name;
@@ -2891,12 +3128,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .iter()
         .zip(&view_tips)
         .map(|(views, tips)| {
+            let sketch_mark = crate::ui_kit::disambiguates(views.len());
             views
                 .iter()
                 .zip(tips)
                 .map(|((view, active, on_screen, window), tip)| {
                     let choice = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
-                    view_tab(view, *active, *on_screen, tip, *window, choice)
+                    view_tab(view, sketch_mark, *active, *on_screen, tip, *window, choice)
                 })
                 .collect()
         })
@@ -2957,7 +3195,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 focused: &mut r.focused,
                 max: MAX_DESIGN_NAME,
             }),
-            menu: &TAB_MENU,
+            menu: &menu,
             close_name: solidcraft_ui_text::tr("ui.close_tab"),
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
@@ -3084,13 +3322,16 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
-    let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
+    let (mut shut, mut pick, mut many, mut dropped, mut renamed, mut saved) = (None, None, None, None, None, None);
     let mut window_drop = false;
     for action in actions {
         match action {
             crate::app_bar::TabAction::Select(i) => pick = Some(i),
             crate::app_bar::TabAction::Close(i) => shut = Some(i),
             crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
+                "ui.renameTab" => renamed = Some(tab),
+                "ui.saveTab" => saved = Some((tab, false)),
+                "ui.saveTabAs" => saved = Some((tab, true)),
                 "ui.closeTab" => shut = Some(tab),
                 "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
                 "ui.closeAllTabs" => many = Some((0..n).collect()),
@@ -3144,6 +3385,39 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    if let Some((tab, as_new)) = saved.filter(|_| idle) {
+        save_tab(app, tab, as_new);
+    }
+    // Rename from the menu: the design's tab is shown first (over the start page too), so its
+    // name is edited in place.
+    if let Some(tab) = renamed.filter(|_| idle) {
+        if tab != selected || app.home.open {
+            switch(app, tab);
+        }
+        let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+        if let Some((name, _)) = info.get(tab).filter(|_| shown == tab && !app.home.open) {
+            start_tab_rename(app, name, Rect::ZERO);
+        }
+    }
+}
+
+/// Save design `i` from its tab's menu, as File › Save does (`as_new`: as File › Save As does).
+/// Another tab's design is shown first, as the "save changes?" prompt does before it saves one,
+/// so a question Save asks (where to save a new design, a read-only or changed file) is about the
+/// design in view.
+fn save_tab(app: &mut SolveApp, i: usize, as_new: bool) {
+    if app.file_picker_busy() || i >= app.docs.count() || app.docs.group.is_some() {
+        return;
+    }
+    let shown = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
+    if i != shown || app.home.open {
+        switch(app, i);
+    }
+    if as_new {
+        crate::toolbar::save_as(app);
+    } else {
+        crate::toolbar::save(app);
+    }
 }
 
 /// The longest name a design takes (as `component.rename` accepts).
@@ -3176,9 +3450,65 @@ pub enum Answer {
     Cancel,
 }
 
+/// File > Revert to Saved: read the active design again from the file it was opened or saved as.
+/// With unsaved changes it asks first ([`revert_prompt`]), as they cannot be undone afterwards.
+pub fn revert(app: &mut SolveApp) {
+    if app.session.path.is_none() {
+        return;
+    }
+    if app.session.is_dirty() {
+        app.docs.reverting = true;
+    } else {
+        revert_now(app);
+    }
+}
+
+/// Close the active tab without asking and open its file again in its place. The file is checked
+/// first, so a missing or unreadable one leaves the tab and its changes where they were.
+fn revert_now(app: &mut SolveApp) {
+    app.docs.reverting = false;
+    let Some(path) = app.session.path.clone() else { return };
+    if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return;
+    }
+    if let Err(e) = solidcraft_engine::io::vfs::check(&path) {
+        app.set_status(e.to_string(), true);
+        return;
+    }
+    if !solidcraft_engine::io::vfs::is_file(&path) {
+        app.set_status(format!("{path}: the file is not there to revert to"), true);
+        return;
+    }
+    let active = app.docs.active;
+    close(app, active, true);
+    app.open_path_async(&path);
+}
+
+/// The question File > Revert to Saved asks when the design has unsaved changes.
+fn revert_prompt(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.docs.reverting {
+        return;
+    }
+    let name = tabs_info(app).get(app.docs.active).map(|x| x.0.clone()).unwrap_or_default();
+    let question = solidcraft_ui_text::format("document.revert_changes", &[("name", &crate::i18n::tr_name(&name))]);
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_revert_prompt"), "status_warning", solidcraft_ui_text::tr("ui.revert_question"))
+        .tone(ui_kit::Tone::Warning)
+        .actions(solidcraft_ui_text::tr("ui.revert"), solidcraft_ui_text::tr("ui.cancel"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &question, ui_kit::Text::Report("question", false));
+        });
+    match action {
+        ui_kit::Action::Ok => revert_now(app),
+        ui_kit::Action::Cancel => app.docs.reverting = false,
+        _ if closed => app.docs.reverting = false,
+        _ => {}
+    }
+}
+
 /// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    revert_prompt(app, ctx);
     quit_step(app);
     // Saved, it asks the Capture Position question first (#9736): that question is the one to
     // answer meanwhile, not this one again.
@@ -3378,6 +3708,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     batch_step(app);
 }
 
+/// Whether a tab is waiting for its save before closing.
+pub(crate) fn saving_to_close(app: &SolveApp) -> bool {
+    app.docs.saving
+}
+
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
     // Save asks the Capture Position question first while a move isn't captured (#9736): the
@@ -3422,20 +3757,6 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
-}
-
-/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
-pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
-    std::iter::once(&app.session)
-        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
-        .map(|session| {
-            // The guard reads only paths and links, never model geometry or undo state.
-            let mut copy = Session::default();
-            copy.doc = session.doc.clone();
-            copy.path = session.path.clone();
-            copy
-        })
-        .collect()
 }
 
 /// Files in any open tab, including linked parts, must not disappear underneath it.
@@ -4656,6 +4977,69 @@ mod tests {
         assert_eq!(h.app.docs.count(), 3, "Cancel keeps the remaining tabs");
     }
 
+    /// A design saved to a file, then changed in the app and not saved again.
+    fn saved_then_changed(h: &mut crate::scenario::Harness) -> std::path::PathBuf {
+        let file = h.dir.join("revert.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":6})).unwrap();
+        assert!(h.app.session.is_dirty());
+        file
+    }
+
+    #[test]
+    fn revert_to_saved_asks_first_and_then_brings_back_the_saved_design() {
+        let mut h = crate::scenario::Harness::new();
+        let file = saved_then_changed(&mut h);
+        let saved = std::fs::read(&file).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(h.app.docs.reverting, "unsaved changes are asked about, not dropped");
+        assert_eq!(h.app.session.doc.features.len(), 2, "nothing is reloaded before the answer");
+        revert_now(&mut h.app);
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 1, "the sphere added after the save is gone");
+        assert!(!h.app.session.is_dirty() && !h.app.docs.reverting);
+        assert_eq!(h.app.docs.count(), 1, "the tab was replaced, not joined by a second one");
+        assert_eq!(h.app.session.path.as_deref().map(std::path::Path::new), Some(file.as_path()));
+        assert_eq!(std::fs::read(&file).unwrap(), saved, "reverting never writes the file");
+    }
+
+    #[test]
+    fn revert_to_saved_without_changes_reloads_what_another_program_wrote() {
+        let mut h = crate::scenario::Harness::new();
+        let file = h.dir.join("outside.solidcraft");
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        // Another copy of the app adds a second feature to the same file.
+        let mut other = Session::default();
+        other.execute("doc.open", &json!({"path":file.to_string_lossy()})).unwrap();
+        other.execute("solid.sphere", &json!({"diameter":9})).unwrap();
+        other.execute("file.save_as", &json!({"path":file.to_string_lossy()})).unwrap();
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting, "nothing to lose, so nothing to ask");
+        h.settle();
+        assert_eq!(h.app.session.doc.features.len(), 2);
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
+    #[test]
+    fn revert_to_saved_is_refused_without_a_file_and_keeps_changes_when_the_file_is_gone() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        assert!(!crate::toolbar::FileAction::Revert.enabled(&h.app), "a design with no file has nothing to revert to");
+        crate::toolbar::FileAction::Revert.run(&mut h.app);
+        assert!(!h.app.docs.reverting);
+        let file = saved_then_changed(&mut h);
+        std::fs::remove_file(&file).unwrap();
+        revert_now(&mut h.app);
+        h.settle();
+        let (text, _, error) = h.app.status.clone().expect("a message");
+        assert!(error && text.contains("not there"), "{text}");
+        assert_eq!(h.app.session.doc.features.len(), 3, "the changes are still in the tab");
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
     #[test]
     fn grouped_row_discard_closes_only_its_tab_without_saving() {
         let mut h = crate::scenario::Harness::new();
@@ -4939,6 +5323,125 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// Save in a tab's menu saves that design to its file, from another tab too (it is shown
+    /// first); a design never saved asks where, as File › Save does. Save As always asks, and
+    /// the design then lives in the new file.
+    #[test]
+    fn save_and_save_as_in_a_tabs_menu_save_that_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let first = h.dir.join("first.sc");
+        h.app.run("file.save_as", json!({"path": first})).unwrap();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        assert!(h.app.session.is_dirty());
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 3, "width": 3, "height": 3})).unwrap();
+        h.frames(3);
+        let menu = |h: &mut crate::scenario::Harness, tab: usize, row: &str| {
+            h.step(&json!({"click": {"handle": format!("tab:design:{tab}")}, "button": "right"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": format!("tab_menu:{row}")}})).unwrap();
+            h.frames(2);
+            h.settle();
+        };
+        // Save on the other tab's menu: that design is shown and written to its own file.
+        menu(&mut h, 0, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 0);
+        assert!(!h.app.session.is_dirty(), "saved");
+        assert_eq!(h.app.session.path.as_deref(), first.to_str());
+        let on_disk = std::fs::read(&first).unwrap();
+        // Save on a design never saved asks where (the scenario's picker answers in its folder).
+        menu(&mut h, 1, "ui.saveTab");
+        assert_eq!(h.app.docs.active, 1);
+        assert!(h.app.session.path.is_some() && !h.app.session.is_dirty(), "saved where the picker said");
+        // Save As writes a new file and leaves the old one as it was.
+        let before = h.app.session.path.clone();
+        switch(&mut h.app, 0);
+        h.app.run("component.rename", json!({"component": 0, "name": "Plate Mk2"})).unwrap();
+        switch(&mut h.app, 1);
+        h.frames(2);
+        menu(&mut h, 0, "ui.saveTabAs");
+        assert_eq!(h.app.docs.active, 0);
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Plate Mk2.sc").to_str(), "Save As offers the design's name");
+        assert_eq!(std::fs::read(&first).unwrap(), on_disk, "the first file is kept as it was");
+        switch(&mut h.app, 1);
+        assert_eq!(h.app.session.path, before, "the other design keeps its own file");
+        // Over the start page, Save shows the design before it saves it.
+        h.app.run("solid.box", json!({"length": 4, "width": 4, "height": 4})).unwrap();
+        h.app.home.open = true;
+        h.frames(2);
+        menu(&mut h, 1, "ui.saveTab");
+        assert!(!h.app.home.open, "the start page gives way to the design");
+        assert!(!h.app.session.is_dirty(), "and it is saved");
+    }
+
+    /// The menu's Rename edits the design's name in its tab, as a double-click does; on a tab
+    /// that isn't shown, that design is shown first. Enter keeps the name.
+    #[test]
+    fn rename_in_a_tabs_menu_edits_its_name_in_place() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.docs.active, 1);
+        let other = h.app.docs.slots.first().and_then(Option::as_ref).map(|d| d.session.doc.name.clone()).unwrap();
+        for (tab, name) in [(1, "Bracket"), (0, "Hinge")] {
+            h.step(&json!({"click": {"handle": format!("tab:design:{tab}")}, "button": "right"})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.docs.active, tab, "the renamed design is the one shown");
+            assert!(renaming_tab(&h.app), "its name is being edited in the tab");
+            h.step(&json!({"text": name})).unwrap();
+            h.step(&json!({"key": "Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.session.doc.name, name);
+            assert!(!renaming_tab(&h.app));
+        }
+        // Each rename reached its own design only.
+        let names: Vec<String> = tabs_info(&h.app).into_iter().map(|(name, _)| name).collect();
+        assert_eq!(names, vec!["Hinge".to_string(), "Bracket".to_string()]);
+        assert_ne!(other, "Hinge");
+    }
+
+    /// The menu's Rename is offered whatever the double-click preference says, and Escape keeps
+    /// the old name.
+    #[test]
+    fn rename_in_the_menu_works_with_the_double_click_preference_off() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.tab_double_click_renames = false;
+        h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app));
+        h.step(&json!({"text": "Discarded"})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, before);
+        assert!(!renaming_tab(&h.app));
+        // Over the start page, Rename shows the design and edits its name.
+        h.app.home.open = true;
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "tab_menu:ui.renameTab"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.home.open, "the start page gives way to the design");
+        assert!(renaming_tab(&h.app), "its name is being edited in the tab");
     }
 
     /// Closing a batch through the tab menu must use the same final screen as closing one tab.
@@ -5982,6 +6485,224 @@ mod tests {
         new_tab(&mut a);
         assert_eq!(a.docs.count(), 3);
         assert_eq!(a.docs.active, 2);
+    }
+
+    /// The volume of the shown design's bodies, in mm³.
+    fn shown_volume(a: &mut SolveApp) -> f64 {
+        a.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
+    }
+
+    /// Three sheets in three tabs: a cube of side 10, 20 and 30 mm, each named, as a nesting
+    /// program makes them. Tab order and ids come back with the app.
+    fn three_sheets() -> (SolveApp, Vec<String>) {
+        let mut a = app();
+        let mut ids = Vec::new();
+        for (n, side) in [(1, 10), (2, 20), (3, 30)] {
+            if n == 1 {
+                a.run("file.new", json!({"name": "Sheet 1"})).unwrap();
+            } else {
+                let reply = a.run("file.new", json!({"name": format!("Sheet {n}"), "new_tab": true})).unwrap();
+                assert_eq!(reply["document_id"], json!(a.session.document_id), "the reply names the new design");
+            }
+            a.run("solid.box", json!({"length": side, "width": side, "height": side})).unwrap();
+            ids.push(a.session.document_id.clone());
+        }
+        (a, ids)
+    }
+
+    /// `file.new` with `new_tab` opens a design in a tab of its own, after the active one, and
+    /// shows it: three calls make three tabs with three ids, and the first two keep their contents.
+    #[test]
+    fn file_new_with_new_tab_opens_a_tab_each_time_and_keeps_the_others() {
+        let (mut a, ids) = three_sheets();
+        assert_eq!(a.docs.count(), 3);
+        assert_eq!(a.docs.active, 2, "the new design is the one shown");
+        let distinct: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(distinct.len(), 3, "{ids:?}");
+        for (i, side) in [10.0, 20.0, 30.0].into_iter().enumerate() {
+            switch(&mut a, i);
+            assert_eq!(a.session.document_id, ids[i]);
+            assert_eq!(a.session.doc.name, format!("Sheet {}", i + 1));
+            assert!((shown_volume(&mut a) - side * side * side).abs() < 1e-6, "tab {i}");
+        }
+        assert_eq!(a.docs.count(), 3, "looking at the tabs opens none");
+    }
+
+    /// The new tab is always opened, even where the active design is blank (a launch's untouched
+    /// design stays beside it), and without `new_tab` or with it false `file.new` replaces the
+    /// active design as it always did.
+    #[test]
+    fn file_new_replaces_the_design_unless_it_is_asked_for_a_tab() {
+        let mut a = app();
+        a.run("file.new", json!({"new_tab": true})).unwrap();
+        assert_eq!(a.docs.count(), 2, "the blank design is kept");
+        for params in [json!({}), json!({"name": "Plain"}), json!({"new_tab": false}), json!({"new_tab": null, "name": "Plain"})] {
+            let reply = a.run("file.new", params.clone()).unwrap();
+            assert_eq!(a.docs.count(), 2, "{params}");
+            assert!(reply.get("document_id").is_none(), "no id without a new tab: {reply}");
+        }
+    }
+
+    /// `document.list` says which design is active, in tab order; `document.activate` shows one by
+    /// its id, and the commands after it act on that design.
+    #[test]
+    fn document_list_and_activate_follow_the_tabs() {
+        let (mut a, ids) = three_sheets();
+        let listed = a.run("document.list", json!({})).unwrap();
+        assert_eq!(listed["active_document_id"], json!(ids[2]), "{listed}");
+        let rows = listed["documents"].as_array().unwrap();
+        assert_eq!(rows.iter().map(|r| r["document_id"].clone()).collect::<Vec<_>>(), ids.iter().map(|i| json!(i)).collect::<Vec<_>>());
+        assert_eq!(rows.iter().map(|r| r["name"].clone()).collect::<Vec<_>>(), [json!("Sheet 1"), json!("Sheet 2"), json!("Sheet 3")]);
+        assert_eq!(rows.iter().map(|r| r["active"].clone()).collect::<Vec<_>>(), [json!(false), json!(false), json!(true)]);
+        assert!(rows.iter().all(|r| r["path"].is_null() && r["dirty"] == json!(true)), "{listed}");
+
+        let shown = a.run("document.activate", json!({"document_id": ids[0]})).unwrap();
+        assert_eq!((shown["document_id"].clone(), shown["name"].clone()), (json!(ids[0]), json!("Sheet 1")), "{shown}");
+        assert_eq!((a.docs.active, &a.session.document_id), (0, &ids[0]));
+        assert_eq!(a.run("document.list", json!({})).unwrap()["active_document_id"], json!(ids[0]));
+        // A command acts on the shown design, and only on it.
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [50, 0, 0]})).unwrap();
+        assert!((shown_volume(&mut a) - 1001.0).abs() < 1e-6);
+        switch(&mut a, 1);
+        assert!((shown_volume(&mut a) - 8000.0).abs() < 1e-6, "the other tab is as it was");
+
+        // A name that no open design has changes nothing, and neither does the design already shown.
+        for bad in [json!({"document_id": "no-such-design"}), json!({}), json!({"document_id": ids[0], "index": 1})] {
+            assert!(a.run("document.activate", bad.clone()).is_err(), "{bad}");
+            assert_eq!(a.docs.active, 1, "{bad}");
+        }
+        a.run("document.activate", json!({"document_id": ids[1]})).unwrap();
+        assert_eq!(a.docs.active, 1);
+    }
+
+    /// A caller kept to some folders sees no path for a design saved outside them and cannot show
+    /// it; a design inside them, or one never saved, is listed and shown as before.
+    #[test]
+    fn a_scoped_caller_neither_sees_nor_shows_a_design_from_outside_its_folders() {
+        use solidcraft_engine::io::vfs::{self, PathScope};
+        let base = std::env::temp_dir().join(format!("solidcraft-doc-list-scope-{}", std::process::id()));
+        let (inside, outside) = (base.join("inside"), base.join("outside"));
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let (mine, theirs) = (inside.join("a.solidcraft"), outside.join("b.solidcraft"));
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+
+        let (mut a, ids) = three_sheets();
+        for (i, p) in [(0, &mine), (1, &theirs)] {
+            switch(&mut a, i);
+            a.session.path = Some(text(p));
+        }
+        switch(&mut a, 2);
+
+        let scope = || Some(PathScope::new([inside.clone()]));
+        let listed = vfs::scoped(scope(), || a.run("document.list", json!({}))).unwrap();
+        let rows = listed["documents"].as_array().unwrap();
+        assert_eq!(rows[0]["path"], json!(text(&mine)), "{listed}");
+        assert!(rows[1]["path"].is_null(), "an outside path is not told: {listed}");
+        assert!(rows[2]["path"].is_null(), "{listed}");
+        assert_eq!(rows[1]["document_id"], json!(ids[1]), "the design itself is still listed");
+        assert_eq!(rows[1]["name"], json!("b"), "a saved design is named by its file");
+
+        let refused = vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[1]}))).unwrap_err();
+        assert!(refused.contains("outside the folders this caller may use"), "{refused}");
+        assert!(!refused.contains(&text(&theirs)) && !refused.contains("b.solidcraft"), "the refusal names the hidden path: {refused}");
+        assert_eq!(a.docs.active, 2, "a refused design is not shown");
+        vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[0]}))).unwrap();
+        assert_eq!(a.docs.active, 0);
+        // The unsaved design has no file to refuse, and an unscoped caller is not limited.
+        vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[2]}))).unwrap();
+        a.run("document.activate", json!({"document_id": ids[1]})).unwrap();
+        assert_eq!(a.docs.active, 1);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// While the assistant follows its own conversation's design, another tab is not shown.
+    #[test]
+    fn document_activate_keeps_to_the_design_the_assistant_follows() {
+        let (mut a, ids) = three_sheets();
+        a.agent_chat.following_document = true;
+        assert!(a.run("document.activate", json!({"document_id": ids[0]})).is_err());
+        assert_eq!(a.docs.active, 2);
+        assert!(a.run("document.activate", json!({"document_id": ids[2]})).is_ok(), "the design shown stays shown");
+        a.agent_chat.following_document = false;
+        a.run("document.activate", json!({"document_id": ids[0]})).unwrap();
+        assert_eq!(a.docs.active, 0);
+    }
+
+    /// `doc.open` with `new_tab` opens the file in a tab of its own, keeps the design that was
+    /// open, and a failed open leaves the tabs and the shown design as they were.
+    #[test]
+    fn doc_open_with_new_tab_keeps_the_open_design() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-doc-open-tab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sheet.solidcraft").to_string_lossy().into_owned();
+        let mut saved = Session::default();
+        saved.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        saved.execute("file.save_as", &json!({"path": file})).unwrap();
+
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let first = a.session.document_id.clone();
+        a.run("doc.open", json!({"path": file, "new_tab": true})).unwrap();
+        assert_eq!((a.docs.count(), a.docs.active), (2, 1));
+        assert_eq!(a.session.path.as_deref(), Some(file.as_str()));
+        assert!((shown_volume(&mut a) - 125.0).abs() < 1e-6);
+        switch(&mut a, 0);
+        assert_eq!(a.session.document_id, first);
+        assert!((shown_volume(&mut a) - 1000.0).abs() < 1e-6, "the design that was open is as it was");
+
+        // The file is open in the second tab already: it is shown, not opened a second time.
+        let shown = a.run("doc.open", json!({"path": file, "new_tab": true})).unwrap();
+        assert_eq!((a.docs.count(), a.docs.active), (2, 1), "{shown}");
+        assert_eq!(shown["path"], json!(file));
+        switch(&mut a, 0);
+
+        let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
+        assert!(a.run("doc.open", json!({"path": missing, "new_tab": true})).is_err());
+        assert_eq!((a.docs.count(), a.docs.active), (2, 0), "no stray tab");
+        assert_eq!(a.session.document_id, first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `new_tab` is taken off the parameters only when it is a boolean or null: any other value
+    /// stays, for the engine's contract check to see. `document.list` is told from the commands
+    /// that change the design, in any spelling, so it is not held while a file loads.
+    #[test]
+    fn new_tab_values_and_the_list_request_are_read_exactly() {
+        for (given, taken, kept) in [
+            (json!({"new_tab": true}), true, false),
+            (json!({"new_tab": false}), false, false),
+            (json!({"new_tab": null}), false, false),
+            (json!({"new_tab": "yes"}), false, true),
+            (json!({"new_tab": 1}), false, true),
+            (json!({}), false, false),
+        ] {
+            let mut params = given.clone();
+            assert_eq!(take_new_tab(&mut params), taken, "{given}");
+            assert_eq!(params.get("new_tab").is_some(), kept, "{given}");
+        }
+        let request = |method: &str, params: Value| crate::ControlRequest::new(method, params).0;
+        assert!(crate::control_job::lists_designs(&request("engine.execute", json!({"command": "document.list"}))));
+        assert!(crate::control_job::lists_designs(&request("command", json!({"id": "DOCUMENT.LIST", "params": null}))));
+        assert!(!crate::control_job::lists_designs(&request("engine.execute", json!({"command": "document.activate"}))));
+        assert!(!crate::control_job::lists_designs(&request("engine.execute", json!({"command": "file.new"}))));
+        assert!(!crate::control_job::lists_designs(&request("document.inspect", json!({}))));
+    }
+
+    /// The tabs are the window's: a batch or a script that opens or shows one would roll back, or
+    /// go on, in the wrong design, so they are refused as the other tab switches are.
+    #[test]
+    fn a_batch_may_not_open_or_show_a_design() {
+        let (a, ids) = three_sheets();
+        for step in
+            [json!({"command": "file.new", "params": {"new_tab": true}}), json!({"command": "document.activate", "params": {"document_id": ids[0]}})]
+        {
+            assert!(crate::control::batch_refusal(std::slice::from_ref(&step)).is_some(), "{step}");
+        }
+        for step in [json!({"command": "file.new", "params": {"new_tab": false}}), json!({"command": "document.list"})] {
+            assert!(crate::control::batch_refusal(std::slice::from_ref(&step)).is_none(), "{step}");
+        }
+        assert_eq!(a.docs.count(), 3);
     }
 
     /// Quitting asks once per design with unsaved changes: Don't Save moves on (and keeps no

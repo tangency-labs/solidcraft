@@ -184,26 +184,6 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     naming: NamingScheme::Unknown,
 };
 
-/// The replayed model of a case: the Rust B-rep as validation receives it, mutations
-/// applied (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` when it does
-/// not build.
-///
-/// # Errors
-///
-/// A [`HarnessError`] for inputs that do not parse, are outside the contract, or a source
-/// the harness cannot read.
-pub fn scene(case: &Case) -> Result<Option<Brep>, HarnessError> {
-    let i: Inputs = case.parse()?;
-    if !in_contract(&i) {
-        return Err(herr("invalid argument: invalid B-rep validation arguments"));
-    }
-    let Ok(mut b) = own_brep(&i)? else {
-        return Ok(None);
-    };
-    mutate(&mut b, &i)?;
-    Ok(Some(b))
-}
-
 /// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
 /// ([`crate::own_builder`], and the `SmBrepConstructor` sheet grids `grid_faces` and
 /// `shared_boundaries` through [`sheet_grid`], in the shim's call order) or, for an `.smb`
@@ -459,7 +439,7 @@ impl UnitDiff for Runner {
         let run =
             validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
         let status = match run {
-            Ok(x) => x,
+            Ok(x) => crate::output::pointer_check_status(x),
             Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         };
         output(&rust_protocol(&b, status, &reports)?)

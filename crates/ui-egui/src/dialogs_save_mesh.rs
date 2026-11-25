@@ -1,7 +1,8 @@
 //! The Save as mesh dialog (`file.save_mesh`): which bodies and the mesh format, then a file dialog.
-//! Send to Slicer (`file.send_to_slicer`) shares the dialog without the format and with a slicer to
-//! send the bodies to: it always asks, and pre-selects the slicer used last time. The list also has
-//! a plain text row for EasyPrint (`file.open_in_easyprint`), which works in a browser too.
+//! Send to Slicer (`file.send_to_slicer`) shares the dialog with a slicer to send the bodies to: it
+//! pre-selects the slicer used last time and its default format (such as STL for ChiTuBox or 3MF
+//! for PrusaSlicer). The list also has a plain text row for EasyPrint (`file.open_in_easyprint`,
+//! which works in a browser too and sends 3MF).
 //!
 //! Send to Slicer also has a Print face input (#8429): it shows the print face of each body being
 //! sent, takes a flat face picked in the viewport as its body's print face (in place of the one it
@@ -45,7 +46,7 @@ const MAX_CUSTOM: usize = 24;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
     format: usize,
-    /// Send to Slicer: only the bodies and the slicer are asked.
+    /// Send to Slicer: bodies, slicer and format are asked (no quality row).
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
     quality: usize,
@@ -376,6 +377,22 @@ fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]
     k.shown = Some((bodies, current));
 }
 
+/// Preselect the preferred mesh format for the active slicer.
+fn preselect_format(k: &mut SaveMesh, entries: &[Entry]) {
+    if k.slicer == EASYPRINT {
+        if let Some(pos) = FORMATS.iter().position(|f| f.1 == "3mf") {
+            k.format = pos;
+        }
+        return;
+    }
+    if let Some(entry) = entries.iter().find(|e| e.key == k.slicer) {
+        let default_fmt = entry.slicer.target().default_format;
+        if let Some(pos) = FORMATS.iter().position(|f| f.1 == default_fmt) {
+            k.format = pos;
+        }
+    }
+}
+
 /// The rows after the Bodies input; true when Enter was pressed in a field.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
     if k.open {
@@ -412,18 +429,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
                 .or_else(|| easyprint.then(|| EASYPRINT.to_string()))
                 .unwrap_or_default()
         };
+        preselect_format(k, &entries);
     }
 
     form_row(ui, "Slicer", |ui| {
         if let Some(path) = app.slicer_menu.picked.take() {
             match add_custom(app, &path) {
-                Ok(()) => k.slicer = path,
+                Ok(()) => {
+                    k.slicer = path;
+                    preselect_format(k, &app.slicer_menu.entries());
+                }
                 Err(e) => app.set_status(e, true),
             }
         }
         let choosing = app.file_picker_busy();
         ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
     });
+    if k.slicer != EASYPRINT {
+        choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
+    }
     false
 }
 
@@ -524,14 +548,18 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
         let at = egui::Rect::from_min_size(rect.left_center() + vec2(ui.spacing().button_padding.x + 1.0, -ICON / 2.0), vec2(ICON, ICON));
         paint_icon(ui, at, tex, &e.slicer.name);
     }
-    if let Some(key) = chosen {
+    if let Some(key) = chosen
+        && k.slicer != key
+    {
         k.slicer = key;
+        preselect_format(k, &entries);
     }
     if let Some(key) = delete {
         app.preferences.custom_slicers.retain(|p| *p != key);
         app.slicer_menu.set_custom(&app.preferences.custom_slicers);
         if k.slicer == key {
             k.slicer = app.slicer_menu.entries().first().map(|e| e.key.clone()).unwrap_or_default();
+            preselect_format(k, &app.slicer_menu.entries());
         }
     }
     if pick_custom {
@@ -571,8 +599,8 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         if k.slicer.is_empty() {
             return Err(solidcraft_ui_text::tr("ui.save_mesh_no_slicer_open").into());
         }
-        p["format"] = json!("3mf");
         if k.slicer == EASYPRINT {
+            p["format"] = json!("3mf");
             return Ok(vec![("file.open_in_easyprint".into(), p)]);
         }
         p["slicer"] = json!(k.slicer);
@@ -610,8 +638,9 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
         return Ok(());
     }
     let (format, ext) = FORMATS.get(k.format).map_or(("stl", "stl"), |f| (f.1, f.2));
-    let body = crate::selection::items(inputs, 0).body_names().into_iter().next();
-    let name = crate::export_name::offered(app, body.as_deref(), body.as_deref().unwrap_or(&app.session.doc.name));
+    let bodies = crate::selection::items(inputs, 0).body_names();
+    let default_name = crate::export_name::default_for_bodies(app, &bodies);
+    let name = crate::export_name::offered(app, bodies.first().map(String::as_str), &default_name);
     app.preferences.save_mesh_format = format.into();
     app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
@@ -636,7 +665,13 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 fn report(app: &mut SolveApp, result: &Value) {
     let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
     let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
-    let skipped_suffix = if skipped.is_empty() { String::new() } else { format!(" (skipped {})", skipped.join(", ")) };
+    // Bodies left out of the file: said plainly, naming each one, in a warning that stays until it is dismissed.
+    let skipped_suffix = if skipped.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", solidcraft_ui_text::format("ui.export_skipped", &[("bodies", &skipped.join(", "))]))
+    };
+    let say = |app: &mut SolveApp, line: String| if skipped.is_empty() { app.set_status(line, false) } else { app.set_status_sticky(line) };
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
@@ -657,12 +692,12 @@ fn report(app: &mut SolveApp, result: &Value) {
                 if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
                     line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
                 }
-                app.set_status(line, false);
+                say(app, line);
             }
             None => {
                 let saved = solidcraft_ui_text::format("ui.saved_to", &[("path", path)]);
                 let line = if skipped_suffix.is_empty() { saved } else { format!("{saved}{skipped_suffix}") };
-                app.set_status(line, false);
+                say(app, line);
             }
         },
     }
@@ -959,13 +994,24 @@ mod tests {
     }
 
     #[test]
-    fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+    fn send_to_slicer_asks_for_bodies_and_a_slicer_and_uses_chosen_format() {
+        let k = SaveMesh { format: 1, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
         let cmds = commands(&k, std::slice::from_ref(&input)).unwrap();
         assert_eq!(cmds, [("file.send_to_slicer".to_string(), json!({"slicer": "prusa", "bodies": ["Part"], "format": "3mf"}))]);
+
+        // When format 0 (STL) is chosen, file.send_to_slicer sends STL.
+        let k_stl = SaveMesh { format: 0, ..k.clone() };
+        let cmds_stl = commands(&k_stl, std::slice::from_ref(&input)).unwrap();
+        assert_eq!(cmds_stl, [("file.send_to_slicer".to_string(), json!({"slicer": "prusa", "bodies": ["Part"], "format": "stl"}))]);
+
+        // EasyPrint always sends 3mf regardless of k.format
+        let k_ep = SaveMesh { slicer: EASYPRINT.into(), format: 0, ..k.clone() };
+        let cmds_ep = commands(&k_ep, std::slice::from_ref(&input)).unwrap();
+        assert_eq!(cmds_ep, [("file.open_in_easyprint".to_string(), json!({"bodies": ["Part"], "format": "3mf"}))]);
+
         // Save as mesh is a plain export in the chosen format: no slicer in it, whatever was set.
         let save = SaveMesh { format: 2, open: false, slicer: "prusa".into(), ..k.clone() };
         let (id, p) = commands(&save, std::slice::from_ref(&input)).unwrap().remove(0);
@@ -973,6 +1019,29 @@ mod tests {
         assert_eq!(button(&save), "Save");
         assert_eq!(button(&k), "Send");
         assert!(commands(&SaveMesh { slicer: String::new(), ..k }, &[input]).is_err());
+    }
+
+    #[test]
+    fn preselect_format_defaults_to_stl_for_chitubox_and_3mf_for_prusa() {
+        let chitubox =
+            slicers::Slicer { id: "chitubox".into(), name: "ChiTuBox".into(), command: vec!["chitubox".into()], icon: None, prusa_major: None };
+        let prusa =
+            slicers::Slicer { id: "prusa".into(), name: "PrusaSlicer".into(), command: vec!["prusa-slicer".into()], icon: None, prusa_major: None };
+        let entries =
+            vec![Entry { key: "chitubox".into(), slicer: chitubox, user: false }, Entry { key: "prusa".into(), slicer: prusa, user: false }];
+        let mut k = SaveMesh { format: 1, quality: 0, open: true, slicer: "chitubox".into(), stale: false, shown: None };
+        preselect_format(&mut k, &entries);
+        assert_eq!(k.format, 0, "ChiTuBox should default to STL (index 0)");
+        assert_eq!(k.format_name(), "stl");
+
+        k.slicer = "prusa".into();
+        preselect_format(&mut k, &entries);
+        assert_eq!(k.format, 1, "PrusaSlicer should default to 3MF (index 1)");
+        assert_eq!(k.format_name(), "3mf");
+
+        k.slicer = EASYPRINT.into();
+        preselect_format(&mut k, &entries);
+        assert_eq!(k.format, 1, "EasyPrint should preselect 3MF");
     }
 
     #[test]
@@ -987,8 +1056,8 @@ mod tests {
     }
 
     /// The Export file name preference names the file every export offers: File › Export, Save As
-    /// Mesh and a body's right-click Export…. Left empty, File › Export offers the design's name and
-    /// the other two the body's, as before.
+    /// Mesh and a body's right-click Export…. With no template, a whole-design export offers the
+    /// design name; the `{body}` template still offers the body name (#18244).
     #[test]
     fn exports_offer_the_name_the_export_file_name_preference_makes() {
         let mut h = crate::scenario::Harness::new();
@@ -1018,7 +1087,10 @@ mod tests {
             h.settle();
             offered.borrow_mut().drain(..).collect::<Vec<_>>()
         };
-        assert_eq!(offer(&mut h), ["Bracket.step", "Base.stl", "Base.step"], "an empty template offers the old names");
+        assert_eq!(offer(&mut h), ["Bracket.step", "Bracket.stl", "Bracket.step"], "a single-body design uses its design name");
+
+        h.app.preferences.export_name = "{body}".into();
+        assert_eq!(offer(&mut h), ["Base.step", "Base.stl", "Base.step"], "the old naming stays available");
 
         h.app.preferences.export_name = "{design}-{body}".into();
         assert_eq!(offer(&mut h), ["Bracket-Base.step", "Bracket-Base.stl", "Bracket-Base.step"]);
@@ -1028,6 +1100,24 @@ mod tests {
         h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
         h.app.preferences.export_name = "{part_number}_rev{revision}".into();
         assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl", "RV-102_revC.step"]);
+    }
+
+    /// A picked body of a multi-body design keeps its own name; selecting every body uses
+    /// the design's name. The template always overrides both defaults.
+    #[test]
+    fn mesh_export_names_a_subset_differently_from_the_whole_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Base"})).unwrap();
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4,"corner":[10,0,0],"operation":"new_body","body_name":"Lid"})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        let base = vec!["Base".to_string()];
+        let both = vec!["Base".to_string(), "Lid".to_string()];
+        assert_eq!(crate::export_name::default_for_bodies(&h.app, &base), "Base");
+        assert_eq!(crate::export_name::default_for_bodies(&h.app, &both), "Bracket");
+        assert_eq!(crate::export_name::default_for_bodies(&h.app, &[]), "Bracket");
+        h.app.preferences.export_name = "{body}".into();
+        let default_name = crate::export_name::default_for_bodies(&h.app, &both);
+        assert_eq!(crate::export_name::offered(&h.app, Some("Base"), &default_name), "Base");
     }
 
     #[test]
@@ -1126,7 +1216,10 @@ mod tests {
         report(&mut h.app, &result);
         let status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
         assert!(status.contains("BrokenSliver"), "{status}");
-        assert!(status.contains("skipped"), "{status}");
+        assert!(status.contains("could not be meshed"), "{status}");
+        // A warning that stays until it is dismissed, not a status that goes after a few seconds.
+        let at = h.app.status.as_ref().map(|s| s.1);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.2) && h.app.status_sticky_at == at, "{:?}", h.app.status);
 
         let slicer_result = json!({
             "path": "/tmp/out.3mf",
@@ -1136,6 +1229,24 @@ mod tests {
         report(&mut h.app, &slicer_result);
         let slicer_status = h.app.status.as_ref().map(|s| s.0.as_str()).unwrap_or_default();
         assert!(slicer_status.contains("BrokenSliver"), "{slicer_status}");
-        assert!(slicer_status.contains("skipped"), "{slicer_status}");
+        assert!(slicer_status.contains("could not be meshed"), "{slicer_status}");
+
+        // Nothing skipped: the plain, passing message.
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| !s.2) && h.app.status_sticky_at != h.app.status.as_ref().map(|s| s.1));
+    }
+
+    /// The toast of a skipped body is still up after the usual time, and goes when it is dismissed.
+    #[test]
+    fn the_skipped_body_toast_stays_until_dismissed() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        report(&mut h.app, &json!({"path": "/tmp/out.3mf", "skipped": ["BrokenSliver"]}));
+        let text = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        let old = crate::now_ms() - 60_000.0;
+        h.app.status = h.app.status.take().map(|(t, _, e)| (t, old, e));
+        h.app.status_sticky_at = Some(old);
+        h.frames(3);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0 == text), "a minute later the warning is still shown");
     }
 }

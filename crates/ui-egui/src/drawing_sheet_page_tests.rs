@@ -6,6 +6,14 @@ use solidcraft_engine::{Sel, geom::Loop2Geom};
 use super::*;
 use crate::scenario::Harness;
 
+/// One frame of `ctx` outside the harness. Its texture changes (glyphs, sheet pictures) have no
+/// renderer here, so they are taken as applied: egui checks that none are dropped unhandled.
+fn frame_on(ctx: &egui::Context, input: egui::RawInput, ui: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+    let mut out = ctx.run_ui(input, ui);
+    out.textures_delta.clear();
+    out
+}
+
 #[test]
 fn cell_fit_keeps_paper_inside_tiny_and_odd_cells_and_preserves_manual_framing() {
     let paper = Vec2::new(420.0, 297.0);
@@ -60,7 +68,7 @@ fn sheet_page_cameras_are_independent_and_passive_paint_restores_the_command_rec
     let doc = h.app.session.doc.clone();
     let undo = h.app.session.undo.len();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), ..Default::default() }, |ui| {
         for id in [first, second] {
             ui.push_id(id, |ui| {
                 crate::documents::with_view_look(&mut h.app, id, |app| {
@@ -136,7 +144,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
     let ctx = h.ctx.clone();
     let canvas = Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0));
     let mut frame = |time, events| {
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
         });
         assert_eq!(h.app.session.selection, selection, "a passive drawing cannot prune the focused drawing's pick");
@@ -153,7 +161,7 @@ fn passive_sheet_wheel_keeps_the_focused_other_drawings_annotation_selected() {
             phase: egui::TouchPhase::Move,
         },
     ];
-    let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
+    let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(1.0 / 60.0), events, ..Default::default() }, |ui| {
         ui.push_id(second, |ui| assert!(show_view(&mut h.app, ui, second)));
     });
     assert_ne!(h.app.drawing_workspace.pages.get(&second).unwrap().scale, before, "the passive wheel actually runs camera navigation");
@@ -269,7 +277,8 @@ fn inactive_child_sheet_scope_restores_picks_focus_and_history_but_targeted_comm
     let receiver = (h.app.session.open_drawing, h.app.session.model_focus, h.app.session.history_part());
     let focus = h.app.session.view_context.clone();
     let ctx = h.ctx.clone();
-    let _ = ctx.run_ui(
+    let _ = frame_on(
+        &ctx,
         egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(900.0, 600.0))), focused: false, ..Default::default() },
         |ui| {
             crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
@@ -805,6 +814,42 @@ fn double_click_edits_a_title_block_cells_text_in_place() {
     assert!(!crate::dim_view::editing(), "the projection symbol has no text");
 }
 
+/// ISO 7200's cells (#20121) are edited where the others are: a double-click on each of the six opens
+/// the box, and Enter types the text over the cell, which shows it on the sheet.
+#[test]
+fn double_click_edits_each_iso_7200_cell_in_place() {
+    let (mut h, _) = plate_sheet();
+    for (name, text) in [
+        ("scale", "NTS"),
+        ("document_type", "Fabrication drawing"),
+        ("document_status", "Released"),
+        ("language", "DE"),
+        ("revision", "C"),
+        ("department", "Sheet metal"),
+    ] {
+        let at = {
+            let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+            let record = &drawing.sheets[0];
+            let (block, placed) = (record.title_block.as_ref().unwrap(), record.title_block_layout().unwrap().unwrap());
+            let i = block.cells.iter().position(|cell| cell.name == name).unwrap();
+            let rect = placed.cells[i].rect;
+            let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+            let (x, y) = ((rect.min.x + rect.max.x) / 2.0, (rect.min.y + rect.max.y) / 2.0);
+            [paper.left() + paper.width() * x as f32 / 420.0, paper.bottom() - paper.height() * y as f32 / 297.0]
+        };
+        h.step(&json!({"click": at, "double": true})).unwrap();
+        h.frames(4);
+        assert!(crate::dim_view::editing(), "the double-click opens the box on the {name} cell");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": text})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(4);
+        assert!(!crate::dim_view::editing());
+        let typed = h.app.session.drawing("drawing.inspect").unwrap().sheets[0].title_block_overrides.get(name).cloned();
+        assert_eq!(typed.as_deref(), Some(text), "{name}");
+    }
+}
+
 /// A view just placed says so before its lines arrive: it is listed as waiting and shows its box
 /// with Projecting…, and that goes once it is drawn. Placing the standard views and drawing them
 /// evaluates the model no more times than it was evaluated before.
@@ -1049,6 +1094,36 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
+/// #21034: the curve where two corner fillets meet is neither a line nor a face-on circle, and the
+/// engine measures neither a length nor a size for it. The tool says so and picks nothing, rather
+/// than sending a length the engine refuses. A 30×20×10 box, 1:1 front view centred at (140, 180):
+/// the curve's point (0.586, 0.586, 9.414) is on paper at (125.586, 184.414).
+#[test]
+fn dimension_tool_refuses_a_curve_it_cannot_dimension_with_a_reason() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 30, "width": 20, "height": 10, "body_name": "Block"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[15, 0, 10], [0, 10, 10]], "radius": 2, "tangent_chain": false})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:1", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [125.586, 184.414], "band_mm": 0.3})).unwrap();
+    assert_eq!(line["line"]["source"]["kind"], "edge", "{line}");
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 125.586, 184.414);
+    use crate::drawing_workspace::dimension::picked_shapes;
+    assert!(picked_shapes(&h.app).is_empty(), "{:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("can't be dimensioned"), "{status}");
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing is placed");
+}
+
 /// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
 /// its two outline lines (silhouettes, not edges) run from x = 115 to 165 at y = 177 and 183, and its
 /// ends, circles seen edge on, are the edges x = 115 and x = 165. The Dimension tool is on.
@@ -1108,18 +1183,43 @@ fn dimension_tool_dimensions_a_cylinders_diameter_from_its_two_outlines() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
-/// An outline line and an edge measure nothing the drawing has a dimension for, so the click after
-/// them adds nothing: the rod's outline, then its left end.
+/// An outline line and an edge measure nothing the drawing has a dimension for: the second pick is
+/// refused with a reason, the first kept, and no place on the sheet is asked for (#20181). The rod's
+/// outline, then its left end.
 #[test]
-fn dimension_tool_adds_nothing_for_an_outline_and_an_edge() {
+fn dimension_tool_refuses_an_outline_and_an_edge_saying_why() {
     use crate::drawing_workspace::dimension::{Shape, picked_shapes};
     let mut h = rod_dimensioning();
     let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
     click_paper(&mut h, 140.0, 183.0);
     click_paper(&mut h, 115.0, 180.0);
-    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_)]), "only the outline stays picked: {:?}", picked_shapes(&h.app));
+    let status = h.app.status.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+    assert_eq!(status, solidcraft_ui_text::tr("ui.drawing_dimension_tool.measures_nothing"));
     click_paper(&mut h, 100.0, 180.0);
-    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing added");
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before + 1, "the outline alone still places its Ø");
+}
+
+/// A Ø between a cylinder's outline lines goes past one of its ends: with the pointer inside the
+/// rod's length, the tool says so before the click, in the engine's words without the command's
+/// name, rather than showing nothing (#20181).
+#[test]
+fn dimension_tool_says_why_it_cannot_place_before_the_click() {
+    use crate::drawing_workspace::dimension::refusal;
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    h.step(&json!({"move": [paper.left() + paper.width() * 140.0 / 420.0, paper.bottom() - paper.height() * 190.0 / 297.0]})).unwrap();
+    h.frames(2);
+    let why = refusal(&h.app).map(str::to_owned).unwrap_or_default();
+    assert!(why.contains("past one of them") && !why.contains("drawing.dimension.add"), "{why:?}");
+    // Past the left end it places, and the reason is gone.
+    h.step(&json!({"move": [paper.left() + paper.width() * 100.0 / 420.0, paper.bottom() - paper.height() * 180.0 / 297.0]})).unwrap();
+    h.frames(2);
+    assert_eq!(refusal(&h.app), None);
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before + 1);
 }
 
 /// Esc drops the tool's picks first and keeps the tool, as in a sketch; the next Esc leaves it.
@@ -1885,7 +1985,7 @@ fn panning_a_tiny_fitted_sheet_keeps_its_zoom_on_the_next_frame() {
     let mut time = 0.0;
     let mut frame = |app: &mut crate::SolveApp, events| {
         time += 1.0 / 60.0;
-        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
+        let _ = frame_on(&ctx, egui::RawInput { screen_rect: Some(canvas), focused: true, time: Some(time), events, ..Default::default() }, |ui| {
             assert!(show_view(app, ui, id));
         });
     };
@@ -2208,7 +2308,7 @@ fn picture_scene(source: u64, rect: Aabb2, opacity: f64, clip: Option<Clip>) -> 
 fn painted(ctx: &egui::Context, marks: &Marks, pictures: &PictureTextures) -> Vec<egui::epaint::ClippedShape> {
     let at = OnScreen { centre: Pos2::ZERO, target: Vec2::ZERO, scale: 10.0 };
     let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
-    ctx.run_ui(egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
+    frame_on(ctx, egui::RawInput::default(), |ui| marks.paint(ui.painter(), &at, visible, Color32::BLACK, 1.0, pictures)).shapes
 }
 
 /// Each text shape's words in `shapes`.
@@ -2392,7 +2492,7 @@ fn fills_and_pictures_paint_in_the_scenes_order() {
 fn picture_upload_timing() {
     let ctx = egui::Context::default();
     // A desktop GPU's largest side, so the 16 Mpx picture is one texture, as `sync` is told.
-    let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
+    let _ = frame_on(&ctx, egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
     for (w, h) in [(4096u32, 4096u32), (1181, 945)] {
         let p = hand_picture(1, w, h, true, None);
         let start = std::time::Instant::now();
@@ -2417,6 +2517,7 @@ fn picture_upload_timing() {
             }
             println!("  meshes, clip {clip:?}: {:.2} us a frame", start.elapsed().as_secs_f64() * 1e4);
         }
+        let _ = frame_on(&ctx, egui::RawInput::default(), |_| {});
     }
 }
 
@@ -2516,4 +2617,88 @@ fn offscreen_arrow_tracks_the_edge_and_hides_when_paper_is_visible() {
 
     assert!(offscreen_arrow(area, sheet_at(260.0, 120.0), 20.0).is_none());
     assert!(offscreen_arrow(area, sheet_at(350.0, 120.0), 110.0).is_none());
+}
+
+/// Every path's points in `shapes`, in paint order: a stroked line or outline.
+fn paths(shapes: &[egui::epaint::ClippedShape]) -> Vec<Vec<Pos2>> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<Vec<Pos2>>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            egui::Shape::Path(path) => out.push(path.points.clone()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+    out
+}
+
+/// A drag shows a view where it goes with its own lines, but a detail view's callout on the parent (its
+/// outline and letter) stays: the preview of the moving view leaves it out, while lighting the same
+/// view for a hover still draws it (#20981).
+#[test]
+fn a_drags_preview_leaves_a_details_callout_where_it_is() {
+    let line =
+        Item::Stroke { path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }], closed: false, width_mm: 0.35, pattern: None };
+    let ring = Item::Stroke {
+        path: vec![Seg2::Arc { center: Vec2::new(50.0, 50.0), radius: 5.0, start: 0.0, sweep: std::f64::consts::TAU }],
+        closed: true,
+        width_mm: 0.18,
+        pattern: None,
+    };
+    let groups =
+        vec![Group { object: 2, kind: ObjectKind::View, items: vec![line] }, Group { object: 2, kind: ObjectKind::ViewLabel, items: vec![ring] }];
+    let scene = Scene { size_mm: Vec2::new(100.0, 100.0), groups, fonts: Vec::new(), clips: Vec::new() };
+    let marks = Marks::of(&scene, 1, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ctx = egui::Context::default();
+    let pictures = PictureTextures::default();
+    let visible = Aabb2 { min: Vec2::new(-1e3, -1e3), max: Vec2::new(1e3, 1e3) };
+    // The preview's camera: the view 30 mm to the right, as the drag's offset shifts the paper.
+    let shifted = OnScreen { centre: Pos2::ZERO, target: Vec2::new(-30.0, 0.0), scale: 10.0 };
+    let run = |paint: &dyn Fn(&egui::Painter)| frame_on(&ctx, egui::RawInput::default(), |ui| paint(ui.painter())).shapes;
+    let moving = run(&|painter| marks.paint_moving(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
+    let drawn = paths(&moving);
+    assert_eq!(drawn.len(), 1, "only the view's own line moves, not the callout: {drawn:?}");
+    assert!(drawn[0].iter().all(|p| p.y.abs() < 1e-3), "it is the view's line: {drawn:?}");
+    let lit = run(&|painter| marks.paint_lit(painter, &shifted, visible, 1.0, &pictures, &[2], Color32::RED));
+    assert_eq!(paths(&lit).len(), 2, "a lit detail still shows its callout");
+}
+
+/// Dragging a detail view moves the detail and leaves its callout on the parent where it was, in the
+/// scene the sheet draws after the release (#20981).
+#[test]
+fn dragging_a_detail_view_leaves_its_callout_in_place() {
+    use solidcraft_engine::Sel;
+    let (mut h, front) = plate_sheet();
+    let made = h
+        .app
+        .run(
+            "drawing.view.detail",
+            json!({"parent": front, "boundary_mm": {"circle": {"centre": [140, 180], "radius": 10}}, "place": {"at": [300, 100]}}),
+        )
+        .unwrap();
+    let detail = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    let sheet = crate::drawing_sheet_page::active_sheet(&h.app).unwrap();
+    let callout = |h: &mut Harness| {
+        let scene = drawing_scene::extract(&mut h.app.session, sheet).unwrap().scene;
+        let found = scene
+            .groups
+            .iter()
+            .find(|g| g.object == detail && g.kind == ObjectKind::ViewLabel && g.items.iter().any(|i| matches!(i, Item::Stroke { .. })));
+        format!("{:?}", found.map(|g| &g.items))
+    };
+    let before = callout(&mut h);
+    assert!(before.contains("Stroke"), "the callout is drawn: {before}");
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    h.app.session.selection = vec![Sel::Drawing { drawing: drawing.id, object: detail }];
+    let from = drawing.view_centre(detail).unwrap();
+    let by = Vec2::new(-40.0, 30.0);
+    h.step(&json!({"drag": [on_screen(from.x, from.y), on_screen(from.x + by.x, from.y + by.y)], "steps": 6})).unwrap();
+    h.frames(2);
+    let after = h.app.session.drawing("drawing.inspect").unwrap().view_centre(detail).unwrap();
+    let moved = after - from;
+    assert!((moved.x - by.x).abs() < 1.0 && (moved.y - by.y).abs() < 1.0, "the detail moved by {moved:?}, not {by:?}");
+    assert_eq!(callout(&mut h), before, "the callout stays where it was");
 }

@@ -153,14 +153,22 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let waited_ms = waited.elapsed().as_secs_f64() * 1000.0;
 
     // Mesh bodies are not intersected: say so, rather than let `count: 0` read as "no overlap".
-    let mut unchecked: Vec<PlacedUnchecked> =
-        meshes_left.iter().map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string() })).collect();
+    let mut unchecked: Vec<PlacedUnchecked> = meshes_left
+        .iter()
+        .map(|b| placed(Unchecked { a: b.name.clone(), b: None, reason: MESH_NOT_CHECKED.to_string(), distance_mm: None, exact: None }))
+        .collect();
     let (mut hits, mut timed) = (Vec::new(), Vec::new());
     let (mut not_checked, mut boolean_ms, mut tessellate_ms) = (0usize, 0.0, 0.0);
     for ((a, b), d) in done {
         let Some(d) = d else {
             not_checked += 1;
-            unchecked.push(placed(Unchecked { a, b: Some(b), reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)") }));
+            unchecked.push(placed(Unchecked {
+                a,
+                b: Some(b),
+                reason: format!("not checked: the time budget of {budget_s} s ran out (budget_s)"),
+                distance_mm: None,
+                exact: None,
+            }));
             continue;
         };
         boolean_ms += d.kernel.boolean_ms;
@@ -176,7 +184,7 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         match d.outcome {
             Outcome::Hit(overlap) => hits.push(PlacedOverlap { a_part: place(&overlap.a), b_part: place(&overlap.b), overlap }),
             Outcome::Clear => {}
-            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason })),
+            Outcome::Unchecked(reason) => unchecked.push(placed(Unchecked { a, b: Some(b), reason, distance_mm: None, exact: None })),
         }
     }
     // A timing profile of the command (`--profile`) counts the kernel time the workers spent,
@@ -225,8 +233,13 @@ fn check(job: &Job) -> Done {
 
 fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
-    // A pair whose shared part can't be worked out is reported, not passed as clear.
-    let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
+    // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
+    // check of the shared part runs here: a part it refuses is reported, not measured.
+    let shared = match solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+        solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect)
+    })
+    .0
+    {
         Ok(Some(o)) => o,
         Ok(None) => return Outcome::Clear,
         Err(e) => return Outcome::Unchecked(e.to_string()),
