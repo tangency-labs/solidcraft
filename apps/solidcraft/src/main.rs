@@ -2048,7 +2048,7 @@ fn main() -> eframe::Result {
             // macOS: AppKit must not move the window from a press on a tab or a bar button.
             #[cfg(target_os = "macos")]
             if !native_titlebar_macos::install(cc) {
-                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
+                solidcraft_engine::note!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;

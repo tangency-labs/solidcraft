@@ -33,6 +33,11 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
 /// Ask for the design a linked component shows instead: in all its placements, or with
 /// `occurrence` in that one only.
 pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>) {
+    start_with(app, component, occurrence, false);
+}
+
+/// `start`; with `sync` the bodies take the new source's names (#16711).
+pub(crate) fn start_with(app: &mut SolveApp, component: u64, occurrence: Option<u64>, sync: bool) {
     if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
@@ -57,6 +62,9 @@ pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>)
         let mut params = json!({"component": component, "path": path});
         if let Some(occurrence) = occurrence {
             params["occurrence"] = json!(occurrence);
+        }
+        if sync {
+            params["names"] = json!("sync");
         }
         let relinked = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", params));
         if let Ok(result) = relinked {
@@ -1369,6 +1377,53 @@ mod tests {
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));
         let _ = std::fs::remove_dir_all(folder);
     }
+
+    /// #16711: Relink Source and Use Its Names takes the new source's body names; Relink Source keeps them.
+    #[test]
+    fn relink_source_and_use_its_names_takes_the_new_sources_body_names() {
+        let (mut app, component, _, folder, _) = fixture("names");
+        let named = folder.join("named.solidcraft");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30, "body_name": "Plate"})).unwrap();
+        part.execute("file.save", &json!({"path": named})).unwrap();
+        let names = |app: &SolveApp| -> Vec<String> {
+            app.session.model.state().bodies.iter().filter(|b| b.component == component).map(|b| b.name.clone()).collect()
+        };
+        let before = names(&app);
+        assert!(!before.contains(&"Plate".to_string()));
+        let rows = context_menu::entries(&app, &Target::Component { id: component });
+        fn find<'a>(rows: &'a [crate::ui_kit::Item], id: &str) -> Option<&'a crate::ui_kit::Item> {
+            rows.iter().find_map(|i| if i.id == id { Some(i) } else { find(&i.children, id) })
+        }
+        let item = find(&rows, "ui.relinkSourceNames").expect("the row");
+        assert_eq!(item.params, Some(json!({"component": component})));
+        answer(&mut app, Some(named.to_string_lossy().into_owned()));
+        start(&mut app, component, None);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        assert_eq!(names(&app), before, "Relink Source keeps the names");
+        app.run("edit.undo", json!({})).unwrap();
+        answer(&mut app, Some(named.to_string_lossy().into_owned()));
+        context_menu::run_item(&mut app, item, egui::Pos2::ZERO);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        assert_eq!(names(&app), ["Plate"]);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// The component menu is a fixed 250 pt column that cuts a long label with an ellipsis, so in
+    /// German "Relink Source (All Instances)…" and "Relink Source and Use Its Names…" must tell
+    /// themselves apart at the start of the label and the new row must fit whole.
+    #[test]
+    fn the_two_relink_rows_differ_at_the_start_in_german() {
+        crate::i18n::install();
+        let _de = solidcraft_ui_text::scope("de");
+        let all = solidcraft_ui_text::tr_command("ui.relinkSource", "Relink Source (All Instances)…");
+        let names = solidcraft_ui_text::tr_command("ui.relinkSourceNames", "Relink Source and Use Its Names…");
+        assert_eq!(names, "Mit Quellnamen neu verknüpfen…");
+        let start = |s: &str| s.chars().take(8).collect::<String>();
+        assert_ne!(start(all), start(names), "{all:?} and {names:?} read alike when cut");
+        assert!(names.chars().count() <= 30, "{names:?} fits the menu column without an ellipsis");
+    }
+
     /// A saved design's STEP link to a file outside the design's own folder is asked about when
     /// the tab comes back, and the file is not read meanwhile (the other test uses an unsaved
     /// design, which has no folder).
