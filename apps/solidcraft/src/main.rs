@@ -727,11 +727,16 @@ struct LostWatch {
 
 impl App {
     fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
-        self.solve.try_prefs().or_else(|reason| {
+        let started = std::time::Instant::now();
+        let result = (|| self.solve.try_prefs().or_else(|reason| {
             log::warn!("Panel layout changes were not saved: {reason}");
             let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
             self.solve.prefs_with_stored_panel_layout(previous.as_deref())
-        })
+        }))();
+        if solidcraft_engine::geom::env::var_os("SAVE_TIMING").is_some() {
+            solidcraft_engine::note!("SolidCraft save: {} ms", started.elapsed().as_millis());
+        }
+        result
     }
 
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping

@@ -1066,6 +1066,10 @@ pub struct SolveApp {
     pub(crate) open_meshing_next: bool,
     /// How long each frame takes on the window thread, by phase.
     pub(crate) frame_watch: frame_watch::Watch,
+    /// The panel layout the last portable preferences were built from, and that result: the
+    /// host's auto-save (eframe's 30 s `App::save`) otherwise decodes every retained command
+    /// record again on the window thread, which took ~0.9 s on a large design.
+    pub(crate) portable_prefs: std::sync::Mutex<Option<(Option<Value>, Option<Value>)>>,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
     /// Where the control channel's design events go ([`control::publish_design`]): the shared
@@ -1301,6 +1305,7 @@ impl SolveApp {
             safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            portable_prefs: std::sync::Mutex::new(None),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
@@ -1530,7 +1535,24 @@ impl SolveApp {
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
-        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        // Rebuilding decodes every retained command record in the layout, which is expensive and
+        // only necessary when the layout changed: an auto-save with the same layout reuses it.
+        let cached = self
+            .portable_prefs
+            .lock()
+            .ok()
+            .and_then(|cache| cache.as_ref().filter(|(cached, _)| *cached == layout).map(|(_, portable)| portable.clone()));
+        let portable = match cached {
+            Some(portable) => portable,
+            None => {
+                let portable = panel_runtime::portable_preferences_value(self, layout.clone())
+                    .map_err(solidcraft_engine::panels::commands::error_text)?;
+                if let Ok(mut cache) = self.portable_prefs.lock() {
+                    *cache = Some((layout, portable.clone()));
+                }
+                portable
+            }
+        };
         Ok(self.prefs_with_panel_layout(portable))
     }
 

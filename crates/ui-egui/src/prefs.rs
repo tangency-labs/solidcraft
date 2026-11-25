@@ -10257,6 +10257,22 @@ mod tests {
         assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused));
     }
 
+    /// The host saves preferences on any settings change and every 30 s. Building them decodes
+    /// every retained command record, which cost ~0.9 s on a 56,100-body design; a save whose
+    /// panel layout is unchanged must reuse the last build instead.
+    #[test]
+    fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let first = app.try_prefs().unwrap();
+        let cached = app.portable_prefs.lock().unwrap().clone();
+        let (layout, portable) = cached.expect("the first save builds and caches the portable preferences");
+        assert_eq!(layout, held_panel_layout(&app).unwrap_or_else(|| crate::panel_runtime::preferences_value(&app)));
+        assert_eq!(portable, crate::panel_runtime::portable_preferences_value(&app, layout.clone()).unwrap());
+        let second = app.try_prefs().unwrap();
+        assert_eq!(first, second);
+        app.portable_prefs.lock().unwrap().clone().expect("the second save keeps the cache");
+    }
+
     #[test]
     fn stored_panel_fallback_preserves_null_absence_and_refuses_malformed_previous_settings() {
         let app = SolveApp::new(Default::default(), Default::default());
