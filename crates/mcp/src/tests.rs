@@ -678,6 +678,35 @@ fn export_tool_writes_a_urdf_package() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `export` passes `quality` and `chord` to `file.export`, called directly and as a batch step
+/// (#20393): a batch step dropped them and wrote the standard mesh.
+#[test]
+fn export_tool_passes_the_mesh_quality_and_chord() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"diameter": 3, "height": 14}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-chord-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let triangles = |name: &str| -> u32 {
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_default();
+        bytes.get(80..84).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+    tool(&mut s, "export", json!({"path": at("standard.urdf")}));
+    tool(&mut s, "export", json!({"path": at("direct.urdf"), "chord": 0.05}));
+    tool(&mut s, "export", json!({"path": at("fine.urdf"), "quality": "fine"}));
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "export", "params": {"path": at("batch.urdf"), "chord": 0.05}}]}));
+    assert_eq!(r["completed"], 1, "{r}");
+    let (standard, direct, batch, fine) =
+        (triangles("standard-base.stl"), triangles("direct-base.stl"), triangles("batch-base.stl"), triangles("fine-base.stl"));
+    assert!(direct > 0 && direct * 5 < standard, "chord 0.05: {direct}, standard {standard}");
+    assert_eq!(batch, direct, "a batch step takes the chord too");
+    assert!(fine > standard, "fine {fine}, standard {standard}");
+    let r = raw_tool(&mut s, "export", json!({"path": at("both.urdf"), "chord": 0.05, "quality": "fine"}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
 #[test]
 fn export_tool_format_argument_accepts_iges() {

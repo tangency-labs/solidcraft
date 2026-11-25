@@ -120,7 +120,7 @@ cone
     Radius = cone.radius (Length)
     Top radius = cone.top_radius (Length)
     Height = cone.height (Length)
-  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
+  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z, 0, 0, 1
 combine
 pattern_rectangular
   inputs:
@@ -148,40 +148,40 @@ hole_simple
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
-  expressions: hole.diameter, hole.depth
+  expressions: hole.diameter, hole.depth, 0, 0, 1
 hole_drilled
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Tip angle = hole.tip_angle (Angle)
-  expressions: hole.diameter, hole.depth, hole.tip_angle
+  expressions: hole.diameter, hole.depth, hole.tip_angle, 0, 0, 1
 hole_counterbore
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Counterbore diameter = hole.cb_diameter (Length)
     Counterbore depth = hole.cb_depth (Length)
-  expressions: hole.diameter, hole.depth, hole.cb_diameter, hole.cb_depth
+  expressions: hole.diameter, hole.depth, hole.cb_diameter, hole.cb_depth, 0, 0, 1
 hole_countersink
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Countersink diameter = hole.cs_diameter (Length)
     Countersink angle = hole.cs_angle (Angle)
-  expressions: hole.diameter, hole.depth, hole.cs_diameter, hole.cs_angle
+  expressions: hole.diameter, hole.depth, hole.cs_diameter, hole.cs_angle, 0, 0, 1
 hole_references
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Reference distance = hole.reference1 (Length)
     Reference distance = hole.reference2 (Length)
-  expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2
+  expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2, 0, 0, 1
 hole_hardware
   inputs:
     Diameter = hole.diameter (Length)
     Depth = hole.depth (Length)
     Hardware length = hole.hardware_length (Length)
-  expressions: hole.diameter, hole.depth, hole.hardware_length
+  expressions: hole.diameter, hole.depth, hole.hardware_length, 0, 0, 1
 thread
   inputs:
     Length = thread.length (Length)
@@ -320,12 +320,12 @@ coil
     Revolutions = coil.turns (Unitless)
     Section size = coil.section_size (Length)
     Start angle = coil.start_angle (Angle)
-  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z
+  expressions: coil.diameter, coil.pitch, coil.turns, coil.section_size, coil.start_angle, coil.x, coil.y, coil.z, 0, 0, 1
 coil_profile
   inputs:
     Pitch = coil_profile.pitch (Length)
     Revolutions = coil_profile.turns (Unitless)
-  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z
+  expressions: coil_profile.pitch, coil_profile.turns, coil_profile.x, coil_profile.y, coil_profile.z, 0, 0, 1
 cell_grid
   inputs:
     Sides = cell_grid.sides (Unitless)
@@ -516,6 +516,13 @@ move
     Z distance = move.z (Length)
     Angle = move.angle (Angle)
   expressions: move.x, move.y, move.z, move.angle
+capture_position
+  inputs:
+    X distance = capture.x (Length)
+    Y distance = capture.y (Length)
+    Z distance = capture.z (Length)
+    Angle = capture.angle (Angle)
+  expressions: capture.x, capture.y, capture.z, capture.angle, capture.ox, capture.oy, capture.oz
 import
 mesh_convert
   inputs:

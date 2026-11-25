@@ -1685,7 +1685,7 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
 #[test]
 fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     let mut h = crate::scenario::Harness::new();
-    h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    *h.app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
     h.app.home.open = false;
     h.app.preferences.navigation_bar = serde_json::from_value(json!({
         "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]

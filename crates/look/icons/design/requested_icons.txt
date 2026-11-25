@@ -215,6 +215,7 @@ loft	false
 lookat	false
 material	false
 measure	false
+merge_lines	false
 mesh_body	false
 mesh_export	false
 mesh_reduce	false
