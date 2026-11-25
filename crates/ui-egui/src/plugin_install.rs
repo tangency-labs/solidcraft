@@ -7,6 +7,11 @@ use solidcraft_ui_text::{format, tr};
 
 use crate::{SolveApp, ui_kit};
 
+/// The plugin package jobs running now, for `control.pending` and `control.running` (#20814).
+pub fn running_jobs() -> Vec<Value> {
+    crate::plugins::running_jobs()
+}
+
 /// The plugin waiting for the user's answer.
 #[derive(Default)]
 pub(crate) struct State {
@@ -20,6 +25,8 @@ pub(crate) struct Ask {
     /// `plugin.install`'s dry-run reply.
     pub(crate) plugin: Value,
     pub(crate) grants: solidcraft_engine::plugin::Grants,
+    /// A downloaded update of an installed plugin (`plugin_updates`).
+    pub(crate) update: bool,
 }
 
 /// Whether this build installs plugins: the browser has no plugins folder.
@@ -84,15 +91,24 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
         input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
+    let update = match crate::plugin_updates::prepare(app, &path, &plugin) {
+        None => false,
+        Some(Ok(())) => true,
+        Some(Err(error)) => {
+            let name = text(&plugin, "name");
+            app.set_status(format("plugin_update.failed", &[("plugin", &name), ("error", &error)]), true);
+            return;
+        }
+    };
     // These are editable starting values, not grants for the new package. Install validates
     // every folder on its worker, including a stored folder that has since disappeared.
     app.plugin_install.generation = app.plugin_install.generation.wrapping_add(1);
-    app.plugin_install.ask = Some(Ask { path, plugin, grants });
+    app.plugin_install.ask = Some(Ask { path, plugin, grants, update });
 }
 
 fn browse_folder(app: &mut SolveApp, name: String) {
     let generation = app.plugin_install.generation;
-    app.pick_folder(move |app, path| {
+    app.pick_folder("", move |app, path| {
         if app.plugin_install.generation == generation
             && let Some(path) = path
             && let Some(ask) = app.plugin_install.ask.as_mut()
@@ -176,6 +192,25 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         1 => lines.push(tr("plugin_install.command_one").to_string()),
         n => lines.push(format("plugin_install.commands", &[("count", &n.to_string())])),
     }
+    // Backgrounds for the 3D view (shaders@0.1), drawn only when picked in Preferences.
+    let shaders = list(plugin.get("shaders"));
+    if !shaders.is_empty() {
+        lines.push(format("plugin_install.shaders", &[("names", &shaders.join(", "))]));
+    }
+    // Colours for the ribbon and panels (shaders@0.2), also only when picked in Preferences.
+    let tints = list(plugin.get("tints"));
+    if !tints.is_empty() {
+        lines.push(format("plugin_install.tints", &[("names", &tints.join(", "))]));
+    }
+    let panels = list(plugin.get("panel_shaders"));
+    if !panels.is_empty() {
+        lines.push(format("plugin_install.panel_shaders", &[("names", &panels.join(", "))]));
+    }
+    let themes = plugin.get("themes").and_then(Value::as_array).into_iter().flatten().filter_map(|t| t.get("id").and_then(Value::as_str));
+    let themes: Vec<&str> = themes.collect();
+    if !themes.is_empty() {
+        lines.push(format("plugin_install.themes", &[("names", &themes.join(", "))]));
+    }
     lines
 }
 
@@ -187,8 +222,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (name, version, summary) = (text(plugin, "name"), text(plugin, "version"), text(plugin, "description"));
     let replaces = plugin.get("replaces").and_then(Value::as_str).map(str::to_string);
     let lines = permission_lines(plugin);
-    let title = tr("plugin_install.title").to_string();
-    let (install, cancel) = (tr("plugin_install.install").to_string(), tr("plugin_install.cancel").to_string());
+    let title = tr(if ask.update { "plugin_update.title" } else { "plugin_install.title" }).to_string();
+    let install = tr(if ask.update { "plugin_update.update" } else { "plugin_install.install" }).to_string();
+    let cancel = tr("plugin_install.cancel").to_string();
     let valid = crate::plugins::valid_grants(&ask.grants) && !crate::plugins::busy(app);
     let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
     let mut browse = None;
@@ -298,7 +334,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Installs the reviewed `.zip` with only the permissions and host folders shown in the question.
-fn install_now(app: &mut SolveApp, ask: &Ask) {
+pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
     let replace = ask.plugin.get("replaces").is_some_and(Value::is_string);
     let folders: Vec<Value> = ask
         .grants
@@ -397,7 +433,7 @@ mod tests {
             lines,
             [
                 "Change application settings and use application diagnostics.",
-                "Open, recover or switch designs.",
+                "Open, recover or switch designs, and see where the open design is saved.",
                 "Read or write files within the approved folders.",
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
@@ -572,7 +608,7 @@ mod tests {
         let chosen = h.dir.join("Chosen exports");
         std::fs::create_dir(&chosen).unwrap();
         let answer = chosen.to_string_lossy().into_owned();
-        h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(Some(answer.clone())))));
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
         review_folder_package(&mut h, "0.1.0", json!([{"name":"source","read":true},{"name":"exports","write":true}]));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
@@ -581,7 +617,7 @@ mod tests {
         assert!(ask.grants.folders[0].folder.as_os_str().is_empty());
         assert_eq!(ask.grants.folders[1].folder, chosen);
         assert!(h.app.session.plugin_state.grants.is_empty(), "Browse does not approve anything");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         h.frames(3);
         h.step(&json!({"widget":"Browse…","near":"exports (write)"})).unwrap();
         crate::file_picker::tick(&mut h.app, &h.ctx);
@@ -602,7 +638,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         let answer = std::rc::Rc::new(std::cell::RefCell::new(None::<Option<String>>));
         let response = answer.clone();
-        h.app.services.pick_folder = Some(Box::new(move || {
+        h.app.services.pick_folder = Some(Box::new(move |_: &str| {
             let response = response.clone();
             Box::pin(std::future::poll_fn(move |_| response.borrow_mut().take().map_or(std::task::Poll::Pending, std::task::Poll::Ready)))
         }));
@@ -684,7 +720,7 @@ mod tests {
         assert!(!crate::plugins::valid_grants(&ask.grants));
         // The screenshot shows a folder a person would pick; the install below uses the test's own folder.
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = std::path::PathBuf::from("/home/maker/Documents/Gear exports");
-        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
         capture_confirm(&mut h.app);
         h.app.plugin_install.ask.as_mut().unwrap().grants.folders[0].folder = h.dir.clone();
         let ask = h.app.plugin_install.ask.take().unwrap();

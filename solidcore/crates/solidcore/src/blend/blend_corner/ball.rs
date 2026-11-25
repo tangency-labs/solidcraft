@@ -26,6 +26,7 @@
 //! | [`place_ball_contacts`]      | `SmBlendCorner::PlaceBallContacts` (`CalcCornerVertGeom`'s Ball part) |
 //! | [`ball_corner_edge_geom`]    | `SmBlendCorner::BuildBallSurface` (`CalcCornerEdgeGeom`'s Ball part) |
 //! | [`create_ball_patch`]        | `SmBlendCorner::CreateBallPatch`                      |
+//! | [`ball_triangle_face`]       | — (not the fork's: the one-patch corner for a caller that knows the ball) |
 //! | `ball_centre` (private)      | `SmBlendCorner::BallCentre`                           |
 //! | `ball_face_quadric` (private) | `sm_BallFaceQuadric`                                 |
 //! | `BallImplicit`, `ball_inverse`, `ball_certified_root` (private) | `SmBallImplicit`, `sm_BallInverse`, `sm_BallCertifiedRoot` |
@@ -84,17 +85,17 @@ const OP_BUILD: &str = "blend::blend_corner::ball::ball_corner_edge_geom";
 const OP_PATCH_NET: &str = "blend::blend_corner::ball::ball_triangle_patch";
 const OP_PATCH: &str = "blend::blend_corner::ball::create_ball_patch";
 
-/// A defect of `op`: a step the ball corner's own checks or constructions promise did not
-/// hold (`why`).
+/// A defect of `op`: a step the corner's own checks or constructions (the ball's, or the
+/// setback fill's) promise did not hold (`why`).
 #[track_caller]
-fn defect(op: &'static str, why: &'static str) -> SolidError {
+pub(super) fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
 }
 
 /// A defect of `op` where something the kernel built is missing (`why`), with the
 /// `SM_ERR_NULL_POINTER` status of the `NER` it replaces.
 #[track_caller]
-fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
@@ -105,13 +106,21 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 /// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
 /// and take a caller's corner.
 #[track_caller]
-fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
+pub(super) fn bad_input(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+) -> SolidError {
     corner_input(op, input, entity).into_error()
 }
 
 /// The [`Failure`] of [`bad_input`], located at `entity` where there is one.
 #[track_caller]
-fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> Failure {
+pub(super) fn corner_input(
+    op: &'static str,
+    input: CornerInput,
+    entity: Option<EntityRef>,
+) -> Failure {
     let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
     match entity {
         Some(at) => failure.at(at),
@@ -123,7 +132,7 @@ fn corner_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>)
 /// input, [`BlendFailure::FaceHasNoSurface`] at the face, status `SM_ERR_NULL_POINTER` (the
 /// site's).
 #[track_caller]
-fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
+pub(super) fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
     Failure::new(op, BlendFailure::FaceHasNoSurface)
         .with_status(SM_ERR_NULL_POINTER)
         .at(EntityRef::Face(face))
@@ -134,7 +143,7 @@ fn face_without_surface(op: &'static str, face: FaceId) -> SolidError {
 /// input, [`BlendFailure::EdgeUseWithoutEdge`] at the edge use, status
 /// `SM_ERR_NULL_POINTER`.
 #[track_caller]
-fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
+pub(super) fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
     SolidError::blend_at(
         op,
         BlendFailure::EdgeUseWithoutEdge,
@@ -146,7 +155,11 @@ fn edge_use_without_edge(op: &'static str, edgeuse: EdgeuseId) -> SolidError {
 /// (`cause`, [`BlendFailure::Solver`]), about `entity` where the check reads one; status
 /// the cause's, `SM_ERR_NULL_POINTER`, the site's.
 #[track_caller]
-fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef>) -> SolidError {
+pub(super) fn solver_input(
+    op: &'static str,
+    cause: SolverFailure,
+    entity: Option<EntityRef>,
+) -> SolidError {
     let failure = Failure::new(op, BlendFailure::Solver(cause));
     match entity {
         Some(at) => failure.at(at),
@@ -159,7 +172,11 @@ fn solver_input(op: &'static str, cause: SolverFailure, entity: Option<EntityRef
 /// not there (`part`), about `entity` where the check reads one; status
 /// `SM_ERR_NULL_POINTER`, the site's.
 #[track_caller]
-fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> SolidError {
+pub(super) fn bad_setup(
+    op: &'static str,
+    part: FilletSetUp,
+    entity: Option<EntityRef>,
+) -> SolidError {
     let failure = Failure::new(op, BlendFailure::FilletSetUpInvalid(part));
     match entity {
         Some(at) => failure.at(at),
@@ -170,13 +187,13 @@ fn bad_setup(op: &'static str, part: FilletSetUp, entity: Option<EntityRef>) -> 
 
 /// The corner has no construction at `step` (status `SM_ERR`).
 #[track_caller]
-fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+pub(super) fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
     SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
 }
 
 /// [`unbuildable`] with the `SM_ERR_NULL_POINTER` status of the site it replaces.
 #[track_caller]
-fn unbuildable_missing(op: &'static str, step: CornerStep) -> SolidError {
+pub(super) fn unbuildable_missing(op: &'static str, step: CornerStep) -> SolidError {
     Failure::new(op, BlendFailure::CornerUnbuildable(step))
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
@@ -1203,6 +1220,42 @@ fn fan_centre(dirs: &[Vec3; 3]) -> Option<Vec3> {
         .iter()
         .all(|&(a, b)| mid.dot(a.cross(b)) * turn > EFF_ZERO);
     inside.then_some(mid)
+}
+
+/// The corner of three equal rounds as [`ball_corner_edge_geom`] makes it where its triangle
+/// is one patch: the ball of `radius` about `centre` between the contacts in the unit
+/// directions `dirs`, its pole at contact 0, carrying its sphere ([`BallPatch`]), its normal
+/// out of the material (towards the centre where the rounds add material, `adds_material`).
+/// For a construction that knows the ball already (the closed-form rounds between planes,
+/// [`crate::blend::exact_round`]). `None` where the triangle is not one patch (a fan's) or
+/// neither turn of the patch faces the material's way.
+///
+/// # Errors
+///
+/// Those of the patch's construction and evaluation.
+pub fn ball_triangle_face(
+    k: &Kernel,
+    centre: Point3,
+    radius: f64,
+    dirs: &[Vec3; 3],
+    adds_material: bool,
+) -> Result<Option<Surface>> {
+    if !far_side(dirs, 0)?.is_some_and(|far| far.is_one_arc()) {
+        return Ok(None);
+    }
+    for turn in 0..2 {
+        let (net, _, _) = ball_triangle_patch(centre, radius, dirs, 0, turn == 1)?;
+        let patch = Surface::from(net.clone());
+        let mid = patch.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5);
+        let at = patch.evaluate_point(k, mid)?;
+        let normal = patch.evaluate_normal(k, mid, Side::Left, Side::Left)?;
+        if (normal.dot(at - centre) < 0.0) == adds_material {
+            return Ok(Some(Surface::from(BallPatch::create(
+                &net, centre, radius,
+            )?)));
+        }
+    }
+    Ok(None)
 }
 
 /// `sm_BallTrianglePatch` (the fork's a6243fa): the ball's triangle between the

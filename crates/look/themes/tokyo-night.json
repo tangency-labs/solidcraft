@@ -2,6 +2,7 @@
   "order": 140,
   "provenance": "Original SolidCraft mapping of Tokyo Night (MIT palette)",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "accent": "#7aa2f7",
     "accent_soft": "#253452",

@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
     CommandSpec::new("plugin.remove", "Remove Plugin", checked!("plugin.remove", remove)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RemoveParams>::new()).output(output_schema_for::<RemoveResult>)
-        .params("id: installed plugin id; removes its folder and stored grants without executing code"),
+        .params("id: installed plugin id, remove_user_data: optional bool (omitted or false keeps per-user settings, true deletes them too); removes its folder and stored grants without executing code or prompting"),
     CommandSpec::new("plugin.revoke", "Revoke Plugin Approvals", checked!("plugin.revoke", revoke)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RevokeParams>::new()).output(output_schema_for::<RevokeResult>)
         .params("id: plugin id; takes back everything approved for it and keeps it installed: it runs with nothing granted until it is installed again with approvals"),
@@ -68,6 +68,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|r| limits.check(&r.limits).err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, exporting: false, error }.text());
     serde_json::to_value(InspectResult {
+        granted_capabilities: package.manifest.granted_capabilities(),
         manifest: package.manifest,
         approval: package.approval,
         host_limits: limits,
@@ -131,7 +132,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check_new(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+            // Only the write holds the lock: the archive was read and checked above without it.
+            let _write = plugin::install::write_lock();
+            plugin::install::install_locked(&plugin, &dir, p.replace).map_err(failed)?;
             std::mem::swap(&mut s.plugin_state.grants, &mut approved_state.grants);
             // Installed: a later session finds the approvals bound to this exact package.
             s.plugin_state.persist_stored().map_err(|e| crate::EngineError::Other(format!("“{}” is installed, but {e}", manifest.name)))?;
@@ -140,6 +143,9 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         s.plugin_state.packages.insert(manifest.id.clone(), folder.to_string_lossy().into_owned());
     }
     let runtime = manifest.runtime.as_ref();
+    let keys = |kind: craft_plugin::shader::ShaderKind| -> Vec<String> {
+        manifest.shaders.iter().filter(|shader| shader.kind == kind).map(|shader| format!("{}/{}", manifest.id, shader.id)).collect()
+    };
     serde_json::to_value(InstallResult {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
@@ -149,6 +155,10 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
+        min_host_version: manifest.min_host_version.clone(),
+        optional_capabilities: manifest.optional_capabilities.clone(),
+        granted_capabilities: manifest.granted_capabilities(),
+        extensions: manifest.extensions.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
         limits: runtime.map(|r| r.limits.clone()),
         host_limits: s.plugin_limits,
@@ -162,6 +172,10 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Exporter).flat_map(|e| e.extensions.iter().cloned()).collect())
             .unwrap_or_default(),
         listeners: runtime.map(|r| r.listeners.clone()).unwrap_or_default(),
+        shaders: keys(craft_plugin::shader::ShaderKind::Background),
+        tints: keys(craft_plugin::shader::ShaderKind::Tint),
+        panel_shaders: keys(craft_plugin::shader::ShaderKind::Panel),
+        themes: manifest.themes.clone(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -392,7 +406,7 @@ fn remove(_s: &mut Session, p: &Value) -> Result<Value> {
     let p: RemoveParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.remove", e.to_string()))?;
     #[cfg(not(target_arch = "wasm32"))]
     {
-        serde_json::to_value(plugin::remove(_s, &p.id)?).map_err(|e| bad("plugin.remove", e.to_string()))
+        serde_json::to_value(plugin::remove(_s, &p.id, p.remove_user_data)?).map_err(|e| bad("plugin.remove", e.to_string()))
     }
     #[cfg(target_arch = "wasm32")]
     {

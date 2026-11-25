@@ -21,6 +21,7 @@
 #![cfg(feature = "profile")]
 #![allow(clippy::unwrap_used)]
 
+use solidcore_ops::bead::{beads, Joint};
 use solidcore_ops::boolean::boolean_with;
 use solidcore_ops::session::{self, CallProfile};
 use solidcore_ops::{make_box, make_cylinder, Body, BooleanOp, Contract};
@@ -335,4 +336,38 @@ fn a_read_leaves_the_body_as_it_was() {
             "{name}: its record changed"
         );
     }
+}
+
+/// The plate with a block across it, united under the proved contract: a body that holds
+/// its proof, with straight inside corners along y at x = 45 and 55, z = 10.
+fn stepped() -> Body {
+    let block = make_box([45.0, 0.0, 10.0], [10.0, 20.0, 10.0]).unwrap();
+    boolean_with(plate(), block, BooleanOp::Union, Contract::Proved)
+        .unwrap()
+        .unwrap()
+}
+
+/// Beads read their part on a copy (#21560): the part's proof stands, so the next proved cut
+/// decides as often as it does on a part no bead was laid on. Laid through the body's lock
+/// instead, the beads would drop the proof and the cut would prove the part again.
+#[test]
+fn beads_leave_the_part_s_proof_standing() {
+    all_fixes();
+    let edge = |b: &Body| {
+        solidcore_ops::pick::edges(b, &[[45.0, 10.0, 10.0]], 1e-6)
+            .unwrap()
+            .unwrap()[0]
+    };
+    let untouched = stepped();
+    edge(&untouched);
+    let bare = second_cut(untouched);
+    let part = stepped();
+    let joint = Joint::Edge {
+        body: 0,
+        edge: edge(&part),
+        legs: [3.0, 3.0],
+        along: None,
+    };
+    assert_eq!(beads(&[&part], &[joint], 0.0).unwrap().len(), 1);
+    assert_eq!(second_cut(part), bare, "the beads dropped the part's proof");
 }
