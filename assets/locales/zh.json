@@ -1157,7 +1157,7 @@
   "ai.prefs.control_listening": "正在监听 127.0.0.1:{port}",
   "ai.prefs.control_not_listening": "未在监听",
   "ai.prefs.control_port": "端口",
-  "ai.prefs.control_port_note": "AI 代理在本机上连接的端口 (127.0.0.1)。默认为 27878：若被占用，则使用下一个空闲端口。其他端口按原样使用。请让 MCP 客户端指向同一端口，例如 solidcraft-cli mcp --connect 127.0.0.1:7878。",
+  "ai.prefs.control_port_note": "AI 代理在本机上连接的端口 (127.0.0.1)。默认为 27878：若被占用，则使用下一个空闲端口。其他端口按原样使用。请让 MCP 客户端指向同一端口，例如 solidcraft-cli mcp --connect 127.0.0.1:27878。",
   "ai.prefs.control_port_taken": "端口 {port} 已被其他程序（或另一个 SolidCraft 窗口）占用。请选择其他端口。",
   "ai.prefs.follow_camera": "跟随相机",
   "ai.prefs.follow_camera_off": "相机自动跟随已关闭。",

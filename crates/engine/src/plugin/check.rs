@@ -153,7 +153,9 @@ fn fix_for(field: &str) -> String {
         "runtime.commands" => {
             "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
         }
-        "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands, all importers or all exporters.",
+        "runtime.entries" => {
+            "Declare 1 to 32 entries, all commands, all importers or all exporters, each with its own name of lowercase letters, digits and dashes, such as \"make-gear\" (no underscores)."
+        }
         "runtime.entries.slots" => {
             "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
         }

@@ -481,6 +481,36 @@ fn hostile_manifest_fields_return_errors() {
     assert!(parse_manifest(br#"{}"#, "sample").is_err());
 }
 
+/// A refused entry list says which entry is wrong and why: a bad name (an underscore, which
+/// command ids allow but entry names don't), a repeated name, or too many or no entries.
+#[test]
+fn a_refused_entry_list_names_the_entry_and_the_rule() {
+    let refusal = |entries: Value| {
+        let mut value = manifest();
+        value["runtime"]["entries"] = entries;
+        match parse(&value) {
+            Err(HostError::InvalidManifest { field, reason }) => (field, reason),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    };
+    let (field, reason) = refusal(json!(["make", "op_add"]));
+    assert_eq!(field, "runtime.entries");
+    assert!(reason.contains("\"op_add\"") && reason.contains("dashes") && reason.contains("no underscores"), "{reason}");
+    let (_, reason) = refusal(json!(["make", "make"]));
+    assert!(reason.contains("\"make\" is declared more than once"), "{reason}");
+    let (_, reason) = refusal(json!([]));
+    assert!(reason.contains("declares 0 entries"), "{reason}");
+    let many: Vec<String> = (0..33).map(|i| format!("e{i}")).collect();
+    let (_, reason) = refusal(json!(many));
+    assert!(reason.contains("declares 33 entries"), "{reason}");
+    // A hostile name is quoted and cut short, never echoed raw.
+    let (_, reason) = refusal(json!([format!("bad\nname{}", "x".repeat(500))]));
+    assert!(reason.contains("\\n") && !reason.contains('\n') && reason.len() < 400, "{reason}");
+    // A cut name says it was cut and how long it is: its first 64 characters may be valid alone.
+    let (_, reason) = refusal(json!([format!("{}_", "a".repeat(64))]));
+    assert!(reason.contains(&format!("\"{}\"… (65 characters)", "a".repeat(64))), "{reason}");
+}
+
 #[test]
 fn larger_manifests_fit_without_removing_input_descriptions() {
     let serialized = serde_json::to_vec(&manifest()).unwrap();

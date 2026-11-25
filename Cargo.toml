@@ -23,6 +23,8 @@ solidcraft-profile = { path = "crates/profile" }
 solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+# The kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md)
+solidcraft-kernel-api = { path = "crates/kernel-api" }
 solidcraft-smlib = { path = "crates/smlib" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }

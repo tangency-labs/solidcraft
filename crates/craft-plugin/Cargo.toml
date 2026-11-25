@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 image = { workspace = true, features = ["jpeg"] }
+naga = { workspace = true, features = ["wgsl-in", "wgsl-out"] }
 schemars = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
