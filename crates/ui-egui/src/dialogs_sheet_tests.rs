@@ -2571,7 +2571,8 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     let texts = shop_check_texts(&mut h);
     assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
-    assert!(texts.iter().any(|t| t == "Source"), "the finding links its source: {texts:?}");
+    // The generic rule cites each shop's page, so its links are numbered.
+    assert!(texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "the finding links its source: {texts:?}");
     let Some(Kind::Sheet(Sm::ShopCheck { shop, data, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("shop dialog") };
     let generic = data.clone();
     *shop = 1;

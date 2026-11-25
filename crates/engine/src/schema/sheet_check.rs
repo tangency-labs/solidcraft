@@ -13,7 +13,7 @@ use serde_json::Value;
 #[schemars(deny_unknown_fields)]
 pub struct CheckShopParams {
     /// The sheet metal body. Default: the last sheet.
-    #[serde(default, deserialize_with = "super::present")]
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub body: Option<String>,
     /// The shop: a built-in profile's id (`generic`, `pcbway`, `jlccnc`, `sendcutsend`), the path

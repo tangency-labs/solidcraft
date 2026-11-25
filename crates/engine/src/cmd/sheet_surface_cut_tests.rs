@@ -1686,7 +1686,8 @@ fn a_sheet_outside_the_shops_stock_is_a_finding() {
 fn a_hole_near_a_bend_is_a_shop_finding_with_the_zone_distance() {
     let mut s = plate();
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
-    run(&mut s, "solid.hole", json!({"position": [50, 5, T], "diameter": 6}));
+    // Off the bend (a hole crossing it is refused), its centre within the 6 mm limit of the zone.
+    run(&mut s, "solid.hole", json!({"position": [50, 9, T], "diameter": 6}));
     run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
     let zone = flat(&mut s)["bend_zones"][0].clone();
     let [y0, y1] = [zone[2].as_f64().unwrap_or(f64::NAN), zone[3].as_f64().unwrap_or(f64::NAN)];
