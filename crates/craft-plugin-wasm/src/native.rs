@@ -77,7 +77,21 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 /// A stalled regular-file read cannot be interrupted portably. Limit detached reads globally;
 /// their permits remain occupied until the OS returns, even after the dialog stops waiting.
 const MAX_PREFIX_READS: usize = 2;
-static PREFIX_READS: std::sync::OnceLock<Arc<AtomicUsize>> = std::sync::OnceLock::new();
+
+/// The process-wide prefix-read counter.
+#[cfg(not(test))]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    static PREFIX_READS: OnceLock<Arc<AtomicUsize>> = OnceLock::new();
+    PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone()
+}
+/// Unit tests run in parallel, one thread each, and a dialog test's read must not be refused
+/// because other tests hold the process-wide permits. Each test thread gets its own counter;
+/// the limit itself is tested directly on a counter of its own.
+#[cfg(test)]
+fn prefix_reads() -> Arc<AtomicUsize> {
+    thread_local! { static PREFIX_READS: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0)); }
+    PREFIX_READS.with(Arc::clone)
+}
 
 struct PrefixPermit(Arc<AtomicUsize>);
 impl Drop for PrefixPermit {
@@ -1877,7 +1891,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             Ok((dir, size, prefix))
         };
         let (dir, size, prefix) = if let Some(end) = dialog_deadline {
-            let reply = start_prefix_read(PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone(), open)?;
+            let reply = start_prefix_read(prefix_reads(), open)?;
             wait_prefix(&reply, end).map_err(|e| with_limits(e, runtime.limits.deadline_ms))?
         } else {
             open()?
