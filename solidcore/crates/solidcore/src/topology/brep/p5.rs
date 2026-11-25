@@ -3873,7 +3873,7 @@ fn transform_in(
         }
     }
     if let Some(before) = trims_before {
-        crate::topology::edgeuse::p3::cover_moved_trims(k, b, before, placement.matrix())?;
+        crate::topology::edgeuse::p3::cover_moved_trims(k, b, &before, placement.matrix())?;
     }
     // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
     // keeps each tolerance at least its own times s; upstream sets every one to the body

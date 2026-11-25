@@ -1988,9 +1988,8 @@ pub(crate) fn trims_before_move(
         // unported and cancelled work is passed on)
         match edge_before_move(b, e) {
             Ok(Some(edge)) => out.push(edge),
-            Ok(None) => {}
             Err(err) if err.is_unported_or_cancelled() => return Err(err),
-            Err(_) => {}
+            Ok(None) | Err(_) => {}
         }
     }
     Ok(Some(TrimsBeforeMove { edges: out }))
@@ -2069,7 +2068,7 @@ fn edge_before_move(b: &Brep, e: EdgeId) -> Result<Option<EdgeBeforeMove>> {
 pub(crate) fn cover_moved_trims(
     k: &Kernel,
     b: &mut Brep,
-    before: TrimsBeforeMove,
+    before: &TrimsBeforeMove,
     m: [[f64; 4]; 4],
 ) -> Result<()> {
     let Some(norm) = crate::query::curve_surface_gap::affine_linear_norm_upper(m) else {
