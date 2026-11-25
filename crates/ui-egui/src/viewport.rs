@@ -8036,7 +8036,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let sketch = app.session.active_sketch;
     let held_tool = if sketch.is_some() && crate::sketch_view::active_sketch(app).is_none() { app.tool.take() } else { None };
     show_view(app, ui);
-    crate::view_tiles::single_sketch_chrome(app, ui);
     if let Some(tool) = held_tool
         && app.session.active_sketch == sketch
         && app.tool.is_none()
