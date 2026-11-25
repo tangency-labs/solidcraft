@@ -1671,7 +1671,7 @@ fn flat_gone(
 /// goes with the panel across its nearer tangent line; between two as near, the one whose material
 /// lies lower in the flat, then more to the left. Taken from where the cut and the material lie,
 /// never from the order of the panels or the pieces. None where no panel has material left.
-fn holder(pieces: &[(Piece, Region2)], r: &Region2) -> Option<usize> {
+pub(crate) fn holder(pieces: &[(Piece, Region2)], r: &Region2) -> Option<usize> {
     let x = r.interior_point();
     let near = |g: &Region2| if region_holds(g, x) { 0.0 } else { outline_gap(g, x) };
     pieces

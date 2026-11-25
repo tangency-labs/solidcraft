@@ -1887,6 +1887,10 @@ fn takes_part(f: &Feature, targets: &[String], b: &ModelBody) -> bool {
     all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) }
 }
 
+/// How near a corner of a tool's footprint in an unfolded flat lies to a piece's outline (a bend
+/// line, a joint, the flat's edge) to count as on it, in mm: as near as the sew joins points.
+const CORNER_ON_OUTLINE: f64 = crate::sheet_surface::CLEAR;
+
 /// What an extrude cut takes from the sheets made from surfaces it reaches, of the bodies it takes
 /// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool a prism
 /// along a flat panel's normal, through its whole thickness, its footprint clear inside the
@@ -1966,7 +1970,95 @@ pub(super) fn surface_prism_cut(
         let t = sk.thickness;
         let tol = 1e-7;
         let mut out = sk.clone();
+        // Unfolded, the flat lies in one plane: a tool square through all of it that goes clear
+        // through no single panel (it crosses a bend, or meets more than one piece) takes its
+        // footprint from the flat, a cut of the sheet's across the joints it reaches, as the
+        // body's cut is read when its walls cross a joint (see `sheet_surface_cuts`). Read
+        // straight into the sheet, its curves stay as drawn: a round hole over a bend stays
+        // arcs, in the flat and folded. The flat's development and pieces, read once.
+        let flat_square = {
+            let s0 = (sk.flat.shift - cut.plane.origin).dot(n);
+            let s1 = s0 + t * sk.flat.z.dot(n);
+            sk.unfolded && sk.flat.z.cross(n).len() <= 1e-9 && reaching.iter().all(|(lo, hi, ..)| *lo <= s0.min(s1) + tol && *hi >= s0.max(s1) - tol)
+        };
+        // With each piece the boxes of its loops (outline, then holes), grown by `CORNER_ON_OUTLINE`.
+        #[allow(clippy::type_complexity)]
+        let mut flat_pieces: Option<(
+            solidcraft_develop::Development,
+            Vec<(crate::sheet_surface::Piece, Region2)>,
+            Vec<Vec<solidcraft_geom::Aabb2>>,
+        )> = None;
         for (lo, hi, plane, region, tool_box) in reaching {
+            if flat_square && !region.holes.is_empty() {
+                // A footprint round an island (a letter's counter) leaves a loose piece: the
+                // body's cut reads it.
+                return Ok(Vec::new());
+            }
+            // The tool's footprint in the flat, cut from it across the joints it reaches (`push`),
+            // or only whether it may be: false where the sheet isn't unfolded square to the tool or
+            // keeps something there already, and the tool's cut is left to the body's.
+            let mut across_flat = |out: &mut crate::SurfaceSheet, push: bool| -> Result<bool> {
+                if !flat_square {
+                    return Ok(false);
+                }
+                if flat_pieces.is_none() {
+                    let Ok(dev) = sk.develop() else { return Ok(false) };
+                    let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()) else { return Ok(false) };
+                    let boxes = pieces
+                        .iter()
+                        .map(|(_, r)| {
+                            std::iter::once(&r.outer)
+                                .chain(&r.holes)
+                                .map(|l| crate::sheet_surface_cuts::loop_box(l).inflated(CORNER_ON_OUTLINE))
+                                .collect()
+                        })
+                        .collect();
+                    flat_pieces = Some((dev, pieces, boxes));
+                }
+                let Some((dev, pieces, loop_boxes)) = flat_pieces.as_ref() else { return Ok(false) };
+                let inv = sk.flat.inverse();
+                let g = crate::sheet_surface_convert::rigid_region(region, |q: Vec2| {
+                    let w = inv.point(plane.to_world(q));
+                    Vec2::new(w.x, w.y)
+                });
+                let gb = crate::sheet_surface_cuts::loop_box(&g.outer);
+                // A corner of the footprint on a piece's outline (a bend line, a joint, the flat's
+                // edge) would meet that outline at a point: the body's cut reads it. Only loops
+                // whose box holds the corner are measured.
+                let on_outline = pieces.iter().zip(loop_boxes).any(|((_, r), boxes)| {
+                    std::iter::once(&r.outer).chain(&r.holes).zip(boxes).any(|(l, b)| {
+                        g.outer
+                            .segs
+                            .iter()
+                            .map(Seg2::start)
+                            .filter(|q| b.contains(*q))
+                            .any(|q| l.segs.iter().any(|e| e.point_at(e.closest_param(q).clamp(0.0, 1.0)).dist(q) <= CORNER_ON_OUTLINE))
+                    })
+                });
+                if on_outline {
+                    return Ok(false);
+                }
+                let apart = |panel: usize, r: &Region2| {
+                    let Some(Some(at)) = dev.placements.get(panel) else { return false };
+                    let b = crate::sheet_surface_cuts::loop_box(&at.region(r).outer);
+                    b.max.x < gb.min.x || gb.max.x < b.min.x || b.max.y < gb.min.y || gb.max.y < b.min.y
+                };
+                // Nothing the sheet keeps there already: its cuts, recesses and loose pieces are
+                // read with the body's cut.
+                if !(out.sheet.cuts.iter().all(|c| apart(c.panel, &c.region))
+                    && out.recesses.iter().all(|r| apart(r.panel, &r.region))
+                    && out.loose.iter().all(|l| apart(l.panel, &l.region)))
+                {
+                    return Ok(false);
+                }
+                if !push {
+                    return Ok(true);
+                }
+                let Some(anchor) = crate::sheet_surface_cuts::holder(pieces, &g) else { return Ok(false) };
+                let Some(Some(at)) = dev.placements.get(anchor) else { return Ok(false) };
+                out.sheet.cuts.push(solidcraft_develop::Cut { panel: anchor, region: at.inverse().region(&g) });
+                Ok(true)
+            };
             // The panel the tool goes square through.
             let mut found = None;
             for (p, frame, own) in &panels {
@@ -1985,6 +2077,13 @@ pub(super) fn surface_prism_cut(
                 };
                 let mapped = crate::sheet_surface_convert::rigid_region(region, chart);
                 let outline = Region2 { outer: mapped.outer.clone(), holes: Vec::new() };
+                // A footprint whose box lies apart from the panel's outline's covers none of it:
+                // beside the panel, read without a boolean (a pattern of many holes over a flat of
+                // many panels meets each panel's box only near it).
+                let (ob, fb) = (crate::sheet_surface_cuts::loop_box(&own.outer), crate::sheet_surface_cuts::loop_box(&outline.outer));
+                if fb.max.x < ob.min.x || ob.max.x < fb.min.x || fb.max.y < ob.min.y || ob.max.y < fb.min.y {
+                    continue;
+                }
                 // Clear inside the panel's material, a hole of it; else through its outline or a
                 // hole of it where it covers some of that material, and beside the panel where
                 // it covers none.
@@ -2001,22 +2100,28 @@ pub(super) fn surface_prism_cut(
                     }
                 }
                 if found.is_some() {
-                    return Ok(Vec::new());
+                    found = None;
+                    break;
                 }
                 found = Some((*p, mapped, *frame, clear));
             }
-            let Some((p, mapped, frame, clear)) = found else { return Ok(Vec::new()) };
             // Nothing else of the sheet in its way, and nothing the panel keeps there already.
-            if boxes.iter().any(|(k, b)| *k != Some(p) && !boxes_apart(tool_box, &Some(*b))) {
+            let found = found.filter(|(p, ..)| !boxes.iter().any(|(k, b)| *k != Some(*p) && !boxes_apart(tool_box, &Some(*b))));
+            let Some((p, mapped, frame, clear)) = found else {
+                if across_flat(&mut out, true)? {
+                    continue;
+                }
                 return Ok(Vec::new());
-            }
+            };
             let near = |r: &Region2| {
                 let (a, b) = (crate::sheet_surface_cuts::loop_box(&r.outer), crate::sheet_surface_cuts::loop_box(&mapped.outer));
                 !(a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y)
             };
             if out.recesses.iter().any(|r| r.panel == p && near(&r.region))
                 || out.loose.iter().any(|l| l.panel == p && near(&l.region))
-                || !out.sheet.cuts.is_empty()
+                // Cuts of the sheet's: unfolded square to the tool, only those near it, read in
+                // the flat; else any.
+                || (!out.sheet.cuts.is_empty() && !across_flat(&mut out, false)?)
             {
                 return Ok(Vec::new());
             }

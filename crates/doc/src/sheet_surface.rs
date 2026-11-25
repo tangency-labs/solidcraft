@@ -34,7 +34,7 @@ pub(crate) enum Piece {
 
 /// How near (mm) a cut may come to a piece's loops and still be a hole of it as it is: as near
 /// as the sew joins points.
-const CLEAR: f64 = 1e-6;
+pub(crate) const CLEAR: f64 = 1e-6;
 
 /// How far (mm) a piece's edge may lie off a zone's tangent line and still run along it.
 const ON_LINE: f64 = 1e-7;
@@ -111,7 +111,16 @@ fn cut_from(pieces: Vec<(Piece, Region2)>, cuts: &[&Region2], work: &mut FlatWor
     if cuts.is_empty() {
         return Ok(pieces);
     }
-    let cuts = stage("joining what is cut from the flat", planar_union(cuts.iter().map(|c| (*c).clone()).collect(), work))?;
+    // Only cuts that meet another are joined: a planar union splits the arcs of every loop it
+    // takes, and a cut on its own is already what joining it would give.
+    let boxes: Vec<_> = cuts.iter().map(|c| crate::sheet_surface_cuts::loop_box(&c.outer).inflated(CLEAR)).collect();
+    let (alone, meeting): (Vec<_>, Vec<_>) =
+        cuts.iter().enumerate().partition(|(i, _)| boxes.iter().enumerate().all(|(j, b)| j == *i || boxes.get(*i).is_none_or(|a| !a.meets(b))));
+    let mut joined: Vec<Region2> = alone.into_iter().map(|(_, c)| (*c).clone()).collect();
+    if !meeting.is_empty() {
+        joined.extend(stage("joining what is cut from the flat", planar_union(meeting.into_iter().map(|(_, c)| (*c).clone()).collect(), work))?);
+    }
+    let cuts = joined;
     let mut out = Vec::with_capacity(pieces.len());
     for (piece, region) in pieces {
         out.extend(stage("cutting the flat", boolean_past_holes(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));

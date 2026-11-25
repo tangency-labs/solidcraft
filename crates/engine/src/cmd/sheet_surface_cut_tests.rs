@@ -43,6 +43,13 @@ fn pockets(s: &mut Session) -> Vec<Value> {
     flat(s)["pockets"].as_array().cloned().unwrap_or_default()
 }
 
+/// What the kernel's full check finds wrong with the sheet's body, `None` when it passes.
+fn check_failure(s: &Session) -> Option<String> {
+    let state = s.model.state();
+    let body = &state.bodies.iter().find(|b| b.name == "Plate")?.body;
+    solidcraft_kernel::failing_check(body).map_or_else(|e| Some(e.to_string()), |f| f.map(|f| format!("{f:?}")))
+}
+
 fn exact_volume(s: &Session) -> f64 {
     s.model
         .state()
@@ -1214,4 +1221,193 @@ fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
     check(&s, whole - 3.0, "cut on the flat");
     run(&mut s, "sheet.refold", json!({}));
     check(&s, whole - 3.0, "folded again");
+}
+
+/// Round holes in one sketch, cut through the flat while the sheet is unfolded, are read straight
+/// into the sheet, also where one crosses the bend's tangent line or lies in its zone: those are
+/// cuts of the sheet's, their circles kept as arcs, and the one clear inside the plate a hole of
+/// it. Refolded, the sheet loses what the same holes drilled one by one take (a pattern of round
+/// holes over a bend).
+#[test]
+fn round_holes_in_one_sketch_cut_through_the_flat_across_a_bend_keep_their_arcs() {
+    // (radius, x, y): across the plate's tangent line (y = 12), inside the bend's zone, and two
+    // clear inside the plate.
+    let holes = [(3.042, 87.84, 10.926), (3.783, 69.982, 5.788), (2.0, 30.0, 40.0), (2.5, 50.0, 30.0)];
+    let drilled = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (r, x, y) in holes {
+            run(&mut s, "solid.cylinder", json!({"radius": r, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        exact_volume(&s)
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Holes"}));
+    for (r, x, y) in holes {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 2.0 * r}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Holes", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    assert_eq!(sk.sheet.cuts.len(), 2, "the holes at the bend are cuts of the sheet's");
+    // Each the circle as drawn, read straight from the sketch: arcs of one circle round the whole turn,
+    // not the pieces a cut read back from the body leaves where the bend's lines cross it.
+    for c in &sk.sheet.cuts {
+        let arcs: Vec<(Vec2, f64, f64)> = c
+            .region
+            .outer
+            .segs
+            .iter()
+            .filter_map(|e| match *e {
+                Seg2::Arc { center, radius, sweep, .. } => Some((center, radius, sweep)),
+                _ => None,
+            })
+            .collect();
+        let one = arcs.len() == c.region.outer.segs.len()
+            && arcs.len() <= 2
+            && arcs.iter().all(|a| a.0.dist(arcs[0].0) < 1e-9 && (a.1 - arcs[0].1).abs() < 1e-9)
+            && (arcs.iter().map(|a| a.2.abs()).sum::<f64>() - 2.0 * PI).abs() < 1e-9;
+        assert!(one, "a hole at the bend stays its circle: {:?}", c.region.outer.segs);
+    }
+    assert_eq!(sk.sheet.panels.iter().map(|p| p.region.holes.len()).sum::<usize>(), 2, "the holes in the plate are its holes");
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
+}
+
+/// A hole over the bend cut from the flat whose box meets a cut the sheet keeps already is left
+/// to the body's cut, as before: it loses what the same two holes drilled one by one take.
+#[test]
+fn a_hole_over_the_bend_next_to_an_earlier_cut_of_the_flat_is_the_bodys_cut() {
+    // (radius, x, y): both over the plate's tangent line (y = 12), their boxes overlapping.
+    let holes = [(3.042, 87.84, 10.926), (2.0, 91.5, 11.0)];
+    let drilled = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (r, x, y) in holes {
+            run(&mut s, "solid.cylinder", json!({"radius": r, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        exact_volume(&s)
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    for (i, (r, x, y)) in holes.into_iter().enumerate() {
+        let name = format!("Hole{i}");
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": name}));
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 2.0 * r}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": name, "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    }
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
+}
+
+/// Footprints cut from the flat that touch a piece's outline without crossing it lose what the
+/// same shapes cut as solids take: a round hole tangent to the plate's tangent line (y = 12), a
+/// notch with one edge on that line and its corners beyond the flat's edge, and a round hole whose
+/// edge runs through the point where the tangent line meets the flat's edge.
+#[test]
+fn footprints_touching_a_bend_line_or_the_flats_edge_cut_as_solids_do() {
+    let solid = |s: &mut Session, case: usize| match case {
+        0 => run(s, "solid.cylinder", json!({"radius": 3, "height": 30, "base": [40, 15, -10], "axis": "Z", "operation": "cut"})),
+        1 => run(s, "solid.box", json!({"corner": [-5, 12, -10], "length": 15, "width": 8, "height": 30, "operation": "cut"})),
+        _ => run(s, "solid.cylinder", json!({"radius": 5, "height": 30, "base": [3, 16, -10], "axis": "Z", "operation": "cut"})),
+    };
+    let drawn = |s: &mut Session, case: usize| match case {
+        0 => run(s, "sketch.circle.center", json!({"center": [40, 15], "diameter": 6})),
+        1 => run(s, "sketch.rectangle.two_point", json!({"p0": [-5, 12], "p1": [10, 20]})),
+        _ => run(s, "sketch.circle.center", json!({"center": [3, 16], "diameter": 10})),
+    };
+    for case in 0..3 {
+        let want = {
+            let mut s = wide_bend();
+            run(&mut s, "sheet.unfold", json!({}));
+            solid(&mut s, case);
+            run(&mut s, "sheet.refold", json!({}));
+            exact_volume(&s)
+        };
+        let mut s = wide_bend();
+        let whole = exact_volume(&s);
+        run(&mut s, "sheet.unfold", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Cut"}));
+        drawn(&mut s, case);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+        run(&mut s, "sheet.refold", json!({}));
+        let v = exact_volume(&s);
+        assert!(want < whole - 1.0, "case {case}: the solid cuts something: {want} of {whole}");
+        assert!((v - want).abs() < 1e-6 * want, "case {case}: {v} vs {want}");
+        // Case 0 covers the volume only, not tangency: the round hole tangent to the tangent line
+        // leaves a body that is not a valid solid, which the kernel's check refuses (Coincident
+        // Vertices, Intersecting Face Loops), cut as a solid as well (tangency-labs/solidcraft#21449).
+        if case != 0 {
+            assert_eq!(check_failure(&s), None, "case {case}: the refolded sheet passes the kernel's check");
+        }
+    }
+}
+
+/// A row of round holes in one sketch, each across the plate's tangent line, cut through the flat
+/// while the sheet is unfolded: refolded, the sheet has the faces and the volume the same holes
+/// drilled one by one leave. Each hole is a cut of the sheet's on its own, its circle kept as it
+/// is, not joined with the others (joining splits every arc it takes, and each split a wall face
+/// more in the bend).
+#[test]
+fn a_row_of_holes_across_a_bend_line_has_the_faces_of_the_holes_drilled() {
+    let holes: Vec<(f64, f64)> = (0..5).map(|i| (2.5 + 5.0 * f64::from(i), 11.5)).collect();
+    let faces = |s: &Session| s.model.state().bodies.first().map(|b| b.body.record().faces.len());
+    let (drilled, drilled_faces) = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (x, y) in &holes {
+            run(&mut s, "solid.cylinder", json!({"radius": 1.5, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        (exact_volume(&s), faces(&s))
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Holes"}));
+    for (x, y) in &holes {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 3.0}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Holes", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    assert_eq!(sk.sheet.cuts.len(), holes.len(), "each hole is a cut of the sheet's");
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
+    assert_eq!(faces(&s), drilled_faces, "the faces of the holes drilled");
+}
+
+/// Two round holes across the plate's tangent line that overlap (a slot of two circles) are still
+/// joined into one cut of the sheet's: refolded, it loses what the same two holes drilled one by
+/// one take.
+#[test]
+fn overlapping_holes_across_a_bend_line_are_joined_into_one_cut() {
+    let holes = [(50.0, 11.5), (52.0, 11.5)];
+    let drilled = {
+        let mut s = wide_bend();
+        run(&mut s, "sheet.unfold", json!({}));
+        for (x, y) in holes {
+            run(&mut s, "solid.cylinder", json!({"radius": 1.5, "height": 30, "base": [x, y, -10], "axis": "Z", "operation": "cut"}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        exact_volume(&s)
+    };
+    let mut s = wide_bend();
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": T, "name": "Slot"}));
+    for (x, y) in holes {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 3.0}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 3.0 * T, "direction": "symmetric", "operation": "cut"}));
+    run(&mut s, "sheet.refold", json!({}));
+    let v = exact_volume(&s);
+    assert!((v - drilled).abs() < 1e-6 * drilled, "{v} vs {drilled}");
 }
