@@ -7160,7 +7160,10 @@ mod glass_tests {
         // another test's thread destroys a Vulkan device (#10232).
         std::mem::forget(instance.clone());
         let policy = crate::test_env::policy();
-        let Some((adapter, _)) = crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy) else {
+        let picked = crate::select::one_listing_at_a_time(|| {
+            crate::select::pick_among(pollster::block_on(instance.enumerate_adapters(wgpu::Backends::GL)), policy)
+        });
+        let Some((adapter, _)) = picked else {
             eprintln!("skipped: no OpenGL adapter qualifies under {}", policy.name());
             return;
         };
