@@ -31,3 +31,7 @@ pub use request::chat_turn_cancelled;
 /// How an error from the client (`client`, native only) starts when a request is still running
 /// in the app after the wait. Outside the client so callers on every target can test for it.
 pub const STILL_RUNNING: &str = "still running:";
+
+/// How an app reply's error starts when the app ran nothing for the request (the user declined it,
+/// or its agent chat turn ended). A caller must not say the request may have run.
+pub const NOT_RUN: &str = "not run:";
