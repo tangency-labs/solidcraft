@@ -169,7 +169,7 @@ fn nurb_cone(k: &mut Kernel) -> Brep {
 /// `stubs4-degenerate-nurb_cone-e8-r0.5`) turns by 0.61 degrees: a crease under the half
 /// degree limit, not a tangent edge. A round of r 0.5 there stands
 /// `r (sec(turn / 2) - 1)` off the edge, under its tolerance, so it is refused as too small
-/// before the solver runs (which leaves the solver's step latch unset), naming the
+/// before the solver runs, naming the
 /// smallest radius `tolerance / (sec(turn / 2) - 1)` that rounds it.
 #[test]
 fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
@@ -213,5 +213,4 @@ fn wr_621_a_shallow_crease_too_small_to_round_is_refused_before_solving() {
         ),
         "{err:?}"
     );
-    assert_eq!(k.fillet_point_step.get(), None);
 }

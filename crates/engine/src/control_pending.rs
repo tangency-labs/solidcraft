@@ -37,7 +37,10 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.starts_with("live.")
         || id == "document.revision"
         || id == "view.status_items"
-        || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
+        || matches!(
+            id,
+            "doc.info" | "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers"
+        )
 }
 
 /// What the command `id` with `params` does: an export that is given a `path` (`*.export*`, as
@@ -116,6 +119,7 @@ mod tests {
             ("engine.execute", json!({"command": "view.status_items", "params": {}})),
             ("engine.execute", json!({"command": "inspect.measure"})),
             ("engine.execute", json!({"command": "model.edges", "params": {"body": "Body1"}})),
+            ("engine.execute", json!({"command": "doc.info"})),
             ("engine.execute", json!({"command": "parameters.export", "params": {"format": "csv"}})),
         ] {
             assert!(reads_only(m, &p), "{m} {p}");

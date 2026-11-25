@@ -53,6 +53,7 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::signed_unit_angle`]                  | not upstream: oriented angle of unit directions   |
 //! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
@@ -85,6 +86,7 @@
 
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector2d::{Point2, Vec2};
@@ -425,6 +427,26 @@ impl Vec3 {
         (parallel, anti)
     }
 
+    /// Not upstream: this direction, reversed when it points more than a right angle away from
+    /// `like` ([`Vec3::parallel_sense`]'s anti-parallel flag): a line's direction given the sense
+    /// of another, as a turn about an edge found again keeps the sense it was picked with.
+    /// `None` when either has zero length or a coordinate that is not finite. The two are
+    /// compared scaled by their largest coordinate, so a vector whose squared length overflows
+    /// still has its sense.
+    #[must_use]
+    pub fn with_sense_of(self, like: Self) -> Option<Self> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !finite(self) || !finite(like) {
+            return None;
+        }
+        if self.length_squared() <= EFF_ZERO_SQ || like.length_squared() <= EFF_ZERO_SQ {
+            return None;
+        }
+        let scaled = |v: Self| v * (1.0 / v.x.abs().max(v.y.abs()).max(v.z.abs()));
+        let anti = scaled(self).parallel_sense(scaled(like), 0.0).1?;
+        Some(if anti { -self } else { self })
+    }
+
     /// True when `self` and `o` are perpendicular within `ang_tol_deg` degrees
     /// (`IsPerpendicularTo`). Zero-length vectors are perpendicular to nothing.
     #[must_use]
@@ -573,9 +595,9 @@ impl Vec3 {
                 return Ok(Point2::new((o.z - o.y * u) / o.x, u));
             }
         }
-        Err(SolidError::geom_failed(
+        Err(SolidError::geom(
             "geom::vector3d::Vec3::solve_two_linear_equations",
-            "the system is singular",
+            GeomFailure::Singular { measure: denom },
         ))
     }
 
@@ -601,9 +623,9 @@ impl Vec3 {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
             2 => Ok(&mut self.z),
-            _ => Err(SolidError::geom_failed(
+            _ => Err(SolidError::geom(
                 "geom::vector3d::Vec3::component_mut",
-                "the component index is out of range",
+                GeomFailure::IndexOutOfRange { index, len: 3 },
             )),
         }
     }
@@ -683,9 +705,11 @@ impl Vec3 {
         if len_sq < EFF_ZERO_SQ {
             z_axis = x_axis.cross(Self::new(0.0, 0.0, 1.0));
             if z_axis.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::geom_failed(
+                // reached when `self` overflows: unitizing a vector whose squared
+                // length is infinite gives a zero vector
+                return Err(SolidError::geom(
                     "geom::vector3d::Vec3::make_unit_ortho_vectors",
-                    "no perpendicular vector found",
+                    GeomFailure::NoPerpendicular,
                 ));
             }
         }
@@ -852,6 +876,34 @@ impl Vec3 {
             let mag = sqrt(crs_norm / v1_len_sq / v2_len_sq);
             Ok(if dot < 0.0 { PI - asin(mag) } else { asin(mag) })
         }
+    }
+
+    /// Signed angle in radians about the unit normal `self`, from unit `start` to unit `end`.
+    /// The directions must be perpendicular to the normal, within `1e-9` for rounding.
+    /// They are not renormalised. A half turn with a triple product below `1e-12` in
+    /// magnitude always chooses positive `PI`, including a negative rounded zero.
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] for non-finite, non-unit or non-perpendicular directions.
+    pub fn signed_unit_angle(self, start: Self, end: Self) -> Result<f64> {
+        if ![self, start, end]
+            .iter()
+            .all(|v| (v.length_squared() - 1.0).abs() <= 1e-9)
+            || self.dot(start).abs() > 1e-9
+            || self.dot(end).abs() > 1e-9
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            });
+        }
+        let sin = self.dot(start.cross(end));
+        let cos = start.dot(end).clamp(-1.0, 1.0);
+        Ok(if cos < 0.0 && sin.abs() < 1e-12 {
+            PI
+        } else {
+            sin.atan2(cos)
+        })
     }
 
     /// Counter-clockwise angle in radians, in `[-PI, PI]`, from `start` to `end`
@@ -1042,6 +1094,54 @@ impl DivAssign<f64> for Vec3 {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn signed_unit_angles_keep_orientation_and_choose_positive_half_turns() {
+        for (normal, start, quarter) in [
+            (Vec3::Z, Vec3::X, Vec3::Y),
+            (Vec3::X, Vec3::Y, Vec3::Z),
+            (Vec3::Y, Vec3::Z, Vec3::X),
+            (Vec3::new(0.0, 0.6, 0.8), Vec3::X, Vec3::new(0.0, 0.8, -0.6)),
+        ] {
+            assert_eq!(normal.signed_unit_angle(start, start).unwrap(), 0.0);
+            assert!((normal.signed_unit_angle(start, quarter).unwrap() - PI / 2.0).abs() < 1e-15);
+            assert!((normal.signed_unit_angle(quarter, start).unwrap() + PI / 2.0).abs() < 1e-15);
+            assert_eq!(normal.signed_unit_angle(start, -start).unwrap(), PI);
+        }
+        for tiny in [-5e-13, -0.0, 0.0, 5e-13] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                PI
+            );
+        }
+        for tiny in [-2e-12_f64, 2e-12] {
+            assert_eq!(
+                Vec3::Z
+                    .signed_unit_angle(Vec3::X, Vec3::new(-1.0, tiny, 0.0))
+                    .unwrap(),
+                tiny.atan2(-1.0)
+            );
+        }
+    }
+
+    #[test]
+    fn signed_unit_angles_refuse_invalid_frames_without_normalising_them() {
+        for invalid in [
+            Vec3::ZERO,
+            Vec3::X * 2.0,
+            Vec3::new(f64::NAN, 0.0, 0.0),
+            Vec3::new(0.0, f64::INFINITY, 0.0),
+            Vec3::new(1e300, 1e300, 0.0),
+        ] {
+            assert!(invalid.signed_unit_angle(Vec3::X, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(invalid, Vec3::Y).is_err());
+            assert!(Vec3::Z.signed_unit_angle(Vec3::X, invalid).is_err());
+        }
+        assert!(Vec3::Z.signed_unit_angle(Vec3::Z, Vec3::X).is_err());
+        assert!(Vec3::Z.signed_unit_angle(Vec3::X, Vec3::Z).is_err());
+    }
+
+    #[test]
     fn distance_along_is_signed_and_ignores_the_sideways_offset() {
         let (o, d) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0));
         assert!((Vec3::new(9.0, 6.0, -4.0).distance_along(o, d) - 4.0).abs() < 1e-12);
@@ -1070,6 +1170,41 @@ mod tests {
                 + PI / 4.0)
                 .abs()
                 < 1e-12
+        );
+    }
+
+    #[test]
+    fn a_direction_takes_the_sense_of_another_and_none_without_length() {
+        let y = Vec3::new(0.1, 1.0, 0.0);
+        assert_eq!(
+            Vec3::new(0.0, -2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 2.0, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 2.0, 0.0))
+        );
+        // Not along one line at all: the sense of the nearer half.
+        assert_eq!(
+            Vec3::new(1.0, -1.0, 0.0).with_sense_of(Vec3::new(0.0, 1.0, 0.0)),
+            Some(Vec3::new(-1.0, 1.0, 0.0))
+        );
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0).with_sense_of(y), None);
+        assert_eq!(y.with_sense_of(Vec3::new(0.0, 0.0, 0.0)), None);
+        assert_eq!(Vec3::new(f64::NAN, 1.0, 0.0).with_sense_of(y), None);
+        // Squared lengths that overflow keep their sense (#21447 review).
+        assert_eq!(
+            Vec3::new(1e200, 0.0, 0.0).with_sense_of(Vec3::new(-1.0, 0.0, 0.0)),
+            Some(Vec3::new(-1e200, 0.0, 0.0))
+        );
+        assert_eq!(
+            Vec3::new(0.0, 1e200, 0.0).with_sense_of(Vec3::new(0.0, 1e300, 0.0)),
+            Some(Vec3::new(0.0, 1e200, 0.0))
+        );
+        // Tiny but above the zero-length tolerance: still compared.
+        assert_eq!(
+            Vec3::new(0.0, -1e-9, 0.0).with_sense_of(y),
+            Some(Vec3::new(0.0, 1e-9, 0.0))
         );
     }
 

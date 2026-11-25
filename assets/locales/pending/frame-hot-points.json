@@ -1,0 +1,83 @@
+{
+  "en": {
+    "ui.frame_arrow_a_tip": "Drag to move the section along A (Offset A) in 1 mm steps; hold Alt or Ctrl for 0.1 mm steps",
+    "ui.frame_arrow_b_tip": "Drag to move the section along B (Offset B) in 1 mm steps; hold Alt or Ctrl for 0.1 mm steps",
+    "ui.frame_hot_point_tip": "Click to put this point of the section on the line",
+    "ui.frame_locate_tip": "Drag to put another point of the section, or a point past it, on the line",
+    "ui.frame_offset_a": "Offset A",
+    "ui.frame_offset_b": "Offset B",
+    "ui.frame_rotate_tip": "Drag to turn the section about the point on the line in 15° steps; hold Alt or Ctrl for 1° steps"
+  },
+  "de": {
+    "ui.frame_arrow_a_tip": "Ziehen, um den Querschnitt entlang A zu verschieben (Versatz A), in 1-mm-Schritten; Alt oder Strg gedrückt halten für 0,1-mm-Schritte",
+    "ui.frame_arrow_b_tip": "Ziehen, um den Querschnitt entlang B zu verschieben (Versatz B), in 1-mm-Schritten; Alt oder Strg gedrückt halten für 0,1-mm-Schritte",
+    "ui.frame_hot_point_tip": "Klicken, um diesen Punkt des Querschnitts auf die Linie zu setzen",
+    "ui.frame_locate_tip": "Ziehen, um einen anderen Punkt des Querschnitts oder einen Punkt außerhalb davon auf die Linie zu setzen",
+    "ui.frame_offset_a": "Versatz A",
+    "ui.frame_offset_b": "Versatz B",
+    "ui.frame_rotate_tip": "Ziehen, um den Querschnitt um den Punkt auf der Linie zu drehen, in 15°-Schritten; Alt oder Strg gedrückt halten für 1°-Schritte"
+  },
+  "ar": {
+    "ui.frame_arrow_a_tip": "اسحب لتحريك المقطع على طول A (الإزاحة A) بخطوات 1 مم؛ اضغط مع الاستمرار على Alt أو Ctrl لخطوات 0.1 مم",
+    "ui.frame_arrow_b_tip": "اسحب لتحريك المقطع على طول B (الإزاحة B) بخطوات 1 مم؛ اضغط مع الاستمرار على Alt أو Ctrl لخطوات 0.1 مم",
+    "ui.frame_hot_point_tip": "انقر لوضع هذه النقطة من المقطع على الخط",
+    "ui.frame_locate_tip": "اسحب لوضع نقطة أخرى من المقطع، أو نقطة خارجه، على الخط",
+    "ui.frame_offset_a": "الإزاحة A",
+    "ui.frame_offset_b": "الإزاحة B",
+    "ui.frame_rotate_tip": "اسحب لتدوير المقطع حول النقطة الواقعة على الخط بخطوات 15°؛ اضغط مع الاستمرار على Alt أو Ctrl لخطوات 1°"
+  },
+  "he": {
+    "ui.frame_arrow_a_tip": "גרור כדי להזיז את החתך לאורך A (היסט A) בצעדים של 1 מ״מ; החזק Alt או Ctrl לצעדים של 0.1 מ״מ",
+    "ui.frame_arrow_b_tip": "גרור כדי להזיז את החתך לאורך B (היסט B) בצעדים של 1 מ״מ; החזק Alt או Ctrl לצעדים של 0.1 מ״מ",
+    "ui.frame_hot_point_tip": "לחץ כדי להציב נקודה זו של החתך על הקו",
+    "ui.frame_locate_tip": "גרור כדי להציב נקודה אחרת של החתך, או נקודה מחוצה לו, על הקו",
+    "ui.frame_offset_a": "היסט A",
+    "ui.frame_offset_b": "היסט B",
+    "ui.frame_rotate_tip": "גרור כדי לסובב את החתך סביב הנקודה שעל הקו בצעדים של 15°; החזק Alt או Ctrl לצעדים של 1°"
+  },
+  "ja": {
+    "ui.frame_arrow_a_tip": "ドラッグすると断面を A 方向に 1 mm 単位で移動します (オフセット A)。Alt または Ctrl を押しながらで 0.1 mm 単位",
+    "ui.frame_arrow_b_tip": "ドラッグすると断面を B 方向に 1 mm 単位で移動します (オフセット B)。Alt または Ctrl を押しながらで 0.1 mm 単位",
+    "ui.frame_hot_point_tip": "クリックすると断面のこの点を線上に置きます",
+    "ui.frame_locate_tip": "ドラッグすると断面の別の点、または断面の外側の点を線上に置きます",
+    "ui.frame_offset_a": "オフセット A",
+    "ui.frame_offset_b": "オフセット B",
+    "ui.frame_rotate_tip": "ドラッグすると線上の点を中心に断面を 15° 単位で回転します。Alt または Ctrl を押しながらで 1° 単位"
+  },
+  "ko": {
+    "ui.frame_arrow_a_tip": "끌면 단면을 A 방향으로 1 mm 단위로 이동합니다 (오프셋 A). Alt 또는 Ctrl을 누르고 있으면 0.1 mm 단위",
+    "ui.frame_arrow_b_tip": "끌면 단면을 B 방향으로 1 mm 단위로 이동합니다 (오프셋 B). Alt 또는 Ctrl을 누르고 있으면 0.1 mm 단위",
+    "ui.frame_hot_point_tip": "클릭하면 단면의 이 점을 선 위에 놓습니다",
+    "ui.frame_locate_tip": "끌면 단면의 다른 점이나 단면 바깥의 점을 선 위에 놓습니다",
+    "ui.frame_offset_a": "오프셋 A",
+    "ui.frame_offset_b": "오프셋 B",
+    "ui.frame_rotate_tip": "끌면 선 위의 점을 중심으로 단면을 15° 단위로 회전합니다. Alt 또는 Ctrl을 누르고 있으면 1° 단위"
+  },
+  "vi": {
+    "ui.frame_arrow_a_tip": "Kéo để di chuyển mặt cắt theo A (Độ lệch A), mỗi bước 1 mm; giữ Alt hoặc Ctrl để có bước 0,1 mm",
+    "ui.frame_arrow_b_tip": "Kéo để di chuyển mặt cắt theo B (Độ lệch B), mỗi bước 1 mm; giữ Alt hoặc Ctrl để có bước 0,1 mm",
+    "ui.frame_hot_point_tip": "Nhấp để đặt điểm này của mặt cắt lên đường",
+    "ui.frame_locate_tip": "Kéo để đặt một điểm khác của mặt cắt, hoặc một điểm bên ngoài nó, lên đường",
+    "ui.frame_offset_a": "Độ lệch A",
+    "ui.frame_offset_b": "Độ lệch B",
+    "ui.frame_rotate_tip": "Kéo để xoay mặt cắt quanh điểm trên đường, mỗi bước 15°; giữ Alt hoặc Ctrl để có bước 1°"
+  },
+  "zh": {
+    "ui.frame_arrow_a_tip": "拖动可沿 A 移动截面（偏移 A），步长 1 mm；按住 Alt 或 Ctrl 时步长 0.1 mm",
+    "ui.frame_arrow_b_tip": "拖动可沿 B 移动截面（偏移 B），步长 1 mm；按住 Alt 或 Ctrl 时步长 0.1 mm",
+    "ui.frame_hot_point_tip": "单击将截面的此点放在线上",
+    "ui.frame_locate_tip": "拖动将截面的另一点或截面外的一点放在线上",
+    "ui.frame_offset_a": "偏移 A",
+    "ui.frame_offset_b": "偏移 B",
+    "ui.frame_rotate_tip": "拖动可绕线上的点旋转截面，步长 15°；按住 Alt 或 Ctrl 时步长 1°"
+  },
+  "es": {
+    "ui.frame_arrow_a_tip": "Arrastra para mover la sección a lo largo de A (Desfase A) en pasos de 1 mm; mantén Alt o Ctrl para pasos de 0,1 mm",
+    "ui.frame_arrow_b_tip": "Arrastra para mover la sección a lo largo de B (Desfase B) en pasos de 1 mm; mantén Alt o Ctrl para pasos de 0,1 mm",
+    "ui.frame_hot_point_tip": "Haz clic para poner este punto de la sección sobre la línea",
+    "ui.frame_locate_tip": "Arrastra para poner otro punto de la sección, o uno fuera de ella, sobre la línea",
+    "ui.frame_offset_a": "Desfase A",
+    "ui.frame_offset_b": "Desfase B",
+    "ui.frame_rotate_tip": "Arrastra para girar la sección alrededor del punto sobre la línea en pasos de 15°; mantén Alt o Ctrl para pasos de 1°"
+  }
+}

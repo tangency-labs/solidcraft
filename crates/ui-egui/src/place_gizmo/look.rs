@@ -126,6 +126,42 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, arms: 
     painter.circle_filled(c, DOT_R, core);
 }
 
+/// An offset arrow's shaft width and how much larger than the marker's arrowheads its head is: it
+/// is the one handle of its move, so it reads at a glance.
+const ARROW_LINE: f32 = 3.0;
+const ARROW_HEAD: f32 = 1.4;
+
+/// An offset arrow: a straight shaft from `from` ending in an arrowhead at `to` (the move it
+/// makes), white on its casing like every handle, with its label (`A`, or `A 5.0 mm`) past the
+/// tip on the panel's backing, as the turn ring's readout. `hot` eases 0 (resting) to 1 (pointer
+/// over or dragging): the head grows a little.
+pub(super) fn offset_arrow(painter: &egui::Painter, from: Pos2, to: Pos2, hot: f32, label: &str, t: &Tokens) {
+    let d = to - from;
+    let len = d.length();
+    if !(len.is_finite() && len > 1.0) {
+        return;
+    }
+    let dir = d / len;
+    let n = vec2(-dir.y, dir.x);
+    let grow = ARROW_HEAD * (0.85 + 0.3 * hot);
+    let (head_len, half) = ((HEAD_LEN * grow).min(len), HEAD_HALF * grow);
+    let base = to - dir * head_len;
+    let head = vec![base + n * half, to, base - n * half];
+    let (core, case) = (core(hot > 0.5), casing());
+    painter.add(egui::Shape::line_segment([from, base], Stroke::new(ARROW_LINE + CASE, case)));
+    painter.add(egui::Shape::convex_polygon(grown(&head, CASE / 2.0), case, Stroke::NONE));
+    painter.add(egui::Shape::line_segment([from, base], Stroke::new(ARROW_LINE, core)));
+    painter.add(egui::Shape::convex_polygon(head, core, Stroke::NONE));
+    let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(t.font_body), t.text);
+    let pad = vec2(4.0, 1.0);
+    let size = galley.size() + 2.0 * pad;
+    // Past the tip by half the label's reach along the arrow, so any direction keeps it clear.
+    let centre = to + dir * (0.5 * (size.x * dir.x.abs() + size.y * dir.y.abs()) + 4.0);
+    let rect = egui::Rect::from_center_size(centre, size);
+    painter.rect(rect, 3.0, t.panel.gamma_multiply(0.92), Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+    painter.galley(rect.min + pad, galley, t.text);
+}
+
 /// A convex polygon with every edge moved outwards by `d` (mitred corners).
 fn grown(pts: &[Pos2], d: f32) -> Vec<Pos2> {
     let n = pts.len();

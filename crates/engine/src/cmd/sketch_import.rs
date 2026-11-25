@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES};
+use solidcraft_io::{AirfoilFormat, DxfEntity, DxfLayer, Geom2, MAX_AIRFOIL_BYTES, MAX_DRAWING_BYTES, SvgShape};
 use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
@@ -14,7 +14,7 @@ use super::sketch_store;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{
     AirfoilInserted, DrawingBoundsParams, DrawingBoundsResult, DrawingBox, DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult,
-    InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve,
+    ExportSvgParams, ExportSvgResult, InsertAirfoilParams, InsertDxfParams, InsertSvgParams, SketchSolve, SvgExported,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -24,6 +24,7 @@ const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new()
 const INSERT_AIRFOIL_CONTRACT: TypedContract<InsertAirfoilParams> = TypedContract::new();
 const DRAWING_BOUNDS_CONTRACT: TypedContract<DrawingBoundsParams> = TypedContract::new();
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+const EXPORT_SVG_CONTRACT: TypedContract<ExportSvgParams> = TypedContract::new();
 
 /// A command's reply as JSON, built from the type its output schema describes so the two can't
 /// drift apart.
@@ -62,6 +63,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
+    CommandSpec::new("sketch.export_svg", "Save As SVG", crate::checked!("sketch.export_svg", export_svg))
+        .icon("svg")
+        .noundo()
+        .contract(&EXPORT_SVG_CONTRACT)
+        .output(output_schema_for::<ExportSvgResult>)
+        .params("sketch?: id|name (default active); path?: file to write (else the SVG text is returned); units?: \"mm\" | \"cm\" | \"in\" | \"inch\" (default mm). The file's width and height carry the unit and its viewBox is the same size without one, so it opens 1:1; the Y axis points down as SVG has it, so the picture is the sketch as seen. Each closed profile is one closed path with its holes as sub-paths; circles, arcs and lines stay themselves and other curves are line segments; construction curves are left out"),
 ];
 
 /// The sketch import command for a drawing file name, regardless of extension case.
@@ -399,6 +406,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
                 &mut sk,
                 LinkKind::Text,
                 LinkSource::Text { text, at, height, angle: own + angle, font: None, style: Default::default(), exprs: Default::default() },
+                None,
             )
             .is_ok()
             {
@@ -538,7 +546,7 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     // The merged points against the spline points that stand for them, and the spline against
     // the straight lines between its points: the kernel bounds both.
     let pieces: Vec<[[f64; 3]; 4]> = solidcraft_sketch::fit_beziers(&spline).iter().map(|piece| piece.map(|c| [c.x, c.y, 0.0])).collect();
-    let fit = solidcore_ops::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
+    let fit = solidcraft_kernel::services::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
 
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -812,6 +820,66 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, ExportDxfResult { exported, param_warnings: Vec::new() });
     }
     reply(cmd, ExportDxfResult { exported: DxfExported::Text { dxf: text, entities: entity_count }, param_warnings: Vec::new() })
+}
+
+fn export_svg(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.export_svg";
+    let id = sketch_store::target(s, p, cmd)?;
+    let st = s.model.state();
+    let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
+    let sk = &ss.sketch;
+
+    if let Some(v) = p.get("units").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`units` must be a string"));
+    }
+    let (unit, per_mm) = match str_(p, "units") {
+        None => ("mm", 1.0),
+        Some(name) => solidcraft_io::svg_unit(name).ok_or_else(|| bad(cmd, format!("unsupported unit `{name}` (use \"mm\", \"cm\" or \"in\")")))?,
+    };
+    if let Some(v) = p.get("path").filter(|v| !v.is_null())
+        && !v.is_string()
+    {
+        return Err(bad(cmd, "`path` must be a string"));
+    }
+
+    // A profile is drawn as one closed contour with its holes. A profile that fills another's hole
+    // is that hole's inside, not a second outline, so it is left out as `sketch.export_dxf` leaves it.
+    let hole_keys: std::collections::HashSet<Vec<&str>> =
+        ss.profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| sorted_curve_ids(h))).collect();
+    let mut in_profile = std::collections::HashSet::new();
+    let mut shapes = Vec::new();
+    for prof in &ss.profiles {
+        for id in prof.outer_curves.iter().chain(prof.hole_curves.iter().flatten()) {
+            in_profile.insert(id.as_str());
+        }
+        if !hole_keys.contains(&sorted_curve_ids(&prof.outer_curves)) {
+            shapes.push(SvgShape::Region { outer: &prof.region.outer, holes: prof.region.holes.iter().collect() });
+        }
+    }
+    // Whatever is not part of a profile is drawn on its own, so nothing visible is lost.
+    for (i, c) in sk.curves.iter().enumerate() {
+        if c.construction || in_profile.contains(c.id.as_str()) {
+            continue;
+        }
+        let pt = |k: usize| sk.point(k).unwrap_or_default();
+        shapes.push(match &c.kind {
+            CurveKind::Line { a, b } => SvgShape::Line(pt(*a), pt(*b)),
+            CurveKind::Circle { c, r } => SvgShape::Circle(pt(*c), *r),
+            CurveKind::Arc { c, a, b } => SvgShape::Arc { c: pt(*c), a: pt(*a), b: pt(*b) },
+            _ => SvgShape::Polyline(sk.polyline(i)),
+        });
+    }
+    let elements = shapes.len();
+    let text = solidcraft_io::write_svg(&shapes, unit, per_mm).map_err(|e| bad(cmd, e.to_string()))?;
+
+    if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
+        solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let exported = SvgExported::Written { path: path.to_string(), elements };
+        return reply(cmd, ExportSvgResult { exported, param_warnings: Vec::new() });
+    }
+    reply(cmd, ExportSvgResult { exported: SvgExported::Text { svg: text, elements }, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -1640,5 +1708,78 @@ EOF
                 assert!((len_in - 2.0).abs() < 1e-8 || (len_in - 3.0).abs() < 1e-8, "edge length {len_in}");
             }
         }
+    }
+
+    /// A 30 x 20 rectangle with a 4 mm circle in it, on the sketch being edited.
+    fn rectangle_with_a_round_hole() -> Session {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        s.execute("sketch.circle.center", &json!({"center": [10, 10], "radius": 4})).unwrap();
+        s
+    }
+
+    #[test]
+    fn export_svg_is_one_closed_path_with_the_hole_at_its_real_size() {
+        let mut s = rectangle_with_a_round_hole();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert!(svg.contains("width=\"30mm\" height=\"20mm\" viewBox=\"0 0 30 20\""), "{svg}");
+        // The profile with its hole is one element: the outline and the hole are sub-paths of it.
+        assert_eq!(out["elements"], 1, "{out}");
+        let path = svg.lines().find(|l| l.starts_with("<path")).unwrap();
+        assert_eq!((path.matches('M').count(), path.matches('Z').count()), (2, 2), "{path}");
+    }
+
+    #[test]
+    fn export_svg_reads_back_into_a_sketch_with_the_same_profiles() {
+        let mut s = rectangle_with_a_round_hole();
+        let svg = s.execute("sketch.export_svg", &json!({})).unwrap()["svg"].as_str().unwrap().to_string();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": svg, "at": [100, 0]})).unwrap();
+        let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        let mut areas: Vec<f64> = ss.profiles.iter().map(|p| p.area).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        assert!((areas[1] - (600.0 - std::f64::consts::PI * 16.0)).abs() < 1e-3, "{areas:?}");
+    }
+
+    #[test]
+    fn export_svg_units_change_the_size_and_a_bad_one_is_refused() {
+        let mut s = rectangle_with_a_round_hole();
+        let cm = s.execute("sketch.export_svg", &json!({"units": "CM"})).unwrap();
+        assert!(cm["svg"].as_str().unwrap().contains("width=\"3cm\" height=\"2cm\" viewBox=\"0 0 3 2\""), "{cm}");
+        let inch = s.execute("sketch.export_svg", &json!({"units": "in"})).unwrap();
+        assert!(inch["svg"].as_str().unwrap().contains("width=\"1.1811in\""), "{inch}");
+        assert!(s.execute("sketch.export_svg", &json!({"units": "furlong"})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"units": 5})).is_err());
+        assert!(s.execute("sketch.export_svg", &json!({"path": 5})).is_err());
+    }
+
+    #[test]
+    fn export_svg_draws_loose_curves_and_leaves_construction_ones_out() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [40, 10]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[0, 0], [100, 50]], "construction": true})).unwrap();
+        let out = s.execute("sketch.export_svg", &json!({})).unwrap();
+        let svg = out["svg"].as_str().unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        assert!(svg.contains("width=\"40mm\" height=\"10mm\""), "the construction line is not in the bounds: {svg}");
+        assert!(svg.contains("<path d=\"M0 10L40 0\"/>"), "{svg}");
+    }
+
+    #[test]
+    fn export_svg_of_an_empty_sketch_is_refused_and_a_path_writes_the_file() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        assert!(s.execute("sketch.export_svg", &json!({})).is_err());
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [12, 8]})).unwrap();
+        let file = std::env::temp_dir().join(format!("solidcraft-export-svg-{}.svg", std::process::id()));
+        let out = s.execute("sketch.export_svg", &json!({"path": file.to_str().unwrap()})).unwrap();
+        assert_eq!(out["elements"], 1, "{out}");
+        let written = std::fs::read_to_string(&file).unwrap();
+        let _ = std::fs::remove_file(&file);
+        assert!(written.contains("width=\"12mm\" height=\"8mm\""), "{written}");
     }
 }

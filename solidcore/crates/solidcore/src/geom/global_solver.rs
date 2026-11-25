@@ -111,6 +111,7 @@
 //!   owner object returns [`SolidError::Unported`] (see the `UNPORTED` marker).
 
 use crate::curve::crv_on_surf::CrvOnSurf;
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
@@ -776,13 +777,23 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     /// [`SolidError::InvalidInput`] for a null slot or tree, or a node id the
     /// tree does not hold.
     pub fn branch_node(&self, branch: &Branch, index: usize) -> Result<&'t TreeNode<O>> {
+        Ok(self.branch_entry(branch, index)?.1)
+    }
+
+    /// The id and the node of `branch` in tree `index` (`apBranch[index]`), for a caller
+    /// that reads both.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`GlobalSolver::branch_node`].
+    pub fn branch_entry(&self, branch: &Branch, index: usize) -> Result<(NodeId, &'t TreeNode<O>)> {
         const OP: &str = "geom::global_solver::GlobalSolver::branch_node";
         let id = branch
             .get(index)
             .copied()
             .flatten()
             .ok_or_else(|| null_node(OP))?;
-        self.tree(index)?.node(id)
+        Ok((id, self.tree(index)?.node(id)?))
     }
 
     /// The bounding box of `branch`'s node in tree `index`
@@ -1347,7 +1358,12 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         self.check_num_trees(OP)?;
         // check for failure
         let Some(best) = self.find_largest_non_leaf(branch)? else {
-            return Err(SolidError::geom_failed(OP, "no node can be subdivided"));
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::NoNodeToSubdivide {
+                    trees: self.num_trees,
+                },
+            ));
         };
 
         if self.operation == SolverOperation::Rayfire {
