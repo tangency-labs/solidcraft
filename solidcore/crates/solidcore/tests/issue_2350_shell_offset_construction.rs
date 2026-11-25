@@ -329,3 +329,66 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     let got = volume(&k, &mut b).unwrap();
     assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
 }
+
+/// A 200 x 200 x 40 block (z -40..0) with a blind hole of radius 25 about (50, 25) from its
+/// top down to z = -29, so an 11 thick floor lies under the hole (tangency-labs/solidcraft#21674,
+/// rebuilt from upstream's `Fillet/box_diff_cyl_big_rad.smb`).
+fn blind_hole_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let hole = create_cylinder(k, Point3::new(50.0, 25.0, -29.0), 25.0, 40.0).unwrap();
+    let mut part = boolean_difference(k, block, hole).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// The block's inset by `wall`, unmerged with extended convex edges (the executive's own
+/// `do_solid_offset`, as the goldens unit `offset.offset_executive_p2` runs it), the planar
+/// face at `open` (axis, value) left in place.
+fn unmerged_inset(wall: f64, open: (usize, f64)) -> solidcore::Result<Brep> {
+    use offset_fixture::planar_faces_at;
+    use solidcore::offset::offset_executive::p1::OffsetOperation;
+    use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
+    let mut k = Kernel::default();
+    let mut part = blind_hole_block(&mut k);
+    let faces = planar_faces_at(&k, &part, open.0, open.1);
+    assert_eq!(faces.len(), 1, "{open:?}");
+    let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, wall, part.tolerance());
+    executive.set_inset(true);
+    executive.set_extend_convex_edges(true);
+    executive.set_shell_faces(&faces);
+    let mut notifications = Notifications::new(&mut part);
+    executive.do_solid_offset(
+        &mut k,
+        Some(&mut part),
+        SolidOffsetOptions::default(),
+        &mut notifications.context(),
+    )
+}
+
+/// #21674: the block's unmerged inset by 10 with a side (y = -100) left in place moves the
+/// bottom up to z = -30 and the hole's floor down to z = -39: the two insets cross (the floor
+/// is 11 thick, less than two walls), so the inset has a through-hole there. Unmerged, the
+/// offset keeps the input's topology and returned a body whose hole wall passes through the
+/// inset bottom; it is refused as walls meeting across the floor, naming half the floor,
+/// 5.5, the largest wall at which the insets do not cross. At 5 (the insets 1 apart) and with
+/// the bottom left in place (nothing crosses) it builds as before.
+#[test]
+fn unmerged_inset_whose_floors_cross_is_refused_naming_half_the_floor() {
+    let err = unmerged_inset(10.0, (1, -100.0)).unwrap_err();
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+        distance, largest, ..
+    })) = err.failure().map(|f| &f.reason)
+    else {
+        panic!("wall 10: not walls meeting across the floor: {err}");
+    };
+    assert!((largest - 5.5).abs() <= 1e-9, "{largest}");
+    assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    for (wall, open) in [(5.0, (1, -100.0)), (10.0, (2, -40.0))] {
+        let result = unmerged_inset(wall, open);
+        assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
+    }
+}

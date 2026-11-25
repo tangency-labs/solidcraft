@@ -328,7 +328,8 @@ fn refuse_singular_or_folding_offset(
 /// Two faces qualify when their inward normals are opposite to within the B-rep's tolerance
 /// over the faces' extent, the second lies ahead of the first along its inward normal by a
 /// gap `g` with `tolerance < g` and `|g - 2 wall| <= tolerance` (where the insets cross, as
-/// across a rib or floor thinner than two walls, the offset leaves that material solid), and
+/// across a rib or floor thinner than two walls, the merge intersects them and keeps the
+/// cavity's regions, WR-667, and an unmerged offset is [`refuse_crossing_planar_insets`]'), and
 /// an interior point of one projects strictly inside the other (`face_classify_uv`), so the
 /// faces overlap across the gap, and a
 /// planar face shares an edge with each and has its interior strictly between their planes:
@@ -344,62 +345,17 @@ fn refuse_meeting_planar_insets(
     operation: &'static str,
 ) -> Result<()> {
     use crate::intersect::point_class::PointClassType;
-    use crate::math::{Point2, Point3};
-    use crate::nurbs::knots::Side;
+    use crate::math::Point3;
     use crate::offset::wall_room::{shell_wall_room, WallRoom};
-    use crate::query::api_queries::{face_bounding_box, face_classify_uv, face_internal_point};
-    use crate::surface::surface::{Surface, SurfaceKind};
+    use crate::query::api_queries::face_classify_uv;
     if !(wall.is_finite() && wall > 0.0 && brep_is_manifold_solid(original)?) {
         return Ok(());
     }
     let tolerance = original.tolerance();
-    // the projection of `p` onto planar face `f`'s plane, in the face's parameters
-    let plane_uv = |b: &Brep, f: FaceId, p: Point3| -> Result<Option<Point2>> {
-        Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
-            Some(SurfaceKind::Plane(plane)) => Some(plane.project_point_to_uv_domain(p)),
-            _ => None,
-        })
-    };
-    // each planar face: an interior point, its unit inward normal, its box, its edges and
-    // whether it is offset (not open)
-    let mut planar = Vec::new();
-    for f in bp1::faces(original, None)? {
-        kernel.check_cancelled(operation)?;
-        let is_plane = matches!(
-            original.face(f)?.surface.as_ref().map(Surface::kind),
-            Some(SurfaceKind::Plane(_))
-        );
-        if !is_plane {
-            continue;
-        }
-        let Some(fu) = face::outer_faceuse(original, f)? else {
-            continue;
-        };
-        let inward = if original.faceuse(fu)?.orientation == OrientType::Same {
-            -1.0
-        } else {
-            1.0
-        };
-        let at = match face_internal_point(kernel, original, f) {
-            Ok(at) => at,
-            Err(e) if e.sm_status().is_some() => continue,
-            Err(e) => return Err(e),
-        };
-        let Some(uv) = plane_uv(original, f, at)? else {
-            continue;
-        };
-        let Some(surface) = original.face(f)?.surface.as_ref() else {
-            continue;
-        };
-        let n = surface.evaluate_normal(kernel, uv, Side::Left, Side::Left)?;
-        let len = n.length();
-        if !(len.is_finite() && len > 0.0) {
-            continue;
-        }
-        let extent = face_bounding_box(kernel, original, f, false)?;
-        let edges = crate::topology::face::p4::edges(original, f, None, false, None)?;
-        planar.push((f, at, n * (inward / len), extent, edges, !open.contains(&f)));
-    }
+    let planar: Vec<_> = planar_walls(kernel, original, open, operation)?
+        .into_iter()
+        .map(|w| (w.face, w.at, w.inward, w.extent, w.edges, w.offset))
+        .collect();
     // a planar face sharing an edge with both `a` and `b` whose interior lies strictly between
     // their planes (the cap of the protrusion they bound: its edges with both are convex)
     let capped = |a: usize, b: usize, pa: Point3, ma: Vec3, gap: f64| {
@@ -476,6 +432,203 @@ fn refuse_meeting_planar_insets(
         )
         .into_error()),
         _ => Ok(()),
+    }
+}
+
+/// The projection of `p` onto planar face `f`'s plane, in the face's parameters; `None`
+/// where `f` is not planar.
+fn plane_uv(b: &Brep, f: FaceId, p: crate::math::Point3) -> Result<Option<crate::math::Point2>> {
+    use crate::surface::surface::{Surface, SurfaceKind};
+    Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
+        Some(SurfaceKind::Plane(plane)) => Some(plane.project_point_to_uv_domain(p)),
+        _ => None,
+    })
+}
+
+/// A planar face of a closed solid, as the inset refusals above and below read it.
+struct PlanarWall {
+    face: FaceId,
+    /// An interior point.
+    at: crate::math::Point3,
+    /// The unit normal into the material.
+    inward: Vec3,
+    /// The face's box.
+    extent: crate::geom::extent3d::Extent3d,
+    /// The face's edges.
+    edges: Vec<EdgeId>,
+    /// Whether the face is offset (not open).
+    offset: bool,
+}
+
+/// Each planar face of `original` with an interior point and a unit normal into the material
+/// (a face whose interior point or normal the queries do not give is left out), in face order.
+fn planar_walls(
+    kernel: &mut Kernel,
+    original: &mut Brep,
+    open: &[FaceId],
+    operation: &'static str,
+) -> Result<Vec<PlanarWall>> {
+    use crate::nurbs::knots::Side;
+    use crate::query::api_queries::{face_bounding_box, face_internal_point};
+    use crate::surface::surface::{Surface, SurfaceKind};
+    let mut planar = Vec::new();
+    for f in bp1::faces(original, None)? {
+        kernel.check_cancelled(operation)?;
+        let is_plane = matches!(
+            original.face(f)?.surface.as_ref().map(Surface::kind),
+            Some(SurfaceKind::Plane(_))
+        );
+        if !is_plane {
+            continue;
+        }
+        let Some(fu) = face::outer_faceuse(original, f)? else {
+            continue;
+        };
+        let inward = if original.faceuse(fu)?.orientation == OrientType::Same {
+            -1.0
+        } else {
+            1.0
+        };
+        let at = match face_internal_point(kernel, original, f) {
+            Ok(at) => at,
+            Err(e) if e.sm_status().is_some() => continue,
+            Err(e) => return Err(e),
+        };
+        let Some(uv) = plane_uv(original, f, at)? else {
+            continue;
+        };
+        let Some(surface) = original.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let n = surface.evaluate_normal(kernel, uv, Side::Left, Side::Left)?;
+        let len = n.length();
+        if !(len.is_finite() && len > 0.0) {
+            continue;
+        }
+        let extent = face_bounding_box(kernel, original, f, false)?;
+        let edges = crate::topology::face::p4::edges(original, f, None, false, None)?;
+        planar.push(PlanarWall {
+            face: f,
+            at,
+            inward: n * (inward / len),
+            extent,
+            edges,
+            offset: !open.contains(&f),
+        });
+    }
+    Ok(planar)
+}
+
+/// Not upstream (#21674): refuses an unmerged inset of `wall` of the closed solid `original`
+/// (its faces `open` left open) where the inset of a planar face has crossed the inset of a
+/// planar face opposite it, across material thinner than twice the wall (a blind hole whose
+/// floor is thinner than two walls: the floor's inset passes below the bottom's). An unmerged
+/// offset (`merge_results` false) only stitches the offset faces and keeps the input's
+/// topology, so it would return a body whose faces cross (the hole's wall passing through the
+/// inset bottom) where the inset has a through-hole; the merge, which intersects the offset
+/// faces and keeps the cavity regions (WR-667), is what changes the topology there. It is
+/// [`OffsetFailure::WallsMeetAcross`], naming half the narrowest such gap: the largest wall at
+/// which the two insets do not cross.
+///
+/// The witness is exact and is read on the built faces (`built`, the offset before it is
+/// stitched, and `offsets`, each original face with its offset faces there): an interior
+/// point `q` of an offset face of a planar face `b` lies at a distance `|h| < wall - tolerance`
+/// from the plane of a planar face `a` that is offset too, whose inward normal is opposite
+/// `b`'s to within the B-rep's tolerance over the faces' extent, and `q`'s projection onto
+/// that plane lies strictly inside `a` (`face_classify_uv`), so `q` is within `|h|` of `a`.
+/// Every point of an inset's boundary lies at least the wall from each face that is offset,
+/// so a body with such a point is not the inset. An offset face the build removed (an extinct
+/// branch) is not in `offsets`, and a pair whose insets meet exactly (`|h|` the wall) is
+/// [`refuse_meeting_planar_insets`]' to decide.
+fn refuse_crossing_planar_insets(
+    kernel: &mut Kernel,
+    original: &mut Brep,
+    open: &[FaceId],
+    wall: f64,
+    offsets: &[(FaceId, Vec<FaceId>)],
+    built: &Brep,
+    operation: &'static str,
+) -> Result<()> {
+    use crate::intersect::point_class::PointClassType;
+    use crate::query::api_queries::{face_classify_uv, face_internal_point};
+    if !(wall.is_finite() && wall > 0.0 && brep_is_manifold_solid(original)?) {
+        return Ok(());
+    }
+    let tolerance = original.tolerance();
+    let planar = planar_walls(kernel, original, open, operation)?;
+    // the pairs (b, a, gap) of offset faces opposite to within the tolerance over both
+    // faces' extent, b ahead of a along a's inward normal by a gap at which their insets
+    // cross (`|gap - wall| < wall - tolerance`, the distance of b's inset from a)
+    let mut pairs = Vec::new();
+    for b in planar.iter().filter(|w| w.offset) {
+        for a in planar.iter().filter(|w| w.offset && w.face != b.face) {
+            if (a.inward + b.inward).length() * a.extent.union(&b.extent).max_dimension()
+                > tolerance
+            {
+                continue;
+            }
+            let gap = (b.at - a.at).dot(a.inward);
+            if gap > tolerance && (gap - wall).abs() < wall - tolerance {
+                pairs.push((b, a, gap));
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(());
+    }
+    // the solid's sense, the interior points and the classifications are found on copies,
+    // leaving the input and the offset's faces as they are
+    let mut input = original.clone_standing_for_self()?;
+    if !crate::topology::brep::is_outward_solid(kernel, &mut input)? {
+        return Ok(());
+    }
+    let mut built = built.clone_standing_for_self()?;
+    // the narrowest gap between two faces whose insets cross, and the face whose inset
+    // crossed
+    let mut narrowest: Option<(FaceId, f64)> = None;
+    for (b, a, gap) in pairs {
+        if narrowest.is_some_and(|(_, g)| g <= gap) {
+            continue;
+        }
+        let Some((_, built_faces)) = offsets.iter().find(|(f, _)| *f == b.face) else {
+            continue;
+        };
+        for &offset_face in built_faces {
+            kernel.check_cancelled(operation)?;
+            let q = match face_internal_point(kernel, &mut built, offset_face) {
+                Ok(q) => q,
+                Err(e) if e.sm_status().is_some() => continue,
+                Err(e) => return Err(e),
+            };
+            // q's distance from a's plane, measured on the built face
+            if (q - a.at).dot(a.inward).abs() >= wall - tolerance {
+                continue;
+            }
+            let Some(uv) = plane_uv(&input, a.face, q)? else {
+                continue;
+            };
+            match face_classify_uv(kernel, &mut input, a.face, uv) {
+                Ok(PointClassType::Face) => {
+                    narrowest = Some((b.face, gap));
+                    break;
+                }
+                Ok(_) => {}
+                Err(e) if e.sm_status().is_some() => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    match narrowest {
+        Some((face, gap)) => Err(Failure::new(
+            operation,
+            OffsetFailure::WallsMeetAcross {
+                face,
+                distance: wall,
+                largest: gap / 2.0,
+            },
+        )
+        .into_error()),
+        None => Ok(()),
     }
 }
 
@@ -1348,6 +1501,36 @@ impl OffsetExecutive {
 
             // (not upstream) each kept edge is the original edge on both its faces
             self.restore_kept_edges(kernel, original, notifications)?;
+
+            // Not upstream (#21674): unmerged, an inset whose opposite planar walls' insets
+            // crossed (a floor thinner than two walls) would keep the input's topology with
+            // its faces crossing; it is refused, as walls meeting exactly are above.
+            if self.inset()
+                && !self.merge_results()
+                && self.local_faces.is_empty()
+                && self.operation() != OffsetOperation::LocalOperation
+            {
+                let mut offsets: Vec<(FaceId, Vec<FaceId>)> = Vec::new();
+                for faceuse in self.faceuse_to_faces.all_firsts() {
+                    let Some(face) = original.faceuse(faceuse)?.face else {
+                        continue;
+                    };
+                    offsets.push((face, self.faceuse_to_faces.seconds(faceuse)));
+                }
+                let wall = self.offset_distance();
+                let open = self.shell_faces().to_vec();
+                if let Some(built) = self.offset_brep() {
+                    refuse_crossing_planar_insets(
+                        kernel,
+                        original,
+                        &open,
+                        wall,
+                        &offsets,
+                        built,
+                        OP_EXTENDED,
+                    )?;
+                }
+            }
 
             let mut result = self.piecewise_merge(kernel, original, Some(&mut *notifications))?;
             // (WR-341: this also runs for a solid input whatever `m_bCreateOffsetSolid`

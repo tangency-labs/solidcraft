@@ -676,6 +676,11 @@ pub enum OffsetFailure {
     /// material exactly twice the distance away (a square boss inset by half its width):
     /// the material between them has no offset left, a change of topology the offset does not
     /// make. `largest` is half the narrowest such width: the largest wall that fits (#18239).
+    /// Also an unmerged inset where the two insets have crossed, the material between the
+    /// faces thinner than twice the distance (a floor under a blind hole: the inset has a
+    /// through-hole there, which the unmerged offset, keeping the input's topology, does not
+    /// build); `largest` is then half that thickness, the largest wall at which they do not
+    /// cross (#21674).
     WallsMeetAcross {
         /// A face of the narrowest such pair.
         face: FaceId,
