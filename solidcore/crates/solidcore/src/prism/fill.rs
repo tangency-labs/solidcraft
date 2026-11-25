@@ -54,8 +54,9 @@
 //! so it is built only where the sides beyond the toes on that side do: [`Channel::depth_normal`]
 //! given and square to the chord. Elsewhere it is refused ([`FillFailure::BlendedToesOffChord`]).
 //! An overlap no longer than the zone tolerance is built with sharp toes
-//! ([`FillNote::SharpToes`]): its end is one point with the toe, and its arcs build only at
-//! some heights.
+//! ([`FillNote::SharpToes`]), within that tolerance of the blended face: a height the blended
+//! face allows (up to half the chord plus the overlap) is built, its crest at most half the
+//! chord.
 //!
 //! **Depth `s`.** Measured from the deeper toe along `-depth_normal` where
 //! [`Channel::depth_normal`] is given, and the fill's bottom runs square to it; else from the
@@ -181,7 +182,7 @@ pub enum FillNote {
         asked: f64,
     },
     /// Blended toes asked with an overlap no longer than the kernel's zone tolerance: built with
-    /// sharp toes (the blend's end is one point with the toe).
+    /// sharp toes (the blend's end is one point with the toe), the crest at most half the chord.
     SharpToes {
         /// Which side.
         side: FillSide,
@@ -363,16 +364,18 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
     shallow_options.face = toes(
         FillSide::Face,
         options.face,
+        0.5 * l0.distance(r0),
         along(l0, r0),
-        zone,
+        (zone, eps),
         &mut notes,
     )?;
     if second_used {
         shallow_options.second_face = Some(toes(
             FillSide::Second,
             second(options),
+            0.5 * rb.distance(lb),
             along(rb, lb),
-            zone,
+            (zone, eps),
             &mut notes,
         )?);
     }
@@ -409,6 +412,22 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
         None
     };
     let face_path = close(l0, r0, options.face);
+    // the profile's budget, before any fit is offered and before the pairwise check: the loop's
+    // lines and arcs as built (long walls cut short count only as cut)
+    let count = face_path.as_ref().map_or(1, Vec::len)
+        + right_wall.len()
+        + left_wall.len()
+        + if second_used {
+            second_path.as_ref().map_or(1, Vec::len)
+        } else {
+            bottom.len()
+        };
+    if count > MAX_SEGMENTS {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a section of more lines and arcs than a profile takes (MAX_SEGMENTS)",
+        ));
+    }
     // a concave face: the deepest that touches none of the section's other sides
     let walls: Vec<Seg2> = right_wall.iter().chain(&left_wall).copied().collect();
     let mut limits = Vec::new();
@@ -488,13 +507,6 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
     group.extend(right_wall.iter().map(|_| 0));
     group.extend(bottom.iter().map(|_| if second_used { 2 } else { 0 }));
     group.extend(left_wall.iter().map(|_| 0));
-    // the profile's budget before the pairwise check (long walls cut short count only as cut)
-    if segs.len() > MAX_SEGMENTS {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a section of more lines and arcs than a profile takes (MAX_SEGMENTS)",
-        ));
-    }
     if loop_crosses(&segs, &group, near_miss(eps)) {
         return Err(SolidError::invalid_input(
             OP,
@@ -805,18 +817,21 @@ fn shallow(
     Ok((contour, floor))
 }
 
-/// Blended toes, before a face's heights are sized. An overlap no longer than the zone
-/// tolerance is built with sharp toes and a note says so: the blend's end is one point with the
-/// toe, and no height fit makes its arcs build (a blend arc is `o (1 + u²) atan(u) / u` long,
-/// `u = h / x`: from `o` to `π o / 2` whatever the height, so at or below `2 zone / π` none
-/// builds). A longer overlap only where the sides beyond the toes run along the chord (`along`),
-/// else refused whatever the height (a height at or below the zone tolerance is built flat, and
-/// has no toes).
+/// Blended toes, before a face's heights are sized (`a` half the chord). An overlap no longer
+/// than the zone tolerance is built with sharp toes and a note says so: the sharp face lies
+/// within the zone tolerance of the blended one. (Its blend arcs would build only at some
+/// heights: a blend arc is `o (1 + u²) atan(u) / u` long, `u = h / x`, from `o` to `π o / 2`,
+/// so at or below `2 zone / π` at none.) A height the blended face allows, up to `a + o`, is
+/// kept and built at most `a` high, the sharp face's limit, so sharp toes refuse no height
+/// the blend would build; past it the sharp face's own limit refuses it. A longer overlap only
+/// where the sides beyond the toes run along the chord (`along`), else refused whatever the
+/// height (a height at or below the zone tolerance is built flat, and has no toes).
 fn toes(
     side: FillSide,
     contour: Contour,
+    a: f64,
     along: bool,
-    zone: f64,
+    (zone, eps): (f64, f64),
     notes: &mut Vec<FillNote>,
 ) -> Result<Contour> {
     let Contour::ConvexBlended { height, overlap } = contour else {
@@ -827,6 +842,11 @@ fn toes(
     }
     if overlap <= zone {
         notes.push(FillNote::SharpToes { side, overlap });
+        let height = if height <= a + overlap + eps {
+            height.min(a)
+        } else {
+            height
+        };
         return Ok(Contour::Convex { height });
     }
     if !along {

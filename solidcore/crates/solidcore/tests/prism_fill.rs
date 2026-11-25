@@ -1058,7 +1058,7 @@ fn an_overlap_within_the_zone_tolerance_is_built_with_sharp_toes() {
         });
         let sharp = section(&Case {
             face: Contour::Convex { height: 1.0 },
-            ..w
+            ..w.clone()
         });
         assert_eq!(blended.region, sharp.region);
         assert_eq!(
@@ -1068,6 +1068,33 @@ fn an_overlap_within_the_zone_tolerance_is_built_with_sharp_toes() {
                 overlap: 1e-6
             }]
         );
+        // a height the blended face allows (up to a + o) but the sharp one does not (past a):
+        // built at a, within the overlap of what was asked (brett19 on #18947)
+        let a = G / 2.0 + 6.0 * tan(30.0);
+        let top = |height: f64| Case {
+            face: Contour::ConvexBlended {
+                height,
+                overlap: 1e-6,
+            },
+            ..w.clone()
+        };
+        let half = section(&Case {
+            face: Contour::Convex { height: a },
+            ..w.clone()
+        });
+        assert_eq!(section(&top(a + 0.5e-6)).region, half.region);
+        // past a + o: refused with the sharp face's limit, which builds
+        let (why, fit) = refused(&top(a + 1e-4));
+        assert_eq!(
+            why,
+            FillFailure::ConvexFaceTooHigh {
+                side: FillSide::Face,
+                height: a + 1e-4
+            }
+        );
+        let fit = fit.unwrap();
+        assert!((fit - a).abs() < 1e-12, "{fit}");
+        section(&top(fit));
     }
 }
 
@@ -1101,11 +1128,19 @@ fn a_section_past_the_profile_budget_is_refused_before_the_crossing_check() {
             line(p(3.0, y(i)), p(3.0, y(i + 1)))
         })
         .collect();
-    let err = run(&channel(mirror(&right), right)).unwrap_err();
-    assert!(
-        matches!(err, SolidError::InvalidInput { reason, .. } if reason.contains("MAX_SEGMENTS")),
-        "{err:?}"
-    );
+    // a concave face too deep for the walls too: refused on the count, not with a fit that
+    // the count would then refuse (brett19 on #18947)
+    for face in [Contour::Flat, Contour::Concave { depth: 5.0 }] {
+        let err = run(&Case {
+            face,
+            ..channel(mirror(&right), right.clone())
+        })
+        .unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { reason, .. } if reason.contains("MAX_SEGMENTS")),
+            "{err:?}"
+        );
+    }
 }
 
 /// How far `fill` grows each side towards a concave face: twice the crossing check's
