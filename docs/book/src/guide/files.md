@@ -413,6 +413,7 @@ placeholder in it is replaced:
 |---|---|
 | `{design}` | The design's name |
 | `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{source}` | The name, without folder or extension, of the file the exported body was imported from; for a body a later feature made, the design's first import. Without an import, the design's name |
 | `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
 
 The help icon next to the setting lists the same placeholders. A design property that is not set

@@ -8,6 +8,8 @@
 macro_rules! appearance_preferences {
     ($next:ident $(, $rest:ident)* ; $($fields:tt)*) => {
         $next! { $($rest),* ; $($fields)*
+            /// An accent colour (`#rrggbb`) over a theme that accepts one; empty (the default): the theme's.
+            accent: String = String::new(), PAGE_APPEARANCE;
             /// A picture behind the model in place of the view's background; empty for none.
             background_image: String = String::new(), PAGE_APPEARANCE;
             /// Colour vision mode (#778): `off`, `protan`, `deutan` or `tritan`.

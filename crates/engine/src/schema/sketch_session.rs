@@ -564,6 +564,9 @@ pub struct ConstructionResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
+    /// Keep identifiable surviving projection edges linked. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
     /// What to delete: curve, point, constraint, wire or link ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
@@ -581,9 +584,22 @@ pub struct DeleteResult {
     pub deleted: usize,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
+    /// Projections part of which was deleted and whose deleted members could not be recorded:
+    /// what remained of each is normal geometry now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_links: Vec<BrokenLink>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A projection `sketch.delete` broke off.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenLink {
+    /// The projection's id.
+    pub link: String,
+    /// Why its deleted members could not be recorded.
+    pub why: String,
 }
 
 // ---------------------------------------------------------------------------------------------

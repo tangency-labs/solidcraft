@@ -222,8 +222,40 @@ fn shown_error(id: &str, e: &str) -> String {
 pub fn cancel() {
     EDIT.with(|edit| *edit.borrow_mut() = None);
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
+    CONSUMED_OUTSIDE_PRESS.set(false);
     window::forget();
     AXIS.with(|axis| *axis.borrow_mut() = None);
+}
+
+std::thread_local! {
+    static CONSUMED_OUTSIDE_PRESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn consumed_outside_press() -> bool {
+    CONSUMED_OUTSIDE_PRESS.get()
+}
+
+pub(crate) fn clear_consumed_outside_press() {
+    CONSUMED_OUTSIDE_PRESS.set(false);
+}
+
+/// Accept the open dimension editor on a left-click outside in the viewport (`e.live.is_none()`).
+/// Returns true if the click was consumed by accepting (or releasing a press that accepted).
+pub fn accept_outside_click(app: &mut SolveApp) -> bool {
+    if CONSUMED_OUTSIDE_PRESS.replace(false) {
+        return true;
+    }
+    let ready = EDIT.with(|edit| edit.borrow().as_ref().is_some_and(|e| e.live.is_none()));
+    if !ready {
+        return false;
+    }
+    let Some(mut edit) = EDIT.with(|edit| edit.borrow_mut().take()) else {
+        return false;
+    };
+    edit.pending = None;
+    edit.fresh = FRESH;
+    settle(app, edit, Some(true), false);
+    true
 }
 
 /// With Draw ellipses with their axes off, D on an ellipse gives its minor radius wherever
@@ -1324,24 +1356,28 @@ fn insert_reference(ctx: &egui::Context, edit: &mut Edit, name: &str, selection:
 
 /// What a click while editing is on: another dimension (to insert, or to open), or the one being
 /// edited, or neither.
-enum Hit {
+pub(super) enum Hit {
     Other { param: Option<String>, model: Option<ModelDim>, id: Option<String> },
     Own,
 }
 
-fn hit_while_editing(pos: Pos2) -> Option<Hit> {
+pub(super) fn hit_while_editing_active(pos: Pos2, active_param: &str, sketch: bool) -> Option<Hit> {
+    let (param, model, id) = if sketch {
+        let d = model_hit(pos)?;
+        (d.param.clone(), Some(d), None)
+    } else {
+        let id = hit(pos)?;
+        let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
+        (param, None, Some(id))
+    };
+    if param.as_deref() == Some(active_param) { Some(Hit::Own) } else { Some(Hit::Other { param, model, id }) }
+}
+
+pub(super) fn hit_while_editing(pos: Pos2) -> Option<Hit> {
     EDIT.with(|editor| {
         let editor = editor.borrow();
         let edit = editor.as_ref()?;
-        let (param, model, id) = if edit.sketch.is_some() {
-            let d = model_hit(pos)?;
-            (d.param.clone(), Some(d), None)
-        } else {
-            let id = hit(pos)?;
-            let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
-            (param, None, Some(id))
-        };
-        if param.as_ref() == Some(&edit.param) { Some(Hit::Own) } else { Some(Hit::Other { param, model, id }) }
+        hit_while_editing_active(pos, &edit.param, edit.sketch.is_some())
     })
 }
 
@@ -1456,6 +1492,9 @@ fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::V
 }
 
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
+    if !ctx.input(|i| i.pointer.any_down() || i.pointer.primary_clicked() || i.pointer.primary_released()) {
+        CONSUMED_OUTSIDE_PRESS.set(false);
+    }
     let Some(mut e) = EDIT.with(|x| x.borrow_mut().take()) else { return };
     if !ctx.input(|i| i.pointer.any_down()) {
         e.caret = egui::TextEdit::load_state(ctx, egui::Id::unique("sc_dim_edit")).and_then(|s| s.cursor.char_range()).or(e.selection);
@@ -1558,11 +1597,25 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         crate::ui_kit::text(ui, error, crate::ui_kit::Text::Report("dimension_error", true));
                     }
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                    let on_popup = r.hovered() || pointer_pos.is_some_and(|p| ui.min_rect().expand(4.0).contains(p));
+                    let in_viewport =
+                        pointer_pos.is_some_and(|p| app.viewport.rect.is_none_or(|view| view.contains(p)) && !crate::shell::covered(app, p));
+                    let left_click_outside = !on_popup && in_viewport && ui.input(|i| i.pointer.primary_pressed() || i.pointer.primary_clicked());
+                    let press_on_reference = ui.input(|i| i.pointer.primary_pressed())
+                        && pointer_pos.is_some_and(|p| hit_while_editing_active(p, &e.param, e.sketch.is_some()).is_some());
+                    let lost_or_outside_press =
+                        r.lost_focus() || (e.live.is_none() && r.has_focus() && in_viewport && ui.input(|i| i.pointer.primary_pressed()));
                     if r.lost_focus() && enter {
                         done = Some(true);
-                    } else if e.fresh > 0 {
+                    } else if e.fresh > 0 || (lost_or_outside_press && press_on_reference) {
                         if !r.has_focus() {
                             r.request_focus();
+                        }
+                    } else if e.live.is_none() && lost_or_outside_press && left_click_outside {
+                        done = Some(true);
+                        if !ui.input(|i| i.pointer.primary_clicked()) {
+                            CONSUMED_OUTSIDE_PRESS.set(true);
                         }
                     } else if r.lost_focus() {
                         done = Some(false);
@@ -1611,7 +1664,7 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
                 }
                 Ok(_) if e.sheet.is_some() => {}
                 Ok(reply) => {
-                    clear_picks(app);
+                    finish_dimension(app);
                     // A new dimension defines its parameter; an edited one renames its own (#4071).
                     // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
@@ -1636,6 +1689,16 @@ fn clear_picks(app: &mut SolveApp) {
     if let Some(tool) = app.tool.as_mut().filter(|t| t.kind == crate::tools::Kind::Dimension) {
         tool.picks.clear();
         tool.point_picks.clear();
+        tool.preselected = false;
+    }
+}
+
+/// Complete a dimension edit: clear pending picks and drop the tool if it started from preselection.
+fn finish_dimension(app: &mut SolveApp) {
+    let drop_tool = app.tool.as_ref().is_some_and(|t| t.kind == crate::tools::Kind::Dimension && t.preselected);
+    clear_picks(app);
+    if drop_tool {
+        app.tool = None;
     }
 }
 
