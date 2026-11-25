@@ -11,7 +11,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::model::{Result, Sketch, SketchError};
-use crate::wire::drawn_polyline;
+use crate::wire::{arc_from_3_points, drawn_polyline};
 use crate::wire_solve::{ACCEPT, MEET, WireConstraintKind, WirePoint};
 
 /// Lines closer than this (radians) to one straight line, or to lying on each other, have no
@@ -164,6 +164,12 @@ impl Sketch {
                 )));
             }
         }
+        // Lines that barely turn give an arc of almost no length, whose three points no longer
+        // say what circle it is on: such a round is not made.
+        let slight = || bad("the lines are too nearly in one straight line there for a round of that radius".into());
+        if arc_from_3_points(round.on_a, round.middle, round.on_b).is_none() {
+            return Err(slight());
+        }
         // Built on a copy, so a step that fails leaves the sketch as it was.
         let mut sk = self.clone();
         let arc = sk.add_drawn_arc_in(&[round.on_a, round.middle, round.on_b], space)?;
@@ -215,6 +221,12 @@ impl Sketch {
             sk.add_wire_constraint(WireConstraintKind::Tangent { line: a.to_string(), arc: arc.clone(), line_end: ia, arc_end: 0 })?,
             sk.add_wire_constraint(WireConstraintKind::Tangent { line: b.to_string(), arc: arc.clone(), line_end: ib, arc_end: 2 })?,
         ];
+        // Nor one that does not hold as built, for the same reason.
+        let holding = sk.wire_constraints_holding();
+        let radius = sk.measure_wire_dimension(&WireConstraintKind::Radius { arc: arc.clone(), value: r });
+        if tangents.iter().any(|t| !holding.contains(t)) || !radius.is_some_and(|measured| (measured - r).abs() <= ACCEPT) {
+            return Err(slight());
+        }
         *self = sk;
         Ok(DrawnFillet { arc, tangents, corner: kept, moved })
     }
@@ -326,7 +338,7 @@ mod tests {
         let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0, 0.0, 80.0)]);
         refused(&mut sk, &ids[0], &ids[0], 5.0, "two different 3D lines");
         refused(&mut sk, &ids[0], "nothing", 5.0, "two drawn 3D lines");
-        // 80 mm of the second line is all of it; 80.001 is more.
+        // 80 mm of the second line is all of it, so nothing of it would be left.
         refused(&mut sk, &ids[0], &ids[1], 80.0, "too large for that corner (it needs 80.000 mm of each line");
         refused(&mut sk, &ids[0], &ids[1], 1e12, "too large for that corner");
         for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
@@ -345,6 +357,12 @@ mod tests {
         refused(&mut sk, &ids[0], &ids[1], 2.0, "one straight line");
         let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 5.0), v(4.0, 0.0, 2.0)]);
         refused(&mut sk, &ids[0], &ids[1], 2.0, "lie on each other");
+        // Lines that barely turn: within a millionth of a radian they are one straight line, and
+        // at a hundred-thousandth the arc would be 0.0002 mm long, too slight to hold as built.
+        for turn in [1e-8_f64, 1e-5] {
+            let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0 + 100.0 * turn.cos(), 100.0 * turn.sin(), 0.0)]);
+            refused(&mut sk, &ids[0], &ids[1], 20.0, "straight line");
+        }
         // A line already tangent to an arc at the corner end.
         let (mut sk, ids) = path(&[v(0.0, 0.0, 0.0), v(100.0, 0.0, 0.0), v(100.0, 0.0, 80.0)]);
         let done = sk.fillet_drawn_lines(&ids[0], &ids[1], 20.0).unwrap();

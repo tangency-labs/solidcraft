@@ -724,12 +724,26 @@ pub(super) fn fillet_3d(s: &mut Session, p: &Value, cmd: &str, radius: &str, cor
     let Ok(sk) = sketch_store::read(&s.doc, id) else { return Ok(None) };
     let line = |q: &Value, k: &str| q.get(k).and_then(Value::as_str).filter(|id| sk.is_drawn_line(id)).map(str::to_string);
     let pairs: Vec<Option<(String, String)>> = corners.iter().map(|q| line(q, "a").zip(line(q, "b"))).collect();
+    // A 3D point names no corner: lines that meet there are told apart only by naming them.
+    let text = |q: &Value, k: &str| q.get(k).and_then(Value::as_str);
+    if corners.iter().filter_map(|q| text(q, "point")).any(|r| sk.resolve_point(r).is_none() && sk.wire_point(r).is_some()) {
+        return Err(bad(cmd, "a 3D corner is given as its two 3D lines, `a` and `b`, not as a point"));
+    }
     if pairs.iter().all(Option::is_none) {
         return Ok(None);
     }
-    let Some(pairs) = pairs.into_iter().collect::<Option<Vec<(String, String)>>>() else {
-        return Err(bad(cmd, "round 3D corners and corners on the sketch plane in separate steps"));
-    };
+    if let Some((other, _)) = corners.iter().zip(&pairs).find(|(_, pair)| pair.is_none()) {
+        let spatial = ["a", "b"].iter().any(|k| text(other, k).is_some_and(|id| sk.is_spatial_corner_curve(id)));
+        return Err(bad(
+            cmd,
+            if spatial {
+                "not supported yet: filleting 3D or linked sketch curves, other than two drawn 3D lines that share an end point"
+            } else {
+                "round 3D corners and corners on the sketch plane in separate steps"
+            },
+        ));
+    }
+    let pairs: Vec<(String, String)> = pairs.into_iter().flatten().collect();
     let said = |e: solidcraft_sketch::SketchError| match e {
         solidcraft_sketch::SketchError::Invalid(why) => bad(cmd, why),
         e => e.into(),

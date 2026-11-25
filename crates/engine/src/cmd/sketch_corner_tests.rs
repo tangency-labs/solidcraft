@@ -1106,7 +1106,9 @@ fn a_fillet_on_3d_lines_lies_in_the_plane_of_the_two_lines() {
     assert!(a.center.dist(corner + bisector * (10.0 / half.sin())) < 1e-6, "{a:?}");
     assert!((a.radius - 10.0).abs() < 1e-9, "{a:?}");
     assert!(a.normal.cross(u.cross(v).normalized().unwrap()).len() < 1e-9, "the arc's plane is the lines' plane: {a:?}");
-    assert!((ta - a.center).dot(u).abs() < 1e-6 && (tb - a.center).dot(v).abs() < 1e-6, "{a:?}");
+    // The arc starts on the first line named (`c[1]`) and ends on the second, square to each.
+    assert!(a.start.dist(tb) < 1e-6 && a.end.dist(ta) < 1e-6, "{a:?}");
+    assert!((a.start - a.center).dot(v).abs() < 1e-6 && (a.end - a.center).dot(u).abs() < 1e-6, "{a:?}");
     // The arc turns by the angle the path turns: π − θ.
     assert!((solidcraft_sketch::arc_sweep(&a) - (std::f64::consts::PI - 2.0 * half)).abs() < 1e-9, "{}", solidcraft_sketch::arc_sweep(&a));
 }
@@ -1196,6 +1198,13 @@ fn a_fillet_on_3d_lines_refuses_what_has_no_corner_to_round() {
         json!({"points": [{"a": c[0], "b": c[1]}, {"a": flat[0], "b": flat[1]}], "radius": 5}),
         "3D corners and corners on the sketch plane in separate steps",
     );
+    // A list whose other corner has a 3D arc says so, not that the corner is on the plane.
+    refused(
+        "sketch.fillet",
+        json!({"points": [{"a": c[0], "b": c[1]}, {"a": c[1], "b": arc}], "radius": 5}),
+        "not supported yet: filleting 3D or linked sketch curves",
+    );
+    refused("sketch.fillet", json!({"point": format!("{}.end", c[0]), "radius": 5}), "a 3D corner is given as its two 3D lines");
     refused(
         "sketch.chamfer.equal_distance",
         json!({"a": c[0], "b": c[1], "distance": 5}),

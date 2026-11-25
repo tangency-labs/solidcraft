@@ -1551,13 +1551,14 @@ pub(crate) fn sketch_changes(
         .enumerate()
         .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
         .collect::<Vec<_>>();
+    // Drawn 3D curves only: a linked one follows the model, which a sketch tool does not change.
     let old_wires = old.into_iter().flat_map(|s| s.sketch.wires.iter().map(|w| (w.id.as_str(), &w.pts))).collect::<std::collections::HashMap<_, _>>();
     let wires = sketch
         .sketch
         .wires
         .iter()
         .enumerate()
-        .filter_map(|(i, w)| if old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
+        .filter_map(|(i, w)| if w.link.is_some() || old_wires.get(w.id.as_str()) == Some(&&w.pts) { None } else { Some(i) })
         .collect::<Vec<_>>();
     if indices.is_empty() && points.is_empty() && wires.is_empty() {
         None
@@ -1741,11 +1742,19 @@ pub(crate) fn paint_sketch(
             painter.circle_filled(point, 3.0, stroke.color);
         }
     }
+    // A 3D point (a corner a fillet keeps) is a dot, like a point on the plane; a curve is counted.
+    let mut wires = 0;
     for wire in preview.wires.iter().filter_map(|index| sketch.sketch.wires.get(*index)) {
         let line: Vec<egui::Pos2> = wire.pts.iter().filter_map(|p| proj.to_screen(*p)).collect();
-        painter.add(egui::Shape::line(line, stroke));
+        match line.as_slice() {
+            [point] => painter.circle_filled(*point, 3.0, stroke.color),
+            _ => {
+                painter.add(egui::Shape::line(line, stroke));
+                wires += 1;
+            }
+        }
     }
-    preview.curves.len() + preview.wires.len()
+    preview.curves.len() + wires
 }
 
 #[cfg(test)]
