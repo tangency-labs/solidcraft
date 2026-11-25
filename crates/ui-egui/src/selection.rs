@@ -15,6 +15,10 @@ pub(crate) use solidcraft_engine::selection_context::same_item;
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
 pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
+    // Select All holds every shown body.
+    if session.all_bodies_selected() {
+        return session.body_visible(body);
+    }
     session.selection.iter().any(|s| match s {
         Sel::Body { name } => name == body,
         Sel::Occurrence { path } => session.occurrence_bodies_shared(path, true).is_ok_and(|b| b.iter().any(|n| n == body)),

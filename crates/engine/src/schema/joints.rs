@@ -708,7 +708,7 @@ pub struct CreateConstraintParams {
     #[schemars(with = "ConstraintTypeParam")]
     pub kind: Option<ConstraintTypeParam>,
     /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
-    /// for an axis, a point).
+    /// for an axis, a point). A round face given as a face is its axis where the rule needs one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub a: Option<JointOriginArg>,
