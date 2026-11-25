@@ -127,7 +127,7 @@ fn near(on: &SurfaceEval, p: Vec3, from: [f64; 2]) -> Option<([f64; 2], f64)> {
         // their box.
         for ((x, range), period) in next.iter_mut().zip(domain.range).zip(domain.period) {
             if let (Some((lo, hi)), None) = (range, period) {
-                *x = x.clamp(lo, hi);
+                *x = x.max(lo).min(hi);
             }
         }
         let moved = (next[0] - q[0]).hypot(next[1] - q[1]);
@@ -326,6 +326,12 @@ fn followed(on: &SurfaceEval, curve: &CurveEval, interval: [f64; 2], seed: &Curv
     Some(Curve2::Spline { knots, points })
 }
 
+/// The use `by` places after use `j` round a loop of `n` uses (`n - 1` places after is the one
+/// before it), or `None` for an empty loop.
+fn after(j: usize, by: usize, n: usize) -> Option<usize> {
+    j.checked_add(by)?.checked_rem(n)
+}
+
 /// Where use `j` of a loop starts in the loop's direction, or ends (`end`).
 fn use_end(l: &[(u32, bool)], pcs: &[Curve2], j: usize, end: bool) -> Option<[f64; 2]> {
     let &(_, forward) = l.get(j)?;
@@ -366,8 +372,8 @@ fn shift(c: &mut Curve2, d: usize, by: f64) {
 fn align(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &mut [Curve2], k: usize) -> R<()> {
     let n = l.len();
     for i in 0..n.saturating_sub(1) {
-        let j = (k + i) % n;
-        let before = use_end(l, pcs, (j + n - 1) % n, true).ok_or("pcurve end")?;
+        let j = after(k, i, n).ok_or("loop use")?;
+        let before = use_end(l, pcs, after(j, n.saturating_sub(1), n).ok_or("loop use")?, true).ok_or("pcurve end")?;
         let start = use_end(l, pcs, j, false).ok_or("pcurve start")?;
         let mut moved = false;
         for (d, ((b, s), period)) in before.into_iter().zip(start).zip(periods).enumerate() {
@@ -396,7 +402,7 @@ fn jumps(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &[Curve2]) -> R<Vec<
     let n = l.len();
     (0..n)
         .map(|j| {
-            let before = use_end(l, pcs, (j + n - 1) % n, true).ok_or("pcurve end")?;
+            let before = use_end(l, pcs, after(j, n.saturating_sub(1), n).ok_or("loop use")?, true).ok_or("pcurve end")?;
             let start = use_end(l, pcs, j, false).ok_or("pcurve start")?;
             Ok(before.into_iter().zip(start).zip(periods).any(|((b, s), p)| p.is_some_and(|p| turns_apart(b, s, p))))
         })
@@ -417,7 +423,9 @@ fn install(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &mut [Curve2], k: 
     *slot = again;
     align(periods, l, pcs, k)?;
     if jumps(periods, l, pcs)?.iter().zip(&was).any(|(now, before)| *now && !*before) {
-        pcs.clone_from_slice(&kept);
+        for (slot, c) in pcs.iter_mut().zip(kept) {
+            *slot = c;
+        }
         return Ok(false);
     }
     Ok(true)
@@ -451,8 +459,11 @@ pub(super) fn retrack(surface: &BSurface, edges: &[EdgeB], edge_loops: &[Vec<(u3
             let meets = if n < 2 {
                 [None, None]
             } else {
-                let (before, after) = (use_end(l, loop_pcs, (k + n - 1) % n, true), use_end(l, loop_pcs, (k + 1) % n, false));
-                if forward { [before, after] } else { [after, before] }
+                let (before, next) = (
+                    after(k, n.saturating_sub(1), n).and_then(|j| use_end(l, loop_pcs, j, true)),
+                    after(k, 1, n).and_then(|j| use_end(l, loop_pcs, j, false)),
+                );
+                if forward { [before, next] } else { [next, before] }
             };
             let mut best: Option<(f64, Curve2)> = None;
             for backward in [false, true] {
