@@ -1797,13 +1797,16 @@ fn inner_pads_cut_inner_traces_and_a_through_pad_has_copper_on_every_layer() {
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
     let (meshes, warnings) = modelled_copper(source);
     assert!(warnings.is_empty(), "{warnings:?}");
-    let inner = meshes.iter().find(|mesh| mesh.name.starts_with("Copper In1.Cu")).expect("the In1 copper");
-    let (low, high) = z_range(inner);
-    assert!(low > 0.0 && high < 1.6, "{low} {high}");
-    // The trace stops at the pad's hole, whose own copper ring is on this layer too.
-    let xs: Vec<f64> = inner.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0])).collect();
+    // The pad's copper and the trace either side of it touch only at the pad's edge, so In1 comes
+    // back as several bodies, all named after the layer.
+    let inner: Vec<&solidcraft_doc::MeshData> = meshes.iter().filter(|mesh| mesh.name.starts_with("Copper In1.Cu")).collect();
+    assert!(inner.len() >= 2, "the trace stops at the pad: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>());
+    for mesh in &inner {
+        let (low, high) = z_range(mesh);
+        assert!(low > 0.0 && high < 1.6, "{low} {high}");
+    }
+    let xs: Vec<f64> = inner.iter().flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0]))).collect();
     assert!(xs.iter().any(|x| (*x - 10.0).abs() < 0.6), "the pad's ring is on In1");
-    assert!(!inner.positions.is_empty());
 }
 
 #[test]
