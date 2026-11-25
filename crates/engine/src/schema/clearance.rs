@@ -208,6 +208,11 @@ pub struct Unchecked {
     /// The other body; `null` for a mesh body.
     pub b: Option<String>,
     pub reason: String,
+    /// Non-boolean minimum distance between the pair (mm), when overlap could not be worked out
+    /// but the boundary distance was still computable; absent for mesh bodies or when distance
+    /// could not be computed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance_mm: Option<f64>,
 }
 
 #[cfg(test)]

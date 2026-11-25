@@ -43,14 +43,16 @@ use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::geom::vector2d::Point2;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::mass::integrator::properties::region_material;
-use crate::math::Point3;
+use crate::mass::integrator::properties::{no_unsure_region, region_material};
+use crate::math::{Point3, Vec3};
 use crate::query::api_queries::{
     edge_closest_point, face_bounding_box, face_classify_uv, surface_closest_point,
 };
 use crate::query::brep::BrepClassifier;
 use crate::query::distance_bound::{pieces_about, Piece};
-use crate::surface::surface::Surface;
+use crate::query::planar_disjoint::planar_interiors_disjoint;
+use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p2::is_manifold_solid;
 use crate::topology::{edgeuse::p1 as eu1, loopuse, Brep, FaceId};
 use crate::{EntityRef, Result, SolidError};
 
@@ -725,4 +727,183 @@ pub fn boundary_distance(k: &Kernel, a: &mut Brep, b: &mut Brep, width: f64) -> 
         upper,
         witness,
     })
+}
+
+/// Certified non-boolean test for whether two closed manifold solids share no interior
+/// volume (pure contact or disjoint, never penetrating).
+///
+/// Runs three certified stages in order:
+/// 1. Strict separation via [`meets`] at `1e-9`: proves disjointness when boundaries stay
+///    apart and neither encloses the other.
+/// 2. Certified separating plane from planar face normals and each body's Bézier hulls:
+///    proves separation or a slab volume strictly below `min_volume` within rounding.
+/// 3. Exact planar-overlap-region proof when every face meeting the overlap box is a plane
+///    with straight edges (covers multi-face flush contacts such as a tenon in a slot).
+///
+/// Returns [`Verdict::Yes`] only when zero interior overlap is certified, [`Verdict::No`]
+/// when real interior overlap is proved, and [`Verdict::Undecided`] whenever any ambiguity
+/// remains.
+///
+/// # Errors
+///
+/// `InvalidInput` for a `min_volume` that is negative or not finite, or a body without faces;
+/// those of the underlying queries and cancellation checks.
+pub fn interiors_disjoint(
+    k: &Kernel,
+    a: &mut Brep,
+    b: &mut Brep,
+    min_volume: f64,
+) -> Result<Verdict> {
+    if !(min_volume.is_finite() && min_volume >= 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "min_volume must be finite and non-negative",
+        ));
+    }
+    if !is_manifold_solid(a)?
+        || !is_manifold_solid(b)?
+        || no_unsure_region(a).is_err()
+        || no_unsure_region(b).is_err()
+    {
+        return Ok(Verdict::Undecided);
+    }
+
+    let box_a = body_box(k, a)?;
+    let box_b = body_box(k, b)?;
+    let mid = |x: f64, y: f64, z: f64, w: f64| 0.5 * (x.min(z) + y.max(w));
+    let origin = Point3::new(
+        mid(box_a.0.x, box_a.1.x, box_b.0.x, box_b.1.x),
+        mid(box_a.0.y, box_a.1.y, box_b.0.y, box_b.1.y),
+        mid(box_a.0.z, box_a.1.z, box_b.0.z, box_b.1.z),
+    );
+    let pa = Prepared::new(k, a, origin)?;
+
+    // Stage 1: certified strict separation (disjoint boundaries and no containment).
+    if meets_prepared(k, a, &pa, b, 1e-9)?.verdict == Verdict::No {
+        return Ok(Verdict::Yes);
+    }
+
+    // Stage 2: certified separating plane along any planar face normal of `a` or `b`.
+    let pb = Prepared::new(k, b, origin)?;
+    if separating_plane_certifies_disjoint(a, &pa, b, &pb, box_a, box_b, min_volume)? {
+        return Ok(Verdict::Yes);
+    }
+
+    // Stage 3: exact planar-overlap-region interior-disjointness proof.
+    planar_interiors_disjoint(k, a, b, box_a, box_b)
+}
+
+/// Maximum number of deduplicated candidate separating-plane normals tested in Stage 2.
+const MAX_SEPARATING_NORMALS: usize = 64;
+
+/// Collects deduplicated unit normals of planar faces in `a` and `b`.
+fn planar_face_normals(a: &Brep, b: &Brep) -> Result<Vec<Vec3>> {
+    let mut normals: Vec<Vec3> = Vec::new();
+    for brep in [a, b] {
+        for &f in brep.face_list() {
+            if normals.len() >= MAX_SEPARATING_NORMALS {
+                return Ok(normals);
+            }
+            let Some(SurfaceKind::Plane(plane)) = brep.face(f)?.surface.as_ref().map(Surface::kind)
+            else {
+                continue;
+            };
+            let Ok(n) = plane.position().z_axis().unitize() else {
+                continue;
+            };
+            if !(n.x.is_finite() && n.y.is_finite() && n.z.is_finite()) {
+                continue;
+            }
+            if !normals.iter().any(|m| m.dot(n).abs() > 1.0 - 1e-6) {
+                normals.push(n);
+            }
+        }
+    }
+    Ok(normals)
+}
+
+/// Certified range `[lo, hi]` of `(x - origin) · n` over all pieces of `prepared`.
+fn prepared_extent_along(prepared: &Prepared, n: Vec3) -> Result<Option<(f64, f64)>> {
+    let u = [n.x, n.y, n.z];
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for fp in &prepared.faces {
+        for piece in &fp.pieces {
+            let (p0, p1) = piece.extent_along(u)?;
+            lo = lo.min(p0 - fp.slack);
+            hi = hi.max(p1 + fp.slack);
+        }
+    }
+    if lo <= hi && lo.is_finite() && hi.is_finite() {
+        Ok(Some((lo, hi)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Whether a planar face normal of `a` or `b` separates the certified Bézier hulls of `a`
+/// and `b` (exact separation, or a sub-nanometer rounding slab whose certified volume bound
+/// is strictly below `min_volume`).
+fn separating_plane_certifies_disjoint(
+    a: &Brep,
+    pa: &Prepared,
+    b: &Brep,
+    pb: &Prepared,
+    box_a: (Point3, Point3),
+    box_b: (Point3, Point3),
+    min_volume: f64,
+) -> Result<bool> {
+    let lo = Point3::new(
+        box_a.0.x.max(box_b.0.x),
+        box_a.0.y.max(box_b.0.y),
+        box_a.0.z.max(box_b.0.z),
+    );
+    let hi = Point3::new(
+        box_a.1.x.min(box_b.1.x),
+        box_a.1.y.min(box_b.1.y),
+        box_a.1.z.min(box_b.1.z),
+    );
+    if !(lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z) {
+        return Ok(true);
+    }
+    let union_lo = Point3::new(
+        box_a.0.x.min(box_b.0.x),
+        box_a.0.y.min(box_b.0.y),
+        box_a.0.z.min(box_b.0.z),
+    );
+    let union_hi = Point3::new(
+        box_a.1.x.max(box_b.1.x),
+        box_a.1.y.max(box_b.1.y),
+        box_a.1.z.max(box_b.1.z),
+    );
+    let scale = (union_hi - union_lo).length().max(1.0);
+    let pad = gamma(8) * scale;
+    let dx = (hi.x - lo.x).max(0.0) + 2.0 * pad;
+    let dy = (hi.y - lo.y).max(0.0) + 2.0 * pad;
+    let dz = (hi.z - lo.z).max(0.0) + 2.0 * pad;
+
+    let normals = planar_face_normals(a, b)?;
+    for n in normals {
+        let (Some((a0, a1)), Some((b0, b1))) =
+            (prepared_extent_along(pa, n)?, prepared_extent_along(pb, n)?)
+        else {
+            continue;
+        };
+        // Both orientations (+n and -n): depth of overlap between [a0, a1] and [b0, b1]
+        // rounded up.
+        let depth_ab = ((a1 - b0) + gamma(2) * (a1.abs() + b0.abs())).max(0.0);
+        let depth_ba = ((b1 - a0) + gamma(2) * (b1.abs() + a0.abs())).max(0.0);
+        let depth = depth_ab.min(depth_ba);
+        if depth == 0.0 {
+            return Ok(true);
+        }
+        if depth <= 1e-9 * scale && min_volume > 0.0 {
+            let max_area = (n.x.abs() * dy * dz + n.y.abs() * dx * dz + n.z.abs() * dx * dy)
+                * (1.0 + gamma(8));
+            let vol_bound = depth * max_area * (1.0 + gamma(4));
+            if vol_bound.is_finite() && vol_bound < min_volume {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
