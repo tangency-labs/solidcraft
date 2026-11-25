@@ -1548,6 +1548,133 @@ fn a_swept_circle_s_record_opens_again() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The arc of `radius` about `axis` through `center`, from `reference`, turning by `turn`.
+fn arc_by(center: [f64; 3], axis: [f64; 3], reference: [f64; 3], radius: f64, turn: f64) -> Curve {
+    Curve::Arc {
+        center,
+        axis,
+        reference,
+        radius,
+        start: 0.0,
+        end: turn,
+    }
+}
+
+/// A pipe of diameter 5 along lines and arcs, one of them a 1 degree arc of radius 50.8, and a
+/// second pipe joined to its end cap (tangency-labs/solidcraft#22146; the paths and profiles as
+/// SolidCraft sweeps them for the issue's design). Each pipe passes the check as the sweep made
+/// it and again read back from its record, which is the form the join takes it in, and the join
+/// is one solid of the volume Pappus gives: a disc of radius 2.5 along a tangent-continuous path,
+/// pi 2.5^2 L, with L = 517.852348653780 for the first path (9.684405810658 + 76.2 x 24.7278 deg
+/// + 107.151927790051 + 26.035 x 193.3178 deg + 266.7 + 50.8 x 1 deg + 12.7) and
+/// 51.076121171858 for the second (3.928214262990 + 124.0819 x 7 deg + 31.988436958318). The
+/// pipes touch on the first's end cap and do not overlap. Each pipe has a wall per segment and two
+/// caps; each circle where walls meet or a cap ends is one edge with one vertex, and each wall has
+/// one seam. The join drops the two caps that touch and merges their circles.
+#[test]
+fn a_pipe_joins_the_end_of_a_pipe_bent_through_a_one_degree_arc() {
+    rig_fixes();
+    let first_path = [
+        line([0.0, 0.0, 0.0], [0.0, 9.525, 1.74988311195596]),
+        arc_by(
+            [0.0, 23.293639577690602, -73.1958610245836],
+            [-1.0, -0.0, -0.0],
+            [0.0, -0.18069080810617585, 0.9835399492984194],
+            76.2,
+            0.4315810318206319,
+        ),
+        line(
+            [0.0, 42.13786635337631, 0.6372962777188018],
+            [0.0, 145.96155585164072, -25.861328744953276],
+        ),
+        arc_by(
+            [0.0, 152.4, -0.6349999999999618],
+            [1.0, 0.0, 0.0],
+            [0.0, -0.2472995639853767, -0.9689390722086929],
+            26.034999999999993,
+            3.3740316177578684,
+        ),
+        line(
+            [0.0, 152.8543734015946, 25.39603474339669],
+            [0.0, -113.805006896615, 30.050591540219166],
+        ),
+        arc_by(
+            [0.0, -114.6915891436288, -20.741671373725517],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.017452406437279636, 0.9998476951563913],
+            50.800000000000004,
+            0.01745329251993666,
+        ),
+        line(
+            [0.0, -114.69158914362866, 30.058328626274474],
+            [0.0, -127.39158914362864, 30.058328626274502],
+        ),
+    ];
+    let first_profile = circle(
+        [0.0, 0.0, 0.0],
+        [0.0, 0.9835399492984193, 0.18069080810617583],
+        [-1.0, 0.0, 0.0],
+        2.5,
+    );
+    let second_path = [
+        line(
+            [0.0, -127.39158914362864, 30.058328626274513],
+            [-1.5407439555097887e-30, -131.319803406619, 30.058328626274523],
+        ),
+        arc_by(
+            [-124.08194968884067, -131.319803406619, 30.058328626274523],
+            [0.0, -3.00454106039183e-15, -1.0],
+            [1.0, 0.0, 0.0],
+            124.08194968884064,
+            0.12217304763960368,
+        ),
+        line(
+            [-0.9248880370297666, -146.44158914362865, 30.05832862627457],
+            [-4.82329784569696, -178.19158914362862, 30.058328626274665],
+        ),
+    ];
+    let second_profile = circle(
+        [0.0, -127.39158914362864, 30.058328626274513],
+        [-3.922250295830076e-31, -1.0, 2.713228027507837e-15],
+        [1.0, -3.922250295830076e-31, 0.0],
+        2.5,
+    );
+    let area = PI * 2.5 * 2.5;
+    let mut pipes = Vec::new();
+    for (name, profile, path, length) in [
+        ("first", first_profile, &first_path[..], 517.852348653780),
+        ("second", second_profile, &second_path[..], 51.076121171858),
+    ] {
+        let (made, _, _) = sweep_placed(&[profile], path, SweepFrame::Follow, true).unwrap();
+        let walls = path.len();
+        assert_eq!(
+            made.counts().unwrap(),
+            [walls + 2, 2 * walls + 1, walls + 1],
+            "the {name} pipe's faces, edges and vertices"
+        );
+        let check = made.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "the {name} pipe as swept: {check}");
+        let (record, _) = made.to_record().unwrap();
+        let (back, _) = Body::from_record(&record, true).unwrap();
+        let check = back.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "the {name} pipe read back from its record: {check}");
+        let v = back.volume(1e-8).unwrap();
+        assert!(rel(v, area * length) < 1e-9, "the {name} pipe's volume {v} vs {}", area * length);
+        pipes.push(back);
+    }
+    let second = pipes.pop().unwrap();
+    let first = pipes.pop().unwrap();
+    let joined = solidcore_ops::boolean::boolean(first, second, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    assert_eq!(joined.counts().unwrap(), [12, 21, 11], "the join's faces, edges and vertices");
+    let check = joined.check(CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "the join: {check}");
+    let expected = area * (517.852348653780 + 51.076121171858);
+    let v = joined.volume(1e-8).unwrap();
+    assert!(rel(v, expected) < 1e-9, "the join's volume {v} vs {expected}");
+}
+
 /// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
 /// circle in two halves of one frame is the full circle from its frame's start; two frames
 /// close at the middle of the longer; an open run in a loop with a line is one arc and the line
