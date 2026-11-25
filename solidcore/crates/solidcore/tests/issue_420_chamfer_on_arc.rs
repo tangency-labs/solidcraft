@@ -333,7 +333,7 @@ fn issue_2546_chamfers_past_the_rounds_radius_are_refused_naming_it() {
 /// reading one is refused on every path, never built as offsets (`Unsupported` where the
 /// record is read alone; a body's face reports its own failure kind).
 #[test]
-fn a_chamfer_of_setbacks_is_a_record_kind_refused_when_read() {
+fn a_chamfer_of_setbacks_is_a_record_kind_its_offsets_net_refused_against() {
     use solidcore::surface::procedural_blend::convert::{definition_surface, from_record};
     use solidcore::surface::procedural_blend::record::{
         ChamferKindRecord, ChamferRecord, ChamferSizeRecord, FaceDefinition, RadiusRecord,
@@ -449,21 +449,20 @@ fn a_chamfer_of_setbacks_is_a_record_kind_refused_when_read() {
         c.wedge = 0.0;
     }
     bad.validate().unwrap();
-    let unsupported = |r: solidcore::Result<()>| matches!(r, Err(SolidError::Unsupported { .. }));
-    assert!(
-        unsupported(from_record(&k, &bad).map(|_| ())),
-        "from_record"
-    );
-    assert!(unsupported(rebuild(&k, &bad).map(|_| ())), "rebuild");
+    // the kind is built (PR B): the record converts to a chamfer of setbacks, and its net,
+    // the chamfer of offsets', is refused against that definition wherever it is certified
+    let read = from_record(&k, &bad).unwrap();
+    assert!(read.chamfer().is_some_and(ChamferDefinition::is_setbacks));
+    assert!(rebuild(&k, &bad).is_err(), "rebuild");
     // nested: a round on it
     let mut outer = good.clone();
     outer.definition.supports[0] = SupportRecord::Blend(Box::new(bad.clone()));
-    assert!(unsupported(from_record(&k, &outer).map(|_| ())), "nested");
+    assert!(from_record(&k, &outer).is_ok(), "nested");
     // a body record's face definition on its net
     let face = FaceDefinition::Procedural(Box::new(bad.definition.clone()));
     let net = Surface::from(pb.clone());
     assert!(
-        unsupported(definition_surface(&k, &face, &net).map(|_| ())),
+        !matches!(definition_surface(&k, &face, &net), Ok(Ok(_))),
         "a face's definition"
     );
     // structurally: the kind and the radius go together, a wedge of 0, no distance and angle

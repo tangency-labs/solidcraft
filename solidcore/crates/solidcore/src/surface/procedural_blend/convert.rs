@@ -78,6 +78,9 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
     let supports = [support_record(k, s0, depth)?, support_record(k, s1, depth)?];
     let radius = match &d.law {
         Some(law) => RadiusRecord::Law(curve_record(law)?),
+        // a chamfer of setbacks has no ball: its offsets slot holds its setbacks, which its
+        // chamfer record keeps
+        None if d.chamfer.is_some_and(|c| c.is_setbacks()) => RadiusRecord::Edge,
         None if d
             .chamfer
             .and_then(ChamferDefinition::constant_setback)
@@ -413,10 +416,11 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
         ));
     }
     let d = &rec.definition;
-    // a chamfer of setbacks, before any of its supports is made (a corner's or a support's
-    // nested blend comes here too)
-    if matches!(d.radius, RadiusRecord::Edge) || d.chamfer.is_some_and(|c| c.is_setbacks()) {
-        return Err(setbacks_not_built());
+    // a chamfer of setbacks by a chord (or a distance and an angle) is not built yet: refused
+    // before any of its supports is made (a corner's or a support's nested blend comes here
+    // too)
+    if let Some(c) = d.chamfer.filter(ChamferRecord::is_setbacks) {
+        chamfer_of(&c)?;
     }
     let support_of = |i: usize, s: &SupportRecord| -> Result<Surface> {
         Ok(match s {
@@ -446,7 +450,16 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     let (law, offsets) = match &d.radius {
         RadiusRecord::Constant { offsets } => (None, *offsets),
         RadiusRecord::Law(law) => (Some(curve_of(law)?), [0.0, 0.0]),
-        RadiusRecord::Edge => return Err(setbacks_not_built()),
+        // no ball: the stations take the setbacks (`station_r`), which the offsets slot holds
+        RadiusRecord::Edge => match chamfer {
+            Some(c) if c.is_setbacks() => (None, c.setbacks()),
+            _ => {
+                return Err(SolidError::invalid_input(
+                    OP_FROM,
+                    "a blend whose radius is its edge is a chamfer of setbacks",
+                ))
+            }
+        },
         RadiusRecord::EqualSetback => {
             let sizes = chamfer
                 .ok_or_else(|| {
@@ -1051,42 +1064,41 @@ fn chamfer_record(c: ChamferDefinition) -> ChamferRecord {
             ChamferSize::Chord(l) => ChamferSizeRecord::Chord(l),
         },
         wedge: c.wedge,
-        kind: ChamferKindRecord::Offsets,
-    }
-}
-
-/// The refusal of a chamfer whose setbacks hold at every station
-/// ([`ChamferKindRecord::Setbacks`], [`RadiusRecord::Edge`]): its record is defined, its
-/// construction and certificate not yet, and reading it as offsets would build another body.
-fn setbacks_not_built() -> SolidError {
-    SolidError::Unsupported {
-        operation: OP_CHAMFER_OF,
-        reason: "a chamfer whose setbacks hold at every station is not built yet",
+        kind: if c.is_setbacks() {
+            ChamferKindRecord::Setbacks
+        } else {
+            ChamferKindRecord::Offsets
+        },
     }
 }
 
 const OP_CHAMFER_OF: &str = "surface::procedural_blend::convert::chamfer_of";
 
-/// The chamfer's sizes a record holds, checked ([`ChamferDefinition::new`]); a chamfer of
-/// setbacks is refused ([`setbacks_not_built`]).
+/// The chamfer's sizes a record holds, checked ([`ChamferDefinition::new`], or for a chamfer
+/// of setbacks held at every station [`ChamferDefinition::of_setbacks`]).
 ///
 /// # Errors
 ///
-/// `Unsupported` for a chamfer of setbacks; those of [`ChamferDefinition::new`].
+/// Those of [`ChamferDefinition::new`] and [`ChamferDefinition::of_setbacks`] (`Unsupported`
+/// for a chamfer of setbacks by a chord or a distance and an angle, not built yet).
 pub(crate) fn chamfer_of(c: &ChamferRecord) -> Result<ChamferDefinition> {
+    let size = match c.size {
+        ChamferSizeRecord::Distances(x) => ChamferSize::Distances(x),
+        ChamferSizeRecord::DistanceAngle { distance, angle } => {
+            ChamferSize::DistanceAngle { distance, angle }
+        }
+        ChamferSizeRecord::Chord(l) => ChamferSize::Chord(l),
+    };
     if c.is_setbacks() {
-        return Err(setbacks_not_built());
+        if c.wedge != 0.0 {
+            return Err(SolidError::invalid_input(
+                OP_CHAMFER_OF,
+                "a chamfer of setbacks has no wedge",
+            ));
+        }
+        return ChamferDefinition::of_setbacks(size);
     }
-    ChamferDefinition::new(
-        match c.size {
-            ChamferSizeRecord::Distances(x) => ChamferSize::Distances(x),
-            ChamferSizeRecord::DistanceAngle { distance, angle } => {
-                ChamferSize::DistanceAngle { distance, angle }
-            }
-            ChamferSizeRecord::Chord(l) => ChamferSize::Chord(l),
-        },
-        c.wedge,
-    )
+    ChamferDefinition::new(size, c.wedge)
 }
 
 const OP_CORNER_TO: &str = "surface::procedural_blend::convert::corner_to_record";

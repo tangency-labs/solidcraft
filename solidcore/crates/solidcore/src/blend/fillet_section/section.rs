@@ -3020,6 +3020,7 @@ mod tests {
         plate_foot: f64,
         d1: f64,
         d2: f64,
+        plate_knot: Option<f64>,
     ) -> (
         Kernel,
         [Surface; 2],
@@ -3068,17 +3069,43 @@ mod tests {
             )
         };
         let (wall, w, height) = (8.0, 20.0, 10.0);
-        let plate = surface(
-            1,
-            1,
-            &[
-                Point3::new(-w, -w, 0.0),
-                Point3::new(-w, w, 0.0),
-                Point3::new(w, -w, 0.0),
-                Point3::new(w, w, 0.0),
-            ],
-            None,
-        );
+        // the plate, with a knot line at x = `plate_knot` if asked (its u stays x's linear map)
+        let plate = match plate_knot {
+            None => surface(
+                1,
+                1,
+                &[
+                    Point3::new(-w, -w, 0.0),
+                    Point3::new(-w, w, 0.0),
+                    Point3::new(w, -w, 0.0),
+                    Point3::new(w, w, 0.0),
+                ],
+                None,
+            ),
+            Some(x) => Surface::from(
+                BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                    u_degree: 1,
+                    v_degree: 1,
+                    control_points: &[
+                        Point3::new(-w, -w, 0.0),
+                        Point3::new(-w, w, 0.0),
+                        Point3::new(x, -w, 0.0),
+                        Point3::new(x, w, 0.0),
+                        Point3::new(w, -w, 0.0),
+                        Point3::new(w, w, 0.0),
+                    ],
+                    form: BSplineSurfaceForm::Unspecified,
+                    u_multiplicities: &[2, 1, 2],
+                    v_multiplicities: &[2, 2],
+                    u_knots: &[0.0, (x + w) / (2.0 * w), 1.0],
+                    v_knots: &[0.0, 1.0],
+                    knot_type: KnotType::Unspecified,
+                    weights: None,
+                    uv_domain: None,
+                })
+                .unwrap(),
+            ),
+        };
         // the wall runs past the edge's ends, as a blend's supports do: three quarters of a
         // turn from -90 to 180 degrees, the edge on the middle one (u = 1/3 + s/3 there)
         let (mut cps, mut ws) = (Vec::new(), Vec::new());
@@ -3160,7 +3187,7 @@ mod tests {
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         let (wall, d1, d2, tol) = (8.0, 2.0, 1.0, 1e-4);
         let (k, [plate, cylinder], edge, [mut rail1, mut rail2, mut uv1, mut uv2], built) =
-            wall_on_plate_setbacks(wall + d1, d1, d2);
+            wall_on_plate_setbacks(wall + d1, d1, d2, None);
         let chamfer = ChamferDefinition::of_setbacks(ChamferSize::Distances([d1, d2])).unwrap();
         let built = built.unwrap().expect("a chamfer of setbacks builds");
         let SurfaceKind::ProceduralBlend(pb) = built.kind() else {
@@ -3209,13 +3236,38 @@ mod tests {
     fn a_chamfer_of_setbacks_past_the_axis_is_refused_as_crossing() {
         use crate::blend::fillet_executive::p3::NoRoomReason;
         use crate::error::blend::BlendFailure;
-        let (.., built) = wall_on_plate_setbacks(8.0 - 9.0, 9.0, 1.0);
+        let (.., built) = wall_on_plate_setbacks(8.0 - 9.0, 9.0, 1.0, None);
         let e = built.expect_err("refused, not built");
         assert_eq!(
             e.blend_failure(),
             Some(&BlendFailure::NoRoom(NoRoomReason::SetbacksCross)),
             "{e:?}"
         );
+    }
+
+    /// The same chamfer on a plate with a knot line at x = 5: the plate's foot (radius 10)
+    /// crosses it at 60 degrees, a station of the net, and the edge's projection (radius 8)
+    /// at acos(5/8), inside a span of the net. The proofs split there, and it builds on its
+    /// closed-form feet as on the plain plate.
+    #[test]
+    fn a_chamfer_of_setbacks_builds_where_the_edge_s_projection_crosses_a_knot_line() {
+        let (wall, d1, d2, tol) = (8.0, 2.0, 1.0, 1e-4);
+        let (k, _, edge, [rail1, rail2, ..], built) =
+            wall_on_plate_setbacks(wall + d1, d1, d2, Some(5.0));
+        let built = built.unwrap().expect("a chamfer of setbacks builds");
+        let SurfaceKind::ProceduralBlend(pb) = built.kind() else {
+            panic!("a blend by its definition: {:?}", built.kind());
+        };
+        assert!(pb.recertify(&k).unwrap() <= tol);
+        for s in [0.0, 0.2, 0.31, 0.37, 0.5, 1.0] {
+            let c = edge.evaluate_point(s).unwrap();
+            let out = Vec3::new(c.x, c.y, 0.0) * (1.0 / wall);
+            let feet = [out * (wall + d1), out * wall + Vec3::Z * d2];
+            for (rail, foot) in [&rail1, &rail2].into_iter().zip(feet) {
+                let q = rail.evaluate_point(s).unwrap();
+                assert!((q - foot).length() <= tol, "s {s}: {q:?} vs {foot:?}");
+            }
+        }
     }
 
     fn work_budget_case(knots: usize, tol: f64) {

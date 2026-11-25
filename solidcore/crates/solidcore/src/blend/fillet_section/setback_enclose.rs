@@ -1045,12 +1045,11 @@ pub fn first_crossing(
     let Some(sb_dir) = sign_of(Ivl::from(fbm - pbm)) else {
         return not;
     };
-    // past the projection's knot line or domain end, the face-side piece continued (only
-    // across b: a side in a, along the edge, is not this proof's)
-    let ia = 1 - ib;
-    if edge_proj.sides.get(ia).copied().unwrap_or(0) != 0 {
-        return not;
-    }
+    // past the projection's knot line or domain end, the face-side piece continued across b
+    // (`Continued`). A projection continued along a, the edge, is its tube's root only: the
+    // cells read the face's own pieces along a (`support_partials`, `knot_cuts` over a), and
+    // its tube is taken on a span at whose end it meets the line, inside its closed piece
+    // over the span (as `prove_setback_feet` proves it), so it is the face's projection
     let side_b = edge_proj.sides.get(ib).copied().unwrap_or(0);
     let cont = if side_b == 0 {
         None
@@ -1443,6 +1442,44 @@ pub fn enclose_chord(
     Ok(Some(ChordTube { d, feet: [t1, t2] }))
 }
 
+/// The edge's projection on `face` at s, a point root from `start` (it proves nothing).
+fn projection_at(
+    face: &Nurbs,
+    edge: &NurbsCurve,
+    s: f64,
+    start: [f64; 2],
+) -> Result<Option<[f64; 2]>> {
+    let Some(c) = edge_at(edge, s)? else {
+        return Ok(None);
+    };
+    newton(
+        start,
+        &|x| Ok(Some(projection_point(face, &c, x))),
+        &inverse_of_columns2,
+    )
+}
+
+/// Which of the face's parameters runs along the edge at s, at the face's point `x`: the one
+/// whose partial has the larger component along the edge's tangent (0 for u), as
+/// [`first_crossing`] takes its a.
+fn along_axis(face: &Nurbs, edge: &NurbsCurve, s: f64, x: [f64; 2]) -> Result<Option<usize>> {
+    let Some([_, c1, _]) = edge_at(edge, s)? else {
+        return Ok(None);
+    };
+    let p = face_at(face, x, 1);
+    let (uc, vc) = (dot3(f64_v(p.at(1, 0)), c1), dot3(f64_v(p.at(0, 1)), c1));
+    Ok(Some(usize::from(uc.abs() < vc.abs())))
+}
+
+/// The knot span of the face's parameter `ia` (0 for u) that `x` lies in.
+fn piece_along(face: &Nurbs, ia: usize, x: f64) -> usize {
+    if ia == 0 {
+        span(&face.u, face.p, face.nu, x)
+    } else {
+        span(&face.v, face.q, face.nv, x)
+    }
+}
+
 /// The most spans [`prove_setback_feet`] proves a definition over: its net's spans, each
 /// halved where a proof does not hold on the whole of it.
 pub const PROOF_SPANS: usize = 1 << 12;
@@ -1453,8 +1490,15 @@ pub const PROOF_SPANS: usize = 1 << 12;
 /// ([`enclose_foot`], from the definition's seeds), its stations not crossing
 /// ([`crossing`]) and the first crossing of its support's section ([`first_crossing`],
 /// from the edge's projection on the support, [`enclose_projection`]). A span on which a
-/// proof decides nothing is halved, within [`PROOF_SPANS`] spans in all. A definition that
-/// is not a chamfer of setbacks has nothing to prove.
+/// proof decides nothing is halved, within [`PROOF_SPANS`] spans in all. Each span is split
+/// first where the edge's projection on a support crosses one of its knot lines along the
+/// edge, so that the projection meets a line only at a span's end. A definition that is not
+/// a chamfer of setbacks has nothing to prove.
+///
+/// Not proved (refused, `SectionNotProved`): a support that ends, along the edge, exactly
+/// where the edge does (the first-crossing proof's cells reach a little past the boxes along
+/// the edge and are not continued past a face's domain there). A blend's supports run past
+/// the edge's ends, as its rails do.
 ///
 /// # Errors
 ///
@@ -1509,13 +1553,69 @@ pub fn prove_setback_feet(
             BlendFailure::SectionNotProved(SectionProof::SetbackFeet),
         )
     };
-    let mut stack: Vec<(f64, f64)> = ss
+    let stack: Vec<(f64, f64)> = ss
         .windows(2)
         .filter_map(|w| match w {
             [a, b] if b > a => Some((*a, *b)),
             _ => None,
         })
         .collect();
+    // each span split where the edge's projection on a support crosses one of its knot lines
+    // along the edge (across the section, a face-side piece is continued instead), so that the
+    // projection meets a line only at a span's end; its pieces are compared just inside the
+    // ends, so a span ending on a line is not split again
+    let mut split: Vec<(f64, f64)> = Vec::new();
+    let mut work: Vec<(f64, f64)> = stack;
+    let mut budget = PROOF_SPANS;
+    while let Some((lo, hi)) = work.pop() {
+        k.check_cancelled(OP)?;
+        let inside = 1e-9 * (hi - lo);
+        let mut cut = None;
+        for (face, seed) in faces.iter().zip(&d.seeds) {
+            let at = |s: f64| -> Result<Option<[f64; 2]>> {
+                let w = seed.evaluate_point(s)?;
+                projection_at(face, &edge, s, [w.x, w.y])
+            };
+            let (Some(pl), Some(ph)) = (at(lo + inside)?, at(hi - inside)?) else {
+                continue;
+            };
+            let Some(ia) = along_axis(face, &edge, 0.5 * (lo + hi), pl)? else {
+                continue;
+            };
+            let a_of = |x: [f64; 2]| x.get(ia).copied().unwrap_or(f64::NAN);
+            let (kl, kh) = (
+                piece_along(face, ia, a_of(pl)),
+                piece_along(face, ia, a_of(ph)),
+            );
+            if kl == kh {
+                continue;
+            }
+            // the crossing, by bisection on the projection's piece
+            let (mut a, mut b) = (lo + inside, hi - inside);
+            for _ in 0..64 {
+                let m = 0.5 * (a + b);
+                let Some(pm) = at(m)? else {
+                    break;
+                };
+                if piece_along(face, ia, a_of(pm)) == kl {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            cut = Some(0.5 * (a + b));
+            break;
+        }
+        match cut {
+            Some(m) if m > lo && m < hi && budget > 0 => {
+                budget -= 1;
+                work.push((lo, m));
+                work.push((m, hi));
+            }
+            _ => split.push((lo, hi)),
+        }
+    }
+    let mut stack = split;
     let mut spans = stack.len();
     while let Some((lo, hi)) = stack.pop() {
         k.check_cancelled(OP)?;
@@ -1571,8 +1671,53 @@ pub fn prove_setback_feet(
             // boundary: its piece as it lies, or continued past whichever end it is at, in
             // one parameter (the first-crossing proof continues a piece across the section,
             // not along the edge)
+            let seed_at = |s: f64| -> Result<[f64; 2]> {
+                let w = seed.evaluate_point(s)?;
+                Ok([w.x, w.y])
+            };
+            let (Some(p_lo), Some(p_hi)) = (
+                projection_at(face, &edge, lo, seed_at(lo)?)?,
+                projection_at(face, &edge, hi, seed_at(hi)?)?,
+            ) else {
+                held = false;
+                break;
+            };
+            let Some(ia) = along_axis(face, &edge, at.m, p_lo)? else {
+                held = false;
+                break;
+            };
+            let ib = 1 - ia;
+            let (knots, deg, count) = if ia == 0 {
+                (&face.u, face.p, face.nu)
+            } else {
+                (&face.v, face.q, face.nv)
+            };
+            let a_of = |x: [f64; 2]| x.get(ia).copied().unwrap_or(f64::NAN);
+            let piece = span(knots, deg, count, 0.5 * (a_of(p_lo) + a_of(p_hi)));
+            let (ka, kb) = (knot(knots, piece as isize), knot(knots, piece as isize + 1));
+            let eta = 1e-9 * (kb - ka).abs().max(f64::MIN_POSITIVE);
+            let meets = |x: f64| (x - kb).abs() <= 1e3 * eta || (x - ka).abs() <= 1e3 * eta;
+            // along a, the side of the line the projection meets at a span's end (the piece it
+            // comes from, continued); across b, as it lies or continued either way
+            let a_side = [a_of(p_lo), a_of(p_hi)]
+                .into_iter()
+                .find(|&x| meets(x))
+                .map_or(0, |x| {
+                    if (x - kb).abs() <= (x - ka).abs() {
+                        -1
+                    } else {
+                        1
+                    }
+                });
             let mut proj = None;
-            for try_sides in [[0, 0], [0, 1], [0, -1], [1, 0], [-1, 0]] {
+            for b_side in [0, 1, -1] {
+                let mut try_sides = [0, 0];
+                if let Some(x) = try_sides.get_mut(ia) {
+                    *x = a_side;
+                }
+                if let Some(x) = try_sides.get_mut(ib) {
+                    *x = b_side;
+                }
                 proj = enclose_projection(k, face, &edge, at, x_m, try_sides)?;
                 if proj.is_some() {
                     break;
@@ -1582,6 +1727,18 @@ pub fn prove_setback_feet(
                 held = false;
                 break;
             };
+            // continued along a, the projection stays in its closed piece over the span (to the
+            // tube's slack): it meets the line at the span's end, not inside it
+            if a_side != 0 {
+                let Some(range) = proj.uv.get(ia).map(Ft::range) else {
+                    held = false;
+                    break;
+                };
+                if !(range.lo >= ka - eta && range.hi <= kb + eta) {
+                    held = false;
+                    break;
+                }
+            }
             let foot_m = f64_v(face_at(face, x_m, 0).at(0, 0));
             let into = sub3(foot_m, c[0]);
             if first_crossing(k, face, &edge, Ivl::from(setback), at, &foot, &proj, into)?

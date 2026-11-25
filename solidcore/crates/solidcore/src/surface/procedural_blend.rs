@@ -455,6 +455,12 @@ pub fn chamfer_to_db(c: &ChamferDefinition) -> (i64, [f64; 3]) {
     if let Some(d) = c.constant_setback() {
         return (3, [d, 0.0, c.wedge]);
     }
+    // a chamfer of setbacks held at every station: two distances (code 4; its chord, code 6,
+    // is not built yet), no wedge
+    if c.is_setbacks() {
+        let [a, b] = c.setbacks();
+        return (4, [a, b, 0.0]);
+    }
     match c.size {
         ChamferSize::Distances([a, b]) => (0, [a, b, c.wedge]),
         ChamferSize::DistanceAngle { distance, angle } => (1, [distance, angle, c.wedge]),
@@ -2249,18 +2255,19 @@ mod tests {
     /// refused by name as not built yet (the ASCII and binary readers both decode through
     /// `chamfer_of_db`); the reserved 5 and an unknown code are refused.
     #[test]
-    fn the_database_refuses_a_chamfer_of_setbacks() {
+    fn the_database_reads_a_chamfer_of_setbacks_and_refuses_its_chord() {
         let right = 0.5 * crate::math::PI;
         let c = chamfer_of_db(0, [1.0, 2.0, right]).unwrap();
         assert_eq!(c.size, ChamferSize::Distances([1.0, 2.0]));
         assert_eq!(chamfer_to_db(&c), (0, [1.0, 2.0, right]));
-        for (code, sizes) in [(4, [1.0, 2.0, 0.0]), (6, [1.5, 0.0, 0.0])] {
-            let r = chamfer_of_db(code, sizes);
-            assert!(
-                matches!(r, Err(SolidError::Unsupported { .. })),
-                "{code}: {r:?}"
-            );
-        }
+        // two distances of setbacks: read, and written back as they were
+        let s = chamfer_of_db(4, [1.0, 2.0, 0.0]).unwrap();
+        assert!(s.is_setbacks());
+        assert_eq!(s.size, ChamferSize::Distances([1.0, 2.0]));
+        assert_eq!(chamfer_to_db(&s), (4, [1.0, 2.0, 0.0]));
+        // a chord of setbacks is not built yet
+        let r = chamfer_of_db(6, [1.5, 0.0, 0.0]);
+        assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
         for code in [5, 7, -1] {
             let r = chamfer_of_db(code, [1.0, 0.5, 0.0]);
             assert!(
