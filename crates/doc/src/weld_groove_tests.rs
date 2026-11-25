@@ -4,13 +4,17 @@
 //! same whatever the order of the picks, mirrored when the parts swap (also off the world axes),
 //! signed by the toe on an outer face that is not convex, along the axis of a round groove, the
 //! parts only read, and a plate not straight along the joint or an outer face that is no plane
-//! refused. Ported from the second groove PR's first slice (solidcore
+//! refused; the weld filling a Y groove flat (its volume in closed form), a fill the groove cannot
+//! take refused with the size that builds; parts of different length and a gap that steps along
+//! the joint refused with the stretches that keep one section, each of which builds on its own;
+//! the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a warning, full
+//! penetration). Ported from the second groove PR's first slice (solidcore
 //! `weld::groove::joint`, never pushed) onto ops reads (#18500).
 
 use std::f64::consts::FRAC_PI_2;
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_kernel::services::prism::extrude_planar_regions;
+use solidcraft_kernel::services::prism::{Contour, extrude_planar_regions};
 use solidcraft_kernel::services::{ExactBody as Body, Order, session, sweep};
 
 use super::*;
@@ -60,10 +64,15 @@ const UP: [f64; 3] = [0.0, 1.0, 0.0];
 /// A 60° V with a root face 1 and a gap 1 on 8 mm plates: the left and right plates, and each
 /// one's groove faces (bevel, then root face).
 fn y_groove() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+    y_groove_of(120.0)
+}
+
+/// [`y_groove`] with the right plate `length` long (the left one 120).
+fn y_groove_of(length: f64) -> ([(Body, Order); 2], [Vec<usize>; 2]) {
     let t = 30.0_f64.to_radians().tan();
     let top = 0.5 + 7.0 * t;
     let left = plate(&[(-40.0, 0.0), (-40.0, -8.0), (-0.5, -8.0), (-0.5, -7.0), (-top, 0.0)]);
-    let right = plate(&[(top, 0.0), (0.5, -7.0), (0.5, -8.0), (40.0, -8.0), (40.0, 0.0)]);
+    let right = swept_by(&Plane::XY, &[(top, 0.0), (0.5, -7.0), (0.5, -8.0), (40.0, -8.0), (40.0, 0.0)], length);
     let lf = [facing(&left, unit(1.0, t)), facing(&left, [1.0, 0.0, 0.0])].concat();
     let rf = [facing(&right, unit(-1.0, t)), facing(&right, [-1.0, 0.0, 0.0])].concat();
     assert_eq!((lf.len(), rf.len()), (2, 2), "{lf:?} {rf:?}");
@@ -352,4 +361,128 @@ fn a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance()
     assert!(near(swapped.x, ex.map(|v| -v)) && near(swapped.y, ey), "{swapped:?}");
     let m = normal(&swapped);
     assert!(near(Vec3::new(m[0], m[1], m[2]), ez.map(|v| -v)), "{swapped:?}");
+}
+
+// ---- the weld ----
+
+fn flat() -> FillOptions {
+    FillOptions { face: Contour::Flat, second_face: None, depth: None }
+}
+
+fn weld(parts: &[(Body, Order); 2], faces: &[Vec<usize>; 2], options: &FillOptions) -> Result<GrooveWeld> {
+    groove_weld([&pick(&parts[0], &faces[0]), &pick(&parts[1], &faces[1])], options)
+}
+
+#[test]
+fn a_y_groove_is_filled_flat_along_the_whole_joint() {
+    let (parts, faces) = y_groove();
+    let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let got = weld(&parts, &faces, &flat()).unwrap();
+    // the groove's section: the V from the surface down to the root face, 1 wide, then the gap
+    // between the root faces, 1 deep: (1 + (1 + 14 tan 30°)) / 2 · 7 + 1
+    let area = 8.0 + 49.0 * 30.0_f64.to_radians().tan();
+    let volume = got.body.volume(1e-9).unwrap();
+    assert!((volume - 120.0 * area).abs() <= 1e-6 * volume, "{volume} != {}", 120.0 * area);
+    assert!((got.fill.channel_depth - 8.0).abs() < 1e-9, "{:?}", got.fill);
+    let (lo, hi) = got.body.bounds().unwrap();
+    assert!(lo[2].abs() < 1e-9 && (hi[2] - 120.0).abs() < 1e-9, "{lo:?} {hi:?}");
+    assert!(lo[1] > -8.0 - 1e-9 && hi[1] < 1e-9, "{lo:?} {hi:?}");
+    // the parts are only read
+    let after: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    assert_eq!(after, before);
+}
+
+#[test]
+fn a_fill_the_groove_cannot_take_is_refused_with_the_size_that_builds() {
+    let (parts, faces) = y_groove();
+    let deep = FillOptions { face: Contour::Concave { depth: 50.0 }, ..flat() };
+    let got = weld(&parts, &faces, &deep).unwrap_err();
+    let GrooveRefusal::Fill { fit: Some(fit), .. } = got else {
+        panic!("not a fill refusal with a fit: {got:?}");
+    };
+    let fits = FillOptions { face: Contour::Concave { depth: fit }, ..flat() };
+    assert!(weld(&parts, &faces, &fits).is_ok());
+}
+
+/// The stretches of a [`GrooveRefusal::SectionChanges`], checked against `want` (from, to).
+fn stretches_of(got: &GrooveRefusal, want: &[(f64, f64)]) {
+    let GrooveRefusal::SectionChanges { stretches } = got else {
+        panic!("not a section refusal: {got:?}");
+    };
+    assert_eq!(stretches.len(), want.len(), "{stretches:?}");
+    for (s, &(from, to)) in stretches.iter().zip(want) {
+        assert!((s.from - from).abs() < 1e-9 && (s.to - to).abs() < 1e-9, "{stretches:?}");
+    }
+}
+
+fn weld_over(parts: &[(Body, Order); 2], faces: &[Vec<usize>; 2], from: f64, to: f64) -> Result<GrooveWeld> {
+    groove_weld_over([&pick(&parts[0], &faces[0]), &pick(&parts[1], &faces[1])], &flat(), Stretch { from, to })
+}
+
+#[test]
+fn parts_of_different_length_are_refused_with_the_stretch_they_share_which_builds() {
+    let (parts, faces) = y_groove_of(100.0);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    stretches_of(&got, &[(0.0, 100.0)]);
+    assert!(got.to_string().contains("weld 0.00 to 100.00 mm"), "{got}");
+    let area = 8.0 + 49.0 * 30.0_f64.to_radians().tan();
+    let volume = weld_over(&parts, &faces, 0.0, 100.0).unwrap().body.volume(1e-9).unwrap();
+    assert!((volume - 100.0 * area).abs() <= 1e-6 * volume, "{volume} != {}", 100.0 * area);
+}
+
+/// An I groove whose left plate's wall steps back 1 at z = 60 (a gap of 1, then 2) on 8 mm
+/// plates, swept down from y = 0: the plates, and each one's wall faces (the left one's two).
+fn stepped_gap() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+    let above = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let left = swept_by(&above, &[(-40.0, 0.0), (-0.5, 0.0), (-0.5, 60.0), (-1.5, 60.0), (-1.5, 120.0), (-40.0, 120.0)], 8.0);
+    let right = swept_by(&above, &[(0.5, 0.0), (40.0, 0.0), (40.0, 120.0), (0.5, 120.0)], 8.0);
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (2, 1), "{lf:?} {rf:?}");
+    ([left, right], [lf, rf])
+}
+
+#[test]
+fn a_gap_that_steps_along_the_joint_is_refused_with_its_two_stretches_each_of_which_builds() {
+    let (parts, faces) = stepped_gap();
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    stretches_of(&got, &[(0.0, 60.0), (60.0, 120.0)]);
+    assert!(got.to_string().contains("weld 0.00 to 60.00 mm, 60.00 to 120.00 mm"), "{got}");
+    // each stretch filled flat: the gap times the plates' 8 times its 60
+    for (from, to, gap) in [(0.0, 60.0, 1.0), (60.0, 120.0, 2.0)] {
+        let built = weld_over(&parts, &faces, from, to).unwrap();
+        let volume = built.body.volume(1e-9).unwrap();
+        assert!((volume - gap * 8.0 * 60.0).abs() <= 1e-6 * volume, "{from}: {volume}");
+        let (lo, hi) = built.body.bounds().unwrap();
+        assert!((lo[2] - from).abs() < 1e-9 && (hi[2] - to).abs() < 1e-9, "{lo:?} {hi:?}");
+    }
+    // a part of one stretch builds; a span across the step does not
+    assert!(weld_over(&parts, &faces, 10.0, 50.0).is_ok());
+    stretches_of(&weld_over(&parts, &faces, 50.0, 70.0).unwrap_err(), &[(0.0, 60.0), (60.0, 120.0)]);
+}
+
+#[test]
+fn a_concave_face_below_the_plate_surface_is_a_warning_in_weld_words() {
+    let (parts, faces) = y_groove();
+    let got = weld(&parts, &faces, &FillOptions { face: Contour::Concave { depth: 0.5 }, ..flat() }).unwrap();
+    let notes = got.notes();
+    let warning = notes.iter().find(|n| n.warning).unwrap_or_else(|| panic!("no warning: {notes:?}"));
+    assert!(warning.text.contains("ISO 6520-1 no. 511") && warning.text.contains("ISO 5817"), "{warning:?}");
+    assert!(warning.text.contains("0.50 mm below the left plate's surface"), "{warning:?}");
+}
+
+#[test]
+fn a_depth_past_the_root_is_full_penetration() {
+    let (parts, faces) = y_groove();
+    let got = weld(&parts, &faces, &FillOptions { depth: Some(20.0), ..flat() }).unwrap();
+    let notes = got.notes();
+    assert!(notes.iter().any(|n| !n.warning && n.text.contains("full penetration")), "{notes:?}");
+}
+
+#[test]
+fn a_fill_refusal_says_what_is_wrong_in_weld_words_and_the_size_that_builds() {
+    let (parts, faces) = y_groove();
+    let got = weld(&parts, &faces, &FillOptions { face: Contour::Concave { depth: 50.0 }, ..flat() }).unwrap_err();
+    let text = got.to_string();
+    assert!(text.starts_with("the groove cannot be filled as asked: a concave weld face 50.00 mm deep"), "{text}");
+    assert!(text.ends_with("mm builds"), "{text}");
 }
