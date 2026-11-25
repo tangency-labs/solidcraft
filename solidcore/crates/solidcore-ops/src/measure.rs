@@ -50,6 +50,7 @@ impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
+impl Answer for Vec<Result<PointLocation>> {}
 impl Answer for Vec<f64> {}
 impl Answer for Vec<solidcore::query::FaceLineHit> {}
 
