@@ -1,0 +1,1 @@
+finds the face a ray meets on the display mesh only for a ray the kernel will not fire (one that starts on the body)

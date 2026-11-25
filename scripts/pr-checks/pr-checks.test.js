@@ -36,6 +36,17 @@ test('parseDefaults', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes - faster zoom').status, 'malformed');
 });
 
+test('parseDefaults reads a "Changes a default" heading with the value on the next line', () => {
+  assert.equal(pc.parseDefaults('## Changes a default\nno — fixes a refused batch\n\n## Validation').status, 'no');
+  assert.equal(pc.parseDefaults('### Changes a default:\r\n\r\nNo.').status, 'no');
+  const r = pc.parseDefaults('## Changes a default\nyes — M opens Sketch Move, old behaviour kept behind preference shortcuts');
+  assert.equal(r.status, 'yes');
+  assert.equal(r.preference, 'shortcuts');
+  assert.equal(pc.parseDefaults('## Changes a default\nyes — fixes three behaviours:\n1. more').status, 'malformed');
+  assert.equal(pc.parseDefaults('## Changes a default\n').status, 'malformed');
+  assert.equal(pc.parseDefaults('## Changes a default in the sketch\nno').status, 'missing');
+});
+
 test('parseDefaults takes a note after the separator', () => {
   for (const sep of [',', '—', '–', '-', ':', ';']) {
     assert.equal(pc.parseDefaults(`Changes a default: no${sep} only a corrected label`).status, 'no', sep);
@@ -58,6 +69,25 @@ test('parseDefaults takes a full stop, spaces and backticks', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference p.  ').status, 'yes');
   assert.equal(pc.parseDefaults('Changes a default: no..x').status, 'no');
   assert.equal(pc.parseDefaults('Changes a default: `nope`').status, 'malformed');
+});
+
+test('parseDefaults takes any punctuation and text after no or yes (#16444)', () => {
+  // The exact line from #16444, carriage return included.
+  const body = 'Changes a default: no. The Latin script is used only when chosen in Preferences. Every Serbian system language, `sr-Latn-RS` included, keeps the Cyrillic catalog it showed before (covered by a test in `i18n.rs`). Users with Serbian selected see the newly translated messages in Serbian instead of English; nothing else about their setup changes.\r\nmore';
+  assert.equal(pc.parseDefaults(body).status, 'no');
+  for (const v of ['no (only a fix)', 'no) only a fix', 'no / only a fix', 'no... only a fix', 'no? only a fix', 'no. "Quoted" note', 'No! Only a fix.']) {
+    assert.equal(pc.parseDefaults(`Changes a default: ${v}`).status, 'no', v);
+  }
+  for (const sep of ['.', '(', '/', '...', '=>']) {
+    const r = pc.parseDefaults(`Changes a default: yes${sep} M opens Sketch Move, old behaviour kept behind preference shortcuts`);
+    assert.equal(r.status, 'yes', sep);
+    assert.equal(r.preference, 'shortcuts', sep);
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes. A4 starts landscape, approved by the owner').approvedByOwner, true);
+  assert.equal(pc.parseDefaults('Changes a default: yes. A4 starts landscape', { ownerApproved: true }).detail, 'A4 starts landscape');
+  // Still refused: a yes that says neither how the old behaviour is kept nor that the owner approved it.
+  assert.equal(pc.parseDefaults('Changes a default: yes. A4 starts landscape').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: notably yes').status, 'malformed');
 });
 
 test('parseDefaults: the owner-approved label stands for the owner\'s approval on any yes', () => {
