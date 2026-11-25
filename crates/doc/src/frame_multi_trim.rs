@@ -39,7 +39,7 @@ fn squared(outline: &Loop2) -> Loop2 {
     };
     // Only an outside corner's arc is squared: squaring an inside corner's (an angle's or a channel's root fillet)
     // would cut into the member's material.
-    let inside = solidcore_ops::section_corners::inside_corner_arcs(outline);
+    let inside = solidcraft_kernel::services::section_corners::inside_corner_arcs(outline);
     // The corner replacing segment k, when it is an outside corner's arc between two lines that meet near it.
     let corner = |k: usize| {
         let at = k.checked_rem(n)?;
@@ -76,7 +76,7 @@ fn meet((a, b): (Vec2, Vec2), (c, d): (Vec2, Vec2)) -> Option<Vec2> {
 /// Whether the section is open, like an angle, a channel or a beam: some corner of an outer outline turns inward
 /// (a line meeting the next at an inside corner, or an inside corner's fillet). A tube's or a bar's never does.
 pub fn is_open(regions: &[Region2]) -> bool {
-    regions.iter().any(|r| solidcore_ops::section_corners::is_open(&r.outer))
+    regions.iter().any(|r| solidcraft_kernel::services::section_corners::is_open(&r.outer))
 }
 
 /// The corners of the rectangle round each of the section's outer outlines (an arc's whole circle's box, a curve's

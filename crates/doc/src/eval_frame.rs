@@ -1461,7 +1461,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
             let at = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d).1;
             let plane = placed(t, at);
             let world: Vec<Vec3> = corners.iter().map(|&q| plane.to_world(q)).collect();
-            solidcore_ops::section_corners::reach_along(end, toward, &world)
+            solidcraft_kernel::services::section_corners::reach_along(end, toward, &world)
         })
         .fold(0.0, f64::max);
     // Never more than the member's own length: a far side that far off is no joint this end makes.
