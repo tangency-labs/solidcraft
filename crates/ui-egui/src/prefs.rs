@@ -4090,7 +4090,7 @@ fn prepare_preferences(
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
     let new = migrate(new);
-    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
+    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib / plugin_allowed_hosts: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }

@@ -3,9 +3,9 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::ui;
 pub use craft_plugin::{
-    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
-    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog,
-    shader, swatches, theme, valid_id,
+    API, AllowedHost, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity,
+    MAX_ALLOWED_HOSTS, MAX_APPROVED_FUEL, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot,
+    check_input, conditions, dialog, shader, swatches, theme, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -42,7 +42,7 @@ pub fn configure_process_host_limits(limits: HostLimits) -> Result<()> {
     PROCESS_HOST_LIMITS.set(limits).map_err(|_| error("process plugin host limits are already configured"))
 }
 pub(crate) fn default_host_limits() -> HostLimits {
-    PROCESS_HOST_LIMITS.get().copied().unwrap_or_default()
+    PROCESS_HOST_LIMITS.get().cloned().unwrap_or_default()
 }
 fn error(s: impl Into<String>) -> EngineError {
     EngineError::Other(format!("plugin: {}", s.into()))
@@ -71,6 +71,10 @@ pub struct Grants {
     /// `input_folder`), approved at install.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub input_folder: bool,
+    /// The package may connect to the endpoints its manifest's `permissions.connect` names
+    /// (capability `net@0.1`), approved at install as a whole. Bound to `package_hash`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub net: bool,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -98,6 +102,12 @@ pub struct AppState {
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
+    /// Whether the call under way may connect (`net@0.1`): its package's grant, set by the host
+    /// for that run alone. A preview clears it.
+    pub net: bool,
+    /// Designs the run under way asked to open in tabs of their own (`doc.open` with `new_tab`):
+    /// files in its granted folders, handed to the window once the run is accepted.
+    pub opens: Vec<String>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
@@ -368,7 +378,7 @@ pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() ->
 /// The ceilings a package runs under: the app's, raised to the fuel and memory the user approved
 /// for this exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
-    let mut limits = session.plugin_limits;
+    let mut limits = session.plugin_limits.clone();
     if let Some(fuel) =
         session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.fuel)
     {
@@ -530,6 +540,7 @@ fn run_package(
         panels::register_package(&mut scratch, &package)?;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
+        scratch.plugin_state.net = grants.net;
         // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
         scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
         scratch.plugin_state.storage_caller =
@@ -558,12 +569,13 @@ fn run_package(
         let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
         let host = SolidCraftHost { file_folders, file_read_folders, ..host };
         let event = panels::event_for(&package.manifest, entry, ui_event)?;
-        let (host, result) = match event {
+        let (mut host, result) = match event {
             Some(event) => craft_plugin_wasm::run_ui_event(host, &package.manifest, &package.component, entry, params, &event),
             None => craft_plugin_wasm::run(host, &package.manifest, &package.component, entry, params),
         };
         let value = result?;
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
+        let opens = std::mem::take(&mut host.session.plugin_state.opens);
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
             || session.sketching_view != host.session.sketching_view
@@ -581,6 +593,7 @@ fn run_package(
         }
         Ok(crate::schema::plugin::RunResult {
             result: value,
+            opens,
             forms: host.forms,
             form_validation: None,
             sketch_exits: host.sketch_exits,
@@ -774,7 +787,36 @@ impl PluginHost for SolidCraftHost {
             _ => (Default::default(), None),
         };
         let params = granted_params.as_ref().unwrap_or(params);
+        // Save As into a folder of the plugin's makes the sub-folders it needs there, as
+        // `files.write-file` does: a plugin has no other way to make an empty folder.
+        if name == "file.save_as"
+            && let Some(path) = params.get("path").and_then(Value::as_str)
+        {
+            make_folders_for(&self.file_folders, std::path::Path::new(path))?;
+        }
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        // A plugin has no design tabs: a design it opens in a new tab is opened by the window once
+        // the run is accepted, as a requested form is. Only a file in its granted folders.
+        if name == "doc.open" && params.get("new_tab") == Some(&Value::Bool(true)) {
+            let path = params.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
+            let only_path = params.as_object().is_some_and(|p| p.keys().all(|key| key == "path" || key == "new_tab"));
+            if !only_path || path.is_empty() {
+                return Err(HostError::InvalidInput {
+                    field: "doc.open".into(),
+                    reason: "a new tab opens one design: give only `path` and `new_tab`".into(),
+                });
+            }
+            solidcraft_io::vfs::scoped(Some(scope), || solidcraft_io::vfs::check(&path))
+                .map_err(|e| HostError::PermissionDenied { permission: format!("doc.open: {e}") })?;
+            if !std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+                return Err(HostError::CommandFailed { command: name.into(), reason: format!("{path}: no such design") });
+            }
+            if s.plugin_state.opens.len() >= 8 {
+                return Err(HostError::LimitExceeded { limit: "a run opens at most 8 designs".into() });
+            }
+            s.plugin_state.opens.push(path.clone());
+            return Ok(json!({"path": path, "new_tab": true, "opening": true}));
+        }
         let finish_sequence = s.sketch_finish_sequence;
         let camera_before = s.camera;
         let before = s.doc.clone();
@@ -817,6 +859,8 @@ impl PluginHost for SolidCraftHost {
         computed.undo.clear();
         computed.redo.clear();
         self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
+        // Designs to open in new tabs leave with an accepted run only.
+        self.session.plugin_state.opens = std::mem::take(&mut computed.plugin_state.opens);
         // Session::execute(plugin.run) owns the one outer undo step.
         if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
             || self.session.active_sketch != computed.active_sketch
@@ -855,6 +899,20 @@ impl PluginHost for SolidCraftHost {
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
         self.groups.clone()
+    }
+    fn granted_net(&self) -> bool {
+        self.session.plugin_state.net
+    }
+    fn net_allowed_hosts(&self) -> Vec<AllowedHost> {
+        self.session.plugin_limits.allowed_hosts.clone()
+    }
+    /// The folders the app keeps for plugins (`plugin-data/<id>/<grant>`, beside the plugins
+    /// folder): a plugin may learn where those are; never a folder the user chose.
+    fn names_folder(&self, folder: &std::path::Path) -> bool {
+        let Some(data) = self.session.plugin_state.plugins_dir().and_then(|plugins| plugins.parent().map(|data| data.join("plugin-data"))) else {
+            return false;
+        };
+        folder.starts_with(&data) && folder != data && !folder.components().any(|part| matches!(part, std::path::Component::ParentDir))
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
         let scope = solidcraft_io::vfs::current_scope();
@@ -946,4 +1004,34 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
 /// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     tools::describe(s, id)
+}
+
+/// Makes the missing folders above `target` when it lies in one of `folders` (a plugin's write
+/// grants), by plain names and never through a link. Elsewhere it does nothing: the command then
+/// refuses the path as it would.
+fn make_folders_for(folders: &[PathBuf], target: &std::path::Path) -> craft_plugin::Result<()> {
+    use std::path::Component;
+    let Some(parent) = target.parent() else { return Ok(()) };
+    let Some((root, inside)) = folders.iter().find_map(|folder| parent.strip_prefix(folder).ok().map(|inside| (folder, inside))) else {
+        return Ok(());
+    };
+    if !inside.components().all(|part| matches!(part, Component::Normal(name) if !name.to_string_lossy().starts_with('.'))) {
+        return Ok(());
+    }
+    let mut at = root.clone();
+    for part in inside.components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(HostError::PermissionDenied { permission: format!("file.save_as: {} is not a folder", at.display()) });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&at)
+                    .map_err(|e| HostError::CommandFailed { command: "file.save_as".into(), reason: format!("{}: {e}", at.display()) })?;
+            }
+            Err(error) => return Err(HostError::CommandFailed { command: "file.save_as".into(), reason: format!("{}: {error}", at.display()) }),
+        }
+    }
+    Ok(())
 }

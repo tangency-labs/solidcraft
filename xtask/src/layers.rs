@@ -74,6 +74,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("testkit", Class::Testkit),
     // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).
     ("craft-plugin", Class::Shared),
+    ("craft-plugin-net", Class::Shared),
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
@@ -329,7 +330,7 @@ fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec
 fn plugin_reaches_solidcraft(crates: &[Crate]) -> Vec<Violation> {
     let by_name: std::collections::HashMap<&str, &Crate> = crates.iter().map(|c| (c.name.as_str(), c)).collect();
     let mut out = Vec::new();
-    for c in crates.iter().filter(|c| matches!(c.name.as_str(), "craft-plugin" | "craft-plugin-wasm")) {
+    for c in crates.iter().filter(|c| matches!(c.name.as_str(), "craft-plugin" | "craft-plugin-net" | "craft-plugin-wasm")) {
         let (mut seen, mut todo) = (std::collections::BTreeSet::new(), vec![c.name.as_str()]);
         while let Some(name) = todo.pop() {
             let Some(k) = by_name.get(name) else { continue };
@@ -846,6 +847,7 @@ mod tests {
     #[test]
     fn plugin_crates_are_shared_and_may_use_each_other() {
         assert_eq!(classify("craft-plugin"), Some(Class::Shared));
+        assert_eq!(classify("craft-plugin-net"), Some(Class::Shared));
         assert_eq!(classify("craft-plugin-wasm"), Some(Class::Shared));
         let g =
             [c("craft-plugin", &[("serde", Normal, false)]), c("craft-plugin-wasm", &[("craft-plugin", Normal, true), ("wasmtime", Normal, false)])];
@@ -854,7 +856,7 @@ mod tests {
 
     #[test]
     fn plugin_crates_must_not_use_any_solidcraft_crate() {
-        for plugin in ["craft-plugin", "craft-plugin-wasm"] {
+        for plugin in ["craft-plugin", "craft-plugin-net", "craft-plugin-wasm"] {
             for kind in [Normal, Dev, Build] {
                 // Even shared SolidCraft crates and dependencies outside the workspace are forbidden.
                 for dep in ["solidcraft-ui-text", "solidcraft-engine", "solidcraft-testkit", "solidcraft"] {

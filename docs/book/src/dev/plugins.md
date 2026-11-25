@@ -24,8 +24,9 @@ component. SolidCraft runs the component in a sandbox:
   the design through read-only commands and returns the file's bytes; SolidCraft writes them where
   the user chose. See [Exporters](../../../plugins.md#exporters).
 
-A plugin has no network access, ever. It reads and writes files only in folders the user approved,
-and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
+A plugin reaches only what the user allowed when installing it: files in the folders it was given,
+and, for one that asks, connections to the servers its manifest names (see `connect` below). It
+runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
 from the input schema in the manifest.
 
 Plugins can be written in any language that compiles to a WebAssembly component. This guide uses
@@ -228,7 +229,7 @@ from). Each problem comes with how to fix it, and the command exits with an erro
 ```text
 plate-maker 0.1.0 (command plugin): 1 error(s), 0 warning(s)
 error   runtime.permissions.net: asks for network access (net)
-        fix: Remove "net": SolidCraft gives plugins no network access. Read and write files through named folder grants instead.
+        fix: Remove "net": to connect, add "net@0.1" to capabilities and name each endpoint in "connect", such as [{"host": "*", "transport": "tls"}].
 ```
 
 It takes the package folder or the `.zip`, and `--json` prints the same as data, the reply of the
@@ -286,7 +287,7 @@ case runs once with its fields' defaults, if it needs nothing else, and is skipp
 `--json` prints pass or fail per case as data, and `--out DIR` keeps each case's resulting design
 and log for a closer look. The command exits with an error when a case fails, so a CI job can run
 it; `--require-cases` also fails the run when an entry is skipped, so CI catches an entry nobody
-tested. Given the `.zip`, `plugin test` runs the cases in the `tests/` folder the `.zip` holds;
+tested. A case reaches no server unless you pass `--allow-net`. Given the `.zip`, `plugin test` runs the cases in the `tests/` folder the `.zip` holds;
 the `.zip` from Step 8 leaves them out, so test the folder.
 
 ## Step 8: install it
@@ -323,14 +324,21 @@ it at install:
   `<name>` is one of the `files` names below; any command but a known input reader (such as
   `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
-  interface, by name and a relative path. The user picks each folder at install; the `files`
-  interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
-  can name the full path. Writes appear only when the run succeeds.
+  interface, by name and a relative path, up to 64 MiB a file. The user picks each folder at
+  install; the `files` interface never shows the plugin where it is, but a `file` or `doc`
+  command's reply or error can name the full path. Writes appear only when the run succeeds. A
+  folder an entry names in `x-solidcraft-app-data-folders` is the plugin's own instead: the app
+  places it and asks nothing, and `files.locate` gives a file's full path there for commands such
+  as `file.save_as` and `doc.open`.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.
-- `net` is refused. SolidCraft gives plugins no network access, and a component that imports a
-  socket or HTTP interface is refused too.
+- `connect` (with `"net@0.1"` in `capabilities`): the servers the plugin connects to through the
+  `net` interface, each `{"host": "github.com", "port": 443, "transport": "tls"}` (host `*` or
+  `*.domain` allowed, port optional, transport `tcp`, `tls` or `ssh`). The install screen lists
+  them; only an `edit` entry connects, never a preview. See
+  [Connections](../../../plugins.md#connections). The old `"net": true` is refused, and so is a
+  component that imports a WASI socket or HTTP interface.
 
 Test a refusal by narrowing a case's `grants`: with `"grants": {}`, a call that needs a group or
 folder fails with `permission_denied`.

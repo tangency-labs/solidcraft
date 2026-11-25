@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let namespace = namespace.replace('-', "_");
     let name = name.replace('-', "_");
     let output = format!(
-        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, storage, types::{{self, PluginError}}}};\n\
+        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, net, storage, types::{{self, PluginError}}}};\n\
          macro_rules! call_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("aliases.rs"), output)?;
@@ -66,6 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                      \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
                      \"{package_name}/files\": super::bindings::{namespace}::{name}::files,\n\
                      \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/net\": super::bindings::{namespace}::{name}::net,\n\
                      \"{package_name}/forms\": super::bindings::{namespace}::{name}::forms,\n\
                      \"{package_name}/design-state\": super::bindings::{namespace}::{name}::design_state,\n\
                      \"{package_name}/storage\": super::bindings::{namespace}::{name}::storage,\n\

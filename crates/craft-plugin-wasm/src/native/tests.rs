@@ -24,8 +24,13 @@ struct App {
     panel_visible: bool,
     interactive: bool,
     forms: Vec<(String, Value)>,
+    /// The granted folders are the app's own for the plugin (`files.locate` names them).
+    own_folders: bool,
 }
 impl PluginHost for App {
+    fn names_folder(&self, _: &Path) -> bool {
+        self.own_folders
+    }
     fn open_form(&mut self, entry: &str, params: &Value) -> Result<()> {
         if !self.interactive {
             return Err(HostError::InteractiveRequired { entry: entry.into() });
@@ -487,7 +492,7 @@ fn dialog_hook_uses_its_own_fuel_ceiling_and_stops_memory_growth() {
         &bytes,
         "make",
         &json!({}),
-        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1 },
+        craft_plugin::HostLimits { max_fuel: 77, max_memory_mib: 1, allowed_hosts: Vec::new() },
     );
     assert_eq!(result.unwrap_err(), HostError::Exhausted { limit: "fuel".into(), allowed: 77 });
     let bytes = dialog_component("0.2.0", "i32.const 10000 memory.grow drop", "{}");
@@ -779,7 +784,60 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         deadline: Instant::now() + Duration::from_secs(5),
         import: None,
         panels: None,
+        net: None,
     }
+}
+#[test]
+fn connections_need_the_grant_an_edit_entry_and_a_named_endpoint() {
+    use net::Host;
+    use std::io::{Read as _, Write as _};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        socket.read_to_end(&mut request).unwrap();
+        socket.write_all(&request.to_ascii_uppercase()).unwrap();
+    });
+    let endpoints = vec![craft_plugin::ConnectPermission { host: "127.0.0.1".into(), port: Some(port), transport: craft_plugin::Transport::Tcp }];
+    let granted = || Some(craft_plugin_net::Connections::new(endpoints.clone(), craft_plugin_net::Options::default()));
+
+    // Without the user's grant there are no connections, and asking ends the call.
+    let mut refused = state(App::default());
+    assert!(matches!(refused.open("127.0.0.1".into(), port, net::Transport::Tcp), Err(PluginError::PermissionDenied(_))));
+    assert!(refused.failed.is_some());
+    // A read entry makes none either, granted or not.
+    let mut reading = state(App::default());
+    reading.effect = Effect::Read;
+    reading.net = granted();
+    assert!(
+        matches!(reading.open("127.0.0.1".into(), port, net::Transport::Tcp), Err(PluginError::PermissionDenied(text)) if text.contains("net.open"))
+    );
+    // An endpoint the manifest does not name is refused, and that ends the call too.
+    let mut elsewhere = state(App::default());
+    elsewhere.net = granted();
+    assert!(matches!(elsewhere.open("127.0.0.1".into(), port, net::Transport::Tls), Err(PluginError::PermissionDenied(_))));
+    assert!(elsewhere.failed.is_some());
+
+    let mut connecting = state(App::default());
+    connecting.net = granted();
+    let id = connecting.open("127.0.0.1".into(), port, net::Transport::Tcp).unwrap();
+    connecting.write(id, b"pack".to_vec()).unwrap();
+    connecting.finish(id).unwrap();
+    let mut answer = Vec::new();
+    loop {
+        let chunk = connecting.read(id, 1024).unwrap();
+        if chunk.is_empty() {
+            break;
+        }
+        answer.extend(chunk);
+    }
+    assert_eq!(answer, b"PACK");
+    connecting.close(id);
+    // A connection that fails (nothing listens now) is an error the plugin may handle: the call goes on.
+    server.join().unwrap();
+    assert!(matches!(connecting.open("127.0.0.1".into(), port, net::Transport::Tcp), Err(PluginError::CommandFailed(_))));
+    assert!(connecting.failed.is_none());
 }
 #[test]
 fn panel_imports_validate_typed_data_and_allow_read_entries_to_update_their_panels() {
@@ -1002,6 +1060,29 @@ fn file_import_denial_rolls_back_even_when_guest_swallows_it_and_grants_enable_r
     assert_eq!(failure, HostError::PermissionDenied { permission: "files.read:project".into() });
     app.grants.push(FileGrant { name: "project".into(), folder: root.clone(), read: true, write: false });
     assert_eq!(run(&mut app, &manifest, &files_component(false, false), "make", &json!({})).unwrap(), json!({}));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn locate_names_only_a_folder_the_app_keeps_for_the_plugin() {
+    // The read-file entry, calling `locate` instead: its result (the path) becomes the entry's.
+    let source = files_component_source(&[false], false, "")
+        .replace("(type $read-result (result (list u8) (error $error)))", "(type $read-result (result string (error $error)))")
+        .replace("(export \"read-file\"", "(export \"locate\"")
+        .replace("(alias export $files \"read-file\"", "(alias export $files \"locate\"");
+    let component = wat::parse_str(source).unwrap();
+    let root = import_folder(&[]);
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: false });
+    let mut app = App::default();
+    app.grants.push(FileGrant { name: "project".into(), folder: root.clone(), read: true, write: false });
+    let refused = run(&mut app, &manifest, &component, "make", &json!({})).unwrap_err();
+    assert!(matches!(&refused, HostError::PermissionDenied { permission } if permission.starts_with("files.locate:project")), "{refused}");
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+    // The app's own folder is named: the entry returns the full path, which is not JSON.
+    app.own_folders = true;
+    let named = run(&mut app, &manifest, &component, "make", &json!({})).unwrap_err();
+    assert!(matches!(&named, HostError::InvalidInput { field, .. } if field == "result"), "{named}");
     std::fs::remove_dir_all(root).unwrap();
 }
 

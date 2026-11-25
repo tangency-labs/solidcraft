@@ -137,6 +137,9 @@ struct CaseGrants {
     memory_mib: Option<usize>,
     #[serde(default)]
     fuel: Option<u64>,
+    /// Connections to the endpoints the manifest names (`net@0.1`).
+    #[serde(default)]
+    net: bool,
 }
 
 /// A folder the plugin may read or write: a fresh, empty one, or a copy of `from` in the tests
@@ -191,11 +194,13 @@ struct Outcome {
 }
 
 fn test(args: &[String]) -> Result<(), String> {
-    crate::known_args("plugin test", args, &["--out"], &["--json", "--require-cases"], true)?;
+    crate::known_args("plugin test", args, &["--out"], &["--json", "--require-cases", "--allow-net"], true)?;
     let path = package_path("test", args, &["--out"])?;
     let json_out = args.iter().any(|a| a == "--json");
     // For CI: an entry no case covers fails the run instead of being skipped.
     let require_cases = args.iter().any(|a| a == "--require-cases");
+    // A package's own test cases never grant it the network: the person running the tests does.
+    let allow_net = args.iter().any(|a| a == "--allow-net");
     let out = crate::flag(args, "--out").map(PathBuf::from);
     // The same checks as `plugin check`: a package that would not install is not tested.
     let report = Session::default().execute("plugin.check", &json!({"path": path})).map_err(|e| e.to_string())?;
@@ -258,7 +263,7 @@ fn test(args: &[String]) -> Result<(), String> {
                 Ok(case) => {
                     let entry = case.entry.clone();
                     let work = scratch.join(format!("case-{index}"));
-                    (entry, run_case(manifest, &installed, &plugins, &tests, &work, &case, out.as_deref(), &name))
+                    (entry, run_case(manifest, &installed, &plugins, &tests, &work, &case, out.as_deref(), &name, allow_net))
                 }
                 Err(e) => (String::new(), CaseResult { failure: Some(e), design: None, journal: None }),
             };
@@ -404,7 +409,8 @@ fn in_tests(tests: &Path, path: &str, what: &str) -> Result<PathBuf, String> {
 }
 
 /// The grants a case runs with, checked with the app's own rules, and the folders made for it.
-fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, case: &Case) -> Result<Grants, String> {
+/// Connections only with `allow_net` (`--allow-net`): a case can't grant itself the network.
+fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, case: &Case, allow_net: bool) -> Result<Grants, String> {
     let runtime = manifest.runtime.as_ref().ok_or("the plugin has no runtime")?;
     let asked = CaseGrants {
         command_groups: runtime.permissions.command_groups.clone(),
@@ -412,8 +418,12 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         input_folder: runtime.permissions.input_folder,
         fuel: Some(runtime.limits.fuel),
         memory_mib: Some(runtime.limits.memory_mib),
+        net: allow_net && !runtime.permissions.connect.is_empty(),
     };
     let wanted = case.grants.as_ref().unwrap_or(&asked);
+    if wanted.net && !allow_net {
+        return Err("grants: this case connects to servers; run plugin test with --allow-net to let it".into());
+    }
     // Every name is one the manifest asks for (a plain lowercase id) before any folder is made, so
     // a case's grants never reach outside its own folder.
     for folder in &wanted.folders {
@@ -435,6 +445,7 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
         fuel: wanted.fuel,
         memory_mib: wanted.memory_mib,
         input_folder: wanted.input_folder,
+        net: wanted.net,
     };
     solidcraft_engine::plugin::validate_grants(manifest, &grants).map_err(|e| format!("grants: {e}"))?;
     // Only a grant the app accepts is seeded from its fixture.
@@ -498,6 +509,7 @@ fn run_case(
     case: &Case,
     out: Option<&Path>,
     name: &str,
+    allow_net: bool,
 ) -> CaseResult {
     let mut journal = None;
     let mut design = None;
@@ -518,7 +530,7 @@ fn run_case(
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let mut grants = case_grants(manifest, &approval, tests, work, case)?;
+        let mut grants = case_grants(manifest, &approval, tests, work, case, allow_net)?;
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
         let folders = grants.folders.clone();
         // Approved as an install would store it: in the scratch plugins folder's grant store, which

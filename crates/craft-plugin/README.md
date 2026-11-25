@@ -13,15 +13,18 @@ no plugin code.
 | `Manifest`, `RuntimeManifest`, `Entry`, `UiSlot` | Package metadata, executable entries, declared inputs and placement preferences |
 | `parse_manifest`, `valid_id` | Bounded parsing and validation; package ids must match folder names |
 | `Permissions`, `FilePermission`, `FileGrant` | Requested capabilities and separately approved named folders |
+| `ConnectPermission`, `Transport`, `AllowedHost` | Endpoints a `net@0.1` plugin connects to, and the user's allowlist of servers |
 | `Limits`, `HostLimits` | Invocation budgets and user ceilings; `HostLimits::check` compares them |
 | `HostError`, `Result` | Typed permission, command, limit, manifest, input, trap and cancellation failures |
-| `API`, `WIT`, `MAX_*` | Interface identifier, WIT text and size/address-space limits |
+| `API`, `WIT`, `MAX_*` | Interface identifier, WIT text and size/address-space limits (`MAX_FILE_BYTES`: one file through `files`) |
 | `ui` | Typed panel declarations, widgets, events, slash-path data and validation |
 
 The app implements `PluginHost` and defines command policy, approval and transaction history.
 `authorize_file_path` applies caller scope to each complete file path, in addition to folder
 grants. Its default denies hidden child names unless a more specific approved folder grant
-covers them; an app may override it to enforce its explicit scope policy.
+covers them; an app may override it to enforce its explicit scope policy. `names_folder` says
+whether `files.locate` may tell the plugin a granted folder's full path: no by default; an app
+answers yes only for a folder it keeps for the plugin, never one the user chose.
 
 The [WIT](wit/plugin.wit) declares `craft:plugin@0.2.0`, world `command-plugin`: the
 capability `commands@0.2` (`CAPABILITIES`). A manifest lists the capabilities it needs
@@ -47,7 +50,11 @@ Commands are exact ids, intersected with the app catalog. A catalog command may 
 sensitive `group`; the guest calls it only when `permissions.command_groups` requests the
 group and `PluginHost::granted_command_groups` grants it. Folder requests alone grant
 nothing: the app supplies matching `FileGrant` values. Clock permission allows wall time;
-without it, the runtime returns a fixed epoch. Requests for `net` are refused.
+without it, the runtime returns a fixed epoch. The reserved `net` boolean is refused; a plugin
+that connects lists `net@0.1` in its capabilities and each endpoint in `permissions.connect`
+(host pattern, optional port, `tcp`, `tls` or `ssh`), and connects only when
+`PluginHost::granted_net` says the user allowed it. `HostLimits::allowed_hosts`, when it names
+any server, narrows every plugin's endpoints further (`HostLimits::allows_host`).
 Parsing a manifest neither approves nor executes its component. These contracts have no
 native execution requirement.
 

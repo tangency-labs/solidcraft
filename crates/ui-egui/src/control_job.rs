@@ -709,7 +709,7 @@ impl SolveApp {
                     prepared,
                     disabled: self.preferences.disabled_plugins.clone(),
                     grants: self.preferences.plugin_grants.clone(),
-                    limits: self.session.plugin_limits,
+                    limits: self.session.plugin_limits.clone(),
                     level,
                     progress: reported,
                     names,

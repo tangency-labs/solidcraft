@@ -915,7 +915,7 @@ fn start(app: &mut SolveApp) {
     // A file an importer plugin reads opens with the plugins the user installed and left on.
     scratch.plugin_state = app.session.plugin_state.clone();
     scratch.disabled_plugins = app.session.disabled_plugins.clone();
-    scratch.plugin_limits = app.session.plugin_limits;
+    scratch.plugin_limits = app.session.plugin_limits.clone();
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();

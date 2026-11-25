@@ -1916,8 +1916,11 @@ pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
         grants.folders.clear();
         grants.command_groups.clear();
         grants.input_folder = false;
+        // A preview runs on every change of a field: it must never reach a server.
+        grants.net = false;
     }
     scratch.plugin_state.file_grants.clear();
+    scratch.plugin_state.net = false;
 }
 
 /// Run the most recently opened dialog's entry.
@@ -2036,6 +2039,8 @@ pub(crate) fn poll(app: &mut SolveApp) {
                 if value.get("ok") != Some(&Value::Bool(true)) {
                     let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
                     app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+                } else {
+                    open_requested_designs(app, &value);
                 }
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
@@ -2118,23 +2123,39 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
     open_requested_forms(app, &reply, source_guard);
 }
 
+/// The designs an accepted run asked to open in tabs of their own (`doc.open` with `new_tab`),
+/// from a dialog or a panel action alike. They load on the file loader, as File › Open's do, so a
+/// large design never holds the window; one already open in a tab is shown instead.
+fn open_requested_designs(app: &mut SolveApp, reply: &Value) {
+    for path in reply.pointer("/result/opens").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+        let mut request = crate::file_load::Request::new(path, crate::file_load::Kind::Open);
+        request.new_tab = true;
+        if let Err(error) = crate::file_load::begin_request(app, request) {
+            app.set_status(error, true);
+        }
+    }
+}
+
 fn open_requested_forms(app: &mut SolveApp, reply: &Value, source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>) {
+    // Forms first, each bound to the design the run started on (its guard); a design opened in a
+    // new tab becomes the active one.
     if let Some(forms) = reply.pointer("/result/forms").and_then(Value::as_array) {
-        let Some(guard) = source_guard else {
-            if !forms.is_empty() {
-                app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
-            }
-            return;
-        };
-        for form in forms {
-            if let (Some(plugin), Some(entry), Some(params)) =
-                (form.get("plugin").and_then(Value::as_str), form.get("entry").and_then(Value::as_str), form.get("params"))
-                && let Err(error) = open_form_with_guard(app, plugin, entry, params, guard.clone())
-            {
-                app.set_status(error, true);
+        match source_guard {
+            None if !forms.is_empty() => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+            None => {}
+            Some(guard) => {
+                for form in forms {
+                    if let (Some(plugin), Some(entry), Some(params)) =
+                        (form.get("plugin").and_then(Value::as_str), form.get("entry").and_then(Value::as_str), form.get("params"))
+                        && let Err(error) = open_form_with_guard(app, plugin, entry, params, guard.clone())
+                    {
+                        app.set_status(error, true);
+                    }
+                }
             }
         }
     }
+    open_requested_designs(app, reply);
 }
 
 /// Draw every open entry dialog, each in its own window.

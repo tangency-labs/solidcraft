@@ -1533,7 +1533,7 @@ impl Session {
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
-        let plugin_limits = self.plugin_limits;
+        let plugin_limits = self.plugin_limits.clone();
         let mut plugin_state = self.plugin_state.clone();
         for package in plugin_state.panels.values_mut() {
             for data in package.data.values_mut() {
@@ -3554,7 +3554,7 @@ impl Session {
             auto_project: self.auto_project,
             project_construction: self.project_construction,
             disabled_plugins: self.disabled_plugins.clone(),
-            plugin_limits: self.plugin_limits,
+            plugin_limits: self.plugin_limits.clone(),
             plugin_state: {
                 let mut state = self.plugin_state.clone();
                 state.link_reads = Default::default();

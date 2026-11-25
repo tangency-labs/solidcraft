@@ -131,7 +131,7 @@ fn check_passes_good_packages_and_names_each_broken_one_with_its_fix() {
     let end = wasi.rfind(')').unwrap();
     wasi.replace_range(end.., "(import \"wasi:cli/environment@0.2.0\" (instance (export \"get\" (func)))))");
     for (manifest, component, field, fix) in [
-        (net, command_component("call $box"), "runtime.permissions.net", "no network access"),
+        (net, command_component("call $box"), "runtime.permissions.net", "add \"net@0.1\" to capabilities"),
         (command_manifest(), wat::parse_str("(module)").unwrap(), "component", "wasm-tools component new"),
         (command_manifest(), wat::parse_str(&wasi).unwrap(), "component", "wasm32-unknown-unknown"),
         (importer_manifest(), command_component("call $box"), "component", "importer-plugin"),
@@ -241,6 +241,23 @@ fn a_json_design_a_case_runs_on_is_not_read_as_a_case() {
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!((report["passed"].as_u64(), report["failed"].as_u64(), report["skipped"].as_u64()), (Some(1), Some(0), Some(0)), "{report}");
     assert_eq!(report["cases"][0]["name"], "on-plate", "{report}");
+}
+
+#[test]
+fn a_case_gets_connections_only_when_plugin_test_is_given_allow_net() {
+    let scratch = Scratch::new();
+    let mut manifest = command_manifest();
+    manifest["capabilities"] = json!(["commands@0.1", "net@0.1"]);
+    manifest["runtime"]["permissions"] = json!({"connect": [{"host": "127.0.0.1", "port": 9, "transport": "tcp"}]});
+    let asks = json!({"entry":"make","grants":{"net":true},"expect":{"model":{"body_count":1}}});
+    let path = package(&scratch.0, &manifest, &command_component("call $box"), &[("asks-net", asks)]);
+    // The package's own case can't grant itself the network.
+    let output = cli(&["plugin", "test", &path]);
+    let said = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    assert!(!output.status.success() && said.contains("--allow-net"), "{said}");
+    // The person running the tests can.
+    let output = cli(&["plugin", "test", &path, "--allow-net"]);
+    assert!(output.status.success(), "{}{}", text(&output.stdout), text(&output.stderr));
 }
 
 #[test]

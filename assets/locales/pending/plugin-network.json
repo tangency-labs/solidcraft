@@ -1,0 +1,90 @@
+{
+  "en": {
+    "plugin_install.connect_any": "any server",
+    "plugin_install.connect_any_port": "any server on port {port}",
+    "plugin_install.connect_ssh": "Connecting to {host} over SSH, signing in with your SSH agent or keys",
+    "plugin_install.connect_tcp": "Connecting to {host} over plain TCP (not encrypted)",
+    "plugin_install.connect_tls": "Connecting to {host} over TLS (encrypted; the server's certificate is checked)",
+    "prefs.plugin_allowed_hosts": "Allowed servers",
+    "prefs.plugin_allowed_hosts_invalid": "Enter up to 64 server names or addresses, each with an optional port, for example github.com or *.gitlab.com:22.",
+    "prefs.plugin_allowed_hosts_note": "When this list names any server, plugins connect only to servers on it, and still only to those each plugin was allowed when it was installed. Separate them with commas; a port is optional. For example: localhost, github.com, *.gitlab.com:22. Leave it empty for no extra limit.",
+    "prefs.plugin_approved_net": "connections to the servers it named"
+  },
+  "ar": {
+    "plugin_install.connect_any": "أي خادم",
+    "plugin_install.connect_any_port": "أي خادم على المنفذ {port}",
+    "plugin_install.connect_ssh": "الاتصال بـ {host} عبر SSH وتسجيل الدخول بوكيل SSH أو مفاتيحك",
+    "plugin_install.connect_tcp": "الاتصال بـ {host} عبر TCP عادي (غير مشفّر)",
+    "plugin_install.connect_tls": "الاتصال بـ {host} عبر TLS (مشفّر، مع التحقق من شهادة الخادم)",
+    "prefs.plugin_allowed_hosts": "الخوادم المسموح بها",
+    "prefs.plugin_allowed_hosts_invalid": "أدخل حتى 64 اسم خادم أو عنوانًا، لكل منها منفذ اختياري، مثل github.com أو *.gitlab.com:22.",
+    "prefs.plugin_allowed_hosts_note": "عندما تتضمن هذه القائمة أي خادم، لا تتصل الإضافات إلا بالخوادم المدرجة فيها، ويبقى كل منها مقيّدًا بما سُمح له عند تثبيته. افصل بينها بفواصل؛ والمنفذ اختياري. مثال: localhost, github.com, *.gitlab.com:22. اتركها فارغة لعدم إضافة أي قيد.",
+    "prefs.plugin_approved_net": "الاتصال بالخوادم التي سمّتها"
+  },
+  "de": {
+    "plugin_install.connect_any": "beliebiger Server",
+    "plugin_install.connect_any_port": "beliebiger Server an Port {port}",
+    "plugin_install.connect_ssh": "Verbindung mit {host} über SSH, Anmeldung mit Ihrem SSH-Agenten oder Ihren Schlüsseln",
+    "plugin_install.connect_tcp": "Verbindung mit {host} über einfaches TCP (unverschlüsselt)",
+    "plugin_install.connect_tls": "Verbindung mit {host} über TLS (verschlüsselt; das Zertifikat des Servers wird geprüft)",
+    "prefs.plugin_allowed_hosts": "Erlaubte Server",
+    "prefs.plugin_allowed_hosts_invalid": "Geben Sie bis zu 64 Servernamen oder Adressen ein, jeweils mit optionalem Port, zum Beispiel github.com oder *.gitlab.com:22.",
+    "prefs.plugin_allowed_hosts_note": "Sobald diese Liste einen Server nennt, verbinden sich Plug-ins nur noch mit Servern auf der Liste, und weiterhin nur mit denen, die jedem Plug-in bei der Installation erlaubt wurden. Trennen Sie die Einträge mit Kommas; ein Port ist optional. Zum Beispiel: localhost, github.com, *.gitlab.com:22. Leer lassen für keine zusätzliche Einschränkung.",
+    "prefs.plugin_approved_net": "Verbindungen zu den genannten Servern"
+  },
+  "he": {
+    "plugin_install.connect_any": "כל שרת",
+    "plugin_install.connect_any_port": "כל שרת בפורט {port}",
+    "plugin_install.connect_ssh": "התחברות אל {host} דרך SSH וכניסה באמצעות סוכן ה-SSH או המפתחות שלך",
+    "plugin_install.connect_tcp": "התחברות אל {host} דרך TCP רגיל (ללא הצפנה)",
+    "plugin_install.connect_tls": "התחברות אל {host} דרך TLS (מוצפן; תעודת השרת נבדקת)",
+    "prefs.plugin_allowed_hosts": "שרתים מותרים",
+    "prefs.plugin_allowed_hosts_invalid": "יש להזין עד 64 שמות שרתים או כתובות, כל אחד עם פורט אופציונלי, למשל github.com או *.gitlab.com:22.",
+    "prefs.plugin_allowed_hosts_note": "כשהרשימה הזו מציינת שרת כלשהו, תוספים מתחברים רק לשרתים שברשימה, ועדיין רק לאלה שהותרו לכל תוסף בעת ההתקנה. יש להפריד בפסיקים; הפורט אופציונלי. לדוגמה: localhost, github.com, *.gitlab.com:22. יש להשאיר ריק כדי לא להוסיף הגבלה.",
+    "prefs.plugin_approved_net": "חיבורים לשרתים שציין"
+  },
+  "ja": {
+    "plugin_install.connect_any": "任意のサーバー",
+    "plugin_install.connect_any_port": "任意のサーバー（ポート {port}）",
+    "plugin_install.connect_ssh": "SSH で {host} に接続し、SSH エージェントまたは鍵でサインインすること",
+    "plugin_install.connect_tcp": "暗号化されない通常の TCP で {host} に接続すること",
+    "plugin_install.connect_tls": "TLS で {host} に接続すること（暗号化され、サーバーの証明書を確認します）",
+    "prefs.plugin_allowed_hosts": "許可するサーバー",
+    "prefs.plugin_allowed_hosts_invalid": "サーバー名またはアドレスを 64 個まで入力してください（ポートは任意）。例: github.com、*.gitlab.com:22",
+    "prefs.plugin_allowed_hosts_note": "この一覧にサーバーがあると、プラグインはインストール時に許可された接続先のうち、この一覧にあるサーバーにだけ接続します。カンマで区切り、ポートは省略できます。例: localhost, github.com, *.gitlab.com:22。空欄なら追加の制限はありません。",
+    "prefs.plugin_approved_net": "指定したサーバーへの接続"
+  },
+  "ko": {
+    "plugin_install.connect_any": "모든 서버",
+    "plugin_install.connect_any_port": "모든 서버의 {port} 포트",
+    "plugin_install.connect_ssh": "SSH로 {host}에 연결하고 SSH 에이전트나 키로 로그인",
+    "plugin_install.connect_tcp": "일반 TCP로 {host}에 연결 (암호화되지 않음)",
+    "plugin_install.connect_tls": "TLS로 {host}에 연결 (암호화되며 서버 인증서를 확인함)",
+    "prefs.plugin_allowed_hosts": "허용된 서버",
+    "prefs.plugin_allowed_hosts_invalid": "서버 이름이나 주소를 최대 64개까지 입력하세요. 포트는 선택 사항입니다. 예: github.com 또는 *.gitlab.com:22",
+    "prefs.plugin_allowed_hosts_note": "이 목록에 서버가 있으면 플러그인은 설치할 때 허용된 대상 중 이 목록의 서버에만 연결합니다. 쉼표로 구분하며 포트는 선택 사항입니다. 예: localhost, github.com, *.gitlab.com:22. 비워 두면 추가 제한이 없습니다.",
+    "prefs.plugin_approved_net": "지정한 서버에 연결"
+  },
+  "vi": {
+    "plugin_install.connect_any": "bất kỳ máy chủ nào",
+    "plugin_install.connect_any_port": "bất kỳ máy chủ nào ở cổng {port}",
+    "plugin_install.connect_ssh": "Kết nối tới {host} qua SSH, đăng nhập bằng SSH agent hoặc khóa của bạn",
+    "plugin_install.connect_tcp": "Kết nối tới {host} qua TCP thường (không mã hóa)",
+    "plugin_install.connect_tls": "Kết nối tới {host} qua TLS (được mã hóa; chứng chỉ của máy chủ được kiểm tra)",
+    "prefs.plugin_allowed_hosts": "Máy chủ được phép",
+    "prefs.plugin_allowed_hosts_invalid": "Nhập tối đa 64 tên hoặc địa chỉ máy chủ, mỗi mục có thể kèm cổng, ví dụ github.com hoặc *.gitlab.com:22.",
+    "prefs.plugin_allowed_hosts_note": "Khi danh sách này có máy chủ nào, plugin chỉ kết nối tới các máy chủ trong danh sách, và vẫn chỉ trong số những máy chủ mỗi plugin được cho phép khi cài đặt. Phân tách bằng dấu phẩy; cổng là tùy chọn. Ví dụ: localhost, github.com, *.gitlab.com:22. Để trống nếu không muốn giới hạn thêm.",
+    "prefs.plugin_approved_net": "kết nối tới các máy chủ đã nêu"
+  },
+  "zh": {
+    "plugin_install.connect_any": "任意服务器",
+    "plugin_install.connect_any_port": "任意服务器的 {port} 端口",
+    "plugin_install.connect_ssh": "通过 SSH 连接到 {host}，并用你的 SSH 代理或密钥登录",
+    "plugin_install.connect_tcp": "通过普通 TCP 连接到 {host}（未加密）",
+    "plugin_install.connect_tls": "通过 TLS 连接到 {host}（已加密；会检查服务器证书）",
+    "prefs.plugin_allowed_hosts": "允许的服务器",
+    "prefs.plugin_allowed_hosts_invalid": "请输入最多 64 个服务器名称或地址，端口可选，例如 github.com 或 *.gitlab.com:22。",
+    "prefs.plugin_allowed_hosts_note": "当此列表包含任何服务器时，插件只会连接到这些服务器，且仍受安装时为每个插件批准的范围限制。用逗号分隔；端口可选。例如：localhost, github.com, *.gitlab.com:22。留空表示不额外限制。",
+    "prefs.plugin_approved_net": "连接到其指定的服务器"
+  }
+}
