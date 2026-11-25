@@ -2519,4 +2519,34 @@ mod tests {
         assert_eq!(ty(3.538e-3 / len, Both), Both);
         assert_eq!(ty(0.5, Inside), Inside);
     }
+
+    /// #18647: `Both` (a touch the UV tolerance puts on both ends of the interval) keeps
+    /// only the ends its point is not 3D-distinct from. On the same line, a point `d` from
+    /// the start lies `len - d` from the end, so each answer follows from the distances.
+    #[test]
+    fn distinct_end_type_splits_both_per_end() {
+        use ExtentPointType::{Both, End, Inside, Start};
+        let k = Kernel::default();
+        let len = 2_469_134.0;
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let ty = |param: f64, tol: f64| {
+            distinct_end_type(&k, &curve, &ivl, param, Both, tol).expect("type")
+        };
+        // 3.5e-3 from the start, 2.47e6 from the end: distinct from both, inside
+        assert_eq!(ty(3.538e-3 / len, 1e-7), Inside);
+        // 1e-9 from the start (below the tolerance): on the start only
+        assert_eq!(ty(1e-9 / len, 1e-7), Start);
+        assert_eq!(ty(1.0 - 1e-9 / len, 1e-7), End);
+        // a tolerance longer than the line: on both ends, still degenerate
+        assert_eq!(ty(0.5, 3e6), Both);
+        // on an end parameter itself, or outside the interval: unchanged
+        assert_eq!(ty(0.0, 1e-7), Both);
+        assert_eq!(ty(1.0, 1e-7), Both);
+        assert_eq!(ty(-0.5, 1e-7), Both);
+    }
 }
