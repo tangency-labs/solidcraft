@@ -327,7 +327,7 @@ fn least(values: impl Iterator<Item = f64>) -> Option<f64> {
 /// order of the part's holes.
 pub fn check(profile: &Profile, part: &Part) -> Report {
     let mut r = Report::default();
-    for id in RuleId::ALL {
+    for &id in RuleId::ALL {
         let Some(rule) = profile.rule(id) else {
             not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
             continue;

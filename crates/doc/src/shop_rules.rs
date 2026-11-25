@@ -100,7 +100,7 @@ pub enum RuleId {
 
 impl RuleId {
     /// Every rule, in the order a report lists them.
-    pub const ALL: [RuleId; 14] = [
+    pub const ALL: &[RuleId] = &[
         RuleId::OneBody,
         RuleId::UniformThickness,
         RuleId::StockThickness,
