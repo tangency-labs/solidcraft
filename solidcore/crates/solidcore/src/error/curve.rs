@@ -785,9 +785,8 @@ impl CurveFailure {
 
     /// Its stable [`ErrorKind`]: [`ErrorKind::NotWithinTolerance`] for a length bracket's
     /// refusal (the accuracy asked is finer than the computation resolves); for a routine's
-    /// failure, the kind of the status it replaced ([`ErrorKind::Failed`],
-    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]) and that of the status of a typed
-    /// cause that replaced one; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
+    /// failure, the kind the status it replaced had ([`ErrorKind::Failed`],
+    /// [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`]), named per variant; [`ErrorKind::StageFailed`] for a stage that failed, reviewed
     /// or not, a defect;
     /// [`ErrorKind::PortInvariant`] for a piece outside its span, a port invariant broken;
     /// [`ErrorKind::InvalidInput`] for a check of the caller's argument or curve,
@@ -802,11 +801,16 @@ impl CurveFailure {
             Self::AngleHasNoNurbParameter { .. }
             | Self::CacheNotBuilt
             | Self::CornerOnViewAxis
+            | Self::Failed(_)
             | Self::FunctionUndefined { .. }
+            | Self::InfiniteTangent { .. }
             | Self::LocalSolveFailed
             | Self::NurbNotTransformed
             | Self::PlacementNotSet
-            | Self::RootNotEvaluated { .. } => ErrorKind::Failed,
+            | Self::PointOnCurveWhenMaximising { .. }
+            | Self::RootNotEvaluated { .. }
+            | Self::SingleLinearCurve
+            | Self::ZeroTangent { .. } => ErrorKind::Failed,
             Self::AngleOutsideArc { .. }
             | Self::AuxiliaryAlongProjection
             | Self::AuxiliaryVectorZero
@@ -842,6 +846,7 @@ impl CurveFailure {
             | Self::TooFewBreakpoints { .. }
             | Self::TooManyDerivatives { .. }
             | Self::UnknownCurveType { .. }
+            | Self::ZeroDirection(_)
             | Self::ZeroScale { .. } => ErrorKind::InvalidInput,
             Self::BaseCurveMethod { .. }
             | Self::CornerByCurveExtension
@@ -866,13 +871,7 @@ impl CurveFailure {
             | Self::LengthPastPieceCap { .. }
             | Self::StartsApart { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::Failed(_)
-            | Self::InfiniteTangent { .. }
-            | Self::Missing(_)
-            | Self::PointOnCurveWhenMaximising { .. }
-            | Self::SingleLinearCurve
-            | Self::ZeroDirection(_)
-            | Self::ZeroTangent { .. } => ErrorKind::of_status(self.comparison_status()),
+            Self::Missing(_) => ErrorKind::Missing,
             Self::PieceOutsideSpan { .. } => ErrorKind::PortInvariant,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::TargetDidNotDrop => ErrorKind::NotFound,
@@ -1265,6 +1264,18 @@ mod tests {
         Failure::new(operation, CurveFailure::StageFailed)
             .with_status(status)
             .into_error()
+    }
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn curve_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (CurveFailure::Failed("x"), ErrorKind::Failed),
+            (CurveFailure::Missing("x"), ErrorKind::Missing),
+            (CurveFailure::SingleLinearCurve, ErrorKind::Failed),
+            (CurveFailure::ZeroDirection("x"), ErrorKind::InvalidInput),
+        ]);
     }
 
     #[test]

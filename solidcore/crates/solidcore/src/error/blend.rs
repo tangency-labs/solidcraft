@@ -1609,7 +1609,7 @@ impl BlendFailure {
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::ArcLengthNotConverged { .. } => ErrorKind::NotConverged,
-            Self::BadIntersections(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::BadIntersections(_) => ErrorKind::Failed,
             Self::BallTriangleNotOnePatch { .. } => ErrorKind::Unsupported,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::BandInputMissing(_) => ErrorKind::Missing,
@@ -1660,7 +1660,7 @@ impl BlendFailure {
             Self::ExtensionEndOnTwoSideLines => ErrorKind::Unsupported,
             Self::FaceHasNoSurface => ErrorKind::InvalidInput,
             Self::FaceWithoutSurface { .. } => ErrorKind::InvalidInput,
-            Self::Failed(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::Failed(_) => ErrorKind::Failed,
             Self::FilletCrossesItself { .. } => ErrorKind::Unsupported,
             Self::FilletEdgeMatchesNoBrepEdge { .. } => ErrorKind::NotFound,
             Self::FilletEndOffIntersectionCurve { .. } => ErrorKind::NotFound,
@@ -1671,13 +1671,13 @@ impl BlendFailure {
             Self::FilletsMeetInNoCurve { .. } => ErrorKind::NotFound,
             Self::FilletsNotIntersected => ErrorKind::Failed,
             Self::GnSectionInvalid { .. } => ErrorKind::InvalidInput,
-            Self::Inconsistent(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::Inconsistent(_) => ErrorKind::Failed,
             Self::InputMissing(_) => ErrorKind::InvalidInput,
             Self::InterpolantDropsToCurves { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveHasNoUvCurve { .. } => ErrorKind::Unsupported,
             Self::IntersectionCurveNotBSpline { .. } => ErrorKind::Unsupported,
             Self::IntersectionEndsOffFace { .. } => ErrorKind::NotFound,
-            Self::InvalidValue(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::InvalidValue(_) => ErrorKind::InvalidInput,
             Self::IsoDirectionNotUOrV => ErrorKind::InvalidInput,
             Self::JoinBlendsRollOffSection => ErrorKind::Unsupported,
             Self::JoinCurveNotBSpline { .. } => ErrorKind::Unsupported,
@@ -1690,7 +1690,7 @@ impl BlendFailure {
             Self::LoopDoesNotSplitBody { .. } => ErrorKind::InvalidInput,
             Self::LoopEdgesBranch { .. } => ErrorKind::InvalidInput,
             Self::MateFaceSurfaceNotBSpline { .. } => ErrorKind::Unsupported,
-            Self::Missing(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::Missing(_) => ErrorKind::Missing,
             Self::MixedCornerUnbuildable(step) => step.class(),
             Self::NeighbourVertexNotProcessed { .. } => ErrorKind::InvalidInput,
             Self::NoBlendedEdgeNearExtension => ErrorKind::NotFound,
@@ -1701,13 +1701,14 @@ impl BlendFailure {
             Self::NoVertexGiven => ErrorKind::InvalidInput,
             Self::NodalArcUnavailable { reason, .. } => reason.class(),
             Self::NotCertified { .. } => ErrorKind::NotWithinTolerance,
-            Self::NotConverged(_) => ErrorKind::of_status(self.comparison_status()),
-            Self::NotWithinTolerance(_) => ErrorKind::of_status(self.comparison_status()),
-            Self::OutsideDomain(_) => ErrorKind::of_status(self.comparison_status()),
+            Self::NotConverged(_) => ErrorKind::NotConverged,
+            Self::NotWithinTolerance(_) => ErrorKind::NotWithinTolerance,
+            Self::OutsideDomain(_) => ErrorKind::OutsideDomain,
             Self::OverflowInputMissing(_) => ErrorKind::Missing,
             Self::OverflowPointDoesNotDrop(_) => ErrorKind::NotFound,
             Self::ParameterListSizes { .. } => ErrorKind::InvalidInput,
-            Self::PassedOn { .. } => ErrorKind::of_status(self.comparison_status()),
+            // built by no library site, and deleted with the other phrase causes (#21566)
+            Self::PassedOn { status, .. } => ErrorKind::of_status(*status),
             Self::PerEdgeListLength { .. } => ErrorKind::InvalidInput,
             Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
             Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
@@ -2886,6 +2887,25 @@ mod tests {
     use super::*;
     use crate::blend::fillet_exact::BlendSpine;
     use crate::SolidError;
+
+    /// The phrase causes that took their class from their status have it whatever status
+    /// they are recorded with (#21871).
+    #[test]
+    fn blend_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (BlendFailure::BadIntersections("x"), ErrorKind::Failed),
+            (BlendFailure::Failed("x"), ErrorKind::Failed),
+            (BlendFailure::Inconsistent("x"), ErrorKind::Failed),
+            (BlendFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (BlendFailure::Missing("x"), ErrorKind::Missing),
+            (BlendFailure::NotConverged("x"), ErrorKind::NotConverged),
+            (
+                BlendFailure::NotWithinTolerance("x"),
+                ErrorKind::NotWithinTolerance,
+            ),
+            (BlendFailure::OutsideDomain("x"), ErrorKind::OutsideDomain),
+        ]);
+    }
 
     #[test]
     fn blend_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

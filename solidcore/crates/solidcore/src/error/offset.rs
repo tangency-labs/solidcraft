@@ -1297,6 +1297,7 @@ impl OffsetFailure {
             | Self::FaceuseHasNoShell { .. }
             | Self::FaceuseNotGiven
             | Self::FollowedBlendIncomplete
+            | Self::InvalidValue(_)
             | Self::LocalFaceNotListed
             | Self::ShellFaceNotOfBody { .. }
             | Self::ShellHasNoRegion { .. }
@@ -1306,15 +1307,16 @@ impl OffsetFailure {
             | Self::VertexNotGiven => ErrorKind::InvalidInput,
             Self::EdgeVanishes { .. } => ErrorKind::OffsetEdgeVanishes,
             // neither a defect nor a refusal: the failure keeps the error of the step that
-            // failed, which decides (`SolidError::is_defect`, `is_refusal`)
+            // failed, which decides (`SolidError::is_defect`, `is_refusal`); the phrase causes
+            // `Failed` and `Inconsistent` are neither either
             Self::FaceDomainUnresolved
+            | Self::Failed(_)
             | Self::GapCornerBlendNotMade { .. }
+            | Self::Inconsistent(_)
             | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
-            Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
-                ErrorKind::of_status(self.comparison_status())
-            }
             Self::Folds { .. } | Self::NotCertified { .. } => ErrorKind::OffsetFolds,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
         }
     }
@@ -1892,6 +1894,18 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn offset_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (OffsetFailure::Failed("x"), ErrorKind::Failed),
+            (OffsetFailure::Inconsistent("x"), ErrorKind::Failed),
+            (OffsetFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (OffsetFailure::Missing("x"), ErrorKind::Missing),
+        ]);
+    }
 
     /// The offset failures that replaced a bare status or a stage failure keep its status and
     /// operation, and answer as the status did; their class is their own (a defect's is

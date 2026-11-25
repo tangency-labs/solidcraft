@@ -840,9 +840,10 @@ impl SurfaceFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
-    /// caller's argument, surface, curve or file, otherwise the kind of the status it
-    /// replaced ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
-    /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
+    /// caller's argument, surface, curve or file, otherwise the kind the status it replaced
+    /// had ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
+    /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]), named per variant
+    /// so the kind never depends on the status recorded with it.
     /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect. Each named
     /// cause has the class its doc names.
     #[must_use]
@@ -874,6 +875,7 @@ impl SurfaceFailure {
             | Self::GeneratorOnAxis
             | Self::InputNotGiven { .. }
             | Self::InvalidDerivativeSurface
+            | Self::InvalidValue(_)
             | Self::LeanNotFinite
             | Self::LineDirectionZero
             | Self::LineSearchNormUnsigned
@@ -920,6 +922,8 @@ impl SurfaceFailure {
             | Self::UnsupportedSurfaceKind
             | Self::UnsupportedTangencyType => ErrorKind::Unsupported,
             Self::AngleNotMeasured
+            | Self::AsItselfNetUnexpected
+            | Self::AsItselfWeightNotPositive
             | Self::BlendSurfaceNotMade
             | Self::CallFailed
             | Self::CentreHasNoParameters
@@ -927,14 +931,29 @@ impl SurfaceFailure {
             | Self::CurveCacheTreeNotBuilt
             | Self::CurveInversionFailed
             | Self::DegenerateParameterNotFound
+            | Self::DirectrixNotFound
             | Self::DistanceNotEnclosed
+            | Self::EllipseBoundsNotCertified
+            | Self::EllipsesNotOnOneExactPlane
             | Self::EvaluationFailed
+            | Self::EvaluationFailedBefore
+            | Self::ExtensionNotMadeInBracket
+            | Self::ExtensionSpanNotPositive
+            | Self::ExtensionSpansPastBound
+            | Self::ExtensionTowardFailed
+            | Self::Failed(_)
             | Self::FartherThanGuess { .. }
+            | Self::GeneratorCircleUndefined
             | Self::GeneratorNotMade
+            | Self::InvertedPointOffOffset
+            | Self::IsoCircleUndefined
             | Self::KnotsAndContinuitiesDisagree { .. }
             | Self::MergedRangeReversed { .. }
+            | Self::NetNotCertified
+            | Self::NoCommonEllipsePlane
             | Self::NoContinuousDomain
             | Self::NoControlPoints
+            | Self::NoNonsingularStepoff
             | Self::NoParameterDirection
             | Self::NoPolarConverter
             | Self::NoTangentTowardDirection
@@ -942,16 +961,25 @@ impl SurfaceFailure {
             | Self::NothingLifted
             | Self::NurbEvaluationFailed
             | Self::NurbNotMade
+            | Self::PlaneCanvasNotFinite
+            | Self::PlanesLineNearlySingular
             | Self::PointDoesNotDrop
+            | Self::PointNotOnGenerator
+            | Self::PointOnAxis
             | Self::RecursionPastBound { .. }
+            | Self::RevolutionArcOutOfRange
+            | Self::RevolutionAxisDegenerate
+            | Self::RotationSenseUndefined
             | Self::SingularBoundaryNotPole { .. }
             | Self::SolveCacheNotMade
             | Self::SurfaceCacheNotBuilt
-            | Self::SurfaceCacheTreeNotBuilt => ErrorKind::Failed,
+            | Self::SurfaceCacheTreeNotBuilt
+            | Self::VectorNotDropped => ErrorKind::Failed,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideParamDomain
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::DomainPastApex
+            | Self::OutsideDomain(_)
             | Self::ParameterOutsideGenerator
             | Self::PointOutsideGivenDomain { .. }
             | Self::PointOutsideSweep
@@ -976,8 +1004,9 @@ impl SurfaceFailure {
             | Self::TooFewUniqueKnots
             | Self::ZeroLengthTangent
             | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::NoRoughGuess => ErrorKind::NotFound,
-            _ => ErrorKind::of_status(self.comparison_status()),
+            Self::OffSurface(_) | Self::PointOffSurface => ErrorKind::NotWithinTolerance,
         }
     }
 }
@@ -1379,6 +1408,53 @@ mod tests {
     use super::*;
     use crate::error::EntityRef;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn surface_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (SurfaceFailure::AsItselfNetUnexpected, ErrorKind::Failed),
+            (SurfaceFailure::AsItselfWeightNotPositive, ErrorKind::Failed),
+            (SurfaceFailure::DirectrixNotFound, ErrorKind::Failed),
+            (SurfaceFailure::EllipseBoundsNotCertified, ErrorKind::Failed),
+            (
+                SurfaceFailure::EllipsesNotOnOneExactPlane,
+                ErrorKind::Failed,
+            ),
+            (SurfaceFailure::EvaluationFailedBefore, ErrorKind::Failed),
+            (SurfaceFailure::ExtensionNotMadeInBracket, ErrorKind::Failed),
+            (SurfaceFailure::ExtensionSpanNotPositive, ErrorKind::Failed),
+            (SurfaceFailure::ExtensionSpansPastBound, ErrorKind::Failed),
+            (SurfaceFailure::ExtensionTowardFailed, ErrorKind::Failed),
+            (SurfaceFailure::Failed("x"), ErrorKind::Failed),
+            (SurfaceFailure::GeneratorCircleUndefined, ErrorKind::Failed),
+            (SurfaceFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (SurfaceFailure::InvertedPointOffOffset, ErrorKind::Failed),
+            (SurfaceFailure::IsoCircleUndefined, ErrorKind::Failed),
+            (SurfaceFailure::Missing("x"), ErrorKind::Missing),
+            (SurfaceFailure::NetNotCertified, ErrorKind::Failed),
+            (SurfaceFailure::NoCommonEllipsePlane, ErrorKind::Failed),
+            (SurfaceFailure::NoNonsingularStepoff, ErrorKind::Failed),
+            (
+                SurfaceFailure::OffSurface("x"),
+                ErrorKind::NotWithinTolerance,
+            ),
+            (SurfaceFailure::OutsideDomain("x"), ErrorKind::OutsideDomain),
+            (SurfaceFailure::PlaneCanvasNotFinite, ErrorKind::Failed),
+            (SurfaceFailure::PlanesLineNearlySingular, ErrorKind::Failed),
+            (SurfaceFailure::PointNotOnGenerator, ErrorKind::Failed),
+            (
+                SurfaceFailure::PointOffSurface,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (SurfaceFailure::PointOnAxis, ErrorKind::Failed),
+            (SurfaceFailure::RevolutionArcOutOfRange, ErrorKind::Failed),
+            (SurfaceFailure::RevolutionAxisDegenerate, ErrorKind::Failed),
+            (SurfaceFailure::RotationSenseUndefined, ErrorKind::Failed),
+            (SurfaceFailure::VectorNotDropped, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn surface_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

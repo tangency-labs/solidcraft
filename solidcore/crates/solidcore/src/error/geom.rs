@@ -306,6 +306,7 @@ impl GeomFailure {
             | Self::PairNotRelated
             | Self::PointSetFull { .. }
             | Self::SpanOutsidePeriod { .. }
+            | Self::ToleranceTooSmall { .. }
             | Self::TooFewRows { .. }
             | Self::VoxelArrayTooLarge { .. } => ErrorKind::InvalidInput,
             Self::BrentDidNotConverge { .. }
@@ -313,6 +314,13 @@ impl GeomFailure {
             | Self::JacobiDidNotConverge { .. }
             | Self::StageFailed => ErrorKind::StageFailed,
             Self::CallFailed { class } => *class,
+            Self::CoincidentPoints
+            | Self::Disjoint { .. }
+            | Self::Failed(_)
+            | Self::NearlySingular
+            | Self::NoNodeToSubdivide { .. }
+            | Self::PointOutsideExtent { .. }
+            | Self::ZeroDifferenceStep { .. } => ErrorKind::Failed,
             Self::CollinearPoints { .. }
             | Self::NoPerpendicular
             | Self::Parallel { .. }
@@ -320,9 +328,9 @@ impl GeomFailure {
             | Self::Singular { .. }
             | Self::ZeroDerivative { .. }
             | Self::ZeroDirection { .. } => ErrorKind::Degenerate,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::TooFarApart { .. } => ErrorKind::NotWithinTolerance,
             Self::UnsupportedTargetType { .. } => ErrorKind::Unsupported,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -517,6 +525,18 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn geom_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (GeomFailure::CoincidentPoints, ErrorKind::Failed),
+            (GeomFailure::Failed("x"), ErrorKind::Failed),
+            (GeomFailure::Missing("x"), ErrorKind::Missing),
+            (GeomFailure::NearlySingular, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn geom_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

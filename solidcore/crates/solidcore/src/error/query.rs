@@ -245,12 +245,33 @@ impl QueryFailure {
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for
     /// [`QueryFailure::InvalidValue`] and for a check of the caller's argument or body,
     /// [`ErrorKind::Unsupported`] for a surface or object the routine does not take,
-    /// [`ErrorKind::Missing`] for [`QueryFailure::Missing`], otherwise the kind of the status
-    /// it replaced.
+    /// [`ErrorKind::Missing`] for [`QueryFailure::Missing`], otherwise the kind the status it
+    /// replaced had, named per variant.
     /// [`QueryFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
+            Self::BoundOverflows
+            | Self::BoundaryNotIntersected
+            | Self::BoundingBoxNotFound
+            | Self::BrepWithoutEdges
+            | Self::BrepWithoutFaces
+            | Self::ClosestPointNotEvaluated
+            | Self::CrossingOffEdge
+            | Self::FaceWithoutLoops
+            | Self::Failed(_)
+            | Self::NoClosestPoint
+            | Self::NoEdgeAtPoint
+            | Self::NoFaceAtPoint
+            | Self::NoFoot
+            | Self::NoLoopClassifies
+            | Self::NoLoopTouches
+            | Self::NoStationDropped
+            | Self::RegionNotFound
+            | Self::RegionWithoutShells
+            | Self::SegmentOutsideTree
+            | Self::SteppedOffOnFirstStep
+            | Self::TangentAlongEdge => ErrorKind::Failed,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EdgeWithoutCurve
             | Self::EdgeuseOrientationUnset
@@ -258,6 +279,7 @@ impl QueryFailure {
             | Self::FaceWithoutFaceuse
             | Self::FaceWithoutSurface
             | Self::InvalidReach
+            | Self::InvalidValue(_)
             | Self::LoopuseWithoutVertexuse
             | Self::NoEdgeGiven
             | Self::NoPatchInBox
@@ -272,9 +294,10 @@ impl QueryFailure {
             | Self::PolyRadialRingNotClosed
             | Self::UndefinedScale
             | Self::UvLineNotMade
-            | Self::VertexuseWithoutVertex => ErrorKind::InvalidInput,
+            | Self::VertexuseWithoutVertex
+            | Self::ZeroLengthVector => ErrorKind::InvalidInput,
+            Self::Missing(_) | Self::NoTrimmedCache => ErrorKind::Missing,
             Self::SurfaceWithoutNurbs | Self::UnsupportedObjectKind => ErrorKind::Unsupported,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -379,6 +402,39 @@ impl crate::SolidError {
 pub(super) mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn query_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (QueryFailure::BoundOverflows, ErrorKind::Failed),
+            (QueryFailure::BoundaryNotIntersected, ErrorKind::Failed),
+            (QueryFailure::BoundingBoxNotFound, ErrorKind::Failed),
+            (QueryFailure::BrepWithoutEdges, ErrorKind::Failed),
+            (QueryFailure::BrepWithoutFaces, ErrorKind::Failed),
+            (QueryFailure::ClosestPointNotEvaluated, ErrorKind::Failed),
+            (QueryFailure::CrossingOffEdge, ErrorKind::Failed),
+            (QueryFailure::FaceWithoutLoops, ErrorKind::Failed),
+            (QueryFailure::Failed("x"), ErrorKind::Failed),
+            (QueryFailure::InvalidValue("x"), ErrorKind::InvalidInput),
+            (QueryFailure::Missing("x"), ErrorKind::Missing),
+            (QueryFailure::NoClosestPoint, ErrorKind::Failed),
+            (QueryFailure::NoEdgeAtPoint, ErrorKind::Failed),
+            (QueryFailure::NoFaceAtPoint, ErrorKind::Failed),
+            (QueryFailure::NoFoot, ErrorKind::Failed),
+            (QueryFailure::NoLoopClassifies, ErrorKind::Failed),
+            (QueryFailure::NoLoopTouches, ErrorKind::Failed),
+            (QueryFailure::NoStationDropped, ErrorKind::Failed),
+            (QueryFailure::NoTrimmedCache, ErrorKind::Missing),
+            (QueryFailure::RegionNotFound, ErrorKind::Failed),
+            (QueryFailure::RegionWithoutShells, ErrorKind::Failed),
+            (QueryFailure::SegmentOutsideTree, ErrorKind::Failed),
+            (QueryFailure::SteppedOffOnFirstStep, ErrorKind::Failed),
+            (QueryFailure::TangentAlongEdge, ErrorKind::Failed),
+            (QueryFailure::ZeroLengthVector, ErrorKind::InvalidInput),
+        ]);
+    }
 
     #[test]
     fn query_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

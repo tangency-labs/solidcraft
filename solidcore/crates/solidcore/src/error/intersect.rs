@@ -588,18 +588,53 @@ impl IntersectFailure {
             | Self::PositionNotAnEnd
             | Self::ReversalLeftNoPoints
             | Self::StartPointLost => ErrorKind::InvalidInput,
-            Self::CurveCacheNotBuilt => ErrorKind::Failed,
+            Self::ApproachHitBoundary
+            | Self::ApproachNotCertified { .. }
+            | Self::ApproachStepNotFound { .. }
+            | Self::BoundaryDropNotOneOrTwo { .. }
+            | Self::BoundaryFixRefused
+            | Self::CurveCacheNotBuilt
+            | Self::Failed(_)
+            | Self::Inconsistent(_)
+            | Self::IntervalCountsDiffer { .. }
+            | Self::IntervalEndMisplaced
+            | Self::IntervalNotDegenerate
+            | Self::LawParameterNotInverted { .. }
+            | Self::NoDeltaStep { .. }
+            | Self::NoFoot
+            | Self::NoIntersection
+            | Self::NoKnots
+            | Self::NotClassifiedWithinSamples { .. }
+            | Self::NotOnSplitEdges { .. }
+            | Self::NotOneFoot { .. }
+            | Self::OnlyInterval
+            | Self::PointClassNotInserted
+            | Self::RepairDidNotSettle { .. }
+            | Self::SeamTouchOffSeam
+            | Self::SphereTrimNotCertified { .. }
+            | Self::SqueezeStalled
+            | Self::StepTangentTooShort
+            | Self::Tangent
+            | Self::ThroughPointNotEvaluated
+            | Self::TouchesUnpaired { .. }
+            | Self::UvPolygonNotInDomain => ErrorKind::Failed,
             Self::DegenerateDomain
             | Self::DegenerateTangent
             | Self::NoSurfaceNormal
             | Self::PointAtEye
             | Self::TangentAlongNormal { .. } => ErrorKind::Degenerate,
-            Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
+            Self::Missing(_)
+            | Self::NoEndSector
+            | Self::NoSectorEdgeuse
+            | Self::SurfaceCacheNotBuilt => ErrorKind::Missing,
+            Self::OutsideDomain(_)
+            | Self::ParameterOffClassifiedCurve { .. }
+            | Self::PointOutsideDomain { .. }
+            | Self::SeamJumpNotSnapped => ErrorKind::OutsideDomain,
             Self::PointsWhereAPlaneCrosses { .. } | Self::MoveNotProved { .. } => {
                 ErrorKind::NotWithinTolerance
             }
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -908,6 +943,46 @@ impl crate::SolidError {
 pub(super) mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn intersect_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (IntersectFailure::ApproachHitBoundary, ErrorKind::Failed),
+            (IntersectFailure::BoundaryFixRefused, ErrorKind::Failed),
+            (IntersectFailure::Failed("x"), ErrorKind::Failed),
+            (IntersectFailure::Inconsistent("x"), ErrorKind::Failed),
+            (IntersectFailure::IntervalEndMisplaced, ErrorKind::Failed),
+            (IntersectFailure::IntervalNotDegenerate, ErrorKind::Failed),
+            (IntersectFailure::Missing("x"), ErrorKind::Missing),
+            (IntersectFailure::NoEndSector, ErrorKind::Missing),
+            (IntersectFailure::NoFoot, ErrorKind::Failed),
+            (IntersectFailure::NoIntersection, ErrorKind::Failed),
+            (IntersectFailure::NoKnots, ErrorKind::Failed),
+            (IntersectFailure::NoSectorEdgeuse, ErrorKind::Missing),
+            (IntersectFailure::OnlyInterval, ErrorKind::Failed),
+            (
+                IntersectFailure::OutsideDomain("x"),
+                ErrorKind::OutsideDomain,
+            ),
+            (IntersectFailure::PointClassNotInserted, ErrorKind::Failed),
+            (
+                IntersectFailure::SeamJumpNotSnapped,
+                ErrorKind::OutsideDomain,
+            ),
+            (IntersectFailure::SeamTouchOffSeam, ErrorKind::Failed),
+            (IntersectFailure::SqueezeStalled, ErrorKind::Failed),
+            (IntersectFailure::StepTangentTooShort, ErrorKind::Failed),
+            (IntersectFailure::SurfaceCacheNotBuilt, ErrorKind::Missing),
+            (IntersectFailure::Tangent, ErrorKind::Failed),
+            (
+                IntersectFailure::ThroughPointNotEvaluated,
+                ErrorKind::Failed,
+            ),
+            (IntersectFailure::UvPolygonNotInDomain, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn intersect_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

@@ -447,6 +447,7 @@ impl PrimitiveFailure {
             | Self::NoRegion
             | Self::OffsetMapIndexOutOfRange { .. }
             | Self::OffsetMapMissing
+            | Self::PlaneCannotCover
             | Self::ProfileFrameDegenerate
             | Self::ProfileMakesSeveralFaces { .. }
             | Self::ProfileNotOneComposite { .. }
@@ -459,22 +460,33 @@ impl PrimitiveFailure {
             | Self::TooFewProfiles { .. }
             | Self::TreeLeavesMoreBreps { .. } => ErrorKind::InvalidInput,
             Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::ClosestPointNotFound
+            Self::AxisInsideFace
+            | Self::CircleNotMade
+            | Self::ClosestPointNotFound
+            | Self::ConeSurfaceNotMade
+            | Self::CylinderDomainNotSet
+            | Self::Failed(_)
+            | Self::HelixNotEvaluated
             | Self::MergeGaveNoBrep
             | Self::MergeOperandMissing { .. }
             | Self::OffsetFacesMissing
             | Self::OffsetMakesNoCurves
+            | Self::PolygonSideNotMade
             | Self::ProfileMakesNoWire
             | Self::SeamLeavesSpan { .. }
             | Self::SeamWeightNotPositive { .. }
+            | Self::SheetHasNoFace
             | Self::SphereEdgeNotDropped { .. }
             | Self::SweepEnclosesNoMaterial
+            | Self::SweptFaceNotMade
+            | Self::SweptSurfaceNotMade
             | Self::TreeLeftNoBrep => ErrorKind::Failed,
+            Self::HelixDeviates { .. } => ErrorKind::NotWithinTolerance,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::OffsetMakesNoSurface
             | Self::PlanarDifferenceEmpty
             | Self::RuledSidesTooShort { .. } => ErrorKind::Degenerate,
             Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -654,6 +666,26 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn primitive_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (PrimitiveFailure::AxisInsideFace, ErrorKind::Failed),
+            (PrimitiveFailure::CircleNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::ConeSurfaceNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::CylinderDomainNotSet, ErrorKind::Failed),
+            (PrimitiveFailure::Failed("x"), ErrorKind::Failed),
+            (PrimitiveFailure::HelixNotEvaluated, ErrorKind::Failed),
+            (PrimitiveFailure::Missing("x"), ErrorKind::Missing),
+            (PrimitiveFailure::PlaneCannotCover, ErrorKind::InvalidInput),
+            (PrimitiveFailure::PolygonSideNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::SheetHasNoFace, ErrorKind::Failed),
+            (PrimitiveFailure::SweptFaceNotMade, ErrorKind::Failed),
+            (PrimitiveFailure::SweptSurfaceNotMade, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn primitive_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

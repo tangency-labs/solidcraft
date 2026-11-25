@@ -136,7 +136,10 @@ impl MassFailure {
             | Self::FaceuseWithoutRegion
             | Self::TrimNotFinite
             | Self::VertexuseWithoutVertex => ErrorKind::InvalidInput,
-            _ => ErrorKind::of_status(self.comparison_status()),
+            Self::Failed(_) | Self::Integrand | Self::SkippedSpan | Self::StepControl => {
+                ErrorKind::Failed
+            }
+            Self::Missing(_) => ErrorKind::Missing,
         }
     }
 }
@@ -196,6 +199,19 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn mass_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (MassFailure::Failed("x"), ErrorKind::Failed),
+            (MassFailure::Integrand, ErrorKind::Failed),
+            (MassFailure::Missing("x"), ErrorKind::Missing),
+            (MassFailure::SkippedSpan, ErrorKind::Failed),
+            (MassFailure::StepControl, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn mass_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

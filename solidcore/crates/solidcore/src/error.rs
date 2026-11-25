@@ -1882,9 +1882,10 @@ impl SolidError {
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
             Self::FilletRefused { .. } => ErrorKind::FilletTooLarge,
-            Self::BlendRefused { code, .. } | Self::RoundRefused { code, .. } => {
-                ErrorKind::of_status(*code)
-            }
+            // a blend refusal's status varies with the site for one refusal (#21871)
+            Self::BlendRefused { code, .. } => ErrorKind::of_status(*code),
+            // built only by `round_room::refused`, with `SM_ERR`
+            Self::RoundRefused { .. } => ErrorKind::Failed,
             Self::Failed(f) => f.kind(),
             Self::Unported { .. } => ErrorKind::Unported,
         }
@@ -2186,6 +2187,24 @@ mod tests {
         assert_eq!(e.is_status_answer(), twin.is_status_answer(), "{e:?}");
         assert!(!e.is_port_failure(), "{e:?}");
         assert_eq!(e.to_string(), text);
+    }
+
+    /// Each `(cause, kind)`: the cause's error is of class `kind` whatever status it is
+    /// recorded with, so its class is a function of the typed cause alone (#21871), and the
+    /// status it is recorded with is kept for the goldens.
+    pub(in crate::error) fn assert_kind_of_cause<R>(cases: &[(R, ErrorKind)])
+    where
+        R: Into<Reason> + Clone + core::fmt::Debug,
+    {
+        for (cause, kind) in cases {
+            for status in [SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER] {
+                let e = Failure::new("op", cause.clone())
+                    .with_status(status)
+                    .into_error();
+                assert_eq!(e.kind(), *kind, "{cause:?} recorded with {status}");
+                assert_eq!(e.sm_status(), Some(status), "{cause:?}");
+            }
+        }
     }
 
     #[test]
@@ -3321,6 +3340,32 @@ mod tests {
             "mass/integrator.rs",
         ] {
             assert!(!library(rel).contains("nl_ser("), "nl_ser in {rel}");
+        }
+    }
+
+    /// A round's refusal is of class `Failed` whatever status it carries (it is built with
+    /// `SM_ERR` only), and the status is kept; a blend refusal still takes its status's
+    /// class, which varies with the site for one refusal (#21871).
+    #[test]
+    fn a_round_refusal_has_its_class_whatever_its_status() {
+        use crate::blend::round_room::RoundRefusal;
+
+        let refusal = RoundRefusal::LawRadiusUnusable {
+            at: 2.0,
+            radius: f64::INFINITY,
+        };
+        assert_eq!(
+            crate::blend::round_room::refused("op", refusal.clone()).kind(),
+            ErrorKind::Failed
+        );
+        for code in [SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER] {
+            let e = SolidError::RoundRefused {
+                operation: "op",
+                code,
+                refusal: refusal.clone(),
+            };
+            assert_eq!(e.kind(), ErrorKind::Failed, "{code}");
+            assert_eq!(e.sm_status(), Some(code));
         }
     }
 

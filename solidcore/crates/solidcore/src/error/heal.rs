@@ -173,9 +173,13 @@ impl HealFailure {
             }
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::DegenerateEdgeInterval => ErrorKind::Degenerate,
-            Self::EdgeNotSplit | Self::EdgesNotGlued => ErrorKind::Failed,
+            Self::EdgeNotSplit
+            | Self::EdgesNotGlued
+            | Self::Failed(_)
+            | Self::Inconsistent(_)
+            | Self::NotYetHealable => ErrorKind::Failed,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::VerticesApart { .. } | Self::EdgesApart { .. } => ErrorKind::NotWithinTolerance,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -263,6 +267,18 @@ impl crate::SolidError {
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The causes that took their class from their status have it whatever status they are
+    /// recorded with (#21871).
+    #[test]
+    fn heal_causes_have_their_class_whatever_their_status() {
+        crate::error::tests::assert_kind_of_cause(&[
+            (HealFailure::Failed("x"), ErrorKind::Failed),
+            (HealFailure::Inconsistent("x"), ErrorKind::Failed),
+            (HealFailure::Missing("x"), ErrorKind::Missing),
+            (HealFailure::NotYetHealable, ErrorKind::Failed),
+        ]);
+    }
 
     #[test]
     fn heal_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {

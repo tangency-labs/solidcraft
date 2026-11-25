@@ -513,7 +513,7 @@ impl BSplineFailure {
     /// [`ErrorKind::InvalidInput`] for a check of the caller's arguments or curve,
     /// [`ErrorKind::Unsupported`] for a curve the method does not take,
     /// [`ErrorKind::NotWithinTolerance`] for a result outside the tolerance asked for; the
-    /// kind of its status otherwise.
+    /// kind its status had otherwise, named per variant.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -552,7 +552,8 @@ impl BSplineFailure {
             | Self::TooFewBreakpoints { .. }
             | Self::TooManyVectors { .. }
             | Self::TrimDomainOutside
-            | Self::WeightOnNonRational => ErrorKind::InvalidInput,
+            | Self::WeightOnNonRational
+            | Self::ZeroAxis => ErrorKind::InvalidInput,
             Self::ArcLoopDegenerate { .. }
             | Self::ArcSweepDegenerate { .. }
             | Self::GeneratorOnAxis
@@ -564,11 +565,20 @@ impl BSplineFailure {
             | Self::NoFootWithinTolerance { .. }
             | Self::PointOffSurface { .. }
             | Self::SubdivisionCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::DegreeOutside { .. }
+            | Self::EndsApart { .. }
+            | Self::EndsCoincide
+            | Self::ExpansionChangesCounts
+            | Self::Failed(_)
+            | Self::JoinNotBuilt
+            | Self::NoNurbsForm
+            | Self::ParameterOutside { .. }
+            | Self::RoutineFailed => ErrorKind::Failed,
+            Self::Missing(_) => ErrorKind::Missing,
             Self::NotRational | Self::NotIntersectionCurve | Self::ArcKindUnsupported => {
                 ErrorKind::Unsupported
             }
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
-            _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
 }
@@ -989,6 +999,24 @@ pub use super::upstream_status;
 mod tests {
     use super::*;
     use crate::SolidError;
+
+    /// The B-spline causes that took their class from their status have it whatever status
+    /// they are recorded with (#21871).
+    #[test]
+    fn b_spline_causes_have_their_class_whatever_their_status() {
+        let cases = [
+            (BSplineFailure::EndsCoincide, ErrorKind::Failed),
+            (BSplineFailure::ExpansionChangesCounts, ErrorKind::Failed),
+            (BSplineFailure::Failed("x"), ErrorKind::Failed),
+            (BSplineFailure::JoinNotBuilt, ErrorKind::Failed),
+            (BSplineFailure::Missing("x"), ErrorKind::Missing),
+            (BSplineFailure::NoNurbsForm, ErrorKind::Failed),
+            (BSplineFailure::RoutineFailed, ErrorKind::Failed),
+            (BSplineFailure::ZeroAxis, ErrorKind::InvalidInput),
+        ]
+        .map(|(b, kind)| (NurbsFailure::BSpline(b), kind));
+        crate::error::tests::assert_kind_of_cause(&cases);
+    }
 
     #[test]
     fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
