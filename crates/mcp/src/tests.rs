@@ -905,7 +905,9 @@ fn measure_region_filters_bodies_and_totals_in_tools_and_batches() {
     for args in [json!({"within":null}), json!({"within":within,"mode":null})] {
         let direct = raw_tool(&mut s, "measure", args.clone());
         assert_eq!(direct["result"]["isError"], true, "{direct}");
-        let batch = tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        let reply = raw_tool(&mut s, "batch", json!({"commands":[{"command":"measure","params":args}]}));
+        assert_eq!(reply["result"]["isError"], true, "{reply}");
+        let batch: Value = serde_json::from_str(reply["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(batch["completed"], 0, "{batch}");
         assert!(batch["failed"].is_object(), "{batch}");
     }
