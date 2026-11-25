@@ -75,7 +75,7 @@
 //!   [`SolidError::InvalidInput`] (a null dereference upstream) propagate.
 //! - **3D-distinct end touches (solidcore-native, #18342, #18647).** `GetLoopTouches` types the
 //!   first and last touch as on the curve's start or end by comparing the curve parameter
-//!   with the face's zone tolerance mapped to UV. A touch strictly inside the interval
+//!   with the face's zone tolerance mapped to UV. A touch on the interval
 //!   whose point is at least the face's intersection tolerance and more than the curve's
 //!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
 //!   such points off an interval end (part 3). The same rule applies per end to a touch
@@ -795,8 +795,8 @@ fn ccw_angle(v: Vec2) -> Result<f64> {
 }
 
 /// solidcore-native: `ty` (a touch's `ClassifyPoint` against the classification interval
-/// with a UV tolerance) with each end it names dropped when `param` is strictly inside
-/// `ivl` and its curve point is 3D-distinct from that end: at least `tol_3d` (the face's
+/// with a UV tolerance) with each end it names dropped when `param` lies on `ivl` (its ends
+/// included) and its curve point is 3D-distinct from that end: at least `tol_3d` (the face's
 /// intersection tolerance) and more than the curve's scaled zero away. `Start` or `End`
 /// distinct from its end becomes `Inside`; `Both` becomes `Inside` when distinct from both
 /// ends, and the type of the one end it is not distinct from otherwise. Upstream compares
@@ -821,7 +821,9 @@ fn distinct_end_type(
         ExtentPointType::Both => (true, true),
         _ => return Ok(ty),
     };
-    if !(param > ivl.min() && param < ivl.max()) {
+    // A touch on an end parameter is 0 from that end, so it keeps that end; for `Both` the
+    // other end is still measured.
+    if !(param >= ivl.min() && param <= ivl.max()) {
         return Ok(ty);
     }
     // Whether each named end is still an end the touch is on: not 3D-distinct from it.
@@ -2502,10 +2504,10 @@ mod tests {
     /// cylinder's ±1234567 axial sentinel range), `distinct_end_type` keeps the `Start` or
     /// `End` type of a genuine end touch (1e-9 in 3D, below the face's intersection
     /// tolerance, or at the end parameter itself) and turns only a touch 3.5e-3 away in 3D
-    /// into `Inside`; other types pass through.
+    /// into `Inside`; `Inside` passes through.
     #[test]
     fn distinct_end_type_keeps_genuine_end_touches() {
-        use ExtentPointType::{Both, End, Inside, Start};
+        use ExtentPointType::{End, Inside, Start};
         let k = Kernel::default();
         let curve = Curve::from(Line::from_points(
             Point3::new(0.0, 0.0, 1_234_567.0),
@@ -2556,9 +2558,11 @@ mod tests {
         assert_eq!(ty(1.0 - 1e-9 / len, 1e-7), End);
         // a tolerance longer than the line: on both ends, still degenerate
         assert_eq!(ty(0.5, 3e6), Both);
-        // on an end parameter itself, or outside the interval: unchanged
-        assert_eq!(ty(0.0, 1e-7), Both);
-        assert_eq!(ty(1.0, 1e-7), Both);
+        // on an end parameter itself: 0 from that end, 2.47e6 from the other
+        assert_eq!(ty(0.0, 1e-7), Start);
+        assert_eq!(ty(1.0, 1e-7), End);
+        // outside the interval: unchanged
         assert_eq!(ty(-0.5, 1e-7), Both);
+        assert_eq!(ty(1.5, 1e-7), Both);
     }
 }
