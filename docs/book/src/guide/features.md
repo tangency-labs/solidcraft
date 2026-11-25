@@ -65,6 +65,13 @@ what they measure: an edge's length (Ø and R for a round one), a face's area an
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
 (I) does more.
 
+**Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
+bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round
+number (1, 2 or 5 times a power of ten) in the design's units, and it changes as you zoom. In an
+orthographic view the scale is the same everywhere. In a perspective view, nearer things look
+larger, so the bar gives the scale at the centre of the view, and its label says so. The control
+channel and assistants turn it on with the `view.scale_bar` command, `{"enabled": true}`.
+
 Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
 operation from what their material does, until you pick one: **Join** when it makes one body with
 a body it touches (a block against a wall, a ring round a hole, a boss meeting only part of a
@@ -82,6 +89,16 @@ A Join you pick whose material touches none of its target bodies still joins it,
 one as a separate piece, and the feature's warning says so: "`Body1` is now in 2 separate
 pieces". Combine joins the bodies it is given without that warning. Changing the default does not
 alter operations already saved in a design.
+
+**A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
+an origin or construction plane while **Profiles** is still empty) opens a sketch while the
+dialog waits: pick its plane or planar face and draw. **Finish Sketch** (or Extrude's own button
+or shortcut) comes back to the dialog with the dialog's other settings as they were. A sketch
+with one profile has it picked; with more, none is picked and you pick the ones to extrude.
+**Cancel Sketch** comes back without it. **OK** makes the
+sketch and the extrude one undo step; **Cancel** leaves the design and the undo history as they
+were. The sketch is an ordinary timeline entry of its own, and `solid.extrude` is unchanged for
+scripts.
 
 **Extrude to a picked target** (Preferences › Tools, on by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
@@ -237,6 +254,12 @@ screw: a socket head (ISO 4762) or a button head (ISO 7380-1) of the bolt's size
 **Counterbore Ø** and **Counterbore depth** with the head's diameter and height plus 0.5 mm each
 side and below; change either to use your own. Scripts use `head: "ISO 4762"` with `clearance`
 on `solid.hole`.
+
+With **Hole Type** Countersink and Clearance, **Screw head** offers a countersunk socket head
+(ISO 10642). It fills **Countersink Ø** with the head's diameter plus 0.5 mm each side and
+**Countersink angle** with 90°, so the head sits 0.5 mm below the face; change either to use your
+own. Scripts use `head: "ISO 10642"` with `clearance` on `solid.hole`: the hole type then
+defaults to countersink.
 
 The **Thread** feature's **Hand** is **Right** (the default), **Left**, or **Both** (a right- and
 a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "left"` (or `"right"`,

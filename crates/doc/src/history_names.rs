@@ -125,7 +125,7 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
-    let centres = || crate::naming::face_centres(b);
+    let centres = || crate::naming::face_centres(b).unwrap_or_default();
     Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
 }
 
@@ -170,7 +170,7 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
-            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { body: None, .. } => {
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
             }
             // Grown from a body before the feature: named after its faces.
@@ -185,7 +185,7 @@ impl<'a> OperandNames<'a> {
                     .get_or_init(|| {
                         Arc::new(derive(body, o, &stage.lineage).unwrap_or_else(|| {
                             let names = crate::naming::geometric_names(body, o, body.body.face_count());
-                            let centres = || crate::naming::face_centres(body);
+                            let centres = || crate::naming::face_centres(body).unwrap_or_default();
                             Names::unverified(names, &crate::naming::mesh_adjacency(body), by_place(&o.feature, &centres))
                         }))
                     })
@@ -231,15 +231,8 @@ impl<'a> OperandNames<'a> {
             Operand::Inner(_) => {
                 given(&self.names).map(|n| Named { name: format!("F{fid}:inner({})", n.name), verified: n.verified, ..Named::default() })
             }
-            Operand::Made(roles) => {
-                let (first, rest) = roles.get(face)?.split_first()?;
-                Some(Named {
-                    name: format!("F{fid}:{first}"),
-                    synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
-                    verified: true,
-                    ..Named::default()
-                })
-            }
+            Operand::Made(roles) => made_face(roles, face, fid),
+            Operand::Rebuilt { roles, feature } => made_face(roles, face, *feature),
             Operand::CopiedTool { roles, feature, instance } => {
                 let named = |role: &String| format!("F{feature}:{role}@F{fid}.{instance}");
                 let (first, rest) = roles.get(face)?.split_first()?;
@@ -290,9 +283,25 @@ impl<'a> OperandNames<'a> {
                 };
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { .. } => None,
+            Operand::Copy { .. }
+            | Operand::Inner(_)
+            | Operand::Made(_)
+            | Operand::CopiedTool { .. }
+            | Operand::Rebuilt { .. }
+            | Operand::Grown { .. } => None,
         }
     }
+}
+
+/// The name of face `face` of a body feature `fid` built, from its roles.
+fn made_face(roles: &[Vec<String>], face: usize, fid: u64) -> Option<Named> {
+    let (first, rest) = roles.get(face)?.split_first()?;
+    Some(Named {
+        name: format!("F{fid}:{first}"),
+        synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
+        verified: true,
+        ..Named::default()
+    })
 }
 
 /// A face's name from what it came from; `None` when an origin cannot be named exactly.

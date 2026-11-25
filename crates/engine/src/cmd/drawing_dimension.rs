@@ -10,12 +10,14 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace, check_chain_length,
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status, TextPlace,
+    check_chain_length, check_set_targets,
 };
+use solidcraft_doc::drawing::line_maths::LineCoords;
+use solidcraft_doc::drawing::measure::{LinearDirection, Reading};
+use solidcraft_doc::drawing::{ByNumber, Drawing, kept_by_number};
 use solidcraft_doc::ids;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
 
 use solidcraft_geom::paper::Scene;
@@ -70,16 +72,14 @@ pub static COMMANDS: &[CommandSpec] = &[
              direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension}, \
              {faces: {a, b: flat, parallel faces the view sees edge-on, direction?: as a linear one's, aligned being square to them}} or \
              {chain: {points: [3 to 64 corners, in order along one line], direction?: as a linear one's, aligned being first to \
-             last}}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
+             last}} or {baseline: {origin: a corner, targets: [2 to 64 corners, in any order], direction?: as a linear one's, aligned \
+             being from the origin to the last target, the others running toward the target farthest from it}: a dimension from the origin to each target, stacked 7 mm apart on paper, the \
+             nearest first; a target before the origin along the line, or in line with it, can't be measured} or {ordinate: as a \
+             baseline's, with 1 to 64 targets: each target's distance at the end of a leader from it, the origin's as 0, numbers that \
+             would overlap moved apart; a target before the origin can't be measured}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
              corner a point, {point}, {edges: [2 to 16 edges]} or {centre: an edge that is a circle or an arc}, and a face a point on \
              it, {point} or {body, index}, each with path?: the \
-             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10;              a linear, length or chain one's on the side away from what it measures); \
-             text?: centred (default) or {at: [x, y]} from the view's centre; text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: \
-             [x, y], a point its line, arc or leader passes through, in paper mm from the sheet's lower-left corner, as edit's drag \
-             (instead of offset_mm and text); decimals?: 0..6 (default 2); override_text?: its text, in which \
-             {value} is its measured number as it reads alone (Ø12.00), so `2× {value} THRU` follows the model, and {{ and }} are a brace each (not a \
-             chain's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \
-             drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
+             occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10; \n             a linear, length, chain or set one's on the side away from what it measures); \n             text?: centred (default) or {at: [x, y]} from the view's centre; text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: \n             [x, y], a point its line, arc or leader passes through, in paper mm from the sheet's lower-left corner, as edit's drag \n             (instead of offset_mm and text; not a set's yet); decimals?: 0..6 (default 2); override_text?: its text, in which \n             {value} is its measured number as it reads alone (Ø12.00), so `2× {value} THRU` follows the model, and {{ and }} are a brace each (not a \n             chain's or a set's); dry_run?: true to answer what it would add, adding nothing (no id is taken, no undo step) → what \n             drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. This is the way to dimension a view, never a free line or text note; drawing.dimension.from_model brings the model's own dimensions in. One undo step; no model is evaluated.",
         ),
     CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
@@ -89,13 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
         .params(
-            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: its text ({value} is its measured number as it reads alone, {{ and }} \
-             a brace each; without {value} it is shown instead of the number), or null to show the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
-             radial dimension's, direction?: a chain's or a silhouettes one's; a drag, instead of offset_mm and text: \
-             text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, arc or leader passes \
-             through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
-             {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
-             when nothing changes; no model is evaluated.",
+            "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: its text ({value} is its measured number as it reads alone, {{ and }} \n             a brace each; without {value} it is shown instead of the number), or null to show the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \n             radial dimension's, direction?: a chain's, a set's or a silhouettes one's, targets?: a set's {remove?: [numbers from 0, \n             each once], add?: [corners]}, taken out first, then added after the rest, the set kept as one dimension; a drag (not a \n             set's yet), instead of offset_mm and text: text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], \n             a point its line, arc or leader passes through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \n             {dimension, changed: [fields]}. What it measures stays, a set's targets aside: to measure something else, add a new \n             one; a set its view can't measure after the change, or a target on a part the view doesn't draw, is refused. One undo \n             step, none when nothing changes; no model is evaluated.",
         ),
     CommandSpec::new(REPAIR, "Repair Drawing Dimension", crate::checked!("drawing.dimension.repair", repair)).begins_edit()
         .icon("dimension")
@@ -105,8 +99,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id, one that reads lost or ambiguous; slot: which of its references, a or b (a linear dimension's corners, \
-             an angle's edges, the faces of silhouettes or of faces), edge (a length's or a radial one's), face (a cylinder's, a sphere's or a cone's) or a \
-             chain's point by its number from 0, one that no longer finds the one thing it names; pick: what that reference names \
+             an angle's edges, the faces of silhouettes or of faces), edge (a length's or a radial one's), face (a cylinder's, a sphere's or a cone's), origin (a \
+             set's) or a chain's point or a set's target by its number from 0, one that no longer finds the one thing it names; pick: what that reference names \
              now, {edge}, {corner} or {face}, each as add takes it but without path (it keeps its own); a candidate inspect lists \
              of the slot's kind passes back as it stands → what drawing.dimension.inspect answers for it. Saved by name; its id, \
              view, place and settings stay, and one the view can't measure is refused. One undo step; no model is evaluated.",
@@ -120,10 +114,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, failed, lost or unmeasurable, \
-             why?, value? (model mm, or degrees for an angle; a chain's overall), foreshortened?, text? (none for a chain; its text with {value} filled in), \
-             measured_text?: its number as it reads with no text of its own, \
-             members?: a chain's [{value, text}] from its first point, last_good? (the value it last read, kept when the design \
-             is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
+             why?, value? (model mm, or degrees for an angle; a chain's overall, a set's farthest target), foreshortened?, text? \n             (none for a chain or a set; its text with {value} filled in), measured_text?: its number as it reads with no text of its own, \n             members?: a chain's [{value, text}] from its first point, or a set's for each target, last_good? (the value it last read, kept when the design \n             is saved, when it has none now), exact, candidates?: [{edge: {body, index}}, {corner: [x, y, z]} or {face: {body, index}}]: \
              what an ambiguous name finds, or a lost one's leads; one of a slot's kind passes back to drawing.dimension.repair as it \
              stands, warnings?: its view edited since to leave out a part it measures, layout?: where it sits on its view's sheet \
              now, in paper mm from the sheet's lower-left corner, its lines before an arrowhead stops one: {extension_lines, \
@@ -188,6 +179,17 @@ fn added(s: &mut Session, request: AddParams) -> Result<Value> {
             check_chain_length(points.len()).map_err(|why| bad(ADD, why.to_string()))?;
             let points = points.iter().map(corner).collect::<Result<_>>()?;
             DimensionKind::Chain { points, direction: direction.unwrap_or(LinearDirection::Aligned) }
+        }
+        KindParam::Baseline { origin, targets, direction } => {
+            // Counted before any target is looked up.
+            check_set_targets(SetKind::Baseline, targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
+            let targets = targets.iter().map(corner).collect::<Result<_>>()?;
+            DimensionKind::Baseline { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
+        }
+        KindParam::Ordinate { origin, targets, direction } => {
+            check_set_targets(SetKind::Ordinate, targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
+            let targets = targets.iter().map(corner).collect::<Result<_>>()?;
+            DimensionKind::Ordinate { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
     };
     let drag = match (request.text_to_mm, request.line_through_mm) {
@@ -297,8 +299,11 @@ pub(crate) fn placed(
         *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
     }
     if new.offset_mm.is_none()
-        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
-            &dimension.kind
+        && let DimensionKind::Linear { direction, .. }
+        | DimensionKind::Length { direction, .. }
+        | DimensionKind::Chain { direction, .. }
+        | DimensionKind::Baseline { direction, .. }
+        | DimensionKind::Ordinate { direction, .. } = &dimension.kind
         && let Some(r) = read.first()
     {
         dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, record, new.view, *direction, &r.points);
@@ -309,7 +314,7 @@ pub(crate) fn placed(
 fn repair(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RepairParams = crate::schema::read(REPAIR, p)?;
     let id = request.dimension.0;
-    let unknown = || bad(REPAIR, format!("the drawing has no dimension {}", ids::encode(id)));
+    let unknown = || no_dimension(REPAIR, id);
     let d = s.drawing(REPAIR)?;
     let view = d.dimension(id).ok_or_else(unknown)?.view;
     let read = crate::drawing_view::ViewSessions::new(s)
@@ -390,7 +395,8 @@ pub(super) fn repair_reference(s: &mut Session, cmd: &str, now: Status, put: imp
 }
 
 /// The reference of `kind` that `slot` names: a linear dimension's corners `a` and `b`, a length's
-/// or a radial one's `edge`, an angle's edges `a` and `b`, a chain's points by number, a cylinder's,
+/// or a radial one's `edge`, an angle's edges `a` and `b`, a chain's points by number, a set's `origin`
+/// and its targets by number, a cylinder's,
 /// a sphere's or a cone's `face`, and the faces `a` and `b` of silhouettes (each keeps its side) or of faces.
 fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
     let fits = slots(kind);
@@ -400,6 +406,11 @@ fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
         DimensionKind::Angle { a, b, .. } => a_or_b(slot, a, b).map(Slot::Edge),
         DimensionKind::Chain { points, .. } => match slot {
             SlotParam::Point(k) => points.get_mut(k).map(Slot::Point),
+            _ => None,
+        },
+        DimensionKind::Baseline { origin, targets, .. } | DimensionKind::Ordinate { origin, targets, .. } => match slot {
+            SlotParam::Origin => Some(Slot::Point(origin)),
+            SlotParam::Point(k) => targets.get_mut(k).map(Slot::Point),
             _ => None,
         },
         DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => {
@@ -427,6 +438,9 @@ fn slots(kind: &DimensionKind) -> String {
         DimensionKind::Length { .. } | DimensionKind::Radial { .. } => "`edge`".into(),
         DimensionKind::Angle { .. } => "`a` and `b`, its edges".into(),
         DimensionKind::Chain { points, .. } => format!("its points, 0 to {}", points.len().saturating_sub(1)),
+        DimensionKind::Baseline { targets, .. } | DimensionKind::Ordinate { targets, .. } => {
+            format!("`origin`, and its targets, 0 to {}", targets.len().saturating_sub(1))
+        }
         DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } | DimensionKind::Cone { .. } => "`face`".into(),
         DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => "`a` and `b`, its faces".into(),
     }
@@ -436,16 +450,50 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.dimension.0;
     let set = &request.set;
-    // A drag places the dimension as the rest of the edit leaves it.
-    let placed = match drag_asked(set)? {
-        Some(drag) => {
-            let mut staged = Drawing::clone(s.drawing(EDIT)?);
-            change(&mut staged, id, set, None)?;
-            Some(drag_on_sheet(s, &staged, id, drag, EDIT)?)
-        }
+    let drag = drag_asked(set)?;
+    let targets = match &set.targets {
         None => None,
+        Some(targets) => {
+            // A set's targets change what it measures. Their numbers and their count are checked
+            // first, so a refused edit looks nothing up; then the added ones are named as add names
+            // them.
+            let record = s.drawing(EDIT)?;
+            let kind = &record.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?.kind;
+            let Some(kind_of_set) = kind.set() else { return Err(bad(EDIT, "`targets` is a set's")) };
+            let kept = kept_by_number(targets_of(kind), &targets.remove, targets.add.len(), |n| check_set_targets(kind_of_set, n)).map_err(
+                |why| match why {
+                    ByNumber::Past { last } => bad(EDIT, format!("`targets.remove` numbers this set's targets, 0 to {}", last.unwrap_or_default())),
+                    ByNumber::Twice => bad(EDIT, "`targets.remove` names each target once"),
+                    ByNumber::Count(why) => bad(EDIT, why.to_string()),
+                },
+            )?;
+            let name = |c: &CornerParam| s.doc.corner_reference(&s.model, &c.pick, &c.path).map_err(|why| bad(EDIT, why.to_string()));
+            let added = targets.add.iter().map(name).collect::<Result<Vec<_>>>()?;
+            Some(kept.into_iter().chain(added).collect::<Vec<_>>())
+        }
     };
-    let changed = s.edit_drawing(EDIT, |d| change(d, id, set, placed))?;
+    // On a staged copy first: a set's new targets are read before they are kept, as add reads a new
+    // dimension, where its view draws its parts (#13048); a drag places the dimension as the rest of
+    // the edit leaves it.
+    let mut placed = None;
+    if targets.is_some() || drag.is_some() {
+        let mut staged = Drawing::clone(s.drawing(EDIT)?);
+        change(&mut staged, id, set, targets.clone(), None)?;
+        if targets.is_some() {
+            let dimension = staged.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?;
+            check_drawn(&staged, dimension.view, dimension.kind.paths(), EDIT)?;
+            let read = crate::drawing_view::ViewSessions::new(s)
+                .read_on(&staged, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
+                .map_err(|e| bad(EDIT, e.to_string()))?;
+            if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
+                return Err(bad(EDIT, why.clone()));
+            }
+        }
+        if let Some(drag) = drag {
+            placed = Some(drag_on_sheet(s, &staged, id, drag, EDIT)?);
+        }
+    }
+    let changed = s.edit_drawing(EDIT, |d| change(d, id, set, targets, placed))?;
     let reply = EditResult { dimension: ids::encode(id), changed, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
@@ -469,17 +517,18 @@ fn drag_asked(set: &DimensionSet) -> Result<Option<Drag>> {
 /// inspect's layout and the sheet are. Refused in their words when its view isn't drawn or it has no
 /// place there, and when the drag can't place it.
 fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Result<(f64, TextPlace)> {
-    let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    let dimension = d.dimension(id).ok_or_else(|| no_dimension(cmd, id))?;
     let read = crate::drawing_view::ViewSessions::new(s)
         .read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(cmd, e.to_string()))?;
     let r = read.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, cmd).map_err(|why| bad(cmd, why))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, cmd).map_err(|why| bad(cmd, why))?;
     let lettering = PaperFonts::new(&d.font, &d.language, false);
     dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
             NotDragged::NoPlace => NO_PLACE,
             NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
+            NotDragged::Set => "not supported yet: dragging a baseline or ordinate set; set its `offset_mm`",
             NotDragged::BetweenEnds => "the line between silhouettes or faces runs beyond their ends: drag it past one of them",
             NotDragged::TextWaits => TEXT_WAITS,
         };
@@ -503,14 +552,14 @@ fn diameter_by_default(points: &[Vec3]) -> bool {
 /// plane, at the depth of what it measures, asked of each shown body's B-rep exactly (inside or on
 /// its boundary is material). With material on both sides or neither, away from the middle of the
 /// view's model box; on that middle (a centre line, a symmetric pair) the fixed rule is +1, above
-/// or to the left ([`crate::drawing_dimension_paper::line_direction`]).
+/// or to the left ([`LineCoords::forward`]).
 fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearDirection, points: &[Vec3]) -> f64 {
     let (Ok(resolved), Ok(shown)) = (drawing.resolve_view(view), crate::drawing_view::shown(s)) else { return 1.0 };
     let basis = resolved.basis;
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return 1.0 };
     let (a, b) = (basis.to_local(*first), basis.to_local(*last));
     // The plane's directions are paper's: a view's paper map only scales and shifts.
-    let Some(n) = crate::drawing_dimension_paper::line_direction(direction, b - a).map(Vec2::perp) else { return 1.0 };
+    let Some(n) = LineCoords::forward(direction, b - a).map(|coords| coords.normal) else { return 1.0 };
     let middle = (a + b) * 0.5;
     let beside = (basis.x * n.x + basis.y * n.y) * (LOOK_PAST_MM / resolved.scale.value.factor());
     let at = (*first + *last) * 0.5;
@@ -528,10 +577,17 @@ fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearD
     }
 }
 
-/// `set` made on dimension `id` of `d`, with a drag's offset and text place when `placed`: the fields it
-/// changes, by name.
-fn change(d: &mut Drawing, id: u64, set: &DimensionSet, placed: Option<(f64, TextPlace)>) -> Result<Vec<String>> {
-    let at = d.dimension_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
+/// `set` made on dimension `id` of `d`, `targets` being a set's whole new list of targets when it
+/// changes them (counted and named by `edit`, before this), with a drag's offset and text place when
+/// `placed`: the fields it changes, by name.
+fn change(
+    d: &mut Drawing,
+    id: u64,
+    set: &DimensionSet,
+    mut targets: Option<Vec<ModelPoint>>,
+    placed: Option<(f64, TextPlace)>,
+) -> Result<Vec<String>> {
+    let at = d.dimension_index(id).ok_or_else(|| no_dimension(EDIT, id))?;
     let Some(dimension) = d.dimensions.get_mut(at).map(Arc::make_mut) else { return Ok(Vec::new()) };
     let before = dimension.clone();
     if let Some(offset) = set.offset_mm {
@@ -580,6 +636,15 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, placed: Option<(f64, Tex
             }
             *direction = set.direction.unwrap_or(*direction);
         }
+        DimensionKind::Baseline { targets: now, direction, .. } | DimensionKind::Ordinate { targets: now, direction, .. } => {
+            if set.reading.is_some() || set.other_side.is_some() {
+                return Err(bad(EDIT, "a set has only `direction` and `targets`: it reads as the view shows it"));
+            }
+            *direction = set.direction.unwrap_or(*direction);
+            if let Some(new) = targets.take() {
+                *now = new;
+            }
+        }
         DimensionKind::Silhouettes { direction, .. } => {
             if set.reading.is_some() || set.other_side.is_some() {
                 return Err(bad(EDIT, "a dimension between silhouettes has only `direction`: it reads as the view shows them"));
@@ -619,10 +684,25 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         }
         DimensionKind::Angle { reading, other_side, .. } => (None, Some(*reading), *other_side, false),
         DimensionKind::Radial { diameter, .. } => (None, None, false, *diameter),
-        DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. } => {
-            (Some(*direction), None, false, false)
-        }
+        DimensionKind::Chain { direction, .. }
+        | DimensionKind::Baseline { direction, .. }
+        | DimensionKind::Ordinate { direction, .. }
+        | DimensionKind::Silhouettes { direction, .. }
+        | DimensionKind::Faces { direction, .. } => (Some(*direction), None, false, false),
         DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } | DimensionKind::Cone { .. } => (None, None, false, false),
+    }
+}
+
+/// `cmd`'s error for a dimension `id` the open drawing doesn't have.
+fn no_dimension(cmd: &str, id: u64) -> EngineError {
+    bad(cmd, format!("the drawing has no dimension {}", ids::encode(id)))
+}
+
+/// A set's targets; none for other kinds.
+fn targets_of(kind: &DimensionKind) -> &[ModelPoint] {
+    match kind {
+        DimensionKind::Baseline { targets, .. } | DimensionKind::Ordinate { targets, .. } => targets,
+        _ => &[],
     }
 }
 
@@ -638,6 +718,7 @@ fn changed_fields(a: &Dimension, b: &Dimension) -> Vec<String> {
         ("reading", x.1 != y.1),
         ("other_side", x.2 != y.2),
         ("diameter", x.3 != y.3),
+        ("targets", targets_of(&a.kind) != targets_of(&b.kind)),
     ];
     fields.into_iter().filter(|(_, changed)| *changed).map(|(name, _)| name.to_string()).collect()
 }
@@ -651,7 +732,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 /// good one ([`Session::dimension_values`]); with none this session, the file's is its last good one.
 fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?.clone();
-    let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    let dimension = d.dimension(id).ok_or_else(|| no_dimension(cmd, id))?;
     let resolved = crate::drawing_view::ViewSessions::new(s)
         .read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
         .map_err(|e| bad(cmd, e.to_string()))?;
@@ -733,7 +814,7 @@ fn alone_on_sheet(
 ) -> std::result::Result<(crate::drawing_dimension_paper::OnPaper, Vec2, Scene), Option<String>> {
     // The view draws from where the design places its parts, as the sheet does; a dimension reads the
     // same either way, as it reads the model, not the session's moves.
-    let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT).map_err(|why| Some(why.to_string()))?;
+    let on = crate::drawing_view::dimension_view_on_sheet(s, d, dimension, INSPECT).map_err(|why| Some(why.to_string()))?;
     let centre = on.centre;
     // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
     let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {

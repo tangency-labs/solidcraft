@@ -226,6 +226,10 @@ pub struct DrawingBorderProfile {
     /// Row letters skip I and O (they read as 1 and 0).
     pub skip_i_and_o: bool,
     pub label_sides: LabelSides,
+    /// Whether the zone letters and numbers and the sheet size are printed (see
+    /// [`SheetLayout::frame_labels`]). Off when not given, as a profile saved before had none.
+    #[serde(default)]
+    pub zone_labels: bool,
     /// How far outside the drawing border the grid reference border runs; the labels sit between
     /// the two.
     pub grid_border_mm: f64,
@@ -273,6 +277,10 @@ pub struct SheetLayout {
     pub rows: Vec<Field>,
     /// The sides labelled on this sheet.
     pub label_sides: Sides,
+    /// Whether the profile prints the zone labels and the sheet size ([`Self::frame_labels`]).
+    pub zone_labels: bool,
+    /// The sheet's size as its label writes it: `A3`, `Letter`, `210 x 297 mm`.
+    pub size_label: String,
     pub grid_border: Aabb2,
     /// Bottom, top, left and right: each from the grid reference border to the drawing border, or
     /// as far inside it as the profile asks.
@@ -291,7 +299,51 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
+impl PaperSize {
+    /// The size as a sheet's label writes it: `A3`, `Letter`, `ANSI B`, `Arch E1`.
+    pub fn label(self) -> &'static str {
+        use PaperSize::*;
+        match self {
+            A0 => "A0",
+            A1 => "A1",
+            A2 => "A2",
+            A3 => "A3",
+            A4 => "A4",
+            A5 => "A5",
+            Letter => "Letter",
+            Legal => "Legal",
+            AnsiA => "ANSI A",
+            AnsiB => "ANSI B",
+            AnsiC => "ANSI C",
+            AnsiD => "ANSI D",
+            AnsiE => "ANSI E",
+            AnsiF => "ANSI F",
+            ArchA => "Arch A",
+            ArchB => "Arch B",
+            ArchC => "Arch C",
+            ArchD => "Arch D",
+            ArchE => "Arch E",
+            ArchE1 => "Arch E1",
+        }
+    }
+}
+
 impl Sheet {
+    /// The size's label: its standard name, or the two sides of a custom one, short side first
+    /// (`210 x 297 mm`, to a tenth of a millimetre when it isn't whole).
+    pub fn size_label(&self) -> String {
+        match self.size {
+            SheetSize::Standard(size) => size.label().to_string(),
+            SheetSize::Custom { sides_mm: [a, b] } => {
+                let side = |v: f64| {
+                    let v = (v * 10.0).round() / 10.0;
+                    if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v:.1}") }
+                };
+                format!("{} x {} mm", side(a.min(b)), side(a.max(b)))
+            }
+        }
+    }
+
     pub fn standard(size: PaperSize, orientation: Orientation) -> Sheet {
         Sheet { size: SheetSize::Standard(size), orientation }
     }
@@ -325,6 +377,7 @@ impl DrawingBorderProfile {
             grid: GridRule::FromCentre { field_mm: 50.0 },
             skip_i_and_o: true,
             label_sides: LabelSides::Iso,
+            zone_labels: true,
             grid_border_mm: 5.0,
             centring_mark_mm: Some(0.0),
             centring_mark_start: CentringMarkStart::SheetEdge,
@@ -363,6 +416,9 @@ impl DrawingBorderProfile {
         let narrowest = self.laid_out_margins().sides().into_iter().fold(f64::INFINITY, f64::min);
         let g = self.grid_border_mm;
         require(g.is_finite() && g >= 0.0 && g <= narrowest, "the grid reference border lies between the sheet border and the drawing border")?;
+        // Its field marks run from the drawing border out to it, so closer than a field's shortest
+        // length they would be slivers drawn on the drawing border's own line.
+        require(g == 0.0 || g >= MIN_FIELD_MM, "the grid reference border lies on the drawing border or at least 1 mm outside it")?;
         if let Some(reach) = self.centring_mark_mm {
             let fits = reach.is_finite() && (0.0..=MAX_SIDE_MM).contains(&reach);
             require(fits, "a centring mark ends on the drawing border or at most 5000 mm inside it")?;
@@ -427,6 +483,8 @@ impl DrawingBorderProfile {
             columns,
             rows,
             label_sides: self.label_sides.on(sheet),
+            zone_labels: self.zone_labels,
+            size_label: sheet.size_label(),
             grid_border,
             centring_marks,
             trimming_marks,
@@ -438,7 +496,96 @@ impl DrawingBorderProfile {
 /// marks at its field edges.
 pub const GRID_LINE_MM: f64 = 0.35;
 
+/// Where a frame label's text sits, along its line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelAlign {
+    /// `at` is the middle of the text.
+    Centre,
+    /// `at` is the start of the text.
+    Left,
+}
+
+/// One text the frame prints: a zone's letter or number, or the sheet's size.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameLabel {
+    pub text: String,
+    /// In sheet millimetres: the middle of the text's capital height, and its middle or its start
+    /// along the line ([`LabelAlign`]).
+    pub at: Vec2,
+    pub cap_mm: f64,
+    pub align: LabelAlign,
+}
+
+/// The cap height of a zone label (ISO 5457: at least 3.5 mm), or as high as the strip between the
+/// drawing border and the grid reference border leaves, with a clearance each side.
+const ZONE_CAP_MM: f64 = 3.5;
+/// The least cap height a zone label has (ISO 3098's smallest lettering is 2.5; the strip a thin
+/// border leaves is no less than this plus its clearances).
+const MIN_ZONE_CAP_MM: f64 = 2.0;
+/// The cap height of the sheet size's label.
+const SIZE_CAP_MM: f64 = 2.5;
+/// The room kept between a label's capitals and the line beside them.
+const CLEAR_MM: f64 = 0.4;
+/// The most labels a frame prints: a profile cut into more zones than any drawing needs is left
+/// unlabelled, so it never fills a sheet with text.
+pub const MAX_FRAME_LABELS: usize = 200;
+
 impl SheetLayout {
+    /// The texts the frame prints, when its profile asks ([`DrawingBorderProfile::zone_labels`]):
+    /// each column's number on the top and bottom, each row's letter on the left and right, on the
+    /// sides the profile labels, centred in the strip between the drawing border and the grid
+    /// reference border; and the sheet's size in the margin outside the grid reference border at
+    /// the bottom left. The strip is what the two lines' half widths leave between the borders. A text
+    /// its strip has no room for, a zone shorter than its label is tall, and all the zones' labels when
+    /// the sides labelled would carry more than [`MAX_FRAME_LABELS`], are left out.
+    pub fn frame_labels(&self) -> Vec<FrameLabel> {
+        let mut out = Vec::new();
+        if !self.zone_labels {
+            return out;
+        }
+        let (d, g) = (self.drawing_border, self.grid_border);
+        // Each line is centred on its edge, so half of it reaches into the strip: the drawing border's
+        // on the inside, the grid reference border's on the outside. The text lies in what remains.
+        let (inner, outer) = (self.drawing_border_line_mm / 2.0, GRID_LINE_MM / 2.0);
+        let strip = (d.min.x - g.min.x).min(d.min.y - g.min.y).min(g.max.x - d.max.x).min(g.max.y - d.max.y) - inner - outer;
+        let cap_mm = ZONE_CAP_MM.min(strip - 2.0 * CLEAR_MM);
+        let side = self.label_sides;
+        // The labels there would be on the sides labelled, before any is left out for its zone's length.
+        let count = self.columns.len() * (usize::from(side.top) + usize::from(side.bottom))
+            + self.rows.len() * (usize::from(side.left) + usize::from(side.right));
+        if cap_mm >= MIN_ZONE_CAP_MM && count <= MAX_FRAME_LABELS {
+            let mid = |a: f64, b: f64| (a + b) / 2.0;
+            let mut put = |text: &str, at: Vec2| out.push(FrameLabel { text: text.to_string(), at, cap_mm, align: LabelAlign::Centre });
+            for column in self.columns.iter().filter(|f| f.to_mm - f.from_mm >= cap_mm * 1.2) {
+                let x = mid(column.from_mm, column.to_mm);
+                if side.top {
+                    put(&column.label, Vec2::new(x, mid(d.max.y + inner, g.max.y - outer)));
+                }
+                if side.bottom {
+                    put(&column.label, Vec2::new(x, mid(g.min.y + outer, d.min.y - inner)));
+                }
+            }
+            for row in self.rows.iter().filter(|f| f.to_mm - f.from_mm >= cap_mm * 1.2) {
+                let y = mid(row.from_mm, row.to_mm);
+                if side.left {
+                    put(&row.label, Vec2::new(mid(g.min.x + outer, d.min.x - inner), y));
+                }
+                if side.right {
+                    put(&row.label, Vec2::new(mid(d.max.x + inner, g.max.x - outer), y));
+                }
+            }
+        }
+        // Below the grid reference border (or the drawing border's own line when there is none), near
+        // the drawing border's left edge.
+        let edge = if g.min.y < d.min.y { outer } else { inner };
+        let room = g.min.y - edge;
+        if room >= SIZE_CAP_MM + 2.0 * CLEAR_MM && !self.size_label.is_empty() {
+            let at = Vec2::new(d.min.x + 2.0, room / 2.0);
+            out.push(FrameLabel { text: self.size_label.clone(), at, cap_mm: SIZE_CAP_MM, align: LabelAlign::Left });
+        }
+        out
+    }
+
     /// What the drawing border draws, as paper groups of kind `drawing_border` for `object`, in this
     /// order and each left out when it has nothing: the drawing border, closed,
     /// `drawing_border_line_mm` wide; the grid reference border and a mark at each edge between two

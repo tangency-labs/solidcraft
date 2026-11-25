@@ -39,7 +39,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
-         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
+         end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
@@ -60,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face)).begins_edit()
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -86,7 +87,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let profile_mode = given("sketch");
     if profile_mode {
-        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle", "end_cut"].into_iter().find(|k| given(k)) {
             return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
         }
     } else if given("profiles") {
@@ -95,7 +96,18 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = if profile_mode { Some(solidcraft_doc::SketchId(super::features::sketch_id(s, p.get("sketch"), cmd, "sketch")?)) } else { None };
     let profiles = if profile_mode { super::features::profiles(p, cmd)? } else { solidcraft_doc::ProfileSel::All };
     let base = point_param(s, p, "base", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
-    let axis = axis_dir_param(p, cmd)?;
+    let reference = p.get("axis").is_some_and(|v| {
+        super::features::axis_dir_form(v).is_err()
+            && (v.as_str().is_some_and(|name| !name.trim().is_empty())
+                || v.is_object() && ["origin", "dir", "curve", "edge", "face", "type"].iter().any(|key| v.get(*key).is_some()))
+    });
+    let (axis, axis_ref) = if let Some(geo) = coil_placed_edge(s, p.get("axis"), cmd)? {
+        (Vec3::Z, Some(solidcraft_doc::AxisRef::Model { geo }))
+    } else if reference {
+        (Vec3::Z, Some(super::features::axis_param(s, sketch.map_or(0, |id| id.0), p, cmd)?))
+    } else {
+        (axis_dir_param(p, cmd)?, None)
+    };
     let diameter = if profile_mode {
         None
     } else {
@@ -144,6 +156,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
+    let end_cut = match str_(p, "end_cut").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("axial") => solidcraft_doc::CoilEndCut::Axial,
+        Some("square") => solidcraft_doc::CoilEndCut::Square,
+        Some(o) => return Err(bad(cmd, format!("unknown end cut `{o}` (axial or square)"))),
+    };
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
@@ -151,6 +168,8 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         FeatureKind::Coil {
             base,
             axis: Dir(axis),
+            axis_ref,
+            reversed: super::reversed_param(p, "reversed", cmd)?,
             sketch,
             profiles,
             diameter,
@@ -161,6 +180,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },
@@ -739,4 +759,14 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
             remove_tools: bool_(p, "remove_tools").unwrap_or(false),
         },
     )
+}
+
+/// A Coil axis saved as the edge of a picked placement (`{type: placed_edge, …}`), checked to
+/// resolve as the Coil reads it; `None` for any other form of `axis`.
+pub(crate) fn coil_placed_edge(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(value) = v.filter(|axis| str_(axis, "type") == Some("placed_edge")) else { return Ok(None) };
+    let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
+    solidcraft_doc::construct::model_axis_in(Some(&s.placed_document()), &s.model.state(), &geo, s.active_component)
+        .map_err(|error| bad(cmd, format!("`axis`: {error}")))?;
+    Ok(Some(geo))
 }
