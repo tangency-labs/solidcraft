@@ -3,6 +3,7 @@
 //! The WGSL is checked off the window thread and built under an error scope on it; whatever fails
 //! leaves the theme's background, with one line in the status bar.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_wgpu::wgpu;
@@ -20,6 +21,8 @@ pub(crate) struct Loaded {
     pub(crate) shader: solidcraft_engine::plugin::shader::Shader,
     /// Each texture's mip levels, largest first: size and straight RGBA.
     pub(crate) textures: Vec<Vec<([u32; 2], Vec<u8>)>>,
+    /// One line for each chosen picture that was refused and replaced by the shipped one.
+    pub(crate) notes: Vec<String>,
 }
 
 pub(crate) type Pending = Arc<Mutex<Option<Result<Loaded, String>>>>;
@@ -88,33 +91,82 @@ pub(crate) fn manifest(folder: &str) -> Result<solidcraft_engine::plugin::Manife
     solidcraft_engine::plugin::parse_manifest(&bytes, name).map_err(|e| e.to_string())
 }
 
+/// The preference's keys for `shader`'s chosen pictures (`plugin/shader/<texture name>`).
+fn pictures_of(prefs: &BTreeMap<String, String>, shader: &str) -> BTreeMap<String, String> {
+    let prefix = format!("{shader}/");
+    prefs.iter().filter(|(k, _)| k.starts_with(&prefix)).map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+/// The key a background is loaded, drawn and failed under: the shader's key, and with chosen
+/// pictures also those, so a new picture loads the background again. Without pictures it is the
+/// shader's key alone.
+fn load_key(shader: &str, pictures: &BTreeMap<String, String>) -> String {
+    if pictures.is_empty() { shader.to_owned() } else { format!("{shader}\n{pictures:?}") }
+}
+
+/// The background's key as it stands in the preferences.
+fn current_key(app: &SolveApp) -> String {
+    let shader = app.preferences.background_shader.as_str();
+    load_key(shader, &pictures_of(&app.preferences.background_shader_pictures, shader))
+}
+
+/// The key as the status line names it: its shader, without the pictures.
+fn shown(key: &str) -> &str {
+    key.split('\n').next().unwrap_or(key)
+}
+
+/// Reads one file of at most `max` bytes.
+fn read_file(path: &std::path::Path, max: usize) -> Result<Vec<u8>, String> {
+    let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+    let size = std::fs::metadata(path).map_err(|e| format!("{name}: {e}"))?.len();
+    if size > max as u64 {
+        return Err(format!("{name}: larger than {} KiB", max / 1024));
+    }
+    std::fs::read(path).map_err(|e| format!("{name}: {e}"))
+}
+
 /// Reads and checks the chosen background off the window thread.
-pub(crate) fn load(folder: String, key: String, limit: u32) -> Result<Loaded, String> {
+pub(crate) fn load(folder: String, key: String, pictures: BTreeMap<String, String>, limit: u32) -> Result<Loaded, String> {
     let manifest = manifest(&folder)?;
     let shader_id = key.split_once('/').map(|(_, s)| s).unwrap_or_default();
     let shader = manifest.shaders.iter().find(|s| s.id == shader_id).ok_or_else(|| format!("{key} is not in the plugin any more"))?;
     let dir = std::path::Path::new(&folder);
-    let read = |file: &str, max: usize| -> Result<Vec<u8>, String> {
-        let path = dir.join(file);
-        let size = std::fs::metadata(&path).map_err(|e| format!("{file}: {e}"))?.len();
-        if size > max as u64 {
-            return Err(format!("{file}: larger than {} KiB", max / 1024));
-        }
-        std::fs::read(&path).map_err(|e| format!("{file}: {e}"))
-    };
+    let read = |file: &str, max: usize| read_file(&dir.join(file), max);
     let source = read(&shader.source, solidcraft_engine::plugin::shader::MAX_SOURCE_BYTES)?;
     let source = String::from_utf8(source).map_err(|_| format!("{} is not UTF-8 text", shader.source))?;
     let compiled = solidcraft_engine::plugin::shader::compile(shader, &source).map_err(|e| e.to_string())?;
     let side = limit.min(solidcraft_engine::plugin::shader::MAX_TEXTURE_SIDE);
+    let max = solidcraft_engine::plugin::shader::MAX_TEXTURE_BYTES;
+    let mut notes = Vec::new();
     let textures = shader
         .textures
         .iter()
         .map(|t| {
-            read(&t.file, solidcraft_engine::plugin::shader::MAX_TEXTURE_BYTES)
-                .and_then(|bytes| mips(&bytes, side).map_err(|e| format!("{}: {e}", t.file)))
+            // The chosen picture, else the shipped one; a chosen picture that won't read or decode
+            // falls back to the shipped one, and a texture with neither is an error.
+            let shipped = || match &t.file {
+                Some(file) => read(file, max).and_then(|bytes| mips(&bytes, side).map_err(|e| format!("{file}: {e}"))),
+                None => Err(format!("{}: no picture chosen", t.name)),
+            };
+            match pictures.get(&format!("{key}/{}", t.name)) {
+                Some(path) => read_file(std::path::Path::new(path), max)
+                    .and_then(|bytes| {
+                        let name = std::path::Path::new(path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                        mips(&bytes, side).map_err(|e| format!("{name}: {e}"))
+                    })
+                    .or_else(|error| {
+                        if t.file.is_some() {
+                            notes.push(error);
+                            shipped()
+                        } else {
+                            Err(error)
+                        }
+                    }),
+                None => shipped(),
+            }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Loaded { wgsl: compiled.wgsl, animated: shader.animated, kind: shader.kind, shader: shader.clone(), textures })
+    Ok(Loaded { wgsl: compiled.wgsl, animated: shader.animated, kind: shader.kind, shader: shader.clone(), textures, notes })
 }
 
 /// A picture's mip levels, at most `limit` on a side, down to 1×1.
@@ -142,13 +194,15 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     if !allowed(app) {
         return;
     }
-    let key = app.preferences.background_shader.clone();
+    let shader = app.preferences.background_shader.clone();
+    let pictures = pictures_of(&app.preferences.background_shader_pictures, &shader);
+    let key = load_key(&shader, &pictures);
     let state = &mut app.plugin_shaders;
     if state.failed.as_ref().is_some_and(|failed| *failed != key) {
         // Another choice: the one that failed may be tried again when it is chosen again.
         state.failed = None;
     }
-    if key.is_empty() || state.render.is_none() || state.failed.as_deref() == Some(key.as_str()) {
+    if shader.is_empty() || state.render.is_none() || state.failed.as_deref() == Some(key.as_str()) {
         return;
     }
     let ctx = painter.ctx().clone();
@@ -158,14 +212,14 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
     if state.active.is_none() {
         let Some(rs) = state.render.clone() else { return };
         if state.loading.as_ref().is_none_or(|(k, _)| *k != key) {
-            let Some(folder) = folder_of(app, &key) else {
+            let Some(folder) = folder_of(app, &shader) else {
                 missing(app, &key);
                 return;
             };
             let pending: Pending = Arc::default();
-            let (slot, repaint, k, limit) = (pending.clone(), ctx.clone(), key.clone(), rs.device.limits().max_texture_dimension_2d);
+            let (slot, repaint, k, limit) = (pending.clone(), ctx.clone(), shader.clone(), rs.device.limits().max_texture_dimension_2d);
             std::thread::spawn(move || {
-                let result = load(folder, k, limit);
+                let result = load(folder, k, pictures, limit);
                 *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(result);
                 repaint.request_repaint();
             });
@@ -176,11 +230,15 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
         let done = state.loading.as_ref().and_then(|(_, p)| p.lock().unwrap_or_else(PoisonError::into_inner).take());
         let Some(done) = done else { return };
         state.loading = None;
+        let notes = done.as_ref().map(|loaded| loaded.notes.clone()).unwrap_or_default();
         match done.and_then(|loaded| build(&rs, &key, loaded)) {
-            Ok(active) => state.active = Some(active),
+            Ok(active) => {
+                state.active = Some(active);
+                announce(app, &key, &notes);
+            }
             Err(error) => {
                 state.failed = Some(key.clone());
-                let message = format!("{} {key}: {error}", solidcraft_ui_text::tr(UNREADABLE));
+                let message = format!("{} {}: {error}", solidcraft_ui_text::tr(UNREADABLE), shown(&key));
                 log::warn!("{message}");
                 app.set_status(message, true);
                 return;
@@ -195,7 +253,7 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
         let key = active.key.clone();
         app.plugin_shaders.failed = Some(key.clone());
         app.preferences.background_shader.clear();
-        log::warn!("graphics device lost while the background effect {key} was drawn; it is turned off");
+        log::warn!("graphics device lost while the background effect {} was drawn; it is turned off", shown(&key));
         return;
     }
     let ppp = ctx.pixels_per_point();
@@ -217,12 +275,13 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
 
 /// A plugin turned off after its background was drawn, or while it loads, drops it, saying so once.
 fn allowed(app: &mut SolveApp) -> bool {
-    let key = app.preferences.background_shader.clone();
-    if key.is_empty() {
+    if app.preferences.background_shader.is_empty() {
         return true;
     }
-    let plugin = key.split_once('/').map_or(key.as_str(), |(id, _)| id);
-    let enabled = crate::plugins::enabled(app, plugin);
+    let key = current_key(app);
+    let shader = app.preferences.background_shader.clone();
+    let plugin = shader.split_once('/').map_or(shader.as_str(), |(id, _)| id).to_owned();
+    let enabled = crate::plugins::enabled(app, &plugin);
     let state = &mut app.plugin_shaders;
     if state.failed.as_deref() == Some(key.as_str()) {
         if !(state.off && enabled) {
@@ -235,10 +294,63 @@ fn allowed(app: &mut SolveApp) -> bool {
     if enabled {
         return true;
     }
-    forget(app, plugin);
+    forget(app, &plugin);
     missing(app, &key);
     app.plugin_shaders.off = true;
     false
+}
+
+/// Says once, when a background loads, which chosen pictures it could not use and that the
+/// shipped ones are shown instead.
+fn announce(app: &mut SolveApp, key: &str, notes: &[String]) {
+    if notes.is_empty() {
+        return;
+    }
+    let message = format!("{}: {}: {}", solidcraft_ui_text::tr("prefs.background_picture_fallback"), shown(key), notes.join("; "));
+    log::warn!("{message}");
+    app.set_status(message, true);
+}
+
+/// Drops the pictures chosen for `plugin`'s backgrounds, for a plugin that is removed.
+pub(crate) fn drop_pictures(app: &mut SolveApp, plugin: &str) {
+    let prefix = format!("{plugin}/");
+    app.preferences.background_shader_pictures.retain(|key, _| !key.starts_with(&prefix));
+}
+
+/// Drops the pictures of plugins that are no longer in the plugins folder: `present` are the ids
+/// found there, including the ones whose manifest is refused.
+pub(crate) fn drop_pictures_not_in(app: &mut SolveApp, present: &dyn Fn(&str) -> bool) {
+    app.preferences.background_shader_pictures.retain(|key, _| key.split_once('/').is_some_and(|(plugin, _)| present(plugin)));
+}
+
+/// Sets the picture a texture is chosen as (`plugin/shader/<texture name>`), checked the way the
+/// preference checks are. The background loads again on its own, because its key changes.
+pub(crate) fn choose_picture(app: &mut SolveApp, picture: &str, path: String) -> Result<(), String> {
+    let mut pictures = app.preferences.background_shader_pictures.clone();
+    pictures.insert(picture.to_owned(), path.clone());
+    if !valid_pictures(&pictures) {
+        return Err(solidcraft_ui_text::format("prefs.background_picture_refused", &[("picture", &path)]));
+    }
+    app.preferences.background_shader_pictures = pictures;
+    Ok(())
+}
+
+/// Whether `pictures` may be stored: at most `MAX_PICTURES` entries, each keyed
+/// `plugin/shader/<texture name>` with an absolute path of at most `MAX_PICTURE_PATH` characters.
+pub(crate) fn valid_pictures(pictures: &BTreeMap<String, String>) -> bool {
+    pictures.len() <= crate::plugins::MAX_PICTURES && pictures.iter().all(|(key, path)| valid_picture(key, path))
+}
+
+/// One entry of `valid_pictures`.
+pub(crate) fn valid_picture(key: &str, path: &str) -> bool {
+    let parts: Vec<&str> = key.split('/').collect();
+    let [plugin, shader, texture] = parts[..] else { return false };
+    crate::plugins::valid_id(plugin)
+        && crate::plugins::valid_id(shader)
+        && solidcraft_engine::plugin::shader::texture_name(texture)
+        && (1..=crate::plugins::MAX_PICTURE_PATH).contains(&path.chars().count())
+        && std::path::Path::new(path).is_absolute()
+        && !path.chars().any(char::is_control)
 }
 
 /// Drops `plugin`'s background, drawn or loading, so it is read again from its folder when next chosen.
@@ -256,7 +368,7 @@ pub(crate) fn forget(app: &mut SolveApp, plugin: &str) {
 /// The chosen background's plugin is missing or off: say so once, not every frame.
 fn missing(app: &mut SolveApp, key: &str) {
     app.plugin_shaders.failed = Some(key.to_owned());
-    let message = format!("{} {key}: {}", solidcraft_ui_text::tr(UNREADABLE), solidcraft_ui_text::tr("prefs.background_shader_missing"));
+    let message = format!("{} {}: {}", solidcraft_ui_text::tr(UNREADABLE), shown(key), solidcraft_ui_text::tr("prefs.background_shader_missing"));
     log::warn!("{message}");
     app.set_status(message, true);
 }
@@ -569,5 +681,192 @@ mod tests {
         assert!(h.app.plugin_shaders.loading.is_some(), "another plugin's removal leaves it");
         super::forget(&mut h.app, "dusk");
         assert!(h.app.plugin_shaders.loading.is_none());
+    }
+
+    const PICTURE_SHADER: &str = "fn background(px: ScPixel) -> vec4<f32> {\n    return textureSampleLevel(picture, sc_clamp, px.uv, 0.0);\n}\n";
+
+    /// A plugin `own` with one background whose texture `picture` is chosen, shipped as
+    /// `default.png` (solid blue) when `shipped` is set; returns its folder.
+    fn own_plugin(h: &crate::scenario::Harness, shipped: bool) -> std::path::PathBuf {
+        let dir = h.dir.join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = if shipped { r#","file":"default.png""# } else { "" };
+        let manifest = format!(
+            r#"{{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.2"],"shaders":[{{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{{"name":"picture","choose":"Picture"{file}}}]}}]}}"#
+        );
+        std::fs::write(dir.join("plugin.json"), manifest).unwrap();
+        std::fs::write(dir.join("own.wgsl"), PICTURE_SHADER).unwrap();
+        if shipped {
+            write_png(&dir.join("default.png"), [0, 0, 255]);
+        }
+        dir
+    }
+
+    fn write_png(path: &std::path::Path, rgb: [u8; 3]) {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([rgb[0], rgb[1], rgb[2], 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        std::fs::write(path, png.get_ref()).unwrap();
+    }
+
+    /// The first mip level of the texture's picture, the bytes that are drawn.
+    fn first_texel(loaded: &super::Loaded) -> Vec<u8> {
+        loaded.textures[0][0].1[..4].to_vec()
+    }
+
+    #[test]
+    fn a_chosen_picture_replaces_the_shipped_one_and_a_broken_one_falls_back() {
+        let h = crate::scenario::Harness::new();
+        let dir = own_plugin(&h, true);
+        let folder = dir.to_string_lossy().into_owned();
+        let shipped = super::load(folder.clone(), "own/own".into(), Default::default(), 512).unwrap();
+        assert_eq!(first_texel(&shipped), vec![0, 0, 255, 255]);
+        let red = dir.join("red.png");
+        write_png(&red, [255, 0, 0]);
+        let chosen: std::collections::BTreeMap<String, String> = [("own/own/picture".to_owned(), red.to_string_lossy().into_owned())].into();
+        let loaded = super::load(folder.clone(), "own/own".into(), chosen.clone(), 512).unwrap();
+        assert_eq!(first_texel(&loaded), vec![255, 0, 0, 255], "the chosen picture is drawn");
+        assert_ne!(super::load_key("own/own", &chosen), super::load_key("own/own", &Default::default()), "a new picture is a new key");
+        let missing: std::collections::BTreeMap<String, String> =
+            [("own/own/picture".to_owned(), h.dir.join("gone.png").to_string_lossy().into_owned())].into();
+        let fallback = super::load(folder.clone(), "own/own".into(), missing, 512).unwrap();
+        assert_eq!(first_texel(&fallback), vec![0, 0, 255, 255], "a missing chosen picture falls back to the shipped file");
+        let garbage = dir.join("garbage.png");
+        std::fs::write(&garbage, b"not a picture").unwrap();
+        let broken: std::collections::BTreeMap<String, String> = [("own/own/picture".to_owned(), garbage.to_string_lossy().into_owned())].into();
+        assert_eq!(first_texel(&super::load(folder, "own/own".into(), broken, 512).unwrap()), vec![0, 0, 255, 255]);
+    }
+
+    /// A pick that won't read or decode shows the shipped picture and is named in one status line.
+    #[test]
+    fn a_bad_pick_falls_back_and_is_named_in_one_status_line() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = own_plugin(&h, true);
+        let folder = dir.to_string_lossy().into_owned();
+        let garbage = dir.join("garbage.png");
+        std::fs::write(&garbage, b"not a picture").unwrap();
+        let broken: std::collections::BTreeMap<String, String> = [("own/own/picture".to_owned(), garbage.to_string_lossy().into_owned())].into();
+        let loaded = super::load(folder.clone(), "own/own".into(), broken, 512).unwrap();
+        assert_eq!(first_texel(&loaded), vec![0, 0, 255, 255]);
+        assert_eq!(loaded.notes.len(), 1, "{:?}", loaded.notes);
+        assert!(loaded.notes[0].contains("garbage.png"), "{:?}", loaded.notes);
+        let none = super::load(folder, "own/own".into(), Default::default(), 512).unwrap();
+        assert!(none.notes.is_empty(), "no pick, nothing to say");
+        super::announce(&mut h.app, "own/own", &none.notes);
+        assert!(h.app.status.is_none(), "nothing to say sets no status");
+        super::announce(&mut h.app, "own/own", &loaded.notes);
+        let (text, _, _) = h.app.status.clone().unwrap();
+        assert!(text.contains("garbage.png") && text.contains("own/own"), "{text}");
+    }
+
+    #[test]
+    fn a_chosen_texture_with_no_shipped_file_and_no_picture_fails_with_one_line() {
+        let h = crate::scenario::Harness::new();
+        let dir = own_plugin(&h, false);
+        let folder = dir.to_string_lossy().into_owned();
+        let error = super::load(folder.clone(), "own/own".into(), Default::default(), 512).err().unwrap();
+        assert!(error.contains("no picture chosen"), "{error}");
+        let gone: std::collections::BTreeMap<String, String> =
+            [("own/own/picture".to_owned(), h.dir.join("gone.png").to_string_lossy().into_owned())].into();
+        assert!(super::load(folder, "own/own".into(), gone, 512).is_err());
+    }
+
+    #[test]
+    fn chosen_pictures_are_keyed_by_texture_name_and_checked_as_preferences() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        assert!(super::valid_picture("own/own/picture", &path));
+        assert!(super::valid_picture("own/own/city_lights2", &path));
+        for (key, path) in [
+            ("own/own/0", path.as_str()),
+            ("own/own/3", path.as_str()),
+            ("own/own", path.as_str()),
+            ("own/own/", path.as_str()),
+            ("Own/own/picture", path.as_str()),
+            ("own/own/Picture", path.as_str()),
+            ("own/own/sc_picture", path.as_str()),
+            ("own/own/picture", "pick.png"),
+            ("own/own/picture", ""),
+        ] {
+            assert!(!super::valid_picture(key, path), "{key} {path}");
+        }
+        assert!(!super::valid_picture("own/own/picture", &format!("{}{}", path, "x".repeat(1024))));
+    }
+
+    /// The cap is `MAX_PICTURES` entries: that many valid keys are kept and one more is refused.
+    #[test]
+    fn at_most_the_cap_of_valid_pictures_may_be_stored() {
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        let keys = |n: usize| -> std::collections::BTreeMap<String, String> { (0..n).map(|i| (format!("p{i}/own/picture"), path.clone())).collect() };
+        assert!(keys(1).keys().all(|key| super::valid_picture(key, &path)), "the keys are valid");
+        assert!(super::valid_pictures(&keys(crate::plugins::MAX_PICTURES)));
+        assert!(!super::valid_pictures(&keys(crate::plugins::MAX_PICTURES + 1)));
+    }
+
+    /// A plugin update that reorders its textures keeps each picture with its texture.
+    #[test]
+    fn a_picture_stays_with_its_texture_when_the_textures_are_reordered() {
+        let h = crate::scenario::Harness::new();
+        let dir = h.dir.join("reorder").join("own");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("own.wgsl"),
+            "fn background(px: ScPixel) -> vec4<f32> {
+    return textureSampleLevel(sky, sc_clamp, px.uv, 0.0) + textureSampleLevel(ground, sc_clamp, px.uv, 0.0);
+}
+",
+        )
+        .unwrap();
+        let red = dir.join("red.png");
+        write_png(&red, [255, 0, 0]);
+        let write_manifest = |order: [&str; 2]| {
+            let textures = order.map(|n| format!(r#"{{"name":"{n}","choose":"{n}"}}"#)).join(",");
+            std::fs::write(
+                dir.join("plugin.json"),
+                format!(
+                    r#"{{"id":"own","name":"Own","version":"1","capabilities":["shaders@0.2"],"shaders":[{{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{textures}]}}]}}"#
+                ),
+            )
+            .unwrap();
+        };
+        let green = dir.join("green.png");
+        write_png(&green, [0, 255, 0]);
+        let chosen: std::collections::BTreeMap<String, String> =
+            [("own/own/sky".to_owned(), red.to_string_lossy().into_owned()), ("own/own/ground".to_owned(), green.to_string_lossy().into_owned())]
+                .into();
+        let folder = dir.to_string_lossy().into_owned();
+        write_manifest(["sky", "ground"]);
+        let before = super::load(folder.clone(), "own/own".into(), chosen.clone(), 512).unwrap();
+        assert_eq!((before.textures[0][0].1[..4].to_vec(), before.textures[1][0].1[..4].to_vec()), (vec![255, 0, 0, 255], vec![0, 255, 0, 255]));
+        write_manifest(["ground", "sky"]);
+        let after = super::load(folder, "own/own".into(), chosen, 512).unwrap();
+        assert_eq!((after.textures[0][0].1[..4].to_vec(), after.textures[1][0].1[..4].to_vec()), (vec![0, 255, 0, 255], vec![255, 0, 0, 255]));
+    }
+
+    /// Turning a plugin off keeps the pictures its person chose.
+    #[test]
+    fn turning_a_plugin_off_keeps_its_chosen_pictures() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        h.app.preferences.background_shader = "own/own".into();
+        h.app.preferences.background_shader_pictures.insert("own/own/picture".into(), path.clone());
+        h.app.preferences.disabled_plugins.insert("own".into());
+        assert!(!super::allowed(&mut h.app));
+        assert_eq!(h.app.preferences.background_shader_pictures.get("own/own/picture"), Some(&path));
+    }
+
+    /// Choose… stores the picture under the texture's key; the preference round trip is `ui.prefs`.
+    #[test]
+    fn the_preference_takes_pictures_the_card_stores_and_refuses_bad_ones() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("pick.png").to_string_lossy().into_owned();
+        let stored = crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/picture": path}})).unwrap();
+        assert_eq!(stored["background_shader_pictures"]["own/own/picture"], serde_json::json!(path));
+        assert_eq!(h.app.preferences.background_shader_pictures.get("own/own/picture"), Some(&path));
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/BAD": path}})).is_err());
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"background_shader_pictures": {"own/own/picture": "pick.png"}})).is_err());
+        assert_eq!(h.app.preferences.background_shader_pictures.len(), 1, "a refused change stores nothing");
+        assert!(super::choose_picture(&mut h.app, "own/own/picture", "x".repeat(2000)).is_err());
+        assert!(super::choose_picture(&mut h.app, "own/own/picture", path.clone()).is_ok());
     }
 }

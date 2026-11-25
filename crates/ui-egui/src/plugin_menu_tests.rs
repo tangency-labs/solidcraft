@@ -1725,6 +1725,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         tints: Vec::new(),
         panels: Vec::new(),
         shader_settings: Default::default(),
+        pictures: Vec::new(),
     }
 }
 

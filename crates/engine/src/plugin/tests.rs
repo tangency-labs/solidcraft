@@ -4445,3 +4445,24 @@ fn the_documented_tint_example_compiles() {
     assert_eq!(manifest.shaders[0].settings.len(), 2);
     craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
 }
+
+/// Shader plugins written before pictures could be chosen parse, validate and serialize as they
+/// did: no `choose`, the shipped `file` kept, nothing new in the manifest's JSON.
+#[test]
+fn legacy_shader_manifests_without_a_chosen_texture_are_unchanged() {
+    for (folder, text) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json")),
+        ("panorama", include_str!("../../../../docs/plugin-examples/panorama/plugin.json")),
+    ] {
+        let plugin = craft_plugin::parse_manifest(text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::validate(&plugin.shaders).unwrap();
+        let original: serde_json::Value = serde_json::from_str(text).unwrap();
+        let again = serde_json::to_value(&plugin).unwrap();
+        for (got, want) in again["shaders"].as_array().unwrap().iter().zip(original["shaders"].as_array().unwrap()) {
+            assert_eq!(got.get("textures"), want.get("textures"), "{folder}");
+        }
+        for texture in plugin.shaders.iter().flat_map(|shader| &shader.textures) {
+            assert!(texture.choose.is_none() && texture.file.is_some(), "{folder}");
+        }
+    }
+}

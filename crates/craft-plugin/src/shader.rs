@@ -64,13 +64,20 @@ impl ShaderKind {
     }
 }
 
+/// A picture a shader samples: one shipped in the plugin's folder, one the person chooses, or
+/// both (the shipped one until a person picks another).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShaderTexture {
     /// The name the shader uses for it, a WGSL identifier (`sky`, `city_lights`).
     pub name: String,
-    /// A `.png` or `.jpg` file name in the plugin's folder.
-    pub file: String,
+    /// A `.png` or `.jpg` file name in the plugin's folder. Needed unless `choose` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// Makes the texture one the person chooses: the label shown beside it, 1..40 printable
+    /// characters. Needs `shaders@0.2` and a background.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choose: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
@@ -142,7 +149,7 @@ fn plain_file(name: &str, extensions: &[&str]) -> bool {
 
 /// A WGSL identifier the host does not reserve: lowercase, digits and `_`, not starting with
 /// `sc_` or a digit, at most 32 characters.
-fn texture_name(name: &str) -> bool {
+pub fn texture_name(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
         && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
@@ -178,8 +185,21 @@ pub fn validate(shaders: &[Shader]) -> Result<()> {
                     "each texture needs a distinct WGSL name: lowercase letters, digits and _, not starting with sc_",
                 ));
             }
-            if !plain_file(&texture.file, &["png", "jpg", "jpeg"]) {
+            if texture.file.is_none() && texture.choose.is_none() {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "needs a file, a choose label, or both"));
+            }
+            if let Some(file) = &texture.file
+                && !plain_file(file, &["png", "jpg", "jpeg"])
+            {
                 return Err(invalid(format!("{field}.textures.{}", texture.name), "must be one lowercase .png or .jpg file name"));
+            }
+            if let Some(label) = &texture.choose
+                && !crate::plain(label, 40)
+            {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "choose must be a label of 1..40 printable characters"));
+            }
+            if texture.choose.is_some() && shader.kind != ShaderKind::Background {
+                return Err(invalid(format!("{field}.textures.{}", texture.name), "only a background's textures may be chosen"));
             }
         }
         if shader.blur.is_some_and(|b| shader.kind != ShaderKind::Panel || !(b.is_finite() && (1.0..=60.0).contains(&b))) {

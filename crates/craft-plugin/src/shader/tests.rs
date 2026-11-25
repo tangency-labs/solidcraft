@@ -7,7 +7,7 @@ fn background(textures: &[&str]) -> Shader {
         name: "Dusk".into(),
         kind: ShaderKind::Background,
         source: "dusk.wgsl".into(),
-        textures: textures.iter().map(|t| ShaderTexture { name: (*t).into(), file: format!("{t}.png") }).collect(),
+        textures: textures.iter().map(|t| ShaderTexture { name: (*t).into(), file: Some(format!("{t}.png")), choose: None }).collect(),
         animated: false,
         settings: Vec::new(),
         blur: None,
@@ -112,7 +112,7 @@ fn the_manifest_list_checks_ids_files_and_texture_names() {
         assert_eq!(validate(&[background(&[name])]).is_ok(), ok, "{name}");
     }
     let mut picture = background(&["sky"]);
-    picture.textures[0].file = "sky.exe".into();
+    picture.textures[0].file = Some("sky.exe".into());
     assert!(validate(&[picture]).is_err());
     assert!(validate(&[background(&["a", "b", "c", "d", "e"])]).is_err());
     let many: Vec<Shader> = (0..=MAX_SHADERS)
@@ -351,7 +351,7 @@ fn a_panel_shader_needs_panel_and_cannot_take_the_hosts_names() {
     assert!(reason(compile(&panel(&[]), &encode).unwrap_err()).contains("sc_encode"), "a background's helper is not a panel's");
     let bound = format!("@group(0) @binding(12) var<uniform> mine: vec4<f32>;\n{FROST}");
     assert!(reason(compile(&panel(&[]), &bound).unwrap_err()).contains("resource `mine`"));
-    let reserved = ShaderTexture { name: "panel".into(), file: "p.png".into() };
+    let reserved = ShaderTexture { name: "panel".into(), file: Some("p.png".into()), choose: None };
     assert!(validate(&[Shader { textures: vec![reserved], ..panel(&[]) }]).is_err(), "panel is a reserved texture name");
 }
 
@@ -383,4 +383,76 @@ fn a_panel_shader_needs_shaders_0_2() {
     assert_eq!((plugin.shaders[0].kind, plugin.shaders[0].blur), (ShaderKind::Panel, Some(14.0)));
     let old = manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"], "shaders": shaders})).unwrap_err();
     assert!(old.to_string().contains("shaders@0.2"), "{old}");
+}
+
+fn chosen(name: &str, file: Option<&str>, choose: Option<&str>) -> ShaderTexture {
+    ShaderTexture { name: name.into(), file: file.map(str::to_owned), choose: choose.map(str::to_owned) }
+}
+
+fn with_texture(texture: ShaderTexture) -> Vec<Shader> {
+    let mut shader = background(&[]);
+    shader.textures = vec![texture];
+    vec![shader]
+}
+
+/// A texture needs a shipped file, a label the person picks it by, or both; the label is 1..40
+/// printable characters.
+#[test]
+fn a_chosen_texture_needs_a_label_or_a_file_and_a_short_label() {
+    validate(&with_texture(chosen("picture", None, Some("Picture")))).unwrap();
+    validate(&with_texture(chosen("picture", Some("default.png"), Some("Picture")))).unwrap();
+    validate(&with_texture(chosen("picture", Some("default.png"), None))).unwrap();
+    let neither = validate(&with_texture(chosen("picture", None, None))).unwrap_err();
+    assert!(reason(neither).contains("needs a file, a choose label, or both"));
+    let long = "x".repeat(41);
+    assert!(validate(&with_texture(chosen("picture", None, Some(&long)))).is_err());
+    assert!(validate(&with_texture(chosen("picture", None, Some("  ")))).is_err());
+    assert!(validate(&with_texture(chosen("picture", None, Some("Bad\tlabel")))).is_err());
+    let forty = "x".repeat(40);
+    validate(&with_texture(chosen("picture", None, Some(&forty)))).unwrap();
+    assert!(validate(&with_texture(chosen("picture", Some("../default.png"), Some("Picture")))).is_err());
+}
+
+#[test]
+fn a_chosen_texture_is_read_from_the_manifest_and_an_unknown_field_is_refused() {
+    let shaders = json!([{"id": "own", "name": "Own", "kind": "background", "source": "own.wgsl",
+        "textures": [{"name": "picture", "choose": "Picture", "file": "default.png"}]}]);
+    let plugin = crate::parse_manifest(
+        json!({"id": "own", "name": "Own", "version": "1", "capabilities": ["shaders@0.2"], "shaders": shaders}).to_string().as_bytes(),
+        "own",
+    )
+    .unwrap();
+    assert_eq!(plugin.shaders[0].textures[0].choose.as_deref(), Some("Picture"));
+    assert_eq!(plugin.shaders[0].textures[0].file.as_deref(), Some("default.png"));
+    let only_label = json!([{"id": "own", "name": "Own", "kind": "background", "source": "own.wgsl",
+        "textures": [{"name": "picture", "choose": "Picture"}]}]);
+    let plugin = crate::parse_manifest(
+        json!({"id": "own", "name": "Own", "version": "1", "capabilities": ["shaders@0.2"], "shaders": only_label}).to_string().as_bytes(),
+        "own",
+    )
+    .unwrap();
+    assert!(plugin.shaders[0].textures[0].file.is_none());
+    let serialized = serde_json::to_value(&plugin.shaders[0].textures[0]).unwrap();
+    assert!(serialized.get("file").is_none(), "{serialized}");
+    let unknown = json!([{"id": "own", "name": "Own", "kind": "background", "source": "own.wgsl",
+        "textures": [{"name": "picture", "choose": "Picture", "tint": "red"}]}]);
+    assert!(
+        crate::parse_manifest(
+            json!({"id": "own", "name": "Own", "version": "1", "capabilities": ["shaders@0.2"], "shaders": unknown}).to_string().as_bytes(),
+            "own",
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_chosen_picture_needs_shaders_0_2_and_a_background() {
+    let shaders = json!([{"id": "own", "name": "Own", "kind": "background", "source": "own.wgsl",
+        "textures": [{"name": "picture", "choose": "Picture"}]}]);
+    let old = manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"], "shaders": shaders})).unwrap_err();
+    assert!(old.to_string().contains("shaders@0.2"), "{old}");
+    manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.2"], "shaders": shaders})).unwrap();
+    let mut tint = tint_shader();
+    tint.textures = vec![chosen("picture", None, Some("Picture"))];
+    assert!(reason(validate(&[tint]).unwrap_err()).contains("only a background"));
 }

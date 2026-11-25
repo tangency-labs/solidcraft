@@ -75,7 +75,7 @@ pub(crate) fn prepare(app: &mut SolveApp, ctx: &egui::Context) {
             let pending: Pending = Arc::default();
             let (slot, repaint, k, limit) = (pending.clone(), ctx.clone(), key.clone(), rs.device.limits().max_texture_dimension_2d);
             std::thread::spawn(move || {
-                let result = crate::plugin_shaders::load(folder, k, limit);
+                let result = crate::plugin_shaders::load(folder, k, Default::default(), limit);
                 *slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(result);
                 repaint.request_repaint();
             });

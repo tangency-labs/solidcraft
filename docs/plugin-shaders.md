@@ -108,8 +108,8 @@ most 8192 pixels on a side (or the graphics card's limit), and builds its mipmap
 
 ## The manifest
 
-`capabilities` must list `"shaders@0.2"` (or `"shaders@0.1"`, for backgrounds with no settings,
-as before). Each entry of `shaders`:
+`capabilities` must list `"shaders@0.2"` (or `"shaders@0.1"`, for backgrounds with no settings or chosen
+pictures, as before). Each entry of `shaders`:
 
 | Field | Required | Meaning |
 |---|---|---|
@@ -117,11 +117,32 @@ as before). Each entry of `shaders`:
 | `name` | yes | What people pick it by, 1 to 80 characters. |
 | `kind` | yes | `"background"`, or `"tint"` ([Tints](#tints), 0.2). |
 | `source` | yes | A `.wgsl` file name in the plugin's folder (lowercase, no folders). |
-| `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`. |
+| `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`, and/or `"choose": "<label>"` for a picture the person picks (see below). |
 | `animated` | no | `true`: redrawn about 30 times a second while shown (10 behind another window), with `sc.time` running. `false` (the default): drawn again only when the view turns or resizes or the theme changes; `sc.time` is 0. |
 | `settings` | no | 0.2: up to 4 sliders on the plugin's card, `{"id", "name", "min", "max", "default"}`; the shader reads their values, in order, as `sc.settings.x` to `.w`. |
 
 A plugin declares at most 8 shaders. A plugin with shaders and no `runtime` is fine.
+
+### Pictures the person chooses
+
+A texture with `choose` is picked by the person, not only shipped. The label (1 to 40 printable
+characters) is shown on the plugin's card under the background's switch, with the picked file's
+name (or "Default") and Choose… and Clear buttons:
+
+```json
+"textures": [{"name": "picture", "choose": "Picture", "file": "default.png"}]
+```
+
+`file` is optional for a chosen texture: it is the picture used until the person picks one, and
+a chosen picture that cannot be read or decoded falls back to it, with one status line naming it. A texture needs `file`,
+`choose`, or both. The pictures are kept in the preferences as `background_shader_pictures`
+(`"plugin/shader/<texture name>"` to an absolute path, at most 64 entries, paths of at most 1024
+characters), and `ui.prefs` sets them the same way, except from a request whose file access is
+confined: the picture is read again on later frames, so such a request can only remove pictures.
+A picture belongs to the texture's name, so reordering the textures in an update keeps each
+picture with its texture. Choosing a picture loads the background again. Removing a plugin, or
+deleting its folder, drops its pictures; turning it off keeps them.
+A chosen picture needs `shaders@0.2`, and only a background's textures may be chosen.
 
 ## What a shader can use
 
@@ -259,7 +280,7 @@ there, and with none chosen the panels draw as before. See [plugin panels](plugi
 
 ## Versions
 
-`shaders@0.2` adds tints and settings; `shaders@0.1` plugins install and draw as before.
+`shaders@0.2` adds tints, settings and chosen pictures; `shaders@0.1` plugins install and draw as before.
 `shaders@0.1` is version 0.1 of the capability. While it is 0.x, a later minor version may change
 it, and SolidCraft then asks you to update the plugin rather than drawing it wrongly. The amendment
 in RFC 0015 lists what is planned next (glass panel materials, a previous-frame texture for effects
