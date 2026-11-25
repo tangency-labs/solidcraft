@@ -1302,3 +1302,28 @@ fn line_helpers_make_unit_choose_the_nearer_meeting_and_measure_across() {
         solidcore_ops::distance_across_surface([0.0; 3], [0.0; 3], [3.0, 4.0, 0.0]).unwrap();
     assert!((plain - 5.0).abs() < 1e-12, "{plain}");
 }
+
+/// A body that names its geometry owners by keys the check cannot know (its naming scheme
+/// `Unknown`) is refused by the check, scoped or not: the check runs on a copy, named afresh,
+/// and the refusal reads the body's own scheme. A body named by its maker is checked.
+#[test]
+fn a_body_of_unknown_naming_is_refused_by_the_check() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Unknown);
+    assert!(matches!(
+        b.check(solidcore_ops::check::CheckLevel::All),
+        Err(Error::Unsupported(_))
+    ));
+    assert!(matches!(
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        ),
+        Err(Error::Unsupported(_))
+    ));
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Caller);
+    assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
+}
