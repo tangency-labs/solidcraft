@@ -77,9 +77,10 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
 /// and `y` along `v`'s part square to `d`. Any finite lengths are taken.
 ///
 /// # Errors
-/// [`Error::Argument`] for a number not finite, a `d` or `v` of no length, or a `v` that leans
-/// within [`solidcore::math::FRAME_LEAN`] (a sine of 1e-6) of `d`, where `y` would follow the
-/// rounding and not `v`.
+/// [`Error::Argument`] for a number not finite, a `d` or `v` of no length, or a `v` whose part
+/// square to `d` is no longer than its own rounding ([`solidcore::math::FRAME_LEAN`], 8 ulps):
+/// `y` would follow the rounding and not `v`. Past that, `y`'s direction is off `v`'s part square
+/// to `d` by about `4ε / sin`; a caller that needs it closer compares that sine itself.
 pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     let [x, y] = Transform::frame_axes(vec3(d), vec3(v)).ok_or(Error::Argument)?;
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
@@ -339,9 +340,9 @@ mod tests {
         assert!(frame_axes([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).is_err());
     }
 
-    /// brett19's probe on #22066: `v` the unit `d` leaned by `k` ulps along `p` square to it. Up
-    /// to a sine of 1e-6 it is refused; past it, and at 1e300, `x` and `y` are unit and square to
-    /// `d` and to each other within a few ulps.
+    /// brett19's probes on #22066: `v` the unit `d` leaned by `k` ulps along `p` square to it.
+    /// Along `d` (and within its rounding) it is refused; from 65 ulps on, at a sine of 5e-7, and
+    /// at 1e±300, `x` and `y` are unit and square to `d` and to each other within a few ulps.
     #[test]
     fn frame_axes_are_a_frame_for_any_v_taken_and_refuse_one_along_d() {
         let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -364,10 +365,9 @@ mod tests {
         let d = [2.0 / 7.0, 3.0 / 7.0, 6.0 / 7.0];
         let p = [6.0 / 7.0, 2.0 / 7.0, -3.0 / 7.0];
         let leaned = |k: f64| [0, 1, 2].map(|i| d[i] + k * f64::EPSILON * p[i]);
-        for k in [65.0, 100.0, 1e3, 1e4, 1e9] {
-            assert!(frame_axes(d, leaned(k)).is_err(), "{k}");
-        }
-        for k in [1e11, 1e12, 1e15] {
+        assert!(frame_axes(d, d).is_err());
+        assert!(frame_axes(d, d.map(|c| -2.0 * c)).is_err());
+        for k in [65.0, 100.0, 1e3, 1e4, 5e-7 / f64::EPSILON, 1e11, 1e15] {
             check(d, d, leaned(k));
         }
         check([2e300, 3e300, 6e300], d, [1e300, 0.0, 0.0]);

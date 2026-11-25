@@ -501,8 +501,10 @@ impl Transform {
     /// unit and square to each other within a few ulps for any `v` taken, `x × y` runs along `d`,
     /// and `y` runs along `v`'s part square to `d`. `d` and `v` are made unit first, at any finite
     /// length (nothing is squared before it is scaled). `None` when a coordinate is not finite, `d`
-    /// or `v` has no length, or `v` leans within [`FRAME_LEAN`] of `d`: `y`'s direction is then
-    /// set by the rounding of taking `v`'s part along `d` out, not by `v`.
+    /// or `v` has no length, or `v`'s part square to `d` is no longer than its own rounding
+    /// ([`FRAME_LEAN`]): `y` would then follow the rounding, not `v`. Otherwise `y`'s direction is
+    /// off `v`'s part square to `d` by about `4ε / sin`, `sin` the sine of the angle between `v`
+    /// and `d`; a caller that needs it closer compares that sine itself.
     #[must_use]
     pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
         if !(finite3(d) && finite3(v)) {
@@ -605,11 +607,11 @@ impl Transform {
 /// The operation name of the refusals of the maps built from their numbers.
 const OP_MAPS: &str = "math::Transform";
 
-/// The least sine of the angle between `v` and `d` that [`Transform::frame_axes`] takes. Taking
-/// `v`'s part along `d` out of the unit `v` leaves a remainder of length `sin` off by a few ulps of
-/// 1, so `y`'s direction is off `v`'s part square to `d` by about `4ε / sin`: at 1e-6 that is under
-/// 1e-9 rad, a millionth of a mm over a metre.
-pub const FRAME_LEAN: f64 = 1e-6;
+/// The remainder [`Transform::frame_axes`] refuses: taking the unit `v`'s part along the unit `d`
+/// out leaves a remainder of length `sin` (the sine of the angle between them) off by a few ulps
+/// of 1 (`v · d` and the product and difference after it, each within an ulp), so a remainder no
+/// longer than 8 ulps is rounding, not `v`, and gives no direction.
+pub const FRAME_LEAN: f64 = 8.0 * f64::EPSILON;
 
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
