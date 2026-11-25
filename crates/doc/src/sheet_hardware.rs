@@ -7,8 +7,8 @@
 //! cut-outs for an edge, and the boundary of a bend's zone, where the flat sheet ends and the bend
 //! starts, for a bend (docs/hardware-catalogue.md, "Near a bend").
 
-use solidcore_ops::prism::{loop_circle, loop_holds, same_circle, segment_distance};
 use solidcore_record::{Loop2, Region2, Vec2};
+use solidcraft_kernel::services::prism::{loop_circle, loop_holds, same_circle, segment_distance};
 
 use crate::hardware_catalog::{HardwareSize, hardware_size};
 use crate::sheet::SheetHardware;
