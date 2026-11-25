@@ -246,6 +246,10 @@ pub struct JointForm {
     alignment_primary_cache: [Option<JointOrigin>; 2],
     /// Backend A/B -> primary UI row, captured when this creation dialog opens.
     pub primary_order: [usize; 2],
+    /// As-built: the bodies of each component picked whole (its Browser row, or the component
+    /// selected when the dialog opened). They are one side, not parts to separate; a record goes
+    /// once any of its bodies leaves Components.
+    pub whole_components: Vec<Vec<String>>,
 }
 
 impl JointForm {
@@ -282,6 +286,7 @@ impl JointForm {
             alignment_primary_key: None,
             alignment_primary_cache: [None, None],
             primary_order: [0, 1],
+            whole_components: Vec::new(),
         }
     }
 
@@ -1387,8 +1392,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             crate::ui_kit::options(ui, "component_options", &mut [("Activate", activate)]);
         }
         Asm::Joint(f) => {
-            // As-built: two components picked, the position comes next.
-            if f.as_built && *active == 0 && inputs.first().is_some_and(|i| i.items.len() >= 2) {
+            let picked = sel_items(inputs, 0);
+            f.whole_components.retain(|bodies| bodies.iter().all(|b| picked.contains(&Sel::Body { name: b.clone() })));
+            // As-built: two components picked, the position comes next. Counted as OK counts
+            // them: a component with two bodies is one.
+            if f.as_built && *active == 0 && occurrences(&app.session, picked).len() >= 2 {
                 *active = 1;
             }
             // Picks that make no joint say why, under them, and offer the way out (#1239).
@@ -2488,6 +2496,11 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let doc = &app.session.doc;
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
+    // As-built: one component picked whole is one side, and the second is still to come (#21842).
+    let whole = f.as_built && f.whole_components.iter().any(|w| w.iter().all(|b| bodies.contains(b)) && bodies.iter().all(|b| w.contains(b)));
+    if whole {
+        return None;
+    }
     // Only every pick naming a body makes the one-component case a problem: a datum plane or axis
     // side names its placement's origin, not a body, so a datum of one part against a face of
     // another is still a two-part joint.
@@ -2498,6 +2511,20 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
+}
+
+/// As-built: a component was picked whole, as these bodies. Kept while Components holds them all.
+pub(crate) fn picked_whole_component(d: &mut Dialog, bodies: &[String]) {
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { return };
+    let held = d.inputs.first().is_some_and(|i| bodies.iter().all(|b| i.items.contains(&Sel::Body { name: b.clone() })));
+    if f.as_built && held && !bodies.is_empty() && !f.whole_components.iter().any(|w| w == bodies) {
+        f.whole_components.push(bodies.to_vec());
+    }
+}
+
+/// As-built with fewer than two components in Components: they are still being picked.
+pub(crate) fn as_built_wants_components(s: &Session, d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Assembly(Asm::Joint(f)) if f.as_built) && occurrences(s, sel_items(&d.inputs, 0)).len() < 2
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order).

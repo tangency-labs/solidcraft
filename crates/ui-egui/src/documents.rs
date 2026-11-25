@@ -1928,23 +1928,46 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
 /// opened while the person is busy in another design). Its view is framed when it is shown.
-pub(crate) fn open_tab_behind(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
-    if app.docs.slots.is_empty() {
-        app.docs.slots.push(None);
-        app.docs.active = 0;
-    }
-    if app.docs.slots.len() >= MAX_OPEN {
-        return Err(format!("at most {MAX_OPEN} designs can be open"));
-    }
+pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+    let at = app.docs.active.saturating_add(1);
+    open_tab_behind_at(app, session, at)
+}
+
+/// Open `session` in a new tab at place `at` among the tabs (past the last: at the end), leaving
+/// the shown design as it is, as [`open_tab_behind`] does.
+pub(crate) fn open_tab_behind_at(app: &mut SolveApp, mut session: Session, at: usize) -> Result<(), String> {
+    let at = make_room(app, at)?;
     session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let mut slot = DocSlot::new(session);
     slot.fit = true;
-    app.docs.slots.insert(app.docs.active + 1, Some(slot));
+    app.docs.slots.insert(at, Some(slot));
+    if at <= app.docs.active {
+        app.docs.active += 1;
+    }
     Ok(())
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+    let at = app.docs.active.saturating_add(1);
+    open_tab_at(app, session, at)
+}
+
+/// Whether a design can be opened in a tab of its own now, or why not: not while a "save
+/// changes?" prompt is open or tabs are being closed one after another, nor past [`MAX_OPEN`].
+pub fn tab_room(app: &SolveApp) -> Result<(), String> {
+    if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err(app.tr("document.finish_save_prompt").to_owned());
+    }
+    if app.docs.slots.len() >= MAX_OPEN {
+        return Err(format!("at most {MAX_OPEN} designs can be open"));
+    }
+    Ok(())
+}
+
+/// The place a new tab asked for at `at` goes (past the last: at the end), with the first slot
+/// made when there is none; refused while a "save changes?" prompt is open or no tab is left.
+fn make_room(app: &mut SolveApp, at: usize) -> Result<usize, String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -1955,9 +1978,19 @@ pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> 
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    Ok(at.min(app.docs.slots.len()))
+}
+
+/// Open `session` in a new tab at place `at` among the tabs (0 before the first, past the last at
+/// the end) and switch to it, framing its model.
+pub fn open_tab_at(app: &mut SolveApp, mut session: Session, at: usize) -> Result<(), String> {
+    let at = make_room(app, at)?;
     session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
-    let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
+    // The shown design's slot moves along with the tabs before it.
+    if at <= app.docs.active {
+        app.docs.active += 1;
+    }
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
     crate::history_folds::load(app);
     app.fit_view();
@@ -2932,6 +2965,7 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
     view_new: "tab:view_new",
     view_more: "tab:view_more",
     switcher: "tab:switcher",
+    file_drop: "tab:file_drop",
 };
 
 /// How far below the bar (points) a design tab is released to tear it off: the distance
@@ -3464,6 +3498,39 @@ pub fn duplicate(app: &mut SolveApp, i: usize) {
     }
     app.cancel_view_animation();
     app.cam = cam;
+}
+
+/// Files dropped on the tab bar open, each as a design in a new tab, at the place the bar marked
+/// (a CAD, mesh, drawing or point cloud file as a new design holding it, never inserted into the
+/// design shown). Called before the app's own drop handling, so those taken are not opened twice.
+/// The pointer is where it was last seen, as for the agent chat's drops.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn take_file_drops(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.input(|i| i.raw.dropped_files.is_empty()) {
+        return;
+    }
+    let pointer = ctx.input(|i| i.pointer.latest_pos());
+    let Some(at) = crate::app_bar::file_drop_place(ctx, tab_strip_id(ctx.viewport_id()), pointer) else { return };
+    let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+    open_files_at(app, files.iter().map(|f| f.path().to_string_lossy().to_string()), at);
+}
+
+/// Open each of `paths` as a design in a new tab, the first at place `at`, the others after it in
+/// their order. A file already open shows its tab instead; one that can't be read says why.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn open_files_at(app: &mut SolveApp, paths: impl Iterator<Item = String>, at: usize) {
+    let mut at = at;
+    for path in paths.filter(|p| !p.is_empty()) {
+        let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
+        request.new_tab_at = Some(at);
+        // The Verify preference checks a design opened this way too, as File > Open does.
+        if app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(&path) {
+            request.options.insert("verify".into(), json!(true));
+            request.auto_verify = true;
+        }
+        at = at.saturating_add(1);
+        let _ = crate::file_load::begin_request(app, request);
+    }
 }
 
 /// The longest name a design takes (as `component.rename` accepts).
@@ -5003,7 +5070,7 @@ mod tests {
     #[test]
     fn grouped_row_save_closes_only_its_tab_and_keeps_the_last_row_grouped() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("row.solidcraft");
         let to = file.to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5089,7 +5156,7 @@ mod tests {
     #[test]
     fn grouped_row_discard_closes_only_its_tab_without_saving() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("discard.solidcraft");
         switch(&mut h.app, 0);
         h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
@@ -5106,7 +5173,7 @@ mod tests {
     fn grouped_last_row_finishes_close_or_quit() {
         for quit in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app = four_tabs();
+            *h.app = four_tabs();
             let file = h.dir.join("last.solidcraft");
             let to = file.to_string_lossy().into_owned();
             h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5145,7 +5212,7 @@ mod tests {
     fn grouped_row_cancelled_picker_or_failed_save_keeps_the_row() {
         for fail in [false, true] {
             let mut h = crate::scenario::Harness::new();
-            h.app = four_tabs();
+            *h.app = four_tabs();
             let bad = h.dir.join("missing").join("row.solidcraft").to_string_lossy().into_owned();
             h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(fail.then(|| bad.clone())))));
             let before = control(&mut h.app, &json!({"action":"quit", "save_indices":[2]}));
@@ -5163,7 +5230,7 @@ mod tests {
     #[test]
     fn grouped_save_selected_writes_only_checked_designs() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("selected.solidcraft");
         let to = file.to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
@@ -5181,7 +5248,7 @@ mod tests {
     #[test]
     fn grouped_existing_paths_save_only_selected_and_failure_keeps_tabs() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let first = h.dir.join("first.solidcraft");
         let second = h.dir.join("second.solidcraft");
         for (i, file) in [(0, &first), (2, &second)] {
@@ -5198,7 +5265,7 @@ mod tests {
             let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
             assert_eq!(design.features.len(), features);
         }
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let bad = h.dir.join("missing").join("bad.solidcraft").to_string_lossy().into_owned();
         h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(bad.clone())))));
         control(&mut h.app, &json!({"action":"quit"}));
@@ -5213,7 +5280,7 @@ mod tests {
     #[test]
     fn grouped_later_save_as_cancel_keeps_all_tabs_and_saves_in_order() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         let file = h.dir.join("first.solidcraft");
         let to = file.to_string_lossy().into_owned();
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -5239,7 +5306,7 @@ mod tests {
     #[test]
     fn grouped_prompt_names_select_tabs_and_keyboard_answers() {
         let mut h = crate::scenario::Harness::new();
-        h.app = four_tabs();
+        *h.app = four_tabs();
         h.app.home.open = false;
         h.app.preferences.language = "en".into();
         switch(&mut h.app, 0);
@@ -5351,6 +5418,202 @@ mod tests {
         control(&mut a, &json!({"save_indices":[],"answer":"save"}));
         assert_eq!(a.docs.count(), 2);
         assert!(!any_dirty(&a));
+    }
+
+    #[derive(Debug)]
+    struct DroppedPath(std::path::PathBuf);
+
+    impl egui::DroppedFile for DroppedPath {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            std::fs::read(&self.0).map_err(|e| e.to_string())
+        }
+    }
+
+    fn dropped(files: &[&std::path::Path]) -> Vec<egui::DroppedFileHandle> {
+        files.iter().map(|p| std::sync::Arc::new(DroppedPath(p.to_path_buf())) as egui::DroppedFileHandle).collect()
+    }
+
+    fn tab_names(app: &SolveApp) -> Vec<String> {
+        tabs_info(app).into_iter().map(|(name, _)| name).collect()
+    }
+
+    /// Files dragged over the tab bar show where they would open; dropped there, each opens as a
+    /// design in a new tab at that place (a mesh too, never inserted into the design shown), and
+    /// one that can't be read says so and opens nothing. Dropped elsewhere they do what they did.
+    #[test]
+    fn files_dropped_on_the_tab_bar_open_in_new_tabs_there() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plate = dir.join("plate.sc");
+        let mut saved = Session::default();
+        saved.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2})).unwrap();
+        saved.execute("file.save_as", &json!({"path": plate})).unwrap();
+        let tetra = dir.join("tetra.stl");
+        std::fs::write(&tetra, "solid t\nfacet normal 0 0 -1\n outer loop\n  vertex 0 0 0\n  vertex 0 10 0\n  vertex 10 0 0\n endloop\nendfacet\nfacet normal 0 -1 0\n outer loop\n  vertex 0 0 0\n  vertex 10 0 0\n  vertex 0 0 10\n endloop\nendfacet\nfacet normal -1 0 0\n outer loop\n  vertex 0 0 0\n  vertex 0 0 10\n  vertex 0 10 0\n endloop\nendfacet\nfacet normal 1 1 1\n outer loop\n  vertex 10 0 0\n  vertex 0 10 0\n  vertex 0 0 10\n endloop\nendfacet\nendsolid t\n").unwrap();
+        let junk = dir.join("junk.step");
+        std::fs::write(&junk, "not a STEP file").unwrap();
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        switch(&mut h.app, 0);
+        h.frames(3);
+        let at = |h: &mut crate::scenario::Harness, handle: &str| {
+            let [x, y] = h.at(&json!({"handle": handle})).unwrap();
+            egui::pos2(x as f32, y as f32)
+        };
+        let between = {
+            let (a, b) = (at(&mut h, "tab:design:0"), at(&mut h, "tab:design:1"));
+            egui::pos2((a.x + b.x) / 2.0, a.y)
+        };
+        let place = |h: &crate::scenario::Harness, p: egui::Pos2| crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(p));
+        let hovered = || vec![egui::HoveredFile { path: Some(tetra.clone()), mime: String::new() }];
+        crate::scenario::clear_handles();
+        h.drag_files(between, hovered(), Vec::new());
+        assert_eq!(place(&h, between), Some(1), "between the two tabs");
+        assert!(crate::scenario::handle_at("tab:file_drop").is_some(), "and marked there");
+        crate::scenario::clear_handles();
+        h.drag_files(egui::pos2(700.0, 400.0), hovered(), Vec::new());
+        assert_eq!(place(&h, egui::pos2(700.0, 400.0)), None, "not over the 3D view");
+        assert!(crate::scenario::handle_at("tab:file_drop").is_none(), "nothing marked there");
+
+        h.drop_files(between, dropped(&[&plate, &tetra, std::path::Path::new("")]));
+        h.settle();
+        assert_eq!(tab_names(&h.app), ["Untitled", "plate", "tetra", "Untitled"], "both open in order between the tabs");
+        assert_eq!(h.app.docs.active, 2, "the last one opened is shown");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1, "the mesh is a design of its own");
+        switch(&mut h.app, 0);
+        assert_eq!(h.app.session.doc.features.len(), 1, "the design that was shown took nothing in");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+
+        // The same file again shows its tab instead of opening it twice.
+        h.frames(3);
+        let first = at(&mut h, "tab:design:0") - vec2(30.0, 0.0);
+        h.drop_files(first, dropped(&[&plate]));
+        h.settle();
+        assert_eq!(h.app.docs.count(), 4, "{:?}", tab_names(&h.app));
+        assert_eq!(h.app.docs.active, 1, "plate's own tab is shown");
+        switch(&mut h.app, 0);
+
+        // At the end of the strip: unreadable files say so and open nothing.
+        h.frames(3);
+        let end = at(&mut h, "tab:new") - vec2(14.0, 0.0);
+        h.drop_files(end, dropped(&[&junk, &dir.join("missing.stl")]));
+        h.settle();
+        assert_eq!(h.app.docs.count(), 4, "{:?}", tab_names(&h.app));
+        assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+        assert_eq!(h.app.docs.active, 0);
+        assert_eq!(h.app.session.doc.features.len(), 1);
+
+        // Dropped on the 3D view, a mesh still goes where it did: into the design shown.
+        h.drop_files(egui::pos2(700.0, 400.0), dropped(&[&tetra]));
+        h.settle();
+        assert_eq!(h.app.docs.count(), 4, "{:?}", tab_names(&h.app));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A tab bar that is no longer drawn takes no drops: its place is read only from the pass it
+    /// was last drawn in or the next.
+    #[test]
+    fn a_tab_bar_not_drawn_takes_no_drops() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        h.frames(3);
+        let [x, y] = h.at(&json!({"handle": "tab:design:0"})).unwrap();
+        let on_bar = egui::pos2(x as f32, y as f32);
+        assert!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(on_bar)).is_some());
+        // Passes in which nothing draws the bar.
+        for _ in 0..3 {
+            let _ = h.ctx.run_ui(Default::default(), |_| {});
+        }
+        assert_eq!(crate::app_bar::file_drop_place(&h.ctx, tab_strip_id(h.ctx.viewport_id()), Some(on_bar)), None);
+    }
+
+    /// `doc.open`'s `tab` over the control channel opens the file in a new tab at that place;
+    /// past the last tab it goes at the end, and a place that is no whole number is refused.
+    #[test]
+    fn doc_open_with_a_tab_place_opens_a_new_tab_there() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut paths = Vec::new();
+        for name in ["first", "last"] {
+            let path = dir.join(format!("{name}.sc"));
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+            s.execute("file.save_as", &json!({"path": path})).unwrap();
+            paths.push(path.to_string_lossy().to_string());
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let open = |h: &mut crate::scenario::Harness, path: &str, tab: Value| {
+            h.call_queued("engine.execute", json!({"command": "doc.open", "params": {"path": path, "tab": tab}})).0
+        };
+        let r = open(&mut h, &paths[0], json!(0));
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle();
+        assert_eq!(tab_names(&h.app), ["first", "Untitled"], "a new tab before the design shown, not in its place");
+        assert_eq!(h.app.docs.active, 0);
+        let r = open(&mut h, &paths[1], json!(u64::MAX));
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle();
+        assert_eq!(tab_names(&h.app), ["first", "Untitled", "last"]);
+        for tab in [json!(-1), json!(0.5), json!("1")] {
+            let r = open(&mut h, &paths[0], tab.clone());
+            assert_eq!(r["ok"], false, "tab {tab}: {r}");
+        }
+        assert_eq!(h.app.docs.count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `doc.open` given both `tab` and `new_tab: true` opens the file at the place `tab` names, not
+    /// after the active tab where `new_tab` alone would put it.
+    #[test]
+    fn doc_open_with_a_tab_place_and_new_tab_opens_at_the_place() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-tab-and-new-tab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("first.sc");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        s.execute("file.save_as", &json!({"path": path})).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let params = json!({"path": path.to_string_lossy(), "tab": 0, "new_tab": true});
+        let r = h.call_queued("engine.execute", json!({"command": "doc.open", "params": params})).0;
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle();
+        assert_eq!(tab_names(&h.app), ["first", "Untitled"], "at the place `tab` names, before the design shown");
+        assert_eq!(h.app.docs.active, 0, "the new tab is shown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A blank design's tab stays when a file is opened beside it at a place: only an open
+    /// without a place takes the blank design's place.
+    #[test]
+    fn a_place_keeps_the_blank_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        open_tab_at(&mut h.app, s, 0).unwrap();
+        assert_eq!(tab_names(&h.app), ["Untitled", "Untitled"]);
+        assert_eq!(h.app.docs.active, 0, "the new tab is shown");
+        assert_eq!(h.app.session.doc.features.len(), 1);
+        switch(&mut h.app, 1);
+        assert!(h.app.session.doc.features.is_empty(), "the blank design kept its tab");
+        open_tab_behind_at(&mut h.app, Session::default(), 0).unwrap();
+        assert_eq!(h.app.docs.count(), 3);
+        assert_eq!(h.app.docs.active, 2, "the shown design is still shown, one place on");
+        assert!(h.app.session.doc.features.is_empty());
     }
 
     /// #3055: a right-click on a tab opens its menu; Close Other Tabs from it keeps that tab.
