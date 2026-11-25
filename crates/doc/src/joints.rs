@@ -3813,6 +3813,7 @@ mod tests {
                     placements: Vec::new(),
                     components: vec![parent],
                     occurrences: vec![inactive],
+                    join: false,
                 },
                 Some("Copies"),
             )

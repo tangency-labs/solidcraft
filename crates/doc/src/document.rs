@@ -1111,6 +1111,11 @@ pub enum FeatureKind {
         /// one id per matrix. Kept across count changes so survivors keep their identity (#12116).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         occurrences: Vec<u64>,
+        /// Join the bodies it copies from and their copies where they touch or overlap (#21625):
+        /// a part made of one patterned sector is one body, whatever the count. Copies that touch
+        /// nothing stay bodies of their own. Off: every copy is a body of its own, as before.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join: bool,
     },
     /// Mirror copies of other features' results in a plane. The copied features are named by
     /// id (#1134).

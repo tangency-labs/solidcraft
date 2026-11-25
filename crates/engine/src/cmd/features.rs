@@ -245,7 +245,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "extent1?, extent2?: expr (greater than zero); ",
             "copy_at_end1?, copy_at_end2?: bool (spacing_extent: one more copy exactly at the extent's end when the spacing doesn't divide it, so only the last gap is shorter); ",
             "alignment?, alignment2?: left|center|right (default right; counts include the original); ",
-            "reversed?, reversed2?: bool (Flip)",
+            "reversed?, reversed2?: bool (Flip); ",
+            "join?: bool (join the bodies copied from and their copies where they touch or overlap; copies that touch nothing stay bodies of their own; default false)",
         )),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ)).begins_edit()
         .at("SOLID", "CREATE")
@@ -258,7 +259,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "count; ",
             "angle? (default 360 deg; partial arcs include both ends); ",
             "alignment?: left|center|right (default right; original stays fixed); ",
-            "reversed?: bool (Flip; selects the extra side for even centered counts)",
+            "reversed?: bool (Flip; selects the extra side for even centered counts); ",
+            "join?: bool (join the bodies copied from and their copies where they touch or overlap; copies that touch nothing stay bodies of their own; default false)",
         )),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
@@ -3338,6 +3340,13 @@ fn finish_pattern(
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     let paths = pattern_occurrences(p, "pattern (components)")?;
+    let join = match p.get("join") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad("pattern", "`join` must be true or false"))?,
+    };
+    if join && !(comps.is_empty() && paths.is_empty()) {
+        return Err(bad("pattern", "`join` joins bodies: a pattern of components places occurrences, which are not joined"));
+    }
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
         let reply = add_feature(
@@ -3350,6 +3359,7 @@ fn finish_pattern(
                 placements,
                 components: Vec::new(),
                 occurrences: Vec::new(),
+                join,
             },
         )?;
         // The pattern is added either way: when it made no copies (the feature failed to
@@ -3381,7 +3391,7 @@ fn finish_pattern(
         let mut reply = add_feature(
             s,
             p,
-            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new() },
+            FeatureKind::Pattern { features, pattern, bodies: Vec::new(), placements: Vec::new(), components, occurrences: Vec::new(), join: false },
         )?;
         let made = s
             .doc

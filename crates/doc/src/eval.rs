@@ -5754,6 +5754,50 @@ fn pattern_copy_name(names: &mut BodyNames, f: &Feature, slot: Option<usize>, so
     }
 }
 
+/// A pattern's Join (#21625): the bodies it copies from and the copies it made (`st.bodies` from
+/// `before` on, made by `f`) are joined into one where they touch or overlap. The bodies copied
+/// from are the bodies picked, or, for a pattern of features, the bodies those features made.
+/// The first keeps its name and place; each piece that touches nothing of the rest stays a body
+/// of its own, named as a copy. A join the kernel refuses fails the feature, saying so.
+fn join_pattern_copies(st: &mut ModelState, f: &Feature, features: &[FeatureId], bodies: &[crate::BodyName], before: usize) -> Result<()> {
+    let source = |b: &ModelBody| if bodies.is_empty() { features.iter().any(|g| g.0 == b.feature) } else { bodies.iter().any(|n| *n == b.name) };
+    let mut group: Vec<usize> = st.bodies.iter().take(before).enumerate().filter(|(_, b)| source(b)).map(|(i, _)| i).collect();
+    group.extend(st.bodies.iter().enumerate().skip(before).filter(|(_, b)| b.feature == f.id).map(|(i, _)| i));
+    let [first, rest @ ..] = group.as_slice() else { return Ok(()) };
+    if rest.is_empty() {
+        return Ok(());
+    }
+    let Some(kept) = st.bodies.get(*first).cloned() else { return Ok(()) };
+    let mut joined = kept.traced();
+    for i in rest {
+        let Some(b) = st.bodies.get(*i) else { continue };
+        let body = crate::flush_join::join_bodies(&joined.body, &b.body, "the pattern's join produced nothing")
+            .map_err(|e| DocError::Invalid(format!("joining the pattern's copies: {e}")))?;
+        joined = Traced::step(body, &[&joined, &b.traced()]);
+    }
+    let pieces = joined.body.lumps()?;
+    let lineages = crate::lineage::Lineage::lumps(&joined.body, joined.lineage.as_ref(), &pieces);
+    // The joined bodies go; the first piece takes the first one's place and name.
+    for i in rest.iter().rev() {
+        if *i < st.bodies.len() {
+            st.bodies.remove(*i);
+        }
+    }
+    let mut output = 0;
+    for (k, (piece, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
+        if k == 0 {
+            if let Some(slot) = st.bodies.get_mut(*first) {
+                *slot = ModelBody::new(kept.name.clone(), piece, kept.feature).with_lineage(lineage);
+            }
+        } else {
+            let name = copy_body_name(st, f, output, &kept.name);
+            st.bodies.push(ModelBody::new(name, piece, f.id).with_lineage(lineage));
+            output += 1;
+        }
+    }
+    Ok(())
+}
+
 fn copy_body_name(state: &ModelState, f: &Feature, k: usize, source: &str) -> String {
     let base = f.body_names.get(k).filter(|name| !name.trim().is_empty()).map(String::as_str).unwrap_or(source);
     unique_body_name(state, base)
@@ -14743,15 +14787,17 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies, placements, components, .. } => {
+        FeatureKind::Pattern { features, pattern, bodies, placements, components, join, .. } => {
             // Component placements are reconciled on the document after evaluation (#12116).
             if !components.is_empty() {
                 let _ = pattern_transforms(doc, vals, st, f.component, pattern)?;
                 return Ok(());
             }
             let mats = own_copies(doc, vals, st, f)?;
+            let before = st.bodies.len();
             if bodies.is_empty() {
-                return replay(doc, vals, f, st, features, &mats, warning);
+                replay(doc, vals, f, st, features, &mats, warning)?;
+                return if *join { join_pattern_copies(st, f, features, bodies, before) } else { Ok(()) };
             }
             // Bodies: each copy is a new body named after its source. A body that cannot be
             // copied (gone, its placement gone, or its geometry refused by the move) is left out
@@ -14774,13 +14820,11 @@ fn eval_feature_kind(
                 st.pattern_left_out.insert(f.id, left_out);
             }
             match first_error {
-                Some(e) if skipped.len() == bodies.len() => Err(e),
-                Some(e) => {
-                    append_warning(warning, pattern_skipped_note(&skipped, &e));
-                    Ok(())
-                }
-                None => Ok(()),
+                Some(e) if skipped.len() == bodies.len() => return Err(e),
+                Some(e) => append_warning(warning, pattern_skipped_note(&skipped, &e)),
+                None => {}
             }
+            if *join { join_pattern_copies(st, f, features, bodies, before) } else { Ok(()) }
         }
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let m = mirror_copy(doc, vals, st, f, plane)?;

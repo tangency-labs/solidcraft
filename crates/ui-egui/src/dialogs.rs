@@ -5158,9 +5158,9 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
         Some("solid.fillet") => &["type", "fit", "corner", "radius2", "mid", "radii", "swap_ends", "smooth"],
         Some("solid.mirror") => &["combine"],
         Some("solid.pattern.rectangular") => {
-            &["alignment", "reversed", "alignment2", "reversed2", "distance1", "distance2", "copy_at_end1", "copy_at_end2"]
+            &["alignment", "reversed", "alignment2", "reversed2", "distance1", "distance2", "copy_at_end1", "copy_at_end2", "join"]
         }
-        Some("solid.pattern.circular") => &["alignment", "reversed"],
+        Some("solid.pattern.circular") => &["alignment", "reversed", "join"],
         Some("solid.hole") => &["all_points", "flip"],
         Some("solid.align") => &["from_snap", "to_snap"],
         Some("solid.boundary_fill") => &["remove_tools"],
@@ -9102,7 +9102,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied, placements, components, .. } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, placements, components, join, .. } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
@@ -9222,6 +9222,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d
                 }
             };
+            // Join is kept as the pattern has it, not as last used (#21625).
+            if matches!(pattern, PatternKind::Rectangular { .. } | PatternKind::Circular { .. }) {
+                d.extra.insert("join".into(), json!(join));
+            }
             // Replay references stay features, including features that created a body.
             let as_features = !features.is_empty();
             if let Some(inp) = d.inputs.first_mut() {

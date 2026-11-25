@@ -1090,6 +1090,11 @@ pub struct PatternCircularParams {
     #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reversed: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -1311,6 +1316,11 @@ pub struct PatternRectangularParams {
     /// As `copy_at_end1`, along the second direction.
     #[serde(default, deserialize_with = "copy_at_end2")]
     pub copy_at_end2: Option<bool>,
+    /// Join the bodies copied from and their copies where they touch or overlap, so a part
+    /// patterned from one piece is one body at any count; copies that touch nothing stay bodies of
+    /// their own (#21625). Default: false, every copy a body of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

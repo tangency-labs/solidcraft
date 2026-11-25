@@ -523,6 +523,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             Some("circular") => {
@@ -550,6 +551,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),

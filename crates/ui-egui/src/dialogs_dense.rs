@@ -804,11 +804,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::PatternRect { .. } => {
             enter |= pattern_direction_group(app, d, ui, 0);
             enter |= pattern_direction_group(app, d, ui, 1);
+            pattern_join_option(ui, d);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, "Total angle", angle);
             solid_pattern_alignment_row(ui, &mut d.extra, 0);
+            pattern_join_option(ui, d);
         }
         Kind::Hole { kind, opts, cb_diameter, cb_depth, cs_diameter, cs_angle, .. } => {
             let doc = &app.session.doc;
@@ -905,6 +907,16 @@ fn extra_segments(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>,
 }
 
 /// Only user changes add optional JSON keys, preserving no-op feature edits.
+/// A pattern of bodies or features: Join bodies if possible, which joins the copies with what they
+/// copy where they touch (#21625). A pattern of components places occurrences, which never join.
+fn pattern_join_option(ui: &mut egui::Ui, d: &mut Dialog) {
+    if d.inputs.first().is_some_and(|i| i.items.iter().any(|x| matches!(x, Sel::Occurrence { .. }))) {
+        d.extra.remove("join");
+        return;
+    }
+    extra_options(ui, "pattern_join", &mut d.extra, &[("Join bodies if possible", "join")]);
+}
+
 fn extra_options(ui: &mut egui::Ui, id: &str, extra: &mut serde_json::Map<String, Value>, choices: &[(&str, &str)]) {
     let mut values: Vec<bool> = choices.iter().map(|(_, key)| extra.get(*key).and_then(Value::as_bool).unwrap_or(false)).collect();
     let before = values.clone();

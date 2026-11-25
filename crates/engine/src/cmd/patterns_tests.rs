@@ -3576,3 +3576,71 @@ fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
     assert_eq!(shown.len(), 3, "{shown:?}");
     assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
 }
+
+/// The bodies of the design, by name.
+fn body_names(s: &Session) -> Vec<String> {
+    s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+}
+
+/// A gear made of one sector (#21625): with Join, a circular pattern of a body that crosses the
+/// axis is one body at any count, and the count can change without a Combine to keep up. Without
+/// it each copy is a body of its own, as before. Copies that touch nothing stay apart; bodies the
+/// pattern doesn't copy are left alone; and the choice is saved with the design.
+#[test]
+fn a_patterns_join_makes_one_body_of_the_copies_that_touch() {
+    let sector = |s: &mut Session| {
+        run(s, "parameters.add", json!({"name": "teeth", "expression": "6", "unit": "none"}));
+        run(s, "solid.box", json!({"corner": [0, -2, 0], "length": 20, "width": 4, "height": 5, "body_name": "Tooth", "name": "ToothBox"}));
+        run(s, "solid.box", json!({"corner": [50, 50, 0], "length": 5, "width": 5, "height": 5, "body_name": "Other"}));
+    };
+    let one = {
+        let mut s = Session::default();
+        sector(&mut s);
+        volume(&mut s)
+    };
+    // Off, as before: a body per copy.
+    let mut s = Session::default();
+    sector(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": "teeth"}));
+    assert_eq!(body_names(&s).len(), 7, "{:?}", body_names(&s));
+    // On: the six overlapping teeth are one body, under the source's name; Other is left alone.
+    for (what, from) in [("bodies", json!({"bodies": ["Tooth"]})), ("features", json!({"features": ["ToothBox"]}))] {
+        let mut s = Session::default();
+        sector(&mut s);
+        let mut p = json!({"axis": "Z", "count": "teeth", "join": true, "name": "Teeth"});
+        if let (Some(p), Some(from)) = (p.as_object_mut(), from.as_object()) {
+            p.extend(from.clone());
+        }
+        run(&mut s, "solid.pattern.circular", p);
+        assert_eq!(body_names(&s), ["Tooth", "Other"], "{what}");
+        let joined = volume(&mut s);
+        assert!(joined > one && joined < 7.0 * one - 1.0, "{what}: the teeth overlap at the axis: {joined} vs {one} each");
+        // More teeth: still one body, with no Combine to update.
+        run(&mut s, "parameters.change", json!({"name": "teeth", "expression": "9"}));
+        assert_eq!(body_names(&s), ["Tooth", "Other"], "{what}: nine teeth");
+        // Saved and opened again.
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut reopened = Session::new(doc);
+        reopened.refresh();
+        assert_eq!(body_names(&reopened), ["Tooth", "Other"], "{what}: reopened");
+    }
+    // Turned on for a pattern made without it.
+    let mut s = Session::default();
+    sector(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": "teeth", "name": "Teeth"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Teeth", "set": {"join": true}}));
+    assert_eq!(body_names(&s), ["Tooth", "Other"], "joined by an edit");
+    // Teeth that don't reach the axis don't touch: each stays a body of its own.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [10, -2, 0], "length": 10, "width": 4, "height": 5, "body_name": "Tooth"}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Tooth"], "axis": "Z", "count": 4, "join": true}));
+    assert_eq!(body_names(&s).len(), 4, "{:?}", body_names(&s));
+    // A rectangular pattern of overlapping slabs joins too.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 4, "height": 2, "body_name": "Slab"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Slab"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 8, "join": true}));
+    assert_eq!(body_names(&s), ["Slab"]);
+    // `join` must be a bool.
+    let error = s.execute("solid.pattern.rectangular", &json!({"bodies": ["Slab"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 10, "join": "yes"}));
+    assert!(error.is_err(), "{error:?}");
+}
