@@ -448,7 +448,8 @@ browser, so it has no folder settings. The control channel sets them with
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
 top component's right-click menu, under **Design**) records who made a design and what it is: project, part
-number, revision, author, organization, description and licence. **OK** applies the changes as
+number, revision, author, organization, description, material, finish (with a list of common
+finishes to pick from; a design that is one part carries them itself) and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and
 `document.metadata.remove` (`key` or `keys`) change them. `document.inspect` and the MCP

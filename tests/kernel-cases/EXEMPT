@@ -319,6 +319,7 @@ pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
 pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
+pulley.insert                     timing-belt pulleys built from sketch, extrude and cylinder features: volumes against the outline's area worked out by hand in crates/engine/src/cmd/pulleys_tests.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.batch                      rendering: images, cameras, stages
@@ -386,6 +387,7 @@ render.texture.list               rendering image resources; crates/engine/src/c
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.all                        the selection
 select.clear                      the selection
+select.edge_loop                  the selection; crates/engine/src/cmd/edit_tests.rs::select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge
 select.filter                     the selection
 select.invert                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
