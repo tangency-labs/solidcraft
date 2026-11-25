@@ -1978,7 +1978,8 @@ fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
 /// edge (#21179): the trace lands on the law's corner, and takes the through point there
 /// whatever its tangent's sign, which is the surfaces' and not the trace's. Each round adds
 /// or removes its balls' union along the edge, the faces square to it going on past its ends
-/// ([`balls_union`]), and is a valid body: a peak, a dip, and a corner off the middle.
+/// (the volumes the kernel's `wr685_law_corners` checks against the union's integral), and is
+/// a valid body: a peak, a dip, and a corner off the middle.
 #[test]
 fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
     use solidcore_ops::{boolean::boolean, BooleanOp};
@@ -1990,29 +1991,44 @@ fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
     };
     let slot = cut([-5.0, -10.0, 12.0], [12.0, 20.0, 6.0]);
     let step = cut([-5.0, -10.0, 20.0], [12.0, 20.0, 20.0]);
-    // the body, a point of the edge, its start, its length, whether the round removes
-    let edges = [
-        (&slot, [-5.0, -9.5, 15.0], [-5.0, -9.5, 12.0], 6.0, true),
-        (&slot, [-5.0, 0.0, 12.0], [-5.0, -9.5, 12.0], 19.0, false),
-        (&step, [-5.0, 0.0, 20.0], [-5.0, -9.5, 20.0], 19.0, false),
-        (&step, [-5.0, -9.5, 25.0], [-5.0, -9.5, 20.0], 10.0, true),
+    // the law's corner and its radii
+    let laws = [
+        (0.5, [1.0, 2.0, 1.0]),
+        (0.5, [1.0, 0.5, 1.0]),
+        (0.3, [1.0, 2.0, 1.0]),
     ];
-    for (body, at, start, length, removes) in edges {
-        for (corner, radii) in [
-            (0.5, [1.0, 2.0, 1.0]),
-            (0.5, [1.0, 0.5, 1.0]),
-            (0.3, [1.0, 2.0, 1.0]),
-        ] {
+    // the body, a point of the edge, its start, and what each law's round adds
+    let (l6, l19, l10) = (
+        [2.900200, 0.744330, 2.883669],
+        [9.479435, 2.376334, 9.472978],
+        [4.942629, 1.247737, 4.931130],
+    );
+    let edges = [
+        (
+            &slot,
+            [-5.0, -9.5, 15.0],
+            [-5.0, -9.5, 12.0],
+            l6.map(|v| -v),
+        ),
+        (&slot, [-5.0, 0.0, 12.0], [-5.0, -9.5, 12.0], l19),
+        (&step, [-5.0, 0.0, 20.0], [-5.0, -9.5, 20.0], l19),
+        (
+            &step,
+            [-5.0, -9.5, 25.0],
+            [-5.0, -9.5, 20.0],
+            l10.map(|v| -v),
+        ),
+    ];
+    for (body, at, start, added) in edges {
+        for ((corner, radii), want) in laws.into_iter().zip(added) {
             let b = body.copy().unwrap();
             let before = volume(&b);
             let knots = [0.0, 0.0, corner, 1.0, 1.0];
             fillet_variable_from(&b, edge_at(&b, at), start, 1, &knots, &radii).unwrap();
-            let moved = volume(&b) - before;
-            let moved = if removes { -moved } else { moved };
-            let want = balls_union(length, corner, radii);
+            let got = volume(&b) - before;
             assert!(
-                (moved - want).abs() <= 1e-4 * want,
-                "{at:?} {radii:?} at {corner}: {moved}, want {want}"
+                (got - want).abs() <= 1e-4 * want.abs(),
+                "{at:?} {radii:?} at {corner}: {got}, want {want}"
             );
             assert!(
                 b.check(CheckLevel::All).unwrap().is_valid(),
@@ -2020,78 +2036,6 @@ fn a_variable_round_with_a_corner_in_its_law_rounds_a_slots_and_a_steps_edge() {
             );
         }
     }
-}
-
-/// The material the balls of a law straight from `radii[0]` to `radii[1]` at the fraction
-/// `corner` and on to `radii[2]` leave along a right-angled edge of `length`: in each plane
-/// square to the edge at x, the ray at the angle t from the edge meets the union first at the
-/// least entry over the balls, and the sector to there is left, so the area is the integral
-/// of entry²/2 over t. The ball at s is of radius r(s), as far from both faces, and the law
-/// goes on past the edge's ends along its end pieces. By Simpson's rule, t = π/4 (1 − cos πq)
-/// making the integrand smooth at the faces. (SolidCraft's `removed_by_balls`.)
-fn balls_union(length: f64, corner: f64, radii: [f64; 3]) -> f64 {
-    fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
-        let h = (b - a) / n as f64;
-        let weight = |i| match i {
-            _ if i == 0 || i == n => 1.0,
-            _ if i % 2 == 1 => 4.0,
-            _ => 2.0,
-        };
-        (0..=n)
-            .map(|i| weight(i) * f(a + i as f64 * h))
-            .sum::<f64>()
-            * h
-            / 3.0
-    }
-    let turn = corner * length;
-    let r = |s: f64| {
-        if s <= turn {
-            radii[1] + (radii[0] - radii[1]) * (turn - s) / turn
-        } else {
-            radii[1] + (radii[2] - radii[1]) * (s - turn) / (length - turn)
-        }
-    };
-    let reach = 1.5 * radii.into_iter().fold(0.0, f64::max);
-    let entry = |x: f64, t: f64| {
-        let at = |s: f64| {
-            let r = r(s);
-            let p = r * (t.cos() + t.sin());
-            let d = p * p - (x - s) * (x - s) - r * r;
-            if r > 0.0 && d >= 0.0 {
-                p - d.sqrt()
-            } else {
-                f64::INFINITY
-            }
-        };
-        let step = reach / 200.0;
-        let nearest = (-200..=200)
-            .map(|i| x + f64::from(i) * step)
-            .min_by(|a, b| at(*a).total_cmp(&at(*b)))
-            .unwrap();
-        let (mut lo, mut hi) = (nearest - step, nearest + step);
-        for _ in 0..60 {
-            let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
-            if at(a) < at(b) {
-                hi = b;
-            } else {
-                lo = a;
-            }
-        }
-        at(nearest).min(at(0.5 * (lo + hi)))
-    };
-    let area = |x: f64| {
-        simpson(
-            |q| {
-                let rho = entry(x, PI / 4.0 * (1.0 - (PI * q).cos()));
-                let rho = if rho.is_finite() { rho } else { 0.0 };
-                0.5 * rho * rho * PI * PI / 4.0 * (PI * q).sin()
-            },
-            0.0,
-            1.0,
-            128,
-        )
-    };
-    simpson(area, 0.0, turn, 64) + simpson(area, turn, length, 64)
 }
 
 /// A round of a linear radius law along a box's straight edge, between its two faces at a
