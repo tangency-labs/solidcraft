@@ -455,6 +455,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
+    // Trim explains incomplete picks before OK can be pressed, including a whole cutting sheet.
+    if matches!(d.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { .. }))
+        && d.error.is_none()
+        && app.preview.error.is_none()
+        && let Err(reason) = apply_commands(app, d)
+    {
+        let hint = crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Hint("trim_missing_input"));
+        crate::scenario::publish_rect("dialog:trim_missing_input", hint.rect);
+    }
     let manage_hint = match &d.kind {
         Kind::Material { .. } => Some("manage.material_hint"),
         Kind::Appearance(_) => Some("manage.appearance_hint"),
