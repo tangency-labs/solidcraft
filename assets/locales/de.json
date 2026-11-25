@@ -5163,7 +5163,6 @@
   "sketch_finish.edit": "Skizze bearbeiten",
   "sketch_finish.finished": "{name} abgeschlossen",
   "sketch_mode.announcement": "{view}, Skizzenmodus",
-  "sketch_mode.editing": "Bearbeitung",
   "sketch_mode.model_card_unavailable": "Öffne eine Modellansicht, bevor du hier eine Skizze beginnst",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Angehängt an {body} / {path}",
