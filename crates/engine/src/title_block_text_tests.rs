@@ -102,7 +102,7 @@ fn labels_and_values_sit_by_the_cell_text_rule() {
         assert_eq!(lines.join(" "), cell["text"], "{}", cell["name"]);
         values += lines.len();
     }
-    assert_eq!(drawn.len(), 12 + values, "{:?}", drawn.iter().map(|r| &r.text).collect::<Vec<_>>());
+    assert_eq!(drawn.len(), 18 + values, "{:?}", drawn.iter().map(|r| &r.text).collect::<Vec<_>>());
     let d = s.drawing("test").unwrap().clone();
     let scene = build(&s, &d, sheet).unwrap().scene;
     let group = scene.groups.last().unwrap();

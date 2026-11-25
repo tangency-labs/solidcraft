@@ -29,64 +29,70 @@ pub struct Query<'a> {
     inner: k::Query,
 }
 
+/// A record as the kernel reads it: its edges and faces copied through `solidcore-convert`
+/// once, each face told whether its shell reads it along its natural normal. A curve or
+/// surface the conversion refuses (geometry too deep) is one the kernel cannot evaluate, as a
+/// malformed one.
+pub(crate) fn kernel_record(record: &Brep) -> k::Record {
+    let mut forward = vec![None; record.faces.len()];
+    for shell in &record.shells {
+        if let Shell::Faces { faces, .. } = shell {
+            for of in faces {
+                if let Some(slot) = forward.get_mut(of.face as usize) {
+                    *slot = Some(of.forward);
+                }
+            }
+        }
+    }
+    let edges = record
+        .edges
+        .iter()
+        .map(|e| k::Edge {
+            curve: solidcore_convert::curve(e.parameters()).ok(),
+            interval: e.interval,
+            faces: e.uses.iter().map(|u| u.face as usize).collect(),
+        })
+        .collect();
+    let faces = record
+        .faces
+        .iter()
+        .zip(forward)
+        .map(|(f, forward)| k::Face {
+            parameters: solidcore_convert::surface(f.parameters()).ok(),
+            surface: solidcore_convert::surface(&f.surface).ok(),
+            domain: f.domain,
+            forward,
+            loops: f
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Loop::Edges { edges } => k::Loop::Edges(
+                        edges
+                            .iter()
+                            .map(|u| k::Use {
+                                edge: u.edge as usize,
+                                forward: u.forward,
+                                pcurve: solidcore_convert::curve2(&u.pcurve),
+                            })
+                            .collect(),
+                    ),
+                    Loop::Vertex { vertex } => {
+                        k::Loop::Vertex(record.vertices.get(*vertex as usize).map(|v| v.point))
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    k::Record { edges, faces }
+}
+
 impl<'a> Query<'a> {
     /// The record made ready. A curve or surface the conversion refuses (geometry too deep) is
     /// one the queries cannot evaluate, as a malformed one.
     #[must_use]
     pub fn new(record: &'a Brep) -> Query<'a> {
-        let mut forward = vec![None; record.faces.len()];
-        for shell in &record.shells {
-            if let Shell::Faces { faces, .. } = shell {
-                for of in faces {
-                    if let Some(slot) = forward.get_mut(of.face as usize) {
-                        *slot = Some(of.forward);
-                    }
-                }
-            }
-        }
-        let edges = record
-            .edges
-            .iter()
-            .map(|e| k::Edge {
-                curve: solidcore_convert::curve(e.parameters()).ok(),
-                interval: e.interval,
-                faces: e.uses.iter().map(|u| u.face as usize).collect(),
-            })
-            .collect();
-        let faces = record
-            .faces
-            .iter()
-            .zip(forward)
-            .map(|(f, forward)| k::Face {
-                parameters: solidcore_convert::surface(f.parameters()).ok(),
-                surface: solidcore_convert::surface(&f.surface).ok(),
-                domain: f.domain,
-                forward,
-                loops: f
-                    .loops
-                    .iter()
-                    .map(|l| match l {
-                        Loop::Edges { edges } => k::Loop::Edges(
-                            edges
-                                .iter()
-                                .map(|u| k::Use {
-                                    edge: u.edge as usize,
-                                    forward: u.forward,
-                                    pcurve: solidcore_convert::curve2(&u.pcurve),
-                                })
-                                .collect(),
-                        ),
-                        Loop::Vertex { vertex } => {
-                            k::Loop::Vertex(record.vertices.get(*vertex as usize).map(|v| v.point))
-                        }
-                    })
-                    .collect(),
-            })
-            .collect();
-        Query {
-            record,
-            inner: k::Query::new(k::Record { edges, faces }),
-        }
+        let inner = k::Query::new(kernel_record(record));
+        Query { record, inner }
     }
 
     /// The record it reads.
@@ -185,6 +191,15 @@ impl<'a> Query<'a> {
     #[must_use]
     pub fn faces_at(&self, p: Vec3, accept: f64) -> Vec<(f64, usize)> {
         self.inner.faces_at(vec3(p), accept)
+    }
+
+    /// The faces that face against the curves `samples` lie on, ascending: each sample a point on
+    /// a curve and its direction there, a face through it meant to face along that direction
+    /// crossed with `normal` ([`k::Query::faces_against`]).
+    #[must_use]
+    pub fn faces_against(&self, normal: Vec3, samples: &[(Vec3, Vec3)], accept: f64) -> Vec<usize> {
+        let samples: Vec<_> = samples.iter().map(|(p, d)| (vec3(*p), vec3(*d))).collect();
+        self.inner.faces_against(vec3(normal), &samples, accept)
     }
 
     /// Where the ray from `o` along `d` meets the faces ahead of `o`: each meeting's distance,
