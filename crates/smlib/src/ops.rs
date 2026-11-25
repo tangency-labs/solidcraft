@@ -58,9 +58,9 @@ impl Blend {
     }
 }
 
-/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
-/// both on a plane (the rounds along a boss's base, at its upright edges): the turn of
-/// [`Brep::blend_dropping`]'s rounds ([`Blend::Round`] only).
+/// How two rounds turn where they meet at a sharp side edge on a face they share (the rounds along
+/// a boss's base, at its upright edges): the turn of [`Brep::blend_dropping`]'s rounds.
+/// [`Turn::Swept`] is for [`Blend::Round`] only.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Turn {
     /// The rounds run on to where they cross and meet in a mitre, the plane section of the two.
@@ -70,6 +70,10 @@ pub enum Turn {
     /// revolved about the side edge, an exact torus tangent to both rounds. A corner where this
     /// is not built is [`Error::TurnRefused`].
     Swept,
+    /// Each turn [`Turn::Swept`] where it is built and [`Turn::Mitre`] where it is not, decided
+    /// per corner before anything is built: never refused where a mitre is made. Chamfers are
+    /// mitred.
+    Auto,
 }
 
 impl Turn {
@@ -78,6 +82,7 @@ impl Turn {
         match self {
             Turn::Mitre => "mitre",
             Turn::Swept => "swept",
+            Turn::Auto => "auto",
         }
     }
 }
