@@ -79,7 +79,7 @@
     "ui.isolate_show": "Ostatní díly se zobrazí jako",
     "ui.isolate_show_hidden": "Skryté",
     "ui.isolate_show_transparent": "Průhledné",
-    "ui.isolate_show_wireframe": "Drátový model",
+    "ui.isolate_show_wireframe": "Drátěný model",
     "ui.isolation": "Izolace",
     "ui.palette_arc_tangent_snap": "Přichytit tečně a ke středu, zadat poloměr a úhel",
     "ui.plugin_dialog_folder_read_once": "Importér smí číst složku, kterou zde vyberete nebo vložíte, i její podsložky, ale jen pro tento import. Chcete-li to povolit natrvalo, schvalte složku v Předvolbách › Moduly plug-in.",
