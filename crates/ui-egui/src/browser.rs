@@ -1265,6 +1265,11 @@ pub(crate) struct Actions {
 }
 
 impl Actions {
+    /// The menu a row asked for, taken so it is opened once.
+    pub(crate) fn take_menu(&mut self) -> Option<(Pos2, Target)> {
+        self.menu.take()
+    }
+
     fn drop_from(&mut self, source: crate::semantic_content::ContentSource, action: DropAction) {
         self.drop = Some((source, action));
     }
@@ -1344,9 +1349,10 @@ impl Lit {
                     continue;
                 }
                 Sel::Feature { id } => Thing::Sketch(*id),
-                Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
-                    Thing::Sketch(*sketch)
-                }
+                Sel::Profile { sketch, .. }
+                | Sel::ExternalSketchCurve { sketch, .. }
+                | Sel::ExternalSketchPoint { sketch, .. }
+                | Sel::PlacedSketchPoint { sketch, .. } => Thing::Sketch(*sketch),
                 Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
                     match app.session.active_sketch {
                         Some(id) => Thing::Sketch(id),
@@ -1364,6 +1370,7 @@ impl Lit {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
                 Hit::SketchPoint { sketch, .. }
+                | Hit::PlacedSketchPoint { sketch, .. }
                 | Hit::SketchPoint3d { sketch, .. }
                 | Hit::SketchMidpoint { sketch, .. }
                 | Hit::SketchCurve { sketch, .. }

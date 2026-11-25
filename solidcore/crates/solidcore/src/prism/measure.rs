@@ -156,8 +156,17 @@ fn net_of(s: &Surface) -> Option<Net> {
 
 /// A whole bound on how far the wall strays across the direction `d` over `height`: a plane's
 /// normal against `d`, a cylinder's axis against it, a ruled net's rows against it (positive
-/// weights make the hull a bound on the surface). `None` where none is proved.
-fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Option<f64> {
+/// weights make the hull a bound on the surface). With `reach`, a net's rows must also run
+/// monotonically along `d` for at least half of `height`, as a prism's wall from cap to cap does
+/// ([`section`]); without it any rows do (the face then lies within the bound of its first row's
+/// curve swept along `d`). `None` where none is proved.
+fn wall_error(
+    surface: &Surface,
+    d: Vec3,
+    height: f64,
+    work: &mut usize,
+    reach: bool,
+) -> Option<f64> {
     if let Some((_, n)) = plane_of(surface) {
         let error = 1024.0
             * f64::EPSILON
@@ -233,7 +242,7 @@ fn wall_error(surface: &Surface, d: Vec3, height: f64, work: &mut usize) -> Opti
                 monotone = false;
             }
         }
-        if !monotone || axial_sign == 0.0 {
+        if reach && (!monotone || axial_sign == 0.0) {
             continue;
         }
         // rank-one weights keep the normalized convex coefficients; their error is bounded by the
@@ -697,7 +706,7 @@ fn certificate(k: &Kernel, b: &Brep, size: f64, frame: &Frame, tol: f64) -> Opti
     for &wall in &walls {
         let info = faces.get(wall)?;
         let surface = b.face(info.id).ok()?.surface.as_ref()?;
-        let variation = wall_error(surface, d, height_, &mut controls)?;
+        let variation = wall_error(surface, d, height_, &mut controls, true)?;
         if variation > tol * 8.0 {
             return None;
         }
@@ -883,6 +892,38 @@ pub struct PrismSection {
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
+}
+
+/// A whole bound on how far face `f` of `b` strays across the direction `d`: the face lies
+/// within the bound of a surface swept along `d`. It is the bound [`section`] proves for each of a
+/// prism's walls (a plane by its normal against `d`, a cylinder by its axis, a ruled spline net by
+/// its rows, however far they run along `d`), taken over the face's own size: the diagonal of its
+/// tight box, curved edges included (a cylinder's cap has one seam vertex, whose vertex box omits
+/// the circle). A net kept for a procedural definition adds its certified distance from it
+/// (`DefinitionRef::bound`, 0 for a definition it matches exactly). A face whose bound is within
+/// the zone tolerance runs straight along `d`.
+///
+/// `None` where no bound is proved: a face with no surface or whose tight box is not found; a
+/// surface that is not a plane, a cylinder or a ruled spline net (an extruded surface among
+/// them); a net past the size or work budget, or whose weights are not positive; a definition
+/// whose distance is not finite; a `d` that is zero or not finite (any finite length else, scaled
+/// before it is squared).
+#[must_use]
+pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
+    let (_, d) = d.length_and_unit()?;
+    let surface = b.face(f).ok()?.surface.as_ref()?;
+    let definition = surface
+        .procedural_definition()
+        .map_or(0.0, |def| def.bound());
+    if !(definition >= 0.0 && definition.is_finite()) {
+        return None;
+    }
+    let bounds = crate::query::api_queries::face_bounding_box(k, b, f, true).ok()?;
+    let size = (bounds.max() - bounds.min()).length();
+    if !size.is_finite() {
+        return None;
+    }
+    Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
 }
 
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).

@@ -243,7 +243,7 @@ fn named_curve_identities(cur: &[LCurve], old: &[Vec2], lay: &Layout, names: &[(
             let [b0, b1] = ends(b)?;
             let old = [*old.get(a0)?, *old.get(a1)?];
             let fresh = [*lay.pts.get(b0)?, *lay.pts.get(b1)?];
-            let agrees = |points: &[Vec2]| solidcore_ops::point_identity::ordered_nearby_points(&old, points, TOL, 16).unwrap_or(false);
+            let agrees = |points: &[Vec2]| solidcraft_kernel::services::point_identity::ordered_nearby_points(&old, points, TOL, 16).unwrap_or(false);
             match (agrees(&fresh), agrees(&[fresh[1], fresh[0]])) {
                 (true, false) => Some((i, (j, false))),
                 (false, true) => Some((i, (j, true))),

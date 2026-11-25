@@ -288,7 +288,8 @@ pub(crate) fn legacy_description(app: &SolveApp) -> Details {
 }
 
 /// Compatibility placement uses the same description and renderer, never a second painter.
-pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::Rect) {
+/// Returns the rects the legends take, so the scale bar keeps clear of them (#375).
+pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::Rect) -> Vec<egui::Rect> {
     let mut descriptions = Vec::new();
     if !app.preferences.viewport_analysis_status {
         descriptions.push(("analysis:legend", legacy_description(app)));
@@ -322,11 +323,14 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
             }
         }
     }
+    let mut placed = Vec::new();
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
+            placed.push(rect);
             free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());
         }
     }
+    placed
 }
 
 fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str, description: &Details) -> Option<egui::Rect> {
