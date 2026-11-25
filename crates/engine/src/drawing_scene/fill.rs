@@ -2,16 +2,16 @@
 //! D6 clips hatch centre-lines and dot centres; explicit physical pen width
 //! paints lines and filled circular dots. No zero becomes a degenerate stroke.
 
-use solidcore_ops::profile::Mark;
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::{Drawing, FillPaint, ResolvedSketchFill};
 use solidcraft_doc::ids;
 use solidcraft_geom::paper::{GridItem, Group, Item, MAX_RECORDS, ObjectKind, Piece, Scene};
+use solidcraft_kernel::services::profile::Mark;
 
 use crate::Result;
 
 fn dot_item(at: Vec2, width: f64) -> std::result::Result<Item, String> {
-    let region = solidcore_ops::profile::dot_region(at, width)
+    let region = solidcraft_kernel::services::profile::dot_region(at, width)
         .ok_or_else(|| "pen width cannot represent a finite positive filled disk at the dot centre".to_string())?;
     let item = Item::Fill { region };
     let scene = Scene::new(Vec2::new(1.0, 1.0), vec![Group { object: 1, kind: ObjectKind::Fill, items: vec![item.clone()] }]);

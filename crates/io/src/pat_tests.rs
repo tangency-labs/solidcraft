@@ -2,11 +2,11 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use crate::{IoError, PatImportOptions, PatUnits, read_pat};
-use solidcore_ops::profile::Mark;
 use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Loop2, Region2, Vec2};
 use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::profile::Mark;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2};
 
 const UNIT: &str = "*UNIT,Original unit probe\n90,1,-2,0.5,4,2,-1,0\n\n";

@@ -23,7 +23,6 @@
 use std::collections::BTreeMap;
 use std::f64::consts::FRAC_PI_4;
 
-use solidcore_ops::profile::Mark;
 use solidcore_record::brep::Loop;
 use solidcore_record::profile::line_family::LineFamily;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -34,6 +33,7 @@ use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::history::{FaceOrigin, History};
+use solidcraft_kernel::services::profile::Mark;
 use solidcraft_kernel::{Body, PlanarPiece};
 use solidcraft_viewport::hatch::{CutPart, HATCH_COLOURS, hatches as pick, seed};
 

@@ -5,10 +5,10 @@
 //! family order, signed angles and dash/gap/dot values are preserved, including repeated
 //! names. This reader neither installs a pattern library nor generates hatch geometry.
 
-use solidcore_ops::profile::MAX_FAMILIES;
 use solidcore_record::Vec2;
 use solidcore_record::profile::line_family::{LineFamily, MAX_DASHES};
 use solidcraft_doc::drawing::hatch::{Invalid, Pattern};
+use solidcraft_kernel::services::profile::MAX_FAMILIES;
 
 use crate::{IoError, Result};
 
