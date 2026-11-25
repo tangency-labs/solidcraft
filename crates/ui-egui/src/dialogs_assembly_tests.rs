@@ -1214,8 +1214,6 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.app.home.open = false;
     harness.app.dialog = Some(edited);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
     for name in ["Offset X", "Offset Y", "Offset Z"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} is editable");
     }
@@ -1226,8 +1224,19 @@ fn editing_a_joint_keeps_all_three_offsets() {
     harness.settle();
     assert_eq!(harness.app.session.doc, before, "Cancel preserves the joint");
 
+    // Even if a prior joint had its Position section folded, Edit Joint opens the saved
+    // offsets again. The user can still fold it while editing.
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Offset X").is_none(), "Position still folds on click");
+    crate::dialogs::cancel(&mut harness.app);
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    for name in ["Offset X", "Offset Y", "Offset Z"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} reopens automatically");
+    }
     for (name, value) in [("Offset X", "20 mm"), ("Offset Y", "40 mm")] {
         harness.step(&json!({"click":{"handle":format!("dialog:{name}")}})).unwrap();
         harness.step(&json!({"key":"A","cmd":true})).unwrap();
@@ -3560,9 +3569,7 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     let joint = harness.app.session.doc.assembly.joints[0].id;
     harness.app.dialog = edit_joint(&harness.app, joint);
     harness.settle();
-    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
-    harness.frames(4);
-    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some());
+    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some(), "Position opens on an existing constraint");
     for name in ["Offset X", "Offset Y"] {
         assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_none());
     }
@@ -3729,4 +3736,71 @@ fn edit_joint_keeps_a_limit_typed_as_an_expression() {
     assert_eq!(app.session.doc.assembly.joints[0].exprs.limit(0), [None, Some("stop")]);
     app.run("parameters.change", json!({"name": "stop", "expression": "12 mm"})).unwrap();
     assert_eq!(app.session.doc.assembly.joints[0].limits[0], Some((0.0, 12.0)));
+}
+
+#[test]
+fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "12.5".into();
+        f.dynamics[0][2] = "0.1".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].dynamics[0].unwrap();
+    assert_eq!((saved.effort, saved.damping), (Some(12.5), Some(0.1)));
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.dynamics[0][0], "12.5");
+        f.dynamics[0] = Default::default();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(app.session.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn find_limits_leaves_the_dynamics_out() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
+    f.dynamics[0][0] = "lots".into();
+    let commands = edit_commands(&app, f, &d.inputs).unwrap();
+    assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
+}
+
+#[test]
+fn a_mistyped_dynamics_value_is_refused_with_a_message() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    for typed in ["lots", "nan", "inf", "-inf"] {
+        if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+            f.dynamics[0][0] = typed.into();
+        }
+        assert!(apply_commands(&app, &d).is_err(), "{typed}");
+    }
 }

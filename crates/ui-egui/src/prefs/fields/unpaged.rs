@@ -94,6 +94,13 @@ macro_rules! unpaged_preferences {
             stand_up_answers: crate::stand_up::Answers = Default::default();
             /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
             update: crate::update::Memo = crate::update::Memo::default();
+            /// URDF export writes motion links as `<mimic>`. Default false: each joint is free, as
+            /// before; the options dialog remembers the last choice.
+            urdf_mimic: bool = false;
+            /// Export URDF with Options writes the meshes where the mesh prefix points, making its
+            /// folder. Default false: next to the URDF whatever the prefix says; the options dialog
+            /// remembers the last choice.
+            urdf_place_meshes: bool = false;
             /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
             /// the environment or the organization turns them off. A build without the `usage-stats`
             /// feature keeps the value and does nothing with it.

@@ -76,6 +76,7 @@ pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
+pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
@@ -273,6 +274,8 @@ mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod plugin_shaders;
 mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
@@ -391,6 +394,7 @@ mod test_pictures;
 mod thin_extrude_tests;
 pub mod tickets;
 pub mod timeline;
+pub mod timeline_2d;
 mod timeline_fold;
 mod timeline_folders;
 pub mod timeline_left;
@@ -745,6 +749,8 @@ pub struct SolveApp {
     pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
+    /// Radius of the last new Fillet applied this session, for the next new Fillet dialog.
+    pub(crate) last_fillet_radius: String,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -905,6 +911,9 @@ pub struct SolveApp {
     pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
+    /// The view background a plugin draws (`shaders@0.1`), when one is chosen.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) plugin_shaders: plugin_shaders::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1027,6 +1036,12 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    /// Where the control channel's design events go ([`control::publish_design`]): the shared
+    /// channel, or a test's own.
+    pub(crate) design_watch: &'static control::DocumentWatch,
+    /// The open designs as the last frame with a subscriber saw them (`document_id`, path,
+    /// read-only); `None` while nobody is subscribed.
+    pub(crate) open_designs_seen: Option<Vec<(String, Option<String>, bool)>>,
     view_window_drag: view_window_drag::State,
     view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
@@ -1141,6 +1156,7 @@ impl SolveApp {
             dialog: None,
             snaps: Default::default(),
             remembered_commands: Vec::new(),
+            last_fillet_radius: String::new(),
             params: None,
             design_properties: None,
             sketch_report: None,
@@ -1217,6 +1233,8 @@ impl SolveApp {
             import_options: None,
             import_options_waiting: Default::default(),
             plugin_menu: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            plugin_shaders: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -1280,6 +1298,8 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            design_watch: &control::DOCUMENT_WATCH,
+            open_designs_seen: None,
             view_window_drag: view_window_drag::State::default(),
             view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
@@ -1369,12 +1389,15 @@ impl SolveApp {
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                     built.target.samples = 1;
                     msaa_fallback = true;
-                    eprintln!("SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session", scene.samples);
+                    solidcraft_engine::note!(
+                        "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
+                        scene.samples
+                    );
                 }
                 Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
-                    eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                    solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                 }
-                Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+                Err(error) => solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
         WgpuBuilt { built, blur: scene.depth.is_some() && window.depth.is_none() && window.samples == 1, msaa_fallback }
@@ -1395,6 +1418,8 @@ impl SolveApp {
         if safe_graphics::blur(self) {
             self.blur.install(rs, built.blur);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plugin_shaders.install(rs);
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }
@@ -1750,6 +1775,8 @@ impl SolveApp {
         // channel. Protect every open tab here, including after asynchronous pickers.
         let removes_open_file = matches!(id, "file.move" | "file.trash")
             && params.get("path").and_then(Value::as_str).is_some_and(|path| documents::uses_file(self, path));
+        // The file the design had before a save, for the `design.saved` event.
+        let saved_from = if matches!(id, "file.save" | "file.save_as") { self.session.path.clone() } else { None };
         let r = if removes_open_file {
             Err("Close designs using this file before renaming, moving, or trashing it".into())
         } else {
@@ -1766,6 +1793,10 @@ impl SolveApp {
             self.library.refresh();
         }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
+        if matches!(id, "file.save" | "file.save_as") && r.is_ok() {
+            let document_id = self.session.document_id.clone();
+            control::post_design_saved(self, &document_id, saved_from);
+        }
         let r = r.map(|mut reply| {
             if let Some(event) = finished_sketch
                 && let Some(reply) = reply.as_object_mut()
@@ -1812,8 +1843,8 @@ impl SolveApp {
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
-        let selection_changed =
-            self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert");
+        let selection_changed = self.session.selection != selected_before
+            || matches!(id, "select.set" | "select.clear" | "select.same_look" | "select.invert" | "select.all");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
             if id == "select.set" {
@@ -2196,7 +2227,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -2342,7 +2373,8 @@ impl SolveApp {
     /// nothing to act on it says what to pick.
     fn ground_selected_occurrences(&mut self) {
         let mut targets: Vec<(u64, bool)> = Vec::new();
-        for sel in &self.session.selection {
+        // Select All grounds the placements of every shown body.
+        for sel in &self.session.selected_items().unwrap_or_default() {
             use solidcraft_engine::Sel;
             // A body, face, edge or vertex picked in the view stands for the placement that owns
             // it, the one a drag on it would move (the outermost inside the active component).
@@ -3038,7 +3070,7 @@ impl SolveApp {
             if let Some(sketch) = finished_sketch {
                 d.take_sketch_profile(&self.session, sketch);
             }
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && self.session.has_selection() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.view_windows.start_tool_panel(self.docs.current_tab());
@@ -3102,7 +3134,7 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
-            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
+            if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             self.tool = Some(t);
@@ -3114,7 +3146,7 @@ impl SolveApp {
                 d.take_sketch_profile(&self.session, sketch);
             }
             // The pre-selection now belongs to the dialog's inputs.
-            if d.wants_picks() && !self.session.selection.is_empty() {
+            if d.wants_picks() && self.session.has_selection() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
@@ -3846,6 +3878,21 @@ impl SolveApp {
     pub fn open_chosen_file(&mut self, path: &str) {
         self.open_path_async(path);
     }
+
+    /// Open a chosen file read-only (`solidcraft --read-only`): a design's Save then asks for a new
+    /// file. A file the format registry imports (STEP, mesh, KiCad, DXF, ...) opens as
+    /// [`Self::open_chosen_file`] opens it: it becomes a new, unsaved design, with no file of its own
+    /// to protect. Any other file is read as a design, whatever its name (`part.sc.bak`), so it opens
+    /// read-only too.
+    pub fn open_chosen_file_read_only(&mut self, path: &str) {
+        use solidcraft_engine::io::formats::{ImportTarget, import_for_path};
+        let import = import_for_path(path).and_then(|f| f.import.as_ref()).map(|i| i.target);
+        if import.is_none_or(|target| target == ImportTarget::Design) {
+            self.open_path_async_with_options(path, json!({"read_only": true}));
+        } else {
+            self.open_chosen_file(path);
+        }
+    }
     pub fn insert_path_async(&mut self, path: &str) {
         file_load::begin(self, path, true);
     }
@@ -4350,6 +4397,7 @@ impl SolveApp {
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
+        timeline::tick_feature_checks(self, ctx);
         edit_in_place::tick(self);
         browser_links::refresh(self, ctx);
         let typing = ctx.egui_wants_keyboard_input();
@@ -4430,7 +4478,8 @@ impl SolveApp {
                 }
             }
         }
-        control::publish_design(self, &control::DOCUMENT_WATCH);
+        let watch = self.design_watch;
+        control::publish_design(self, watch);
     }
 
     /// Input for another viewport of the same app. Shared jobs are serviced by the root window.
@@ -4651,7 +4700,8 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        control::publish_design(self, &control::DOCUMENT_WATCH);
+        let watch = self.design_watch;
+        control::publish_design(self, watch);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
@@ -4662,6 +4712,7 @@ impl SolveApp {
         self.view_windows.opening_host(opening_host);
     }
 
+    /// Renders the main CAD workspace UI including ribbon, sidebar browser, timeline, and 3D viewport.
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         if self.embedded {
             self.ui.layout = ui_kit::LayoutMode::Docked;
@@ -4734,6 +4785,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // The recovery banner's Discard all asks here (File view lists the designs inline).
+                recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
                 plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
@@ -4800,6 +4853,7 @@ impl SolveApp {
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
         panel_runtime::finish_app_host(self, ui);
+        library::drag_cursor(self, ui.ctx());
         if view_tiles::focus_pressed(self) {
             ui.ctx().request_repaint();
         }
@@ -4933,6 +4987,7 @@ impl SolveApp {
                 continue;
             };
             self.run_control(ctx, req);
+            control::post_request_open_close(self);
         }
         self.control_rx = rx;
     }

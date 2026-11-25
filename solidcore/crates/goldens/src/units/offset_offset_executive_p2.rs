@@ -1655,6 +1655,19 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .as_ref()
         .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
+    // (a probe's input, for the result's soundness: capture off, nothing). Named only where
+    // the call promises a finished solid of a solid: a shell, or a merged and stitched
+    // offset of the whole body (no shell faces kept); a member call left unmerged, unstitched
+    // or keeping shell faces hands back pieces, not a solid (#13685)
+    let promises_solid = match input.operation {
+        Operation::StaticShell | Operation::ApiShell => true,
+        _ => {
+            input.config.merge_results
+                && !input.config.skip_stitch_merge
+                && input.faces.is_empty()
+        }
+    };
+    crate::soundness::input(source.as_ref().filter(|_| promises_solid));
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
@@ -2071,6 +2084,51 @@ fn generated(rng: &mut Rng) -> Inputs {
 mod tests {
     use super::*;
 
+    /// tangency-labs/solidcraft#18634: the `review_box_translated_*_null` rows' 1e-3 box
+    /// at (1e6, 1e6, 1e6) was refused by its constructor (status 1001), as main's
+    /// position-scaled degeneracy floor refused sides up to about 1e-9 times the
+    /// coordinate. It now builds a 6/12/8 box, and each case's result is the one the same
+    /// box gets at the origin (the fixture's valid-box controls: built, status 1007 for
+    /// a null selection), with the moved box's coordinates translated by (1e6, 1e6, 1e6).
+    #[test]
+    fn far_review_boxes_answer_as_at_the_origin() {
+        let shift = 1e6;
+        for name in ["review_box_translated_source_null", "review_box_translated_foreign_null"] {
+            let far = crate::case::regression_case(&Runner, name);
+            let mut near = far.clone();
+            let mut moved = Vec::new();
+            for role in ["source", "foreign"] {
+                if near.inputs[role]["origin"] == serde_json::json!([shift, shift, shift]) {
+                    near.inputs[role]["origin"] = serde_json::json!([0.0, 0.0, 0.0]);
+                    moved.push(role);
+                }
+            }
+            assert!(!moved.is_empty(), "{name}");
+            let (f, n) = (Runner.run_rust(&far).unwrap(), Runner.run_rust(&near).unwrap());
+            assert_eq!(f.rejected, None, "{name}");
+            assert_eq!(f.ints["status"], [1007], "{name}");
+            assert_eq!((&f.ints, &f.error, &f.rejected), (&n.ints, &n.error, &n.rejected), "{name}");
+            assert_eq!(f.values.keys().collect::<Vec<_>>(), n.values.keys().collect::<Vec<_>>());
+            for (key, fv) in &f.values {
+                let nv = &n.values[key];
+                let translated = key.ends_with(".geometry")
+                    && moved.iter().any(|role| key.starts_with(&format!("{role}.")));
+                if !translated {
+                    assert_eq!(fv, nv, "{name} {key}");
+                    continue;
+                }
+                // [tolerance, box min xyz, box max xyz]: the tolerance is kept and every
+                // coordinate is the origin box's moved by `shift`: `EPS/2 |a|` is under one
+                // ulp of the far value, so this asserts `a` is the rounded sum itself
+                assert_eq!(fv.len(), 7, "{name} {key}");
+                assert_eq!(fv[0], nv[0], "{name} {key}");
+                for (a, b) in fv[1..].iter().zip(&nv[1..]) {
+                    assert!((a - (b + shift)).abs() <= f64::EPSILON / 2.0 * a.abs(), "{name} {key}: {a} {b}");
+                }
+            }
+        }
+    }
+
     /// The Rust result bodies of the cases named in `$SC_SOUNDNESS_CASES`, measured on their own
     /// ([`crate::soundness::probe`]).
     #[test]
@@ -2083,6 +2141,12 @@ mod tests {
     /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
     /// bodies the soundness probe measures. `None` for a case that builds no body.
     fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        overlap_offsets("0.36")
+    }
+
+    /// The rounded outward offsets of `extrudeHoles1` at `k`, each with its status, the
+    /// result body the soundness probe measures (`None` without one) and `result.present`.
+    fn overlap_offsets(k: &str) -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
         let ctx = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2091,7 +2155,7 @@ mod tests {
         [0, 2, 3, 4, 5]
             .into_iter()
             .map(|f| {
-                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k{k}_out_rnd");
                 let case = cases.iter().find(|c| c.name == name).unwrap();
                 crate::soundness::start();
                 let out = Runner.run_rust(case).unwrap();
@@ -2150,6 +2214,23 @@ mod tests {
             eprintln!("{name}: built, gap {offset} against {tolerance}");
             assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
             assert_eq!(body.manifold, Some(false), "{name}");
+        }
+    }
+
+    /// #18927's moved rows here (`ssi_proto_topology_statuses_pass_on` removed): the same
+    /// offsets at k 0.35 reach `resolve_overlapping_proto_edges`, whose replacement of an
+    /// overlap group fails (`find_interval`: the parameter is before the start) after the
+    /// group's proto edges and edge definitions were taken out of the intersection. Each is
+    /// refused (1001) and builds no result body. Measured on main 6ea034c437 (before
+    /// #18927, with `moved_cases_results_measured`): each returned success with a body
+    /// that `check_brep` level 2 refuses (faces with partially coincident edges, or a loop
+    /// of bad orientation), four of them not manifold.
+    #[test]
+    fn k035_overlap_offsets_are_refused() {
+        for (name, status, body, present) in overlap_offsets("0.35") {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
         }
     }
 
@@ -2706,11 +2787,12 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
-            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
-            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
-            // rejected, status 1001
-            let refused = !case.name.ends_with("_selected")
-                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            // #15350: a box too small for its tolerance (1e-6 at the origin) is refused by
+            // `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor rejected,
+            // status 1001. #18634: the 1e-3 box at (1e6, 1e6, 1e6) now builds and answers as
+            // at the origin (see `far_review_boxes_answer_as_at_the_origin`), so the
+            // `_translated_` null rows take the null-selection branch below (status 1007).
+            let refused = !case.name.ends_with("_selected") && case.name.contains("_tiny_");
             if refused {
                 assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
                 assert_eq!(rust.ints["status"], [1001], "{}", case.name);
