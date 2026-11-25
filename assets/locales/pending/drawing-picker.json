@@ -14,5 +14,25 @@
   "fr": {
     "ui.drawing_picker.back": "Revenir à {name}",
     "ui.drawing_picker.new": "Nouveau plan…"
+  },
+  "ar": {
+    "ui.drawing_picker.back": "العودة إلى {name}",
+    "ui.drawing_picker.new": "لوحة جديدة…"
+  },
+  "he": {
+    "ui.drawing_picker.back": "חזרה אל {name}",
+    "ui.drawing_picker.new": "שרטוט חדש…"
+  },
+  "ja": {
+    "ui.drawing_picker.back": "{name} に戻る",
+    "ui.drawing_picker.new": "新規図面…"
+  },
+  "vi": {
+    "ui.drawing_picker.back": "Quay lại {name}",
+    "ui.drawing_picker.new": "Bản vẽ mới…"
+  },
+  "zh": {
+    "ui.drawing_picker.back": "返回 {name}",
+    "ui.drawing_picker.new": "新建绘图…"
   }
 }
