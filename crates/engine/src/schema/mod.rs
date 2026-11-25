@@ -166,6 +166,7 @@ pub mod sketch_ends;
 pub mod sketch_equation;
 pub mod sketch_import;
 pub mod sketch_inspect;
+pub mod sketch_links;
 pub mod sketch_modify;
 pub mod sketch_project;
 pub mod sketch_session;

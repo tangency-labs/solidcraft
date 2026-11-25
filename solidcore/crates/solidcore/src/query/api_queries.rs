@@ -24,7 +24,7 @@
 //! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | [`FacePointCandidates`] | not upstream: cached kernel face boxes for narrowing point queries |
-//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
+//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`], [`face_normal_at_clamped_uv`], [`face_normal_at_vertex`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -2123,6 +2123,34 @@ pub fn face_normal_at_uv(
     certify_normal(k, surface, uv, n * (sign / len), sense)
 }
 
+/// [`face_normal_at_uv`] after clamping a finite solver parameter `uv` to the face
+/// surface's natural UV domain (classification drops may accept a parameter up to UV
+/// tolerance past a domain boundary).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an uninitialised or non-finite `uv`, or a missing
+/// surface; those of [`face_normal_at_uv`] and the surface's natural UV domain.
+pub fn face_normal_at_clamped_uv(
+    k: &Kernel,
+    brep: &Brep,
+    f: FaceId,
+    uv: Point2,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
+    if !uv.is_initialized() || !uv.x.is_finite() || !uv.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "parameter is not finite"));
+    }
+    let surface = brep
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let uv = domain.clamp_point(uv);
+    face_normal_at_uv(k, brep, f, uv, faceuse)
+}
+
 /// Cached kernel face boxes for narrowing point queries in the supplied face order.
 /// A box hit is only a candidate: callers still test the face's exact trimmed area.
 /// The cache is valid while the faces' geometry and topology stay unchanged.
@@ -2282,6 +2310,28 @@ pub fn face_normal_at_edge(
         return Err(SolidError::invalid_input(OP, "edge interval not finite"));
     }
     edgeuse_face_frame(k, brep, eu, t, faceuse)
+}
+
+/// The unit normal of face `f` at vertex `v` (one of `f`'s boundary or loop vertices),
+/// in the sense of `faceuse`, evaluated at [`crate::topology::vertexuse::compute_uv_point`]'s
+/// parameter point clamped to the surface's natural UV domain.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a vertex that does not bound `f`; those of
+/// [`crate::topology::vertex::vertexuse_of_face`],
+/// [`crate::topology::vertexuse::compute_uv_point`] and [`face_normal_at_clamped_uv`].
+pub fn face_normal_at_vertex(
+    k: &Kernel,
+    brep: &mut Brep,
+    v: VertexId,
+    f: FaceId,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
+    let vu = crate::topology::vertex::vertexuse_of_face(brep, v, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the vertex does not bound the face"))?;
+    let uv = crate::topology::vertexuse::compute_uv_point(k, brep, vu, true)?;
+    face_normal_at_clamped_uv(k, brep, f, uv, faceuse)
 }
 
 /// The unit direction into face `f` from the middle of its edge `e`'s interval: in the face's
@@ -3017,6 +3067,55 @@ mod tests {
             }
         }
         assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn face_normal_at_vertex_and_clamped_uv_match_face_sense() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let vertices: Vec<VertexId> = b.vertices().ids().collect();
+        let (mut on_count, mut off_count) = (0usize, 0usize);
+        for &f in &faces {
+            let (a, c) = face::faceuses(&b, f).unwrap();
+            let (a, c) = (a.unwrap(), c.unwrap());
+            for &v in &vertices {
+                if crate::topology::vertex::vertexuse_of_face(&b, v, Some(f))
+                    .unwrap()
+                    .is_some()
+                {
+                    let n = face_normal_at_vertex(&k, &mut b, v, f, a).unwrap();
+                    let rev = face_normal_at_vertex(&k, &mut b, v, f, c).unwrap();
+                    assert_eq!(n.value, -rev.value);
+                    assert!(n.bound <= 1e-12, "{n:?}");
+                    on_count += 1;
+                } else {
+                    assert!(face_normal_at_vertex(&k, &mut b, v, f, a).is_err());
+                    off_count += 1;
+                }
+            }
+        }
+        assert_eq!((on_count, off_count), (24, 24));
+
+        let f0 = faces[0];
+        let (a, _) = face::faceuses(&b, f0).unwrap();
+        let a = a.unwrap();
+        let domain = b
+            .face(f0)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(&k)
+            .unwrap();
+        let n_max = face_normal_at_uv(&k, &b, f0, domain.max(), a).unwrap();
+        let overshoot = Point2::new(domain.max().x + 1e-12, domain.max().y + 1e-12);
+        let n_clamped = face_normal_at_clamped_uv(&k, &b, f0, overshoot, a).unwrap();
+        assert_eq!(n_clamped.value, n_max.value);
+        assert!(face_normal_at_clamped_uv(&k, &b, f0, Point2::UNDEF, a).is_err());
+        assert!(face_normal_at_clamped_uv(&k, &b, f0, Point2::new(f64::NAN, 0.0), a).is_err());
     }
 
     #[test]

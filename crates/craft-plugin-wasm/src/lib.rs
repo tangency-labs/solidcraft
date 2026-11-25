@@ -91,8 +91,9 @@ pub fn dialog_fields<H: PluginHost + 'static>(
 /// Checks `component` against `manifest` the way a call would, without running any of its code:
 /// the runtime declaration, the component's size, that it is a component (not a core module) that
 /// compiles, imports nothing but this host's interfaces at its version (never WASI or the network),
-/// and exports the interfaces of its world (`command-plugin`, `panel-plugin`, or
-/// `importer-plugin`). The error names what is wrong; `plugin check` adds how to fix it.
+/// and exports the interfaces of its world (`command-plugin`, `panel-plugin`, `importer-plugin`, or
+/// the additive `importer-plugin-with-storage`). The error names what is wrong; `plugin check` adds
+/// how to fix it.
 pub fn check_component(manifest: &Manifest, component: &[u8]) -> Result<()> {
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     {
@@ -122,9 +123,11 @@ pub struct Imported {
     pub report: LossReport,
 }
 
-/// Runs an importer entry on one file in a fresh instance. It touches no app state, so there is
-/// no transaction: the app opens the design as a new one only when the whole call succeeds.
-/// A trap fails this call alone.
+/// Runs an importer entry on one file in a fresh instance. The app opens the design as a new
+/// one only when the whole call succeeds. An importer requesting `user-storage@0.1` starts a
+/// host transaction: on success the app must commit it after validating and accepting the design,
+/// or roll it back if acceptance fails. Execution failures roll it back before returning.
+/// Importers without user storage keep the host's transaction lifecycle unchanged.
 pub fn run_import<H: PluginHost + 'static>(
     host: H,
     manifest: &Manifest,
@@ -143,6 +146,27 @@ pub fn run_import<H: PluginHost + 'static>(
     {
         let _ = (manifest, component, entry, options, request);
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}
+
+/// A dialog hook runs in a fresh importer instance, with no design writes or evaluation and
+/// no sibling-file access. Its source is a snapshot of at most the first 64 KiB.
+pub fn update_fields<H: PluginHost + 'static>(
+    host: H,
+    manifest: &Manifest,
+    component: &[u8],
+    entry: &str,
+    context: &Value,
+    request: &ImportRequest,
+) -> (H, Result<Value>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::update_fields(host, manifest, component, entry, context, request)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, entry, context, request);
+        (host, Err(craft_plugin::HostError::Trap { reason: "dialog hooks require a native build".into() }))
     }
 }
 
