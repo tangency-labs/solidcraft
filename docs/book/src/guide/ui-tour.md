@@ -19,8 +19,9 @@ view.
   the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave the old
   one (Preferences › Interface turns the double-click off, for a double-click that maximizes the
   window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
-  opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. On the
-  right: Report a bug,
+  opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
+  and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
+  do. On the right: Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
@@ -197,6 +198,11 @@ view.
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
   Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
+  Click the view button in the History's header, with History placed at the **Bottom**, for a multi-track
+  component matrix view that maps features across their owning components, visualizes cross-component actions
+  with vertical connectors, highlights topological dependency corridors `[ ... ]` for safe reordering,
+  and supports folder grouping and cascading suppression (the 2D Timeline applies only to bottom placement;
+  placing History at the left or in the browser activates the 1D view). See [2D Timeline](timeline-2d.md).
 - **Status bar** (off by default: Preferences › Interface › **Status bar**). A thin bar along
   the window's bottom edge, below the timeline. From the right: the design's units (click them
   to change the design's units, one undo step), the open sketch's state in its colour (under

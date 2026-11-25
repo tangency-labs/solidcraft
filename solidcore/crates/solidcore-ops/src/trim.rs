@@ -28,6 +28,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::curve::curve::Curve as KCurve;
 use solidcore::geom::tol::are_same_to_tol;
 use solidcore::kernel::Kernel;
@@ -40,13 +41,13 @@ use solidcore::topology::brep::p5::remove_faces_notified;
 use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme, VertexId};
-use solidcore::EntityRef;
+use solidcore::{EntityRef, SolidError};
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_proved, Body, Expect};
 use crate::error::status;
-use crate::history;
+use crate::history::{self, History, Made};
 use crate::order::{self, Order};
-use crate::session::run_on;
+use crate::session::{run_on, run_taking, with_body};
 use crate::split::{copies_of, curve_ref, MAX_FACES};
 use crate::sweep::{dropped_on, kernel_curves, tolerance_ok, Curve};
 use crate::{Error, Result};
@@ -58,8 +59,7 @@ pub const MAX_CURVES: usize = 4096;
 pub const MAX_PICKS: usize = 10_000;
 
 /// Why [`trim_by_dropped_curves`] refuses a curve the kernel's drop lands on no face.
-const CURVE_LANDS_NOWHERE: &str =
-    "a curve drops onto no face of the body (a curve across the seam of a closed face is not dropped yet)";
+const CURVE_LANDS_NOWHERE: &str = "a curve drops onto no face of the body";
 
 /// Why [`trim_by_dropped_curves`] refuses a point that picks no one region.
 const PICK_ON_A_CUT: &str =
@@ -394,9 +394,7 @@ fn cut_dropped(
             }
         }
     }
-    // A curve the kernel drops onto no face is no part of any cut. The kernel's drop gives no
-    // curve for one that leaves a face's parameter box, which a curve across the seam of a
-    // closed face does.
+    // A curve the kernel drops onto no face is no part of any cut.
     if landed.iter().flatten().any(|seen| !seen) {
         return Ok(Err(Error::Unsupported(CURVE_LANDS_NOWHERE)));
     }
@@ -495,6 +493,69 @@ fn keep_picked(
     remove_faces(&cut, &order, &dropped)
 }
 
+/// Remove a connected feature whose two boundary loops need extensions that cross.
+/// The returned solid and its history belong to a copy. `None` means the selection
+/// did not use a patch trimmed at the intersection of its two extensions.
+///
+/// # Errors
+/// Invalid face indices, a refused extension or a result that is not a closed solid.
+pub fn remove_feature_with_crossing_patches(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    if faces.is_empty() || faces.len() > MAX_FACES {
+        return Err(Error::Argument);
+    }
+    let (result, mapped) = body.copy_with_order(order)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(&mapped, i))
+        .collect::<Result<Vec<_>>>()?;
+    let selection: HashSet<_> = picked.iter().copied().collect();
+    if selection.len() != picked.len() {
+        return Err(Error::Argument);
+    }
+    let mut trimmed = false;
+    let history = history::recorded(&result, &mapped, Made::Plain, || {
+        trimmed = with_body("remove_feature_with_crossing_patches", &result, |k, b| {
+            let mut executive = FeatureExecutive::new(k, b)?;
+            let Some(i) = executive.add_feature(
+                k,
+                &picked,
+                RebuildBrepType::ExtendSurface,
+                RebuildBrepType::FromOtherBrep,
+            )?
+            else {
+                return Ok(false);
+            };
+            // add_feature starts at the first face. A second disconnected selection
+            // must not be silently left behind.
+            if !executive.features().get(i).is_some_and(|feature| {
+                feature.loops.len() == 2
+                    && feature.faces.len() == selection.len()
+                    && feature.faces.iter().all(|face| selection.contains(face))
+            }) {
+                return Ok(false);
+            }
+            Ok(executive.do_defeature(k)?.is_empty()
+                && executive
+                    .features()
+                    .get(i)
+                    .is_some_and(|feature| feature.trimmed_crossing_base_patches))
+        })?;
+        Ok(())
+    })?;
+    if !trimmed {
+        return Ok(None);
+    }
+    // Recording materializes UV trims. Check the solid the caller will receive.
+    let (solid, proof) = run_taking("finish_crossing_patches", &[("brep", &result)], |k| {
+        finish_proved(k, result.take_held().0, Expect::SOLID)
+    })??;
+    Ok(Some((Body::held(solid, proof), history)))
+}
+
 /// A copy of `body` without record faces `faces` (indices into `order`, distinct), and without
 /// the edges and vertices only they used: what is left of a solid is a sheet. `body` is
 /// unchanged.
@@ -505,17 +566,11 @@ fn keep_picked(
 /// - [`Error::Empty`]: every face taken out;
 /// - the kernel's errors.
 pub fn remove_faces(body: &Body, order: &Order, faces: &[usize]) -> Result<Body> {
-    if faces.is_empty() || faces.len() > MAX_FACES {
-        return Err(Error::Argument);
-    }
-    let mut seen = HashSet::new();
-    let mut picked = Vec::new();
-    for &f in faces {
-        if !seen.insert(f) {
-            return Err(Error::Argument);
-        }
-        picked.push(order::face(order, f)?);
-    }
+    validate_face_indices(order, faces)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(order, i))
+        .collect::<Result<Vec<_>>>()?;
     let left = run_on("remove_faces", &[("brep", body)], |k| {
         // the record's faces are the body's own: looked up in it, then mapped to their copies
         let (mut a, picked) = {
@@ -540,4 +595,99 @@ pub fn remove_faces(body: &Body, order: &Order, faces: &[usize]) -> Result<Body>
         finish(k, a, Expect::FACES)
     })??;
     Ok(Body::new(left))
+}
+
+fn validate_face_indices(order: &Order, faces: &[usize]) -> Result<()> {
+    if faces.is_empty() || faces.len() > MAX_FACES {
+        return Err(Error::Argument);
+    }
+    let mut seen = HashSet::new();
+    if faces
+        .iter()
+        .any(|&i| i >= order.faces.len() || !seen.insert(i))
+    {
+        return Err(Error::Argument);
+    }
+    Ok(())
+}
+
+/// Remove a selected groove whose two rims the kernel can close together. Returns the new
+/// solid and its face and edge history in record order. If the two annular supports cannot
+/// be identified, the selection gives `None` so another removal can try it.
+/// The operand is unchanged, including when the kernel refuses the construction.
+///
+/// # Errors
+/// Invalid face indices or repeated picks, the kernel's construction errors, or a result
+/// that is not a valid outward solid.
+pub fn remove_ring_groove(
+    body: &Body,
+    order: &Order,
+    faces: &[usize],
+) -> Result<Option<(Body, History)>> {
+    validate_face_indices(order, faces)?;
+    let (result, mapped) = body.copy_with_order(order)?;
+    let picked = faces
+        .iter()
+        .map(|&i| order::face(&mapped, i))
+        .collect::<Result<Vec<_>>>()?;
+    let history = history::recorded_if_changed(&result, &mapped, Made::Plain, || {
+        with_body("remove_ring_groove", &result, |k, b| {
+            remove_selected_ring(k, b, &picked)
+        })
+    })?;
+    let Some(history) = history else {
+        return Ok(None);
+    };
+    // Recording materializes missing UV trims and clears the history tags.
+    // Prove the resulting B-rep after those edits and return it with that proof.
+    let (solid, proof) = run_taking("finish_ring_groove", &[("brep", &result)], |k| {
+        finish_proved(k, result.take_held().0, Expect::SOLID)
+    })??;
+    Ok(Some((Body::held(solid, proof), history)))
+}
+
+/// Try an annular closure on the selected faces of the copy.
+pub(crate) fn remove_selected_ring(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[FaceId],
+) -> solidcore::Result<bool> {
+    match recognize_ring_groove(k, b, picked) {
+        Ok(Some(mut groove)) => Ok(groove.do_defeature(k)?.is_empty()),
+        Err(e)
+            if e.is_unported_or_cancelled()
+                || matches!(e, SolidError::PreparationRequired { .. }) =>
+        {
+            Err(e)
+        }
+        // A failed probe says nothing about whether an ordinary fillet chain can come off.
+        Ok(None) | Err(_) => Ok(false),
+    }
+}
+
+fn recognize_ring_groove<'a>(
+    k: &mut Kernel,
+    b: &'a mut Brep,
+    picked: &[FaceId],
+) -> solidcore::Result<Option<FeatureExecutive<'a>>> {
+    let mut feature = FeatureExecutive::new(k, b)?;
+    let Some(i) = feature.add_feature(
+        k,
+        picked,
+        RebuildBrepType::ExtendSurface,
+        RebuildBrepType::FromOtherBrep,
+    )?
+    else {
+        return Ok(None);
+    };
+    let selection: HashSet<_> = picked.iter().copied().collect();
+    // add_feature partitions from the first selected face. Never accept a subset
+    // of a disconnected selection as the requested groove.
+    if !feature.features().get(i).is_some_and(|f| {
+        f.faces.len() == selection.len() && f.faces.iter().all(|face| selection.contains(face))
+    }) || feature.annular_supports(k, i)?.is_none()
+    {
+        return Ok(None);
+    }
+    Ok(Some(feature))
 }

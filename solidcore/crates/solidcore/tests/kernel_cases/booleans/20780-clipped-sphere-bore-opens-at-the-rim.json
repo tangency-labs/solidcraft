@@ -1,0 +1,51 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1",
+        "b2"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "20780-clipped-sphere-bore-opens-at-the-rim",
+  "expected": {
+    "body_count": 1,
+    "faces": 4,
+    "source": "analytic",
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 2292.318455496415
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "20780-clipped-sphere-bore-opens-at-the-rim.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b3"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#20780"
+  ],
+  "what": "A sphere of radius 10 mm clipped at z = -6 and 7 has a lower rim of radius 8 mm. A coaxial cutter of radius r = 7.99999 mm extends from that rim to z = 0. At the 0.00001 mm coincidence tolerance, the kernel collapses the narrow annulus onto a shared rim. The sphere, top disc, bore wall and bore ceiling are the four faces of the open solid. A skin across the opening adds two faces while giving the same volume. Integrating the spherical sections and subtracting the cylinder gives pi * (100 * 13 - (7^3 - (-6)^3)/3 - 6*r^2) mm^3."
+}
