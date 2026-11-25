@@ -1472,12 +1472,37 @@ mod tests {
         assert_eq!(shape(&body), before);
     }
 
+    /// The round that was [`a_failed_variable_radius_fillet_keeps_its_error_and_a_current_body`]'s
+    /// failure, 0.5 to 30 along the first edge of the 10 x 20 x 30 box, now builds. The body
+    /// passes the level-2 check, has the box's six faces and the round, and is smaller than
+    /// the box by more than the integration's requested accuracy (a convex edge's round only
+    /// removes material).
+    #[test]
+    fn a_variable_radius_round_wider_than_its_faces_builds_a_valid_body() {
+        let mut k = Kernel::default();
+        let mut body = boxed(&mut k);
+        let edge = p1::edges(&body, None).unwrap()[0];
+        variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1).unwrap();
+        let check = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut body,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap();
+        assert!(check.is_valid(), "{:?}", check.lines());
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 7);
+        let volume =
+            crate::mass::integrator::properties::brep_volume_default(&k, &mut body, 1e-11).unwrap();
+        assert!(volume < 6000.0 * (1.0 - 2e-11), "{volume}");
+    }
+
     #[test]
     fn a_failed_variable_radius_fillet_keeps_its_error_and_a_current_body() {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let edge = p1::edges(&body, None).unwrap()[0];
-        let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
+        // (0.5 to 30 now builds: a_variable_radius_round_wider_than_its_faces_builds_a_valid_body)
+        let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 1000.0, 1, 1);
         assert!(matches!(
             result,
             Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
