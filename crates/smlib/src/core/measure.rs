@@ -177,7 +177,9 @@ pub(crate) fn bounds(body: &Body) -> Result<([f64; 3], [f64; 3])> {
 /// `SmCrvSrfGapFunction` with 20 samples, its largest sample: [`Body::edge_face_largest_gap`]).
 /// Indices in the body's edge and face order.
 pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Result<f64> {
-    ops_on("edge_face_distance", &[("brep", body)], || {
+    // a refusal in words (no curve or surface, an empty interval, a gap not finite) is the
+    // capi's rejected input with its reason ([`super::blend::refused`])
+    ops_as("edge_face_distance", &[("brep", body)], super::blend::refused, || {
         let order = body.own_order();
         body.edge_face_largest_gap(&order, edge, face)
     })
@@ -230,7 +232,7 @@ pub(crate) fn classify_points(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Re
         return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
     }
     let located = ops_on("classify_points", &[("brep", body)], || body.locate_points(points))?;
-    Ok(located.into_iter().map(|l| point_class(l.map_err(|e| super::call::error("classify_point", e, None)))).collect())
+    Ok(located.into_iter().map(|l| point_class(l.map_err(|e| super::blend::refused("classify_point", e, None)))).collect())
 }
 
 /// [`classify_point`]'s class of a point the modelling layer placed. A region the kernel is unsure
