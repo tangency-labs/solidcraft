@@ -7767,6 +7767,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let lit_edges = feedback.lit_edges;
         let (lit_instanced_edges, lit_instanced_hidden) = (feedback.lit_instanced_edges, feedback.lit_instanced_hidden);
         let planned = feedback.planned;
+        // The scene the frame draws carries the hover placement too, not only the cache.
+        sc.hover_place = feedback.hover_place;
         if let Ok(mut cache) = app.viewport.hover_block.lock() {
             *cache = Some(HoverBlock {
                 key,
@@ -16776,12 +16778,26 @@ mod tests {
         let names: Vec<String> = crate::open_meshing::session_world(&assembly.session).bodies.iter().map(|b| b.name.clone()).collect();
         assert_eq!(names.len(), 2, "two placements of the part");
         build_scene(&assembly);
-        assembly.viewport.hover_bodies = names;
+        // A whole-body hover names the placement for the cull, which tints the model's own draw:
+        // no copy of the placement's triangles is built.
+        assembly.viewport.hover_bodies = vec![names[0].clone()];
+        let hovered_place = build_highlight(&assembly);
+        let (draw, row, entry) = hovered_place.hover_place.expect("the hovered placement is named for the cull");
+        let instanced_draw = &assembly.viewport.instanced_at.lock().unwrap()[&names[0]];
+        assert_eq!((draw, row), *instanced_draw, "the placement the model scene draws");
+        assert!(entry > 0, "the palette entry the cull writes into the row is a real one");
+        assert!(hovered_place.hover_instanced.is_empty(), "no copy of the placement");
+        assert_eq!(hovered_place.tris.len(), 0);
+        assert!(hovered_place.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "no copy of the placement");
+        // A selected whole body keeps the instanced highlight: a selection can mix with a hover.
+        assembly.viewport.hover_bodies.clear();
+        assembly.session.selection = names.iter().map(|n| Sel::Body { name: n.clone() }).collect();
         let instanced = build_highlight(&assembly);
-        assert_eq!(instanced.hover_instanced.len(), 1, "the part's one shared mesh");
-        assert_eq!(instanced.hover_instanced[0].count(), 2, "both of its placements");
+        assert_eq!(instanced.selected_instanced.len(), 1, "the part's one shared mesh");
+        assert_eq!(instanced.selected_instanced[0].count(), 2, "both of its placements");
         assert_eq!(instanced.tris.len(), 0);
         assert!(instanced.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "no copy of the placements");
+        assembly.session.selection.clear();
         // A see-through body is not in the block's opaque runs: its own vertices in the block are
         // drawn again, recoloured in the highlight's palette, and still no triangle is copied.
         app.viewport.hover_bodies.clear();
