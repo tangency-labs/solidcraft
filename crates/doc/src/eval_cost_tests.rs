@@ -4875,6 +4875,45 @@ fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
     assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
 }
 
+/// #611: a parameter rename keeps the results only when they are the ones evaluating `previous`
+/// gives: a `previous` that builds something else (a literal that differs) is refused, and the
+/// model is left as it was.
+#[test]
+fn a_parameter_rename_keeps_no_results_evaluated_for_another_design() {
+    let mut doc = Document::default();
+    doc.set_param("w", "2", None, None).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "w".into(),
+                width: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let shown = model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let mut other = doc.clone();
+    let FeatureKind::Box { height, .. } = &mut other.feature_mut(feature).unwrap().kind else { panic!("box") };
+    *height = "5".into();
+    let mut renamed = other.clone();
+    renamed.rename_param("w", "v").unwrap();
+    assert_eq!(renamed.param_rename_from(&other), Some(("w".into(), "v".into())));
+    assert!(!model.rename_param(&other, &renamed, "w", "v"), "the results are not the 2 x 3 x 5 box's");
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), shown, "the model is left as it was");
+    // The design the results were evaluated for is renamed without evaluating.
+    let mut same = doc.clone();
+    same.rename_param("w", "v").unwrap();
+    assert!(model.rename_param(&doc, &same, "w", "v"));
+    model.evaluate(&same);
+    assert_eq!(model.last_recomputed, 0);
+}
+
 /// Add a sketch on XY with disjoint rectangles `(x, y, w, h)` and extrude all of them to `height`
 /// with `Operation::Join`.
 fn join_rects(doc: &mut Document, rects: &[(f64, f64, f64, f64)], height: f64) -> u64 {

@@ -2699,8 +2699,8 @@ impl Session {
     }
 
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed
-    /// a body or a feature (or undid or redid such a rename) renames it in the model instead,
-    /// which keeps every result and mesh (#3044).
+    /// a body, a feature or a parameter (or undid or redid such a rename) renames it in the model
+    /// instead, which keeps every result and mesh (#3044, #611).
     fn refresh_from(&mut self, previous: &Arc<Document>, visibility_restored: bool) {
         let rename = self.body_rename(previous);
         // Undo/redo restored visibility in the target document's names already. Remapping
@@ -2729,6 +2729,13 @@ impl Session {
         // A feature's name labels it and builds nothing.
         if let Some(id) = self.doc.feature_rename_from(previous)
             && self.model.rename_feature(&self.doc, id)
+        {
+            self.revision += 1;
+            return;
+        }
+        // A parameter's name changes no value (#611).
+        if let Some((old, new)) = self.doc.param_rename_from(previous)
+            && self.model.rename_param(previous, &self.doc, &old, &new)
         {
             self.revision += 1;
             return;

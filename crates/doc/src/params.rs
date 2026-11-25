@@ -776,6 +776,54 @@ fn doc_len(units: &str) -> f64 {
     }
 }
 
+/// Rename parameter `old` to `new` in a sketch: its dimensions, pattern counts and spacings,
+/// point and text expressions, equation formulas and text words. How many references changed.
+/// [`Document::rename_param`] renames a design's sketches with it, and the model the solved
+/// copies it keeps of them (#611).
+pub(crate) fn rename_param_in_sketch(sketch: &mut solidcraft_sketch::Sketch, old: &str, new: &str) -> usize {
+    let mut n = 0;
+    for param in sketch.dimension_params_mut() {
+        if param.as_deref() == Some(old) {
+            *param = Some(new.to_string());
+            n += 1;
+        }
+    }
+    for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    for e in sketch.text_exprs_mut() {
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    // An equation curve's variable hides a parameter of its name: such a parameter is not what
+    // its formulas refer to.
+    for (variable, e) in sketch.equation_exprs_mut() {
+        if variable == old {
+            continue;
+        }
+        let r = expr::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    for e in sketch.text_word_exprs_mut() {
+        let r = crate::text_params::rename_reference(e, old, new);
+        if r != *e {
+            *e = r;
+            n += 1;
+        }
+    }
+    n
+}
+
 /// The parameters the design's sheet metal rules and its plastic rules read. Every sheet metal
 /// or plastic feature reads all the rules of its kind, so they are read once for a whole list of
 /// features ([`Document::feature_reads`]), not again for each feature.
@@ -1060,45 +1108,7 @@ impl Document {
                 }
             }
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-                for param in sketch.dimension_params_mut() {
-                    if param.as_deref() == Some(old) {
-                        *param = Some(new.to_string());
-                        n += 1;
-                    }
-                }
-                for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
-                    let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                for e in sketch.text_exprs_mut() {
-                    let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                // An equation curve's variable hides a parameter of its name: such a parameter is
-                // not what its formulas refer to.
-                for (variable, e) in sketch.equation_exprs_mut() {
-                    if variable == old {
-                        continue;
-                    }
-                    let r = expr::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
-                for e in sketch.text_word_exprs_mut() {
-                    let r = crate::text_params::rename_reference(e, old, new);
-                    if r != *e {
-                        *e = r;
-                        n += 1;
-                    }
-                }
+                n += rename_param_in_sketch(sketch, old, new);
             }
             if let FeatureKind::CapturePosition { joints, .. } = &mut f.kind {
                 for e in joints.iter_mut().flat_map(|cj| cj.exprs.iter_mut()).flatten() {
