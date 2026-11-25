@@ -49,6 +49,7 @@ use crate::blend::fillet_executive::p3::{
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::{ids, Attribute, Behavior, TagData};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
 use crate::kernel::Kernel;
@@ -685,7 +686,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 relations.mates.vertices.record(vertex, other)?;
             }
         }
-        if let Some((edges, faces)) = &self.0.cleanup_kept {
+        if let Some(edges) = &self.0.cleanup_kept {
             // An input edge is kept by its id while it is still the whole input edge, with
             // the ends it had. A split one is not: which of its pieces keeps the id follows
             // the edge's direction, so a part and its mirror image would keep different
@@ -698,7 +699,20 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                     relations.kept_edges.insert(edge);
                 }
             }
-            relations.kept_faces.clone_from(faces);
+            // #17169: a face is the target's while it carries the target's face mark, so
+            // a face the trim left of a split input face is one whichever piece kept the
+            // id (by its id alone, a round and its mirror image kept different faces).
+            for face in p1::faces(self.0.target, None)? {
+                let key = p3::topology_ref(self.0.target_serial, EntityRef::Face(face)).key;
+                if self
+                    .0
+                    .attributes
+                    .find_attribute(key, ids::FILLET_TARGET_FACE)
+                    .is_some()
+                {
+                    relations.kept_faces.insert(face);
+                }
+            }
         }
         let before = p1::edges(self.0.target, None)?;
         let vertices_before = std::mem::take(&mut self.0.vertices_before);
@@ -1020,7 +1034,57 @@ impl FilletSession<'_> {
         // (not upstream) the blend face log is read after the split, whose faces replace
         // the round's
         let logged = self.take_blend_faces(k, status.is_ok() && split.is_ok());
-        (status, split.and(logged))
+        let unmarked = self.remove_target_face_marks();
+        (status, split.and(logged).and(unmarked))
+    }
+
+    /// WR-459 (#17169): marks each face of the target, as filleting starts, with
+    /// [`ids::FILLET_TARGET_FACE`] (`SM_AB_COPY`, so a split's pieces and a merge's
+    /// survivor carry it): the clean-up after filleting leaves the faces that carry it.
+    fn mark_target_faces(&mut self) -> Result<()> {
+        for face in p1::faces(self.objects.target, None)? {
+            let mark = Attribute::tag(ids::FILLET_TARGET_FACE, TagData::default(), Behavior::Copy);
+            let handle = self.objects.attributes.insert(mark)?;
+            // recorded first, so a failed attach is still destroyed at the end
+            self.objects.cleanup_face_marks.push(handle);
+            let key = self.target_identity(EntityRef::Face(face)).key;
+            self.objects.attributes.add_attribute(key, handle)?;
+        }
+        Ok(())
+    }
+
+    /// Removes every target face mark ([`Self::mark_target_faces`]) when filleting ends,
+    /// whether it succeeded or not, so the target's attributes are as they would be without
+    /// them: the marks set, and the copies the splits and merges made of them.
+    fn remove_target_face_marks(&mut self) -> Result<()> {
+        // the recorded marks go first, so a failed face walk below cannot leak them
+        let mut status = Ok(());
+        for handle in std::mem::take(&mut self.objects.cleanup_face_marks) {
+            if self.objects.attributes.get(handle).is_some() {
+                // (destroyed even after an earlier failure; the first error is kept)
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
+            }
+        }
+        // then the copies the splits and merges made, found on the target's faces
+        let mut found = Vec::new();
+        for face in p1::faces(self.objects.target, None)? {
+            let key = self.target_identity(EntityRef::Face(face)).key;
+            if let Some(handle) = self
+                .objects
+                .attributes
+                .find_attribute(key, ids::FILLET_TARGET_FACE)
+            {
+                found.push(handle);
+            }
+        }
+        for handle in found {
+            if self.objects.attributes.get(handle).is_some() {
+                let destroyed = self.objects.attributes.destroy(handle);
+                status = status.and(destroyed);
+            }
+        }
+        status
     }
 
     /// [`Self::do_filleting`]'s filleting, without the split at the radius law's corners
@@ -1148,19 +1212,13 @@ impl FilletSession<'_> {
             .into_iter()
             .collect();
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
-        self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
-            let mut edges = std::collections::BTreeMap::new();
-            for edge in p1::edges(self.objects.target, None)? {
-                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
-                edges.insert(edge, ends);
-            }
-            Some((
-                edges,
-                p1::faces(self.objects.target, None)?.into_iter().collect(),
-            ))
-        } else {
-            None
-        };
+        let mut edges = std::collections::BTreeMap::new();
+        for edge in p1::edges(self.objects.target, None)? {
+            let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+            edges.insert(edge, ends);
+        }
+        self.objects.cleanup_kept = Some(edges);
+        self.mark_target_faces()?;
         // WR-661: the boundary an open result must keep to be kept.
         self.objects.open_input = OpenInput::capture(self.objects.target)?;
         self.with_filleting_context(k, |session, k| {
