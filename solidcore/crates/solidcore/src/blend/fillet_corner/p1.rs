@@ -225,7 +225,9 @@ fn ignored<T>(r: Result<T>, fallback: T) -> Result<T> {
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             Err(e)
@@ -1297,6 +1299,7 @@ pub fn check_nx1_degeneracy_status(
                     e,
                     SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::NotFound { .. }
                 ) || e.is_not_certified() =>
             {
@@ -1541,7 +1544,9 @@ impl FilletCorner {
                 Err(e)
                     if matches!(
                         e,
-                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                        SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }
                     ) || e.is_not_certified() =>
                 {
                     return Err(e)
@@ -2174,7 +2179,9 @@ impl FilletCorner {
             if let Err(e) = &calc {
                 if matches!(
                     e,
-                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                 ) || e.is_not_certified()
                 {
                     return calc;
