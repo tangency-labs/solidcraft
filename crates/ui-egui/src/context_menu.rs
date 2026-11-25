@@ -436,26 +436,56 @@ fn isolate_key(app: &SolveApp) -> String {
     crate::keymap::display_for(app, "browser.isolate").unwrap_or_default()
 }
 
-/// Isolate, as before: while isolating it narrows what stays on screen. [`items`] adds Unisolate
+/// Isolate, as before: while isolating it narrows what stays on screen. [`items`] adds Exit Isolation
 /// beside it (#8120).
 pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
     act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).key(&isolate_key(app)).on(!bodies.is_empty())
 }
 
-/// Isolate this placement. [`items`] adds Unisolate beside it (#8120).
+/// Isolate this placement. [`items`] adds Exit Isolation beside it (#8120).
 pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
     act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path })).key(&isolate_key(app))
 }
 
-/// While an Isolate is in effect, Unisolate follows the menu's Isolate entry (#8120), unless the
-/// menu offers it already, as the empty-space menu does.
+/// While an Isolate is in effect, Exit Isolation follows the menu's Isolate entry (#8120), unless
+/// the menu offers it already, as the empty-space menu does. On what is already all that is on
+/// screen Isolate would change nothing, so Exit Isolation takes its place there.
 fn add_unisolate(app: &SolveApp, v: &mut Vec<Item>) {
     if !isolating(app) || v.iter().any(|item| item.id == "ui.unisolate") {
         return;
     }
     if let Some(at) = v.iter().position(|item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence") {
-        v.insert(at + 1, unisolate_item(app));
+        if isolates_nothing(app, &v[at]) {
+            v[at] = unisolate_item(app);
+        } else {
+            v.insert(at + 1, unisolate_item(app));
+        }
     }
+}
+
+/// Whether Isolate entry `item` would change nothing: its bodies are exactly the ones shown.
+fn isolates_nothing(app: &SolveApp, item: &Item) -> bool {
+    let params = item.params.as_ref();
+    let bodies: Vec<String> = match item.id.as_str() {
+        "ui.isolate" => params
+            .and_then(|p| p.get("bodies"))
+            .and_then(Value::as_array)
+            .map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default(),
+        "ui.isolateOccurrence" => {
+            let path: Vec<u64> = params
+                .and_then(|p| p.get("path"))
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            app.session.occurrence_bodies(&path, true).unwrap_or_default()
+        }
+        _ => return false,
+    };
+    let Ok(world) = app.session.world_state() else { return false };
+    let shown: std::collections::BTreeSet<&str> =
+        world.bodies.iter().map(|body| body.name.as_str()).filter(|name| app.session.body_visible(name)).collect();
+    !bodies.is_empty() && shown == bodies.iter().map(String::as_str).collect()
 }
 
 /// Returns an isolation menu item for a component. While an Isolate is in effect, the menu adds

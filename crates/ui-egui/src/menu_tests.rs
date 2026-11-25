@@ -410,8 +410,16 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Unisolate");
-    assert!(after.iter().any(|i| i.label == "Isolate"), "Isolate stays, to narrow the isolation");
+    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Exit Isolation");
+    // On what is already all that shows, Isolate would change nothing: Exit Isolation alone.
+    assert!(!after.iter().any(|i| i.label == "Isolate"), "only Exit Isolation on the isolated body");
+    let other = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).unwrap();
+    app.run("browser.visibility", json!({"items": [kept.clone(), other], "visible": true, "isolate": true})).unwrap();
+    let wider = context_menu::items(&app, &t);
+    assert!(
+        wider.iter().any(|i| i.label == "Isolate") && wider.iter().any(|i| i.label == "Exit Isolation"),
+        "inside a wider isolation Isolate narrows it"
+    );
     act(&mut app, &t, "Exit Isolation");
     assert!(app.session.visibility.hidden_bodies.is_empty(), "Unisolate restores every body");
 
