@@ -2066,6 +2066,29 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// #21326 (WR-647 part B): a sphere of radius 1 with two circle loops of radius
+    /// 0.866 at z = +-0.5 and face tolerance 1 (fixture `stage3_sph_two_tol1`) passes
+    /// `SetProps_Stage3`. A classification input on a loop edge ends inside an interval
+    /// whose rest stays within the edge's tolerance (its midpoint 0.58 from the edge,
+    /// tolerance 1.00001); splitting it there left that rest unlabelled and the face was
+    /// refused (`SM_ERR_NOTYET_HEAL_FACE`, 1040, no loop tree root).
+    #[test]
+    fn sphere_two_loops_at_tolerance_one_passes_stage3() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let case = ctx
+            .fixture_cases(Runner.id())
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "stage3_sph_two_tol1")
+            .unwrap();
+        let v = rust(&case.parse().unwrap()).unwrap().values.get("v").cloned().unwrap();
+        // the Stage 3 classification status (1040 = NoLoopTreeRoot before the fix)
+        assert_eq!(v.first(), Some(&1000.0));
+    }
+
     /// The values of the Stage 3 script of generated case `s3gen{i}`.
     fn stage3_values(i: usize) -> Vec<f64> {
         let seed = CaseContext::seed_for("heal.face_props/stage3", i);

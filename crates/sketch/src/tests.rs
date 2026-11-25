@@ -30,7 +30,8 @@ thread_local! {
     static ID_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// A linear search for a point or curve by id on this thread.
+/// A linear search of a sketch's points, curves or pattern relations on this thread (a call of
+/// `point_index`, `curve_index` or `pattern_relation_ids`).
 pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
@@ -337,6 +338,63 @@ fn conflicting_constraints_fail_and_restore() {
     assert_eq!(sk.points, before.points);
 }
 
+/// A solve under a cancelled token ([`crate::cancel`], the app's Cancel) stops before
+/// its first iteration: the sketch fails and keeps its geometry. The same solve uncancelled
+/// iterates and solves.
+#[test]
+fn cancelled_solve_stops_and_restores() {
+    let build = || {
+        let mut sk = Sketch::new();
+        let l = rect(&mut sk, [v(0.3, -0.2), v(38.0, 1.0), v(41.0, 29.0), v(-1.0, 31.0)]);
+        use ConstraintKind::*;
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 40.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 30.0 }, None).unwrap();
+        sk
+    };
+    let token = crate::cancel::CancelToken::new();
+    token.cancel();
+    let mut sk = build();
+    let before = sk.points.clone();
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert_eq!(rep.iterations, 0, "{rep:?}");
+    assert_eq!(sk.points, before);
+    let mut sk = build();
+    let rep = seeded(false, || solve(&mut sk));
+    assert!(rep.ok() && rep.iterations > 0, "{rep:?}");
+}
+
+/// Cancel stops a solve part way: a long chain whose last link conflicts keeps LM iterating
+/// over every link; cancelled at a fixed point of its work (the token's 2,000th check, inside
+/// its first iterations), it stops there, with fewer iterations than it does uncancelled,
+/// failed, and its geometry as it was.
+#[test]
+fn cancel_stops_a_solve_part_way() {
+    let mut sk = Sketch::new();
+    let mut prev = 0usize;
+    let mut last = 0;
+    for i in 0..400 {
+        let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
+        last = sk.add_line_pts(prev, p, None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l: last }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Length { l: last, value: 10.0 }, None).unwrap();
+        prev = p;
+    }
+    sk.add_constraint(ConstraintKind::Vertical { l: last }, None).unwrap();
+    let free = seeded(false, || solve(&mut sk.clone()));
+    assert!(free.iterations > 2, "{free:?}");
+    let before = sk.points.clone();
+    let token = crate::cancel::CancelToken::after_polls(2_000);
+    let rep = seeded(false, || crate::cancel::within(&token, || solve(&mut sk)));
+    assert_eq!(rep.status, SolveStatus::Failed, "{rep:?}");
+    assert!(rep.iterations < free.iterations, "{} iterations cancelled, {} not", rep.iterations, free.iterations);
+    assert_eq!(sk.points, before);
+}
+
 #[test]
 fn circles_tangent_equal_concentric() {
     let mut sk = Sketch::new();
@@ -497,6 +555,32 @@ fn midpoint_symmetry_point_on_curve_arc() {
     let (ax, _) = line_pts(&sk, axis);
     assert!((sk.points[s1].pos.x + sk.points[s2].pos.x - 2.0 * ax.x).abs() < 1e-7);
     assert!((sk.points[s1].pos.y - sk.points[s2].pos.y).abs() < 1e-7);
+}
+
+/// Four closed strips laid out as a # shut off a 6 x 6 square inside none of them: the one gap
+/// (#19963). Four open lines laid out as a # close off the same square, which was drawn by them,
+/// so it is no gap; neither is a region inside a strip or where two strips cross.
+#[test]
+fn enclosed_gaps_are_regions_crossing_closed_loops_shut_off() {
+    let mut sk = Sketch::new();
+    for (x0, y0, x1, y1) in [(-6.0, 3.0, 6.0, 4.0), (-6.0, -4.0, 6.0, -3.0), (-4.0, -6.0, -3.0, 6.0), (3.0, -6.0, 4.0, 6.0)] {
+        rect(&mut sk, [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)]);
+    }
+    let ps = find_profiles(&sk);
+    let gaps = enclosed_gaps(&sk, &ps);
+    assert_eq!(gaps.len(), ps.len());
+    let found: Vec<f64> = ps.iter().zip(&gaps).filter(|(_, g)| **g).map(|(p, _)| p.area).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0] - 36.0).abs() < 1e-9, "{found:?}");
+    assert!(ps.iter().zip(&gaps).filter(|(_, g)| !**g).all(|(p, _)| !p.region.contains(v(0.0, 0.0))));
+
+    let mut open = Sketch::new();
+    for (a, b) in [(v(-6.0, 3.0), v(6.0, 3.0)), (v(-6.0, -3.0), v(6.0, -3.0)), (v(-3.0, -6.0), v(-3.0, 6.0)), (v(3.0, -6.0), v(3.0, 6.0))] {
+        open.add_line(a, b, None, None, None).unwrap();
+    }
+    let ps = find_profiles(&open);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert_eq!(enclosed_gaps(&open, &ps), [false]);
 }
 
 #[test]
@@ -1967,6 +2051,52 @@ fn a_fillet_follows_its_corner_when_the_corner_mirrors() {
 }
 
 #[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_corner_mirrors() {
+    // The fillet carries a point at its middle. When the corner mirrors, the arc is stored the
+    // other way round (its ends swapped), which puts the middle at the opposite end of the
+    // circle: the solve must either keep the point at the middle of the arc or fail.
+    let (mut sk, _, arc, _, _, far2) = filleted_corner();
+    let m = sk.add_point(v(38.0, 12.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    let q = sk.add_point(v(40.0, -20.0), None).unwrap();
+    sk.points[q].fixed = true;
+    sk.add_constraint(ConstraintKind::Coincident { p: far2, q }, None).unwrap();
+    let rep = solve(&mut sk);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
+fn a_midpoint_on_a_fillet_stays_satisfied_when_the_solve_swaps_its_ends() {
+    // The corner of `a_fillet_the_solve_leaves_in_place_keeps_its_short_arc_against_a_mirrored_reference`
+    // with a point at the arc's middle: judged against a mirrored reference the arc is swapped
+    // after the solve. The point must end at the middle of the arc that stays, or the solve fails.
+    let mut sk = Sketch::new();
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
+    let CurveKind::Line { b: ta, .. } = sk.curves[l1].kind else { panic!() };
+    let end = v(35.0 + 5.0 * s, 15.0 - 5.0 * s);
+    let arc = sk.add_arc(v(35.0, 15.0), v(35.0, 10.0), end, [None, Some(ta), None], None).unwrap();
+    let CurveKind::Arc { b: tb, .. } = sk.curves[arc].kind else { panic!() };
+    let l2 = sk.add_line(end, end + v(10.0, 10.0), Some(tb), None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: arc, value: 5.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l1, b: arc }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Tangent { a: l2, b: arc }, None).unwrap();
+    for p in &mut sk.points {
+        p.fixed = true;
+    }
+    let m = sk.add_point(v(37.0, 11.0), None).unwrap();
+    let id = sk.add_constraint(ConstraintKind::Midpoint { p: m, l: arc }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let mirrored: Vec<Vec2> = sk.points.iter().map(|p| v(80.0 - p.pos.x, p.pos.y)).collect();
+    let rep = solve_with(&mut sk, &Hold::default(), Some(&mirrored), Analysis::Full, None);
+    let ci = sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let residual = constraint_residual(&sk, ci).unwrap();
+    assert!(!rep.ok() || residual < 1e-6, "reported ok with the midpoint {residual} off: {rep:?}");
+}
+
+#[test]
 fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
     // Without the horizontal and vertical, the second line turns about the corner: the arc
     // shrinks towards flat (the lines collinear) and the lines keep leaving it. Past flat the
@@ -2408,6 +2538,205 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// A sketch shaped like a hostile design file. One circular pattern copy names, at every
+/// reference, the last of `n` points, `n` curves and `2n` constraints, the last a pattern relation.
+/// Then `m` patterns that need no copies (a circular one of count 1 and a 1 by 1 rectangular one
+/// in turn) each name the last curve, by its start point as the centre or as both directions.
+fn sketch_naming_its_last_ids(n: usize, m: usize) -> Sketch {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let (point, curve) = (sk.points[a].clone(), sk.curves[line].clone());
+    sk.points.extend((0..n).map(|i| SPoint { id: format!("q{i}"), ..point.clone() }));
+    sk.curves.extend((0..n).map(|i| Curve { id: format!("c{i}"), ..curve.clone() }));
+    let constraint = |id: String, kind| Constraint { id, kind, param: None, driven: false, text: None };
+    sk.constraints.extend((0..2 * n - 1).map(|i| constraint(format!("k{i}"), ConstraintKind::Fix { p: a })));
+    let relation = ConstraintKind::PatternPoint { p: 0, q: a, center: Some(0), angle: PI, offset: Vec2::ZERO, directions: [None, None] };
+    sk.constraints.push(constraint("kz".into(), relation));
+    let (p, c) = (format!("q{}", n - 1), format!("c{}", n - 1));
+    let instance =
+        PatternInstance { index: [1, 0], curves: vec![c.clone(); n], points: vec![(p.clone(), p); n], constraints: vec!["kz".into(); 2 * n] };
+    let kind = SketchPatternKind::Circular { center: "origin".into(), count: 2, angle: 180.0, alignment: PatternAlignment::Right, reversed: false };
+    sk.patterns.push(SketchPattern {
+        id: "pat".into(),
+        entities: vec![c.clone()],
+        kind,
+        count_expression: None,
+        instances: vec![instance],
+        expressions: Default::default(),
+    });
+    sk.patterns.extend((0..m).map(|i| {
+        let kind = if i % 2 == 0 {
+            SketchPatternKind::Circular { center: format!("{c}.start"), count: 1, angle: 180.0, alignment: PatternAlignment::Right, reversed: false }
+        } else {
+            SketchPatternKind::Rectangular {
+                dir: v(1.0, 0.0),
+                dir2: None,
+                direction: Some(c.clone()),
+                direction2: Some(c.clone()),
+                count: 1,
+                spacing: 1.0,
+                count2: 1,
+                spacing2: 1.0,
+                alignment: PatternAlignment::Right,
+                alignment2: PatternAlignment::Right,
+                reversed: false,
+                reversed2: false,
+            }
+        };
+        SketchPattern {
+            id: format!("pat{i}"),
+            entities: vec![c.clone()],
+            kind,
+            count_expression: None,
+            instances: vec![],
+            expressions: Default::default(),
+        }
+    }));
+    sk
+}
+
+/// Reading a design checks each sketch pattern's centre or direction lines, and that each pattern
+/// copy names curves, points and pattern relations its sketch has. Each was once found by a
+/// linear search over the sketch's ids, so a hostile file within the size limits took many
+/// minutes per sketch to read. One such file has a copy naming the last of 200 000 curves,
+/// 200 000 points and 400 000 constraints at every reference. Another has 400 000 patterns that
+/// need no copies, each naming the last curve. The checks must not search per reference or per
+/// pattern, and they accept and refuse exactly what they did.
+#[test]
+fn pattern_checks_do_not_search_ids_per_reference() {
+    fn changed(sk: &Sketch, change: impl FnOnce(&mut Sketch)) -> Sketch {
+        let mut sk = sk.clone();
+        change(&mut sk);
+        sk
+    }
+    // The centre of the last circular pattern and the second direction of the last rectangular one.
+    fn centre(sk: &mut Sketch) -> &mut String {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Circular { center, .. } = &mut p.kind { Some(center) } else { None })
+            .unwrap()
+    }
+    fn direction(sk: &mut Sketch) -> &mut Option<String> {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Rectangular { direction2, .. } = &mut p.kind { Some(direction2) } else { None })
+            .unwrap()
+    }
+    let n = 20_000;
+    let sk = sketch_naming_its_last_ids(n, n);
+    let last = format!("c{}", n - 1);
+    let refused = || Err("invalid value: invalid sketch pattern instance".to_string());
+    let unset = || Err("invalid value: invalid sketch pattern settings".to_string());
+    let circle = |sk: &mut Sketch| sk.curves[0].kind = CurveKind::Circle { c: 0, r: 1.0 };
+    let cases = [
+        ("every reference found", sk.clone(), Ok(())),
+        ("an unknown curve", changed(&sk, |sk| sk.patterns[0].instances[0].curves[n / 2] = "c-1".into()), refused()),
+        ("an unknown point", changed(&sk, |sk| sk.patterns[0].instances[0].points[n / 2].1 = "q-1".into()), refused()),
+        ("a constraint that is no pattern relation", changed(&sk, |sk| sk.patterns[0].instances[0].constraints[n] = "k0".into()), refused()),
+        // An id two constraints share counts when either of them is a pattern relation.
+        ("an id a fix shares with the relation", changed(&sk, |sk| sk.constraints[0].id = "kz".into()), Ok(())),
+        // The relations themselves are checked after the copies. The hostile file's pattern
+        // radius between a line and itself is refused there.
+        (
+            "a pattern radius between a line and itself",
+            changed(&sk, |sk| sk.constraints[2 * n - 1].kind = ConstraintKind::PatternRadius { a: 0, b: 0 }),
+            Err("invalid value: pattern radius needs two circles or ellipses".to_string()),
+        ),
+        ("a centre on an unknown curve", changed(&sk, |sk| *centre(sk) = "c-1.start".into()), unset()),
+        ("a centre a line does not have", changed(&sk, |sk| *centre(sk) = format!("{last}.center")), unset()),
+        // A point id comes first, even one named like a curve's point.
+        (
+            "a point named like a centre a line does not have",
+            changed(&sk, |sk| {
+                sk.points[1].id = format!("{last}.center");
+                *centre(sk) = format!("{last}.center");
+            }),
+            Ok(()),
+        ),
+        ("the origin as a centre", changed(&sk, |sk| *centre(sk) = "origin".into()), Ok(())),
+        // Of two curves with one id, the first decides, as `curve_index` finds it. A circle has
+        // no start point.
+        (
+            "a circle before the last curve with its id",
+            changed(&sk, |sk| {
+                circle(sk);
+                sk.curves[0].id.clone_from(&last);
+            }),
+            unset(),
+        ),
+        ("a direction on an unknown curve", changed(&sk, |sk| *direction(sk) = Some("c-1".into())), unset()),
+        (
+            "a direction that is no line",
+            changed(&sk, |sk| {
+                circle(sk);
+                let id = sk.curves[0].id.clone();
+                *direction(sk) = Some(id);
+            }),
+            unset(),
+        ),
+    ];
+    let mut searches = Vec::new();
+    for (what, sk, expected) in cases {
+        ID_SEARCHES.with(|c| c.set(0));
+        assert_eq!(sk.validate_patterns().map_err(|e| e.to_string()), expected, "{what}");
+        searches.push((what, ID_SEARCHES.with(std::cell::Cell::get)));
+    }
+    // One walk of the constraints builds the set of pattern relations. Nothing else searches,
+    // neither per reference nor per pattern.
+    assert!(searches.iter().all(|(_, count)| *count <= 1), "id searches in one check of the patterns {searches:?}");
+}
+
+/// Pruning drops each pattern that names a curve the sketch no longer has, with the relations
+/// its copies made, and keeps every other pattern and constraint. It once looked each pattern up
+/// in a list of the dropped ones, so a design with many patterns to drop took minutes at its
+/// first solve.
+#[test]
+fn pruning_drops_exactly_the_patterns_that_lost_a_curve() {
+    let m = 20_000;
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let c = sk.curves[line].id.clone();
+    let before = sk.constraints.len();
+    sk.constraints.extend((0..m).map(|i| Constraint {
+        id: format!("f{i}"),
+        kind: ConstraintKind::Fix { p: a },
+        param: None,
+        driven: false,
+        text: None,
+    }));
+    sk.patterns.extend((0..m).map(|i| SketchPattern {
+        id: format!("pat{i}"),
+        // Every other pattern copies a curve that is gone.
+        entities: vec![if i % 2 == 0 { c.clone() } else { "gone".into() }],
+        kind: SketchPatternKind::Rectangular {
+            dir: v(1.0, 0.0),
+            dir2: None,
+            direction: Some(c.clone()),
+            direction2: None,
+            count: 2,
+            spacing: 1.0,
+            count2: 1,
+            spacing2: 1.0,
+            alignment: PatternAlignment::Right,
+            alignment2: PatternAlignment::Right,
+            reversed: false,
+            reversed2: false,
+        },
+        count_expression: None,
+        instances: vec![PatternInstance { index: [1, 0], curves: vec![], points: vec![], constraints: vec![format!("f{i}")] }],
+        expressions: Default::default(),
+    }));
+    sk.prune_patterns();
+    let kept: Vec<_> = sk.patterns.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(kept, (0..m).step_by(2).map(|i| format!("pat{i}")).collect::<Vec<_>>());
+    let fixes: Vec<_> = sk.constraints[before..].iter().map(|k| k.id.clone()).collect();
+    assert_eq!(fixes, (0..m).step_by(2).map(|i| format!("f{i}")).collect::<Vec<_>>());
 }
 
 /// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
@@ -2933,4 +3262,216 @@ fn removing_a_point_from_a_spline_with_its_own_knots_is_refused() {
     assert!(sk.remove_spline_point(c, pts[3]).is_err());
     let CurveKind::Spline { pts: kept, nurbs: Some(now), .. } = &sk.curves[c].kind else { panic!("{:?}", sk.curves[c].kind) };
     assert_eq!((kept.len(), now), (7, &nurbs));
+}
+
+/// A loose spline that ends at a corner of a loop, tangent to the loop's arc there and bending
+/// a little less than it, so that it hugs the arc from outside: its sampled chords cut inside
+/// the circle and "cross" the arc a few thousandths from the corner, where the spline itself
+/// only touches it. That crossing is no cut, and the turn at the corner follows the spline's own
+/// tangent and bend, not its chord's: the loop is the arc and the two lines, with no hairline
+/// piece of the spline in it (the extrude of such a profile was not a closed solid).
+#[test]
+fn a_loose_spline_tangent_to_an_arc_at_a_corner_leaves_the_loop_whole() {
+    use solidcraft_geom::Seg2Geom;
+    let mut sk = Sketch::new();
+    let (o, corner, top) = (v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0));
+    sk.add_arc(o, corner, top, [None, None, None], Some("a1")).unwrap();
+    sk.add_line(top, o, None, None, Some("l1")).unwrap();
+    sk.add_line(o, corner, None, None, Some("l2")).unwrap();
+    // A cubic Bézier along the circle of radius 12.5 about (-2.5, 0), which touches the arc's
+    // circle from outside at the corner, from 40 degrees down to the corner.
+    let (c, r, sweep) = (v(-2.5, 0.0), 12.5_f64, 40_f64.to_radians());
+    let k = 4.0 / 3.0 * (sweep / 4.0).tan() * r;
+    let at = |a: f64| c + v(a.cos(), a.sin()) * r;
+    let tangent = |a: f64| v(-a.sin(), a.cos());
+    let cv = [at(sweep), at(sweep) - tangent(sweep) * k, corner + tangent(0.0) * k, corner];
+    let pts: Vec<usize> = cv.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    let profiles = find_profiles(&sk);
+    assert_eq!(profiles.len(), 1, "{:?}", profiles.iter().map(|p| p.outer_curves.clone()).collect::<Vec<_>>());
+    let profile = &profiles[0];
+    assert_eq!(distinct_curves(&profile.outer_curves), ["a1", "l1", "l2"].map(String::from), "{:?}", profile.outer_curves);
+    assert!((profile.area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{}", profile.area);
+    for seg in &profile.region.outer.segs {
+        assert!(seg.start().dist(seg.end()) > 1.0, "a hairline piece {seg:?}");
+    }
+}
+
+/// A circle just inside a hexagon's corners (a hex socket drawn with a circle nearly through its
+/// corners, #20661): the circle crosses each side twice, close to the corner. The sketch keeps
+/// the central region and a sliver at each corner, so a point at the centre finds a profile.
+#[test]
+fn circle_just_inside_hexagon_corners_keeps_the_regions() {
+    // A hexagon 2 mm across flats: corners at its circumradius 1.1547 (2 / sqrt 3, to 7 places).
+    let big = 1.1547005;
+    let half = 0.57735027;
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
+    for gap in [0.0, 2e-4, 5e-4, 1e-3] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), big - gap, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "gap {gap}: no profile at the centre ({} profiles)", ps.len());
+        let slivers = ps.iter().filter(|p| p.area < 1e-3).count();
+        let expected = if gap == 0.0 { 0 } else { 6 };
+        assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+    }
+}
+
+/// A circle crossing a hexagon's sides a hair from their corners (#20992): a hexagon of apothem
+/// 1 mm and a concentric circle just short of its corners. The sketch has thirteen regions (the
+/// centre, a sliver at each corner and a segment outside each side), and the centre one is found,
+/// as for a circle well inside the corners.
+#[test]
+fn circle_crossing_hexagon_sides_near_the_corners_finds_every_region() {
+    // The corners of a regular hexagon of apothem 1, at radius 2/sqrt(3) = 1.1547005383792515.
+    let (big, half) = (1.154_700_538_379_251_5, 0.577_350_269_189_625_8);
+    let corners = [v(big, 0.0), v(half, 1.0), v(-half, 1.0), v(-big, 0.0), v(-half, -1.0), v(half, -1.0)];
+    for radius in [1.1, 1.1545, 1.15469] {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None).unwrap()).collect();
+        for i in 0..6 {
+            sk.add_line_pts(pts[i], pts[(i + 1) % 6], None).unwrap();
+        }
+        sk.add_circle(v(0.0, 0.0), radius, None, None).unwrap();
+        let ps = find_profiles(&sk);
+        assert_eq!(ps.len(), 13, "radius {radius}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        assert!(profile_at_point(&ps, v(0.0, 0.0)).is_some(), "radius {radius}: no profile at the centre");
+        let biggest = ps.iter().map(|p| p.area).fold(0.0, f64::max);
+        let centre = profile_at_point(&ps, v(0.0, 0.0)).and_then(|i| ps.get(i)).map(|p| p.area).unwrap_or(0.0);
+        assert!((centre - biggest).abs() < 1e-12, "radius {radius}: the centre region ({centre}) is not the largest ({biggest})");
+    }
+}
+
+/// `bezier_distance` measures a point off a straight Bézier piece exactly (#20048): the piece
+/// whose controls all lie on a line is that line, so the distance is the perpendicular one.
+#[test]
+fn bezier_distance_measures_a_point_off_a_straight_piece() {
+    let line = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(30.0, 0.0)];
+    assert!((crate::bezier_distance(&line, Vec2::new(5.0, 3.0)) - 3.0).abs() < 1e-9);
+    assert!(crate::bezier_distance(&line, Vec2::new(17.0, 0.0)) < 1e-9);
+    assert!((crate::bezier_distance(&line, Vec2::new(40.0, 0.0)) - 10.0).abs() < 1e-9);
+}
+
+/// A smooth contour fits within the tolerance through few of its points (#20048): 800 samples
+/// of a sine need a fraction of the 500 a fit point spline takes, and the answer keeps the
+/// contour's order.
+#[test]
+fn a_smooth_contour_fits_within_the_tolerance_through_few_points() {
+    let given: Vec<Vec2> = (0..800)
+        .map(|i| {
+            let x = 80.0 * i as f64 / 799.0;
+            Vec2::new(x, 10.0 * (x / 10.0).sin())
+        })
+        .collect();
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 150, "chose {} points", fit.chosen.len());
+    assert!(fit.chosen.len() >= 2);
+    assert_eq!(fit.chosen.first(), given.first());
+    assert_eq!(fit.chosen.last(), given.last());
+    // The chosen points are the given ones, in their order along the contour.
+    let mut next = 0;
+    for p in &fit.chosen {
+        let at = given[next..].iter().position(|q| q == p).expect("a chosen point is a given point") + next;
+        assert!(at >= next);
+        next = at + 1;
+    }
+}
+
+/// A corner is densified around, not skipped: the fit is smooth (no kink), so a V needs points
+/// beside its corner to stay within the tolerance, and the guarantee holds (#20048).
+#[test]
+fn a_v_contour_fits_within_the_tolerance_around_its_corner() {
+    let side = |from: Vec2, to: Vec2, n: usize| (0..=n).map(|i| from + (to - from) * (i as f64 / n as f64)).collect::<Vec<_>>();
+    let mut given = side(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0), 50);
+    given.extend(side(Vec2::new(10.0, 10.0), Vec2::new(20.0, 0.0), 50).into_iter().skip(1));
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 30, "chose {} points", fit.chosen.len());
+    assert_eq!(fit.chosen.first(), given.first());
+    assert_eq!(fit.chosen.last(), given.last());
+    // The fit is smooth, so it rounds the corner; it needs chosen points beside it.
+    assert!(fit.chosen.iter().any(|p| p.dist(Vec2::new(10.0, 10.0)) < 1.0), "{:?}", fit.chosen);
+}
+
+/// A straight contour fits through its two ends alone (#20048): the fit through two points is
+/// the segment between them, and every given point lies on it.
+#[test]
+fn a_straight_contour_fits_through_its_two_ends_alone() {
+    let given: Vec<Vec2> = (0..100).map(|i| Vec2::new(0.1 * i as f64, 0.0)).collect();
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert_eq!(fit.chosen, vec![Vec2::new(0.0, 0.0), Vec2::new(9.9, 0.0)]);
+    assert!(fit.deviation < 1e-6, "the line is straight: deviation {}", fit.deviation);
+}
+
+/// Points too rough for a smooth spline refuse, naming that even the most points cannot reach
+/// the tolerance (#20048): a zigzag needs a point at nearly every turn.
+#[test]
+fn zigzag_points_beyond_the_tolerance_refuse() {
+    let given: Vec<Vec2> = (0..1000).map(|i| Vec2::new(0.1 * i as f64, 0.5 * (i % 2) as f64)).collect();
+    let err = crate::fit_within_tolerance(&given, 0.0001, false).unwrap_err();
+    let words = err.to_string();
+    assert!(words.contains("do not reach the tolerance"), "{words}");
+}
+
+/// A closed contour drops its closing repeat and fits the circle through few points (#20048).
+#[test]
+fn a_closed_contour_drops_its_closing_repeat_and_fits() {
+    let mut given: Vec<Vec2> = (0..100)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / 99.0;
+            Vec2::new(10.0 * a.cos(), 10.0 * a.sin())
+        })
+        .collect();
+    given.push(given[0]);
+    let fit = crate::fit_within_tolerance(&given, 0.01, true).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 60, "chose {} points", fit.chosen.len());
+    assert!(fit.chosen.len() >= 6);
+    assert_ne!(fit.chosen.first(), fit.chosen.last(), "the closing repeat is the caller's");
+}
+
+/// `bezier_distance` measures the curve, not the chords between samples (#20048 review): the
+/// cubic through y = x² has (0.5, 0.5) on its first chord, but the curve is 0.16589 away (the
+/// closest place is x = ∛¼).
+#[test]
+fn bezier_distance_measures_the_curve_not_the_chord() {
+    let parabola = [Vec2::new(0.0, 0.0), Vec2::new(32.0 / 3.0, 0.0), Vec2::new(64.0 / 3.0, 1024.0 / 3.0), Vec2::new(32.0, 1024.0)];
+    let got = crate::bezier_distance(&parabola, Vec2::new(0.5, 0.5));
+    assert!((got - 0.16589).abs() < 1e-3, "distance {got}");
+    assert!(crate::bezier_distance(&parabola, Vec2::new(0.0, 0.0)) < 1e-9);
+}
+
+/// A point the duplicate fold could hide is kept and measured (#20048 review): at coordinates
+/// near 10⁶ mm, a point 0.0005 mm from its neighbour stays when the tolerance is 0.0001.
+#[test]
+fn a_point_the_duplicate_fold_could_hide_is_kept() {
+    let given = [Vec2::new(1_000_000.0, 0.0), Vec2::new(1_000_000.0, 0.0005), Vec2::new(1_000_010.0, 0.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
+    assert_eq!(fit.chosen.len(), 3, "{:?}", fit.chosen);
+    assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
+}
+
+/// A closed contour that repeats an end's position away from the end still fits (#20048
+/// review): the seed's middle point comes from positions distinct from both ends.
+#[test]
+fn a_closed_contour_repeating_an_end_position_far_in_still_fits() {
+    let given = [Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(1.0, 0.1), Vec2::new(5.0, 5.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.01, true).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() >= 3);
+}
+
+/// The duplicate fold is reserved in the tolerance budget (#20048 review): a folded point is
+/// within the fold of its neighbour, and distance is 1-Lipschitz, so a fit that succeeds keeps
+/// every given point, folded ones included, within the tolerance.
+#[test]
+fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
+    let given = [Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.000099999), Vec2::new(5.0, 0.000100004), Vec2::new(10.0, 0.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
+    assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
 }

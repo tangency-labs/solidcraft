@@ -116,7 +116,7 @@
 //!   each vertex on sides of both coordinates): the corner main's point is nearest, the
 //!   axis vector main's tangent is nearest, and the exact multiple of 90° between them
 //!   (`label_vertexuse`).
-//! * `topology.brep_validation` (2 rows): the samples of the edge uses' UV trims and of the
+//! * `topology.brep_validation` (1 row): the samples of the edge uses' UV trims and of the
 //!   edges' `CrvOnSurf` curves over copies of them, against the exact iso line (side and
 //!   direction those main's samples single out) and the exact surface point on it
 //!   (`label_validation`).

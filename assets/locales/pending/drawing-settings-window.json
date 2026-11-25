@@ -24,8 +24,6 @@
     "ui.drawing_settings.updates": "التحديث"
   },
   "de": {
-    "cmd.drawing_set": "Zeichnungseinstellungen",
-    "ui.drawing_panel.auto": "Automatisch",
     "ui.drawing_settings.deferred": "Aufgeschoben",
     "ui.drawing_settings.deferred_help": "Aufgeschobene Ansichten behalten ihre letzten Linien, bis die Zeichnung aktualisiert wird.",
     "ui.drawing_settings.drawing_immediate": "Zeichnungsänderungen gelten sofort. Jede Änderung ist ein Rückgängig-Schritt.",

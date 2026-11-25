@@ -216,7 +216,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let frame = ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     let spec = solidcraft_engine::find_command("sketch.redefine");
-    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_label(s.label));
+    let command = spec.as_ref().map_or("", |s| solidcraft_ui_text::tr_command(s.id, s.label));
     let title = solidcraft_ui_text::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
     let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
     let mut painted = false;
