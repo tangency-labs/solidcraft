@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="840" height="440" viewBox="0 0 840 440">
+  <title>21660-tight-box-search</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="840" height="440" fill="#ffffff"/>
+    <rect id="domain_before" data-name="domain before" x="40" y="80" width="300" height="300" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <path id="face_before" data-name="face before" d="M97 150 C150 126 260 126 316 138 L310 302 C250 320 150 320 100 314 Z" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="domain_after" data-name="domain after" x="460" y="80" width="300" height="300" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <polygon id="trims_box" data-name="trims box" points="517,129 736,129 736,320 517,320" fill="#dce9f5" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <path id="face_after" data-name="face after" d="M517 150 C570 126 680 126 736 138 L730 302 C670 320 570 320 520 314 Z" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="outside_cell" data-name="outside cell" x="520" y="131" width="14" height="14" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <path id="outside_cell_cross" data-name="outside cell cross" d="M520 131 L534 145 M534 131 L520 145" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <rect id="c1" x="120" y="132" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c2" x="150" y="129" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c3" x="180" y="128" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c4" x="210" y="127" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c5" x="240" y="128" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c6" x="270" y="130" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <rect id="c7" x="300" y="134" width="8" height="8" fill="none" stroke="#999999" stroke-miterlimit="10"/>
+    <circle id="solver_point" data-name="solver point" cx="329" cy="89" r="4" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="16" fill="#000000"><tspan x="0" y="0">Before: the search starts from the whole UV domain</tspan></text>
+    <text transform="matrix(1 0 0 1 460 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="16" fill="#000000"><tspan x="0" y="0">After: it starts from the box of the face&apos;s trims</tspan></text>
+    <text transform="matrix(1 0 0 1 175 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the face</tspan></text>
+    <text transform="matrix(1 0 0 1 595 230)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the face</tspan></text>
+    <text transform="matrix(1 0 0 1 40 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the surface&apos;s domain</tspan></text>
+    <text transform="matrix(1 0 0 1 460 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the surface&apos;s domain</tspan></text>
+    <text transform="matrix(1 0 0 1 120 96)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a cell at the limits counts with</tspan></text>
+    <text transform="matrix(1 0 0 1 120 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the solver&apos;s point, off the face</tspan></text>
+    <line x1="304" y1="104" x2="324" y2="92" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 640 345)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the trims&apos; box</tspan></text>
+    <line x1="685" y1="333" x2="700" y2="320" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 470 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">no trim box meets it, its middle is outside: set aside</tspan></text>
+    <line x1="520" y1="114" x2="526" y2="130" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 120 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">cells along the trim, divided to the limits</tspan></text>
+  </g>
+</svg>
