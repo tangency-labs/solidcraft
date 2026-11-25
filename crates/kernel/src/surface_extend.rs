@@ -383,10 +383,24 @@ fn up_to(body: &Body, at: &[Vec3], picked: &[(usize, usize)], tool: &SplitTool, 
     Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
 }
 
+/// How far past its edges (picked at `at`) `body` extends to reach past all of `target`: its own
+/// reach ([`REACH`]), or past the farthest corner of the target's box from a pick, with room for the
+/// body's other points, when that is farther.
+fn reach_of(body: &Body, at: &[Vec3], target: &Body) -> Result<f64> {
+    let size = body.size().max(1e-6);
+    let own = size * REACH;
+    // A target with no solidcore form (a mesh) is refused where it would cut.
+    let (Some(p), Some(form)) = (at.first(), target.ops_body()) else { return Ok(own) };
+    let (lo, hi) = form.0.bounds().map_err(|e| failed("target bounds", e.to_string()))?;
+    let farthest =
+        solidcore_ops::measure::box_max_distance_to_point(lo, hi, [p.x, p.y, p.z]).map_err(|e| failed("target distance", e.to_string()))?;
+    Ok(own.max(farthest + 2.0 * size))
+}
+
 /// The faces extended past the target body and cut where they first run into it, keeping the
 /// pieces the surface's own faces lie in.
 fn up_to_body(body: &Body, at: &[Vec3], picked: &[(usize, usize)], target: &Body, mode: ExtendMode) -> Result<Body> {
-    let (long, _) = continued(body, at, picked, body.size().max(1e-6) * REACH, mode)?;
+    let (long, _) = continued(body, at, picked, reach_of(body, at, target)?, mode)?;
     let inside = (0..body.face_count()).map(|f| crate::surface_untrim::face_point(body, f)).collect::<Result<Vec<_>>>()?;
     let cut = crate::surface_trim::stop_extension(&long, body, &inside, target)?;
     Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
@@ -656,6 +670,10 @@ mod tests {
         assert!(rel(area(&out), 165.0) < 1e-9, "{}", area(&out));
         let bb = measure(&out).unwrap().bbox;
         assert!(bb.min.x.abs() < 1e-9 && (bb.max.x - 18.0).abs() < 1e-9, "{bb:?}");
+        // A wall far past 50 times the sheet's size is reached: 10 * 1000.
+        let distant = wall(&[[1000.0, -1.0], [1000.0, 11.0]]);
+        let out = to(&distant, ExtendMode::Natural).unwrap();
+        assert!(rel(area(&out), 10_000.0) < 1e-9, "{}", area(&out));
         let half = wall(&[[15.0, -1.0], [15.0, 5.0]]);
         let e = to(&half, ExtendMode::Natural).unwrap_err();
         assert!(e.to_string().contains("never meets"), "{e}");

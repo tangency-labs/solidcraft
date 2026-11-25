@@ -534,8 +534,10 @@ fn cut_feet(
 /// Refuses a kept face (record faces `kept` of `cur`, order `order`) that runs on away from the
 /// original surface across one of the edges the body cut (`feet`, each edge's nearest points of
 /// that surface): there the kernel's binormal of the face's edge use, pointing into the face,
-/// leads away from it. A sample the kernel cannot evaluate (a degenerate stretch of the edge)
-/// decides nothing.
+/// leads away from it. A sample at the nearest point itself decides nothing.
+///
+/// # Errors
+/// The kernel's, for a sample it cannot evaluate: the side there is not known.
 fn runs_away(cur: &Body, order: &Order, kept: &[usize], feet: &[Feet]) -> Result<()> {
     let faces = kept
         .iter()
@@ -554,9 +556,8 @@ fn runs_away(cur: &Body, order: &Order, kept: &[usize], feet: &[Feet]) -> Result
                     let Some([x, y, z]) = *foot else {
                         continue;
                     };
-                    let Ok(Some(part)) =
-                        edgeuse_binormal_away_from(k, b, eu, s, Point3::new(x, y, z))
-                    else {
+                    let foot = Point3::new(x, y, z);
+                    let Some(part) = edgeuse_binormal_away_from(k, b, eu, s, foot)? else {
                         continue;
                     };
                     if part > ON_PAST {
