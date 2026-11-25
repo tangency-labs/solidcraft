@@ -3212,6 +3212,22 @@ pub(crate) fn meridian_rounding(
     rad_to_deg(radians) * (1.0 + gamma(16))
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Sphere {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            radius,
+            inside_out,
+        } = self;
+        d.tag(0x5F);
+        base.content(d)?;
+        d.f64(*radius);
+        d.bool(*inside_out);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

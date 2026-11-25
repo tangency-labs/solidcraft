@@ -307,6 +307,7 @@ impl SolverRails for FilletSolver {
     }
 
     fn set_offsets(&mut self, radius: f64) -> Result<()> {
+        self.check_station_radius(radius, OP)?;
         for rail in 0..2 {
             let d = radius * self.orientation(rail)?;
             self.rail_mut(rail)?.set_offset_distance(d);
@@ -1081,14 +1082,33 @@ impl SurfaceSurfaceFs {
 
 // ---- SmConstantDistanceFS -----------------------------------------------------------------
 
-/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): every cross
-/// section has the same chord length between the rails.
+/// The constant-distance fillet/chamfer solver (`SmConstantDistanceFS`): a fixed
+/// chord between rails, or a fixed common setback on the two tangent planes.
 #[derive(Debug, Clone)]
 pub struct ConstantDistanceFs {
     /// The `SmFilletSolver` base.
     pub solver: FilletSolver,
     /// `m_dDistance`: the distance between corresponding rail points.
     pub distance: f64,
+}
+
+/// The equal setback's rolling radius and its derivative with respect to the dot
+/// of the inward unit normals. Their angle is the supplement of the tangent
+/// planes' wedge, so r/d = tan(wedge/2) = |n0+n1| / |n0-n1|.
+pub(crate) fn equal_setback_radius(setback: f64, [n0, n1]: [Vec3; 2]) -> Result<(f64, f64)> {
+    let sum_sq = (n0 + n1).length_squared();
+    let diff_sq = (n0 - n1).length_squared();
+    let radius = setback * (sum_sq / diff_sq).sqrt();
+    let derivative = 4.0 * radius / (sum_sq * diff_sq);
+    if !radius.is_finite() || radius <= 0.0 || !derivative.is_finite() {
+        return Err(SolidError::blend_trace(
+            OP_CD_JAC,
+            TraceFailure::EdgeFacesTangent {
+                dot: Some(n0.dot(n1)),
+            },
+        ));
+    }
+    Ok((radius, derivative))
 }
 
 /// The outputs of [`ConstantDistanceFs::load_initial_values`] besides the arrays it
@@ -1311,6 +1331,34 @@ impl ConstantDistanceFs {
         // set sDiff2 = vector between points on the fillet center curve (desire sDiff2.Length == 0.0)
         let diff2 = diff1 + radius * (n_f - n_g);
 
+        let (value, row, diverged) = if let Some(setback) = self.solver.station_setback() {
+            let (target, dr_dp) = equal_setback_radius(setback, [n_f, n_g])?;
+            (
+                radius - target,
+                (
+                    -dr_dp * n_g.dot(unit_n_f_du),
+                    -dr_dp * n_g.dot(unit_n_f_dv),
+                    -dr_dp * n_f.dot(unit_n_g_du),
+                    -dr_dp * n_f.dot(unit_n_g_dv),
+                    1.0,
+                ),
+                diff1.length() > 20.0 * setback,
+            )
+        } else {
+            let value = diff1.dot(diff1) - self.distance * self.distance;
+            (
+                value,
+                (
+                    2.0 * diff1.dot(du_f),
+                    2.0 * diff1.dot(dv_f),
+                    -2.0 * diff1.dot(du_g),
+                    -2.0 * diff1.dot(dv_g),
+                    0.0,
+                ),
+                value.abs().sqrt() > 10.0 * self.distance,
+            )
+        };
+
         if let Some(j) = jacobian {
             let mut i = *num_equations;
             let last_column = add(surf2_off.max(surf1_off), 2, OP)?;
@@ -1339,13 +1387,7 @@ impl ConstantDistanceFs {
                     -dv_g.z - radius * unit_n_g_dv.z,
                     n_f.z - n_g.z,
                 ),
-                (
-                    2.0 * diff1.dot(du_f),
-                    2.0 * diff1.dot(dv_f),
-                    -2.0 * diff1.dot(du_g),
-                    -2.0 * diff1.dot(dv_g),
-                    0.0,
-                ),
+                row,
             ] {
                 set_j(j, i, surf1_off, a, OP)?;
                 set_j(j, i, s1, b, OP)?;
@@ -1358,14 +1400,13 @@ impl ConstantDistanceFs {
 
         // Compute function values - distance vector between offset points on fillet center curve
         //                           distance between points on rail curves
-        let value = diff1.dot(diff1) - self.distance * self.distance;
         for v in [diff2.x, diff2.y, diff2.z, value] {
             set_f(f, *num_equations, v, OP)?;
             *num_equations = add(*num_equations, 1, OP)?;
         }
 
         // failure: railPoints more than 10*m_Distance apart
-        if value.abs().sqrt() > 10.0 * self.distance {
+        if diverged {
             // No convergance just skip out of here
             return Err(SolidError::blend_trace(
                 OP,
@@ -1399,9 +1440,9 @@ impl ConstantDistanceFs {
     /// extended by the extension factor becomes two new intervals at
     /// `rIntervals[len(rGuessT)..]`, two `false` periodicities and the new UV guess are
     /// appended, and `surface2_index` becomes the old guess count. Then always:
-    /// `rIntervals[surface2_index + 2] = [0, 10 L]`, a `false` periodicity, both
-    /// offset distances `L sqrt(2) / 2` (times the orientations), and that radius
-    /// appended to the guesses.
+    /// the radius is nonnegative, bounded above by `10 L` for a chord and free to
+    /// take any finite value for equal setbacks. A `false` periodicity is appended
+    /// and the initial radius `L sqrt(2) / 2` sets both offsets (with orientations).
     ///
     /// # Errors
     ///
@@ -1459,9 +1500,16 @@ impl ConstantDistanceFs {
             guess_t.push(uv2.y);
         }
 
-        // Last of all load the distance
+        // For equal setbacks the radius is d cot(phi / 2), unbounded as the
+        // normal separation phi decreases to zero. The reference wedge only
+        // seeds the solve, so retain the whole nonnegative finite range.
+        let upper = if self.solver.station_setback().is_some() {
+            f64::MAX
+        } else {
+            self.distance * 10.0
+        };
         *interval_mut(intervals, add(surface2_index, 2, OP)?, OP)? =
-            Extent1d::from_min_max(0.0, self.distance * 10.0);
+            Extent1d::from_min_max(0.0, upper);
         periodicities.push(false);
         let approx_radius = self.distance * 2.0_f64.sqrt() / 2.0;
         self.solver.set_offsets(approx_radius)?;
@@ -3754,6 +3802,118 @@ mod tests {
         );
         assert!(fs.can_make_analytic());
         assert_eq!(fs.jacobian_size(), 5);
+    }
+
+    #[test]
+    fn a_shallow_station_can_solve_above_the_chord_radius_limit() {
+        use crate::blend::fillet_solver::p3::StepSolveOutcome;
+        use crate::intersect::surface_intersector::p1::SrfIndex;
+        use crate::surface::plane::Plane;
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+
+        let k = Kernel::default();
+        let setback = 0.2;
+        let angle = 2.0_f64.to_radians();
+        // At mid-arc one normal has rotated 45 degrees from the station normal.
+        let reference = PI - (angle.cos() * std::f64::consts::FRAC_1_SQRT_2).acos();
+        let chamfer = ChamferDefinition::new(ChamferSize::Distances([setback; 2]), reference)
+            .unwrap()
+            .at_every_station()
+            .unwrap();
+        let distance = chamfer.offsets().unwrap()[0] * std::f64::consts::SQRT_2;
+        let expected = setback / (0.5 * angle).tan();
+        assert!(expected > 10.0 * distance);
+
+        let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
+        let mut solver = FilletSolver::new(1e-7, 0.35, 0.175);
+        solver.chamfer = Some(chamfer);
+        solver.orientations = [1.0; 2];
+        for (i, x) in [Vec3::X, Vec3::new(angle.cos(), 0.0, -angle.sin())]
+            .into_iter()
+            .enumerate()
+        {
+            let plane = Plane::new(Vec3::ZERO, x, Vec3::Y, Vec2::new(1.0, 1.0), &domain);
+            solver.surfaces[i] = Some(OffsetSurfaceSlot {
+                key: i as u64,
+                surface: OffsetSurface::new(
+                    &k,
+                    0.0,
+                    Surface::from(plane),
+                    SurfaceId::Free(i as u32),
+                    SS_UNKNOWN,
+                )
+                .unwrap(),
+            });
+        }
+
+        let mut fs = ConstantDistanceFs { solver, distance };
+        // The two rails are parallel to Y. Their centre is d along X and r above
+        // the first face. Step past v = 1 to make the trace intersect that UV edge.
+        let uv = Point2::new(0.0, 0.0);
+        let mut point = TsectPnt::new();
+        assert!(FilletSolver::point_on_plane_solve(
+            &mut fs,
+            &k,
+            None,
+            Vec3::ZERO,
+            Vec3::Y,
+            &domain,
+            &domain,
+            uv,
+            uv,
+            &mut point
+        )
+        .unwrap());
+        assert!((point.user_doubles[0] - expected).abs() < 1e-9);
+
+        for rail in [SrfIndex::First, SrfIndex::Second] {
+            *point.uv_deriv_mut(rail) = Vec2::new(0.0, 1.0);
+        }
+        *point.crv_deriv_mut() = Vec3::Y;
+        *point.crv_pos_mut() = Vec3::new(setback, 0.0, expected);
+        let mut next = TsectPnt::new();
+        let mut step = 1.5;
+        let mut outcome = StepSolveOutcome::default();
+        FilletSolver::step_solve(
+            &mut fs,
+            &k,
+            None,
+            &point,
+            &mut step,
+            &domain,
+            &domain,
+            &mut next,
+            &mut outcome,
+        )
+        .unwrap();
+        assert!(outcome.clipped && outcome.found_good_point);
+        assert!((step - 1.0).abs() < 1e-9);
+        assert!((next.uv_pos(SrfIndex::First).y - 1.0).abs() < 1e-9);
+        assert!((next.user_doubles[0] - expected).abs() < 1e-9);
+
+        let mut clipped = crate::blend::fillet_solver::p1::FindClippedRadiusEfo::new(
+            &mut fs.solver,
+            0,
+            &[domain; 2],
+            SurfParamType::U,
+            0.0,
+            [uv; 2],
+            distance,
+        )
+        .unwrap();
+        for radius in [f64::INFINITY, f64::NAN, -1.0] {
+            assert!(matches!(
+                clipped.evaluate(&k, radius),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+        let parallel = equal_setback_radius(setback, [Vec3::Z; 2]).unwrap_err();
+        assert!(matches!(
+            parallel.blend_failure(),
+            Some(crate::error::blend::BlendFailure::Trace(
+                TraceFailure::EdgeFacesTangent { .. }
+            ))
+        ));
     }
 
     #[test]

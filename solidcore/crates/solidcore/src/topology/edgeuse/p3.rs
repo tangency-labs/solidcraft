@@ -1783,7 +1783,15 @@ pub fn get_or_create_uv_trim_curve(
     // Not upstream (#18162): the edge tolerance follows the trim's proved distance from the
     // edge curve, not only the drop's reported error, whose fit part is the fit tolerance (the
     // edge's own tolerance) and would raise the edge from its own tolerance on every refit.
-    let raise_by = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
+    //
+    // Not upstream (#21105): in a validate-only pass (`Kernel::with_held_trim_raise`, the
+    // pass's `bValidateOnly`) the trim raises nothing, as `SetUVTrimCurve` raises nothing on
+    // a B-rep marked validate-only; the raise distance is then not wanted, and not proved.
+    let raise_by = if k.caches.hold_trim_raise || b.validate_only() {
+        0.0
+    } else {
+        trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?
+    };
     set_uv_trim_curve(
         b,
         eu,
@@ -2308,7 +2316,6 @@ fn raised_trim_bound(
 ///
 /// [`SolidError::NotFound`] for a dangling id.
 fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
-    let up = |x: f64| x * (1.0 + 4.0 * f64::EPSILON);
     let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
     let mut vertices: Vec<crate::topology::VertexId> = Vec::new();
     for v in [v0, v1].into_iter().flatten() {
@@ -2317,35 +2324,9 @@ fn cover_vertex_ends(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         }
     }
     for v in vertices {
-        let at = b.vertex(v)?.point;
-        let mut reach = 0.0_f64;
-        for x in crate::topology::vertex::edges(b, v, None)? {
-            let rec = b.edge(x)?;
-            let Some(curve) = rec.curve.as_ref() else {
-                continue;
-            };
-            let (s0, s1) = crate::topology::edge::start_end_vertices(b, x)?;
-            for (end, t) in [
-                (s0, rec.interval.evaluate(0.0)),
-                (s1, rec.interval.evaluate(1.0)),
-            ] {
-                if end != Some(v) {
-                    continue;
-                }
-                // (an end not evaluated, or with no bound on its evaluation's error, raises
-                // nothing: the vertex is left as upstream leaves it for that end)
-                let Ok(p) = curve.evaluate_point(k, t) else {
-                    continue;
-                };
-                let Some(error) = curve.point_error_bound(t) else {
-                    continue;
-                };
-                let far = up(up(at.distance(p)) + up(error * up(3.0_f64.sqrt())));
-                if far.is_finite() {
-                    reach = reach.max(far);
-                }
-            }
-        }
+        // (an end not evaluated, or with no bound on its evaluation's error, raises
+        // nothing: the vertex is left as upstream leaves it for that end)
+        let reach = crate::topology::vertex::edge_end_reach(k, b, v)?;
         if reach > b.vertex(v)?.tolerance {
             crate::topology::vertex::set_tolerance(b, v, reach, true, true)?;
         }
@@ -2719,6 +2700,50 @@ pub(crate) fn trim_deviation_bound(
     let floor = TRIM_BOUND_FLOOR * fit;
     k.work_counters.add_trim_deviation_bound();
     crate::query::curve_surface_gap::trim_image_gap_bound_within(
+        k,
+        &surface,
+        curve,
+        trim,
+        [ivl.min(), ivl.max()],
+        floor,
+        [enough, over],
+        budget,
+    )
+}
+
+/// Not upstream (WR-450, #18923): [`trim_deviation_bound`] at equal parameters
+/// ([`trim_same_parameter_gap_bound_within`]): a proved bound on how far the image of the UV
+/// trim `trim` of `eu` at each parameter of its edge's interval is from the edge curve's point
+/// at that parameter, so also how far the two parameters slip. `fit`, `enough`, `over` and
+/// `budget` mean what they mean there. `None` where the pair has no exact data to bound it
+/// from (no surface or curve, or as [`trim_same_parameter_gap_bound_within`] says);
+/// `Some(f64::INFINITY)` where it has but the gap is not enclosed.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
+///
+/// [`trim_same_parameter_gap_bound_within`]: crate::query::curve_surface_gap::trim_same_parameter_gap_bound_within
+pub(crate) fn trim_same_parameter_deviation_bound(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    trim: &Curve,
+    fit: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+) -> Result<Option<f64>> {
+    let Some((e, surface)) = trim_pair_surface(b, eu)? else {
+        return Ok(None);
+    };
+    let edge_rec = b.edge(e)?;
+    let Some(curve) = edge_rec.curve.as_ref() else {
+        return Ok(None);
+    };
+    let ivl = edge_rec.interval;
+    let floor = TRIM_BOUND_FLOOR * fit;
+    k.work_counters.add_trim_deviation_bound();
+    crate::query::curve_surface_gap::trim_same_parameter_gap_bound_within(
         k,
         &surface,
         curve,

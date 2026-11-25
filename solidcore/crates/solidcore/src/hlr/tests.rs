@@ -6206,3 +6206,50 @@ fn spline_points_and_hulls_come_from_their_own_knot_spans() {
         }
     }
 }
+
+#[test]
+fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
+    let face = |center: [f64; 3], radius: f64| k::Face {
+        surface: k::Surface::BallPatch { center, radius },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    // The sphere is the label's, as it is.
+    let sphere = surface::ball_sphere(&face([1., 2., 3.], 2.));
+    assert!(matches!(
+        sphere,
+        Ok(Some(Analytic::Sphere { c, r })) if [c.x, c.y, c.z, r] == [1., 2., 3., 2.]
+    ));
+    // Its parameters are its form's: without one there is no chart.
+    assert!(matches!(
+        S3::of_face(&face([1., 2., 3.], 2.)),
+        Err(HlrError::Invalid("ball patch without its form"))
+    ));
+    // A sphere that is no sphere is refused with its reason.
+    for (center, radius) in [
+        ([f64::NAN, 0., 0.], 1.),
+        ([0., f64::INFINITY, 0.], 1.),
+        ([0.; 3], 0.),
+        ([0.; 3], -1.),
+        ([0.; 3], f64::NAN),
+        ([0.; 3], f64::INFINITY),
+    ] {
+        assert!(matches!(
+            surface::ball_sphere(&face(center, radius)),
+            Err(HlrError::Invalid("ball patch sphere"))
+        ));
+    }
+    // Every other face has no ball sphere.
+    let plane = k::Face {
+        surface: k::Surface::Plane {
+            origin: [0.; 3],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 1., 0.],
+        },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    assert!(matches!(surface::ball_sphere(&plane), Ok(None)));
+}
