@@ -626,18 +626,8 @@ fn truncated_64_char_prefix_does_not_consolidate_unrelated_long_material_names()
     properties_part(&file, &name_pb, Some(4.2), [12, 34, 56]);
 
     let mut s = Session::default();
-    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
-        name: name_pa.clone(),
-        density: 4.2,
-        appearance: None,
-        physical_card: None,
-    });
-    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial {
-        name: name_pb.clone(),
-        density: 9.0,
-        appearance: None,
-        physical_card: None,
-    });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: name_pa.clone(), density: 4.2, appearance: None, physical_card: None });
+    s.doc_mut().user_materials.push(solidcraft_doc::UserMaterial { name: name_pb.clone(), density: 9.0, appearance: None, physical_card: None });
     let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
     let p = run(&mut s, "component.properties", json!({"component": c}));
     let assigned = p["bodies"][0]["material"].as_str().unwrap().to_string();
