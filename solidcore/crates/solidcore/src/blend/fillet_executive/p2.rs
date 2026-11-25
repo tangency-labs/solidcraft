@@ -24,6 +24,9 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
+//! - **Split rails** (WR-19502, not upstream). Before `SetFilletBrepEdgeMap` maps a
+//!   geometry's rails, [`EdgeMapAccess::mapping_split_rail`] splits any rail that the
+//!   stitched fillet B-rep splits and no one edge matches. The pieces join its other rails.
 //! - **Solver approximation tolerance.** `SetFilletParameters` takes `TOL_FACTOR` times
 //!   the edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`), not times an edge
 //!   tolerance the healer raised only to cover the edge's edge/face gap; elsewhere the
@@ -80,7 +83,8 @@ use crate::blend::fillet_standard_solver::p1::{
 };
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::vector2d::Vec2;
@@ -145,6 +149,18 @@ pub trait EdgeMapAccess<O: ClassObject + SolutionObject + Ord> {
         candidates: &[O],
         multiple: bool,
     ) -> Result<()>;
+    /// (Not upstream; #19502) Split rail `rail` of geometry `geom` where the candidate
+    /// edges split it end to end and none matches it whole, the pieces after the first
+    /// joining the geometry's other rails on that side; nothing otherwise.
+    /// # Errors
+    /// Invalid or missing object; those of the lookup and the split.
+    fn mapping_split_rail(
+        &mut self,
+        k: &mut Kernel,
+        geom: O,
+        rail: O,
+        candidates: &[O],
+    ) -> Result<()>;
 }
 impl<O, A> EdgeMapAccess<O> for A
 where
@@ -190,6 +206,11 @@ where
     ) -> Result<()> {
         ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
     }
+    /// The executive's access has no pseudo B-rep of its own to split: its rails map as
+    /// upstream's do.
+    fn mapping_split_rail(&mut self, _: &mut Kernel, _: O, _: O, _: &[O]) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// `SetFilletParameters`' note for a G^n section of another order or thumbweight (WR-685).
@@ -198,19 +219,26 @@ const GN_INVALID: &str =
 
 const OP: &str = "blend::fillet_executive::p2";
 
-/// `SM_ERR_NULL_POINTER` (`NER`, or a null upstream dereferences): `$what` names the
-/// missing object.
-macro_rules! null {
-    ($what:literal) => {
-        SolidError::blend_missing(OP, $what)
-    };
+/// A missing thing the executive built (upstream `NER`): a [`BlendFailure::Defect`]
+/// keeping the status `SM_ERR_NULL_POINTER`, `why` saying why it is always there.
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
-/// `SM_ERR_INVALID_INPUT` as `SetFilletParameters` returns it: the parameters are refused,
-/// as `what` says.
-fn invalid_value(what: &'static str) -> SolidError {
-    SolidError::blend_invalid_value(OP, what)
-}
+/// Why a solver's corner is always there when the law sequences are walked.
+const CORNERS_BUILT: &str = "a filleted edge's solver has no corner at an end: the corners are \
+     built at both ends of every solver's edge before the law sequences are walked";
+
+/// Why a variable-radius change's rail and side edge uses always have edges.
+const RAIL_EDGES: &str = "a variable-radius solver's rail or side edge use has no edge: a solver \
+     rolls on an edge use of its edge, and its side edge use is one of the fillet geometry's, \
+     each built on an edge";
+
+/// Why a solver's rail and side edges are always there once its geometry is built.
+const FILLET_EDGES_BUILT: &str = "a solver's fillet geometry has no rail, edge use or side \
+     edge: the fillet B-rep is built with a rail and a side edge on every solver it maps";
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -626,8 +654,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// # Errors
     ///
     /// `SM_ERR_INVALID_INPUT` (after noting the error) for a null B-rep or an edge not
-    /// on its edge list; those of the adapter.
-    fn check_edges_are_in_brep<A>(&mut self, access: &A, brep: Option<O>, edges: &[O]) -> Result<()>
+    /// on its edge list; those of the adapter. Returns the B-rep.
+    fn check_edges_are_in_brep<A>(&mut self, access: &A, brep: Option<O>, edges: &[O]) -> Result<O>
     where
         A: FilletParametersAccess<O> + ?Sized,
     {
@@ -636,7 +664,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 FilletErrorType::InvalidInput,
                 Some("SetFilletParameters: Null target Brep.\n"),
             );
-            return Err(invalid_value("the target B-rep is null"));
+            return Err(SolidError::blend(OP, BlendFailure::TargetNotGiven));
         };
         for (ie, &edge) in edges.iter().enumerate() {
             if !access.parameters_edge_is_live(brep, edge)? {
@@ -644,10 +672,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     FilletErrorType::InvalidInput,
                     Some(&format!("Edge[ {ie:2} ]: not an edge of the target Brep\n")),
                 );
-                return Err(invalid_value("an edge is not an edge of the target B-rep"));
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::EdgeNotInTarget { index: ie },
+                ));
             }
         }
-        Ok(())
+        Ok(brep)
     }
 
     /// Reset the execution switches and per-preparation bookkeeping shared by
@@ -663,6 +694,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
         // the fork's (WR-631): no cliff overflow, no open ends yet
         self.cliff_overflow = false;
+        self.continued_cliffs.clear();
         self.open_ends.clear();
         // the fork's (WR-634): no overflow edges yet, no mitred edges (9ba2b12)
         self.overflow_edges.clear();
@@ -715,7 +747,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Ok(());
         }
 
-        self.check_edges_are_in_brep(access, params.brep, params.edges)?;
+        // the B-rep, checked here (upstream reads `pBrep` again below)
+        let brep = self.check_edges_are_in_brep(access, params.brep, params.edges)?;
         let mut ang_tol_deg = params.ang_tol_deg;
         if ang_tol_deg <= EFF_ZERO {
             ang_tol_deg = 20.0;
@@ -745,7 +778,6 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         let edges = edges.as_slice();
         // the fork's SplitBlendedVertexFans (WR-665, tangency-labs/smlib@e418750)
-        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
         let points = access.parameters_split_blended_vertex_fans(k, brep, edges)?;
         self.fan_split_points.extend(points);
 
@@ -760,11 +792,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 FilletErrorType::InvalidInput,
                 Some("SetFilletParameters: Input array size mismatch."),
             );
-            return Err(invalid_value("the input lists' sizes do not match"));
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::ParameterListSizes {
+                    edges: num_filleted_edges,
+                    cross_sections: params.xsect_types.len(),
+                    radius_types: params.radius_types.len(),
+                    radii: params.radius_values.len(),
+                },
+            ));
         };
 
-        // pBrep->GetContext() (checked above)
-        let brep = params.brep.ok_or_else(|| null!("the B-rep"))?;
+        // pBrep->GetContext(): `brep`, checked above
 
         // Note, dApproxTol will be reset for each edge: the default (10 times the B-rep
         // tolerance) is computed but never read.
@@ -792,13 +831,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             .radius_values
             .first()
             .ok_or_else(|| first("no radius"))?;
-        let mut generator: Option<O> = None;
+        // the one generator of a single cross-section type, made before the edges
+        let mut single_generator: Option<O> = None;
 
         // the fork's SmGnSectionFSG in place of the blend curve (WR-685)
         let gn_order = params.continuity as usize;
         let gn_invalid = |kind: FilletSurfaceGeneratorType| {
             kind == FilletSurfaceGeneratorType::BlendCurve
                 && !GnSectionFsg::is_valid(gn_order, params.thumbweight)
+        };
+        let gn_section_invalid = || {
+            SolidError::blend(
+                OP,
+                BlendFailure::GnSectionInvalid {
+                    order: gn_order,
+                    thumbweight: params.thumbweight,
+                },
+            )
         };
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
@@ -819,21 +868,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if gn_invalid(xsect_type) {
                 self.error
                     .note_error(FilletErrorType::InvalidInput, Some(GN_INVALID));
-                return Err(invalid_value(
-                    "a G^n section's order must be 2 to 4 and its thumbweight below 1",
-                ));
+                return Err(gn_section_invalid());
             }
             let Some(spec) = generator_spec(xsect_type, xsect_tol) else {
                 self.error.note_error(
                     FilletErrorType::InvalidInput,
                     Some("SetFilletParameters: Invalid Fillet Surface Generator type."),
                 );
-                return Err(invalid_value(
-                    "the fillet surface generator type is not valid",
-                ));
+                return Err(SolidError::blend(OP, BlendFailure::CrossSectionTypeUnknown));
             };
             let fsg = access.parameters_new_generator(k, spec)?;
-            generator = Some(fsg);
+            single_generator = Some(fsg);
             // Save it, so that we can delete it when filleting is finished.
             self.add_fillet_surface_generator(fsg);
         }
@@ -849,7 +894,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     FilletErrorType::InvalidInput,
                     Some(&format!("Edge[ {ii:2} ]: cannot be filleted\n")),
                 );
-                return Err(invalid_value("an edge cannot be filleted"));
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::EdgeNotFilletable { index: ii },
+                ));
             };
 
             // 2. Fillet Solver: switch on radius type.
@@ -901,8 +949,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                                 FilletErrorType::InvalidInput,
                                 Some("SetFilletParameters: second radii size mismatch."),
                             );
-                            return Err(invalid_value(
-                                "the second radii list's size does not match",
+                            return Err(SolidError::blend(
+                                OP,
+                                BlendFailure::PerEdgeListLength {
+                                    edges: num_filleted_edges,
+                                    given: second_radii.len(),
+                                },
                             ));
                         }
                         second_radius = second_radii.get(ii).copied();
@@ -930,9 +982,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     edgeuse: eu,
                 }),
                 FilletSolverType::VariableRadius => {
-                    let laws = params
-                        .var_rad_laws
-                        .ok_or_else(|| null!("the variable-radius law list"))?;
+                    let laws = params.var_rad_laws.ok_or_else(|| {
+                        SolidError::blend(OP, BlendFailure::VariableRadiusLawsNotGiven)
+                    })?;
                     let Some(law) = laws.get(ii).copied().flatten() else {
                         self.error.note_edge_error(
                             Some(edge),
@@ -942,7 +994,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                                 "Edge[ {ii:2} ]: no variable-radius law specified\n"
                             )),
                         );
-                        return Err(invalid_value("an edge has no variable-radius law"));
+                        return Err(SolidError::blend(
+                            OP,
+                            BlendFailure::VariableRadiusLawMissing { index: ii },
+                        ));
                     };
                     Some(SolverSpec::VariableRadius {
                         approx_tol,
@@ -969,15 +1024,22 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         "Edge[ {ii:2} ]: invalid radius type (Fillet Solver)\n"
                     )),
                 );
-                return Err(invalid_value(
-                    "an edge's radius type is not valid for the fillet solver",
+                return Err(SolidError::blend(
+                    OP,
+                    BlendFailure::RadiusTypeNotForEdges {
+                        index: ii,
+                        kind: radius_type,
+                    },
                 ));
             };
             let fs = access.parameters_new_solver(k, &spec)?;
             self.load_fillet_solver(k, access, fs)?;
 
-            // 3. Fillet Surface Generator: switch on cross-section type.
-            if !single_xsect_type {
+            // 3. Fillet Surface Generator: switch on cross-section type (a per-edge one
+            // where the cross-section type is not single).
+            let fsg = if let Some(fsg) = single_generator {
+                fsg
+            } else {
                 xsect_type = *params
                     .xsect_types
                     .get(ii)
@@ -985,25 +1047,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 if gn_invalid(xsect_type) {
                     self.error
                         .note_error(FilletErrorType::InvalidInput, Some(GN_INVALID));
-                    return Err(invalid_value(
-                        "a G^n section's order must be 2 to 4 and its thumbweight below 1",
-                    ));
+                    return Err(gn_section_invalid());
                 }
                 let Some(spec) = generator_spec(xsect_type, 0.1) else {
                     self.error.note_error(
                         FilletErrorType::InvalidInput,
                         Some("SetFilletParameters: Invalid Fillet Surface Generator type."),
                     );
-                    return Err(invalid_value(
-                        "the fillet surface generator type is not valid",
-                    ));
+                    return Err(SolidError::blend(OP, BlendFailure::CrossSectionTypeUnknown));
                 };
                 let fsg = access.parameters_new_generator(k, spec)?;
-                generator = Some(fsg);
                 // Save it, so that we can delete it when filleting is finished.
                 self.add_fillet_surface_generator(fsg);
-            }
-            let fsg = generator.ok_or_else(|| null!("the surface generator"))?;
+                fsg
+            };
             access.parameters_set_generator(fs, fsg)?;
         }
 
@@ -1200,7 +1257,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         A: EdgeMapAccess<O> + ?Sized,
     {
         // get edges from FilletBrep (fillet edges already created)
-        let fillet = self.fillet.ok_or_else(|| null!("the fillet B-rep"))?;
+        let fillet = self.fillet.ok_or_else(|| {
+            null_defect(
+                "the edge map is set without a fillet B-rep: it is set only after the surface \
+                 filleting has built the fillet B-rep",
+            )
+        })?;
         let edges = access.mapping_edges(fillet)?;
 
         // for every FilletEdgeSolver
@@ -1208,9 +1270,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             for geom in access.mapping_solver_geoms(solver)? {
+                // (not upstream; #19502) a rail the stitch split, where another round's
+                // rail meets it along part of it, is split there too, each piece mapping
+                // to its own edge
+                for rail in access
+                    .mapping_geom_rails(geom)?
+                    .into_iter()
+                    .take(2)
+                    .flatten()
+                {
+                    access.mapping_split_rail(k, geom, rail, &edges)?;
+                }
+
                 // set every rail's fillet B-rep edge
                 for rail in access.mapping_geom_rails(geom)? {
-                    let rail = rail.ok_or_else(|| null!("the rail"))?;
+                    let rail = rail.ok_or_else(|| null_defect(FILLET_EDGES_BUILT))?;
                     access.mapping_find(k, rail, &edges, false)?;
                 }
 
@@ -1218,7 +1292,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 for eu in access.mapping_side_edgeuses(geom)? {
                     let fe = access
                         .mapping_edgeuse_edge(eu)?
-                        .ok_or_else(|| null!("the side edge"))?;
+                        .ok_or_else(|| null_defect(FILLET_EDGES_BUILT))?;
                     if access.mapping_original_face(fe)?.is_none() {
                         continue;
                     }
@@ -1351,7 +1425,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut start_edge: Option<O> = None;
         for list in &self.law_sequence_edges {
             for fs in solvers.iter() {
-                let fs = fs.ok_or_else(|| null!("the fillet solver"))?;
+                let fs = fs.ok_or_else(|| {
+                    null_defect(
+                        "a solver slot to walk is empty: the pass starts from the executive's \
+                         live solvers and compresses the list after each walk",
+                    )
+                })?;
                 let this_edge = access.smooth_solver_edge(fs)?;
                 if list.contains(&this_edge) {
                     start_edge = list.first().copied(); // First in list.
@@ -1381,7 +1460,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if start_edge.is_none() {
                 let corner0 = access
                     .smooth_solver_corner(self, fs, 0)?
-                    .ok_or_else(|| null!("the solver's corner"))?;
+                    .ok_or_else(|| null_defect(CORNERS_BUILT))?;
 
                 let mut curr_fs = fs;
                 let mut prev_fs = access.smooth_corner_tangent_solver(k, self, corner0, fs)?;
@@ -1413,7 +1492,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
                     let prev_corner = access
                         .smooth_solver_other_corner(self, prev, curr_corner)?
-                        .ok_or_else(|| null!("the solver's other corner"))?;
+                        .ok_or_else(|| null_defect(CORNERS_BUILT))?;
                     curr_fs = prev;
                     prev_fs = access.smooth_corner_tangent_solver(k, self, prev_corner, curr_fs)?;
                     curr_corner = prev_corner;
@@ -1429,13 +1508,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         Err(err) if !err.is_unported_or_cancelled() => Ok(Vec::new()),
                         r => r,
                     })?
-                    .ok_or_else(|| null!("the edge's solver"))?;
+                    .ok_or_else(|| {
+                        null_defect(
+                            "a law sequence's first edge has no solver: every edge of a law \
+                             sequence is a filleted edge, which has a solver",
+                        )
+                    })?;
             }
 
             let corner0 = access.smooth_solver_corner(self, fs, 0)?;
             let corner1 = access
                 .smooth_solver_corner(self, fs, 1)?
-                .ok_or_else(|| null!("the solver's end corner"))?;
+                .ok_or_else(|| null_defect(CORNERS_BUILT))?;
 
             if Some(corner1) == corner0 {
                 continue; // Single closed loop.
@@ -1473,7 +1557,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
                 let next_corner = access
                     .smooth_solver_other_corner(self, next, curr_corner)?
-                    .ok_or_else(|| null!("the solver's other corner"))?;
+                    .ok_or_else(|| null_defect(CORNERS_BUILT))?;
                 let curr_fs = next;
                 next_fs = access.smooth_corner_tangent_solver(k, self, next_corner, curr_fs)?;
                 curr_corner = next_corner;
@@ -1527,9 +1611,12 @@ impl Default for SurfaceFilletOptions {
 /// Entry `i` of an intersection's UV curve list (`SM_ERR_NULL_POINTER` for a null
 /// curve, which upstream dereferences).
 fn uv(list: &[Option<Curve>], i: usize) -> Result<&Curve> {
-    list.get(i)
-        .and_then(Option::as_ref)
-        .ok_or_else(|| null!("the intersection's UV curve"))
+    list.get(i).and_then(Option::as_ref).ok_or_else(|| {
+        null_defect(
+            "the offset surfaces' intersection has no UV curve at an index it lists: the \
+                 intersection fills every curve slot it returns",
+        )
+    })
 }
 
 /// `SmFilletExecutive::SurfaceSurfaceFillet`: fillets two surfaces with signed radii
@@ -1614,7 +1701,13 @@ where
                 )?;
                 // Self-intersecting fillets are not yet handled
                 if !solutions.is_empty() {
-                    return Err(SolidError::blend_failed(OP, "the fillet intersects itself"));
+                    return Err(SolidError::blend(
+                        OP,
+                        BlendFailure::FilletCrossesItself {
+                            first: ii,
+                            second: jjj,
+                        },
+                    ));
                 }
             }
         }
@@ -1786,15 +1879,15 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         let mut at_start = crate::topology::brep_data::UNSURE;
         let eu = access
             .solver_edgeuse(self.fs, self.rail_idx)?
-            .ok_or_else(|| null!("the rail's edge use"))?;
+            .ok_or_else(|| null_defect(RAIL_EDGES))?;
         let e = access
             .edgeuse_edge(eu)?
-            .ok_or_else(|| null!("the edge use's edge"))?;
+            .ok_or_else(|| null_defect(RAIL_EDGES))?;
         let (edge_v1, edge_v2) = access.edge_vertices(e)?;
 
         let side_edge = access
             .edgeuse_edge(self.side_eu)?
-            .ok_or_else(|| null!("the side edge use's edge"))?;
+            .ok_or_else(|| null_defect(RAIL_EDGES))?;
         let (side_v1, side_v2) = access.edge_vertices(side_edge)?;
 
         if edge_v1 == edge_v2 {
@@ -1837,9 +1930,12 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
         };
 
         // Evaluate the radius at the proper end (no reversal: already checked).
-        let vrfs = access
-            .variable_radius_solver_mut(self.fs)?
-            .ok_or_else(|| null!("the solver's variable-radius form"))?;
+        let vrfs = access.variable_radius_solver_mut(self.fs)?.ok_or_else(|| {
+            null_defect(
+                "a variable-radius solver has no variable-radius form: the solver \
+                     answered as one at the start of the set-up and nothing changes it",
+            )
+        })?;
         let values = law_evaluate(&mut vrfs.law, edge_t, &edge_ivl, false)?;
         let [end_rad, _, _] = values;
 
@@ -1853,9 +1949,6 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             // (status ignored upstream; fork 873c7c9 passes it on, SER, as does this)
             const_bsp.edit_parameterization(&unit_ivl)?;
 
-            let vrfs = access
-                .variable_radius_solver_mut(self.fs)?
-                .ok_or_else(|| null!("the solver's variable-radius form"))?;
             if let FilletLawKind::BSpline {
                 law_curve,
                 extended_law,
@@ -1865,20 +1958,15 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
                 self.saved_bsp = Some(core::mem::replace(law_curve, const_bsp));
                 *extended_law = None;
             }
-        } else {
-            let vrfs = access
-                .variable_radius_solver_mut(self.fs)?
-                .ok_or_else(|| null!("the solver's variable-radius form"))?;
-            if let FilletLawKind::Linear {
-                start_radius,
-                end_radius,
-            } = &mut vrfs.law.kind
-            {
-                self.start_rad = *start_radius;
-                self.end_rad = *end_radius;
-                *start_radius = end_rad;
-                *end_radius = end_rad;
-            }
+        } else if let FilletLawKind::Linear {
+            start_radius,
+            end_radius,
+        } = &mut vrfs.law.kind
+        {
+            self.start_rad = *start_radius;
+            self.end_rad = *end_radius;
+            *start_radius = end_rad;
+            *end_radius = end_rad;
         }
         Ok(())
     }
@@ -2026,8 +2114,8 @@ impl DirectTemporaryRadiusChange {
             .curve_based
             .solver
             .edgeuse(rail_index)?
-            .ok_or_else(|| null!("the rail's edge use"))?;
-        let e = edgeuse::p1::edge(target, eu)?.ok_or_else(|| null!("the edge use's edge"))?;
+            .ok_or_else(|| null_defect(RAIL_EDGES))?;
+        let e = edgeuse::p1::edge(target, eu)?.ok_or_else(|| null_defect(RAIL_EDGES))?;
         let edge_v1 = edge::start_vertex(target, e)?;
         let edge_v2 = match edge_v1 {
             Some(v1) => edge::other_vertex(target, e, Some(v1))?,
@@ -2035,7 +2123,7 @@ impl DirectTemporaryRadiusChange {
         };
 
         let side_edge =
-            edgeuse::p1::edge(target, side_eu)?.ok_or_else(|| null!("the side edge use's edge"))?;
+            edgeuse::p1::edge(target, side_eu)?.ok_or_else(|| null_defect(RAIL_EDGES))?;
         let side_v1 = edge::start_vertex(target, side_edge)?;
         let side_v2 = match side_v1 {
             Some(v1) => edge::other_vertex(target, side_edge, Some(v1))?,
@@ -2147,7 +2235,7 @@ mod tests {
     /// a typed blend failure that keeps the `SM_ERR_INVALID_INPUT` status of the bare
     /// `Upstream` it replaced.
     #[test]
-    fn an_invalid_gn_order_is_a_typed_invalid_value() {
+    fn an_invalid_gn_order_is_a_named_invalid_input() {
         let mut k = Kernel::default();
         let mut body =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
@@ -2158,12 +2246,14 @@ mod tests {
         let error = session
             .prepare_constant_radius_edges(&mut k, &[edge], 1.0, 2, 9, 0.5)
             .unwrap_err();
-        assert_eq!(
-            error.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::InvalidValue(
-                "a G^n section's order must be 2 to 4 and its thumbweight below 1"
-            ))
+        assert!(
+            matches!(
+                error.blend_failure(),
+                Some(&BlendFailure::GnSectionInvalid { order: 9, .. })
+            ),
+            "{error:?}"
         );
+        assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
         assert_eq!(
             error.upstream_status(),

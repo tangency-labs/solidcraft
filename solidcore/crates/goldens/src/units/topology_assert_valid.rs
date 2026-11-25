@@ -8,7 +8,7 @@
 //! report identity.
 
 use super::topology_edgeuse_p1::BrepIn;
-use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use crate::{AbsFloor, Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::geom::assert_array::{labels, obj_type_string, AssertArray, ObjectKey as ReportKey};
@@ -426,7 +426,7 @@ fn output(protocol: &[f64], capi: bool) -> Result<Output, HarnessError> {
         let mut lines = Vec::new();
         let pointer_failures = pointers.iter().any(|r| r.ints.get(4) == Some(&0));
         if status != 1000 && pointers.is_empty() {
-            lines.push(format!("SmBrep::ValidatePointers failed with status {status}"));
+            lines.push("SmBrep::ValidatePointers failed without a report".to_string());
         }
         lines.extend(pointers.iter().filter(|r| failed(r)).map(line));
         if pointer_failures {
@@ -537,7 +537,7 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
         Ok(c) => c,
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
     };
-    out.push(f64::from(check.pointers_status));
+    out.push(f64::from(crate::output::pointer_check_status(check.pointers)));
     put_reports(&mut out, &check.pointer_reports);
     out.push(match check.assert_valid {
         None => -1.0,
@@ -625,7 +625,7 @@ fn capi_output(check: solidcore::Result<validation::BrepCheck>) -> Result<Output
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
     };
     let mut out = vec![0.0];
-    out.push(f64::from(check.pointers_status));
+    out.push(f64::from(crate::output::pointer_check_status(check.pointers)));
     put_reports(&mut out, &check.pointer_reports);
     out.push(match check.assert_valid {
         None => -1.0,
@@ -828,9 +828,29 @@ impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.assert_valid"
     }
+    /// Test 13 (edge-on-face) and test 1 (vertex corner) gaps are exact zero for a
+    /// body that passes: a gap below this floor is rounding noise in the projection,
+    /// which differs in the last bits between architectures. The floor is far below
+    /// any real gap (a failing edge or vertex is off by the tolerance, ~1e-5).
+    fn abs_floors(&self) -> &'static [AbsFloor] {
+        const FLOOR: f64 = 1e-12;
+        static FLOORS: &[AbsFloor] = &[
+            AbsFloor {
+                key: "edge_test13_max_gap",
+                abs: FLOOR,
+                why: "a passing edge's gap is exact zero, so sub-floor values are architecture rounding",
+            },
+            AbsFloor {
+                key: "vertex_test1_max_gap_3d",
+                abs: FLOOR,
+                why: "a passing vertex's gap is exact zero, so sub-floor values are architecture rounding",
+            },
+        ];
+        FLOORS
+    }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut b = match own_brep(&mut k, &i.brep)? {
             Ok(b) => b,
             Err(o) => return Ok(o),
@@ -942,5 +962,35 @@ impl UnitDiff for Runner {
             value,
         })
         .ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Runner;
+    use crate::compare::{floor_of, values_agree};
+    use crate::UnitDiff;
+
+    /// The near-zero gaps of tests 13 and 1 carry an absolute floor so they agree
+    /// across architectures; without it they differ in the last bits (WR-777's
+    /// arm64/x86-64 noise).
+    #[test]
+    fn floors_cover_the_architecture_noise_keys() {
+        let floors = Runner.abs_floors();
+        let keys: Vec<_> = floors.iter().map(|f| f.key).collect();
+        assert_eq!(keys, ["edge_test13_max_gap", "vertex_test1_max_gap_3d"]);
+        for key in keys {
+            let floor = floor_of(floors, key);
+            // A passing body's zero gap against last-bit noise, up to the floor itself.
+            assert!(values_agree(0.0, 5e-13, floor), "{key}: noise below the floor");
+            assert!(values_agree(0.0, 1e-12, floor), "{key}: noise at the floor");
+            // Anything bigger is a real change: just above the floor, and a failing
+            // edge or vertex off by the tolerance.
+            assert!(!values_agree(0.0, 2e-12, floor), "{key}: just above the floor");
+            assert!(!values_agree(0.0, 1e-5, floor), "{key}: a real gap");
+        }
+        // Other keys keep the relative rule alone.
+        let other = floor_of(floors, "max_vertex_edge_face_gaps");
+        assert!(!values_agree(0.0, 5e-13, other));
     }
 }

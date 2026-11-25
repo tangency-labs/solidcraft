@@ -209,6 +209,61 @@ fn hair_step_box(step: f64, tols: Tols) -> Record {
     polyhedron(&corners, &cycles, tols)
 }
 
+/// A 50 mm block with a notch `depth` deep and 10 wide cut across its front face (y = 0) from
+/// x = 20 to 30, top to bottom: the notch's floor lies at y = `depth`, joined to the front by
+/// two walls `depth` wide.
+fn notched_block(depth: f64, tols: Tols) -> Record {
+    let outline = [
+        [0.0, 0.0],
+        [20.0, 0.0],
+        [20.0, depth],
+        [30.0, depth],
+        [30.0, 0.0],
+        [50.0, 0.0],
+        [50.0, 50.0],
+        [0.0, 50.0],
+    ];
+    // the outline at z = 0 (corners 0 to 7) and at z = 50 (8 to 15)
+    let corners: Vec<[f64; 3]> = [0.0, 50.0]
+        .iter()
+        .flat_map(|&z| outline.iter().map(move |&[x, y]| [x, y, z]))
+        .collect();
+    let walls: Vec<[usize; 4]> = (0..8)
+        .map(|i| [i, (i + 1) % 8, (i + 1) % 8 + 8, i + 8])
+        .collect();
+    let mut cycles: Vec<&[usize]> =
+        vec![&[0, 7, 6, 5, 4, 3, 2, 1], &[8, 9, 10, 11, 12, 13, 14, 15]];
+    cycles.extend(walls.iter().map(|w| &w[..]));
+    polyhedron(&corners, &cycles, tols)
+}
+
+/// A U 50 mm wide and 20 high, 50 deep (z = 0 to 50): two prongs 5 wide (x = 0 to 5 and 45
+/// to 50) standing on a base `base` thick, so the U's floor lies at y = `base` from x = 5 to 45.
+fn thin_based_u(base: f64, tols: Tols) -> Record {
+    let outline = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0, 20.0],
+        [45.0, 20.0],
+        [45.0, base],
+        [5.0, base],
+        [5.0, 20.0],
+        [0.0, 20.0],
+    ];
+    // the outline at z = 0 (corners 0 to 7) and at z = 50 (8 to 15)
+    let corners: Vec<[f64; 3]> = [0.0, 50.0]
+        .iter()
+        .flat_map(|&z| outline.iter().map(move |&[x, y]| [x, y, z]))
+        .collect();
+    let walls: Vec<[usize; 4]> = (0..8)
+        .map(|i| [i, (i + 1) % 8, (i + 1) % 8 + 8, i + 8])
+        .collect();
+    let mut cycles: Vec<&[usize]> =
+        vec![&[0, 7, 6, 5, 4, 3, 2, 1], &[8, 9, 10, 11, 12, 13, 14, 15]];
+    cycles.extend(walls.iter().map(|w| &w[..]));
+    polyhedron(&corners, &cycles, tols)
+}
+
 /// [`hair_step_box`] whose step ends at the right face in a 45° triangular cap: the corner where
 /// the riser, the back half of the top and the right face would meet is cut by a triangle whose
 /// three sides, `step / 2` long or less, are all shorter than their tolerance, and whose area is
@@ -518,20 +573,36 @@ fn a_hair_step_heals_to_one_edge_between_its_two_tops() {
 /// as SMLib's healer does, and grows none.
 #[test]
 fn a_hair_step_heals_where_the_tolerance_covers_a_real_gap() {
-    let rec = with_vertex_gap(
-        hair_step_box(3e-4, TOLS),
-        [10.0, 0.0, 0.0],
-        [0.0, 0.0, 2e-4],
-    );
-    let (body, _) = Body::from_record(&rec, true).unwrap();
+    let gap = 2e-4;
+    let rec = with_vertex_gap(hair_step_box(3e-4, TOLS), [10.0, 0.0, 0.0], [0.0, 0.0, gap]);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
     assert_eq!(failed(&body), [7, 7, 11, 11, 11, 11, 34]);
     heals(&rec, [7, 15, 10]);
-    // SMLib's own healer on the same record: every tolerance reset small, the gap no longer
-    // covered
+    // `no_tolerance_grew` is one-sided; the heal shrinks none either: the gapped corner, which
+    // no squeeze moves, keeps the stated tolerance
+    let (healed, _) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    let (after, _) = healed.unwrap().body.to_record().unwrap();
+    let corner = after.vertices.iter().find(|v| v.point == [10.0, 0.0, gap]);
+    assert_eq!(corner.map(|v| v.tolerance), Some(TOLS.vertex));
+
+    // SMLib's own healer on the same record passes the check by shrinking: every tolerance is
+    // reset under the stated one, and the gapped corner keeps the gap gain times twice its gap
+    // as its zone (#17739), half the record tolerance; the check holds a gap to half the zone
     let (smlib_healed, _) = Body::from_record(&rec, false).unwrap();
     let healed = smlib_healed.check(CheckLevel::All).unwrap();
-    assert!(!healed.is_valid());
-    assert!(healed.failed_tests().iter().all(|&t| t <= 3), "{healed}");
+    assert!(healed.is_valid(), "{healed}");
+    let (after, _) = smlib_healed.to_record().unwrap();
+    for v in &after.vertices {
+        assert!(v.tolerance < TOLS.vertex, "{v:?}");
+        if v.point == [10.0, 0.0, gap] {
+            assert!(v.tolerance / 2.0 >= 2.0 * gap, "{v:?}");
+        }
+    }
+    assert!(
+        after.vertices.iter().any(|v| v.point == [10.0, 0.0, gap]),
+        "the gapped corner is kept"
+    );
+    assert!(after.edges.iter().all(|e| e.tolerance < TOLS.edge));
 }
 
 /// The hair step ending in a 45° cap at the right face: four short edges squeezed (the cap's
@@ -614,13 +685,138 @@ fn a_piece_longer_than_its_edge_tolerance_is_not_cut() {
     assert_eq!(knots(&b), before);
 }
 
-/// A body the check passes is given back as it is.
+/// A body the check passes is given back as it is: it has nothing the heal takes, so it is not
+/// checked either.
 #[test]
 fn a_body_that_passes_is_not_healed() {
     let (body, order) = Body::from_record(&hair_step_box(3e-3, TOLS), true).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
     let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
     assert!(healed.is_none() && !report.kept);
-    assert_eq!(report.why_not.as_deref(), Some("the body passes the check"));
+    assert_eq!(
+        report.why_not.as_deref(),
+        Some("nothing the heal takes could be proved")
+    );
+    assert_eq!((report.before, report.after), (None, None));
+}
+
+/// A block notched twice the zone tolerance deep (2e-5 at the default 1e-5) through SMLib's own
+/// healer: on the bottom and the top face, the edges where the notch's two walls meet them,
+/// `depth` long, leave the faces' domain side y = 0 square to it. Their far ends stand `depth`
+/// off that side, past the tolerance within which two places coincide (the larger of the
+/// contact tolerance and the faces' zone tolerance, 1e-5; `geom::tol::coincidence_tol_3d`),
+/// so each edge leaves the side. The check read the side to upstream's intersection
+/// tolerance, 2e-5 inclusive, at which the whole edge lies on it, running square to the
+/// side's direction rather than along it, and refused the body (Loop test 2, "Bad Loop
+/// Orient"). It is a valid solid of the block less the notch, 50³ − 10 · 50 · `depth` (to
+/// 1e-6 of the notch's volume; measured within 1e-9 of it), as a notch past the band was
+/// (2.1e-5, 5e-5).
+#[test]
+fn a_block_notched_twice_the_tolerance_deep_is_valid() {
+    for tol in [1e-5, 1e-7] {
+        let tols = Tols {
+            body: 1e-5,
+            edge: tol,
+            vertex: tol,
+        };
+        for depth in [2e-5, 2.1e-5, 5e-5] {
+            let case = format!("tolerance {tol:e}, depth {depth:e}");
+            let (body, _) = Body::from_record(&notched_block(depth, tols), false)
+                .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            assert_eq!(failed(&body), [0_u32; 0], "{case}");
+            // the block's six faces and the notch's three, with the front face in two
+            assert_eq!(body.counts().unwrap(), [10, 24, 16], "{case}");
+            let notch = 50.0_f64.powi(3) - body.volume(1e-9).unwrap();
+            let want = 10.0 * 50.0 * depth;
+            assert!(
+                (notch - want).abs() <= 1e-6 * want,
+                "{case}: {notch} vs {want}"
+            );
+        }
+    }
+}
+
+/// #17689: a U held to 1e-7 (a STEP file's uncertainty) whose base is 1.17e-6 thick, far past
+/// its tolerance, is valid. On the U's two end faces the floor edge lies 1.17e-6 inside the
+/// side of the face's domain that the base's outer edge runs along, and runs along it the
+/// other way. The side test read it within the contact tolerance (1e-5), so on that side and
+/// running the wrong way, and the check refused the body (Loop test 2, once on each end face),
+/// while the surface's own tolerance holds the two places apart. The thickest base here is the
+/// contact tolerance itself; the thinnest is the reporter's. The body is taken as SolidCraft
+/// takes an imported one, trusted, so the check sees it as built. With its edges held to the
+/// contact tolerance, the floor edge lies on the side within its own tolerance, and the body
+/// is refused as before.
+#[test]
+fn a_u_whose_base_is_well_past_a_tight_tolerance_thick_is_valid() {
+    let tols = Tols {
+        body: 1e-7,
+        edge: 1e-7,
+        vertex: 1e-7,
+    };
+    for base in [1.17e-6, 2e-6, 1e-5] {
+        let case = format!("base {base:e}");
+        let (body, _) = Body::from_record(&thin_based_u(base, tols), true)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert_eq!(failed(&body), [0_u32; 0], "{case}");
+        // the U's two end faces and its eight sides
+        assert_eq!(body.counts().unwrap(), [10, 24, 16], "{case}");
+        let want = 50.0 * 20.0 * 50.0 - 40.0 * (20.0 - base) * 50.0;
+        let volume = body.volume(1e-9).unwrap();
+        assert!(
+            (volume - want).abs() <= 1e-9 * want,
+            "{case}: {volume} vs {want}"
+        );
+    }
+    // edges held to 1e-5 may lie on the side: the floor edge, within its own tolerance of it
+    // and running the wrong way, still fails Loop test 2 on each end face, and within that
+    // tolerance it coincides with the base's outer edge (Face test 34, which the side band
+    // does not reach)
+    let loose_edges = Tols {
+        body: 1e-7,
+        edge: 1e-5,
+        vertex: 1e-5,
+    };
+    for base in [1.17e-6, 2e-6] {
+        let case = format!("edges at 1e-5, base {base:e}");
+        let (body, _) = Body::from_record(&thin_based_u(base, loose_edges), true)
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+        assert_eq!(failed(&body), [2, 2, 34, 34], "{case}");
+    }
+}
+
+/// A body the check fails for a defect the heal cannot prove away (a spline piece the check
+/// calls one point, on an edge whose tolerance is far smaller than the piece) is given back as
+/// it is without its full check: with no edit proved there is nothing to compare, and the full
+/// check is the costliest step of the heal. The refusal says why the piece stays.
+#[test]
+fn a_body_with_nothing_the_heal_takes_is_given_back_unchecked() {
+    let tols = Tols {
+        body: 1e-9,
+        edge: 1e-8,
+        vertex: 1e-8,
+    };
+    let rec = box_with_a_short_spline_span(tols, 1e-8);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
+    assert!(failed(&body).contains(&15), "{:?}", failed(&body));
+    let (healed, report) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    assert!(healed.is_none() && !report.kept);
+    assert_eq!(
+        report.why_not.as_deref(),
+        Some("nothing the heal takes could be proved")
+    );
+    assert_eq!((report.before, report.after), (None, None));
+    assert_eq!(
+        report.cut_pieces + report.squeezed_edges + report.collapsed_faces,
+        0
+    );
+    assert!(
+        report
+            .refused
+            .iter()
+            .any(|r| r.starts_with("short edge left:")),
+        "{:?}",
+        report.refused
+    );
 }
 
 /// The real-defect side of the squeeze's certificate: the riser's end edge, a hair shorter than

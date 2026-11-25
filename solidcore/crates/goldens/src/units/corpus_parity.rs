@@ -43,7 +43,6 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
-use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep_with_keys, CheckLevel};
 use solidcore::topology::brep_data::BrepData;
 use solidcore::topology::brep_data_write::FromBrepEnv;
@@ -165,7 +164,7 @@ fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
         records: &mut records,
         next_key: GEOMETRY_KEYS,
     };
-    read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
+    crate::refit::read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env)?;
     crate::tolsub::after_read(&mut b);
     Ok(Read {
         breps: vec![b],
@@ -312,7 +311,7 @@ fn measure_rust(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),
@@ -337,7 +336,7 @@ fn measure_rust_roundtrip(path: &Path, accuracy: f64) -> Measured {
         Ok(b) => b,
         Err(e) => return Measured::Broken(format!("read {}: {e}", path.display())),
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let read = match read_breps(&mut k, bytes) {
         Ok(r) => r,
         Err(e) => return stopped(Vec::new(), "read", e),

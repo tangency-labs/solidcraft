@@ -125,7 +125,7 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
         }
     }
     let named: Vec<Named> = named.into_iter().collect::<Option<_>>()?;
-    let centres = || crate::naming::face_centres(b);
+    let centres = || crate::naming::face_centres(b).unwrap_or_default();
     Some(qualify_at(named, &adjacency(h), by_place(&o.feature, &centres)))
 }
 
@@ -133,9 +133,7 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
 fn built_by_unnamed_tool(face: &FaceProv, operands: &[OperandNames]) -> bool {
     !face.origins.is_empty()
         && face.origins.iter().all(|origin| match *origin {
-            FaceOrigin::Face { operand, face } => {
-                operands.get(operand).is_some_and(|op| matches!(op.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty)))
-            }
+            FaceOrigin::Face { operand, face } => operands.get(operand).is_some_and(|op| op.is_unnamed_tool_face(face)),
             _ => false,
         })
 }
@@ -172,7 +170,7 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
-            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { body: None, .. } => {
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
             }
             // Grown from a body before the feature: named after its faces.
@@ -187,7 +185,7 @@ impl<'a> OperandNames<'a> {
                     .get_or_init(|| {
                         Arc::new(derive(body, o, &stage.lineage).unwrap_or_else(|| {
                             let names = crate::naming::geometric_names(body, o, body.body.face_count());
-                            let centres = || crate::naming::face_centres(body);
+                            let centres = || crate::naming::face_centres(body).unwrap_or_default();
                             Names::unverified(names, &crate::naming::mesh_adjacency(body), by_place(&o.feature, &centres))
                         }))
                     })
@@ -195,6 +193,13 @@ impl<'a> OperandNames<'a> {
                 Some(OperandNames { operand, body: Some(body.clone()), names, edges: OnceLock::new() })
             }
         }
+    }
+
+    /// Whether face `face` is a face of a tool the feature built whose roles are not known (a
+    /// thread's narrowing sleeve): it has no name to give, and says nothing about the face it
+    /// merged into.
+    fn is_unnamed_tool_face(&self, face: usize) -> bool {
+        matches!(self.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty))
     }
 
     /// The name of face `face`.
@@ -226,15 +231,8 @@ impl<'a> OperandNames<'a> {
             Operand::Inner(_) => {
                 given(&self.names).map(|n| Named { name: format!("F{fid}:inner({})", n.name), verified: n.verified, ..Named::default() })
             }
-            Operand::Made(roles) => {
-                let (first, rest) = roles.get(face)?.split_first()?;
-                Some(Named {
-                    name: format!("F{fid}:{first}"),
-                    synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
-                    verified: true,
-                    ..Named::default()
-                })
-            }
+            Operand::Made(roles) => made_face(roles, face, fid),
+            Operand::Rebuilt { roles, feature } => made_face(roles, face, *feature),
             Operand::CopiedTool { roles, feature, instance } => {
                 let named = |role: &String| format!("F{feature}:{role}@F{fid}.{instance}");
                 let (first, rest) = roles.get(face)?.split_first()?;
@@ -285,9 +283,25 @@ impl<'a> OperandNames<'a> {
                 };
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { .. } => None,
+            Operand::Copy { .. }
+            | Operand::Inner(_)
+            | Operand::Made(_)
+            | Operand::CopiedTool { .. }
+            | Operand::Rebuilt { .. }
+            | Operand::Grown { .. } => None,
         }
     }
+}
+
+/// The name of face `face` of a body feature `fid` built, from its roles.
+fn made_face(roles: &[Vec<String>], face: usize, fid: u64) -> Option<Named> {
+    let (first, rest) = roles.get(face)?.split_first()?;
+    Some(Named {
+        name: format!("F{fid}:{first}"),
+        synonyms: rest.iter().map(|r| format!("F{fid}:{r}")).collect(),
+        verified: true,
+        ..Named::default()
+    })
 }
 
 /// A face's name from what it came from; `None` when an origin cannot be named exactly.
@@ -297,7 +311,17 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
     let mut names: Vec<Named> = Vec::with_capacity(origins.len());
     for origin in origins.iter().copied() {
         let named = match origin {
-            FaceOrigin::Face { operand, face } => operands.get(operand)?.face(face, fid)?,
+            FaceOrigin::Face { operand, face } => {
+                let op = operands.get(operand)?;
+                match op.face(face, fid) {
+                    Some(named) => named,
+                    // A face of an unnamed tool merged into a named face (a narrowing sleeve's end
+                    // flush with the part's face) does not change what the named face is. A face
+                    // made only of such faces keeps no name: `merged` gets none to merge.
+                    None if op.is_unnamed_tool_face(face) => continue,
+                    None => return None,
+                }
+            }
             FaceOrigin::Edge { operand, edge } => {
                 let (edge, verified) = operands.get(operand)?.edge(edge)?;
                 Named { name: format!("F{fid}:blend({edge})"), verified, ..Named::default() }
@@ -557,7 +581,7 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
 }
 
 /// Whether `stem` names a face by its index alone (`F7:face:12`, `Body1:face:3`).
-fn named_by_index(stem: &str) -> bool {
+pub(crate) fn named_by_index(stem: &str) -> bool {
     stem.rsplit_once(":face:").is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit()))
 }
 

@@ -368,3 +368,18 @@ fn a_center_point_arc_takes_three_clicks_without_enter() {
         assert!(!sketch.constraints.iter().any(|c| c.kind.is_dimension()), "radius {radius} at {angle} deg: clicks alone add no typed dimension");
     }
 }
+
+/// A value box that follows the cursor has its whole text selected, so typing replaces it.
+/// Right Arrow (or Left, Home, End) keeps the shown value and moves the caret into it, so
+/// typing adds to it: `-5` after the length makes the expression `<length>-5` (#20607).
+#[test]
+fn a_caret_key_in_a_following_value_box_keeps_its_value_to_add_to() {
+    let mut h = start("sketch.line");
+    let live = h.app.tool.as_ref().unwrap().dims[0].value.clone();
+    assert!(!live.is_empty() && !h.app.tool.as_ref().unwrap().dims[0].locked, "the first box shows the live value: {live:?}");
+    h.step(&json!({"key":"ArrowRight"})).unwrap();
+    h.step(&json!({"text":"-5"})).unwrap();
+    let b = &h.app.tool.as_ref().unwrap().dims[0];
+    assert!(b.locked, "{b:?}");
+    assert_eq!(b.value, format!("{live}-5"));
+}

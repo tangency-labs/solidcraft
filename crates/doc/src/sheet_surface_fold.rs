@@ -88,11 +88,14 @@ struct Cell {
     piece: Piece,
     outer: Vec<Seg2>,
     holes: Vec<Vec<Seg2>>,
+    /// Loops its faces leave open with no wall: a bead's footprint, closed by the bead's own
+    /// faces.
+    open: Vec<Vec<Seg2>>,
 }
 
 impl Cell {
     fn loops(&self) -> impl Iterator<Item = &Vec<Seg2>> {
-        std::iter::once(&self.outer).chain(&self.holes)
+        std::iter::once(&self.outer).chain(&self.holes).chain(&self.open)
     }
 }
 
@@ -106,23 +109,26 @@ struct Folded<'a> {
 }
 
 /// The folded solid of a developed sheet `t` thick: each of its flat's `pieces` (see
-/// [`crate::sheet_surface::pieces`]), carried into space by `fold`; and the name `name` gives each
-/// face of it, by the piece and the part of it the face was made for.
+/// [`crate::sheet_surface::pieces`]), carried into space by `fold`, with its `forms` (beads):
+/// each one's footprint left open in its panel's cell and its own faces sewn in; and the name
+/// `name` gives each face of it, by the piece and the part of it the face was made for.
 pub(crate) fn solid(
     dev: &Development,
     fold: &Fold,
     t: f64,
     pieces: &[(Piece, Region2)],
+    forms: &[crate::sheet_surface_bead::Form],
     work: &mut FlatWork,
     name: &dyn Fn(Piece, FaceRole) -> Option<String>,
 ) -> Result<(Body, Vec<Option<String>>)> {
-    solid_of(&Folded { dev, fold: Some(fold), flat: None, t }, pieces, work, name)
+    solid_of(&Folded { dev, fold: Some(fold), flat: None, t }, pieces, forms, work, name)
 }
 
 /// [`solid`] laid flat in the plane of the frame `flat` (the flat's): each piece a face of its own
 /// on either side and its walls, as the folded solid has them, so the flat's faces are the folded
 /// sheet's faces laid flat and keep what they were made for (#7990: an unfold merges no faces, and
 /// a refold finds each face as it was). Pieces meet along the lines where bends start, coplanar.
+/// The blank stays flat: no form is pressed into it.
 pub(crate) fn solid_flat(
     dev: &Development,
     flat: Rigid3,
@@ -131,18 +137,38 @@ pub(crate) fn solid_flat(
     work: &mut FlatWork,
     name: &dyn Fn(Piece, FaceRole) -> Option<String>,
 ) -> Result<(Body, Vec<Option<String>>)> {
-    solid_of(&Folded { dev, fold: None, flat: Some(flat), t }, pieces, work, name)
+    solid_of(&Folded { dev, fold: None, flat: Some(flat), t }, pieces, &[], work, name)
 }
 
-/// The solid of `pieces` where `f` carries them (see [`solid`]).
+/// The solid of `pieces` where `f` carries them, with `forms` (see [`solid`]).
 fn solid_of(
     f: &Folded<'_>,
     pieces: &[(Piece, Region2)],
+    forms: &[crate::sheet_surface_bead::Form],
     work: &mut FlatWork,
     name: &dyn Fn(Piece, FaceRole) -> Option<String>,
 ) -> Result<(Body, Vec<Option<String>>)> {
     let t = f.t;
-    let cells = cells(pieces.to_vec(), work)?;
+    let mut cells = cells(pieces.to_vec(), work)?;
+    for form in forms {
+        let centre = form.centre;
+        let mine = |c: &Cell| {
+            c.piece == Piece::Panel(form.panel)
+                && Loop2 { segs: c.outer.clone() }.contains(centre)
+                && !c.holes.iter().any(|h| Loop2 { segs: h.clone() }.contains(centre))
+        };
+        let cell = cells.iter_mut().find(|c| mine(c)).ok_or_else(|| DocError::Invalid("a bead lies on no panel of its sheet".into()))?;
+        cell.open.push(form.open.clone());
+    }
+    for c in &mut cells {
+        c.outer = f.split_wide_roll_segs(c.piece, &c.outer);
+        for h in &mut c.holes {
+            *h = f.split_wide_roll_segs(c.piece, h);
+        }
+        for o in &mut c.open {
+            *o = f.split_wide_roll_segs(c.piece, o);
+        }
+    }
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     // Shared with a neighbor: the same flat line the other way, landing in the same place
     // (flat neighbors from two pieces laid side by side do not).
@@ -186,8 +212,9 @@ fn solid_of(
             faces.push(FaceSpec { loops, surface, probe: Some((p, p - f.at(c.piece, center, inside)?)) });
             names.push(name(c.piece, FaceRole::Cap { surface: side == 0, at: center }));
         }
-        // Walls along runs no other cell shares.
-        for (run, [bottom, top]) in runs.iter().flatten().zip(edges.iter().flatten()) {
+        // Walls along runs no other cell shares; none round an open loop.
+        let walled = 1 + c.holes.len();
+        for (run, [bottom, top]) in runs.iter().take(walled).flatten().zip(edges.iter().take(walled).flatten()) {
             if let [e] = run.as_slice()
                 && shared(ci, c, e)?
             {
@@ -205,6 +232,12 @@ fn solid_of(
             let outward = pm - f.at(c.piece, within, t / 2.0)?;
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
             names.push(name(c.piece, FaceRole::Wall { a, b, mid }));
+        }
+    }
+    for form in forms {
+        for (face, made) in &form.faces {
+            faces.push(face.clone());
+            names.push(name(Piece::Panel(form.panel), FaceRole::Bead { bead: form.bead, face: *made }));
         }
     }
     // Until the kernel sews faces that touch along an edge face to face (#1597): two walls on one
@@ -232,7 +265,12 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
         .into_iter()
         .filter_map(|(piece, r)| {
             let outer = clean(r.outer);
-            (!outer.is_empty()).then(|| Cell { piece, outer, holes: r.holes.into_iter().map(clean).filter(|h| !h.is_empty()).collect() })
+            (!outer.is_empty()).then(|| Cell {
+                piece,
+                outer,
+                holes: r.holes.into_iter().map(clean).filter(|h| !h.is_empty()).collect(),
+                open: Vec::new(),
+            })
         })
         .collect();
     let edges = raw.iter().map(|c| c.loops().map(Vec::len).sum::<usize>()).sum::<usize>();
@@ -267,10 +305,61 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
         }
         v
     };
-    Ok(raw.iter().map(|c| Cell { piece: c.piece, outer: split(&c.outer), holes: c.holes.iter().map(|h| split(h)).collect() }).collect())
+    Ok(raw
+        .iter()
+        .map(|c| Cell { piece: c.piece, outer: split(&c.outer), holes: c.holes.iter().map(|h| split(h)).collect(), open: Vec::new() })
+        .collect())
 }
 
 impl Folded<'_> {
+    /// Splits any line or arc on a rolled panel whose 3D angular sweep exceeds three quarters of a
+    /// turn (`3π/2`) in half, so that its folded 3D arc keeps its ends well apart for three-point
+    /// circle fitting (#21829; on a cone a 360° rim unfolds to less than 270° in the flat and is
+    /// not caught by `sheet_surface::halved`).
+    fn split_wide_roll_segs(&self, piece: Piece, segs: &[Seg2]) -> Vec<Seg2> {
+        let Some(fold) = self.fold.filter(|_| self.flat.is_none()) else { return segs.to_vec() };
+        let (Piece::Panel(i) | Piece::Tab(_, i)) = piece else { return segs.to_vec() };
+        if fold.axis(i).is_none() {
+            return segs.to_vec();
+        }
+        let wide = |seg: &Seg2| -> bool {
+            let mut prev: Option<f64> = None;
+            let mut total = 0.0;
+            for k in 0..=4 {
+                let Some(q) = fold.param(i, seg.point_at(k as f64 / 4.0)) else { return false };
+                if let Some(p) = prev {
+                    let mut dy = q.y - p;
+                    dy -= (dy / std::f64::consts::TAU).round() * std::f64::consts::TAU;
+                    total += dy;
+                }
+                prev = Some(q.y);
+            }
+            total.abs() > 1.5 * std::f64::consts::PI + 1e-6
+        };
+        let mut out = Vec::with_capacity(segs.len());
+        for &seg in segs {
+            if wide(&seg) {
+                match seg {
+                    Seg2::Arc { center, radius, start, sweep } => {
+                        let half = sweep / 2.0;
+                        out.push(Seg2::Arc { center, radius, start, sweep: half });
+                        out.push(Seg2::Arc { center, radius, start: start + half, sweep: half });
+                        continue;
+                    }
+                    Seg2::Line { a, b } => {
+                        let mid = a.lerp(b, 0.5);
+                        out.push(Seg2::Line { a, b: mid });
+                        out.push(Seg2::Line { a: mid, b });
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            out.push(seg);
+        }
+        out
+    }
+
     fn bent(&self, zone: usize) -> Option<&Bent> {
         self.dev.zones.get(zone).and_then(|z| self.fold?.bends.get(z.joint)).and_then(Option::as_ref)
     }
@@ -292,8 +381,20 @@ impl Folded<'_> {
     /// split alike, so that a ruled wall joins them piece by piece.
     fn edges(&self, piece: Piece, run: &[Seg2]) -> Result<[EdgeSpec; 2]> {
         let sampled = |depth: f64| (0..=SAMPLES).map(|k| self.at(piece, run_at(run, k as f64 / SAMPLES as f64), depth)).collect::<Result<Vec<_>>>();
+        // A run's samples on one circle make it an arc, but in a bend's zone a short piece of a
+        // helix (a cut across a zone's curved end near a joint of its spans) passes for one too,
+        // whose wall would be a cone the rulings at its ends don't lie on: there only a line
+        // straight across the bend folds to an arc (round the bend's axis).
+        let across = |bent: &Bent| run.iter().all(|s| matches!(*s, Seg2::Line { a, b } if bent.straight_across(a, b)));
         if let (Some(surface), Some(deep)) = (simple(&sampled(0.0)?), simple(&sampled(self.t)?)) {
-            return Ok([surface, deep]);
+            let arc = matches!(surface, EdgeSpec::Arc { .. }) || matches!(deep, EdgeSpec::Arc { .. });
+            let held = match piece {
+                Piece::Zone(z) if arc => self.bent(z).is_some_and(across),
+                _ => true,
+            };
+            if held {
+                return Ok([surface, deep]);
+            }
         }
         // Equal pieces of each of the run's segments, as few as keep within the tolerance at
         // both depths; each joint of the run starts a piece.

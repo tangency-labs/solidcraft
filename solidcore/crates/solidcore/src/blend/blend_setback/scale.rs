@@ -478,7 +478,7 @@ mod tests {
                 .collect();
             let tol = 1.0e-9 * (1.0 + k * model.size);
             let mut own = FillStats::default();
-            let fill = fill_hole_counted(&kernel, &faces, &rounds, 1, tol, &mut own);
+            let fill = fill_hole_counted(&kernel, &faces, &rounds, 1, tol, true, &mut own);
             println!(
                 "scale {k} search solves {} steps {} own solves {} steps {}",
                 search.solves, search.qp_steps, own.solves, own.qp_steps
