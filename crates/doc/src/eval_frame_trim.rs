@@ -6,7 +6,7 @@
 use super::*;
 use crate::frame::{MemberRecord, Side, TrimEnd, TrimMemberRef, TrimTarget};
 use kernel::Body;
-use solidcore_ops::frame_trim::{self, Target, TrimRefusal};
+use solidcraft_kernel::services::frame_trim::{self, Target, TrimRefusal};
 
 /// The members a `FrameMember` feature lays out, before they are built.
 pub(super) struct Layout {
