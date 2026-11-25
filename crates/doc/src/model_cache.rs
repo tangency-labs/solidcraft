@@ -1278,7 +1278,7 @@ impl Model {
                     }
                     continue;
                 }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, 0);
+                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,
@@ -1291,27 +1291,19 @@ impl Model {
                 };
                 // And what it changed, by what it read, as an evaluation keeps it: the first edit
                 // after opening then evaluates only the features that read what the edit changed,
-                // as every later edit does, not every feature after the edit. An import's key also
-                // digests the features before it, so an import is left out (evaluated as before),
-                // as is a feature that names its pieces as later features pick them. So is one
-                // whose bodies were not stamped with this key (saved by a version that keyed them
+                // as every later edit does, not every feature after the edit. Features that name
+                // their pieces as later features pick them are left out, as is any feature whose
+                // bodies were not stamped with this key (saved by a version that keyed them
                 // otherwise, or stamped by the whole model): `stamp` would work their names out
                 // afresh, with no lineage to work them from. It is evaluated again instead.
                 if let Some((k, read)) = &key.reads
-                    && !matches!(f.kind, FeatureKind::Import { .. })
                     && !f.shell_piece_order
                     && let Some(change) = r.state.change_from(&before, f, read)
                 {
                     // A change that holds whatever the bodies it did not read was stamped with the
                     // key without them; one saved before that key, with the other.
-                    let stamped = |k: &u64| {
-                        change.bodies.iter().all(|b| match b {
-                            Changed::Made(b) => b.key == made_body_key(*k, &b.name),
-                            Changed::Kept(_) => true,
-                        })
-                    };
-                    let relative = key.relative.filter(|_| change.relative.is_some());
-                    if let Some(k) = relative.into_iter().chain([*k]).find(stamped) {
+                    let relative = key.relative.filter(|_| change.relative().is_some());
+                    if let Some(k) = relative.into_iter().chain([*k]).find(|k| change.made_bodies_stamped(*k)) {
                         let bytes = change.retained_bytes();
                         cache.changes.put(k, whole.with(change), bytes, r.ms);
                     }

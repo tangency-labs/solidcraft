@@ -115,6 +115,7 @@ fn schemas_and_the_key_check_agree() {
             "participants",
             "pitch",
             "profiles",
+            "reversed",
             "revolutions",
             "section",
             "section_position",
@@ -125,6 +126,104 @@ fn schemas_and_the_key_check_agree() {
             "turns",
         ],
     );
+}
+
+#[test]
+fn coil_axis_contract_accepts_directions_and_revolve_references() {
+    let schema = input_schema_for::<CoilParams>();
+    for axis in [
+        json!("X"),
+        json!(" y "),
+        json!("z"),
+        json!([1, 2, 3]),
+        json!({"x": 1, "y": 2, "z": 3}),
+        json!("Helix axis"),
+        json!("@origin/1/X"),
+        json!({"dir": [0, 0, 1]}),
+        json!({"origin": ["offset = 10 mm", 0, 0], "dir": [0, 1, 0]}),
+        json!({"curve": "l1"}),
+        json!({"sketch": "Section", "curve": "l1"}),
+        json!({"type": "sketch_line", "sketch": "Section", "curve": "l1"}),
+        json!({"edge": [10, 0, 0]}),
+        json!({"face": [10, 0, 0]}),
+        json!({"type": "edge", "at": [10, 0, 0]}),
+        json!({"type": "face", "at": [10, 0, 0]}),
+        json!({"type": "sketch_axis", "axis": "x"}),
+        json!({"type": "sketch_axis", "axis": "y"}),
+        json!({"type": "world", "axis": "Y"}),
+        json!({"type": "placed_edge", "body": "Stock", "path": [4], "at": [10, 0, 0], "name": "F5:top|F5:side"}),
+    ] {
+        let p = with(&coil(), "axis", axis.clone());
+        let parsed: CoilParams = serde_json::from_value(p.clone()).unwrap();
+        assert_eq!(parsed.axis.unwrap().0, axis);
+        assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+    }
+    for axis in [json!(null), json!(""), json!(" \t\n"), json!([0, 0, 0]), json!([1, 2]), json!({"x": 1}), json!(true), json!(7)] {
+        let p = with(&coil(), "axis", axis.clone());
+        let error = serde_json::from_value::<CoilParams>(p).unwrap_err().to_string();
+        let original = serde_json::from_value::<crate::schema::AxisDir>(axis).unwrap_err().to_string();
+        assert!(error.contains(&original), "{error} does not preserve {original}");
+    }
+    assert!(serde_json::from_value::<CoilParams>(coil()).unwrap().axis.is_none());
+    for axis in [
+        json!({"origin": [0, 0, 0]}),
+        json!({"dir": [1, 0]}),
+        json!({"curve": 7}),
+        json!({"edge": [1, 2]}),
+        json!({"face": null}),
+        json!({"type": "sketch_axis", "axis": "z"}),
+        json!({"type": "sketch_axis"}),
+        json!({"type": "world", "axis": "y"}),
+        json!({"type": "world"}),
+    ] {
+        let error = serde_json::from_value::<CoilParams>(with(&coil(), "axis", axis.clone())).unwrap_err().to_string();
+        let original = serde_json::from_value::<crate::schema::RevolveAxis>(axis).unwrap_err().to_string();
+        assert!(error.contains(&original), "{error} does not preserve {original}");
+    }
+}
+
+#[test]
+fn coil_axis_contract_rejects_malformed_tags_with_other_axis_fields() {
+    let schema = input_schema_for::<CoilParams>();
+    for axis in [
+        json!({"type": "sketch_axis", "axis": "z", "curve": "l1"}),
+        json!({"type": "sketch_axis", "curve": "l1", "dir": [0, 1, 0]}),
+        json!({"type": "sketch_axis", "axis": "y", "edge": null}),
+        json!({"type": "world", "axis": "x", "curve": "l1"}),
+        json!({"type": "world", "curve": "l1"}),
+        json!({"type": "world", "axis": "X", "face": [0, 0]}),
+        json!({"edge": null, "curve": "l1"}),
+        json!({"face": [0, 0], "curve": "l1"}),
+        json!({"type": "placed_edge", "curve": "l1"}),
+        json!({"type": "placed_edge", "dir": [0, 1, 0]}),
+        json!({"type": "placed_edge", "x": 0, "y": 1, "z": 0}),
+    ] {
+        let params = with(&coil(), "axis", axis);
+        assert!(serde_json::from_value::<CoilParams>(params.clone()).is_err(), "{params}");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &params), "{params}");
+    }
+}
+
+#[test]
+fn coil_reverse_contract_is_independent_of_clockwise() {
+    let schema = input_schema_for::<CoilParams>();
+    for reversed in [false, true] {
+        for clockwise in [false, true] {
+            let p = with(&with(&coil(), "reversed", json!(reversed)), "clockwise", json!(clockwise));
+            let parsed: CoilParams = serde_json::from_value(p.clone()).unwrap();
+            assert_eq!(parsed.reversed, Some(reversed));
+            assert_eq!(parsed.clockwise, Some(clockwise));
+            assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+        }
+    }
+    assert!(serde_json::from_value::<CoilParams>(coil()).unwrap().reversed.is_none());
+    for value in [json!(null), json!("true"), json!(1), json!([])] {
+        let p = with(&coil(), "reversed", value);
+        assert!(serde_json::from_value::<CoilParams>(p.clone()).is_err(), "{p}");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+        let messages: Vec<String> = crate::schema::issues("solid.coil", &p).into_iter().map(|issue| issue.message).collect();
+        assert_eq!(messages, ["`reversed` must be true or false"], "{p}");
+    }
 }
 
 /// As `assert_strict_keeps_todays_errors`, on the design `fixture` makes: for the calls that need
@@ -185,6 +284,7 @@ fn strict_keeps_todays_errors() {
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": [1, 2]})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": null})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": [0, 0, 0]})),
+        ("solid.coil", with(&coil(), "reversed", json!(null))),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "profiles": [0]})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "operation": "glue"})),
         ("solid.coil", json!({"sketch": "Nope", "revolutions": 2, "pitch": 8})),
