@@ -161,6 +161,7 @@ pub use check::CheckReport;
 pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
+pub use error::ErrorClass;
 pub use error::FailureCode;
 pub use error::FitKind;
 pub use error::OffsetRefusal;

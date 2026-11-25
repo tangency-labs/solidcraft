@@ -13,19 +13,21 @@
 use serde::{Deserialize, Serialize};
 
 /// A failed kernel call's code as data to keep and send: the call (`"blend"`), the kernel's
-/// stable number for the kind of failure (`kind`, 0 for a failure solidcore-ops decided itself)
-/// and the kernel routine that failed (`operation`, a module path; for kind 0, the name of
-/// solidcore-ops' error).
+/// stable number for the kind of failure (`kind`, 0 for a failure solidcore-ops decided itself),
+/// the kernel routine that failed (`operation`, a module path; for kind 0, the name of
+/// solidcore-ops' error) and the kernel's class of the error (`class`: `refusal`, `defect`,
+/// `port_failure` or `unclassed`), copied from the kernel's code, never derived here.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ErrorCode {
     pub call: String,
     pub kind: u16,
     pub operation: String,
+    pub class: String,
 }
 
 impl From<solidcraft_smlib::failure::FailureCode> for ErrorCode {
     fn from(c: solidcraft_smlib::failure::FailureCode) -> Self {
-        ErrorCode { call: c.call.to_owned(), kind: c.kind, operation: c.operation.to_owned() }
+        ErrorCode { call: c.call.to_owned(), kind: c.kind, operation: c.operation.to_owned(), class: c.class.name().to_owned() }
     }
 }
 

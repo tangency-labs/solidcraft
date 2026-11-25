@@ -651,13 +651,16 @@ fn blend_failure(
             return (crate::session::noted(&e, error), None);
         }
     }
-    let (kind, operation) = (e.kind().code(), e.operation());
+    let (kind, operation, class) = (e.kind().code(), e.operation(), e.class());
     let (error, edge) = match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
     };
-    (crate::session::noted_as(kind, operation, error), edge)
+    (
+        crate::session::noted_as(kind, operation, class, error),
+        edge,
+    )
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's

@@ -40,13 +40,16 @@ pub struct FailureCode {
     pub kind: u16,
     /// `SolidError::operation()`: the kernel routine that failed.
     pub operation: &'static str,
+    /// `SolidError::class()`: refusal, defect, port failure or unclassed; unclassed for kind 0.
+    pub class: ErrorClass,
 }
 ```
 
 - `session::take_failure_code() -> Option<FailureCode>` reads it after a failed call, on the thread that made it, beside `session::take_failure_detail()` (the kernel's words), and taken like it. The session sets it in `run_with`, which holds the call name: a call that fails with a kernel error has that error's kind and operation; a refusal the call's answer carries has those of the kernel error it is, as ops typed it (each place ops types a kernel error, `status()` and the blend, round and offset refusals, notes it for the call; the refusal must be of the variant the note became, so a point or an index ops adds afterwards keeps it, and an attempt the call tries and gives up puts the note back); a failure ops decided itself (an argument, a result its own checks refuse, a caught panic) is kind `FailureCode::OPS` (0) with the `Error`'s variant name (`Error::name()`) as its operation. A cancellation is no failure and has none, nor has an argument an operation refuses before it starts a call. A call that ran out of fuel (`solidcore_ops::fuel`, `Error::OutOfFuel`) is a failure: kind `ErrorKind::OutOfFuel` (95), and as its operation the kernel check that found the tank empty, or `OutOfFuel` when no kernel error came back up with it. It is beside `Error`, not inside it: `Error` is a plain value applications compare and match by its variants, and every variant would have to carry it.
 - `Failure` (the hook) gets `code: FailureCode`, the same code.
 - Its `Display` is `call · kind · operation`.
-- Every field is a static string or an integer: no geometry, no names, no numbers from the model. Two reports of one failure have equal codes, compared as strings.
+- Every field is a static string, an integer or the error's class: no geometry, no names, no numbers from the model. Two reports of one failure have equal codes, compared as strings.
+- `class` is the class solidcore gives the error (`SolidError::class`, from its cause chain as `is_port_failure`, `is_defect` and `is_refusal` decide it, in that order), so an application tells a refusal (change the input) from the kernel's fault without keeping a table of the kinds. A failure ops decided itself is unclassed. It is not part of the `Display`, and a grouping never keys on it: it follows from the error, as `kind` does.
 - `kind` is the stable part and the bucket. `operation` splits a coarse kind (6, `Failed`, "does not describe how yet") and follows the module path, so a refactor can move it: it is the second level of a signature, never its key.
 
 ### 3.2 Arguments with the bodies

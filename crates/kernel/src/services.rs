@@ -14,6 +14,7 @@ use crate::body::Body;
 
 pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
+pub use solidcore_ops::ErrorClass;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
 pub use solidcore_ops::SquareFaceLevel;

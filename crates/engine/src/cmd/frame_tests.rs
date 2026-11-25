@@ -8390,9 +8390,9 @@ fn separate_curves_and_point_pairs_keep_none_member_identity_and_analytic_volume
 #[test]
 fn frame_member_refusals_keep_their_geometry_data_and_session_failure_code() {
     use solidcraft_kernel::services::frame_member::{self as stock, Failure, Refusal};
-    use solidcraft_kernel::services::{Error, FailureCode, session};
+    use solidcraft_kernel::services::{Error, ErrorClass, FailureCode, session};
 
-    let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember" };
+    let expected_code = FailureCode { call: "frame_member", kind: FailureCode::OPS, operation: "FrameMember", class: ErrorClass::Unclassed };
     let origin = solidcore_record::Vec3::ZERO;
     let error = stock::line(origin, origin).unwrap_err();
     assert!(matches!(&error, Failure::Geometry(Refusal::Line)), "{error:?}");

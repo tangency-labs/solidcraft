@@ -615,11 +615,15 @@ pub struct ErrorCodeReply {
     /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
     /// error.
     pub operation: String,
+    /// The kernel's class of the error: `refusal` (a fact of the geometry: change the input),
+    /// `defect` (the kernel's fault), `port_failure` (a part of the kernel not ported, or a
+    /// preparation it needs), or `unclassed` (none of them, and every failure of kind 0).
+    pub class: String,
 }
 
 impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
     fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
-        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone(), class: c.class.clone() }
     }
 }
 

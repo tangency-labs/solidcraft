@@ -53,7 +53,7 @@ use solidcore::{Brep, SolidError};
 
 use crate::body::Body;
 use crate::error::status;
-use crate::{Error, FailureCode, Result};
+use crate::{Error, ErrorClass, FailureCode, Result};
 
 /// The kernels waiting between calls, the one given back last at the end.
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
@@ -272,24 +272,24 @@ thread_local! {
     /// The code of the last failed call on this thread ([`take_failure_code`]).
     static CODE: Cell<Option<FailureCode>> = const { Cell::new(None) };
     /// The last kernel error the call running on this thread typed into an [`Error`] ([`noted`]):
-    /// its kind's code, its operation, and the name of the variant it became.
-    static NOTED: Cell<Option<(u16, &'static str, &'static str)>> = const { Cell::new(None) };
+    /// its kind's code, its operation, its class, and the name of the variant it became.
+    static NOTED: Cell<Option<(u16, &'static str, ErrorClass, &'static str)>> = const { Cell::new(None) };
 }
 
 /// `r`, the kernel's error `e` as ops types it, noted for the call running on this thread: when
 /// the call's answer refuses with an error of `r`'s variant (`r` itself, or `r` with what the
-/// call adds to it, a point, an index), its [`FailureCode`] is `e`'s kind and operation, not a
+/// call adds to it, a point, an index), its [`FailureCode`] is `e`'s kind, operation and class, not a
 /// failure ops decided itself. Every place ops types a kernel error into an [`Error`] passes it
 /// here; outside a call it is `r`, untouched. The last note wins: a call that types two kernel
 /// errors into one variant, drops one and refuses with the other, reports the later one's code,
 /// so a call that tries and gives up something puts its earlier note back ([`note_back`]).
 pub(crate) fn noted(e: &SolidError, r: Error) -> Error {
-    noted_as(e.kind().code(), e.operation(), r)
+    noted_as(e.kind().code(), e.operation(), e.class(), r)
 }
 
 /// What the call running on this thread noted last ([`noted`]), for work that tries something
 /// and gives it up to put back ([`note_back`]): a refusal it returns is the one noted before.
-pub(crate) type Note = Option<(u16, &'static str, &'static str)>;
+pub(crate) type Note = Option<(u16, &'static str, ErrorClass, &'static str)>;
 
 /// The note of the call running on this thread, to put back with [`note_back`].
 pub(crate) fn note() -> Note {
@@ -301,11 +301,12 @@ pub(crate) fn note_back(n: Note) {
     let _ = NOTED.try_with(|c| c.set(n));
 }
 
-/// [`noted`] for a kernel error already taken apart: its kind's code and its operation.
-pub(crate) fn noted_as(kind: u16, operation: &'static str, r: Error) -> Error {
+/// [`noted`] for a kernel error already taken apart: its kind's code, its operation and its
+/// class.
+pub(crate) fn noted_as(kind: u16, operation: &'static str, class: ErrorClass, r: Error) -> Error {
     if in_call() {
         // (a thread being torn down notes nothing)
-        let _ = NOTED.try_with(|n| n.set(Some((kind, operation, r.name()))));
+        let _ = NOTED.try_with(|n| n.set(Some((kind, operation, class, r.name()))));
     }
     r
 }
@@ -608,6 +609,7 @@ fn run_with<T: Answer>(
                 call,
                 kind: solidcore::error::ErrorKind::OutOfFuel.code(),
                 operation,
+                class: ErrorClass::Unclassed,
             });
             (Err(e), false)
         }
@@ -637,10 +639,11 @@ fn run_with<T: Answer>(
     let why = failed.map(|e| {
         // the kernel's error the call failed with, or the one its refusal is as ops typed it
         let code = kernel_code.unwrap_or_else(|| match noted {
-            Some((kind, operation, typed)) if typed == e.name() => FailureCode {
+            Some((kind, operation, class, typed)) if typed == e.name() => FailureCode {
                 call,
                 kind,
                 operation,
+                class,
             },
             _ => FailureCode::of_ops(call, &e),
         });
