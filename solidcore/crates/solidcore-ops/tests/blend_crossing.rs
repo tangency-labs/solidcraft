@@ -742,3 +742,50 @@ fn rounds_meeting_a_tangent_chain_at_a_tab_corner_build() {
         assert!(v < volume(&part) - swept, "round {r}: {v}");
     }
 }
+
+/// What the band check still refuses on [`ring_with_tab`]: past the corner the inner edge's
+/// and the near arc's rounds take off only the wedge between their rails (from the corner up to
+/// where the rails cross at x = -10 - r, R = 13 - r), and a round whose rail lies inside that
+/// wedge overlaps them. A hole of radius 0.15 at (-10.8, -6) lies in it at r = 1.4 (0.6 in
+/// from the inner rail x = -11.4, and at R = 12.37, 0.77 out from the arc's rail R = 11.6);
+/// its top rim rounded at 0.1 with the chain is refused, and the part is left as it was. So is
+/// the chain at 1.6, wider than half the tab (3 mm): the two rounds' bands on its top overlap.
+#[test]
+fn rounds_overlapping_past_a_tab_corner_are_refused() {
+    let (part, edges) = ring_with_tab();
+    let refused = |body: &Body, edges: &[usize], sizes: &[f64]| {
+        let c = body.copy().unwrap();
+        let before = (c.counts().unwrap(), volume(&c));
+        match blend(&c, Blend::Round, edges, sizes, &[], Corners::Filled) {
+            Err(Error::NoRoom | Error::TooLarge { .. }) => {}
+            other => panic!("{sizes:?}: {other:?}"),
+        }
+        assert_eq!(c.counts().unwrap(), before.0, "{sizes:?}");
+        assert!(rel(volume(&c), before.1) < 1e-12, "{sizes:?}");
+    };
+    refused(&part, &edges, &[1.6]);
+    let holed = built(|k| {
+        let outer = create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 13.0, 10.0)?;
+        let inner = create_cylinder(k, Vec3::new(0.0, 0.0, -1.0), 10.0, 12.0)?;
+        let ring = boolean_difference(k, outer, inner)?;
+        let tab = create_box(k, Vec3::new(-13.0, -30.0, 0.0), 3.0, 30.0, 10.0)?;
+        let joined = boolean_union(k, ring, tab)?;
+        let hole = create_cylinder(k, Vec3::new(-10.8, -6.0, -1.0), 0.15, 12.0)?;
+        boolean_difference(k, joined, hole)
+    });
+    let mut picked = [
+        [-10.0, -20.0, 10.0],
+        [-13.0, -20.0, 10.0],
+        [0.0, -13.0, 10.0],
+        [0.0, 13.0, 10.0],
+    ]
+    .map(|p| edge_at(&holed, p))
+    .to_vec();
+    picked.push(edge_at(&holed, [-10.65, -6.0, 10.0]));
+    refused(&holed, &picked, &[1.4, 1.4, 1.4, 1.4, 0.1]);
+    // the hole's rim alone builds
+    let c = holed.copy().unwrap();
+    blend(&c, Blend::Round, &picked[4..], &[0.1], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("rim alone: {e:?}"));
+    assert!(c.check(CheckLevel::All).unwrap().is_valid());
+}

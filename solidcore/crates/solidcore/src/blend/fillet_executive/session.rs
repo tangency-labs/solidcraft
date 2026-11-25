@@ -6549,18 +6549,32 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             ];
             edge_curves.push((curve, ivl, ends));
         }
-        // each blended edge's ends that another blended edge shares: corners, where the
-        // band past the end is the corner's (#21749)
-        let mut corner_ends = Vec::new();
-        for &(edge_b, ends_b) in &edges {
+        // each blended edge's ends that other blended edges share (corners, #21749): the end
+        // of the edge's curve nearest the vertex, and the indices of those other edges
+        let mut corner_ends: Vec<Vec<(crate::math::Point3, Vec<usize>)>> = Vec::new();
+        for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
             let mut at = Vec::new();
             for v in ends_b.into_iter().flatten() {
-                let shared = edges
-                    .iter()
-                    .any(|&(edge_j, ends_j)| edge_j != edge_b && ends_j.contains(&Some(v)));
-                if shared {
-                    at.push(crate::topology::vertex::point(self.target, v)?);
+                let others: Vec<usize> = (0..edges.len())
+                    .filter(|&j| {
+                        edges.get(j).is_some_and(|&(edge_j, ends_j)| {
+                            edge_j != edge_b && ends_j.contains(&Some(v))
+                        })
+                    })
+                    .collect();
+                let Some((_, _, [q0, q1])) = edge_curves.get(b) else {
+                    continue;
+                };
+                if others.is_empty() {
+                    continue;
                 }
+                let at_v = crate::topology::vertex::point(self.target, v)?;
+                let end = if (at_v - *q0).length() <= (at_v - *q1).length() {
+                    *q0
+                } else {
+                    *q1
+                };
+                at.push((end, others));
             }
             corner_ends.push(at);
         }
@@ -6835,17 +6849,12 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             // band's chord across the face and falsely catch a distant rail
                             // (#2903), and an end on another edge of the run (a tangent
                             // chain's) says nothing of band `b`'s width. A closed edge (both
-                            // ends one point) has no end to run on past. Nor has an end where
-                            // another blended edge meets edge `b` (#21749): the corner there
-                            // ends the band at the mitre with that edge's blend, as it trims
-                            // two bands that share a vertex (above), so the band does not run
-                            // on past it as wide as its section.
+                            // ends one point) has no end to run on past.
                             let own_end_b = edge_curves
                                 .get(b)
                                 .map(|(_, _, ends)| *ends)
                                 .filter(|[q0, q1]| (*q0 - *q1).length() > tol)
-                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol))
-                                .filter(|_| !corners_b.iter().any(|&c| (e - c).length() <= tol));
+                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol));
                             let past_end = match own_end_b {
                                 Some(ends) if at_run_end && band_has_ends => Some(ends),
                                 _ => None,
@@ -6924,6 +6933,31 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     }
                                 };
                                 if inside && !sample_off_face(k, self.target, *face_a, p)? {
+                                    // Not the fork's (#21749): past a corner, where other
+                                    // blended edges meet edge `b` at this end, the band runs on
+                                    // only as far as the corner's mitre: the sample is in it
+                                    // where it also lies in the band of the edge that meets `b`
+                                    // there on this face, run on past the corner
+                                    // (`inside_corner_wedge`).
+                                    if let Some((_, others)) =
+                                        corners_b.iter().find(|(q, _)| (e - *q).length() <= tol)
+                                    {
+                                        if !inside_corner_wedge(
+                                            k,
+                                            CornerWedge {
+                                                rails: &rails,
+                                                edge_curves: &edge_curves,
+                                                others,
+                                                face: *face_a,
+                                            },
+                                            e,
+                                            p,
+                                            tol,
+                                            apart,
+                                        )? {
+                                            continue;
+                                        }
+                                    }
                                     return Ok(false);
                                 }
                                 continue;
@@ -7099,6 +7133,88 @@ fn inside_band_past_run_end(
     }
     let from_rail = (sample - r).dot(section * (1.0 / width));
     Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
+}
+
+/// The blends that meet a band's edge at a corner, as [`inside_corner_wedge`] reads them.
+struct CornerWedge<'a> {
+    /// Every blend's rails, with the face each rolls on and its kept interval.
+    rails: &'a [SolverRails],
+    /// Every blended edge's curve, its interval and the ends of the curve.
+    edge_curves: &'a [(
+        crate::curve::curve::Curve,
+        crate::geom::extent1d::Extent1d,
+        [crate::math::Point3; 2],
+    )],
+    /// The indices of the other blended edges at the corner.
+    others: &'a [usize],
+    /// The face the sample lies on.
+    face: FaceId,
+}
+
+/// Whether a sample past a band's edge's end at a corner (#21749), already inside that band's
+/// run-on ([`inside_band_past_run_end`]), lies in the material the corner takes off. Past a
+/// corner the blends of the edges that meet there on the face run on past it until they meet
+/// at their mitre, and take off only what lies in both their bands: the wedge between their
+/// rails up to where the rails cross. So the sample is inside where it also lies in the run-on
+/// of the band of another edge at the corner that has a rail on `face`, past the same end
+/// (`end`); where no edge at the corner has a rail on `face` (a blended side edge, whose
+/// blend rolls on other faces), the end is judged as a free one: inside.
+///
+/// # Errors
+/// Those of the drops onto the rails and their evaluation.
+fn inside_corner_wedge(
+    k: &Kernel,
+    wedge: CornerWedge<'_>,
+    end: crate::math::Point3,
+    sample: crate::math::Point3,
+    tol: f64,
+    apart: f64,
+) -> Result<bool> {
+    use crate::geom::global_solver::SolverOperation;
+    let mut on_face = false;
+    for &c in wedge.others {
+        let Some((_, rail, kept)) = wedge
+            .rails
+            .get(c)
+            .and_then(|own| own.iter().find(|(f, _, _)| *f == wedge.face))
+        else {
+            continue;
+        };
+        let Some((_, _, [c0, c1])) = wedge.edge_curves.get(c) else {
+            continue;
+        };
+        on_face = true;
+        let other_end = if (end - *c0).length() <= (end - *c1).length() {
+            *c1
+        } else {
+            *c0
+        };
+        let ivl = rail.natural_interval();
+        let on_rail = rail.drop_point(
+            k,
+            &ivl,
+            sample,
+            None,
+            crate::math::BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if !on_rail.success {
+            continue;
+        }
+        let r = rail.evaluate_point(k, on_rail.parameter)?;
+        let at = PastRunEnd {
+            end,
+            other_end,
+            sample,
+            on_rail: (on_rail.parameter, r),
+            kept: [kept.min(), kept.max()],
+        };
+        if inside_band_past_run_end(k, rail, &ivl, at, tol, apart)? {
+            return Ok(true);
+        }
+    }
+    Ok(!on_face)
 }
 
 /// A step of the band check that found nothing where a point always exists (a drop onto a
