@@ -8,10 +8,12 @@
 //! | [`intersect_curves`], [`CurveIntersections`]          | `SmApiIntersectCurves`         |
 //! | [`curve_crossings`]                                   | (not upstream)                 |
 //! | [`curve_plane_crossings`]                             | (not upstream)                 |
+//! | [`curve_plane_section`], [`PlaneSection`]             | (not upstream)                 |
 //! | [`intersect_surfaces`]                                | `SmApiIntersectSurfaces`       |
 //! | [`intersect_surfaces_within`]                         | (not upstream)                 |
 //! | `refuse_points_where_a_plane_crosses` (private)       | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
+//! | [`intersect_faces_read_only`]                         | (not upstream)                 |
 //! | [`intersect_breps`], [`BrepOperands`]                 | `SmApiIntersectBreps`          |
 //! | [`intersect_curve_surface`], [`CurveHits`]            | `SmApiIntersectCurveSurface`   |
 //! | [`intersect_curve_face`]                              | `SmApiIntersectCurveFace`      |
@@ -50,13 +52,18 @@
 //! the caller's tolerance of [`intersect_surfaces_within`], when larger),
 //! between a plane and a surface the plane crosses
 //! ([`IntersectFailure::PointsWhereAPlaneCrosses`]); upstream returns the points.
+//! Not upstream (#15130): [`intersect_faces_read_only`] is [`intersect_faces`] on trial
+//! copies of the B-reps (`Brep::clone_for_trial_keeping_definitions`), because the face
+//! intersection edits the B-reps it classifies on (their faces' UV trim curves, gap caches
+//! and trimmed surface caches, a raised edge tolerance) and a caller that only reads a part,
+//! as a weld between two parts does, must find it as it was.
 
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR};
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR};
 use crate::eval::Frame;
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::extent1d::Extent1d;
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::solution_array::{
@@ -68,25 +75,24 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::point_class::PointClassType;
 use crate::intersect::surface_intersector::p1::SurfaceIntersector;
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::query::brep::{BrepFaceServices, CurveFaceObject, CurveFaceServices};
 use crate::surface::plane::Plane;
 use crate::surface::surface::{Surface, SurfaceIntersection, SurfaceKind, TsectCurveType};
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::topology::brep::p3::brep_copy_mapped;
 use crate::topology::brep::planar_section::{
     create_planar_section_curves, PlanarSectionOptions, SectionOutputs,
 };
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::face::p3::{face_intersect_breps, FaceBreps, FaceIntersectOptions};
-use crate::topology::proto_topology::p1::CopyBrepMap;
 use crate::topology::Brep;
 use crate::topology::FaceId;
 
 const OP: &str = "intersect::api_intersectors::intersect_brep_with_plane";
 const OP_CURVES: &str = "intersect::api_intersectors::intersect_curves";
 const OP_CROSSINGS: &str = "intersect::api_intersectors::curve_crossings";
-const OP_PLANE_CROSSINGS: &str = "intersect::api_intersectors::curve_plane_crossings";
+const OP_PLANE_SECTION: &str = "intersect::api_intersectors::curve_plane_section";
 const OP_SURFACES: &str = "intersect::api_intersectors::intersect_surfaces";
 
 const OP_BREPS: &str = "intersect::api_intersectors::intersect_breps";
@@ -550,37 +556,39 @@ pub fn intersect_faces(
     })
 }
 
-/// [`intersect_faces`] of `face1` of `brep1` and `face2` of `brep2`, two B-reps it only
-/// reads: it meets the faces on copies of both ([`brep_copy_mapped`]), so neither B-rep
-/// changes, not even the caches and trim curves the intersection would make on it.
+/// [`intersect_faces`] of `face1` of `brep1` and `face2` of `brep2`, B-reps it only reads:
+/// it intersects the faces on trial copies of them
+/// (`Brep::clone_for_trial_keeping_definitions`: the same ids, owners and geometry, each
+/// face surface with a cache slot of its own), so the UV trim curves, gap caches, trimmed
+/// surface caches and tolerances the intersection makes or raises stay on the copies. The
+/// same B-rep passed twice ([`core::ptr::eq`]) is one copy ([`FaceBodies::One`]), as
+/// [`intersect_faces`] takes it. What the copies share with the B-reps is only caches of
+/// values they give alike: the edge curves' memos, the cache slots of nested surfaces (an
+/// offset's or a STEP surface's base) and of edge curves' surfaces.
 ///
 /// # Errors
 ///
-/// Those of [`brep_copy_mapped`]; [`SolidError::InvalidInput`] for a face not of its
-/// B-rep; those of [`intersect_faces`].
+/// Those of `Brep::clone_for_trial_keeping_definitions` (a trimmed surface cache in use,
+/// geometry nested too deeply); those of [`intersect_faces`] on the copies, as on the
+/// B-reps (a face not of its B-rep: `NotFound`).
 pub fn intersect_faces_read_only(
-    k: &mut Kernel,
+    k: &Kernel,
     brep1: &Brep,
     face1: FaceId,
     brep2: &Brep,
     face2: FaceId,
     want_points: bool,
 ) -> Result<Intersections> {
-    let (mut copy1, map1) = brep_copy_mapped(k, brep1)?;
-    let (mut copy2, map2) = brep_copy_mapped(k, brep2)?;
-    let face_of = |map: &CopyBrepMap<EntityRef>, f| match map.get_at(Some(EntityRef::Face(f))) {
-        Ok(Some(EntityRef::Face(c))) => Ok(c),
-        _ => Err(SolidError::invalid_input(
-            "intersect_faces_read_only",
-            "a face not of its B-rep",
-        )),
-    };
-    let (f1, f2) = (face_of(&map1, face1)?, face_of(&map2, face2)?);
+    let mut copy1 = brep1.clone_for_trial_keeping_definitions()?;
+    if core::ptr::eq(brep1, brep2) {
+        return intersect_faces(k, FaceBodies::One(&mut copy1), face1, face2, want_points);
+    }
+    let mut copy2 = brep2.clone_for_trial_keeping_definitions()?;
     intersect_faces(
         k,
         FaceBodies::Two(&mut copy1, &mut copy2),
-        f1,
-        f2,
+        face1,
+        face2,
         want_points,
     )
 }
@@ -706,21 +714,57 @@ pub struct CurveHits {
 /// (`SM_ST_RANGE_OF_VALUES`), its start and its end (`[curve t, surface u, surface v]`).
 type CurveSurfaceSolution = (bool, SolutionEnd, SolutionEnd);
 
-/// Isolated intersections of `curve` over `interval` with the infinite plane of `frame`,
-/// in curve order and in the frame's local coordinates. The kernel's curve/surface solve
-/// uses the model's zone tolerance, including contacts at either interval endpoint.
-/// Overlapping intervals have no isolated intersection; a closed curve's seam is returned
-/// once. Points are evaluated on the curve's definition, never on display segments.
+/// Isolated intersections of `curve` over `interval` with the infinite plane of `frame`:
+/// the points of [`curve_plane_section`], none for a curve lying in the plane.
 ///
 /// # Errors
-/// [`SolidError::InvalidInput`] for a nonfinite or reversed interval, or a frame that is
-/// not finite and orthonormal; those of the plane constructor and intersection solve.
+/// Those of [`curve_plane_section`].
 pub fn curve_plane_crossings(
     k: &Kernel,
     curve: &Curve,
     interval: &Extent1d,
     frame: &Frame,
 ) -> Result<Vec<Point2>> {
+    Ok(match curve_plane_section(k, curve, interval, frame)? {
+        PlaneSection::InPlane => Vec::new(),
+        PlaneSection::Meets { points, .. } => points,
+    })
+}
+
+/// Where a curve meets a plane ([`curve_plane_section`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlaneSection {
+    /// The curve lies in the plane over the whole interval.
+    InPlane,
+    /// The curve meets the plane at isolated points and over parts of its interval, or
+    /// misses it.
+    Meets {
+        /// The isolated intersections, in curve order and in the frame's local
+        /// coordinates. A point at the end of a range of `in_plane` is not among them.
+        points: Vec<Point2>,
+        /// The curve parameter ranges over which the curve lies in the plane, in curve
+        /// order. Together they never cover the whole interval.
+        in_plane: Vec<Extent1d>,
+    },
+}
+
+/// Where `curve` over `interval` meets the infinite plane of `frame`: the kernel's
+/// curve/surface solve at the model's zone tolerance. Its range solutions are the parts of
+/// the curve lying in the plane, and the curve lies in the plane when they cover the whole
+/// interval end to end, at the kernel's parameter tolerance (`EFF_ZERO`). Its point
+/// solutions are the isolated intersections, including contacts at either interval
+/// endpoint; a closed curve's seam is returned once. Points are evaluated on the curve's
+/// definition, never on display segments.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a nonfinite or reversed interval, or a frame that is
+/// not finite and orthonormal; those of the plane constructor and intersection solve.
+pub fn curve_plane_section(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    frame: &Frame,
+) -> Result<PlaneSection> {
     if !interval.min().is_finite()
         || !interval.max().is_finite()
         || interval.min() > interval.max()
@@ -728,7 +772,7 @@ pub fn curve_plane_crossings(
         || crate::eval::check::frame(frame).is_err()
     {
         return Err(SolidError::invalid_input(
-            OP_PLANE_CROSSINGS,
+            OP_PLANE_SECTION,
             "the interval or plane frame is invalid",
         ));
     }
@@ -746,23 +790,62 @@ pub fn curve_plane_crossings(
         tolerance,
     )?;
     let mut parameters = Vec::new();
+    let mut in_plane = Vec::new();
     for solution in solutions.as_slice() {
-        if solution.solution_type == SolutionType::SingleValue {
-            parameters.push(solution.start.param(0)?);
+        match solution.solution_type {
+            SolutionType::SingleValue => parameters.push(solution.start.param(0)?),
+            SolutionType::RangeOfValues => {
+                let (a, b) = (solution.start.param(0)?, solution.end.param(0)?);
+                in_plane.push(Extent1d::from_min_max(a.min(b), a.max(b)));
+            }
+            _ => {}
         }
+    }
+    in_plane.sort_by(|a, b| a.min().total_cmp(&b.min()));
+    if covers(&in_plane, interval) {
+        return Ok(PlaneSection::InPlane);
     }
     parameters.sort_by(f64::total_cmp);
     let mut kept: Vec<Point3> = Vec::new();
-    let mut out = Vec::new();
+    let mut points = Vec::new();
     for parameter in parameters {
         let point = curve.evaluate_point(k, parameter)?;
         if !kept.iter().any(|p| point.distance(*p) <= tolerance) {
             kept.push(point);
             let relative = point - origin;
-            out.push(Point2::new(relative.dot(x), relative.dot(y)));
+            points.push(Point2::new(relative.dot(x), relative.dot(y)));
         }
     }
-    Ok(out)
+    Ok(PlaneSection::Meets { points, in_plane })
+}
+
+/// Whether the parameter ranges `ranges` (sorted by their starts) cover `interval` end to
+/// end: the first starts at the interval's start, each next one starts where the ones
+/// before it reach, and they reach the interval's end, each at the kernel's parameter
+/// tolerance (`EFF_ZERO`). No ranges cover nothing. Each test accepts, so a range with a
+/// NaN end covers nothing.
+fn covers(ranges: &[Extent1d], interval: &Extent1d) -> bool {
+    let mut reach = interval.min();
+    for range in ranges {
+        let starts_within_reach = range.min() <= reach
+            || matches!(
+                range.classify_point(reach, EFF_ZERO),
+                ExtentPointType::Start
+                    | ExtentPointType::Inside
+                    | ExtentPointType::End
+                    | ExtentPointType::Both
+            );
+        if !starts_within_reach {
+            return false;
+        }
+        reach = reach.max(range.max());
+    }
+    !ranges.is_empty()
+        && (reach >= interval.max()
+            || matches!(
+                interval.classify_point(reach, EFF_ZERO),
+                ExtentPointType::End | ExtentPointType::Both
+            ))
 }
 
 /// The solutions `sm_AppendCurveSurfaceHits` walks: `pSurface->GlobalCurveIntersect` of
@@ -1152,6 +1235,93 @@ mod tests {
             .is_empty());
     }
 
+    /// A curve lying in the plane lies in it over its whole interval, and over part of
+    /// its range too: a line, a circle, an arc, a polyline (one range per segment, end to
+    /// end) and a cubic spline, all in Z = 0. Moved 1 off the plane, each misses it.
+    #[test]
+    fn a_curve_lying_in_a_plane_is_in_it_over_its_whole_interval() {
+        use crate::eval::Curve as Record;
+        use std::f64::consts::{PI, TAU};
+
+        let k = Kernel::default();
+        let at = |z: f64| Frame {
+            origin: [0.0, 0.0, z],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        let spline = Record::Spline {
+            knots: vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0],
+            points: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 2.0, 0.0],
+                [3.0, -1.0, 0.0],
+                [4.0, 3.0, 0.0],
+                [6.0, 0.0, 0.0],
+            ],
+        };
+        let line = Record::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [40.0, 3.0, 0.0],
+        };
+        let curves = [
+            (line.clone(), [0.0, 1.0]),
+            (line, [0.2, 0.7]),
+            (
+                Record::Circle {
+                    frame: at(0.0),
+                    radius: 10.0,
+                },
+                [0.0, TAU],
+            ),
+            (
+                Record::Circle {
+                    frame: at(0.0),
+                    radius: 500.0,
+                },
+                [0.3, PI],
+            ),
+            (
+                Record::Polyline {
+                    points: vec![[0.0, 0.0, 0.0], [5.0, 1.0, 0.0], [7.0, 9.0, 0.0]],
+                },
+                [0.0, 2.0],
+            ),
+            (spline.clone(), [0.0, 1.0]),
+            (spline, [0.1, 0.8]),
+        ];
+        for (record, range) in curves {
+            let made = crate::curve::from_parameters::from_parameters(&k, &record, range).unwrap();
+            let section = |z| curve_plane_section(&k, &made.curve, &made.interval, &at(z)).unwrap();
+            assert_eq!(section(0.0), PlaneSection::InPlane, "{record:?} {range:?}");
+            assert_eq!(
+                section(1.0),
+                PlaneSection::Meets {
+                    points: Vec::new(),
+                    in_plane: Vec::new(),
+                },
+                "{record:?} {range:?}"
+            );
+        }
+    }
+
+    /// Ranges cover an interval only end to end: a gap, a missing end, a range with a NaN
+    /// end or no range at all leaves part of it uncovered.
+    #[test]
+    fn ranges_cover_an_interval_only_end_to_end() {
+        let r = Extent1d::from_min_max;
+        let whole = r(0.0, 2.0);
+        assert!(covers(&[r(0.0, 2.0)], &whole));
+        assert!(covers(&[r(0.0, 1.0), r(1.0, 2.0)], &whole));
+        assert!(covers(&[r(0.0, 1.5), r(1.0, 2.0)], &whole));
+        assert!(!covers(&[r(0.0, 1.0), r(1.1, 2.0)], &whole));
+        assert!(!covers(&[r(0.1, 2.0)], &whole));
+        assert!(!covers(&[r(0.0, 1.9)], &whole));
+        assert!(!covers(&[], &whole));
+        assert!(!covers(&[r(f64::NAN, 2.0)], &whole));
+        assert!(!covers(&[r(0.0, f64::NAN)], &whole));
+        assert!(!covers(&[r(0.0, 1.0), r(f64::NAN, 2.0)], &whole));
+    }
+
     /// A cubic B-spline whose first four control points lie in Z = 0 lies in that
     /// plane over its first knot span (a span depends on four control points) and
     /// leaves it after (#19912). The solve gives that span as a range, without a point
@@ -1209,6 +1379,43 @@ mod tests {
             curve_plane_crossings(&k, &rises, &rises.natural_interval(), &xy)
                 .unwrap()
                 .is_empty()
+        );
+        // The first span lies in the plane, not the whole curve.
+        let (_, lo, hi) = first_span(&rises);
+        assert_eq!(
+            curve_plane_section(&k, &rises, &rises.natural_interval(), &xy).unwrap(),
+            PlaneSection::Meets {
+                points: Vec::new(),
+                in_plane: vec![Extent1d::from_min_max(lo, hi)],
+            }
+        );
+
+        // In the plane over its first and last spans, with a bump above it between: both
+        // ends lie in the plane and there is no crossing, but the curve does not lie in it.
+        let bump = curve(
+            &[
+                in_plane.as_slice(),
+                &[[4.0, 0.0, 1.0]],
+                &[
+                    [5.0, 0.0, 0.0],
+                    [6.0, 1.0, 0.0],
+                    [7.0, 0.0, 0.0],
+                    [8.0, 0.0, 0.0],
+                ],
+            ]
+            .concat(),
+        );
+        let knots = bump.knots(&k, None).unwrap().0;
+        let (first, last) = (knots[1], knots[knots.len() - 2]);
+        assert_eq!(
+            curve_plane_section(&k, &bump, &bump.natural_interval(), &xy).unwrap(),
+            PlaneSection::Meets {
+                points: Vec::new(),
+                in_plane: vec![
+                    Extent1d::from_min_max(0.0, first),
+                    Extent1d::from_min_max(last, 1.0),
+                ],
+            }
         );
 
         let wave = curve(

@@ -15,6 +15,8 @@
 
 #[path = "../analytic_cv_edit.rs"]
 mod analytic_cv_edit;
+#[path = "../bead.rs"]
+mod bead;
 #[path = "../birail.rs"]
 mod birail;
 #[path = "../blend.rs"]
@@ -31,6 +33,8 @@ mod blend_overflow_first;
 mod blend_room;
 #[path = "../blend_surface.rs"]
 mod blend_surface;
+#[path = "../check_cost.rs"]
+mod check_cost;
 #[path = "../classify_point_grazing_ray.rs"]
 mod classify_point_grazing_ray;
 #[path = "../coincidence_gate_definitions.rs"]
@@ -129,6 +133,8 @@ mod profile_hook;
 mod proof_reuse;
 #[path = "../railed.rs"]
 mod railed;
+#[path = "../rebuild_within.rs"]
+mod rebuild_within;
 #[path = "../round_ending_at_a_slight_bend.rs"]
 mod round_ending_at_a_slight_bend;
 #[path = "../round_on_noisy_cylinders.rs"]

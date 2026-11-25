@@ -27,7 +27,9 @@
 //! | `build_boolean_offset_faces` (private) | `BuildOffsetOfFaceuse` 2D-boolean branch |
 //! | [`OffsetExecutive::map_edgeuses`] | `MapEdgeuses` |
 //!
-//! Deviations: RAII replaces the destructor. Constructor scalars are an immutable snapshot
+//! Deviations: not upstream (#13685), a rounded offset's cap whose tube folds over itself is
+//! refused (`refuse_folding_tube`, the certificate `query::tangent_edge::tube_regularity`).
+//! RAII replaces the destructor. Constructor scalars are an immutable snapshot
 //! of `SmOffsetGeometryCreation` parameters, not a retained creator reference or its implementation. `Relation` uses deterministic id order
 //! instead of upstream hash/pointer order; bubble sorting remains stable, including unordered
 //! floating-point comparisons. Extension identity is a caller-supplied key, never an address.
@@ -276,6 +278,13 @@ pub struct OffsetExecutive {
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// Source uses whose paired edge curves were successfully installed.
     pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the source uses whose mated offset reached no neighbour's offset at
+    /// either end (the trim took the drop of both its vertices): where both edges of a
+    /// face of two edges are such, the face's offset is empty (`eliminate_empty_lenses`).
+    pub(super) unreached_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original faces of two edges whose offset is empty, their
+    /// neighbours' offsets mated across them (`eliminate_empty_lenses`).
+    pub(super) eliminated_lenses: BTreeSet<FaceId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
@@ -340,6 +349,8 @@ impl OffsetExecutive {
             wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             mated_edgeuses: BTreeSet::new(),
+            unreached_edgeuses: BTreeSet::new(),
+            eliminated_lenses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
         }
@@ -569,8 +580,12 @@ impl OffsetExecutive {
     /// beyond a collapsed face, seen from its edge use `edgeuse`. Across a rail (a
     /// tangent edge of a four-sided round) it is the radial of the opposite rail; across
     /// an end edge, seen from `from` (one of that edge's vertices), the radial of the
-    /// rail at the edge's other vertex. `None` when the edge use's face did not
-    /// collapse, the face across collapsed too, or the face has another shape.
+    /// rail at the edge's other vertex. A round of more or fewer sides (one that meets
+    /// another round at a corner, or ends on a sliver of a third face) has its rails
+    /// told from its ends by what they bound: across a rail it is the radial of the
+    /// loop's one other tangent edge onto a face that keeps an offset. `None` when the
+    /// edge use's face did not collapse, the face across collapsed too, or the face has
+    /// another shape.
     ///
     /// # Errors
     ///
@@ -592,11 +607,33 @@ impl OffsetExecutive {
         let tan_tol_deg = self.tangency_tol_degrees();
         let next = if eu2::is_tangent_sector(kernel, original, edgeuse, tan_tol_deg, false, true)? {
             let loopuse = present(eu::loopuse(original, edgeuse)?, EU_NO_LOOPUSE)?;
-            if eu::loopuse_edgeuses(original, loopuse)?.len() != 4 {
-                return Ok(None);
+            let uses = eu::loopuse_edgeuses(original, loopuse)?;
+            if uses.len() == 4 {
+                let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
+                eu::ccw_edgeuse(original, ccw)?
+            } else {
+                // a rail is a tangent edge onto a face that keeps an offset: an end met by
+                // another collapsed round (a seam's split, a corner's mitre) is not one
+                let mut rails = Vec::new();
+                for &u in &uses {
+                    if u == edgeuse
+                        || !eu2::is_tangent_sector(kernel, original, u, tan_tol_deg, false, true)?
+                    {
+                        continue;
+                    }
+                    let beyond = match eu::radial(original, u)? {
+                        Some(r) if r != u => eu::face(original, r)?,
+                        _ => None,
+                    };
+                    if beyond.is_some_and(|f| !self.is_collapsed_face(f)) {
+                        rails.push(u);
+                    }
+                }
+                match rails.as_slice() {
+                    [rail] => Some(*rail),
+                    _ => None,
+                }
             }
-            let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
-            eu::ccw_edgeuse(original, ccw)?
         } else {
             let Some(from) = from else {
                 return Ok(None);
@@ -673,6 +710,7 @@ impl OffsetExecutive {
         self.crossing_edgeuses.clear();
         self.periodic_boundary_ends.clear();
         self.mated_edgeuses.clear();
+        self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
     }
 
@@ -1400,6 +1438,7 @@ impl OffsetExecutive {
         };
         let creator = self.geometry_creator();
         let mut new_faces = Vec::new();
+        let mut tube_checked = false;
         // cpp:2918–3071: every mapped offset edge-use pair may need a cap face.
         for (index, offset) in synchronized.edgeuses.iter().copied().enumerate() {
             let mut other_offset = paired_other(&synchronized, index, edge)?;
@@ -1451,6 +1490,18 @@ impl OffsetExecutive {
             let Some(surface) = cap.surface else {
                 continue;
             };
+            // Not upstream (#13685): a rounded offset's cap is the tube of radius |d| about
+            // the edge; one that folds over itself is refused, naming the largest distance at
+            // which it is proved not to fold, never built into an unsound body. Checked once an edge, on the first cap
+            // built; a closing wall and a local operation's caps are no such tube.
+            if !tube_checked
+                && !cap.closing_wall
+                && self.local_faces.is_empty()
+                && self.operation() != OffsetOperation::LocalOperation
+            {
+                tube_checked = true;
+                self.refuse_folding_tube(kernel, original, edgeuse, edge)?;
+            }
             // Build a face in m_pOffsetBrep for the new cap surface; its own
             // `sLoopPoints` is empty.
             let new_face = self.make_cap_face(
@@ -1482,6 +1533,39 @@ impl OffsetExecutive {
             &new_faces,
             &mut notifications.rekey(offset_key_of),
         )
+    }
+
+    /// Not upstream (#13685): refuses the rounded offset when the tube of radius `|d|` its cap
+    /// about `edge` lies on folds over itself ([`crate::error::offset::OffsetFailure::TubeFolds`],
+    /// naming the largest distance at which it is proved not to fold) or is not proved regular
+    /// ([`crate::error::offset::OffsetFailure::TubeNotCertified`]). The tube runs along the
+    /// face use normals for an outset, against them for an inset: those on the side of
+    /// `edgeuse`, the use of `edge` the offset builds from.
+    fn refuse_folding_tube(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        edgeuse: EdgeuseId,
+        edge: EdgeId,
+    ) -> Result<()> {
+        use crate::error::offset::OffsetFailure;
+        use crate::error::Failure;
+        use crate::query::tangent_edge::{tube_regularity, TubeRegularity};
+        let d = self.offset_distance.abs();
+        let outward = (self.offset_distance >= 0.0) != self.inset();
+        let reason = match tube_regularity(kernel, original, edgeuse, d, outward)? {
+            TubeRegularity::Regular => return Ok(()),
+            TubeRegularity::Folds { largest } => OffsetFailure::TubeFolds {
+                edge,
+                distance: self.offset_distance,
+                largest,
+            },
+            TubeRegularity::NotCertified => OffsetFailure::TubeNotCertified {
+                edge,
+                distance: self.offset_distance,
+            },
+        };
+        Err(Failure::new(OP, reason).into_error())
     }
 
     /// The geometry creator this executive's scalars stand for

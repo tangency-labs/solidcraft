@@ -595,6 +595,51 @@ fn an_extrude_to_a_face_keeps_its_names_when_only_the_distance_is_edited() {
     assert_eq!(shell_error(&s, id), None);
 }
 
+/// Regression (#21380): an edit to a Fillet or Chamfer that omits `edges` (such as changing
+/// `radius` or `distance`) keeps its stored `edge_names` and `edge_refs`, whereas sending `edges`
+/// — even at the exact same coordinates (#16661) — reselects broken edge references now.
+#[test]
+fn fillet_and_chamfer_reselect_broken_edges_when_timeline_edit_sends_edges() {
+    for (cmd, size_key) in [("solid.fillet", "radius"), ("solid.chamfer", "distance")] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 10}));
+        let pick = [20.0, 0.0, 10.0];
+        let id = run(&mut s, cmd, json!({"edges": [pick], size_key: 1.5}))["feature"].as_u64().unwrap();
+        let real_names = s.doc.feature(id).map(|f| f.edge_names.clone()).unwrap_or_default();
+        let real_refs = s.doc.feature(id).map(|f| f.edge_refs.clone()).unwrap_or_default();
+        assert!(!real_names.is_empty() && real_names.iter().all(|n| !n.is_empty()), "{cmd}: {real_names:?}");
+        assert!(!real_refs.is_empty(), "{cmd}: {real_refs:?}");
+
+        // Editing only the radius/distance keeps the stored edge names and refs intact.
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {size_key: 2.0}}));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(real_names.clone()));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_refs.clone()), Some(real_refs.clone()));
+        assert_eq!(shell_error(&s, id), None);
+
+        // Simulate stale edge metadata pointing to a missing edge name/ref.
+        let stale_names = vec!["F99:stale|F99:edge".to_string()];
+        if let Some(f) = s.doc_mut().feature_mut(id) {
+            f.edge_names = stale_names.clone();
+            f.edge_refs.clear();
+        }
+        s.execute("timeline.edit", &json!({"feature": id, "set": {size_key: 1.2}})).ok();
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(stale_names));
+        assert!(shell_error(&s, id).is_some(), "{cmd}: stale reference should still fail when `edges` is omitted");
+
+        // Re-sending the same coordinates refreshes `edge_names` and `edge_refs` and clears the error.
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": {"edges": [pick]}}));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_names.clone()), Some(real_names));
+        assert_eq!(s.doc.feature(id).map(|f| f.edge_refs.clone()), Some(real_refs));
+        assert_eq!(shell_error(&s, id), None);
+
+        let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+        assert_eq!(shell_error(&reopened, id), None);
+    }
+}
+
 /// A design saved by 0.30.1 numbered the pieces of each peg's round side (`F3:side#1`, `F4:side#2`),
 /// which the kernel now builds whole. A chamfer on the pegs' top edges saved under those names is
 /// found again on the edge each pick lies on (#16535): the same edges the chamfer had when picked,
