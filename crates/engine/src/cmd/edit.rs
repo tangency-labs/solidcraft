@@ -2796,6 +2796,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));
     }
+    // A redefine keeps what the feature's result was (#21969): a surface body where it closes,
+    // or a solid there in a feature saved before `stays_surface`.
+    let stays = match &old.kind {
+        FeatureKind::SurfaceSweep { stays_surface, .. } if cid == "surface.sweep" => Some(*stays_surface),
+        FeatureKind::SurfaceLoft { stays_surface, .. } if cid == "surface.loft" => Some(*stays_surface),
+        FeatureKind::SurfaceOffset { stays_surface, .. } if cid == "surface.offset" => Some(*stays_surface),
+        FeatureKind::SurfaceRuled { stays_surface, .. } if cid == "surface.ruled" => Some(*stays_surface),
+        FeatureKind::SurfaceExtend { stays_surface, .. } if cid == "surface.extend" => Some(*stays_surface),
+        _ => None,
+    };
+    if let Some(stays) = stays
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays));
+    }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"
         && let Some(parameters) = params.as_object_mut()

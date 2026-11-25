@@ -85,7 +85,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<UnstitchParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ReverseNormalParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ThickenParams>(), &with(&["bodies", "operation", "symmetric", "targets", "thickness", "touching"]));
-    assert_keys(input_schema_for::<OffsetParams>(), &with(&["body", "chain", "distance", "faces", "tolerance"]));
+    assert_keys(input_schema_for::<OffsetParams>(), &with(&["body", "chain", "distance", "faces", "stays_surface", "tolerance"]));
     assert_keys(input_schema_for::<UntrimParams>(), &with(&["face", "holes", "in_place", "outer"]));
     assert_keys(input_schema_for::<FairParams>(), &with(&["body", "faces", "iterations", "keep_edges", "strength", "tolerance"]));
 }
@@ -351,7 +351,7 @@ fn assert_sheet_keeps_todays_errors(id: &str, calls: &[Value]) {
 fn surface_extend_and_trim_contracts_and_replies() {
     assert_keys(
         input_schema_for::<SurfaceExtendParams>(),
-        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "up_to"],
+        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "stays_surface", "up_to"],
     );
     assert_keys(
         input_schema_for::<SurfaceTrimParams>(),
@@ -462,7 +462,7 @@ fn loft_of(section: Value) -> Value {
 fn surface_loft_contract_and_reply() {
     assert_keys(
         input_schema_for::<SurfaceLoftParams>(),
-        &["body_name", "body_names", "continuity", "crown", "faced", "name", "participants", "rail_fit", "rails", "sections"],
+        &["body_name", "body_names", "continuity", "crown", "faced", "name", "participants", "rail_fit", "rails", "sections", "stays_surface"],
     );
     let schema = input_schema_for::<SurfaceLoftParams>();
     let schema = schema.as_value();

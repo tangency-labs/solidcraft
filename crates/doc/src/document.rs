@@ -2392,6 +2392,10 @@ pub enum FeatureKind {
         /// new or redefined sweep, which follows the spline itself.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         spline_as_samples: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
@@ -2413,6 +2417,10 @@ pub enum FeatureKind {
         /// lofts save it; designs saved before it keep each wall along its skinned surface's normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// The faces at `faces` copied out at a signed `distance` along their normals as a new
     /// surface body (0 copies them); `chain` takes each pick's whole smooth chain of faces;
@@ -2428,6 +2436,10 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Tolerance")]
         tolerance: Option<Expr>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A strip of ruled surface `distance` wide hanging off the chain of `body`'s edges through
     /// `edges`, as a new surface body: along `mode` (`angle` from `direction`, or from the
@@ -2455,6 +2467,10 @@ pub enum FeatureKind {
         face: Option<FacePick>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         far: Vec<Option<Vec<Position>>>,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body's boundary edges through `edges` extended outward: by `distance`, or up
     /// to `up_to`; the surface continued (`mode` natural) or a run-off face along each edge
@@ -2471,6 +2487,10 @@ pub enum FeatureKind {
         up_to: Option<ExtendTo>,
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         neighbours: bool,
+        /// A result whose shells close stays a surface body (#21969). New features save it;
+        /// designs saved before it make a solid of a result that closes, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A blend surface bridging two picked edge chains of two bodies (`surface.blend`): each end
     /// repeats the surface it leaves up to its requested continuity, with the fullness `bulge`.
