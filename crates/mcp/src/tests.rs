@@ -4599,6 +4599,52 @@ fn batch_steps_may_name_tools() {
     assert!(volume(&mut s) > 4000.0);
 }
 
+/// `open` takes a KiCad board and its options: the ones `doc.open` publishes, named and described
+/// by the same source, and the path says which files it opens (#21320).
+#[test]
+fn open_takes_the_kicad_board_options_of_doc_open() {
+    let mut s = server();
+    let listed = call(&mut s, 1, "tools/list", json!({}));
+    let open = listed["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "open").unwrap().clone();
+    let properties = &open["inputSchema"]["properties"];
+    let published = solidcraft_engine::schema::file::kicad_open_properties();
+    assert!(!published.is_empty());
+    for (name, schema) in &published {
+        assert_eq!(&properties[name.as_str()], schema, "`{name}` is doc.open's own");
+    }
+    assert!(properties["path"]["description"].as_str().unwrap().contains(".kicad_pcb"), "{properties}");
+    let text = open["description"].as_str().unwrap();
+    assert!(text.contains("KiCad") && text.contains("`execute` with `doc.open`") && text.contains("--allow-path"), "{text}");
+    // A board opens with the options, as `execute` with `doc.open` opens it.
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-kicad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let board = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &board,
+        r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1)))"#,
+    )
+    .unwrap();
+    let path = board.to_string_lossy();
+    let opened = tool(
+        &mut s,
+        "open",
+        json!({"path": path, "copper": "none", "silkscreen": false, "components": false, "thickness": 2.0, "color": "#112233", "representation": "mesh"}),
+    );
+    assert_eq!(opened["board_path"], json!(path), "{opened}");
+    let same = tool(
+        &mut s,
+        "execute",
+        json!({"command": "doc.open", "params": {"path": path, "copper": "none", "silkscreen": false, "components": false, "thickness": 2.0, "color": "#112233", "representation": "mesh"}}),
+    );
+    assert_eq!(opened["bodies"].as_array().map(Vec::len), same["bodies"].as_array().map(Vec::len), "{opened} {same}");
+    // A bad option is the command's error, not a silently dropped argument.
+    let bad = raw_tool(&mut s, "open", json!({"path": path, "copper": "gold"}));
+    assert_eq!(bad["result"]["isError"], true, "{bad}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An unknown argument is refused with the tool's real arguments listed.
 #[test]
 fn unknown_arguments_list_the_real_ones() {
