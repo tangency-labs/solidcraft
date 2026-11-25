@@ -31,6 +31,29 @@ fn check(s: &mut Session, want: f64, hole: bool, height: f64) {
     }
 }
 #[test]
+fn extrude_refuses_a_malformed_face_instead_of_using_the_last_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"name":"Base"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+
+    for mode in crate::schema::ParamCheck::ALL {
+        s.param_check = mode;
+        for face in [json!("F1:+z#[F1:+x]"), json!([5, 5]), json!([5, 5, "20"]), json!({"x": 5, "y": 5}), Value::Null] {
+            let error = s.execute("solid.extrude", &json!({"face":face,"distance":5,"operation":"new"})).unwrap_err();
+            assert!(matches!(&error, crate::EngineError::BadParams { cmd, msg } if cmd == "solid.extrude" && msg.contains("face")), "{error}");
+            assert_eq!(s.doc.to_json(), before, "a refused face must leave the design unchanged");
+        }
+    }
+    s.param_check = crate::schema::ParamCheck::Off;
+    let features = s.doc.features.len();
+    run(&mut s, "solid.extrude", json!({"distance":5,"operation":"new"}));
+    assert_eq!(s.doc.features.len(), features + 1);
+}
+
+#[test]
 fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
     for hole in [false, true] {
         let mut s = Session::default();

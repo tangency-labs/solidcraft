@@ -218,6 +218,9 @@ pub struct JointForm {
     pub found_note: Option<String>,
     /// The design and the joint (as the dialog had it) the found limits are for.
     pub searched: Option<Searched>,
+    /// Edit Joint: open Position on the first frame so X/Y/Z are visible (#18791).
+    /// The section remains collapsible and its ordinary toggle state is unchanged.
+    pub show_position: bool,
     /// Edit Joint Limits: open the Limits section when the dialog first draws.
     pub show_limits: bool,
     /// Per joint value: effort, velocity, damping, friction, as typed (empty: not set). Shown
@@ -262,6 +265,7 @@ impl JointForm {
             found: Vec::new(),
             found_note: None,
             searched: None,
+            show_position: false,
             show_limits: false,
             dynamics: Vec::new(),
             animate: false,
@@ -620,6 +624,7 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut f = JointForm::new(false, &app.session.doc);
     f.name = j.name.clone();
     f.editing = Some(id);
+    f.show_position = true;
     f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
     let mut inputs = side_inputs();
     for (input, pick) in inputs.iter_mut().zip(&f.sides) {
@@ -1414,6 +1419,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                 }
                 enter |= expr_row(ui, "Angle", &mut f.angle);
                 let lateral = f.lateral_offsets(&app.session.doc);
+                if std::mem::take(&mut f.show_position) {
+                    // The same disclosure can have persisted closed from creating a joint:
+                    // reopen it once when editing, then respect subsequent user clicks.
+                    let id = ui.make_persistent_id("joint_position");
+                    ui.ctx().data_mut(|d| d.insert_persisted(id, true));
+                }
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
                     for (l, v) in ["Offset X", "Offset Y", "Offset Z"].iter().zip(f.offset.iter_mut()) {
                         if !lateral && *l != "Offset Z" {
