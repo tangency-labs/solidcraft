@@ -244,11 +244,14 @@ pub const ARABIC: Candidates = &[
 /// also covers Lao). The interface uses a candidate only if it draws Lao.
 pub const LAO: Candidates = &[
     // Windows
-    ("Noto Sans Lao", &["C:\\Windows\\Fonts\\NotoSansLao-Regular.ttf"]),
-    ("Noto Sans Lao UI", &["C:\\Windows\\Fonts\\NotoSansLaoUI-Regular.ttf"]),
-    ("Lao UI", &["C:\\Windows\\Fonts\\LaoUI.ttf"]),
-    ("Leelawadee UI", &["C:\\Windows\\Fonts\\LeelawUI.ttf"]),
-    ("Leelawadee", &["C:\\Windows\\Fonts\\leelawad.ttf"]),
+    (
+        "Noto Sans Lao",
+        &[
+            "C:\\Windows\\Fonts\\NotoSansLao-Regular.ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao[wdth,wght].ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao-VariableFont_wdth,wght.ttf",
+        ],
+    ),
     // macOS
     ("Noto Sans Lao", &["/Library/Fonts/NotoSansLao-Regular.ttf"]),
     ("Lao Sangam MN", &["/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf", "/System/Library/Fonts/Lao Sangam MN.ttf"]),
