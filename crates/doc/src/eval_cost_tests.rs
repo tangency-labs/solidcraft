@@ -155,6 +155,58 @@ pub(crate) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(Cell::get)
 }
 
+/// Run `f` while measuring its [`Counts`] without modifying this thread's outer counters.
+pub(crate) fn measure<R>(f: impl FnOnce() -> R) -> (R, Counts) {
+    let saved = COUNTS.with(|c| c.replace(Counts::default()));
+    struct Restore(Counts);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COUNTS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(saved);
+    let r = f();
+    let delta = COUNTS.with(Cell::get);
+    (r, delta)
+}
+
+/// Add `delta` to this thread's [`Counts`].
+pub(crate) fn add(delta: Counts) {
+    count(|c| {
+        c.moved += delta.moved;
+        c.digested += delta.digested;
+        c.imports_read += delta.imports_read;
+        c.cam_meshes += delta.cam_meshes;
+        c.mesh_digested += delta.mesh_digested;
+        c.joint_faces += delta.joint_faces;
+        c.faces_at += delta.faces_at;
+        c.measures += delta.measures;
+        c.body_searches += delta.body_searches;
+        c.feature_searches += delta.feature_searches;
+        c.cut += delta.cut;
+        c.cylinder_search += delta.cylinder_search;
+        c.tapped_wall += delta.tapped_wall;
+        c.miss_intersects += delta.miss_intersects;
+        c.cut_tools += delta.cut_tools;
+        c.apart_unions += delta.apart_unions;
+        c.surfaces += delta.surfaces;
+        c.flats += delta.flats;
+        c.joined_apart += delta.joined_apart;
+        c.kept_checks += delta.kept_checks;
+        c.detached_checks += delta.detached_checks;
+        c.reused_checks += delta.reused_checks;
+        c.thread_cuts += delta.thread_cuts;
+        c.grouped_thread_fallbacks += delta.grouped_thread_fallbacks;
+        c.hole_tools += delta.hole_tools;
+        c.tight_boxes += delta.tight_boxes;
+        c.blends += delta.blends;
+        c.fit_searches += delta.fit_searches;
+        c.classifications += delta.classifications;
+        c.hole_points += delta.hole_points;
+        c.contact_tests += delta.contact_tests;
+    });
+}
+
 #[test]
 fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};

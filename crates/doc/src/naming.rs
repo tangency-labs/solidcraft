@@ -181,7 +181,7 @@ pub use crate::name_lookup::{
 pub use crate::piece_names::parent_piece;
 
 /// Deeper chains than this are named by position only (bounded work and stack).
-const MAX_DEPTH: usize = 400;
+pub(crate) const MAX_DEPTH: usize = 400;
 
 /// How deep the bodies a feature makes on `before` are in the chain of features that named them.
 pub(crate) fn depth_after(before: &ModelState) -> usize {

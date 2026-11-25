@@ -2,6 +2,8 @@
 
 #[path = "eval_overlap.rs"]
 mod overlap;
+#[path = "eval_parallel.rs"]
+mod parallel;
 #[path = "placed_mesh.rs"]
 mod placed_mesh;
 #[path = "placement_reuse.rs"]
@@ -5357,7 +5359,8 @@ impl Model {
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests, heal);
+        let prev_import_digests = std::mem::take(&mut self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
@@ -5369,6 +5372,45 @@ impl Model {
         let envelopes: std::collections::HashSet<u64> =
             doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
         let watched = crate::progress::begin(doc.features.len());
+        let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
+        let prepared_imports = parallel::prefetch_imports(
+            doc,
+            &vals,
+            &self.results,
+            &prev_import_digests,
+            &self.import_digests,
+            &self.cache,
+            &primed,
+            &rolled_results,
+            ctx,
+            previous_context,
+            shared_ctx,
+            self.no_cache,
+            prefetch_limit,
+            watched.cancelled(),
+        );
+        let prefetched = parallel::prefetch_components(
+            doc,
+            &vals,
+            &self.param_errors,
+            &self.results,
+            &self.empty,
+            &self.frame_bodies,
+            &self.cache,
+            &self.import_digests,
+            &feature_component,
+            &envelopes,
+            carried.as_ref(),
+            &prepared_imports,
+            validation,
+            heal,
+            ctx,
+            previous_context,
+            shared_ctx,
+            self.no_cache,
+            prefetch_limit,
+            watched.cancelled(),
+        );
         let mut poses = std::collections::HashMap::new();
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
         // replace the old ones in the results reused after them (#12139).
@@ -5645,21 +5687,35 @@ impl Model {
                 let relative = reads.and(key.relative);
                 let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
                 let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
-                let hit_relative = by_relative.is_some();
+                let mut hit_relative = by_relative.is_some();
                 let reused = by_relative
                     .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
+                let prefetched_use = if reused.is_none() {
+                    relative.and_then(|k| prefetched.get(f.id, k)).and_then(|p| state.with_relative(&p.cached.state, f.id).map(|next| (next, p)))
+                } else {
+                    None
+                };
+                if prefetched_use.is_some() {
+                    hit_relative = true;
+                }
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
                 // A kernel call that failed before this feature is not its failure.
                 kernel::failure::clear();
                 let t0 = now();
-                let (mut next, cached) = match reused {
-                    Some((next, c)) => {
+                let (mut next, cached, prefetched_change) = match (reused, prefetched_use) {
+                    (Some((next, c)), _) => {
                         restored += 1;
-                        (next, Some(c))
+                        (next, Some(c), None)
                     }
-                    None => {
+                    (None, Some((next, p))) => {
+                        recomputed += 1;
+                        #[cfg(test)]
+                        cost_tests::add(p.counts);
+                        (next, Some(p.cached.clone()), Some(p.cached.state.clone()))
+                    }
+                    (None, None) => {
                         recomputed += 1;
                         let mut next = (*state).clone();
                         // The names the design must not use again travel with the state (#4957, #4302).
@@ -5668,7 +5724,7 @@ impl Model {
                         for b in &mut next.bodies {
                             b.made = crate::lineage::Made::Before;
                         }
-                        (next, None)
+                        (next, None, None)
                     }
                 };
                 let mut warning = cached.as_ref().and_then(|c| c.warning.clone());
@@ -5720,7 +5776,18 @@ impl Model {
                         let (r, deferred) = kernel::validating(validation, || {
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
                             let meshes = prepared_meshes.as_ref().filter(|(id, _)| *id == f.id).map(|(_, meshes)| meshes);
-                            let r = eval_feature(eval_doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, meshes);
+                            let r = eval_feature(
+                                eval_doc,
+                                &vals,
+                                f,
+                                &mut next,
+                                &mut warning,
+                                &mut import_report,
+                                &mut repair,
+                                heal,
+                                meshes,
+                                prepared_imports.get(f.id),
+                            );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                             r
                         });
@@ -5811,10 +5878,10 @@ impl Model {
                 let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
                 // What it changed, when that is only what it read: kept for whatever the rest of the
                 // model holds, and its bodies are known by what it read.
-                let change = match (&cached, reads) {
+                let change = prefetched_change.or_else(|| match (&cached, reads) {
                     (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f, read),
                     _ => None,
-                };
+                });
                 // A change that holds whatever the bodies it did not read is known by the key
                 // without them, and so are the bodies it made.
                 let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative().is_some()));
@@ -15344,9 +15411,10 @@ fn eval_feature(
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
+    prepared_import: Option<&parallel::PreparedImport>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -15415,6 +15483,7 @@ fn eval_feature_kind(
     repair: &mut Option<Arc<kernel::RepairReport>>,
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
+    prepared_import: Option<&parallel::PreparedImport>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -16856,9 +16925,12 @@ fn eval_feature_kind(
                     "the bodies of the linked file {file} are not in this design: it was saved without them, and they have not been read from the file since; Update Links reads them"
                 )));
             }
-            let (imp, digest) = match records {
-                Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
-                None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+            let (imp, digest) = match prepared_import {
+                Some((imp, digest)) => (imp.clone(), digest.clone()),
+                None => match records {
+                    Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                    None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+                },
             };
             let names = import_body_names(st, &f.body_names, &imp, skip);
             // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
