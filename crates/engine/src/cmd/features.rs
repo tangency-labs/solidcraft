@@ -1607,7 +1607,7 @@ fn body_reachable(s: &Session, body_name: &str, path: &[u64]) -> Result<()> {
         }
         // STEP links remain editable import bases: downstream features rebuild when their
         // source updates. Linked designs keep their own editable history in the source file.
-        if s.doc.links.get(&c).is_some_and(|link| link.step_names.is_none()) {
+        if s.doc.links.get(&c).is_some_and(|link| link.is_design()) {
             return Err(EngineError::Other(format!(
                 "`{}` is in {}, which is linked to a design file: open that design to change it, or break the link first",
                 body.name,

@@ -4861,6 +4861,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
