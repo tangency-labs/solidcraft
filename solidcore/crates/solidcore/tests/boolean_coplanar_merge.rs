@@ -166,35 +166,35 @@ fn wavy_diagonal_strip(k: &mut Kernel, n: u32, w: f64) -> solidcore::Brep {
     .unwrap()
 }
 
-/// The faces marked by the shell walks of the union of the woven `n` x `n` grid with
-/// [`wavy_diagonal_strip`] ([`solidcore::kernel::WorkCounters::shell_traversal_faces`]),
-/// after checking the union's volume against the grid's and the strip's less their common
-/// part's.
-fn grid_and_strip_shell_walks(n: u32) -> u64 {
-    use solidcore::boolean::api_brep::boolean_intersection;
+/// The union of the woven `n` x `n` grid with [`wavy_diagonal_strip`], checked valid at
+/// Level 2: the faces its shell walks marked
+/// ([`solidcore::kernel::WorkCounters::shell_traversal_faces`]), its faces, edges and
+/// vertices, and its volume.
+fn grid_and_strip_shell_walks(n: u32) -> (u64, [usize; 3], f64) {
     let mut k = Kernel::default();
     let w = 1.0;
     let (a, b) = (grid(&mut k, n, w, 0), grid(&mut k, n, w, 1));
-    let mut woven = boolean_union(&mut k, a, b).unwrap();
-    let mut strip = wavy_diagonal_strip(&mut k, n, w);
-    let woven_volume = brep_volume_default(&k, &mut woven, 1e-9).unwrap();
-    let strip_volume = brep_volume_default(&k, &mut strip, 1e-9).unwrap();
-    let (c, d) = (grid(&mut k, n, w, 0), grid(&mut k, n, w, 1));
-    let woven_copy = boolean_union(&mut k, c, d).unwrap();
-    let strip_copy = wavy_diagonal_strip(&mut k, n, w);
-    let mut common = boolean_intersection(&mut k, woven_copy, strip_copy).unwrap();
-    let common_volume = brep_volume_default(&k, &mut common, 1e-9).unwrap();
+    let woven = boolean_union(&mut k, a, b).unwrap();
+    let strip = wavy_diagonal_strip(&mut k, n, w);
     k.work_counters.reset();
     let mut u = boolean_union(&mut k, woven, strip).unwrap();
     let marked = k.work_counters.shell_traversal_faces();
+    let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{n} x {n}: {lines:?}");
+    let topology = [
+        get_faces(&u).unwrap().len(),
+        solidcore::topology::brep::p1::edges(&u, None)
+            .unwrap()
+            .len(),
+        solidcore::topology::brep::p1::vertices(&u, None)
+            .unwrap()
+            .len(),
+    ];
     let volume = brep_volume_default(&k, &mut u, 1e-9).unwrap();
-    let expected = woven_volume + strip_volume - common_volume;
-    println!("{n} x {n} grid and a diagonal strip: {marked} faces marked by shell walks, volume {volume}");
-    assert!(
-        (volume - expected).abs() <= 1e-9 * expected,
-        "volume {volume}, expected {expected}"
-    );
-    marked
+    println!("{n} x {n} grid and a diagonal strip: {marked} faces marked by shell walks, faces, edges, vertices {topology:?}, volume {volume:?}");
+    (marked, topology, volume)
 }
 
 /// The union deletes the faces of the grid inside the strip and of the strip inside the
@@ -204,9 +204,19 @@ fn grid_and_strip_shell_walks(n: u32) -> u64 {
 /// asks the same of its two ends. Breadth first, the walks marked 862 and 3194 faces for
 /// 4 x 4 and 8 x 8 strips. Depth first, as upstream walks, they wandered over the far side
 /// of the shell first, and the wire edges' walks covered the whole shell every time: 4936
-/// and 27464 faces.
+/// and 27464 faces. The union is the one the depth-first walks make: valid, 91 faces, 289
+/// edges, 191 vertices and 90.2478725649763 of volume for 4 x 4, 271, 945, 627 and
+/// 339.57198870404693 for 8 x 8.
 #[test]
 fn deleting_faces_inside_a_union_walks_only_near_the_face() {
-    let counts = [4, 8].map(grid_and_strip_shell_walks);
-    assert_eq!(counts, [862, 3194]);
+    let unions = [4, 8].map(grid_and_strip_shell_walks);
+    assert_eq!(unions.map(|u| u.0), [862, 3194]);
+    assert_eq!(unions.map(|u| u.1), [[91, 289, 191], [271, 945, 627]]);
+    for (u, reference) in unions.iter().zip([90.2478725649763, 339.57198870404693]) {
+        assert!(
+            (u.2 - reference).abs() <= 1e-12 * reference,
+            "volume {}, depth first {reference}",
+            u.2
+        );
+    }
 }
