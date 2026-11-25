@@ -4779,9 +4779,17 @@ mod tests {
     /// reports the failure, gen0248, gen0308 and gen0642 kept the boundary curves; gen0152,
     /// gen0258 and gen0266 failed in the lift with their rows as now.
     ///
+    /// gen0039, gen0155 and gen0545 are the whole-piece cases: the midpoint of the kept
+    /// piece is within the tolerance, but the piece runs outside the domain (an end 1.47,
+    /// 1.47 and 5.30 outside). Before, the lift moved the offset edge's curve up to 4.84,
+    /// 4.84 and 6.75 off the edge (gen0039 and gen0545 through `EdgeuseOffset`, recorded
+    /// as status 0) and check_brep Level 2 gained 4, 4 and 8 lines (bad edge, endpoints
+    /// outside the face domain, loop gaps).
+    ///
     /// The certificate of each moved row: replayed to the op, `ExtendTrimEdges` with the
-    /// op's edge uses (`EdgeuseOffset` passes its four as they are) refuses with the
-    /// midpoint at least 1 outside the domain, far past the UV point tolerance that decides
+    /// op's edge uses (`EdgeuseOffset` passes its four as they are) refuses with a point
+    /// of the kept piece (its midpoint, or for the whole-piece cases an end of a Bezier
+    /// segment, both on the curve) at least 1 outside the domain, far past the UV point tolerance that decides
     /// "inside" (`EFF_ZERO_SQRT * (1 + |uv|)`), and leaves both offset edges as they were. The fix changes nothing but this
     /// refusal, so the op is the first that moves in its row and every later move follows
     /// from the edges keeping their input.
@@ -4791,7 +4799,9 @@ mod tests {
         use solidcore::error::Reason;
         let k = Kernel::default();
         for (name, at) in [
+            ("gen0039", 1),
             ("gen0152", 3),
+            ("gen0155", 4),
             ("gen0163", 0),
             ("gen0248", 1),
             ("gen0258", 1),
@@ -4802,6 +4812,7 @@ mod tests {
             ("gen0329", 2),
             ("gen0473", 1),
             ("gen0484", 4),
+            ("gen0545", 3),
             ("gen0577", 2),
             ("gen0642", 2),
             ("gen0666", 0),
@@ -4863,7 +4874,7 @@ mod tests {
                 panic!("{name} op {at}: not the off-domain refusal: {e}");
             };
             // a domain miss, not noise at the boundary (the UV point tolerance that decides
-            // "inside" is 1e-6 times one plus the midpoint's largest coordinate)
+            // "inside" is 1e-6 times one plus the point's largest coordinate)
             assert!(*outside >= 1.0, "{name} op {at}: outside {outside:e}");
             let after = state(&two);
             assert!(
@@ -4874,6 +4885,27 @@ mod tests {
                         .all(|(a, b)| a.to_bits() == b.to_bits()),
                 "{name} op {at}: the refusal changed an offset edge"
             );
+            // through `EdgeuseOffset` (gen0039, gen0248, gen0308, gen0545, gen0642), as the script runs it: the
+            // wrapper only reports the refusal, so its recorded status is 0, and both offset
+            // edges keep their input
+            if matches!(rest.as_slice(), [ROp { op: OpIn::EdgeuseOffset { .. } }]) {
+                let (o, full, _) = run_but_last(&i, 0);
+                let (pre, _, _) = run_but_last(&i, 1);
+                assert_eq!(
+                    o[pre.len()..pre.len() + 2],
+                    [15.0, 0.0],
+                    "{name} op {at}: EdgeuseOffset's recorded status"
+                );
+                let through = state(&full);
+                assert!(
+                    before.len() == through.len()
+                        && before
+                            .iter()
+                            .zip(&through)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{name} op {at}: EdgeuseOffset changed an offset edge"
+                );
+            }
         }
     }
 

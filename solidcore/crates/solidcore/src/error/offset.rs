@@ -2235,6 +2235,16 @@ mod tests {
                 false,
             ),
             (
+                O::ExtendedCurveOffDomain {
+                    edge: None,
+                    outside: 12.5,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+                false,
+            ),
+            (
                 O::ExtendedEdgeUntrimmed,
                 ErrorKind::Unsupported,
                 false,
@@ -2456,16 +2466,6 @@ mod tests {
                     edge: None,
                     max_drop_to_surf: 0.5,
                     meet_tol: 1e-4,
-                },
-                ErrorKind::Unsupported,
-                false,
-                false,
-                false,
-            ),
-            (
-                O::ExtendedCurveOffDomain {
-                    edge: None,
-                    outside: 12.5,
                 },
                 ErrorKind::Unsupported,
                 false,
@@ -2922,14 +2922,6 @@ mod tests {
                 None,
             ),
             (OffsetFailure::ExtendedEdgeUntrimmed, SM_ERR, None),
-            (
-                OffsetFailure::ExtendedCurveOffDomain {
-                    edge: None,
-                    outside: 12.5,
-                },
-                SM_ERR,
-                None,
-            ),
             (OffsetFailure::LocalFaceNotListed, SM_ERR, None),
             (OffsetFailure::VertexArcsNotOneSphere, SM_ERR, None),
             (
@@ -3065,6 +3057,19 @@ mod tests {
             assert_eq!(e.entity(), entity, "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
         }
+        // a solidcore-native refusal (#21743) replaced no status: it is not an upstream
+        // status, but reports `SM_ERR` to the comparison and names its edge
+        let cause = OffsetFailure::ExtendedCurveOffDomain {
+            edge: Some(edge),
+            outside: 12.5,
+        };
+        assert!(!cause.replaces_upstream_status(), "{cause:?}");
+        assert!(!cause.is_phrase() && !cause.is_defect(), "{cause:?}");
+        let e = SolidError::offset("offset::op", cause);
+        assert_eq!(e.upstream_status(), None, "{cause:?}");
+        assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
+        assert_eq!(e.entity(), Some(EntityRef::Edge(edge)), "{cause:?}");
+        assert_eq!(e.kind(), ErrorKind::Unsupported, "{cause:?}");
         // a site that kept another status keeps it through `with_status`
         let e = Failure::new("offset::op", OffsetFailure::FaceHasNoOuterFaceuse { face })
             .with_status(SM_ERR_INVALID_INPUT)
