@@ -250,7 +250,7 @@ configuration folder exists, and no client program is started. Supported:
 | `--client` | Configuration file |
 | --- | --- |
 | `opencode` | `~/.config/opencode/opencode.json` (or `.jsonc`) |
-| `claude-desktop` | `%APPDATA%\Claude\claude_desktop_config.json`, `~/Library/Application Support/Claude/`, `~/.config/Claude/`, and the Microsoft Store package's folder |
+| `claude-desktop` | `%APPDATA%\Claude\claude_desktop_config.json`, `~/Library/Application Support/Claude/`, `~/.config/Claude/`, and the Microsoft Store package's folders (`%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Claude` and `%LOCALAPPDATA%\Claude-Data\claude_…`) |
 | `claude-code` | `~/.claude.json` (user scope `mcpServers`) |
 | `cursor` | `~/.cursor/mcp.json` |
 | `codex` | `$CODEX_HOME` or `~/.codex`, `config.toml` (CLI, IDE extension and desktop app) |
@@ -339,9 +339,10 @@ Start the app with its control channel for `solidcraft-live`, from PowerShell:
 
 Open `claude_desktop_config.json` with Claude Desktop's **Settings > Developer > Edit Config**
 rather than by its path: the Microsoft Store (MSIX) build of Claude Desktop can keep its data in
-its own package folder (`%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude`) instead of
-`%APPDATA%\Claude`, and Edit Config opens the file the app actually reads. Quit Claude Desktop
-completely (from the notification area) and start it again to load the servers.
+its own folders (`%LOCALAPPDATA%\Claude-Data\claude_…`, or in older versions
+`%LOCALAPPDATA%\Packages\…\LocalCache\Roaming\Claude`) instead of `%APPDATA%\Claude`, and Edit
+Config opens the file the app actually reads. `mcp setup` writes to each of these that exists.
+Quit Claude Desktop completely (from the notification area) and start it again to load the servers.
 
 ### Agent skills
 
