@@ -147,6 +147,7 @@ pub enum Error {
     CurveDoesNotCut,
     /// The answer is not exact in the input's geometry.
     NotExact,
+<<<<<<< HEAD
     /// Faces moved, but the tangent blends on them cannot follow them (taken off, the faces
     /// moved, put back at their own sizes): `exact` where they would need a continuation that
     /// cannot be made exactly, else where they cannot be put back as they were; `why` in the
@@ -166,6 +167,11 @@ pub enum Error {
         /// How far that point lies past the drafted plane.
         depth: f64,
     },
+=======
+    /// A split that cut no face, where a tool ran into a face and ended inside it: its curve on
+    /// the face is a crack, which cuts nothing off.
+    ToolStopsShort,
+>>>>>>> origin/ops-split
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
     /// A frame-stock path or its section the kernel refuses, including the curve index
@@ -538,8 +544,12 @@ impl Error {
             Error::NoEffect => "NoEffect",
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
+<<<<<<< HEAD
             Error::BlendsNotFollowed { .. } => "BlendsNotFollowed",
             Error::DraftCutsThrough { .. } => "DraftCutsThrough",
+=======
+            Error::ToolStopsShort => "ToolStopsShort",
+>>>>>>> origin/ops-split
             Error::Profile(..) => "Profile",
             Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
@@ -1066,6 +1076,7 @@ impl std::fmt::Display for Error {
             Error::NoEffect => write!(f, "the operation did nothing"),
             Error::CurveDoesNotCut => write!(f, "the curves do not divide the face into regions"),
             Error::NotExact => write!(f, "not exact in the input's geometry"),
+<<<<<<< HEAD
             Error::BlendsNotFollowed { exact: true, why } => write!(
                 f,
                 "the blends on the moved faces need a continuation that cannot be made exactly: {why}"
@@ -1080,6 +1091,11 @@ impl std::fmt::Display for Error {
             } => write!(
                 f,
                 "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+=======
+            Error::ToolStopsShort => write!(
+                f,
+                "the tool ends inside the face it runs into, so it cuts nothing off"
+>>>>>>> origin/ops-split
             ),
             Error::Profile(r) => write!(
                 f,
