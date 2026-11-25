@@ -52,7 +52,9 @@
 //!   fork cuts it against every sheet face. With one fillet on chains that share no face, a
 //!   boss beside one chain had its walls continued down through the body into another chain's
 //!   round, where no band reaches it, and the sheet trimmed there did not sew in
-//!   (`RoundNotSewn`, status 1001). Faces joined to no solver's own face are cut as the fork's.
+//!   (`RoundNotSewn`, status 1001). A round is a connected piece of the sheet, so one chain's
+//!   faces, corners included, are cut as the fork's; so are the faces of a round whose rails
+//!   are not known.
 //! - **The trace.** The fork's `SM_ERR_MESSAGE` naming a reached feature isn't kept: the
 //!   port's kernel has no message channel for a step that goes on.
 //! - **Merging on a face.** The fork's `MergeCurvesOnSurface` takes the face's surface; the
@@ -334,8 +336,10 @@ struct Feature {
 
 /// Not the fork's (#22144): per sheet face, the faces its round rolls on. A round is the
 /// sheet's faces joined by edges to a solver's own faces, and rolls on the faces that solver's
-/// rails lie on (on every such solver's, where one round holds several). A face joined to no
-/// solver's face is left out.
+/// rails lie on (on every such solver's, where one round holds several). A round's faces are left
+/// out where it holds no solver's own face, or a solver none of whose rails is known (no
+/// constant-section geometry): what it rolls on is not known, so every feature may reach it,
+/// as in the fork.
 fn round_supports(
     sheet: &Brep,
     rounds: &[(Vec<FaceId>, Vec<FaceId>)],
@@ -362,11 +366,16 @@ fn round_supports(
         count += 1;
     }
     let mut rolls_on: BTreeMap<usize, Vec<FaceId>> = BTreeMap::new();
+    let mut unknown: BTreeSet<usize> = BTreeSet::new();
     for (own, supports) in rounds {
         for f in own {
             let Some(&c) = component.get(f) else {
                 continue;
             };
+            if supports.is_empty() {
+                unknown.insert(c);
+                continue;
+            }
             let on = rolls_on.entry(c).or_default();
             for &s in supports {
                 if !on.contains(&s) {
@@ -377,6 +386,7 @@ fn round_supports(
     }
     Ok(component
         .into_iter()
+        .filter(|(_, c)| !unknown.contains(c))
         .filter_map(|(f, c)| rolls_on.get(&c).map(|on| (f, on.clone())))
         .collect())
 }
