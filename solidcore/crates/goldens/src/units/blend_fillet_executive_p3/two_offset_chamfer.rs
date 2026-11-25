@@ -539,16 +539,16 @@ mod wr458_rows {
     use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
-    /// A moved row: name, main's volume, main's status, and the status and counts now.
-    type Row = (&'static str, f64, i64, [i64; 4]);
+    /// A moved row: name, and the status and counts now.
+    type Row = (&'static str, [i64; 4]);
 
     const ROWS: &[Row] = &[
-        ("issue-880-half-arc-rim-0-setbacks-1-1", 1741.1795726975015, 0, [0, 10, 16, 8]),
-        ("issue-880-half-arc-rim-0-setbacks-1-2", 1722.3679528489, 0, [0, 10, 16, 8]),
-        ("issue-880-half-arc-rim-1-setbacks-1-1", 1756.2036827601814, 1001, [0, 8, 13, 7]),
-        ("issue-880-half-arc-rim-whole-offsets-1-1", 1738.1733249505112, 0, [0, 6, 10, 6]),
-        ("issue-880-half-arc-rim-whole-offsets-1-2", 1722.718732542222, 0, [0, 6, 10, 6]),
-        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", 1719.8131116131408, 0, [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-0-setbacks-1-1", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-0-setbacks-1-2", [0, 10, 16, 8]),
+        ("issue-880-half-arc-rim-1-setbacks-1-1", [0, 8, 13, 7]),
+        ("issue-880-half-arc-rim-whole-offsets-1-1", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1-2", [0, 6, 10, 6]),
+        ("issue-880-half-arc-rim-whole-offsets-1.4437-1.4437", [0, 6, 10, 6]),
     ];
 
     /// One test per row: each row's certificates take minutes.
@@ -591,7 +591,7 @@ mod wr458_rows {
         .unwrap();
         let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
         assert_eq!(picked.len(), 1, "{row}: one row of that name");
-        for &&(name, old, _main_status, after) in &picked {
+        for &&(name, after) in &picked {
             let case = cases.iter().find(|c| c.name == name).unwrap();
             let input = case
                 .parse::<super::super::Inputs>()
@@ -614,7 +614,7 @@ mod wr458_rows {
             assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
             assert!(is_manifold_solid(&done.body).unwrap(), "{name}: not one closed manifold solid");
             let blends = certified_blends(&k, &mut done.body, name);
-            let estimates = volume_band(&k, &mut done.body, &blends, old, name);
+            let estimates = volume_band(&k, &mut done.body, &blends, name);
             mass_bands(&k, &mut done.body, &estimates, name);
         }
     }

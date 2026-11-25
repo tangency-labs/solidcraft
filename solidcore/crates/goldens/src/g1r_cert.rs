@@ -364,11 +364,14 @@ pub(crate) fn extend_to_certified(
 /// net at 1e9 resolves no finer than about 1e-6, which the kernel's own removal
 /// arithmetic on that net shares), so the step is accepted when the rest of the bound is
 /// within `MODEL_TOL`: `|S1 - S2|` is then within `MODEL_TOL` plus that resolution (a
-/// relative 1e-13 of the net's largest point at most, checked, far inside every golden's
-/// tolerance). Each term's own evaluation (with `P` rounded from its homogeneous form) is
-/// widened by gamma(8) of its inputs' magnitudes (`R` the largest `|P|`), and the sum by
-/// gamma(n + 4), `n` the number of rows. The bound is taken span by span ([`removed_bound`]:
-/// the live rows and least live weight of each span of `s`'s domain).
+/// rounding of the net's magnitude: its largest homogeneous coordinate, or weight times
+/// its largest point, over its least live weight, which a rational net's small weights
+/// enlarge; by construction at most 4 gamma(10) (1 + gamma) of it, about 4.4e-15, and
+/// checked against 1e-13 of it as a consistency check of the bookkeeping). Each term's
+/// own evaluation (with `P` rounded from its homogeneous form) is widened by gamma(8) of
+/// its inputs' magnitudes (`R` the largest `|P|`), and the sum by gamma(n + 4), `n` the
+/// number of rows. The bound is taken span by span ([`removed_bound`]: the live rows and
+/// least live weight of each span of `s`'s domain).
 fn certify_removed(
     s: &NlSurface,
     e: &NlSurface,
@@ -446,6 +449,8 @@ fn removed_bound(
         .collect();
     // `d` and the lowered weight by (row in the removal direction of `r`, column)
     let mut cells: Vec<(usize, usize, f64, f64, f64)> = Vec::new();
+    // the largest homogeneous coordinate and weight of `e`'s rows the reinsertion combines
+    let (mut mx_hi, mut mw_hi) = (0.0_f64, 0.0_f64);
     for (j, row) in sn.iter().enumerate() {
         for (i, b) in row.iter().enumerate() {
             let (at, other, x) = if udir {
@@ -497,6 +502,7 @@ fn removed_bound(
                 + rij * dw.abs()
                 + gamma(8) * (mags + big_r * dw.abs());
             let ri = 3.0_f64.sqrt() * ix + (c.length() + rij) * iw;
+            (mx_hi, mw_hi) = (mx_hi.max(mx), mw_hi.max(mw));
             cells.push((at, other, di, ri, hx[3] - iw));
         }
     }
@@ -567,10 +573,15 @@ fn removed_bound(
     if spans == 0 || !worst.is_finite() || !worst_r.is_finite() {
         return Err("no span of the input's domain bounded".into());
     }
-    // (rounding relative to the net's magnitude, not a deviation)
-    if worst_r > 1e-13 * big_r.max(1.0) {
+    // (rounding relative to the net's magnitude, not a deviation: its largest homogeneous
+    // coordinate, or weight times its largest point, over its least live weight, which
+    // bound every resolution term; a consistency check, the terms being at most
+    // 4 gamma(10) (1 + gamma) of it by construction)
+    let w_lo = cells.iter().fold(f64::INFINITY, |m, x| m.min(x.4));
+    let scale = ((3.0_f64.sqrt() * mx_hi).max(mw_hi * big_r) / w_lo).max(big_r);
+    if worst_r > 1e-13 * scale.max(1.0) {
         return Err(format!(
-            "the reinsertion's resolution {worst_r:e} is not rounding of a net at {big_r:e}"
+            "the reinsertion's resolution {worst_r:e} is not rounding of a net at {scale:e}"
         ));
     }
     Ok((worst, worst_r))

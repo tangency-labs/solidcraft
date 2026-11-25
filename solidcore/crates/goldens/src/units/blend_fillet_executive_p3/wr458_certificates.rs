@@ -31,31 +31,31 @@ use solidcore::topology::FaceId;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// A moved row: name, main's volume (`None`: an open result), and its status and counts
+/// A moved row: name, whether the result is closed (else open), and its status and counts
 /// (the same on main).
-type Row = (&'static str, Option<f64>, [i64; 4]);
+type Row = (&'static str, bool, [i64; 4]);
 
 const ROWS: &[Row] = &[
-    ("corner3x2-union-inset-side-step-edges1-14-r1", Some(2600.6420851684975), [0, 25, 38, 15]),
-    ("corner3x2-union-inset-side-step-edges12-13-r1", Some(2600.6420849381543), [0, 25, 38, 15]),
-    ("curve-sih-box_diff_cyl-all-edges-r0.25", Some(949.2763524350879), [0, 40, 76, 39]),
-    ("issue_2020_mitred_put_back_d9_full", Some(1006.3206273131401), [0, 8, 12, 6]),
-    ("issue_2176_tabbed_plate_tab_side_r0_5", Some(4054.672334381553), [0, 14, 21, 9]),
-    ("issue_2176_tabbed_plate_tab_top_r0_5", Some(4054.77021264696), [0, 14, 21, 9]),
-    ("source-file-box_with_large_fillet-edge4", Some(862.6278909025616), [0, 14, 22, 10]),
-    ("source-file-corner_box-all-edges", Some(455.9755263923814), [0, 30, 60, 32]),
-    ("source-file-nurb_box-all-edges", Some(899.6454001648498), [0, 24, 48, 26]),
-    ("stubs3-union-inset-side-step-edges13-17-r1", Some(2602.8856942157045), [0, 23, 35, 14]),
-    ("stubs3-union-inset-side-step-edges14-15-r1", Some(2603.9587033987177), [0, 23, 35, 14]),
-    ("stubs3-union-inset-side-step-edges14-18-r1", Some(2602.8856942157045), [0, 23, 35, 14]),
-    ("stubs3-union-overhang-corner-edges14-15-r1", Some(2602.6710923791024), [0, 23, 35, 14]),
-    ("stubs3-union-overhang-front-edges14-15-r1", Some(2603.100296052308), [0, 22, 34, 14]),
-    ("stubs4-Heart-all-edges-r0.1", Some(326.05828850759485), [0, 14, 26, 14]),
-    ("stubs4-coons_01_03_29-e3-r0.5", None, [0, 8, 12, 5]),
-    ("stubs4-degenerate-brepForFillet2-e7-r0.5", Some(3614.981459311338), [0, 11, 17, 8]),
-    ("stubs4-degenerate-brepForFillet2-e9-r0.5", Some(3616.232731993582), [0, 11, 17, 8]),
-    ("sweep5-ext_w_hole-e15-r1.0", Some(234.29244337666438), [0, 16, 24, 10]),
-    ("sweep5-nurb_box1-all-r0.5", Some(3793.323246921), [0, 18, 36, 20]),
+    ("corner3x2-union-inset-side-step-edges1-14-r1", true, [0, 25, 38, 15]),
+    ("corner3x2-union-inset-side-step-edges12-13-r1", true, [0, 25, 38, 15]),
+    ("curve-sih-box_diff_cyl-all-edges-r0.25", true, [0, 40, 76, 39]),
+    ("issue_2020_mitred_put_back_d9_full", true, [0, 8, 12, 6]),
+    ("issue_2176_tabbed_plate_tab_side_r0_5", true, [0, 14, 21, 9]),
+    ("issue_2176_tabbed_plate_tab_top_r0_5", true, [0, 14, 21, 9]),
+    ("source-file-box_with_large_fillet-edge4", true, [0, 14, 22, 10]),
+    ("source-file-corner_box-all-edges", true, [0, 30, 60, 32]),
+    ("source-file-nurb_box-all-edges", true, [0, 24, 48, 26]),
+    ("stubs3-union-inset-side-step-edges13-17-r1", true, [0, 23, 35, 14]),
+    ("stubs3-union-inset-side-step-edges14-15-r1", true, [0, 23, 35, 14]),
+    ("stubs3-union-inset-side-step-edges14-18-r1", true, [0, 23, 35, 14]),
+    ("stubs3-union-overhang-corner-edges14-15-r1", true, [0, 23, 35, 14]),
+    ("stubs3-union-overhang-front-edges14-15-r1", true, [0, 22, 34, 14]),
+    ("stubs4-Heart-all-edges-r0.1", true, [0, 14, 26, 14]),
+    ("stubs4-coons_01_03_29-e3-r0.5", false, [0, 8, 12, 5]),
+    ("stubs4-degenerate-brepForFillet2-e7-r0.5", true, [0, 11, 17, 8]),
+    ("stubs4-degenerate-brepForFillet2-e9-r0.5", true, [0, 11, 17, 8]),
+    ("sweep5-ext_w_hole-e15-r1.0", true, [0, 16, 24, 10]),
+    ("sweep5-nurb_box1-all-r0.5", true, [0, 18, 36, 20]),
 ];
 
 /// One test per moved row, so the test runner spreads the rows over its threads.
@@ -165,7 +165,7 @@ fn definitions(k: &Kernel, b: &Brep, name: &str) -> Vec<(FaceId, f64)> {
 fn check(row: &str) {
     let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
     assert_eq!(picked.len(), 1, "{row}: one row of that name");
-    for &&(name, old_volume, after) in &picked {
+    for &&(name, closed, after) in &picked {
         let input = inputs(name).real_solid.expect("a real solid");
         assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
         let seen: Rc<RefCell<usize>> = Rc::default();
@@ -174,7 +174,7 @@ fn check(row: &str) {
         let output = crate::trim_hook::with_hook(
             Box::new(move |body: &mut Brep| {
                 *into.borrow_mut() += 1;
-                certify(body, name, old_volume, after);
+                certify(body, name, closed, after);
             }),
             || rust(&input),
         );
@@ -186,7 +186,7 @@ fn check(row: &str) {
 }
 
 /// The certificates of the recorded body of row `name`, as the module header says.
-fn certify(body: &mut Brep, name: &str, old_volume: Option<f64>, after: [i64; 4]) {
+fn certify(body: &mut Brep, name: &str, closed: bool, after: [i64; 4]) {
     assert_eq!(counts(body, 0), after, "{name}");
     let mut k = Kernel::default();
     let lines = check_brep(&mut k, body, CheckLevel::Level2).unwrap().lines();
@@ -203,9 +203,9 @@ fn certify(body: &mut Brep, name: &str, old_volume: Option<f64>, after: [i64; 4]
     got.sort_unstable();
     assert_eq!(got, main, "{name}: Level 2 lines other than main's: {lines:?}");
     let blends = definitions(&k, body, name);
-    if let Some(old) = old_volume {
+    if closed {
         assert!(is_manifold_solid(body).unwrap(), "{name}: not one closed manifold solid");
-        let estimates = volume_band(&k, body, &blends, old, name);
+        let estimates = volume_band(&k, body, &blends, name);
         mass_bands(&k, body, &estimates, name);
     }
 }
