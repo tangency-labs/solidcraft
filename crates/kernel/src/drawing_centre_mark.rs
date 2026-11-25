@@ -2,8 +2,8 @@
 //! the view first; both the radius and overshoot given here are paper millimetres. Styling,
 //! reference resolution and gaps against other annotations belong to the scene builder.
 
-use crate::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
 use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM};
 
 /// A centre mark that cannot be represented on the paper scene.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
