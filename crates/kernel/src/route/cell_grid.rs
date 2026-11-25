@@ -73,8 +73,9 @@ mod tests {
     #[test]
     fn the_routed_sketched_grid_is_solidcores() {
         use solidcore_ops::cell_grid as ops;
-        use solidcore_record::cell_grid::SketchCell;
-        let spec = default_cell_grid();
+        use solidcore_record::cell_grid::{Clip, SketchCell};
+        // a sketched cell has no chords of its own to snap along, so it takes whole cells
+        let spec = CellGridSpec { clip: Clip::Whole, ..default_cell_grid() };
         let field = [square(60.0)];
         let cell = SketchCell { profile: square(8.0), origin: None, pitch_x: 12.0, pitch_y: 12.0, stagger: 0.5, cell_angle: 0.0, flip: false };
         let plan = plan_sketch_cell_grid(&field, &cell, &spec).unwrap();
