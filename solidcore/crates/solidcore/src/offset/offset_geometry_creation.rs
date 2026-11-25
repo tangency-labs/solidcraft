@@ -302,6 +302,10 @@ struct TrimmedEdge<O> {
     inverted: bool,
     /// Material boundaries reached through a chart seam that disappears.
     periodic_ends: Vec<PeriodicBoundaryEnd<O>>,
+    /// (not upstream) How many of the two trim points are the base vertex dropped onto the
+    /// curve because no neighbour's offset gave the curve a trim point there: an end no
+    /// neighbour bounds.
+    dropped: usize,
 }
 
 /// An intersection end whose old chart seam no longer meets the intersection.
@@ -4610,6 +4614,9 @@ impl OffsetGeometryCreation {
         let mut ends = [0.0_f64; 2];
         // (not upstream) whether each trim point is a cut by a neighbour's offset surface
         let mut cuts = [false; 2];
+        // (not upstream) how many trim points are drops of the base vertex: no neighbour
+        // gave the curve a candidate there
+        let mut dropped = 0usize;
         let mut periodic_ends = Vec::new();
         // (not upstream) where the base edge's middle drops onto the curve, once it is asked
         // for: one parameter for both ends
@@ -5150,7 +5157,8 @@ impl OffsetGeometryCreation {
 
             // If we have no candidate TrimPoints found by intersecting the 3DCurve with other
             // geometry, get a candidate TrimPoint by dropping the Vertex->Point onto the 3DCurve
-            if solutions.is_empty() {
+            let drop = solutions.is_empty();
+            if drop {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let point = brep.vertex_point(base_vertex)?;
                 solutions = Self::point_solve(
@@ -5282,6 +5290,9 @@ impl OffsetGeometryCreation {
             if let Some(c) = cuts.get_mut(i) {
                 *c = cut;
             }
+            if drop {
+                dropped += 1;
+            }
             // (#14062) the second trim point is the first one's twin: the edge is the whole
             // curve, end to end, not from a first point the solutions give within their
             // tolerance of the seam, which would leave that bit of the turn out
@@ -5363,6 +5374,7 @@ impl OffsetGeometryCreation {
                 interval: trim_ivl,
                 inverted,
                 periodic_ends,
+                dropped,
             }))
         } else {
             Ok(None)
@@ -6295,6 +6307,7 @@ impl OffsetGeometryCreation {
             interval: trim_ivl,
             inverted,
             periodic_ends,
+            ..
         }) = trimmed
         else {
             // TrimExtendedEdge() call did not work: a search that found no cut
@@ -6658,6 +6671,8 @@ impl OffsetGeometryCreation {
         // Now see if we have an intersection curve that has proper trimming
         let mut off_curve: Option<SolidError> = None;
         let mut min_dist = BIG_DOUBLE;
+        // (not upstream) the chosen curve's trim points that no neighbour gave
+        let mut min_dropped = usize::MAX;
         // (the chosen curve with its two UV curves, which every candidate has)
         let mut min_curve: Option<(O, O, O)> = None;
         let mut trim_ivl = Extent1d::new();
@@ -6733,6 +6748,7 @@ impl OffsetGeometryCreation {
                 interval: my_trim,
                 inverted: my_inverted,
                 periodic_ends: my_periodic_ends,
+                dropped: my_dropped,
             }) = my_trim
             {
                 if !my_periodic_ends.is_empty() {
@@ -6761,8 +6777,16 @@ impl OffsetGeometryCreation {
 
                     let dist = distance(mid_pnt, orig_mid);
 
-                    if dist < min_dist {
+                    // Not upstream: a curve the neighbours' offsets bound at more of its ends
+                    // comes first. An end no neighbour bounds is the base vertex dropped onto
+                    // the curve; where another curve is cut there, the dropped one ends
+                    // nowhere the offset's vertices are (a piece of the intersection split off
+                    // by a periodic chart's seam, past the neighbours' offsets), so it is not
+                    // the edge's offset, however near its middle lies. The midpoint decides
+                    // between curves bounded alike, as upstream.
+                    if (my_dropped, dist) < (min_dropped, min_dist) {
                         min_curve = Some((c3, uv1, uv2));
+                        min_dropped = my_dropped;
                         min_dist = dist;
                         trim_ivl = my_trim;
                         inverted = my_inverted;
