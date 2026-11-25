@@ -2091,7 +2091,7 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
             // Both ends of the shaft are free: a length starts from the end picked.
             let top = crate::dialogs::edge_sel(&h.app.session, Vec3::new(4.0, 0.0, 4.0)).unwrap();
             let d = h.app.dialog.as_mut().unwrap();
-            d.inputs.iter_mut().find(|i| i.label == "Start end (optional)").unwrap().items = vec![top];
+            d.inputs.iter_mut().find(|i| i.label == "Start side (optional)").unwrap().items = vec![top];
         }
         if h.app.dialog.as_ref().unwrap().previews() {
             wait_feature_preview(&mut h);
@@ -4927,6 +4927,39 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
     let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(edit, "timeline.redefine");
     assert_eq!(p["params"]["operation"], "cut", "{p}");
+}
+
+/// #18344: the Pipe window has a Type row, so a hollow pipe is a choice and not a word in the
+/// Wall field. The wall the window holds is the pipe's wall: a thickness typed in it is never
+/// dropped, and a tube without a thickness is refused.
+#[test]
+fn a_pipe_is_hollow_when_its_window_says_so() {
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Path"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 20, "id": "c"}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let mut d = start(&mut app, vec![Sel::SketchCurve { id: "c".into(), sketch: None }], "solid.pipe");
+    assert!(matches!(d.kind, Kind::Pipe { hollow: 0, .. }), "{:?}", d.kind);
+    // A solid pipe has no wall.
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1.get("wall").is_none(), "{:?}", cmds[0].1);
+    // A hollow one has one.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 1;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
+    // A hollow pipe with no wall is refused: it would be a solid rod.
+    let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    wall.clear();
+    assert!(apply_commands(&app, &d).is_err(), "a hollow pipe without a wall");
+    // A thickness the window holds is the pipe's wall, and it is never dropped.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 0;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
 }
 
 #[test]

@@ -1540,6 +1540,32 @@ fn wire_split_shell(
     body: Option<ObjectRef>,
 ) -> Result<()> {
     const OP: &str = OP_DELETE_EDGE;
+    // Not upstream: whether the shell still joins `v1` to `v2`, asked first with a walk
+    // that ends at `v2` (`shell_traversal_to_vertices`). When it does, and the shell's
+    // head is not one of the edge uses going away, the whole walk below would change
+    // nothing: no shell splits, the head stays, and its marks are this call's own (with a
+    // body identity they are the caller's records, which keep the whole walk). Deleting
+    // the wire edges left by the faces a union deletes walked the whole shell for each.
+    if body.is_none() {
+        let head = shell_head(b, shell)?;
+        if head != Some(EntityRef::Edgeuse(eu)) && head != Some(EntityRef::Edgeuse(eu_mate)) {
+            let mut asked = std::collections::BTreeSet::from([v2]);
+            topology_traverser::shell_traversal_to_vertices(
+                k,
+                b,
+                &mut Marks::default(),
+                v1,
+                shell,
+                &mut asked,
+                lock,
+            )?;
+            if asked.is_empty() {
+                delete_edgeuse(k, b, env, eu)?;
+                delete_edgeuse(k, b, env, eu_mate)?;
+                return Ok(());
+            }
+        }
+    }
     let mut indexed = body.is_none().then(Marks::default);
     let mut marks = match indexed.as_mut() {
         Some(marks) => super::p3::DeletionMarks::Indexed(marks),

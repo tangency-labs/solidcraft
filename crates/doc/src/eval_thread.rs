@@ -71,7 +71,8 @@ pub(super) enum Extent {
 /// What a thread feature asks for: its size, how far it runs and from which end.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ThreadAsk<'a> {
-    /// The form; `None`: the one `designation`'s prefix names, else metric.
+    /// The form; `None`: infer a historically supported form, else metric. Unified needs an
+    /// explicit form on a Thread feature; tapped holes use their own catalogue.
     pub form: Option<ThreadForm>,
     pub designation: Option<&'a str>,
     pub hand: ThreadHand,
@@ -225,6 +226,9 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let dia = cyl.radius * 2.0;
     let form = match (ask.form, ask.designation.and_then(ThreadForm::of_designation)) {
+        // Saved Threads without a form predate Unified support and must keep their metric
+        // interpretation. Commands store Unified explicitly; tapped holes have their own catalogue.
+        (None, Some(ThreadForm::Unified)) if !ask.tapped => ThreadForm::Metric,
         (Some(f), _) | (None, Some(f)) => f,
         (None, None) => ThreadForm::Metric,
     };
@@ -287,6 +291,14 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
                 designation = designation.replacen("R ", "Rc ", 1);
             }
         }
+    }
+    if form == ThreadForm::Unified
+        && let Some(given) = ask.designation
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        // Preserve the authored series and tolerance class, including UNEF/UN and decimal or
+        // fractional sizes absent from the catalogue. The parser has validated this callout.
+        designation = given.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
     }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
@@ -816,7 +828,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         (None, Some(crate::ThreadLimit::Plane(pl))) => Extent::UpTo(doc.resolve_plane_in(vals, pl, 0, f.component, Some(st))?),
         (None, None) => Extent::Full,
     };
-    // A form left at its default is the one the designation names (`Tr20x4`).
+    // A default form keeps historical inference (`Tr20x4`), but never opts into Unified.
+    // New Unified Thread features store their form explicitly at command creation.
     let form = (*form != ThreadForm::Metric).then_some(*form);
     let ask = ThreadAsk {
         form,

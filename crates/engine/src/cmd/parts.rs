@@ -138,9 +138,18 @@ const SHCS: [(&str, f64, f64, f64, f64); 14] = [
 ];
 
 /// ISO 7380-1: (size, head diameter dk, head height k, socket s, socket depth t, the last being
-/// the key engagement depth, which is 0.59 to 0.63 k throughout). The standard runs M3 to M16:
-/// the M2.5 and M14 some suppliers list are not in it.
-const BHCS: [(&str, f64, f64, f64, f64); 8] = [
+/// the key engagement depth, which is 0.59 to 0.63 k in the standard's sizes). The standard runs
+/// M3 to M16.
+///
+/// M2 and M2.5 are not in it, in the 2022 edition either, and no other standard we found has
+/// them; they are here because they are sold everywhere as "ISO 7380" screws (`off_standard`
+/// marks them). Their rows are suppliers' figures, which the PR that added them lists by source:
+/// the tables agree on dk, k and s (one lists the M2 head as 3.5 to 3.8 and one its socket as
+/// 1.27), and t is from the one table that gives it for both. The M14 some suppliers list is
+/// still left out.
+const BHCS: [(&str, f64, f64, f64, f64); 10] = [
+    ("M2", 3.5, 1.3, 1.3, 0.8),
+    ("M2.5", 4.5, 1.5, 1.5, 1.0),
     ("M3", 5.7, 1.65, 2.0, 1.04),
     ("M4", 7.6, 2.2, 2.5, 1.3),
     ("M5", 9.5, 2.75, 3.0, 1.56),
@@ -169,9 +178,11 @@ const BUTTON_FLAT: f64 = 0.7;
 /// size; the standard's real rim is rounded and a little smaller (dk max 5.81 at M3), which the
 /// sharp cone does not draw. t is the standard's minimum engagement depth: the 2013 edition has it
 /// larger at M4, M5, M8 and M10 (1.5, 1.9, 3 and 3.6), and these are the newer edition's. M14 is
-/// the standard's non-preferred size. The standard runs M2 to M20; M2 and M2.5 are left out here
-/// because only one of the tables we compared lists them.
-const CSK: [(&str, f64, f64, f64, f64); 10] = [
+/// the standard's non-preferred size. The standard runs M2 to M20 since its 2019 edition, which
+/// added M2 and M2.5; one of the tables we compared lists those two, and its dk and k fit the cone.
+const CSK: &[(&str, f64, f64, f64, f64)] = &[
+    ("M2", 4.7, 1.35, 1.3, 0.75),
+    ("M2.5", 5.88, 1.69, 1.5, 1.0),
     ("M3", 6.72, 1.86, 2.0, 1.1),
     ("M4", 8.96, 2.48, 2.5, 1.4),
     ("M5", 11.2, 3.1, 3.0, 1.75),
@@ -238,9 +249,18 @@ const WASHER: [(&str, f64, f64, f64); 14] = [
     ("M30", 31.0, 56.0, 4.0),
 ];
 
-/// ISO 4026: (size, socket s, socket depth t).
-const SET_SCREW: [(&str, f64, f64); 7] =
-    [("M3", 1.5, 1.2), ("M4", 2.0, 1.5), ("M5", 2.5, 2.0), ("M6", 3.0, 2.0), ("M8", 4.0, 3.0), ("M10", 5.0, 4.0), ("M12", 6.0, 4.8)];
+/// ISO 4026: (size, socket s, socket depth t). The standard starts at M1.6.
+const SET_SCREW: [(&str, f64, f64); 9] = [
+    ("M2", 0.9, 0.8),
+    ("M2.5", 1.3, 1.2),
+    ("M3", 1.5, 1.2),
+    ("M4", 2.0, 1.5),
+    ("M5", 2.5, 2.0),
+    ("M6", 3.0, 2.0),
+    ("M8", 4.0, 3.0),
+    ("M10", 5.0, 4.0),
+    ("M12", 6.0, 4.8),
+];
 
 /// ISO 8734 diameters.
 const DOWEL: [f64; 9] = [2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0];
@@ -459,8 +479,8 @@ fn first_length(lengths: &[f64], at_least: f64) -> f64 {
 }
 
 /// Standard lengths for screws, bolts and pins (mm).
-const LENGTHS: [f64; 22] =
-    [4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 80.0, 90.0, 100.0, 120.0];
+const LENGTHS: [f64; 23] =
+    [3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 80.0, 90.0, 100.0, 120.0];
 
 /// Millimetres per inch.
 const INCH: f64 = 25.4;
@@ -641,6 +661,19 @@ pub(crate) fn countersunk_head(standard: &str, size: &str) -> Option<std::result
     )
 }
 
+/// A size its family's standard does not have, sold under the standard's name all the same: the
+/// M2 and M2.5 button heads. `parts.library` marks its row, and its part number names no standard.
+fn off_standard(family: &str, size: &str) -> bool {
+    family == "button_head_cap_screw" && ["M2", "M2.5"].iter().any(|s| s.eq_ignore_ascii_case(size.trim()))
+}
+
+/// The size Insert Part opens a family on, when it is not the family's first: the button head,
+/// countersunk and set screws opened on M3 before M2 and M2.5 were added, and still do.
+/// `parts.library` marks its row `default_size`.
+fn default_size(family: &str) -> Option<&'static str> {
+    matches!(family, "button_head_cap_screw" | "countersunk_socket_screw" | "set_screw").then_some("M3")
+}
+
 fn default_length(d: f64) -> f64 {
     LENGTHS.iter().copied().find(|l| *l >= 2.5 * d).unwrap_or(100.0)
 }
@@ -789,7 +822,8 @@ fn shape(family: &str, size: &str, length: Option<f64>) -> std::result::Result<S
             Shape::Rod {
                 d,
                 pitch: Some(pitch),
-                len: length.unwrap_or_else(|| LENGTHS.iter().copied().find(|l| *l >= d).unwrap_or(d)),
+                // At least 4: the default an M3 set screw had before the list began at 3.
+                len: length.unwrap_or_else(|| LENGTHS.iter().copied().find(|l| *l >= d.max(4.0)).unwrap_or(d)),
                 socket: Some((s, t)),
             }
         }
@@ -1084,7 +1118,18 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
     let fam = |id: &str| -> PartFamily {
         let mut sizes: Vec<Value> = match id {
             "socket_head_cap_screw" => SHCS.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
-            "button_head_cap_screw" => BHCS.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
+            "button_head_cap_screw" => BHCS
+                .iter()
+                .map(|r| {
+                    let mut row = json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4});
+                    if off_standard(id, r.0)
+                        && let Some(m) = row.as_object_mut()
+                    {
+                        m.insert("in_standard".into(), json!(false));
+                    }
+                    row
+                })
+                .collect(),
             "countersunk_socket_screw" => CSK.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
             "hex_bolt" => HEX_BOLT.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "across_flats": r.1, "head_height": r.2})).collect(),
             "hex_nut" => HEX_NUT.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "across_flats": r.1, "height": r.2})).collect(),
@@ -1137,6 +1182,15 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
+        if let Some(opens) = default_size(id) {
+            for row in &mut sizes {
+                if row.get("size").and_then(Value::as_str) == Some(opens)
+                    && let Value::Object(m) = row
+                {
+                    m.insert("default_size".into(), json!(true));
+                }
+            }
+        }
         let system = if is_inch(id) { "inch" } else { "metric" };
         let threads = threaded(id).then(|| [ThreadMode::Cosmetic, ThreadMode::Modeled].map(|m| m.id().to_string()).to_vec());
         PartFamily { family: id.into(), name: name.into(), standard: standard.into(), system: system.into(), sizes, lengths, threads }
@@ -1169,6 +1223,7 @@ fn part_name(family: &str, size: &str, sh: &Shape) -> String {
 /// bearing's designation, and the family's name with the size. A hex bolt is ISO 4017 (threaded to
 /// the head) unless its modelled thread leaves a plain shank under the head: that one is ISO 4014.
 fn identity(family: &str, size: &str, sh: &Shape, mode: ThreadMode) -> (String, String) {
+    let off_standard = off_standard(family, size);
     let size = match sh {
         Shape::Screw { len, .. } | Shape::Rod { len, .. } => size_with_length(family, size, *len),
         _ => size.to_string(),
@@ -1204,7 +1259,7 @@ fn identity(family: &str, size: &str, sh: &Shape, mode: ThreadMode) -> (String, 
         _ => "",
     };
     let name = FAMILIES.iter().find(|f| f.0 == family).map_or("Part", |f| f.1);
-    let part_number = if standard.is_empty() { size.clone() } else { format!("{standard} {size}{series}") };
+    let part_number = if standard.is_empty() || off_standard { size.clone() } else { format!("{standard} {size}{series}") };
     (part_number, format!("{name} {size}"))
 }
 
@@ -2115,9 +2170,37 @@ mod tests {
         let l = run(&mut Session::default(), "parts.library", json!({"family": "button_head_cap_screw"}));
         let m6 = l["sizes"].as_array().and_then(|a| a.iter().find(|x| x["size"] == "M6")).cloned().unwrap_or_default();
         assert_eq!((m6["head_diameter"].as_f64(), m6["head_height"].as_f64(), m6["socket"].as_f64()), (Some(10.5), Some(3.3), Some(4.0)));
-        // ISO 7380-1 has no M2, M2.5, M14 or larger than M16; the lengths are a screw's.
+        // ISO 7380-1 has no M14 or larger than M16; the lengths are a screw's. M2 and M2.5 are the
+        // suppliers' sizes, which the standard does not have: their rows say so.
         let sizes: Vec<&str> = l["sizes"].as_array().map(|a| a.iter().filter_map(|x| x["size"].as_str()).collect()).unwrap_or_default();
-        assert_eq!(sizes, ["M3", "M4", "M5", "M6", "M8", "M10", "M12", "M16"]);
+        assert_eq!(sizes, ["M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12", "M16"]);
+        let off: Vec<&str> = l["sizes"]
+            .as_array()
+            .map(|a| a.iter().filter(|x| x["in_standard"] == false).filter_map(|x| x["size"].as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(off, ["M2", "M2.5"]);
+        // Insert Part still opens the button head, countersunk and set screws on M3, as before
+        // the smaller sizes came first; every other family opens on its first size.
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let opening: Vec<(String, String)> = all["families"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|f| {
+                let id = f["family"].as_str().unwrap_or_default().to_string();
+                f["sizes"].as_array().into_iter().flatten().filter(|x| x["default_size"] == true).map(move |x| (id.clone(), x["size"].to_string()))
+            })
+            .collect();
+        let want = [("button_head_cap_screw", "\"M3\""), ("countersunk_socket_screw", "\"M3\""), ("set_screw", "\"M3\"")];
+        assert_eq!(opening, want.map(|(a, b)| (a.to_string(), b.to_string())));
+        // An M2 x 5: head Ø3.5, 1.3 high, and a part number that names no standard.
+        let mut small = Session::default();
+        run(&mut small, "parts.insert", json!({"family": "button_head_cap_screw", "size": "M2", "length": 5}));
+        let (lo, hi) = bbox(&small, "BHCS M2x5");
+        assert!((hi.x - lo.x - 3.5).abs() < 1e-6 && (lo.z + 5.0).abs() < 1e-6 && (hi.z - 1.3).abs() < 1e-6, "{lo:?} {hi:?}");
+        let comp = small.doc.components.iter().find(|c| c.name.starts_with("BHCS")).map(|c| c.id).unwrap_or(0);
+        let number = small.doc.components.iter().find(|c| c.id == comp).and_then(|c| c.metadata.text(solidcraft_doc::metadata::PART_NUMBER));
+        assert_eq!(number, Some("M2x5"));
         assert!(l["lengths"].as_array().is_some_and(|a| !a.is_empty()), "{l}");
         // An M6 x 20 button head: head Ø10.5, 3.3 high over the seating plane, shank 20 long.
         let mut s = Session::default();
@@ -2158,7 +2241,7 @@ mod tests {
         }
         assert_eq!(super::cap_screw_head("ISO 4762", "3.0").unwrap(), super::cap_screw_head("ISO 4762", "M3").unwrap());
         // Still refused, and named as written: a size the table lacks, or not a size at all.
-        assert!(super::countersunk_head("ISO 10642", "2").unwrap().unwrap_err().contains("`M2`"));
+        assert!(super::countersunk_head("ISO 10642", "1.6").unwrap().unwrap_err().contains("`M1.6`"));
         assert!(super::cap_screw_head("ISO 4762", "big").unwrap_err().contains("`big`"));
     }
 
@@ -2169,10 +2252,9 @@ mod tests {
         let m6 = row("M6");
         let dims = [&m6["head_diameter"], &m6["head_height"], &m6["socket"], &m6["socket_depth"]].map(|v| v.as_f64());
         assert_eq!(dims, [Some(13.44), Some(3.72), Some(4.0), Some(2.2)]);
-        // M2 and M2.5 are left out (one source only), and the cone is 90° at every size: k is half
-        // the way from the shank to dk.
+        // The cone is 90° at every size: k is half the way from the shank to dk.
         let sizes: Vec<&str> = l["sizes"].as_array().map(|a| a.iter().filter_map(|x| x["size"].as_str()).collect()).unwrap_or_default();
-        assert_eq!(sizes, ["M3", "M4", "M5", "M6", "M8", "M10", "M12", "M14", "M16", "M20"]);
+        assert_eq!(sizes, ["M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12", "M14", "M16", "M20"]);
         for size in sizes {
             let (d, dk, k) = (
                 row(size)["d"].as_f64().unwrap_or(0.0),

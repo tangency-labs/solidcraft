@@ -1299,7 +1299,8 @@ pub enum FeatureKind {
         /// Where the thread runs up to from the end it starts at, instead of a length.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         up_to: Option<ThreadLimit>,
-        /// The thread's form; `designation`'s prefix names it when this is the default.
+        /// The thread's form; the default keeps historical designation inference. Unified must
+        /// be stored explicitly so older Threads with no form keep their metric interpretation.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         form: crate::thread_forms::ThreadForm,
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
@@ -4427,9 +4428,39 @@ pub struct DesignLink {
     /// before it was kept have none and are taken as up to date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_sha256: Option<String>,
+    /// The importer that read the source, when it is an importer (a plugin's or another built-in
+    /// reader) and not Insert Design's own reader or the STEP reader `step_names` marks. Update
+    /// Links asks the same importer to read the file again. Absent for designs and STEP sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub importer: Option<LinkImporter>,
+}
+
+/// The importer a linked source was read with: enough to read the file again, or to say what is
+/// missing when it can't. An importer plugin names its package, so a different or missing one is
+/// told apart. This build reads only records that name a plugin (Insert Design always writes
+/// one); a built-in reader for another format would add its own rule beside `format`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LinkImporter {
+    /// What reads the file: an installed importer's id (`plugin.entry`), or a built-in format's.
+    pub format: String,
+    /// The importer plugin's id. A record without one is not read again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The version of the plugin that read the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The options the importer was given, read again with the same ones. Null: none.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub options: serde_json::Value,
 }
 
 impl DesignLink {
+    /// Whether the source is a design that Insert Design reads (not a STEP file or an importer's
+    /// file): only such a link follows a design's configurations, is edited in place or relinked.
+    pub fn is_design(&self) -> bool {
+        self.step_names.is_none() && self.importer.is_none()
+    }
+
     /// What [`Self::file_sha256`] keeps for a source file's `bytes`.
     pub fn file_digest(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
@@ -4589,6 +4620,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Named Section Analyses: sets of cutting planes that can be shown again (#20649).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_sections: Vec<crate::saved_sections::SavedSection>,
     /// Construction planes dragged to a size of their own, by feature id: `[x0, y0, x1, y1]` in the
     /// plane's own coordinates, mm. Others are drawn at their automatic size. Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -4945,6 +4979,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
