@@ -253,6 +253,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             Asm::Coupling(f) => f.sizes.iter_mut().collect(),
             Asm::Cam(f) => vec![&mut f.radius],
             Asm::Interference { clearance, .. } => vec![clearance],
+            Asm::SocketReach { diameter, length, .. } => vec![diameter, length],
             Asm::Trace(f) if doc.assembly.joints.get(f.joint).is_some_and(|j| !j.kind.is_angle(f.index)) => vec![&mut f.from, &mut f.to],
             _ => vec![],
         },

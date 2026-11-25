@@ -3012,6 +3012,50 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
     assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
 }
 
+/// Socket Reach (#21884) on the issue's example: Compute checks off the window thread, then the
+/// dialog lists the rib that blocks a 19 mm socket over a bolt head and shows the socket's space
+/// and the rib's part of it; without the rib the socket is clear and only its space is shown.
+#[test]
+fn socket_reach_lists_the_rib_in_the_sockets_way_and_shows_its_space() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"corner": [0, 0, 0], "length": 100, "width": 60, "height": 5, "body_name": "Plate"})).unwrap();
+    s.execute("solid.cylinder", &json!({"base": [30, 30, 5], "radius": 6.5, "height": 5, "operation": "new", "body_name": "Head"})).unwrap();
+    s.execute("solid.box", &json!({"corner": [42, 0, 5], "length": 5, "width": 60, "height": 40, "operation": "new", "body_name": "Wall"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.apply_off_thread = Some(std::time::Duration::ZERO);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let check = |app: &mut SolveApp| -> (Value, usize) {
+        app.start("inspect.socket_reach");
+        let d = app.dialog.as_mut().expect("the dialog opens");
+        if let Some(input) = d.inputs.first_mut() {
+            input.items = vec![Sel::Edge { body: "Head".into(), index: 0, point: Vec3::new(36.5, 30.0, 10.0) }];
+        }
+        let c = socket_reach(app, app.dialog.as_ref().map_or(&[][..], |d| &d.inputs[..]), "19", "30", false);
+        if let Some(Kind::Assembly(Asm::SocketReach { result, shown, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*result, *shown, *check) = (None, Vec::new(), Some(c));
+        }
+        for _ in 0..3000 {
+            let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| crate::dialogs::show(app, ui.ctx()));
+            out.textures_delta.clear();
+            match app.dialog.as_ref().map(|d| &d.kind) {
+                Some(Kind::Assembly(Asm::SocketReach { result: Some(r), shown, check: None, .. })) => return (r.clone(), shown.len()),
+                Some(Kind::Assembly(Asm::SocketReach { .. })) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                _ => panic!("the dialog stays open"),
+            }
+        }
+        panic!("the check never came back");
+    };
+    let (clear, shown) = check(&mut app);
+    assert_eq!(clear["clear"], json!(true), "{clear}");
+    assert_eq!(shown, 1, "the socket's space only");
+    app.dialog = None;
+    app.run("solid.box", json!({"corner": [39, 26, 5], "length": 3, "width": 8, "height": 40, "operation": "new", "body_name": "Rib"})).unwrap();
+    let (blocked, shown) = check(&mut app);
+    assert_eq!(blocked["blocked"][0]["body"], json!("Rib"), "{blocked}");
+    assert_eq!(shown, 2, "the socket's space and the rib's part of it");
+}
+
 /// The Joint dialog over two boxes, Component 1 taking a pick, in the harness (a real viewport).
 fn joint_picking_component_1() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();

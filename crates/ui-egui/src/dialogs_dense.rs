@@ -113,6 +113,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::Trace(_) => Some("motion.trace"),
             crate::dialogs_assembly::Asm::Drive { .. } => Some("joint.drive"),
             crate::dialogs_assembly::Asm::Interference { .. } => Some("inspect.interference"),
+            crate::dialogs_assembly::Asm::SocketReach { .. } => Some("inspect.socket_reach"),
         },
         _ => kind.simple_metadata().map(|(command, _)| command),
     }

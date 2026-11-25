@@ -23,6 +23,7 @@ const CONTACT_VOLUME: f64 = 0.01;
 const MAX_BODIES: usize = 20_000;
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.socket_reach", "Socket Reach", crate::checked!("inspect.socket_reach", socket_reach))
+    .at("SOLID", "INSPECT")
     .icon("interference")
     .noundo()
     .read_only()

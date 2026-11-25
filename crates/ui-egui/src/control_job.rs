@@ -142,6 +142,7 @@ const READ_ON_A_COPY: &[&str] = &[
     "document.inspect",
     "inspect.clearance",
     "inspect.interference",
+    "inspect.socket_reach",
     "inspect.parameter_variants",
     // The collisions of a motion study: the study plays on a copy, and the check of a slow pair
     // took the window thread minutes, so the window stopped answering and the app was closed

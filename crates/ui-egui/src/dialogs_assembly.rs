@@ -147,6 +147,20 @@ pub enum Asm {
         /// Compute's check under way (its reply lands here).
         check: Option<Check>,
     },
+    /// Socket Reach (#21884): a socket's space about a picked circular edge, and the parts in it.
+    SocketReach {
+        /// The socket's outside diameter and the length checked, as typed.
+        diameter: String,
+        length: String,
+        /// From the other side of the edge.
+        flip: bool,
+        result: Option<Value>,
+        /// The socket's space, then the part of each blocking body in it, in world placement.
+        shown: Vec<Mesh>,
+        /// The picks the result is for.
+        of: Vec<Sel>,
+        check: Option<Check>,
+    },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
     Trace(Box<TraceForm>),
 }
@@ -333,6 +347,7 @@ impl Asm {
             Asm::Cam(_) => "CAM",
             Asm::Constrain(_) => "CONSTRAIN",
             Asm::Interference { .. } => "INTERFERENCE",
+            Asm::SocketReach { .. } => "SOCKET REACH",
             Asm::Trace(_) => "MOTION TRACE",
         }
     }
@@ -385,6 +400,18 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "inspect.interference" => (
             Asm::Interference { result: None, overlaps: Vec::new(), of: Vec::new(), clearance: "0".into(), check: None },
             vec![SelInput::new("Bodies (all if none)", BODIES, true)],
+        ),
+        "inspect.socket_reach" => (
+            Asm::SocketReach {
+                diameter: crate::length_input::model(&s.doc, 19.0),
+                length: crate::length_input::model(&s.doc, 30.0),
+                flip: false,
+                result: None,
+                shown: Vec::new(),
+                of: Vec::new(),
+                check: None,
+            },
+            vec![SelInput::new("Circular edge", EDGES, false), SelInput::new("Bodies to ignore", BODIES, true)],
         ),
         _ => return None,
     };
@@ -1733,9 +1760,149 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                 interference_rows(app, ui, r);
             }
         }
+        Asm::SocketReach { diameter, length, flip, result, shown, of, check } => {
+            let picked: Vec<Sel> = inputs.iter().flat_map(|i| i.items.clone()).collect();
+            if let Some(c) = check.take() {
+                match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
+                    Ok(None) => {
+                        *check = Some(c);
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                    }
+                    // Shown unless the design changed meanwhile, as Interference's.
+                    Ok(Some((r, m))) => {
+                        if c.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc)) {
+                            (*result, *shown, *of) = (Some(r), m, c.of);
+                        }
+                        ui.ctx().request_repaint();
+                    }
+                    Err(()) => {}
+                }
+            }
+            enter |= expr_row(ui, "Diameter", diameter);
+            enter |= expr_row(ui, "Length", length);
+            form_row(ui, "", |ui| {
+                crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("Flip"), flip);
+            });
+            form_row(ui, "", |ui| {
+                if check.is_some() {
+                    ui.add(egui::Spinner::new().size(Tokens::get().font_small));
+                    return;
+                }
+                let stale = result.is_some() && *of != picked;
+                if crate::ui_kit::button(
+                    ui,
+                    solidcraft_ui_text::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
+                    crate::ui_kit::Button::Normal,
+                )
+                .clicked()
+                {
+                    (*result, *shown) = (None, Vec::new());
+                    *check = Some(socket_reach(app, inputs, diameter, length, *flip));
+                    ui.ctx().request_repaint();
+                }
+            });
+            if check.is_none()
+                && let Some(r) = result.as_ref()
+            {
+                socket_reach_rows(app, ui, r);
+            }
+        }
         Asm::Trace(f) => enter |= trace::rows(app, ui, f, inputs),
     }
     enter
+}
+
+/// Socket Reach's check for the picked edge, off the window thread as Interference's.
+fn socket_reach(app: &SolveApp, inputs: &[SelInput], diameter: &str, length: &str, flip: bool) -> Check {
+    let picked: Vec<Sel> = inputs.iter().flat_map(|i| i.items.clone()).collect();
+    let check = Check { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc), of: picked, started: crate::now_ms() };
+    let edge = inputs.first().and_then(|i| i.items.first()).and_then(|sel| match sel {
+        Sel::Edge { point, .. } => Some(*point),
+        _ => None,
+    });
+    let ignore: Vec<String> = inputs.get(1).map(|i| i.items.body_names()).unwrap_or_default();
+    let (scale, _) = crate::prefs::unit_scale(&app.session.doc.units);
+    let size = |text: &str| crate::prefs::parse_length_mm(text, scale).filter(|v| *v > 0.0);
+    let reply = match (edge, size(diameter), size(length)) {
+        (None, ..) => (json!({ "error": solidcraft_ui_text::tr("dialog.socket_reach_pick") }), Vec::new()),
+        (Some(_), None, _) | (Some(_), _, None) => (json!({ "error": solidcraft_ui_text::tr("dialog.socket_reach_sizes") }), Vec::new()),
+        (Some(at), Some(d), Some(l)) => {
+            let p = json!({ "edge": pt(at), "diameter": d, "length": l, "flip": flip, "ignore": ignore });
+            #[cfg(not(target_arch = "wasm32"))]
+            if app.apply_off_thread.is_some() {
+                let (ahead, world, out, params) =
+                    (app.session.ahead(), crate::open_meshing::session_world(&app.session), check.reply.clone(), p.clone());
+                let spawned = solidcraft_engine::kernel::kernel_thread("socket reach").spawn(move || {
+                    let r = socket_reach_now(ahead, &world, params);
+                    if let Ok(mut slot) = out.lock() {
+                        *slot = Some(r);
+                    }
+                });
+                if spawned.is_ok() {
+                    return check;
+                }
+            }
+            socket_reach_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
+        }
+    };
+    if let Ok(mut slot) = check.reply.lock() {
+        *slot = Some(reply);
+    }
+    check
+}
+
+/// `inspect.socket_reach` with `p` on a copy of the session; the socket's space and the part of
+/// each blocking body in it, meshed in world placement for the view only.
+fn socket_reach_now(ahead: solidcraft_engine::Ahead, world: &solidcraft_engine::doc::ModelState, p: Value) -> (Value, Vec<Mesh>) {
+    use solidcraft_engine::kernel;
+    let r = match ahead.replies(&[("inspect.socket_reach".to_string(), p)]).pop() {
+        Some(Ok(r)) => r,
+        Some(Err(e)) => return (json!({ "error": e.to_string() }), Vec::new()),
+        None => return (json!({}), Vec::new()),
+    };
+    let v = |key: &str| -> Option<Vec3> {
+        let a = r.get(key)?.as_array()?;
+        Some(Vec3::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?))
+    };
+    let (Some(origin), Some(direction), Some(d), Some(l)) = (v("origin"), v("direction"), r["diameter_mm"].as_f64(), r["length_mm"].as_f64()) else {
+        return (r, Vec::new());
+    };
+    let Ok(space) = kernel::cylinder(origin, direction, d / 2.0, l) else { return (r, Vec::new()) };
+    let blockers: Vec<_> = r["blocked"].as_array().into_iter().flatten().filter_map(|b| world.body(b["body"].as_str()?)).collect();
+    let tolerance = |b: &kernel::Body| kernel::MeshTolerance::chord((b.size() * 2e-3).max(1e-3));
+    let mut meshes: Vec<Mesh> = space.mesh(&tolerance(&space)).into_iter().collect();
+    meshes.extend(
+        kernel::map_with_local_pools(&blockers, usize::MAX, |b| {
+            let Some(o) = kernel::boolean(&b.body, &space, kernel::BoolOp::Intersect)? else { return Ok(None) };
+            o.mesh(&tolerance(&o)).map(Some)
+        })
+        .into_iter()
+        .filter_map(|m| m.ok().flatten()),
+    );
+    (r, meshes)
+}
+
+/// Socket Reach's result: clear, or the bodies in the socket's way and how much of it each takes.
+fn socket_reach_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
+    if let Some(e) = r.get("error").and_then(Value::as_str) {
+        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
+        return;
+    }
+    let blocked = r["blocked"].as_array().cloned().unwrap_or_default();
+    if blocked.is_empty() {
+        crate::ui_kit::status_line(ui, solidcraft_ui_text::tr("dialog.socket_reach_clear"), crate::ui_kit::StatusTone::Dim);
+    }
+    for b in &blocked {
+        form_row(ui, b["body"].as_str().unwrap_or(""), |ui| {
+            let from = crate::prefs::show_mm(app, b["from_mm"].as_f64().unwrap_or(0.0), 1);
+            ui.label(RichText::new(solidcraft_ui_text::format("dialog.socket_reach_blocks", &[("from", &from)])).color(Tokens::get().warning));
+        });
+    }
+    for u in r["unchecked"].as_array().into_iter().flatten() {
+        form_row(ui, u["body"].as_str().unwrap_or(""), |ui| {
+            ui.label(RichText::new(u["reason"].as_str().unwrap_or("")).color(Tokens::get().text_dim));
+        });
+    }
 }
 
 fn capital(s: &str) -> String {
@@ -2702,7 +2869,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Cam(f) => return crate::dialogs_coupling::cam::commands(app, f, inputs),
         Asm::Constrain(f) => return crate::dialogs_constrain::commands(app, f, inputs),
         // The check runs from its Compute button; OK only closes.
-        Asm::Interference { .. } => Vec::new(),
+        Asm::Interference { .. } | Asm::SocketReach { .. } => Vec::new(),
         Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
     })
 }
@@ -2895,6 +3062,32 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
 
 // ---- overlay ----
 
+/// A mesh's front faces in `colour` at `alpha`, shaded by how they face the view.
+fn shaded_mesh(painter: &egui::Painter, proj: &Proj, m: &Mesh, colour: Color32, alpha: u8) {
+    let back = proj.cam.back();
+    let mut em = egui::Mesh::default();
+    for tri in &m.triangles {
+        let Some(ps) = m.tri(tri) else { continue };
+        let Some(n) = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalized() else { continue };
+        let facing = n.dot(back);
+        if facing <= 0.0 {
+            continue;
+        }
+        let k = 0.55 + 0.45 * facing;
+        let shade = |c: u8| (f64::from(c) * k) as u8;
+        let fill = Color32::from_rgba_unmultiplied(shade(colour.r()), shade(colour.g()), shade(colour.b()), alpha);
+        let sp: Vec<Pos2> = ps.iter().filter_map(|p| proj.to_screen(*p)).collect();
+        if sp.len() == 3 {
+            let base = em.vertices.len() as u32;
+            for p in sp {
+                em.colored_vertex(p, fill);
+            }
+            em.add_triangle(base, base + 1, base + 2);
+        }
+    }
+    painter.add(egui::Shape::mesh(em));
+}
+
 /// Snap glyphs under the cursor and at the picked origins; the overlap of an interference.
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
     let aligning = alignment_side(&d.kind, d.active).is_some();
@@ -2911,31 +3104,19 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     let t = Tokens::get();
     let Kind::Assembly(k) = &mut d.kind else { return };
     if let Asm::Interference { overlaps, .. } = k {
-        // Front faces only, shaded by how they face the view.
-        let back = proj.cam.back();
         for m in overlaps.iter() {
-            let mut em = egui::Mesh::default();
-            for tri in &m.triangles {
-                let Some(ps) = m.tri(tri) else { continue };
-                let Some(n) = (ps[1] - ps[0]).cross(ps[2] - ps[0]).normalized() else { continue };
-                let facing = n.dot(back);
-                if facing <= 0.0 {
-                    continue;
-                }
-                let k = 0.55 + 0.45 * facing;
-                let shade = |c: u8| (f64::from(c) * k) as u8;
-                let ic = t.interference;
-                let fill = Color32::from_rgba_unmultiplied(shade(ic.r()), shade(ic.g()), shade(ic.b()), 210);
-                let sp: Vec<Pos2> = ps.iter().filter_map(|p| proj.to_screen(*p)).collect();
-                if sp.len() == 3 {
-                    let base = em.vertices.len() as u32;
-                    for p in sp {
-                        em.colored_vertex(p, fill);
-                    }
-                    em.add_triangle(base, base + 1, base + 2);
-                }
+            shaded_mesh(painter, proj, m, t.interference, 210);
+        }
+        return;
+    }
+    // The socket's space, see-through, then the parts of the bodies in its way.
+    if let Asm::SocketReach { shown, .. } = k {
+        for (i, m) in shown.iter().enumerate() {
+            if i == 0 {
+                shaded_mesh(painter, proj, m, t.accent, 70);
+            } else {
+                shaded_mesh(painter, proj, m, t.interference, 210);
             }
-            painter.add(egui::Shape::mesh(em));
         }
         return;
     }
