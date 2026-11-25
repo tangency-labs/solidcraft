@@ -672,15 +672,26 @@ fn short_tube_torus(origin: Vec3, major: f64, minor: f64, mid: f64, arc: f64) ->
     BSplineSurface::from_nurb(nurb, true)
 }
 
-/// A torus's own numbers build on a form of which the tube shows only a short arc: a tool's
-/// section with a short arc in it, turned about a line, sweeps such a torus (the end of a tooth
-/// space cut with a round cutter). The form does not fix the tube's circle (a 0.1 degree arc of a
-/// circle of radius 13.7 is 0.024 long and 5e-6 high), so the recogniser finds no torus in it and,
-/// for its conventions, `build` had none to carry the support on: the label was dropped, or the
-/// body refused. The support says where the tube is; the form's net says which way it runs
-/// (`Torus::conventions_of`). Built so, the surface is the support, and evaluates as the form.
+/// A reader that works a torus back out of a face's form keeps the torus it finds where the form
+/// lies on it, and takes the label's own numbers only where it does not
+/// (`Torus::from_label_unless_found_stands`). A tool's section with a short arc in it, turned
+/// about a line, sweeps a torus of which the tube shows only that arc (the end of a tooth space
+/// cut with a round cutter). Such a form does not fix the tube's circle (a 0.1 degree arc of a
+/// circle of radius 13.7 is 0.024 long and 5e-6 high), so the torus worked back out of it is
+/// off it, or none is found. Over tubes that show from 60 down to 0.02 degrees:
+///
+/// - where the form lies on the torus found, the label is not asked;
+/// - a torus the label gives carries the label's numbers exactly and evaluates as the form;
+/// - where the label gives none, the kernel's proof of the label on the form refuses it too.
+///
+/// A tube that shows 60 degrees is found as it is, in every place. A label a thousandth off its
+/// form gives no torus.
 #[test]
-fn a_torus_showing_a_short_arc_of_its_tube_builds_on_its_own_numbers() {
+fn a_reader_takes_a_torus_labels_own_numbers_only_where_the_form_is_off_the_torus_it_finds() {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::surface::surface::Surface;
+    use solidcore::surface::torus::Torus;
+
     let k = Kernel {
         fixes: solidcore::kernel::UpstreamFixes::all(),
         ..Kernel::default()
@@ -693,49 +704,74 @@ fn a_torus_showing_a_short_arc_of_its_tube_builds_on_its_own_numbers() {
     ] {
         for (major, minor) in [(38.725, 13.725), (10.0, 3.0), (26.0, 1.0)] {
             for mid in [180.0, 0.0, 90.0, 137.0] {
-                for arc in [5.0, 1.2, 0.3, 0.1, 0.02] {
+                let placement = Axis2Placement::from_stored(origin, x, y);
+                let label = AnalyticSupport::Torus {
+                    placement,
+                    major_radius: major,
+                    minor_radius: minor,
+                };
+                for arc in [60.0, 5.0, 1.2, 0.3, 0.1, 0.02] {
                     let at =
                         format!("R {major} r {minor} at {origin:?}, {arc} degrees about {mid}");
                     let form = short_tube_torus(origin, major, minor, mid, arc);
-                    let support = AnalyticSupport::Torus {
-                        placement: solidcore::geom::axis2_placement::Axis2Placement::from_stored(
-                            origin, x, y,
-                        ),
-                        major_radius: major,
-                        minor_radius: minor,
+                    // what such a reader finds in the form (a refusal of the test is no torus)
+                    let found = Torus::is_nurb_surface_torus(&k, &form, 1.0)
+                        .ok()
+                        .flatten()
+                        .map(Surface::from);
+                    let stands = match found.as_ref().and_then(AnalyticSupport::of) {
+                        Some(of_found) => lies_on(&form, &of_found.implicit()).unwrap(),
+                        None => false,
                     };
-                    let built = support
-                        .build(&k, form.copy())
-                        .unwrap_or_else(|e| panic!("{at}: {e}"));
-                    assert_eq!(AnalyticSupport::of(&built), Some(support), "{at}");
-                    let size = origin.length() + major + minor;
-                    let d = form.natural_uv_domain();
-                    for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1)] {
-                        let uv = Point2::new(
-                            d.min().x + (d.max().x - d.min().x) * a,
-                            d.min().y + (d.max().y - d.min().y) * b,
-                        );
-                        let step = built.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
-                        let off = (built.evaluate_step_point(&k, step).unwrap()
-                            - form.evaluate_point(uv).unwrap())
-                        .length();
-                        assert!(
-                            off <= 64.0 * f64::EPSILON * size,
-                            "{at}: {off:e} off at {uv:?}"
-                        );
+                    let own = Torus::from_label_unless_found_stands(
+                        &k,
+                        placement,
+                        major,
+                        minor,
+                        &form,
+                        found.as_ref(),
+                    )
+                    .unwrap_or_else(|e| panic!("{at}: {e}"));
+                    if arc >= 60.0 {
+                        assert!(stands, "{at}: the form lies on the torus found in it");
                     }
-                    // a torus a thousandth off the form is still refused
-                    let off_form = AnalyticSupport::Torus {
-                        placement: solidcore::geom::axis2_placement::Axis2Placement::from_stored(
-                            origin, x, y,
+                    match own {
+                        _ if stands => assert!(own.is_none(), "{at}: the torus found is kept"),
+                        Some(torus) => {
+                            assert_eq!(AnalyticSupport::of(&torus), Some(label), "{at}");
+                            let size = origin.length() + major + minor;
+                            let d = form.natural_uv_domain();
+                            for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1)] {
+                                let uv = Point2::new(
+                                    d.min().x + (d.max().x - d.min().x) * a,
+                                    d.min().y + (d.max().y - d.min().y) * b,
+                                );
+                                let step = torus.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                                let off = (torus.evaluate_step_point(&k, step).unwrap()
+                                    - form.evaluate_point(uv).unwrap())
+                                .length();
+                                assert!(
+                                    off <= 64.0 * f64::EPSILON * size,
+                                    "{at}: {off:e} off at {uv:?}"
+                                );
+                            }
+                        }
+                        None => assert!(
+                            label.build(&k, form.copy()).is_err(),
+                            "{at}: no torus of a label its form proves"
                         ),
-                        major_radius: major + 1e-3,
-                        minor_radius: minor,
-                    };
-                    assert!(
-                        off_form.build(&k, form.copy()).is_err(),
-                        "{at}: a torus off the form"
-                    );
+                    }
+                    // a label a thousandth off the form gives no torus, whatever was found
+                    let off_form = Torus::from_label_unless_found_stands(
+                        &k,
+                        placement,
+                        major + 1e-3,
+                        minor,
+                        &form,
+                        None,
+                    )
+                    .unwrap_or_else(|e| panic!("{at}: {e}"));
+                    assert!(off_form.is_none(), "{at}: a torus off the form");
                 }
             }
         }

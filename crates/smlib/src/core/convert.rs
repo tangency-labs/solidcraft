@@ -2028,18 +2028,24 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
     Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
 }
 
-/// `TorusOfArrays`: the torus of the arrays' own numbers (its frame and radii) on its NURBS form,
-/// where the kernel proves the form on that torus (`Torus::stored_on_form`: the form lies on it,
-/// and it evaluates as the form at the form's own parameters), holding the form. These are the
-/// numbers the torus was made with. SMLib's test ([`analytic_of_nurbs`]) works them back out of the
-/// form, from circles through three points of each meridian: a tube that shows only a short arc
-/// fixes those circles to its rounding over the square of the arc's angle, so the torus found was
-/// 1e-10 to 1e-9 off the form it was found in (a 1.2 degree arc of a tube of radius 13.7), which
-/// the body's own check then refused, and below about 0.3 degrees no torus was found at all.
-/// `None` where the form is not the parametrisation of that torus (the arrays of an older body,
-/// whose numbers were worked out that way): the test is then asked, as before.
-fn torus_of_arrays(k: &Kernel, nurbs: &BSplineSurface, p: Axis2Placement, major: f64, minor: f64) -> Result<Option<Surface>> {
-    Torus::stored_on_form(k, p, major, minor, nurbs).map_err(sc("Torus::stored_on_form"))
+/// `TorusOfArrays`: the torus of the arrays' own numbers (torus `j`'s frame and radii) on the face's
+/// NURBS form, where the reader needs it and the kernel proves it
+/// (`Torus::from_label_unless_found_stands`). `found` is what SMLib's test ([`analytic_of_nurbs`])
+/// worked back out of the form, from circles through three points of each meridian. Where the form
+/// lies on it, it is the face's torus as this reader has always made it, to the last bit, and this
+/// is `None`. A tube that shows only a short arc fixes those circles to its rounding over the
+/// square of the arc's angle: the torus found was 1e-10 to 1e-9 off the form it was found in (a
+/// 1.2 degree arc of a tube of radius 13.7), which the body's own check then refused, and below
+/// about 0.3 degrees none was found. There the arrays' own numbers, the ones the torus was made
+/// with, are the face's torus where the kernel proves the form on them. `None` too where it does
+/// not, and where the arrays name no frame for the torus (too short, or axes that make none).
+fn torus_of_arrays(k: &Kernel, f: &In<'_>, j: usize, nurbs: &BSplineSurface, found: Option<&Surface>) -> Result<Option<Surface>> {
+    let numbers = || -> Result<(Axis2Placement, f64, f64)> {
+        let p = placement(get3(f.r(FACE_TORUS_ORIGIN), j)?, get3(f.r(FACE_TORUS_AXIS), j)?, get3(f.r(FACE_TORUS_REF_DIRECTION), j)?)?;
+        Ok((p, get(f.r(FACE_TORUS_MAJOR_RADIUS), j)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j)?))
+    };
+    let Ok((p, major, minor)) = numbers() else { return Ok(None) };
+    Torus::from_label_unless_found_stands(k, p, major, minor, nurbs, found).map_err(sc("Torus::from_label_unless_found_stands"))
 }
 
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
@@ -2325,27 +2331,25 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             let j_torus = i_torus;
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            // a torus first as the arrays' own numbers say it is, on this form
-            let own = if ty == SURFACE_TORUS_I {
-                let p = placement(
-                    get3(f.r(FACE_TORUS_ORIGIN), j_torus)?,
-                    get3(f.r(FACE_TORUS_AXIS), j_torus)?,
-                    get3(f.r(FACE_TORUS_REF_DIRECTION), j_torus)?,
-                )?;
-                torus_of_arrays(k, &nurbs, p, get(f.r(FACE_TORUS_MAJOR_RADIUS), j_torus)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j_torus)?)?
+            let found = analytic_of_nurbs(k, &nurbs, ty, xsect)?;
+            // a torus the form does not lie on, or that was not found: the arrays' own, where
+            // the kernel proves the form on it
+            let found = if ty == SURFACE_TORUS_I {
+                match torus_of_arrays(k, f, j_torus, &nurbs, found.as_ref())? {
+                    Some(own) => Some(own),
+                    None => found,
+                }
             } else {
-                None
-            };
-            let found = match own {
-                Some(torus) => Some(torus),
-                None => analytic_of_nurbs(k, &nurbs, ty, xsect)?,
+                found
             };
             match found {
                 Some(analytic) => analytic,
                 // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
                 // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face
-                // keeps that, on the range and trims it already carries.
-                None if ty == SURFACE_CONE_I => Surface::from(nurbs),
+                // keeps that, on the range and trims it already carries. So is a torus no reading
+                // gives: its tube shows too short an arc for SMLib's test to find it, and the
+                // arrays' own numbers are not proved on the form.
+                None if ty == SURFACE_CONE_I || ty == SURFACE_TORUS_I => Surface::from(nurbs),
                 None => return Err(Error::Solidcore(format!("flat arrays: face {i}: a NURBS form that is not its analytic surface"))),
             }
         } else if ty == SURFACE_SPHERE_I {

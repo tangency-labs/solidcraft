@@ -1761,23 +1761,7 @@ impl AnalyticSupport {
     /// checks of the point set, before the parametrisation's).
     fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
         let form = form.copy();
-        let mut surface = match (recognise(k, self.kind(), &form)?, *self) {
-            (Some(s), _) => s,
-            // a torus the recogniser cannot work back out of the form (a short arc of the tube
-            // fixes neither its circle nor its plane): this support says where the tube is,
-            // and the form's net which way it runs
-            (
-                None,
-                Self::Torus {
-                    placement,
-                    major_radius,
-                    minor_radius,
-                },
-            ) => Torus::conventions_of(k, placement, major_radius, minor_radius, &form)?
-                .map(Surface::from)
-                .ok_or_else(not_form)?,
-            (None, _) => return Err(not_form()),
-        };
+        let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
         // Recover the generator's height interval from its actual endpoints. The
         // recogniser supplies the swap and inside-out conventions, but its fitted
         // height datum and span can retain amplified circle-centre rounding.
