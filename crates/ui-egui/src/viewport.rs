@@ -1074,6 +1074,8 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     }
     app.cam.up.hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
+    // What an Isolate hid may be drawn see-through or as edges.
+    (app.preferences.isolate_others, app.session.visibility.before_isolate.as_ref().map(|b| &b.shown_bodies)).hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     app.session.visibility.hidden_sketches.hash(&mut h);
@@ -1230,6 +1232,40 @@ pub(crate) fn frame_ghosted(app: &SolveApp, body: &solidcraft_engine::doc::Model
     use solidcraft_engine::doc::FeatureKind;
     frame_ghosting(app)
         && app.session.doc.feature(body.feature).is_some_and(|f| matches!(f.kind, FeatureKind::FrameMember { .. } | FeatureKind::FrameEndCap { .. }))
+}
+
+/// How the view can show what an Isolate hid, with each choice's id and label (#8120).
+pub(crate) const ISOLATE_SHOWS: [(solidcraft_engine::schema::view_navigation::IsolateShow, &str, &str); 3] = [
+    (solidcraft_engine::schema::view_navigation::IsolateShow::Hidden, "hidden", "ui.isolate_show_hidden"),
+    (solidcraft_engine::schema::view_navigation::IsolateShow::Transparent, "transparent", "ui.isolate_show_transparent"),
+    (solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe, "wireframe", "ui.isolate_show_wireframe"),
+];
+
+/// How body `name` is drawn because an Isolate hid it: see-through or as its edges, when the
+/// view shows what an Isolate hid ([`crate::prefs::Prefs::isolate_others`]). `None` for a body
+/// shown, hidden by the user before the Isolate, or with the setting at Hidden. Such a body
+/// stays hidden in the design, but is drawn and can be picked ([`body_shown`]).
+pub(crate) fn isolate_ghost(app: &SolveApp, name: &str) -> Option<solidcraft_engine::schema::view_navigation::IsolateShow> {
+    use solidcraft_engine::schema::view_navigation::IsolateShow;
+    let show = app.preferences.isolate_others;
+    if show == IsolateShow::Hidden {
+        return None;
+    }
+    let before = app.session.visibility.before_isolate.as_ref()?;
+    (before.shown_bodies.contains(name) && !app.session.body_visible(name)).then_some(show)
+}
+
+/// Body `b` is drawn as its edges alone because an Isolate hid it and the view shows that as
+/// wireframe. A body with no edges to draw (a mesh imported without them) is drawn see-through
+/// instead, so it never vanishes. Its faces are not drawn, so they are not picked either.
+pub(crate) fn wire_ghost(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    isolate_ghost(app, &b.name) == Some(solidcraft_engine::schema::view_navigation::IsolateShow::Wireframe) && !b.mesh_in_place().0.edges.is_empty()
+}
+
+/// Body `name` can be picked: shown, or drawn see-through or as edges because an Isolate hid it
+/// ([`isolate_ghost`]) while clicks select such parts (`isolate_others_pick`, on by default).
+pub(crate) fn body_shown(app: &SolveApp, name: &str) -> bool {
+    app.body_visible(name) || (app.preferences.isolate_others_pick && isolate_ghost(app, name).is_some())
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -2039,6 +2075,8 @@ struct BodyDraw {
     simplified: SimplifiedEdges,
     /// Its edges are drawn from its instanced mesh's shared edges ([`shared_edges`]), not here.
     edges_shared: bool,
+    /// Drawn as its edges alone, whatever the style: what an Isolate hid, shown as wireframe.
+    wire: bool,
 }
 
 impl BodyDraw {
@@ -2060,6 +2098,7 @@ impl BodyDraw {
             self.edge.0,
             self.hidden_edge.0,
             self.edges_shared,
+            self.wire,
         )
             .hash(&mut h);
         // The block holds the slot its box is tested under: another slot is another block.
@@ -2068,6 +2107,8 @@ impl BodyDraw {
     }
 
     fn build(&self, out: &mut crate::gpu::BlockBuilder, shaded: bool, edges: bool, hidden_edges: bool, markers: bool) {
+        // A body drawn as its edges: no faces, and every edge, as the wireframe style draws.
+        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges) };
         let m = &self.mesh;
         let color = |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color);
         let class = |ti: usize| {
@@ -2977,7 +3018,9 @@ fn body_scene(
     // Every shown body, and the ones this scene takes. The arena and the appearance cache
     // keep every shown body, so a scene of some of them (a drag drawn as a layer) leaves the
     // others' slots and looks as they were.
-    let visible = |b: &&solidcraft_engine::doc::ModelBody| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name);
+    let visible = |b: &&solidcraft_engine::doc::ModelBody| {
+        (app.body_visible(&b.name) || isolate_ghost(app, &b.name).is_some()) && !app.preview.effective_replaced().contains(&b.name)
+    };
     let shown_names: Vec<&str> = st.bodies.iter().filter(visible).map(|b| b.name.as_str()).collect();
     let shown: Vec<&solidcraft_engine::doc::ModelBody> =
         st.bodies.iter().enumerate().filter(|(i, b)| takes(*i) && visible(b)).map(|(_, b)| b).collect();
@@ -3005,7 +3048,7 @@ fn body_scene(
     let keyed: Vec<_> = shown
         .iter()
         .map(|b| {
-            let faded = body_faded(app, b, &active_bodies);
+            let faded = body_faded(app, b, &active_bodies) || isolate_ghost(app, &b.name).is_some();
             let identity = match appearance.keys.get(&b.name).copied() {
                 Some(key) => key,
                 None => {
@@ -3049,6 +3092,9 @@ fn body_scene(
     sc.instanced_hidden_edges = hidden_edges && instances.edges.is_some();
     let mut thread_budget = solidcraft_engine::cosmetic_threads::Budget::default();
     for (b, (faded, identity, slots, copy)) in shown.into_iter().zip(keyed) {
+        // What an Isolate hid, shown as its edges: faint edges, no faces, never from a plan or an
+        // instance (whose faces those draw).
+        let wire = wire_ghost(app, b);
         let resolved = match appearance.bodies.get(&b.name) {
             Some((key, resolved)) if *key == identity => resolved.clone(),
             _ => {
@@ -3061,7 +3107,11 @@ fn body_scene(
                 resolved
             }
         };
-        set_palette_color(&mut arena, &mut sc.palette, slots.edge, edge_col);
+        let ghost_edge = || {
+            let [r, g, b, _] = edge_col;
+            c4(Color32::from_rgb(r, g, b).gamma_multiply(0.45))
+        };
+        set_palette_color(&mut arena, &mut sc.palette, slots.edge, if wire { ghost_edge() } else { edge_col });
         set_palette_color(&mut arena, &mut sc.palette, slots.hidden_edge, hidden_col);
         if app.preferences.cosmetic_threads
             && thread_budget.available()
@@ -3155,7 +3205,7 @@ fn body_scene(
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
         // The plan is built only for a body with a class.
-        let planned = class.and_then(|class| Some((drawn_plan(app, b, true)?, class)));
+        let planned = class.filter(|_| !wire).and_then(|class| Some((drawn_plan(app, b, true)?, class)));
         let on_gpu = planned.is_some();
         if let Some((plan, class)) = planned {
             sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.to_vec(), class, closed });
@@ -3180,7 +3230,7 @@ fn body_scene(
         // (alike faces share a colour): only while every face has a slot of its own.
         let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
         let edge_colours = (slots.edge, slots.hidden_edge);
-        let instanced = if on_gpu {
+        let instanced = if on_gpu || wire {
             None
         } else if face_looks.is_empty() {
             instances.place(b, slots.instance, edge_colours, look, oit, slots.motion)
@@ -3198,7 +3248,7 @@ fn body_scene(
         // a copy shares with the others and which name no motion (with none, the arena full, its
         // faces are drawn in its own colour slot, which does).
         arena.drawn_in_shared(&name, instanced.is_none() && slots.faces != u32::MAX);
-        let edge_tol = if edges { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
+        let edge_tol = if edges || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         if edges_shared && let Some((mesh, place)) = &instanced {
             edge_placements.insert(b.name.clone(), (mesh.clone(), *place));
         }
@@ -3221,6 +3271,7 @@ fn body_scene(
                 edge_tol,
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared,
+                wire,
             },
             None => BodyDraw {
                 name,
@@ -3240,6 +3291,7 @@ fn body_scene(
                 edge_tol,
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared: false,
+                wire,
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -5101,7 +5153,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
-        if (!through && !app.body_visible(&b.name)) || frame_ghosted(app, b) {
+        // Nor do the faces of what an Isolate hid shown as wireframe: only its edges are drawn.
+        if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) || wire_ghost(app, b) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -5175,7 +5228,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
-        if !through && !app.body_visible(&b.name) {
+        if !through && !crate::viewport::body_shown(app, &b.name) {
             continue;
         }
         // A ghosted frame member's vertices are picked, its edges are not.
@@ -7135,7 +7188,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // in the error colour, over the shading (and dimmed where the model hides it), like the
     // selection's outline.
     for (body, face) in &app.viewport.refused_ring {
-        let Some(b) = st.body(body).filter(|_| app.session.body_visible(body)) else { continue };
+        let Some(b) = st.body(body).filter(|_| crate::viewport::body_shown(app, body)) else { continue };
         // The face itself tinted (a face whose edges are two small circles still reads as one).
         face_tris(&mut sc, &shown(b), *face, c4(t.error.gamma_multiply(0.35)), false);
         let m = drawn_mesh(app, b);
@@ -7203,7 +7256,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         let k = (strength * 2.25).min(1.0);
         let rim = Color32::from_rgb(blend(edge.r(), cap.r(), k), blend(edge.g(), cap.g(), k), blend(edge.b(), cap.b(), k));
         let outline = EdgeColours::new(&mut feedback, rim, rim);
-        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+        for b in st.bodies.iter().filter(|b| crate::viewport::body_shown(app, &b.name) && !app.preview.effective_replaced().contains(&b.name)) {
             let Some(Ok(face)) = s.doc.print_face(&st, b) else { continue };
             let (r, g, bl) = body_rgb(app, &b.name);
             face_tris(&mut feedback, &shown(b), face.index, [mix(r, cap.r()), mix(g, cap.g()), mix(bl, cap.b()), 255], true);
@@ -7234,7 +7287,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // A live preview stands in for the body: its old faces would fight with it.
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
-                if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
+                if let Some(b) = by_name.get(body).filter(|_| crate::viewport::body_shown(app, body) && !replaced(body)) {
                     // The only face of an imported mesh covers all its triangles and has no
                     // pickable outline. Preserve authored normals in the copied fill: the
                     // instanced flat shader uses the geometric normal even on a triangle with
@@ -7267,7 +7320,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // As a face: lit over a live preview, the old body fought with it in slivers. A body
                 // Move/Copy moves is outlined by its preview while one draws it.
                 if let Some(b) = by_name.get(name)
-                    && app.body_visible(name)
+                    && crate::viewport::body_shown(app, name)
                     && !replaced(name)
                     && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
                 {
@@ -7307,7 +7360,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             }
             Sel::Edge { body, index, point } => {
                 if let Some(b) = by_name.get(body)
-                    && app.body_visible(body)
+                    && crate::viewport::body_shown(app, body)
                     && !moving(body)
                 {
                     let m = drawn(b);
@@ -7436,7 +7489,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+    for b in st.bodies.iter().filter(|b| crate::viewport::body_shown(app, &b.name)) {
         // A body the preview stands in for is not lit, its old faces fighting with the preview,
         // but outlined by what the preview draws for it where it says (a combine's result, or a
         // tool it ghosts).
@@ -7993,7 +8046,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     refresh_layout(app, ui.ctx());
     let resp = ui.interact(rect, ui.scope_id().with("viewport"), Sense::click_and_drag());
-    let design_dragged = crate::library::drop_on_view(app, &resp);
+    let design_dragged = egui::DragAndDrop::has_payload_of_type::<crate::parts_library::Dragged>(ui.ctx());
     let flat = crate::dialogs_sheet::flat_active(app);
     if !flat {
         app.flat_view.fitted = false;
@@ -8093,7 +8146,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && !joint_handle_pointer
                 && !navigating
                 && !dragging_layer
-                // A design dragged in from the document browser lands in the design, not on a face.
+                // A part dragged in from the parts library lands in the design, not on a face.
                 && !design_dragged
         })
         .map(|p| {
@@ -8150,6 +8203,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !manipulator_dragging
         && !design_dragged;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
+    // A part dragged in from the parts library: where it lands, and the insert on release.
+    let drop_at = crate::parts_library::view_drop(app, ui, rect, &proj);
     // The picture may run past the view's own rectangle (the focused view of a tiled window).
     let paint = app.viewport.bleed.take().unwrap_or(rect);
     let layer = ui.layer_id();
@@ -9034,6 +9089,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
+    if let Some(at) = drop_at {
+        crate::parts_library::paint_drop(&painter, at);
+    }
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
@@ -9836,7 +9894,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         let active_bodies = if scoped_bodies { active_body_names(app) } else { None };
         let measuring = measuring_mesh_edges(app);
         for b in &st.bodies {
-            if !app.body_visible(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
+            if !crate::viewport::body_shown(app, &b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
                 continue;
             }
             let m = b.mesh();
@@ -10636,8 +10694,13 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let hidden = (sk.view.hide_points && i != 0) || (sk.view.hide_projected && p.link.is_some());
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)).filter(|_| !hidden) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
+        // Project's opt-in gives reference points their curves' colour. Off keeps main's
+        // determined/free point colours, including for saved projections.
+        let link = p.link.as_deref().and_then(|l| sk.link(l)).filter(|_| app.ui.project_link_tools);
         let c = if conflict.point(i) {
             t.sketch_conflict
+        } else if let Some(link) = link {
+            if link.lost { t.sketch_lost } else { t.sketch_projected }
         } else if p.link.is_none() && locked.get(i).copied().unwrap_or(false) {
             t.sketch_locked
         } else if det {
@@ -10910,7 +10973,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
     }
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, true);
         if !crate::render_workspace::active(app) {
             crate::view_angles::show(app, ui, rect);
         }
@@ -10922,7 +10985,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
 pub(crate) fn show_card_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, false);
     }
     crate::navigation_bar_view::show(app, ui, rect);
 }
@@ -11051,7 +11114,7 @@ pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
     })
 }
 
-pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !compass_enabled(app) {
         return;
     }
@@ -11059,11 +11122,11 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
-        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
+        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect, focused_view),
     }
 }
 
-fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
@@ -11079,8 +11142,9 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
+        turn_around_label: (focused_view && app.preferences.navigator_turn_around).then(|| app.tr("ui.navigator_turn_around").to_owned()),
     };
-    // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
+    // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
             let d = Vec3::from(direction);
@@ -11093,6 +11157,10 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             app.animate_turn(to);
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
+        Some(crate::view_compass::ViewAction::TurnAround) => {
+            let camera = app.cam_anim.as_ref().map_or(app.cam, |animation| animation.to);
+            let _ = app.run("view.navigate", json!({"camera":camera,"action":"turn_around","fit":app.preferences.navigator_fit}));
+        }
         None => {}
     }
 }
@@ -13590,6 +13658,7 @@ mod tests {
             edge_tol: tol,
             simplified: simplified.clone(),
             edges_shared: false,
+            wire: false,
         };
         let lines = |d: &BodyDraw| {
             let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));

@@ -1039,6 +1039,86 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
+    /// Not upstream (#21801): combines the vertex definition `vd` with an imprinted
+    /// definition of its proto vertex, as [`ProtoTopologyManager::resolve_proto_vertex`]
+    /// combines a proto vertex's definitions before they are imprinted. A definition added
+    /// while vertex definitions were being imprinted (the split point of an edge definition,
+    /// [`ProtoTopologyManager::edge_definition_split`]) joins its proto vertex after that
+    /// combining, so it is never weighed against the definitions there: when one of them is
+    /// the same point (the two would be combined there, with the same distance allowance),
+    /// is already imprinted, and its final vertices lie on the topology `vd` is on, imprinting `vd` as well would put a second vertex
+    /// beside that one's. `vd` instead takes that definition's final vertices in both B-reps
+    /// (the nearest such definition when several qualify) and its classifications stay as
+    /// they are; upstream would keep one of the two by the dimension of their topology, and
+    /// here the imprinted one is kept. The edges ending there are fitted to the proto
+    /// vertex's position, not to `vd`'s, so no tolerance is grown for the gap between
+    /// them. Answers whether `vd` was combined (and so needs no imprint).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ProtoTopologyManager::can_combine_vertex_definitions`];
+    /// [`SolidError::InvalidInput`] for a deleted definition or proto vertex.
+    pub fn combine_with_imprinted(
+        &mut self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        vd: VertexDefId,
+    ) -> Result<bool> {
+        let v = self.vd_ref(vd)?;
+        if v.final_vertex(1).is_some() || v.final_vertex(2).is_some() {
+            return Ok(false);
+        }
+        let position = v.position();
+        let on = [v.src_topo(1), v.src_topo(2)];
+        let pv = self.pv_live(v.proto_vertex())?;
+        let siblings = self
+            .proto_vertex(pv)
+            .map(|p| p.vertex_definitions().to_vec())
+            .unwrap_or_default();
+        let mut nearest: Option<(f64, [O; 2])> = None;
+        for other in siblings {
+            if other == vd {
+                continue;
+            }
+            let o = self.vd_ref(other)?;
+            let (Some(v1), Some(v2)) = (o.final_vertex(1), o.final_vertex(2)) else {
+                continue;
+            };
+            // `v1` and `v2` are live, unmerged vertices: `imprint_body` calls this only in
+            // its vertex definition passes, after `other` was imprinted in the same pass or
+            // an earlier one, and nothing in between removes or glues a vertex. Those passes
+            // edit the B-reps only through `imprint_vertex_definition`, whose merge
+            // (`merge_into_brep_with_curve_identity`) makes a shell vertex, a vertex loop or
+            // an edge split, or reuses the vertex classified, and whose `update_edges` edits
+            // only proto topology; this function edits neither B-rep. Vertices are glued or
+            // squeezed away (`glue_coincident_brep_vertices`) only after every definition
+            // is imprinted.
+            let dist = position.distance(o.position());
+            if nearest.is_some_and(|(d, _)| dist >= d) {
+                continue;
+            }
+            let factor = self.vertex_combine_factor(brep, vd, other)?;
+            if self.can_combine_vertex_definitions_within(k, brep, vd, other, factor)? == 0 {
+                continue;
+            }
+            // the edge definitions split at `vd` find their end vertex among the proto
+            // vertex's final vertices by its connection to their own topology
+            // (`proto_vertex_final_vertex`), so the vertices taken over must lie on the
+            // topology `vd` is on; otherwise `vd` is imprinted
+            let [on1, on2] = on;
+            if are_connected(brep, on1, Some(v1))? && are_connected(brep, on2, Some(v2))? {
+                nearest = Some((dist, [v1, v2]));
+            }
+        }
+        let Some((_, [v1, v2])) = nearest else {
+            return Ok(false);
+        };
+        let v = self.vd_mut(vd)?;
+        v.set_final_vertex(1, Some(v1));
+        v.set_final_vertex(2, Some(v2));
+        Ok(true)
+    }
+
     // ---- SmEdgeDefinition ------------------------------------------------------------
 
     /// Imprints the edge definition `ed` into both B-reps (`Imprint`; the vertex
@@ -4157,6 +4237,8 @@ mod tests {
         vertex_tol: Option<f64>,
         /// whether the point classification fails (a status the split ignores)
         classify_fails: bool,
+        /// `(vertex, face)` index pairs: the faces each vertex handle is used in
+        vertex_faces: Vec<(usize, usize)>,
     }
 
     impl ClassGeometry<H> for Geo {
@@ -4200,8 +4282,13 @@ mod tests {
     /// The bare stand-ins: no uses, no B-rep; an edge's start vertex dereferences its
     /// missing primary edge use.
     impl ProtoTopology<H> for Geo {
-        fn vertex_use_faces(&self, _vertex: H) -> Result<Vec<Option<H>>> {
-            Ok(Vec::new())
+        fn vertex_use_faces(&self, vertex: H) -> Result<Vec<Option<H>>> {
+            Ok(self
+                .vertex_faces
+                .iter()
+                .filter(|&&(v, _)| vertex.1 == ClassObjectKind::Vertex && v == vertex.0)
+                .map(|&(_, f)| Some(H(f, ClassObjectKind::Face)))
+                .collect())
         }
         fn edge_use_faces(&self, _edge: H) -> Result<Vec<Option<H>>> {
             Ok(Vec::new())
@@ -5024,6 +5111,161 @@ mod tests {
 
     /// The definitions of [`vertex_defs_on_one_vertex`] (`FAR` combined away into `P`),
     /// with a proto edge from the proto vertex along a line that starts at `end`, resolved.
+    const F0: H = H(20, ClassObjectKind::Face);
+    const F1: H = H(21, ClassObjectKind::Face);
+
+    /// A classification on the face (or region) `f`, its parameters set.
+    fn face_pc(f: H) -> PointClassification<H> {
+        let mut pc = PointClassification::new(1e-5);
+        let class = if f.1 == ClassObjectKind::Region {
+            PointClassType::Region
+        } else {
+            PointClassType::Face
+        };
+        pc.set_class_object(class, Some(f));
+        pc.set_uv_param(Point2::new(0.0, 0.0));
+        pc
+    }
+
+    /// The vertices `V0`, `V2`, `V4` are used in the face `F0` (B-rep 1) and `V1`, `V3`, `V5`
+    /// in `F1` (B-rep 2); `V6` and `V7` in neither.
+    fn late_geo() -> Geo {
+        Geo {
+            vertex_faces: vec![(0, 20), (2, 20), (4, 20), (1, 21), (3, 21), (5, 21)],
+            ..Geo::default()
+        }
+    }
+
+    /// A sibling of the late definition: its offset from `P` along x, its source objects
+    /// and its final vertices (`None`: not imprinted).
+    type Sibling = (f64, [H; 2], Option<[usize; 2]>);
+
+    /// A proto vertex at `P` listing `siblings` (in that order) and then the late definition
+    /// on the faces `F0`, `F1` at `P`, with no final vertices. Returns the manager, the late
+    /// definition and the siblings.
+    fn late_definition_after(
+        k: &Kernel,
+        geo: &Geo,
+        siblings: &[Sibling],
+    ) -> (ProtoTopologyManager<H>, VertexDefId, Vec<VertexDefId>) {
+        let mut m = manager();
+        let pv = m.new_proto_vertex(P, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let mut ids = Vec::new();
+        for &(dx, [t1, t2], finals) in siblings {
+            let at = P + Vec3::new(dx, 0.0, 0.0);
+            let mut vd =
+                VertexDefinition::new(k, geo, &face_pc(t1), &face_pc(t2), at, 1e-5, 1e-6, None)
+                    .unwrap();
+            if let Some([v1, v2]) = finals {
+                vd.set_final_vertex(1, Some(H(v1, ClassObjectKind::Vertex)));
+                vd.set_final_vertex(2, Some(H(v2, ClassObjectKind::Vertex)));
+            }
+            let id = m.insert_vertex_definition(vd).unwrap();
+            m.add_vertex_definition(pv, id).unwrap();
+            ids.push(id);
+        }
+        let vd =
+            VertexDefinition::new(k, geo, &face_pc(F0), &face_pc(F1), P, 1e-5, 1e-6, None).unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+        (m, vd, ids)
+    }
+
+    fn finals(m: &ProtoTopologyManager<H>, vd: VertexDefId) -> [Option<H>; 2] {
+        let v = m.vertex_def(vd).unwrap();
+        [v.final_vertex(1), v.final_vertex(2)]
+    }
+
+    const fn vertex(i: usize) -> H {
+        H(i, ClassObjectKind::Vertex)
+    }
+
+    /// #21801 review: a late definition on the faces of an imprinted sibling's vertices, within
+    /// the combine distance, takes those vertices and keeps its own position, sources and
+    /// place at the proto vertex; once it has them it is not combined again.
+    #[test]
+    fn a_late_definition_takes_an_imprinted_siblings_vertices_on_its_own_topology() {
+        let k = Kernel::default();
+        let geo = late_geo();
+        let (mut m, vd, ids) = late_definition_after(&k, &geo, &[(1e-6, [F0, F1], Some([0, 1]))]);
+        assert!(m.combine_with_imprinted(&k, &geo, vd).unwrap());
+        assert_eq!(finals(&m, vd), [Some(vertex(0)), Some(vertex(1))]);
+        let v = m.vertex_def(vd).unwrap();
+        assert_eq!(v.position(), P);
+        assert_eq!([v.src_topo(1), v.src_topo(2)], [Some(F0), Some(F1)]);
+        let pv = v.proto_vertex().unwrap();
+        let sibling = ids.first().copied().unwrap();
+        assert_eq!(
+            m.proto_vertex(pv).unwrap().vertex_definitions(),
+            &[sibling, vd]
+        );
+        assert_eq!(finals(&m, sibling), [Some(vertex(0)), Some(vertex(1))]);
+        assert!(!m.combine_with_imprinted(&k, &geo, vd).unwrap());
+        assert_eq!(finals(&m, vd), [Some(vertex(0)), Some(vertex(1))]);
+    }
+
+    /// #21801 review: a sibling whose final vertex in either B-rep is off the late
+    /// definition's topology, one not imprinted (or imprinted in one B-rep only), one on
+    /// topology the late definition is not connected to, and one beyond the combine distance
+    /// each leave it to be imprinted as before: no final vertex is set.
+    #[test]
+    fn a_late_definition_whose_siblings_vertices_are_off_its_topology_is_imprinted() {
+        let k = Kernel::default();
+        let geo = late_geo();
+        let cases: [&[Sibling]; 6] = [
+            &[(1e-6, [F0, F1], Some([6, 7]))],
+            &[(1e-6, [F0, F1], Some([0, 7]))],
+            &[(1e-6, [F0, F1], Some([6, 1]))],
+            &[(0.0, [F0, F1], None)],
+            &[(1e-6, [R0, R1], Some([0, 1]))],
+            &[(1.0, [F0, F1], Some([0, 1]))],
+        ];
+        for siblings in cases {
+            let (mut m, vd, _) = late_definition_after(&k, &geo, siblings);
+            assert!(
+                !m.combine_with_imprinted(&k, &geo, vd).unwrap(),
+                "{siblings:?}"
+            );
+            assert_eq!(finals(&m, vd), [None, None], "{siblings:?}");
+        }
+        // imprinted in B-rep 1 only
+        let (mut m, vd, ids) = late_definition_after(&k, &geo, &[(1e-6, [F0, F1], None)]);
+        let sibling = ids.first().copied().unwrap();
+        m.vertex_def_mut(sibling)
+            .unwrap()
+            .set_final_vertex(1, Some(vertex(0)));
+        assert!(!m.combine_with_imprinted(&k, &geo, vd).unwrap());
+        assert_eq!(finals(&m, vd), [None, None]);
+    }
+
+    /// #21801 review: of the siblings that qualify, the nearest gives its vertices, in
+    /// whichever order the proto vertex lists them; a nearer sibling that does not qualify
+    /// (off the late definition's topology, or not imprinted) is passed over.
+    #[test]
+    fn a_late_definition_takes_the_nearest_qualifying_siblings_vertices() {
+        let k = Kernel::default();
+        let geo = late_geo();
+        let siblings: [Sibling; 5] = [
+            (3e-5, [F0, F1], Some([2, 3])),
+            (5e-6, [F0, F1], Some([6, 7])),
+            (1e-5, [F0, F1], Some([0, 1])),
+            (2e-5, [F0, F1], Some([4, 5])),
+            (0.0, [F0, F1], None),
+        ];
+        let mut reversed = siblings;
+        reversed.reverse();
+        for order in [siblings, reversed] {
+            let (mut m, vd, _) = late_definition_after(&k, &geo, &order);
+            assert!(m.combine_with_imprinted(&k, &geo, vd).unwrap(), "{order:?}");
+            assert_eq!(
+                finals(&m, vd),
+                [Some(vertex(0)), Some(vertex(1))],
+                "{order:?}"
+            );
+        }
+    }
+
     fn resolve_with_an_edge_from(end: Point3) -> (ProtoTopologyManager<H>, ProtoVertexId) {
         let k = Kernel::default();
         let mut geo = absorb_geo();

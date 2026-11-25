@@ -318,8 +318,8 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
 - **The mitre** (`OffsetGeometryCreation::mate_edges`, `offset_geometry_creation.rs`) intersects
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
-  edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
-  the two surfaces is replaced by that curve.
+  edge uses. A marched piece lying on an exact line or conic of the two surfaces is replaced by
+  that curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
