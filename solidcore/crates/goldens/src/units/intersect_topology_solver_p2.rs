@@ -343,6 +343,10 @@ impl FaceQueries<StaticHandle> for StaticScene {
     fn face_zone_tol_3d(&self, face: StaticHandle) -> SolidResult<f64> {
         self.face_tolerance(face)
     }
+    fn face_has_loopuses(&self, face: StaticHandle) -> SolidResult<bool> {
+        let (b, f) = self.face_entity(face).ok_or_else(static_error)?;
+        solidcore::topology::face::p4::has_loopuses(b, f)
+    }
     fn face_point_classify(
         &self,
         k: &Kernel,

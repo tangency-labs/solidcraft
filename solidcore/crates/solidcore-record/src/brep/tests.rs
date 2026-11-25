@@ -872,6 +872,7 @@ fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
         SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
             form: form.clone(),
+            revolution: None,
         }
     };
     BlendDefinitionRecord {
@@ -880,6 +881,7 @@ fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
             SupportRecord::Nurbs {
                 kind: SupportKindRecord::Plane,
                 form,
+                revolution: None,
             },
         ],
         sides: [1., 1.],

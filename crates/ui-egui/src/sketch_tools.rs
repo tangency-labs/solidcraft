@@ -215,7 +215,7 @@ pub fn trim_drag_end(app: &mut SolveApp) -> bool {
 fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     let Ok(v) = app.run(cmd, p) else { return };
     let mark = match cmd {
-        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, "Center of mass".to_string())),
+        "inspect.center_of_mass" => v3(&v["center"]).map(|c| (c, center_label(app, c))),
         _ => v3(&v["at"]).zip(v["min_radius"].as_f64()).map(|(c, r)| (c, format!("R min {}", crate::prefs::show_mm(app, r, 1)))),
     };
     if let Some(m) = mark {
@@ -223,6 +223,14 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     } else if cmd == "inspect.minimum_radius" {
         app.set_status("Minimum radius: it is straight (no curvature)", false);
     }
+}
+
+/// Mass Center's marker label: the centre's coordinates in the design's units, written as
+/// Design Properties writes them.
+fn center_label(app: &SolveApp, c: Vec3) -> String {
+    let at = |v: f64| crate::prefs::show_mm_bare(app, v);
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    format!("Center of mass ({}, {}, {}) {unit}", at(c.x), at(c.y), at(c.z))
 }
 
 /// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
@@ -305,7 +313,7 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
     if id == "sketch.intersect"
         && let Some(dialog) = crate::dialogs::Dialog::for_command(app, id)
     {
-        if dialog.wants_picks() && !app.session.selection.is_empty() {
+        if dialog.wants_picks() && app.session.has_selection() {
             let _ = app.session.execute("select.clear", &json!({}));
         }
         app.dialog = Some(dialog);
@@ -690,15 +698,18 @@ pub fn refine_snap(
             }
         }
     }
-    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
-    // stays a visual guide. Shift skips this.
+    // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch
+    // preferences ask for it. One reference stays a visual guide. Shift skips this. With
+    // `sketch_align_points` on, the point lines up with both references below, as it would
+    // without this snap (#20859); otherwise it is a free coordinate and adds no constraint.
+    let mut crossing = None;
     if !mid_only
         && app.preferences.sketch_recent_snap
         && best.is_none()
-        && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
+        && let Some(meeting) = app.viewport.tracking.meeting_of(sk, plane, proj, a)
     {
-        best = Some((at.dist(lp), "+", at));
+        best = Some((meeting.at.dist(lp), "+", meeting.at));
+        crossing = Some(meeting);
     }
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
@@ -765,13 +776,22 @@ pub fn refine_snap(
     };
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
     // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
-    // command makes on that line (#13413).
+    // command makes on that line (#13413). It comes first: `line_up` keeps the first of equally
+    // near points, so a free point that happens to share the coordinate does not take its place.
+    let mut targets: Vec<(Option<String>, Vec2)> = Vec::new();
     if app.preferences.sketch_align_points {
         targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+        targets.extend(align_targets(proj, sk, plane, &own));
     }
     let mut lined = Vec::new();
+    // Where two guides meet, the point lines up with the two references the guides come from:
+    // level with one and plumb with the other (#20859), never with another point that happens
+    // to share a coordinate.
+    if let Some(meeting) = crossing.filter(|_| app.preferences.sketch_align_points) {
+        lined.extend(meeting.level.map(|(id, at)| Lined { id: Some(id), at, horizontal: true }));
+        lined.extend(meeting.plumb.map(|(id, at)| Lined { id: Some(id), at, horizontal: false }));
+    }
     if !mid_only
         && best.is_none()
         && let Some(prev) = prev
@@ -1130,8 +1150,9 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
 /// side (the engine refuses it), and construction curves are ignored when more than two meet.
-/// Each side must be a line, or an arc for a fillet.
-pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, arcs_ok: bool) -> Option<(usize, usize)> {
+/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open control
+/// point spline (#9178).
+pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, curves_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
         .curves
@@ -1145,7 +1166,12 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    let takes = |c: &solidcraft_engine::sketch::Curve| match c.kind {
+        CurveKind::Line { .. } => true,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => curves_ok,
+        _ => false,
+    };
+    if curves.iter().any(|(_, c)| !takes(c)) {
         return None;
     }
     match curves[..] {
@@ -1156,7 +1182,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
 
 /// Corner tools accept endpoints shared by two editable curves. Pick among those endpoints
 /// directly so the origin, a circle centre or an overlapping loose point cannot hide a corner.
-pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool) -> Option<(Vec2, String)> {
+pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, curves_ok: bool) -> Option<(Vec2, String)> {
     let st = crate::open_meshing::session_world(&app.session);
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
@@ -1168,7 +1194,7 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, pi, arcs_ok)?;
+            corner_curves(sk, pi, curves_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))

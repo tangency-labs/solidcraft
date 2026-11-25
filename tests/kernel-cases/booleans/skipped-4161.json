@@ -589,7 +589,7 @@
  },
  {
   "source": "tangency-labs/solidcraft#5201",
-  "why": "no kernel geometry: Deboss needs a complete cylinder or coaxial sleeve (the emboss command's stated limit)"
+  "why": "no kernel geometry: the issue has no reproducible model to rebuild"
  },
  {
   "source": "tangency-labs/solidcraft#5222",

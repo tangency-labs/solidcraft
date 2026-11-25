@@ -15,12 +15,12 @@ use crate::schema::inspect::{
 };
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
-    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
-    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
-    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
-    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
-    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DiskStamp, DocInfoParams, DocInfoResult,
+    DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch,
+    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
+    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected,
+    SketchPoint, SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo, WireControlInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract:
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
 const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
+const DOC_INFO_CONTRACT: TypedContract<DocInfoParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -94,6 +95,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
+    CommandSpec::new("doc.info", "Design File Info", crate::checked!("doc.info", design_file_info))
+        .any_part()
+        .doc_only()
+        .icon("inspect")
+        .noundo()
+        .read_only()
+        .contract(&DOC_INFO_CONTRACT)
+        .output(output_schema_for::<DocInfoResult>)
+        .params(
+            "→ path (the design's file; null until it is first saved), read_only (a save to its own file is refused), \
+             unsaved (changes its file does not hold, as document.inspect's dirty), disk ({len, modified_ns}: size in bytes and \
+             modification time in nanoseconds since the Unix epoch as a decimal string, when it was opened or last saved; \
+             null without a file, in the browser, or when they could not be read), \
+             document_id (as document.revision). In a plugin run: the design the run started on, as it was before the run. Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -150,14 +166,20 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("appearance.copy", "Copy Look", crate::checked!("appearance.copy", appearance_gestures::copy)).icon("copy").noundo().key("Ctrl+Alt+C")
         .contract(&COPY_CONTRACT).output(crate::schema::output_schema_for::<AppearanceCopyResult>)
         .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
-    CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
-        .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
+    CommandSpec::new("appearance.paste", "Paste Look", crate::checked!("appearance.paste", appearance_gestures::paste)).icon("paste").key("Ctrl+Alt+V")
+        .contract(&PASTE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceAssignResult>)
+        .params(
+            "bodies/faces/components: appearance.assign targets, and no look keys: the look is the one appearance.copy put in the clipboard. \
+             Applies it atomically in one undo step; no dialogs.",
+        ),
     CommandSpec::new("appearance.favorite", "Favorite Look", crate::checked!("appearance.favorite", appearance_gestures::favorite)).icon("star").noundo().doc_only()
         .contract(&FAVORITE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceFavoriteResult>)
         .params("look: appearance.assign look keys (appearance, or color/name/opacity/pbr); favorite: true to mark, false to unmark → the validated look and the preference; UI library preference only, no document change or dialogs."),
-    CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
-    ),
+    CommandSpec::new("appearance.chain", "Appearance Chain", crate::checked!("appearance.chain", appearance_chain::chain)).icon("inspect").noundo()
+        .contract(&CHAIN_CONTRACT).output(crate::schema::output_schema_for::<AppearanceChainResult>)
+        .params(
+            "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        ),
     CommandSpec::new("appearance.replace", "Replace Appearance", crate::checked!("appearance.replace", appearance_chain::replace))
         .icon("appearance")
         .contract(&REPLACE_CONTRACT)
@@ -507,6 +529,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 end: a.end.into(),
                 sweep_deg: solidcraft_sketch::arc_sweep(&a).to_degrees(),
             }),
+            control: w.control.map(|c| WireControlInfo { degree: c.degree, points: w.fit.iter().map(|&p| p.into()).collect() }),
         })
         .collect();
     Some(SketchInspected {
@@ -624,6 +647,27 @@ fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
         }));
     }
     out
+}
+
+impl Session {
+    /// What `doc.info` says of this session's own design (a scratch copy names its source's file).
+    pub(crate) fn doc_info(&self) -> DocInfoResult {
+        DocInfoResult {
+            path: self.path.clone().or_else(|| self.source_path.clone()),
+            read_only: self.read_only,
+            unsaved: self.is_dirty(),
+            disk: self.disk.map(|d| DiskStamp { len: d.len, modified_ns: d.modified_ns.map(|ns| ns.to_string()) }),
+            document_id: self.document_id.clone(),
+            param_warnings: Vec::new(),
+        }
+    }
+}
+
+/// `doc.info`: in a plugin run, the design the run started on as it was before the run
+/// (`AppState::caller_design`); a design the run opened itself, or any other session, answers for itself.
+fn design_file_info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let info = s.plugin_state.caller_design.clone().filter(|c| c.document_id == s.document_id).unwrap_or_else(|| s.doc_info());
+    reply("doc.info", info)
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -792,7 +836,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -950,16 +994,18 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
-    AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearanceReplaceParams, AppearanceReplaceResult,
-    BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance,
-    StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceChainParams, AppearanceChainResult, AppearanceCopyParams, AppearanceCopyResult,
+    AppearanceFavoriteParams, AppearanceFavoriteResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePasteParams, AppearanceReplaceParams, AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot,
+    LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
 const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
+const CHAIN_CONTRACT: TypedContract<AppearanceChainParams> = TypedContract::new();
+const PASTE_CONTRACT: TypedContract<AppearancePasteParams> = TypedContract::new();
 const FAVORITE_CONTRACT: TypedContract<AppearanceFavoriteParams> = TypedContract::new();
 const REPLACE_CONTRACT: TypedContract<AppearanceReplaceParams> = TypedContract::new();
 
@@ -990,7 +1036,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();

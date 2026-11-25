@@ -263,12 +263,181 @@ fn end_named(b: &ModelBody, face: usize, own: &CylinderFace, name: &str) -> Opti
     }
 }
 
-/// The x axis an x reference gives a frame at `o` (of `component`) with axis `z` (`None`: no
-/// reference).
+/// One exact named face on the permitted component; no proximity tie-break.
+fn alignment_face<'a>(doc: &Document, st: &'a ModelState, component: u64, name: &str) -> Result<(&'a ModelBody, usize)> {
+    let mut found = None;
+    for body in component_bodies(doc, st, component) {
+        for index in 0..body.body.record().faces.len() {
+            if crate::naming::face_has_name(body, index, name) {
+                if !crate::naming::face_name_exact(body, index) {
+                    return Err(DocError::Invalid("alignment needs an exact persistent face identity".into()));
+                }
+                if found.replace((body, index)).is_some() {
+                    return Err(DocError::Invalid("alignment face identity is ambiguous".into()));
+                }
+            }
+        }
+    }
+    found.ok_or_else(|| DocError::Invalid("alignment face no longer exists on the origin's component".into()))
+}
+
+/// A named edge is the unique exact intersection of its named incident faces.
+fn alignment_edge<'a>(doc: &Document, st: &'a ModelState, component: u64, name: &str) -> Result<(&'a ModelBody, usize)> {
+    let parsed = crate::persistent_name::EdgeName::parse(name).map_err(|_| DocError::Invalid("alignment needs an exact edge identity".into()))?;
+    if parsed.tie.is_some() || parsed.faces.is_empty() {
+        return Err(DocError::Invalid("alignment edge identity is ambiguous".into()));
+    }
+    let mut owning: Option<&ModelBody> = None;
+    let mut faces = Vec::new();
+    for name in &parsed.faces {
+        let (body, face) = alignment_face(doc, st, component, &name.to_string())?;
+        if owning.is_some_and(|b| !std::ptr::eq(b, body)) {
+            return Err(DocError::Invalid("alignment edge faces are on different bodies".into()));
+        }
+        if faces.contains(&face) {
+            return Err(DocError::Invalid("alignment edge identity is ambiguous".into()));
+        }
+        owning = Some(body);
+        faces.push(face);
+    }
+    let body = owning.ok_or_else(|| DocError::Invalid("alignment edge has no incident face".into()))?;
+    let mut found = body.body.record().edges.iter().enumerate().filter(|(_, e)| {
+        let mut uses: Vec<_> = e.uses.iter().map(|u| u.face as usize).collect();
+        uses.sort_unstable();
+        uses.dedup();
+        uses.len() == faces.len() && faces.iter().all(|f| uses.contains(f))
+    });
+    let (edge, _) = found.next().ok_or_else(|| DocError::Invalid("alignment edge no longer exists".into()))?;
+    if found.next().is_some() {
+        return Err(DocError::Invalid("alignment edge identity is ambiguous".into()));
+    }
+    Ok((body, edge))
+}
+
+pub(super) fn alignment_direction(doc: &Document, st: &ModelState, reference: &super::AlignmentRef, component: u64, origin: Vec3) -> Result<Vec3> {
+    use super::AlignmentRef;
+    let bad = |message: &str| DocError::Invalid(message.into());
+    let owns = |feature| -> Result<()> {
+        let f = doc.feature(feature).ok_or_else(|| bad("alignment feature no longer exists"))?;
+        if f.component != component {
+            return Err(bad("alignment reference is not on the origin's component"));
+        }
+        Ok(())
+    };
+    match reference {
+        AlignmentRef::CircleCenter(rim) => {
+            let (body, face) = alignment_face(doc, st, component, &rim.name)?;
+            let (end_body, end) = alignment_face(doc, st, component, &rim.end)?;
+            if !std::ptr::eq(body, end_body)
+                || !matches!(solidcraft_kernel::face_surface(&body.body, face), Some(solidcraft_kernel::FaceSurface::Cylinder { .. }))
+            {
+                return Err(bad("alignment center must remain a cylindrical rim"));
+            }
+            let ends = solidcraft_kernel::face_edge_indices(&body.body, end);
+            let mut shared = solidcraft_kernel::face_edge_indices(&body.body, face).into_iter().filter(|e| {
+                ends.contains(e) && body.body.record().edges.get(*e).is_some_and(|e| matches!(e.curve, solidcore_record::brep::Curve::Circle { .. }))
+            });
+            let edge = shared.next().ok_or_else(|| bad("alignment circle rim no longer exists"))?;
+            if shared.next().is_some() {
+                return Err(bad("alignment circle rim is ambiguous"));
+            }
+            let circle = solidcraft_kernel::edge_circle(&body.body, edge).ok_or_else(|| bad("alignment circle is unavailable"))?;
+            let center = doc.model_body_offset(body).map_or(circle.center, |m| apply_point(m, circle.center));
+            Ok(center - origin)
+        }
+        AlignmentRef::Edge { name } => {
+            let (body, edge) = alignment_edge(doc, st, component, name)?;
+            let direction = match body.body.record().edges.get(edge).map(|e| &e.curve) {
+                Some(solidcore_record::brep::Curve::Line { start, end }) => Vec3::from(*end) - Vec3::from(*start),
+                Some(solidcore_record::brep::Curve::Circle { .. }) => {
+                    let c = solidcraft_kernel::edge_circle(&body.body, edge).ok_or_else(|| bad("alignment circle is unavailable"))?;
+                    *c.axis
+                }
+                _ => return Err(bad("alignment edge must remain an exact line or circle")),
+            };
+            Ok(doc.model_body_offset(body).map_or(direction, |m| apply_vector(m, direction)))
+        }
+        AlignmentRef::Cylinder { name } => {
+            let (body, face) = alignment_face(doc, st, component, name)?;
+            match solidcraft_kernel::face_surface(&body.body, face) {
+                Some(solidcraft_kernel::FaceSurface::Cylinder { axis, .. }) => {
+                    let direction = *axis;
+                    Ok(doc.model_body_offset(body).map_or(direction, |m| apply_vector(m, direction)))
+                }
+                _ => Err(bad("alignment reference must remain cylindrical")),
+            }
+        }
+        AlignmentRef::Construction { feature } | AlignmentRef::ConstructionPlane { feature } => {
+            owns(*feature)?;
+            let plane = matches!(reference, AlignmentRef::ConstructionPlane { .. });
+            let f = doc.feature(*feature).ok_or_else(|| bad("alignment feature no longer exists"))?;
+            if if plane {
+                !matches!(f.kind, crate::FeatureKind::ConstructionPlane { .. })
+            } else {
+                !matches!(f.kind, crate::FeatureKind::ConstructionAxis { .. })
+            } {
+                return Err(bad("alignment construction has the wrong kind"));
+            }
+            let mut found = st.construct.iter().filter(|c| c.feature == *feature);
+            let c = found.next().ok_or_else(|| bad("alignment construction is not evaluated"))?;
+            if found.next().is_some() {
+                return Err(bad("alignment construction identity is ambiguous"));
+            }
+            match (&c.geom, plane) {
+                (crate::construct::ConstructGeom::Axis { dir, .. }, false) => Ok(*dir),
+                (crate::construct::ConstructGeom::Plane(p), true) => Ok(p.normal()),
+                _ => Err(bad("alignment evaluated construction has the wrong kind")),
+            }
+        }
+        AlignmentRef::SketchLine { sketch, curve } => {
+            owns(*sketch)?;
+            let ss = st.sketch(*sketch).ok_or_else(|| bad("alignment sketch no longer exists"))?;
+            let index = ss.sketch.curve_index(curve).ok_or_else(|| bad("alignment line no longer exists"))?;
+            if !matches!(ss.sketch.curves[index].kind, solidcraft_sketch::CurveKind::Line { .. }) {
+                return Err(bad("alignment sketch curve must remain a line"));
+            }
+            let solidcraft_sketch::CurveKind::Line { a, b } = ss.sketch.curves[index].kind else {
+                return Err(bad("alignment sketch curve must remain a line"));
+            };
+            let (a, b) = (
+                ss.sketch.point(a).ok_or_else(|| bad("alignment endpoint is missing"))?,
+                ss.sketch.point(b).ok_or_else(|| bad("alignment endpoint is missing"))?,
+            );
+            Ok(ss.plane.to_world(b) - ss.plane.to_world(a))
+        }
+        AlignmentRef::OriginAxis { axis } => match axis.as_str() {
+            "X" => Ok(Vec3::X),
+            "Y" => Ok(Vec3::Y),
+            "Z" => Ok(Vec3::Z),
+            _ => Err(bad("unknown alignment axis")),
+        },
+        AlignmentRef::OriginPlane { plane } => match plane.as_str() {
+            "XY" => Ok(Vec3::Z),
+            "XZ" => Ok(-Vec3::Y),
+            "YZ" => Ok(Vec3::X),
+            _ => Err(bad("unknown alignment plane")),
+        },
+    }
+}
+
+/// The unprojected direction of a secondary reference. The existing frame resolver performs
+/// the one strict projection; legacy references retain their fallback policy.
 pub(super) fn x_axis(doc: &Document, st: &ModelState, component: u64, x: Option<&XRef>, o: Vec3) -> Result<Option<Vec3>> {
     Ok(match x {
         None => None,
         Some(XRef::Dir(d)) => Some(*d),
+        Some(XRef::Reference { reference, reverse }) => {
+            let direction = alignment_direction(doc, st, reference, component, o)?;
+            Some(if *reverse { -direction } else { direction })
+        }
+        Some(XRef::Planar { planar_face, reverse }) => {
+            let (body, face) = alignment_face(doc, st, component, planar_face)?;
+            let Some(solidcraft_kernel::FaceSurface::Plane { normal, .. }) = solidcraft_kernel::face_surface(&body.body, face) else {
+                return Err(DocError::Invalid("alignment reference must remain planar".into()));
+            };
+            let n = doc.model_body_offset(body).map_or(*normal, |m| apply_vector(m, *normal));
+            Some(if *reverse { -n } else { n })
+        }
         Some(XRef::Face { face, pick }) => {
             let nf = named_face(doc, st, component, pick.unwrap_or(o), face)?;
             if let Some((_, n)) = nf.plane()? {
@@ -324,6 +493,13 @@ pub fn face_name_at(doc: &Document, st: &ModelState, component: u64, pick: Vec3,
     }
     let (_, b, f) = best?;
     crate::naming::face_names(b).get(f).filter(|n| !n.is_empty()).cloned()
+}
+
+/// Whether the face called `name` nearest `pick` (the component's coordinates) on the bodies of
+/// `component` is round: a cylinder, as its exact surface says. `false` when no face has that name.
+pub fn face_is_round(doc: &Document, st: &ModelState, component: u64, pick: Vec3, name: &str) -> bool {
+    named_face(doc, st, component, pick, name)
+        .is_ok_and(|f| matches!(solidcraft_kernel::face_surface(&f.body.body, f.face), Some(solidcraft_kernel::FaceSurface::Cylinder { .. })))
 }
 
 /// A circle-centre snap for the round end of a component's cylindrical face centred at

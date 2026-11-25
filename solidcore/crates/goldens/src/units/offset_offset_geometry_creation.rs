@@ -915,6 +915,13 @@ impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
         fp2::tolerance(self.brep_r(face)?, fid(face))
     }
 
+    fn face_has_loopuses(&self, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        solidcore::topology::face::p4::has_loopuses(self.brep_r(face)?, fid(face))
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -1256,7 +1263,7 @@ impl OffsetBrep<H> for Two {
         e2: H,
         ang_tol_deg: f64,
     ) -> solidcore::Result<bool> {
-        let k = &Kernel::default();
+        let k = &crate::runner_kernel();
         if e1.b != vertex.b || e2.b != vertex.b {
             return Err(invalid("edges of another B-rep"));
         }
@@ -2090,7 +2097,7 @@ fn own_failure(which: &str, e: &SolidError) -> Output {
 /// Builds the B-reps ([`side`]) and resolves the script; `Err(Ok(output))` is the output
 /// reported when the B-reps cannot be built or something cannot be resolved.
 fn prepare(i: &Inputs) -> Result<Prepared, Early> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let side_a = side(&mut k, &i.brep_a).map_err(|e| Box::new(Err(e)))?;
     let side_b = match &i.brep_b {
         Some(b) => Some(side(&mut k, b).map_err(|e| Box::new(Err(e)))?),
@@ -2327,7 +2334,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<Vec<f64>, Fail> {
 
 /// [`run_rust_script`] with the two B-reps as the script leaves them.
 fn run_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Two), Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let Prepared {
         mut two, hdr, ops, ..
     } = p;
@@ -2989,7 +2996,7 @@ pub fn result_breps(case: &Case) -> Result<super::surface_surface_p2::Drawn, Har
     let mut drawn = Vec::new();
     drawn.extend(a.map(|a| ("a", a)));
     drawn.extend(b.map(|b| ("b", b)));
-    Ok((Kernel::default(), drawn))
+    Ok((crate::runner_kernel(), drawn))
 }
 
 // ---- generation -----------------------------------------------------------------------------
@@ -4600,7 +4607,7 @@ mod tests {
         input.brep_a = fixture.clone();
         input.brep_b = Some(fixture);
         let mut prepared = prepare(&input).unwrap();
-        let k = Kernel::default();
+        let k = crate::runner_kernel();
         for (arena, tolerance) in [(0, 0.003), (1, 0.007)] {
             let handle = hd(arena, K_FACE_SURFACE, 0);
             let brep = prepared.two.brep_m(handle).unwrap();
@@ -4687,7 +4694,7 @@ mod tests {
             else {
                 panic!("{name}: not a TrimExtendedEdge");
             };
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let same_tol = 10.0 * OffsetGeometryCreation::new(i.dist, i.approx).this_approx_tol_3d();
             let base = triple_to_h(*base).unwrap();
             let edge = two.edgeuse_edge(base).unwrap().unwrap();
@@ -4704,11 +4711,11 @@ mod tests {
             assert_eq!((nat.min(), nat.max()), (0.0, main_max), "{name}");
             assert!(curve.is_closed(&k, &nat, same_tol).unwrap(), "{name}");
             assert!(
-                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.min(), nat.max(), same_tol, true).unwrap(),
                 "{name}"
             );
             assert!(
-                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol).unwrap(),
+                is_first_point_again(&k, curve, nat.max(), nat.min(), same_tol, true).unwrap(),
                 "{name}"
             );
             // the script through that op now: the trim finds no second point (status 0, no

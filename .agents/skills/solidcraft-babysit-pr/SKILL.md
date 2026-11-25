@@ -35,7 +35,7 @@ Adapted from tstack's babysit-pr (https://github.com/t3dotgg/tstack, MIT; see `.
 - No status comments ("still waiting"). Comment only when it says something new.
 
 ## Conflicts
-On a conflict, rebase your own branch onto the latest `main` and push with `--force-with-lease`. Never force-push a branch someone else works on.
+On a conflict, merge the latest `main` in (cheaper: CI carries a passing run) or rebase and push with `--force-with-lease`. Never force-push a branch someone else works on.
 
 ## When it is done
 Checks green, findings handled, no open requests. You never merge or queue it: a maintainer adds `ready to merge` and the merge queue lands it. Until it merges, say plainly that it is pending.

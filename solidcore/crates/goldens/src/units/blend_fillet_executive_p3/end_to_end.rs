@@ -1438,16 +1438,14 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
             p1::vertices(&body, None)?.len() as f64,
         ])
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
+    match run() {
         Ok(values) => {
             let mut out = Output::new();
             out.ints.insert(
                 "api_status_counts".into(),
                 values.into_iter().map(|v| v as i64).collect(),
             );
-            Ok(Some(super::with_point_step(out, step)))
+            Ok(Some(out))
         }
         Err(error) => match Output::unported(&error) {
             Some(deferred) => Ok(Some(deferred)),
@@ -1460,10 +1458,7 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     if let Some(shell) = input.shell {
         let mut k = crate::runner_kernel();
         return match shell_rust(&mut k, input, shell) {
-            Ok(values) => Ok(super::with_point_step(
-                shell_output(&values)?,
-                super::rust_point_step(&k),
-            )),
+            Ok(values) => shell_output(&values),
             Err(error) => match Output::unported(&error) {
                 Some(deferred) => Ok(deferred),
                 None => Err(HarnessError::new(error.to_string())),
@@ -1474,12 +1469,11 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {
         Ok(values) => {
-            let out = if input.checkpoint == Checkpoint::Full {
-                output(&values)?
+            if input.checkpoint == Checkpoint::Full {
+                output(&values)
             } else {
-                prefix::output(&values, input.checkpoint)?
-            };
-            Ok(super::with_point_step(out, super::rust_point_step(&k)))
+                prefix::output(&values, input.checkpoint)
+            }
         }
         Err(RealSolidRunError::Fixture(error)) => Err(error),
         Err(RealSolidRunError::Kernel(error)) => match Output::unported(&error) {
@@ -1574,10 +1568,8 @@ pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, Har
         }
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(surface_surface_output(&values)?, step)),
+    match run() {
+        Ok(values) => surface_surface_output(&values),
         Err(error) => Output::unported(&error)
             .ok_or_else(|| HarnessError::new(error.to_string())),
     }
@@ -1894,7 +1886,7 @@ pub(super) mod round_definition_proof {
     /// golden's accuracy and at the integrator's finest, where it converges.
     pub(in super::super) struct Estimates {
         /// At [`MASS_ACCURACY`], as the golden measures.
-        golden: MassProperties,
+        pub(in super::super) golden: MassProperties,
         /// At [`ESTIMATE_ACCURACY_FINEST`].
         converged: MassProperties,
     }
@@ -3550,6 +3542,12 @@ mod g5_blend_corner_certificates {
 #[cfg(test)]
 #[path = "wr613_certificates.rs"]
 mod wr613_certificates;
+
+/// WR-646 (#18917): the variable-radius rows whose rounds now follow their law, each
+/// certified on its finished body.
+#[cfg(test)]
+#[path = "wr646_certificates.rs"]
+mod wr646_certificates;
 
 #[cfg(test)]
 mod wr664_near_knot_trims {
