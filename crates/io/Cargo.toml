@@ -15,10 +15,7 @@ dxf-legacy-baseline-tests = []
 trust-unknown-source = []
 
 [dependencies]
-solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-step = { workspace = true }
-solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -87,10 +84,7 @@ sysinfo = { workspace = true }
 trash = "5.2.9"
 
 [dev-dependencies]
-solidcore-ops = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-testkit = { workspace = true }
-# The mesh path's stats, built by hand in the export notes' test.
-solidcore-tess = { workspace = true }
 # Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.
 rand = "0.8"
