@@ -1,50 +1,53 @@
-//! Hatch expansion: validate stored pattern values, convert inputs field by field,
-//! and ask the kernel for complete bounded marks. PAT parsing stays in the app.
-use solidcore::hatch as kernel;
+//! Planar profiles: line families clipped to a region (`solidcore::prism::profile::line_family`).
+//! Validate the stored families, convert inputs field by field, and ask the kernel for
+//! complete bounded marks. Named patterns and PAT parsing stay in the app.
+use solidcore::prism::profile::line_family as kernel;
 use solidcore_convert as convert;
-use solidcore_record::hatch::{Invalid, Pattern};
+use solidcore_record::profile::line_family::{Invalid, LineFamily};
 use solidcore_record::{Region2, Seg2, Vec2};
 
-/// One complete hatch mark in paper millimetres.
+pub use kernel::MAX_FAMILIES;
+
+/// One complete mark in millimetres.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark {
     /// A stroke between its clipped endpoints.
     Line {
-        /// First clipped endpoint in paper millimetres.
+        /// First clipped endpoint in millimetres.
         a: Vec2,
-        /// Last clipped endpoint in paper millimetres.
+        /// Last clipped endpoint in millimetres.
         b: Vec2,
     },
     /// A dot at its centre.
     Dot {
-        /// Centre in paper millimetres.
+        /// Centre in millimetres.
         at: Vec2,
     },
 }
 
-/// Expand a pattern or refuse it without partial geometry.
+/// Clip each family's lines, in turn, to the region, under one work budget, or refuse
+/// without partial geometry.
 ///
 /// # Errors
-/// Invalid patterns, unsupported boundaries, uncertain arithmetic or exhausted budgets.
-pub fn generate(pattern: &Pattern, region: &Region2) -> Result<Vec<Mark>, Invalid> {
-    pattern.validate()?;
+/// Invalid families, more than [`MAX_FAMILIES`], unsupported boundaries, uncertain
+/// arithmetic or exhausted budgets.
+pub fn clip_line_family(families: &[LineFamily], region: &Region2) -> Result<Vec<Mark>, Invalid> {
+    if families.len() > MAX_FAMILIES {
+        return Err(Invalid("more than 64 line families"));
+    }
+    families.iter().try_for_each(LineFamily::validate)?;
     admit_region(region)?;
-    let pattern = kernel::Pattern {
-        name: pattern.name.clone(),
-        description: pattern.description.clone(),
-        families: pattern
-            .families
-            .iter()
-            .map(|family| kernel::Family {
-                angle: family.angle,
-                origin: convert::vec2(family.origin),
-                delta_x: family.delta_x,
-                delta_y: family.delta_y,
-                dashes: family.dashes.clone(),
-            })
-            .collect(),
-    };
-    kernel::generate(&pattern, &convert::region2(region))
+    let families: Vec<kernel::LineFamily> = families
+        .iter()
+        .map(|family| kernel::LineFamily {
+            angle: family.angle,
+            origin: convert::vec2(family.origin),
+            delta_x: family.delta_x,
+            delta_y: family.delta_y,
+            dashes: family.dashes.clone(),
+        })
+        .collect();
+    kernel::clip(&families, &convert::region2(region))
         .map_err(|error| Invalid(error.0))
         .map(|marks| {
             marks
