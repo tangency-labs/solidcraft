@@ -481,7 +481,7 @@ fn closure(c: u8) -> SurfParamType {
 /// A status record value: `0` for `SM_SUCCESS`.
 fn code(c: i32) -> f64 {
     if c == SM_SUCCESS {
-        0.0
+        crate::status::ok_slot(0.0)
     } else {
         f64::from(c)
     }

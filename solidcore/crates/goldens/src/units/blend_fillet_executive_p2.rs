@@ -86,9 +86,6 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 /// "Upstream would dereference null" in a status slot.
 const NULL_DEREF: f64 = -2.0;
 
-/// The box has fewer than 12 edges (`-4 n_edges`): no op runs on either side.
-const SHORT_BOX: f64 = -4.0;
-
 // ---- inputs -----------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -248,13 +245,9 @@ fn record(i: &Inputs) -> (Op, Vec<f64>) {
     (op, v)
 }
 
-/// The status slot as a guard error, or the values.
+/// The values of a case.
 fn values_output(o: Vec<f64>) -> Output {
-    match o.first() {
-        Some(&s) if s == NULL_DEREF => Output::harness("null_deref"),
-        Some(&s) if s == SHORT_BOX => Output::harness("box_edge_count"),
-        _ => Output::new().values("out", o),
-    }
+    Output::new().values("out", o)
 }
 
 // ---- Rust side --------------------------------------------------------------------------
@@ -1461,19 +1454,38 @@ fn status_of(e: &SolidError) -> f64 {
 
 /// [`status_of`] as recorded before kinds.
 fn legacy_status_of(e: &SolidError) -> f64 {
+    if null_deref(e) {
+        NULL_DEREF
+    } else {
+        crate::output::blend_status(e).map_or(-9.0, f64::from)
+    }
+}
+
+/// Whether `e` is a null dereference upstream: `SM_ERR_NULL_POINTER` from the p2 module.
+fn null_deref(e: &SolidError) -> bool {
     match e {
         SolidError::Upstream {
             operation, code, ..
-        } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
+        } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => true,
         // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
         // module's operation keeping `SM_ERR_NULL_POINTER`
-        e if e.operation() == P2_OP
-            && e.blend_failure().is_some()
-            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
-        {
-            NULL_DEREF
+        e => {
+            e.operation() == P2_OP
+                && e.blend_failure().is_some()
+                && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER)
         }
-        e => crate::output::blend_status(e).map_or(-9.0, f64::from),
+    }
+}
+
+/// A failed call's output: a deferral, a null dereference upstream (an error on both
+/// sides, decided from the error), or `o` (the status slot first) as values.
+fn failed_output(e: &SolidError, o: Vec<f64>) -> Output {
+    if let Some(deferred) = Output::unported(e) {
+        deferred
+    } else if null_deref(e) {
+        Output::kernel(e, "null_deref")
+    } else {
+        values_output(o)
     }
 }
 
@@ -1624,7 +1636,7 @@ fn radius_type(code: usize) -> Result<FilletSolverType, HarnessError> {
 /// A Rust error as the case's output: a deferral, or the status alone (as the shim
 /// writes it for a failed set-up).
 fn error_output(e: &SolidError) -> Output {
-    Output::unported(e).unwrap_or_else(|| values_output(vec![status_of(e)]))
+    failed_output(e, vec![status_of(e)])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1694,8 +1706,8 @@ fn set_params(
     let mut executive = executive(None);
     let ex = &mut executive;
     let status = match ex.set_fillet_parameters(&mut k, &mut access, &params) {
-        Ok(()) => 0.0,
-        Err(e) if e.is_unported() => return Ok(error_output(&e)),
+        Ok(()) => crate::status::ok_slot(0.0),
+        Err(e) if e.is_unported() || null_deref(&e) => return Ok(error_output(&e)),
         Err(e) => status_of(&e),
     };
     Ok(values_output(vec![
@@ -1862,42 +1874,28 @@ fn exec(sub: usize, n: usize, bx: &BoxIn) -> Result<Output, HarnessError> {
             second_radii: None,
         };
         if let Err(e) = ex.set_fillet_parameters(&mut k, &mut access, &params) {
-            return Ok(if e.is_unported() {
-                error_output(&e)
-            } else {
-                values_output(vec![status_of(&e)])
-            });
+            return Ok(error_output(&e));
         }
         if let Err(e) = access.create_corners(&mut k, ex, None) {
-            return Ok(if e.is_unported() {
-                error_output(&e)
-            } else {
-                values_output(vec![status_of(&e)])
-            });
+            return Ok(error_output(&e));
         }
         if sub == 3 {
             let mut list: Vec<Option<Handle>> = ex.solvers.iter().copied().map(Some).collect();
             let mut seq = Vec::new();
             return match ex.collect_tangent_edge_sequence_narrow(&k, &access, &mut list, &mut seq) {
                 Ok(()) => Ok(values_output(vec![
-                    0.0,
+                    crate::status::ok_slot(0.0),
                     seq.len() as f64,
                     list.len() as f64,
                 ])),
-                Err(e) if e.is_unported() => Ok(error_output(&e)),
-                Err(e) => Ok(values_output(vec![
-                    status_of(&e),
-                    seq.len() as f64,
-                    list.len() as f64,
-                ])),
+                Err(e) => Ok(failed_output(
+                    &e,
+                    vec![status_of(&e), seq.len() as f64, list.len() as f64],
+                )),
             };
         }
         if let Err(e) = ex.process_smooth_edge_sequences(&mut k, &mut access) {
-            return Ok(if e.is_unported() {
-                error_output(&e)
-            } else {
-                values_output(vec![status_of(&e)])
-            });
+            return Ok(error_output(&e));
         }
         let b = access
             .brep(Handle::Brep(0))
@@ -2077,7 +2075,7 @@ fn temp_radius(variable: bool, start: f64, end: f64, bx: &BoxIn) -> Result<Outpu
                 side,
                 |_| Ok(()),
             ) {
-                Ok(()) => Ok(values_output(vec![0.0])),
+                Ok(()) => Ok(values_output(vec![crate::status::ok_slot(0.0)])),
                 Err(e) => Ok(error_output(&e)),
             }
         }

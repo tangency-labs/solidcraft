@@ -46,9 +46,6 @@ pub struct Runner;
 /// Largest sample count of `Convex`.
 const MAX_SAMPLES: usize = 64;
 
-/// "Upstream would dereference null" in an output slot.
-const NULL_DEREF: f64 = -2.0;
-
 /// The UV curve given to `CheckAndSetUVTrimCurve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "src", rename_all = "snake_case")]
@@ -351,9 +348,6 @@ fn analytic_evaluators(s: &Setup) -> Option<Output> {
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(op: &OpIn, body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == NULL_DEREF {
-        return Output::harness("null_deref");
-    }
     match op {
         OpIn::Tangent { .. } | OpIn::Convex { .. } => Output::new().int("result", first as i64),
         OpIn::CheckSet { .. } => Output::new()
@@ -467,7 +461,7 @@ fn run_rust_op(
                 )
             });
             let code = match status {
-                Ok(()) => Ok(0.0),
+                Ok(()) => Ok(crate::status::ok_slot(0.0)),
                 Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };
@@ -482,7 +476,7 @@ fn run_rust_op(
         }
         OpIn::Rebuild { .. } => {
             let status = match eu2::rebuild_uv_trim_curve(&k, b, eu) {
-                Ok(()) => Ok(0.0),
+                Ok(()) => Ok(crate::status::ok_slot(0.0)),
                 Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => Ok(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
                 Err(e) => Err(e),
             };

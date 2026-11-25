@@ -155,9 +155,6 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
 /// The output of an op body (after the build status), as both sides build it.
 fn output_of(body: &[f64]) -> Output {
     let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == NULL_DEREF {
-        return Output::harness("null_deref");
-    }
     Output::new()
         .int("status", first as i64)
         .values("state", body.get(1..).unwrap_or(&[]).to_vec())
@@ -262,7 +259,7 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
             match r {
                 Ok(c) => {
                     v.extend([
-                        0.0,
+                        crate::status::ok_slot(0.0),
                         c.max_dist_to_surf,
                         c.max_deviation.filter(|_| *want_dev).unwrap_or(-1.0),
                     ]);

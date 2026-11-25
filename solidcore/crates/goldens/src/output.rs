@@ -108,7 +108,7 @@ impl Output {
         if let Some(deferred) = Self::unported(e) {
             return deferred;
         }
-        let out = Self::err(crate::status::kernel_text(e, String::new()));
+        let out = Self::err(crate::status::kernel_text(e, legacy));
         match crate::status::largest_size(e) {
             Some(d) => out.values("largest_size", vec![d]),
             None => out,
@@ -136,7 +136,7 @@ impl Output {
         if crate::status::typed() {
             Self::rejected(format!(
                 "{prefix}: {}",
-                crate::status::kernel_text(e, String::new())
+                crate::status::kernel_text(e, legacy)
             ))
         } else {
             Self::rejected(legacy)

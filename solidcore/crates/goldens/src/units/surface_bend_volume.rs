@@ -413,11 +413,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let v = need()?;
             let (g, ok) = bend_of(v)?.inv_evaluate_guess_point_simple(v3(*p));
             // the dispatch reports the same status
-            let st = match v.inv_evaluate_guess_point_simple(v3(*p)) {
+            let r = v.inv_evaluate_guess_point_simple(v3(*p));
+            let st = match &r {
                 Ok(_) => crate::status::ok_slot(0.0),
-                Err(e) => status(&e),
+                Err(e) => status(e),
             };
-            if ok != (st == 0.0) {
+            if ok != r.is_ok() {
                 return Err(harness("dispatch status disagrees with the bend"));
             }
             o.push(st);

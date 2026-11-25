@@ -464,9 +464,10 @@ fn update_output(protocol: &[f64]) -> Result<Output, HarnessError> {
     if rd.num()? != 0.0 {
         return Ok(Output::rejected("native fixture construction failed"));
     }
+    let updated = rd.num()? == 1.0;
     let status = rd.num()? as i64;
     let o = Output::new().int("update_status", status);
-    if status != 1000 {
+    if !updated {
         if rd.pos != protocol.len() {
             return Err(herr("trailing update output"));
         }
@@ -503,7 +504,8 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
     let mut out = vec![0.0];
     match validation::validate_and_update_tolerances(k, b, false, Some(&mut reports), i.level) {
         Ok(g) => {
-            out.push(crate::status::ok_slot(1000.0));
+            // (whether the update ran, then the status the row records)
+            out.extend([1.0, crate::status::ok_slot(1000.0)]);
             out.extend([
                 f64::from(g.violated_or_updated),
                 g.max_vertex_edge_gap,
@@ -517,7 +519,7 @@ fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, Harne
             }
         }
         Err(up_err) if crate::status::is_kernel(&up_err, solidcore::error::upstream_status(&up_err).is_some()) => {
-            out.push(f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1))));
+            out.extend([0.0, f64::from(crate::status::kind_slot(&up_err, solidcore::error::upstream_status(&up_err).unwrap_or(-1)))]);
             return update_output(&out);
         }
         Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::kernel(&e, e.to_string()))),

@@ -567,7 +567,8 @@ fn run_rust_op(b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Fail> {
             });
             match slot(lu1::loop_loopuses(b, l))? {
                 Ok((a, c)) => o.extend([f64::from(a.index()), idx(c, LoopuseId::index)]),
-                Err(kernel_err) => o.extend([null(&kernel_err), NULL_DEREF]),
+                // (both of the pair's slots carry the call's outcome)
+                Err(kernel_err) => o.extend([null(&kernel_err), null(&kernel_err)]),
             }
             bool_slot(&mut o, lu1::is_outer_loop(b, l))?;
             bool_slot(&mut o, lu1::loop_is_closed_ptrs(b, l))?;

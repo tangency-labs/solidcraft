@@ -108,8 +108,6 @@ const MAX_GEOM_SOLVERS: usize = 8;
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 400;
 
-/// "Upstream would dereference null": the shim refused the input.
-const REFUSED: f64 = -2.0;
 /// The corner id the shim exports the corner under test (`this`) as.
 const THIS_CORNER: u32 = 1_000_000;
 
@@ -381,9 +379,6 @@ fn create_output(rec: &[f64]) -> Result<Output, HarnessError> {
         .first()
         .copied()
         .ok_or_else(|| harness("empty record"))?;
-    if first == REFUSED {
-        return Ok(Output::rejected("upstream would dereference null"));
-    }
     let mut out = Output::new().int("corner", first as i64);
     if first == 0.0 {
         if rec.len() != 1 {
@@ -686,9 +681,6 @@ fn corner_output(rec: &[f64]) -> Result<Output, HarnessError> {
         .first()
         .copied()
         .ok_or_else(|| harness("empty record"))?;
-    if first == REFUSED {
-        return Ok(Output::rejected("upstream would dereference null"));
-    }
     let get = |i: usize| {
         rec.get(i)
             .copied()

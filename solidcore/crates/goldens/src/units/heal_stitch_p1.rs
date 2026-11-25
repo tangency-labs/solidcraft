@@ -617,19 +617,46 @@ fn push_ids<I: solidcore::topology::ArenaId + Copy>(v: &mut Vec<f64>, ids: &[I])
 
 // ---- C++ side ---------------------------------------------------------------------------
 
-fn guarded_output(o: Vec<f64>) -> Output {
-    if o.first() == Some(&NULL_DEREF) {
-        Output::harness("null_dereference_guard")
-    } else {
-        Output::new().values("out", o)
+// ---- Rust side --------------------------------------------------------------------------
+
+/// Why an op has no values of its own. Decided from the error or the runner's own guard,
+/// never from a status number read back out of a slot.
+enum Stop {
+    /// An error the case does not record as a status (an unported callee defers it).
+    Error(SolidError),
+    /// `InvalidInput` raised by the port itself: a null dereference upstream.
+    NullDeref(SolidError),
+    /// The runner did not make the call (the shim's guard on a face without a surface).
+    Skipped,
+}
+
+impl From<SolidError> for Stop {
+    fn from(e: SolidError) -> Self {
+        Self::Error(e)
     }
 }
 
-// ---- Rust side --------------------------------------------------------------------------
+/// Whether `e` marks a null dereference upstream: `InvalidInput` raised by the port itself
+/// (not from an API entry point or a callee, and with no upstream status).
+fn null_deref(e: &SolidError) -> bool {
+    solidcore::error::upstream_status(e).is_none()
+        && matches!(e, SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. }
+            if *operation == "heal::stitch::p1")
+}
 
-/// The `SmStatus` of a Rust error: an upstream code as is; `InvalidInput` raised by the
-/// port itself marks a null dereference upstream (`-2`), from the API entry points or a
-/// callee it is `SM_ERR_INVALID_INPUT`.
+/// A failed call: its status as the case's values, or the [`Stop`] it is.
+fn recorded(e: SolidError) -> Result<Vec<f64>, Stop> {
+    if e.is_unported() {
+        Err(Stop::Error(e))
+    } else if null_deref(&e) {
+        Err(Stop::NullDeref(e))
+    } else {
+        Ok(vec![status_of(&e)])
+    }
+}
+
+/// The `SmStatus` of a Rust error: an upstream code as is; `InvalidInput` from the API
+/// entry points or a callee is `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     crate::status::kind_slot(e, legacy_status_of(e))
 }
@@ -646,20 +673,15 @@ fn legacy_status_of(e: &SolidError) -> f64 {
     }
 }
 
-/// `Ok(values)` on success; `Err` propagates `Unported`, any other error becomes its
-/// status.
-fn status_or<T>(
-    r: solidcore::Result<T>,
-    f: impl FnOnce(T) -> Vec<f64>,
-) -> solidcore::Result<Vec<f64>> {
+/// `Ok(values)` on success; a failure is [`recorded`].
+fn status_or<T>(r: solidcore::Result<T>, f: impl FnOnce(T) -> Vec<f64>) -> Result<Vec<f64>, Stop> {
     match r {
         Ok(v) => {
-            let mut o = vec![0.0];
+            let mut o = vec![crate::status::ok_slot(0.0)];
             o.extend(f(v));
             Ok(o)
         }
-        Err(e) if e.is_unported() => Err(e),
-        Err(e) => Ok(vec![status_of(&e)]),
+        Err(e) => recorded(e),
     }
 }
 
@@ -818,18 +840,18 @@ fn push_span(o: &mut Vec<f64>, span: &BezierSpan) {
 }
 
 #[allow(clippy::too_many_lines)] // one arm per op
-fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result<Vec<f64>> {
+fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> Result<Vec<f64>, Stop> {
     let mut cb = st::DefaultStitchCallback::new();
     match op {
-        Resolved::Export => Err(SolidError::invalid_input(
+        Resolved::Export => Err(Stop::Error(SolidError::invalid_input(
             "difftest",
             "export has no Rust op",
-        )),
+        ))),
         Resolved::Select { a, b: c, dist } => {
             if matches!((a, c), (EntityRef::Edge(_), EntityRef::Edge(_))) {
                 for f in b.faces().ids().collect::<Vec<_>>() {
                     if fp2::surface(b, f)?.is_none() {
-                        return Ok(vec![crate::status::state_slot(crate::status::RunnerState::Skipped, NULL_DEREF)]);
+                        return Err(Stop::Skipped);
                     }
                 }
             }
@@ -856,7 +878,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             let r = match st::test_and_split_edge(k, b, *edge, *p, *tol) {
                 Ok(r) => {
                     let mut o = vec![
-                        0.0,
+                        crate::status::ok_slot(0.0),
                         f64::from(r.reason as u8),
                         r.dist_to_edge,
                         flag(r.new_vertex.is_some()),
@@ -866,8 +888,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     }
                     Ok(o)
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status_of(&e)]),
+                Err(e) => recorded(e),
             };
             let mut o = r?;
             if *probe {
@@ -887,7 +908,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             let mut c: Vec<Option<VertexId>> = l2.iter().copied().map(Some).collect();
             match s.stitch_vertex_pairs(k, b, &mut a, &mut c) {
                 Ok(r) => {
-                    let mut o = vec![0.0, r.max_vertex_gap, r.min_unstitched_vert_gap];
+                    let mut o = vec![crate::status::ok_slot(0.0), r.max_vertex_gap, r.min_unstitched_vert_gap];
                     o.extend(ids_out(&r.processed));
                     o.extend(ids_out(&r.deleted));
                     o.extend(opt_ids_out(&a));
@@ -897,8 +918,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     }
                     Ok(o)
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status_of(&e)]),
+                Err(e) => recorded(e),
             }
         }
         Resolved::Edges { tol, flags, verts } => {
@@ -910,7 +930,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             let v: Vec<Option<VertexId>> = verts.iter().copied().map(Some).collect();
             match s.stitch_edges_of_vertices(k, b, &v) {
                 Ok(r) => {
-                    let mut o = vec![0.0, r.max_edge_gap, r.min_unstitched_edge_gap];
+                    let mut o = vec![crate::status::ok_slot(0.0), r.max_edge_gap, r.min_unstitched_edge_gap];
                     o.extend(ids_out(&r.glued));
                     o.extend(ids_out(&r.deleted));
                     if !r.glued.is_empty() {
@@ -918,8 +938,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     }
                     Ok(o)
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status_of(&e)]),
+                Err(e) => recorded(e),
             }
         }
         Resolved::Simple {
@@ -936,7 +955,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             match r {
                 Ok(r) => {
                     let mut o = vec![
-                        0.0,
+                        crate::status::ok_slot(0.0),
                         r.max_vertex_gap,
                         r.max_edge_gap,
                         r.stitched_edges as f64,
@@ -944,8 +963,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     digest(k, b, &mut o)?;
                     Ok(o)
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status_of(&e)]),
+                Err(e) => recorded(e),
             }
         }
         Resolved::Unify { api, tol, face, n } => {
@@ -959,7 +977,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             };
             match r {
                 Ok(flipped) => {
-                    let mut o = vec![0.0];
+                    let mut o = vec![crate::status::ok_slot(0.0)];
                     o.extend(ids_out(&flipped));
                     for f in &flipped {
                         let d = fp2::uv_domain(b, *f)?;
@@ -968,8 +986,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     digest(k, b, &mut o)?;
                     Ok(o)
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status_of(&e)]),
+                Err(e) => recorded(e),
             }
         }
         Resolved::Api {
@@ -983,10 +1000,10 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             flags,
         } => {
             let brep = if *null_brep { None } else { Some(&mut *b) };
-            let out = match which {
-                0 => status_or(st::api_stitch(k, brep), |()| Vec::new()),
-                1 => status_or(st::api_stitch_face(k, brep, *face), |()| Vec::new()),
-                2 => status_or(st::api_stitch_into_solid(k, brep), |r| {
+            let r = match which {
+                0 => st::api_stitch(k, brep).map(|()| Vec::new()),
+                1 => st::api_stitch_face(k, brep, *face).map(|()| Vec::new()),
+                2 => st::api_stitch_into_solid(k, brep).map(|r| {
                     vec![
                         flag(r.produces_a_solid),
                         r.stitched_edges as f64,
@@ -994,14 +1011,10 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         r.max_edge_gap,
                     ]
                 }),
-                3 => status_or(
-                    st::api_stitch_into_shell(k, brep, *well_formed, *ratio),
-                    |r| vec![r.stitched_edges as f64, r.max_vertex_gap, r.max_edge_gap],
-                ),
-                4 => status_or(st::api_unify_normals(k, brep, *face, *n), |f| ids_out(&f)),
-                5 => status_or(st::api_simple_face_stitch(k, brep, &[], &[]), |_| {
-                    Vec::new()
-                }),
+                3 => st::api_stitch_into_shell(k, brep, *well_formed, *ratio)
+                    .map(|r| vec![r.stitched_edges as f64, r.max_vertex_gap, r.max_edge_gap]),
+                4 => st::api_unify_normals(k, brep, *face, *n).map(|f| ids_out(&f)),
+                5 => st::api_simple_face_stitch(k, brep, &[], &[]).map(|_| Vec::new()),
                 _ => {
                     let [squeeze_small_edges, split_edges_with_vertices, making_manifold_solid, remove_laminar_slivers] =
                         *flags;
@@ -1011,7 +1024,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         making_manifold_solid,
                         remove_laminar_slivers,
                     };
-                    status_or(st::api_stitch_advanced(k, brep, *tol, options), |r| {
+                    st::api_stitch_advanced(k, brep, *tol, options).map(|r| {
                         vec![
                             r.stitched_edges as f64,
                             r.lamina_edges as f64,
@@ -1022,8 +1035,9 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                 }
             };
             // the B-rep after a successful call (the shim's `put_digest`)
-            let mut out = out?;
-            if !*null_brep && out.first() == Some(&0.0) {
+            let succeeded = r.is_ok();
+            let mut out = status_or(r, |v| v)?;
+            if !*null_brep && succeeded {
                 digest(k, b, &mut out)?;
             }
             Ok(out)
@@ -1054,9 +1068,11 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             #[cfg(test)]
             crate::certify::keep(&b);
-            Ok(guarded_output(o))
+            Ok(Output::new().values("out", o))
         }
-        Err(e) => match Output::unported(&e) {
+        Err(Stop::Skipped) => Ok(Output::harness("null_dereference_guard")),
+        Err(Stop::NullDeref(e)) => Ok(Output::kernel(&e, "null_dereference_guard")),
+        Err(Stop::Error(e)) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => Err(harness(format!("rust: {e}"))),
         },

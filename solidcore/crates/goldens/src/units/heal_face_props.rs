@@ -1184,7 +1184,7 @@ pub(crate) fn add_down_side(b: &mut Brep, face: FaceId) -> Result<(), HarnessErr
 
 fn status(r: solidcore::Result<()>) -> Result<f64, solidcore::SolidError> {
     match r {
-        Ok(()) => Ok(1000.0),
+        Ok(()) => Ok(crate::status::ok_slot(1000.0)),
         Err(e) if e.is_unported() => Err(e),
         Err(err) if crate::status::is_kernel(&err, solidcore::error::upstream_status(&err).is_some()) => Ok(f64::from(crate::status::kind_slot(&err, solidcore::error::upstream_status(&err).unwrap_or(-1)))),
         Err(e) => Err(e),

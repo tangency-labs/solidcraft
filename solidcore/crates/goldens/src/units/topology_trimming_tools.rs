@@ -1149,7 +1149,7 @@ fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     put_vec(&mut o, r.plane_normal);
                     put_vec(&mut o, r.curves_box.min());
                     put_vec(&mut o, r.curves_box.max());
-                    if *outer && st == 0.0 {
+                    if *outer && r.status().is_ok() {
                         find_outer(
                             k,
                             &mut o,

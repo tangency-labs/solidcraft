@@ -412,7 +412,7 @@ type Run = Result<Vec<f64>, SolidError>;
 /// The status of `r` (or the unported error, which defers the case).
 fn status_of(r: &solidcore::Result<()>) -> Result<f64, SolidError> {
     match r {
-        Ok(()) => Ok(0.0),
+        Ok(()) => Ok(crate::status::ok_slot(0.0)),
         Err(e) if e.is_unported() => Err(e.clone()),
         Err(e) => Ok(status(e)),
     }
@@ -492,7 +492,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 Err(e) => return Ok(Err(e)),
             };
             let mut o = vec![st];
-            if st == 0.0 {
+            if r.is_ok() {
                 dump_tree(&mut o, &cache)?;
             }
             Ok(Ok(o))
@@ -500,11 +500,11 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::Get => {
             let mut cache = cache_of(surface_in(&i.surf)?, &i.opts);
             let r = cache.get_tree(&k).map(|_| ());
-            let st = match status_of(&r) {
-                Ok(s) => s,
-                Err(e) => return Ok(Err(e)),
-            };
-            let got = st == 0.0;
+            // (an unported callee defers the case; any other error is not recorded)
+            if let Err(e) = status_of(&r) {
+                return Ok(Err(e));
+            }
+            let got = r.is_ok();
             let mut o = vec![if got { 0.0 } else { 1.0 }];
             if got {
                 dump_tree(&mut o, &cache)?;

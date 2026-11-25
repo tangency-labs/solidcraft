@@ -249,14 +249,16 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => crate::status::ok_slot(0.0),
-        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
-        Err(SolidError::Upstream { code, .. }) => f64::from(*code),
+        Err(e) if nlib_number(e).is_some() => {
+            crate::status::kind_slot(e, f64::from(nlib_number(e).unwrap_or_default()))
+        }
+        Err(e @ SolidError::Upstream { code, .. }) => crate::status::kind_slot(e, f64::from(*code)),
         // Upstream's NLib flag without an error number (see the module docs of
         // `solidcore::nurbs::nurbs_srf`).
         Err(kernel_err @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
             crate::status::kind_slot(kernel_err, 1000.0)
         }
-        Err(_) => -1.0,
+        Err(e) => crate::status::kind_slot(e, -1.0),
     }
 }
 

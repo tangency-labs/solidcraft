@@ -372,12 +372,12 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
 }
 
 /// The output of the constructor's record after the build status, as both sides build
-/// it: `-2` (upstream would dereference null) is an error output.
-fn eu_output(body: &[f64]) -> Output {
-    let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == -2.0 {
+/// it: `None` (upstream would dereference null) is an error output.
+fn eu_output(body: Option<&[f64]>) -> Output {
+    let Some(body) = body else {
         return Output::harness("null_deref");
-    }
+    };
+    let first = body.first().copied().unwrap_or(f64::NAN);
     Output::new()
         .int("status", first as i64)
         .values("out", body.get(1..).unwrap_or(&[]).to_vec())
@@ -434,8 +434,8 @@ fn eu_safe(b: &Brep, eu: Option<EdgeuseId>) -> Result<bool, SolidError> {
     Ok(true)
 }
 
-/// The Rust record body of the constructor; `Err` for an error that is not an
-/// upstream status.
+/// The Rust record body of the constructor; `None` where upstream would dereference
+/// null, `Err` for an error that is not an upstream status.
 #[allow(clippy::too_many_arguments)]
 fn rust_edgeuse_body(
     b: &mut Brep,
@@ -446,7 +446,7 @@ fn rust_edgeuse_body(
     dist: f64,
     fu: f64,
     fv: f64,
-) -> Result<Vec<f64>, SolidError> {
+) -> Result<Option<Vec<f64>>, SolidError> {
     let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
@@ -454,13 +454,13 @@ fn rust_edgeuse_body(
         None
     };
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
-        return Ok(vec![-2.0]);
+        return Ok(None);
     }
     let mut v = Vec::new();
     let mut pseudo = FilletBrep::new();
     let id = FilletSolverId(0);
     let fs = ConstantDistanceFs::from_edgeuse(&k, b, &mut pseudo, id, tol, ang, tan, dist, eu)?;
-    v.push(0.0);
+    v.push(crate::status::ok_slot(0.0));
     let built = fs.solver.edgeuses[0].is_some();
     v.push(flag(built));
     v.extend(fs.solver.orientations);
@@ -487,7 +487,7 @@ fn rust_edgeuse_body(
                 d.min().y + fv * (d.max().y - d.min().y),
             );
             match s.surface.evaluate_point(&k, uv) {
-                Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
+                Ok(p) => v.extend([crate::status::ok_slot(0.0), p.x, p.y, p.z]),
                 Err(e) if e.is_unported() => return Err(e),
                 Err(e) => {
                     let st = match e {
@@ -507,7 +507,7 @@ fn rust_edgeuse_body(
     put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
-    Ok(v)
+    Ok(Some(v))
 }
 
 fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
@@ -545,7 +545,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         }
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *dist, *fu, *fv) {
-        Ok(body) => Ok(eu_output(&body)),
+        Ok(body) => Ok(eu_output(body.as_deref())),
         Err(e) => {
             if let Some(o) = Output::unported(&e) {
                 return Ok(o);
@@ -562,7 +562,8 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- LoadInitialValues with edge uses ---------------------------------------------------
 
-/// The Rust record body of the edge-use `LoadInitialValues` op (the shim's mode 1).
+/// The Rust record body of the edge-use `LoadInitialValues` op (the shim's mode 1);
+/// `None` where upstream would dereference null.
 #[allow(clippy::too_many_arguments)]
 fn rust_cr_eu_body(
     b: &mut Brep,
@@ -575,7 +576,7 @@ fn rust_cr_eu_body(
     fu: f64,
     fv: f64,
     ext: f64,
-) -> Result<Vec<f64>, SolidError> {
+) -> Result<Option<Vec<f64>>, SolidError> {
     let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
@@ -583,7 +584,7 @@ fn rust_cr_eu_body(
         None
     };
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
-        return Ok(vec![-2.0]);
+        return Ok(None);
     }
     // (the constructor's fillet geometry is compared by blend.fillet_standard_solver_p1)
     let mut pseudo = FilletBrep::new();
@@ -594,12 +595,12 @@ fn rust_cr_eu_body(
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
         Err(e) if crate::status::is_kernel(&e, solidcore::error::upstream_status(&e).is_some()) => {
-            return Ok(vec![f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))]);
+            return Ok(Some(vec![f64::from(crate::status::kind_slot(&e, solidcore::error::upstream_status(&e).unwrap_or(-1)))]));
         }
         Err(e) => return Err(e),
     };
     fs.solver.surface_extension_factor = ext;
-    let mut v = vec![0.0];
+    let mut v = vec![crate::status::ok_slot(0.0)];
     let mut s1 = fs.surface(rail)?.clone();
     let d = s1.surface.natural_uv_domain();
     let mut ivls = ExtentNd::new(4);
@@ -652,7 +653,7 @@ fn rust_cr_eu_body(
     v.push(guess.len() as f64);
     v.extend_from_slice(&guess);
     v.extend(offsets(&fs));
-    Ok(v)
+    Ok(Some(v))
 }
 
 fn rust_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
@@ -703,7 +704,7 @@ fn rust_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
         *fv,
         *ext,
     ) {
-        Ok(body) => Ok(eu_output(&body)),
+        Ok(body) => Ok(eu_output(body.as_deref())),
         Err(e) => {
             if let Some(o) = Output::unported(&e) {
                 return Ok(o);

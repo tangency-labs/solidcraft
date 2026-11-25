@@ -90,7 +90,7 @@ fn param_code(p: SurfParamType) -> f64 {
 /// A status record value: `0` for `SM_SUCCESS` (1000), as the shim's `st`.
 fn code(c: i32) -> f64 {
     if c == SM_SUCCESS {
-        0.0
+        crate::status::ok_slot(0.0)
     } else {
         f64::from(c)
     }

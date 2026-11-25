@@ -1195,12 +1195,12 @@ fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessErro
 }
 
 /// The output of the constructor's record after the build status, as both sides build
-/// it: `-2` (upstream would dereference null) is an error output.
-fn eu_output(body: &[f64]) -> Output {
-    let first = body.first().copied().unwrap_or(f64::NAN);
-    if first == -2.0 {
+/// it: `None` (upstream would dereference null) is an error output.
+fn eu_output(body: Option<&[f64]>) -> Output {
+    let Some(body) = body else {
         return Output::harness("null_deref");
-    }
+    };
+    let first = body.first().copied().unwrap_or(f64::NAN);
     Output::new()
         .int("status", first as i64)
         .values("out", body.get(1..).unwrap_or(&[]).to_vec())
@@ -1257,8 +1257,8 @@ fn eu_safe(b: &Brep, eu: Option<EdgeuseId>) -> Result<bool, SolidError> {
     Ok(true)
 }
 
-/// The Rust record body of the constructor; `Err` for an error that is not an
-/// upstream status.
+/// The Rust record body of the constructor; `None` where upstream would dereference
+/// null, `Err` for an error that is not an upstream status.
 #[allow(clippy::too_many_arguments)]
 fn rust_edgeuse_body(
     b: &mut Brep,
@@ -1270,7 +1270,7 @@ fn rust_edgeuse_body(
     r2: Option<f64>,
     fu: f64,
     fv: f64,
-) -> Result<Vec<f64>, SolidError> {
+) -> Result<Option<Vec<f64>>, SolidError> {
     let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
@@ -1278,7 +1278,7 @@ fn rust_edgeuse_body(
         None
     };
     if !eu_safe(b, Some(eu))? || !eu_safe(b, radial)? {
-        return Ok(vec![-2.0]);
+        return Ok(None);
     }
     let mut v = Vec::new();
     let mut pseudo = FilletBrep::new();
@@ -1332,7 +1332,7 @@ fn rust_edgeuse_body(
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;
     put_eu_state(&k, &mut v, b, radial)?;
-    Ok(v)
+    Ok(Some(v))
 }
 
 /// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
@@ -1365,7 +1365,7 @@ pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId
     if body {
         let out = rust_edgeuse_body(&mut s.brep, s.eu, tol, ang, tan, r, r2, fu, fv)
             .map_err(|e| he(&e))?;
-        if out.first() == Some(&-2.0) {
+        if out.is_none() {
             return Ok(None);
         }
     }
@@ -1417,7 +1417,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
         return Ok(o);
     }
     match rust_edgeuse_body(&mut s.brep, s.eu, *tol, *ang, *tan, *r, *r2, *fu, *fv) {
-        Ok(body) => Ok(eu_output(&body)),
+        Ok(body) => Ok(eu_output(body.as_deref())),
         Err(e) => {
             if let Some(o) = Output::unported(&e) {
                 return Ok(o);
