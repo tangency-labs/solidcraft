@@ -104,6 +104,18 @@ pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 
     Some([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
+/// Signed angle about unit `normal`, from unit `start` to unit `end`, in radians.
+/// Calls [`Vec3::signed_unit_angle`], including its positive choice for a half turn.
+///
+/// # Errors
+/// [`Error::Refused`] for non-finite, non-unit or non-perpendicular directions,
+/// retaining the kernel routine and reason.
+pub fn signed_unit_angle(normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<f64> {
+    vec3(normal)
+        .signed_unit_angle(vec3(start), vec3(end))
+        .map_err(crate::error::status)
+}
+
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
 /// axes square, through [`Transform::rigid_plane_axes`]. The caller establishes that the
 /// matrix is a rigid motion; skew source axes retain their parametrisation.
@@ -439,6 +451,30 @@ mod tests {
         assert_eq!(same_sense([0.0; 3], [0.0, 1.0, 0.0]), None);
         assert_eq!(same_sense([0.0, 1.0, 0.0], [0.0; 3]), None);
         assert_eq!(same_sense([f64::NAN, 1.0, 0.0], [0.0, 1.0, 0.0]), None);
+    }
+
+    #[test]
+    fn signed_unit_angle_keeps_the_axis_order_and_half_turn_direction() {
+        let (normal, start, end) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert_eq!(
+            signed_unit_angle(normal, start, end).unwrap(),
+            std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, end, start).unwrap(),
+            -std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, start, [-1.0, -5e-13, 0.0]).unwrap(),
+            std::f64::consts::PI
+        );
+        assert_eq!(
+            signed_unit_angle(start, normal, start),
+            Err(Error::Refused {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            })
+        );
     }
 
     /// The mirror in the plane y = 0.
