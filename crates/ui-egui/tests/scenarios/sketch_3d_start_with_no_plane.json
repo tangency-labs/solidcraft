@@ -1,0 +1,14 @@
+[
+ {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [10, 0, 5], "length": 10, "width": 10, "height": 5}}},
+ {"call": "ui.view", "params": {"view": "iso"}},
+ {"start": "sketch.create3d"},
+ {"expect": {"sketching": true, "dialog": null, "errors": 0}},
+ {"click": {"world": [10, 0, 10]}},
+ {"click": {"world": [20, 10, 10]}},
+ {"click": {"world": [10, 10, 10]}},
+ {"key": "Escape"},
+ {"key": "Escape"},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["wires", 1, "id"], "value": "w2"}}},
+ {"start": "sketch.finish"},
+ {"expect": {"sketching": false, "features": 2, "errors": 0}}
+]

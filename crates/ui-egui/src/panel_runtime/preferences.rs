@@ -471,6 +471,24 @@ pub fn persistent_preferences_value(app: &crate::SolveApp) -> PanelResult<Option
 }
 
 /// Also used for the held Preferences baseline. Unreadable recovery stays exact.
+/// Everything [`portable_preferences_value`] reads besides the layout it converts: the saved
+/// record recovery keeps as it is, and the panels registered now. A conversion cached with these
+/// and the layout is the one a fresh conversion would make.
+#[derive(Clone, PartialEq)]
+pub struct PortableInputs {
+    preserve: Option<Value>,
+    registry: PanelRegistry,
+}
+
+/// The inputs of [`portable_preferences_value`] for `app`, other than the layout.
+pub fn portable_inputs(app: &crate::SolveApp) -> PortableInputs {
+    let runtime = app.panel_runtime.as_ref();
+    PortableInputs {
+        preserve: runtime.and_then(|runtime| runtime.preferences.as_ref()).and_then(|state| state.preserve.clone()),
+        registry: runtime.map(|runtime| runtime.runtime().layout().registry().clone()).unwrap_or_default(),
+    }
+}
+
 pub fn portable_preferences_value(app: &crate::SolveApp, value: Option<Value>) -> PanelResult<Option<Value>> {
     let Some(value) = value else { return Ok(None) };
     bounded_record(&value)?;

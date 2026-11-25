@@ -527,6 +527,15 @@ automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
+A file that an installed **importer plugin** reads links the same way: **Insert Design** takes it
+(`component.insert_design` with `path`, and `format` and `options` to choose the importer). The
+link remembers which plugin and version read the file, with its options. **Update Links** asks
+that plugin to read the file again when it changed, and keeps placements, names and joints as
+for any linked part. If the plugin is not installed or is turned off, the link says which plugin
+and version it needs and the component keeps its last bodies. A file read by a plugin is not
+read again by itself when a tab comes back; use **Update Links**. **Break Link** keeps the
+bodies and forgets both the file and the plugin.
+
 An assembly can be saved without the bodies of its linked parts:
 `file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
 placements, joints and face names, and no copy of the part's bodies, so it stays small and a
