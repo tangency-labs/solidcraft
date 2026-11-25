@@ -2655,7 +2655,10 @@ fn asymmetric_profile_and_old_designs_preserve_face_names() {
     let st = model.state();
     let b = st.body("Body1").expect("Body1 built");
     let names = crate::naming::face_names(b);
-    let centres = crate::naming::face_centres(b);
+    const EXPECTED: &[&str] =
+        &["F2:side:a1", "F2:side:l6", "F2:side:l4", "F2:start", "F2:top", "F2:side:l1", "F4:side:l3", "F2:side:l3", "F4:bottom", "F2:side:l2"];
+    assert_eq!(&names[..], EXPECTED);
+    let centres = crate::naming::face_centres(b).expect("face centres");
     assert_eq!(names.len(), centres.len());
     // For every face on Body1, verifying that names land consistently:
     assert!(!names.is_empty(), "faces named");
