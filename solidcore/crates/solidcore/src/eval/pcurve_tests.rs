@@ -2632,6 +2632,54 @@ fn a_patch_boundary_pcurve_is_exact_where_the_tolerance_covers_its_proved_gap() 
     assert_eq!(made[0][0], None);
 }
 
+/// An edge whose pace repeats on a dyadic grid of its parameter. The boundary is a straight cubic
+/// row of 12.7 mm at an even pace; the edge is the same line at the pace
+/// `g(t) = t + A sin²(16 π t)`, which equals the even pace at every multiple of 1/16 of the
+/// parameter and bows about 4 µm between them. The map's pieces start at 1/8 and halve, so every
+/// midpoint a halving tests is a multiple of 1/16, where the straight piece is exact. A refinement
+/// that tests the midpoint alone sees no error, stops at pieces that are 4 µm off, and the proof
+/// then fails the cap. A piece is split on its error at points that are no dyadic fraction of it,
+/// so this gets its map, either way round.
+#[test]
+fn an_edge_whose_pace_repeats_on_a_dyadic_grid_gets_a_reparametrised_line() {
+    let length = 12.7;
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4)
+            .map(|i| {
+                let x = length * i as f64 / 3.0;
+                vec![[x, 0., 0.], [x, 10., 0.]]
+            })
+            .collect(),
+    };
+    let bow = 3.0e-4;
+    let pace = |t: f64| t + bow * (16.0 * PI * t).sin().powi(2);
+    let count = 256;
+    let params: Vec<f64> = (0..=count).map(|j| j as f64 / count as f64).collect();
+    for reversed in [false, true] {
+        let points: Vec<[f64; 3]> = params
+            .iter()
+            .map(|&t| {
+                let u = if reversed { 1.0 - pace(t) } else { pace(t) };
+                [length * u, 0., 0.]
+            })
+            .collect();
+        let (knots, points) = interpolate(&params, &points, 3);
+        let edge = Curve::Spline { knots, points };
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("reversed {reversed}: no proof"));
+        assert!(found.gap < 1e-3, "reversed {reversed}: gap {}", found.gap);
+        let Curve2::Spline { points, .. } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(points.len() > 16, "{} points", points.len());
+        let lifted = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(lifted <= found.gap, "lifts {lifted}, proved {}", found.gap);
+    }
+}
+
 /// Where the tolerance in force already takes a boundary edge as a straight line, the pcurve is
 /// that line to the bit (not the proof's, whose ends sit exactly on the patch's corners), so a face
 /// read before this proof is read the same after it.

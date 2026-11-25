@@ -258,25 +258,40 @@ fn refine(
             if !(tm > ta && tm < tb) {
                 continue;
             }
-            let lin = 0.5 * (ga + gb);
-            // The samples run monotonically in the boundary's parameter, either way.
-            let hint = if increasing {
-                samples.partition_point(|x| x.0 < lin)
-            } else {
-                samples.partition_point(|x| x.0 > lin)
+            // The straight piece is tested at several points, none of them a dyadic fraction of
+            // the edge's parameter: an edge whose pace repeats on such a grid has its
+            // straight-line error exactly zero at every midpoint the halving produces (the
+            // 2-point Gauss-Legendre nodes are far from any simple fraction).
+            let mut off = false;
+            let mut mid_s = None;
+            for f in [0.5, 0.2113, 0.7887] {
+                let tf = ta + (tb - ta) * f;
+                let lin = ga + (gb - ga) * f;
+                // The samples run monotonically in the boundary's parameter, either way.
+                let hint = if increasing {
+                    samples.partition_point(|x| x.0 < lin)
+                } else {
+                    samples.partition_point(|x| x.0 > lin)
+                }
+                .min(samples.len().saturating_sub(1));
+                let window = hint.saturating_sub(WINDOW)..(hint + WINDOW).min(samples.len());
+                let on_edge = point(edge, tf)?;
+                let (s, _) = nearest(iso, samples, window, on_edge)?;
+                let s = s.max(first).min(last);
+                if point(iso, s)?.dist(on_edge) > limit {
+                    return None;
+                }
+                let speed = norm_up_of(derivs(iso, s)?[1])?;
+                if (s - lin).abs() * speed > target {
+                    off = true;
+                }
+                if f == 0.5 {
+                    mid_s = Some(s);
+                }
             }
-            .min(samples.len().saturating_sub(1));
-            let window = hint.saturating_sub(WINDOW)..(hint + WINDOW).min(samples.len());
-            let on_edge = point(edge, tm)?;
-            let (s, _) = nearest(iso, samples, window, on_edge)?;
-            let s = s.max(first).min(last);
-            if point(iso, s)?.dist(on_edge) > limit {
-                return None;
-            }
-            let speed = norm_up_of(derivs(iso, s)?[1])?;
-            if (s - lin).abs() * speed > target {
+            if off {
                 // Inside the piece's range, so it stays monotone.
-                let s = s.max(ga.min(gb)).min(ga.max(gb));
+                let s = mid_s?.max(ga.min(gb)).min(ga.max(gb));
                 split.push((i, tm, s));
             }
         }
