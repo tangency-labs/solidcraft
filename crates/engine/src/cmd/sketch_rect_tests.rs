@@ -119,6 +119,52 @@ fn center_rectangle_draws_both_diagonals_like_fusion() {
     }
 }
 
+/// A rotatable rectangle (#21467) holds its sides parallel and perpendicular with only the bottom
+/// horizontal: the same freedom as the ordinary one, and deleting that one constraint lets it turn
+/// as a rectangle. Without the option, each side stays horizontal or vertical as before.
+#[test]
+fn a_rotatable_rectangle_turns_once_its_one_horizontal_is_deleted() {
+    for (cmd, params) in [
+        ("sketch.rectangle.two_point", json!({"p0": [1, 1], "p1": [21, 15], "rotatable": true})),
+        ("sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9], "rotatable": true})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, cmd, params);
+        let l = ids(&r["curves"]);
+        assert_eq!(constraints_of(&mut s, "horizontal").len(), 1, "{cmd}: {r}");
+        assert_eq!(constraints_of(&mut s, "vertical").len(), 0, "{cmd}");
+        assert_eq!(constraints_of(&mut s, "perpendicular").len(), 1, "{cmd}");
+        assert_eq!(constraints_of(&mut s, "parallel").len(), 2, "{cmd}");
+        assert_eq!(healthy(&mut s, cmd), 4, "{cmd}: x, y, width, height, as the ordinary one");
+        run(&mut s, "sketch.dimension", json!({"entities": [l[0]], "value": 30}));
+        run(&mut s, "sketch.dimension", json!({"entities": [l[1]], "value": 12}));
+        assert_eq!(healthy(&mut s, &format!("{cmd} sized")), 2, "{cmd}");
+
+        // Deleting the one horizontal gives the turn back, and a dragged corner turns it whole.
+        let horizontal = constraints_of(&mut s, "horizontal");
+        run(&mut s, "sketch.delete", json!({"entities": horizontal}));
+        assert_eq!(healthy(&mut s, &format!("{cmd} freed")), 3, "{cmd}: x, y and the turn");
+        // Its bottom-left corner pinned at the origin, so a dragged far corner can only turn it.
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", l[0]), "b": "origin"}));
+        assert_eq!(healthy(&mut s, &format!("{cmd} pinned")), 1, "{cmd}: only the turn is left");
+        run(&mut s, "sketch.move_point", json!({"point": format!("{}.end", l[1]), "to": [5, 30]}));
+        healthy(&mut s, &format!("{cmd} turned"));
+        let sk = active(&s);
+        let dir = |c: &str| {
+            let pi = sk.curves[sk.curve_index(c).unwrap()].kind.point_ids();
+            (sk.point(pi[1]).unwrap() - sk.point(pi[0]).unwrap()).normalized().unwrap()
+        };
+        assert!(dir(&l[0]).y.abs() > 0.05, "{cmd}: the bottom side turned: {:?}", dir(&l[0]));
+        assert!(dir(&l[0]).dot(dir(&l[1])).abs() < 1e-6, "{cmd}: still square-cornered");
+        assert!(dir(&l[0]).cross(dir(&l[2])).abs() < 1e-6 && dir(&l[1]).cross(dir(&l[3])).abs() < 1e-6, "{cmd}: opposite sides parallel");
+    }
+    // The option off, or not given: each side horizontal or vertical, as before.
+    let (mut s, _) = rect("two");
+    assert_eq!((constraints_of(&mut s, "horizontal").len(), constraints_of(&mut s, "vertical").len()), (2, 2));
+    assert_eq!(constraints_of(&mut s, "parallel").len(), 0);
+}
+
 // ---- Edge Center Rectangle -------------------------------------------------------------
 
 fn active(s: &Session) -> solidcraft_sketch::Sketch {

@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.sketch.rectangle_rotatable": "Rectangles can be turned",
+    "prefs.sketch.rectangle_rotatable_note": "The 2-point and center rectangles hold their sides parallel and perpendicular, with only the bottom side horizontal: delete that constraint to turn the rectangle. Off: each side horizontal or vertical."
+  },
+  "ar": {
+    "prefs.sketch.rectangle_rotatable": "يمكن تدوير المستطيلات",
+    "prefs.sketch.rectangle_rotatable_note": "يحافظ المستطيل ذو النقطتين والمستطيل المركزي على أضلاعهما متوازية ومتعامدة، والضلع السفلي وحده أفقي: احذف هذا القيد لتدوير المستطيل. عند الإيقاف: كل ضلع أفقي أو رأسي."
+  },
+  "de": {
+    "prefs.sketch.rectangle_rotatable": "Rechtecke lassen sich drehen",
+    "prefs.sketch.rectangle_rotatable_note": "Das 2-Punkt- und das Mittelpunkt-Rechteck halten ihre Seiten parallel und senkrecht, nur die untere Seite horizontal: Diese Bedingung löschen, um das Rechteck zu drehen. Aus: jede Seite horizontal oder vertikal."
+  },
+  "he": {
+    "prefs.sketch.rectangle_rotatable": "אפשר לסובב מלבנים",
+    "prefs.sketch.rectangle_rotatable_note": "המלבן בשתי נקודות והמלבן ממרכז שומרים על צלעות מקבילות ומאונכות, ורק הצלע התחתונה אופקית: מחקו אילוץ זה כדי לסובב את המלבן. כבוי: כל צלע אופקית או אנכית."
+  },
+  "ja": {
+    "prefs.sketch.rectangle_rotatable": "長方形を回転可能にする",
+    "prefs.sketch.rectangle_rotatable_note": "2点長方形と中心長方形の辺を平行・垂直に保ち、水平なのは下辺だけにします。その拘束を削除すると長方形を回転できます。オフ: 各辺を水平または垂直に保ちます。"
+  },
+  "vi": {
+    "prefs.sketch.rectangle_rotatable": "Cho phép xoay hình chữ nhật",
+    "prefs.sketch.rectangle_rotatable_note": "Hình chữ nhật hai điểm và hình chữ nhật từ tâm giữ các cạnh song song và vuông góc, chỉ cạnh dưới nằm ngang: xóa ràng buộc đó để xoay hình chữ nhật. Tắt: mỗi cạnh nằm ngang hoặc thẳng đứng."
+  },
+  "zh": {
+    "prefs.sketch.rectangle_rotatable": "矩形可旋转",
+    "prefs.sketch.rectangle_rotatable_note": "两点矩形和中心矩形的边保持平行和垂直，仅底边为水平：删除该约束即可旋转矩形。关闭时：每条边保持水平或竖直。"
+  }
+}

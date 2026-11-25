@@ -752,8 +752,12 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     let params = match t.cmd {
         // A corner or centre clicked on a curve, a midpoint or a crossing stays there, as a
         // line's end does (#18756).
-        "sketch.rectangle.two_point" => json!({"p0": held(app, &p[0]), "p1": held(app, &p[1])}),
-        "sketch.rectangle.center" => json!({"center": held(app, &p[0]), "corner": held(app, &p[1])}),
+        "sketch.rectangle.two_point" => {
+            json!({"p0": held(app, &p[0]), "p1": held(app, &p[1]), "rotatable": app.preferences.rectangle_rotatable})
+        }
+        "sketch.rectangle.center" => {
+            json!({"center": held(app, &p[0]), "corner": held(app, &p[1]), "rotatable": app.preferences.rectangle_rotatable})
+        }
         "sketch.rectangle.rounded" => {
             json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "radius": crate::sketch_dims::rounded_radius_value(app, t, p[0].0, p[1].0)})
         }

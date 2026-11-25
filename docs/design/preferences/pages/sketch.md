@@ -27,6 +27,7 @@ Two columns of checkboxes.
 | Centre-point arc follows the cursor | Checkbox | `Prefs.center_arc_follows_cursor` | `true` | none | none | |
 | Extended construction line tools | Checkbox | `Prefs.sketch_construction_lines` | `true` | none | none | |
 | Draw ellipses with their axes | Checkbox | `Prefs.ellipse_axes` | `true` | "The major and minor axes as construction lines, so the half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its minor radius wherever the value is pulled, drawn and labelled R as before." | none | New in #9292; not in `PROFILE_KEYS` (that list is the frozen pre-split baseline). |
+| Rectangles can be turned | Checkbox | `Prefs.rectangle_rotatable` | `false` | "The 2-point and center rectangles hold their sides parallel and perpendicular, with only the bottom side horizontal: delete that constraint to turn the rectangle. Off: each side horizontal or vertical." | none | New in #21467. |
 | Dimension new shapes fully | Checkbox | `Prefs.sketch_auto_dimensions` | `false` | "Typed values plus every dimension that fixes the shape." | none | |
 | Place from the sketch origin | Checkbox (dimmed on the board while the one above is off) | `Prefs.sketch_auto_locate` | `false` | "With full dimensions." | none | Dimmed unless "Dimension new shapes fully" is on. |
 | Shortcut again switches mode | Checkbox | `Prefs.shortcut_cycles_modes` | `false` | "Off: it starts the tool again." | none | |

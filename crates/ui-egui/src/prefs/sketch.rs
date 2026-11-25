@@ -110,6 +110,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch_mirror_auto_line",
             "prefs.region_pick_takes_holes",
             "prefs.sketch.ellipse_axes",
+            "prefs.sketch.rectangle_rotatable",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
@@ -182,6 +183,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.region_pick_takes_holes,
                 );
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
+                check(
+                    ui,
+                    "rectangle_rotatable",
+                    "prefs.sketch.rectangle_rotatable",
+                    Some("prefs.sketch.rectangle_rotatable_note"),
+                    &mut app.preferences.rectangle_rotatable,
+                );
                 check(
                     ui,
                     "sketch_auto_dimensions",

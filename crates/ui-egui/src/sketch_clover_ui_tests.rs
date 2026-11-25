@@ -71,3 +71,26 @@ fn a_clover_drawn_by_clicks_snaps_every_corner_without_redundant_constraints() {
     // On the origin: the two column widths and the two row heights are left.
     assert_eq!(solved.report.dof, 4);
 }
+
+/// Preferences › Sketch › Rectangles can be turned (#21467): the 2-Point Rectangle tool holds its
+/// sides parallel and perpendicular with only the bottom horizontal. Off (the default), each side
+/// is horizontal or vertical as before.
+#[test]
+fn the_rectangle_tool_draws_a_rotatable_rectangle_with_the_preference_on() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for on in [false, true] {
+        let mut h = Harness::new();
+        h.app.preferences.rectangle_rotatable = on;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        rectangle(&mut h, [0., 0.], [20., 12.], false);
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let count = |f: fn(&ConstraintKind) -> bool| sk.constraints.iter().filter(|c| f(&c.kind)).count();
+        let horizontal = count(|k| matches!(k, ConstraintKind::Horizontal { .. }));
+        let vertical = count(|k| matches!(k, ConstraintKind::Vertical { .. }));
+        let parallel = count(|k| matches!(k, ConstraintKind::Parallel { .. }));
+        let perpendicular = count(|k| matches!(k, ConstraintKind::Perpendicular { .. }));
+        assert_eq!(sk.curves.len(), 4, "on {on}: {:?}", sk.curves);
+        let want = if on { (1, 0, 2, 1) } else { (2, 2, 0, 0) };
+        assert_eq!((horizontal, vertical, parallel, perpendicular), want, "on {on}: {:?}", sk.constraints);
+    }
+}
