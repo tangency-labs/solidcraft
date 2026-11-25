@@ -254,3 +254,56 @@ fn a_sweep_path_curve_deleted_from_its_sketch_can_be_picked_again() {
     );
     assert!(h.app.dialog.is_none(), "the sweep was not applied: {:?}", h.app.preview.error);
 }
+
+/// The bodies a window's Target Bodies row holds.
+fn target_bodies(h: &Harness) -> Option<Vec<String>> {
+    use crate::selection::SelectionExt;
+    let d = h.app.dialog.as_ref()?;
+    d.inputs.iter().find(|i| i.label == "Target Bodies").map(|i| i.items.body_names())
+}
+
+/// The Sweep window shows the bodies a Join joins, and joins the body picked there (#17895).
+#[test]
+fn sweep_join_joins_the_target_bodies_picked_in_the_dialog() {
+    for picked in [vec![], vec!["Left"]] {
+        let mut h = Harness::new();
+        // Two slabs the swept square passes through: a Join takes both of them by itself.
+        h.app.run("solid.box", json!({"length":6,"width":6,"height":10,"corner":[-3,-3,-5],"body_name":"Left"})).unwrap();
+        h.app.run("solid.box", json!({"length":6,"width":6,"height":15,"corner":[-3,-3,30],"body_name":"Right"})).unwrap();
+        let sketch = setup(&mut h);
+        h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+        h.frames(3);
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+            d.inputs[1].items = vec![Sel::SketchCurve { id: "up".into(), sketch: None }];
+            let Kind::Sweep { operation, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+            *operation = 1;
+        }
+        // The operation is picked by hand, as in the window's list.
+        h.ctx.data_mut(|m| m.insert_temp(crate::op_auto::picked_id(), true));
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]), "Join shows an empty Target Bodies");
+        if !picked.is_empty() {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+            for name in &picked {
+                d.pick(&h.app.session, Sel::Body { name: (*name).into() });
+            }
+            h.frames(2);
+            assert_eq!(target_bodies(&h), Some(picked.iter().map(|n| n.to_string()).collect()));
+        }
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        let FeatureKind::Sweep { targets, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("sweep") };
+        let targets: Vec<String> = targets.iter().map(|t| t.0.clone()).collect();
+        let bodies = crate::open_meshing::session_world(&h.app.session).bodies.len();
+        if picked.is_empty() {
+            assert!(targets.is_empty(), "none picked: the command's own scope");
+            assert_eq!(bodies, 1, "the swept square joins both slabs");
+        } else {
+            assert_eq!(targets, picked, "the picked bodies");
+            assert_eq!(bodies, 2, "the slab that was not picked stays apart");
+        }
+    }
+}

@@ -429,6 +429,8 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;
+    // The tips of this window's Target Bodies row: what a Join joins and what a Cut cuts.
+    let (join_tip, cut_tip) = target_bodies_tips(&d.kind);
     if matches!(d.kind, Kind::Appearance(_)) {
         ui.spacing_mut().item_spacing.y = t.space_10;
     }
@@ -631,8 +633,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             // Join and Cut take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.
-            set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
-            if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, join_tip, cut_tip);
+            if d.inputs.iter().any(|i| i.label == TARGET_BODIES && !i.items.is_empty()) {
                 *auto_op = false;
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
@@ -1028,6 +1030,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     let pasted = crate::dialogs_move::pasted(d);
     // Picked components moved earlier and not captured: Revert Position puts just them back.
     let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
+    // The tips of this window's Target Bodies row: what a Join joins and what a Cut cuts.
+    let (join_tip, cut_tip) = target_bodies_tips(&d.kind);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -1070,6 +1074,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             }
             crate::op_auto::op_row(ui, "rv_op", operation);
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, join_tip, cut_tip);
         }
         Kind::Shell { thickness } => {
             // The direction below says which side the wall grows to; the label stays short enough
@@ -1298,11 +1304,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Loft { operation, rail_fit } => {
             crate::op_auto::op_row(ui, "lf_op", operation);
             crate::dialogs_sweep::rail_fit_row(ui, "lf", rail_fit);
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, join_tip, cut_tip);
         }
         Kind::Sweep { operation, opts } => {
             enter |= crate::dialogs_sweep::rows_with(ui, opts, "sw", |ui| {
                 crate::op_auto::op_row(ui, "sw_op", operation);
             });
+            // Join and Cut take their bodies in Target Bodies.
+            set_target_bodies(&mut d.inputs, &mut d.active, &mut d.extra, *operation, join_tip, cut_tip);
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
