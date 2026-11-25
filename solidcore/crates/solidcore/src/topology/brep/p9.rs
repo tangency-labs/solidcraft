@@ -155,18 +155,6 @@ pub struct SplitEdgeOutput {
     pub vertex: Option<VertexId>,
 }
 
-impl SplitEdgeOutput {
-    /// The upstream status; dependency errors use the enclosing `Result`.
-    #[must_use]
-    pub const fn status(self) -> i32 {
-        if self.split {
-            0
-        } else {
-            SM_ERR
-        }
-    }
-}
-
 /// `FindInfiniteRegion`, including its optional shell and bounding box arguments.
 ///
 /// The first call, `GetRegions`, requires the B-rep's native owning-list order.
@@ -1019,9 +1007,9 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
 ///
 /// The editing state is the B-rep's `m_bEditingEnabled` ([`Brep::editing_enabled`]):
 /// false from the constructor, set by editing scopes. Ordinary no-split results are
-/// successful Rust returns whose
-/// [`SplitEdgeOutput::status`] is `SM_ERR`; this preserves outputs that C++ callers
-/// consume despite that status. Dependency/invalid-graph errors remain `Err`.
+/// successful Rust returns whose [`SplitEdgeOutput::split`] is false (upstream's
+/// `SM_ERR`); this preserves outputs that C++ callers consume despite that status.
+/// Dependency/invalid-graph errors remain `Err`.
 ///
 /// # Errors
 /// Invalid graph; evaluator errors; face notifications or the

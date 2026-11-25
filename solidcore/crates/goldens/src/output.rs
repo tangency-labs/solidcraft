@@ -291,6 +291,18 @@ pub fn arc_length_status(r: &solidcore::curve::curve::p3::ArcLengthParameter) ->
     }
 }
 
+/// The upstream status number the goldens record for `MakeVertexSplitEdge`: 0 when it split
+/// the edge, `SM_ERR` (1001) when it did not, so the recorded rows stay as they are. The
+/// golden re-bless (#21874) replaces this conversion with the typed value.
+#[must_use]
+pub fn split_edge_status(split: solidcore::topology::brep::p9::SplitEdgeOutput) -> i32 {
+    if split.split {
+        0
+    } else {
+        solidcore::error::SM_ERR
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{blend_status, float_bits};
