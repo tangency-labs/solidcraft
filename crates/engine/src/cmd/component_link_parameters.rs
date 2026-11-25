@@ -823,7 +823,8 @@ fn settable_names(s: &Session, comp: u64, link: &DesignLink) -> Option<std::sync
         return Some(names);
     }
     let (_, file, bytes) = read_linked(s, comp, link).ok()?;
-    if link.file_sha256.as_ref().is_some_and(|kept| *kept != DesignLink::file_digest(&bytes)) {
+    // A link with no record of what it read is not known to hold this file's bytes either.
+    if link.file_sha256.as_ref().is_none_or(|kept| *kept != DesignLink::file_digest(&bytes)) {
         return None;
     }
     let (mut doc, _) = read_document(&file, &bytes, false).ok()?;
@@ -909,18 +910,30 @@ fn stale_links(s: &Session) -> Vec<String> {
             Err(why) => why,
             Ok(true) => match read_linked(s, *comp, link) {
                 Err(e) => e.to_string(),
-                Ok((_, file, bytes)) if link.file_sha256.as_ref().is_some_and(|kept| *kept != DesignLink::file_digest(&bytes)) => {
-                    format!("{} changed since this design last read it; Update Links takes in the change", file.display())
-                }
-                Ok((_, file, _)) => match loop_through(&file) {
-                    Some(chain) => format!("its design links back to one that passes it values ({chain})"),
-                    None => "its bodies were made with other values than this design passes it now".to_string(),
+                Ok((_, file, bytes)) => match (not_as_read(link, &file, &bytes), loop_through(&file)) {
+                    (Some(why), _) => why,
+                    (None, Some(chain)) => format!("its design links back to one that passes it values ({chain})"),
+                    (None, None) => "its bodies were made with other values than this design passes it now".to_string(),
                 },
             },
         };
         stale.push(format!("{cname} keeps its bodies: {why}"));
     }
     stale
+}
+
+/// Why a value edit may not build `bytes`, the file `link` names, into this design: they are not
+/// known to be what the link last read. A link that kept no digest (saved before links kept one,
+/// or written by hand) is treated as a changed file, so only Update Links reads it. `None` when
+/// the bytes are the ones the link read.
+fn not_as_read(link: &DesignLink, file: &Path, bytes: &[u8]) -> Option<String> {
+    match &link.file_sha256 {
+        None => Some(format!("{} has no record of what this design last read from it; Update Links reads it", file.display())),
+        Some(kept) if *kept != DesignLink::file_digest(bytes) => {
+            Some(format!("{} changed since this design last read it; Update Links takes in the change", file.display()))
+        }
+        Some(_) => None,
+    }
 }
 
 /// The links of a linked design that kept their bodies, driven once more ([`drive_links`]): the
@@ -991,11 +1004,8 @@ fn drive_links_here(s: &mut Session) -> Result<HeldReads> {
             note_kept(format!("{cname} keeps its bodies: its design links back to one that passes it values ({chain})"));
             continue;
         }
-        if link.file_sha256.as_ref().is_some_and(|kept| *kept != DesignLink::file_digest(&bytes)) {
-            note_kept(format!(
-                "{cname} keeps its bodies: {} changed since this design last read it; Update Links takes in the change",
-                file.display()
-            ));
+        if let Some(why) = not_as_read(&link, &file, &bytes) {
+            note_kept(format!("{cname} keeps its bodies: {why}"));
             continue;
         }
         let drove = driven_bodies(&file, &bytes, selected_configuration(&link), &link, false, &host, s.validation())

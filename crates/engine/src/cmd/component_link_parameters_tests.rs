@@ -1480,6 +1480,41 @@ fn setting_a_legacy_links_parameters_records_the_file_it_read() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A link with no record of the file it read (saved before links kept a digest, or written by
+/// hand) is not known to hold the file's bytes: a value edit keeps its bodies and says why,
+/// Update Links records the file, and the next edit drives it (upstream review of #20542).
+#[test]
+fn a_value_edit_never_drives_a_link_with_no_record_of_its_file() {
+    let dir = folder("no-digest");
+    let part = dir.join("plate.sc");
+    save_plate(&part);
+    let mut s = driven_assembly(&part);
+    run(&mut s, "component.link_parameters", json!({"component": "Plate", "set": {"h": "lift"}}));
+    assert!((volume(&mut s) - 2400.0).abs() < 1e-6);
+    for link in s.doc_mut().links.values_mut() {
+        link.file_sha256 = None;
+    }
+    let kept = run(&mut s, "parameters.change", json!({"name": "lift", "expression": "7 mm"}));
+    assert!(kept.get("linked").is_none(), "{kept}");
+    let why = kept["link_warnings"][0].as_str().unwrap_or("");
+    assert!(
+        why.contains("Plate keeps its bodies") && why.contains("has no record of what this design last read from it; Update Links reads it"),
+        "{kept}"
+    );
+    assert!((volume(&mut s) - 2400.0).abs() < 1e-6, "the link keeps its bodies");
+    assert!(s.doc.links.values().all(|l| l.file_sha256.is_none()), "a value edit records nothing");
+
+    // Update Links reads the file with the link's values (10 × 20 × 7) and records it.
+    run(&mut s, "component.update_links", json!({}));
+    let read = solidcraft_doc::DesignLink::file_digest(&std::fs::read(&part).unwrap());
+    assert_eq!(s.doc.links.values().next().unwrap().file_sha256.as_deref(), Some(read.as_str()));
+    assert!((volume(&mut s) - 1400.0).abs() < 1e-6);
+    let driven = run(&mut s, "parameters.change", json!({"name": "lift", "expression": "9 mm"}));
+    assert_eq!(driven["linked"], json!(["Plate"]), "{driven}");
+    assert!((volume(&mut s) - 1800.0).abs() < 1e-6);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Saving without linked bodies (`linked_bodies: false`) keeps the bodies of a link that passes
 /// values, and says so: reading the file again as it is would give the design's own sizes.
 #[test]
