@@ -5364,7 +5364,7 @@ mod tests {
         }
         assert_eq!(
             BlendFailure::OverflowInputMissing(OverflowInput::FaceSurface).to_string(),
-            "missing: a face a blend's overflow reads has no surface"
+            "invalid_input: a face a blend's overflow reads has no surface"
         );
     }
 
