@@ -30,6 +30,7 @@
 # geom.assert_array: the ValidatePointers label table gains test 147, "Warn Reversed End" (tangency-labs/solidcraft#21105): the digest is this branch's file (written by main_expected_digests; the unit has no ROWS case). It adds table_16011_1_147, brep_validate_pointers_last reads list_len 148 for 147, and the 183 generated cases that draw a test index from SmBrep list 1 draw from 148 entries; with only that entry removed the branch's unit compares changed=0 added=0 removed=0 against main's file
 # blend.fillet_geom_p1, blend.fillet_solver_p4, blend.fillet_standard_solver_p2, nlib.srf_adv_p1, nlib.srf_adv_p3, nurbs.b_spline_surface_n_lib_p1, surface.offset_surface: #21383 moves 179 rows, all ok -> ok, by the G1R homogeneous continuation (a rational side with mixed weight ratios gets the far row cb(1+t)B - tI, which is G1); each moved row is certified by its unit's g1r_moved_rows test (or each_moved_row_extends_its_base_by_certified_g1_steps); the digests are the branch files
 # topology.face_p1: a seam move needs a closed direction (UB-138, tangency-labs/solidcraft#21368): the digest is this branch's file. Its 62 MoveSeam rows move (the 37 UB-137 rows on vase_rev.smb and 25 op9/p5 rows), each replayed and checked by topology_face_p1::tests::seam_move_rows_keep_the_tolerances_the_geometry_needs; no other value moved
+# blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_cutting, topology.brep_p10, topology.face_p3: a B-rep ray classifies against the faces' current trims while the body is edited (WR-732 retired, #18934): the digests are this branch's files with the rows put back, on top of #20179's lines above and #21353's clamped-sliver lines (fillet_executive_p3's 10 sphere_diff_3cylinders rows carry both changes in their mass; the four e1/e4 rows also WR-459's topology, #21270). Lines moved against this main: the Fillet/sphere_diff_3cylinders.smb reads, whose five classified trims the implant now makes (fillet_executive_p3's 10 sphere_diff_3cylinders rows, mass only; corpus.parity 1; topology.face_p3 12, the uv_trim_f* rows without _rebuild; tolsub::replay puts main's read back to main's row hashes and wr493_rows proves the trims), topology.brep_p10's gen0026 (the healer's remade trims, 62 doubles by up to 1.7e-8, within the comparator; its rows stay certified) and gen0298 (Shell/problemShell16.smb with zone_tol -1 and scale -1: four doubles, each twice in its dbls, among them vertex 4's tolerance from 115.9 to 235.1), topology.brep_cutting's gen0050 (edge 8 and its vertices from 1.03e-3 to 1.48e-3, vertex 32 from 5.9e-4 to 1.19e-3) and gen0049 (within the comparator). After WR-450's retirement (#21342) both are this branch's lines, and wr450_rows no longer replays them; blend.feature_executive's fillet_each_fillet1019 and single_face_fillet1019_3 (WR-450 rows) move within the comparator (the base's area and volume by up to 9.1e-13 relative, three record doubles by 1e-15) and are this branch's runs, as wr450_rows' as-is replay requires. The ROWS values of heal.stitch_p1, heal.stitch_p2 and blend.fillet_executive_p3's bottle-e8 that the retirement moves are new values of their rows, certified above, so those digests stay
 # intersect.curve_class_p1, surface.surface_p4, surface.surface_point_solve_p3: #21504 (#20438) drops a global minimise answer farther than the target, and a dropped minimise falls back to the tree solve; each moved row is certified empty over its domain (target_bounded_solves_are_certified_empty in surface_surface_p4 and surface_surface_point_solve_p3) or replayed to main's row with the drops kept and each drop certified (target_bounded_rows_moved_only_through_certified_drops); the digests are the branch files
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
@@ -46,7 +47,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	29550c0f9b47966c
 blend.fillet_executive_p2	c14f791e96f99dd6
-blend.fillet_executive_p3	fe508f7c401609c3
+blend.fillet_executive_p3	b7de2f1c04ec4de3
 blend.fillet_geom_p1	555c086725065e34
 blend.fillet_geom_p2	4a54b5291270572a
 blend.fillet_geom_p3	15646cd3bfb41d7e
@@ -73,7 +74,7 @@ boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
 boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	cc0a822ffd4df3da
-corpus.parity	6b612bf10f3da914
+corpus.parity	64b194bd1258a346
 curve.composite_curve_p1	1b0a64a4a148983b
 curve.composite_curve_p2	4fa0f15e4b4a048b
 curve.conic	4955fffee7af9409
@@ -286,12 +287,12 @@ topology.api_projection	bfeb43d364a8f619
 topology.assert_valid	8c458efc020a7500
 topology.brep_cache	41208a4f463da33e
 topology.brep_constructor	068f13ea03e351d1
-topology.brep_cutting	3e7e099756bce8b5
+topology.brep_cutting	d6cd6b9a6f16aec4
 topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	43e7e1d8398b121a
 topology.brep_mirror	718965df3039bddd
 topology.brep_p1	6e3289ecf3e20a67
-topology.brep_p10	67db17d74e288cb1
+topology.brep_p10	bb75b23b0943484a
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
 topology.brep_p4	2b2814e782d110c9
@@ -309,7 +310,7 @@ topology.edgeuse_p2	4b628e0b414efcc0
 topology.edgeuse_p3	7c0b8d580d2a7b12
 topology.face_p1	aa482091622a15f7
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	99ab9055de228b11
+topology.face_p3	91db64e75856c341
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3
