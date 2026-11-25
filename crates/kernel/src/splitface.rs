@@ -1407,7 +1407,12 @@ mod tests {
             })
             .collect();
 
-        let sk_plane = Plane::new(Vec3::ZERO, Vec3::new(-0.382683, 0.92388, 0.0).normalized().unwrap(), Vec3::Z).unwrap();
+        // Precomputed unit vector for the sketch plane X axis (unit normalization of (-0.382683, 0.92388, 0)).
+        const SKETCH_X: Vec3 = Vec3::new(-0.382_682_898_036_223, 0.923_879_753_837_282, 0.0);
+        // Precomputed plain offset-tube volume: pi * (101^2 - 95^2) * 400 = 470_400 * pi mm^3.
+        const PLAIN_TUBE_VOL: f64 = 1_477_805.184_292_861_8;
+
+        let sk_plane = Plane::new(Vec3::ZERO, SKETCH_X, Vec3::Z).unwrap();
         let target = tube.face_within(Vec3::new(91.464074, 37.88566, 10.0), 1.0).unwrap().unwrap();
         let picks = [Vec3::new(91.464074, 37.88566, 10.0), Vec3::new(91.464074, -37.88566, 10.0)];
 
@@ -1418,13 +1423,17 @@ mod tests {
             let healed_twice = crate::boolean_record::healed(&healed_once).unwrap().with_split_lines(split.splits.clone());
             assert_eq!(healed_twice.face_count(), split.face_count());
             let raised = crate::offset_faces(&split, &picks, 4.0).unwrap();
-            (raised.face_count(), raised.volume_at(1e-6).unwrap())
+            let vol = raised.volume_at(1e-6).unwrap();
+            let raised_healed = crate::offset_faces(&healed_twice, &picks, 4.0).unwrap();
+            let healed_vol = raised_healed.volume_at(1e-6).unwrap();
+            assert_eq!(raised_healed.face_count(), raised.face_count());
+            assert!((healed_vol - vol).abs() < 1e-3, "repeated-heal offset volume ({healed_vol:.3}) must match split offset volume ({vol:.3})");
+            (raised.face_count(), vol)
         };
 
         let (fwd_faces, fwd_vol) = run_case(forward);
         let (rev_faces, rev_vol) = run_case(reversed);
-        let plain_tube_vol = std::f64::consts::PI * (101.0_f64.powi(2) - 95.0_f64.powi(2)) * 400.0;
-        assert!(fwd_vol < plain_tube_vol - 200.0, "forward pocket was filled: {fwd_vol:.3} vs plain {plain_tube_vol:.3}");
+        assert!(fwd_vol < PLAIN_TUBE_VOL - 200.0, "forward pocket was filled: {fwd_vol:.3} vs plain {PLAIN_TUBE_VOL:.3}");
         assert!((fwd_vol - 1_477_519.984).abs() < 0.05, "forward volume {fwd_vol:.3}");
         assert!((fwd_vol - rev_vol).abs() < 1e-3, "forward ({fwd_vol:.3}) and reversed ({rev_vol:.3}) volumes must match");
         assert!(fwd_faces > 6 && rev_faces > 6, "recess walls must exist: fwd={fwd_faces}, rev={rev_faces}");
