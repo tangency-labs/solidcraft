@@ -671,7 +671,7 @@ fn preview_inputs(case: &goldens::Case) -> ([f64; 3], Vec<usize>, f64) {
 }
 
 /// The axis (0, 1, 2) a box edge runs along and its corner point.
-fn box_edge(b: &Brep, e: solidcore::topology::EdgeId) -> (usize, Vec3, Vec3) {
+fn box_edge(b: &Brep, e: EdgeId) -> (usize, Vec3, Vec3) {
     let vs = edge::vertices(b, e, None).unwrap();
     let pts: Vec<Vec3> = vs
         .iter()
