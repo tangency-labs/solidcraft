@@ -1,7 +1,7 @@
 use solidcraft_geom::tess::EvaluateMesh as _;
 use std::collections::HashMap;
 
-use solidcore_record::Vec3;
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 
 use solidcore_record::brep::Curve;
@@ -847,5 +847,38 @@ fn a_face_whose_edge_cannot_be_sampled_is_left_out_and_the_rest_meshed() {
         let [left_out] = stats.unmeshed.as_slice() else { panic!("{t:?}: {:?}", stats.unmeshed) };
         assert!(!has[left_out.face], "{t:?}");
         assert!(left_out.reason.contains("nodes"), "{t:?}: {}", left_out.reason);
+    }
+}
+
+/// #18783: the oblique clevis from the report, about 6 m from the origin. STEP joins the
+/// cylinder patches into whole faces; their oblique trim chords must be parted on the curves
+/// before either the display or the strict export triangulation can use them.
+#[test]
+fn an_oblique_clevis_meshes_after_a_step_round_trip() {
+    let x = Vec3::new(0.657964, 0.376525, 0.65216);
+    let y = Vec3::new(-0.753049, 0.328982, 0.569814);
+    let block = |origin, lo: Vec2, hi: Vec2, depth| {
+        let plane = Plane::new(origin, x, y).expect("the report's sketch plane");
+        let region = Region2 { outer: Loop2::polygon(&[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)]), holes: vec![] };
+        ok(crate::extrude(&plane, &[region], 0.0, depth)).pop().expect("one prism")
+    };
+    let body = block(Vec3::new(120.0, -5973.590675, 323.515737), Vec2::new(-22.0, -22.0), Vec2::new(82.0, 22.0), 42.0);
+    let slot = block(Vec3::new(120.0, -5984.415993, 329.765737), Vec2::new(-23.0, -23.0), Vec2::new(32.0, 23.0), 17.0);
+    let body = cut(&body, &slot);
+    let cross_hole = ok(crate::cylinder(Vec3::new(120.0, -5972.72465, 323.015737), Vec3::new(0.0, -0.866025, 0.5), 8.5, 44.0));
+    let body = cut(&body, &cross_hole);
+    let bore = ok(crate::cylinder(Vec3::new(174.611031, -5960.525667, 388.144994), -x, 8.0, 22.0));
+    let body = cut(&body, &bore);
+    let step = ok(crate::step_export(&[&body], "SolidCraft"));
+    let imported = ok(crate::step_import(&step)).bodies.into_iter().next().expect("the clevis").body;
+    for (name, body) in [("constructed clevis", &body), ("STEP clevis", &imported)] {
+        let tolerance = crate::MeshTolerance::export_of(body.size());
+        let display = ok(body.mesh(&tolerance));
+        assert!(!display.triangles.is_empty(), "{name}");
+        assert_watertight(&display, name);
+        let (export, stats) = ok(body.export_mesh(&crate::MeshSpec::chord(tolerance.chord)));
+        assert!(!export.triangles.is_empty(), "{name}");
+        assert!(stats.lenient.is_empty(), "{name}: {:?}", stats.lenient);
+        assert_watertight(&export, name);
     }
 }

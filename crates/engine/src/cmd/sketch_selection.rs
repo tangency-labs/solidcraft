@@ -159,7 +159,14 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
         "concentric" => n == 2 && (r == 2 || (r == 1 && p == 1)),
         "curvature" => n == 2 && p == 0 && c >= 1,
         "horizontal_vertical" => n != 1 || l == 1,
-        "midpoint" => p == n || l == n - p,
+        // A point with a line, or with an arc (#16860: it sits halfway along it; a circle has no ends).
+        "midpoint" => {
+            let arc = selection.iter().any(|s| {
+                matches!(s, Sel::SketchCurve { id, .. }
+                    if sketch.curve_index(id).and_then(|i| sketch.curves.get(i)).is_some_and(|c| matches!(c.kind, crate::sketch::CurveKind::Arc { .. })))
+            });
+            p == n || l == n - p || (n == 2 && p == 1 && r == 1 && arc)
+        }
         // As the command takes them: two points, two lines, two circles or arcs, or a point with
         // any curve (a spline or ellipse too).
         "coincident" => n == 2 && (p == 2 || l == 2 || r == 2 || (p == 1 && (l == 1 || r == 1 || c == 1))),

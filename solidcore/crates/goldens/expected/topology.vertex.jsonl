@@ -788,7 +788,7 @@
 {"case":"corner_box_with_large_fillet_v2_off1em5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[224.00005684998496,228.00005684998496,8599.000681777656]],"n":145}}}
 {"case":"corner_box_with_large_fillet_v2_off1em7","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[216.0000004,220.0000004,8483.0000048]],"n":145}}}
 {"case":"corner_box_with_large_fillet_v3_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[203.0,211.0,8782.0]],"n":145}}}
-{"case":"corner_box_with_large_fillet_v4_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[161.00000000000028,161.00000000000028,7825.0000000000055]],"n":145}}}
+{"case":"corner_box_with_large_fillet_v4_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[147.0000000000001,151.0000000000001,7622.000000000002]],"n":145}}}
 {"case":"corner_box_with_large_fillet_v5_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[223.0,231.0,9072.0]],"n":145}}}
 {"case":"corner_box_with_large_fillet_v6_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[203.0,211.0,8760.0]],"n":145}}}
 {"case":"corner_box_with_large_fillet_v7_none","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[141.00000000000549,141.00000000000549,7575.000000000104]],"n":145}}}
@@ -4909,7 +4909,7 @@
 {"case":"surf_sphere150_rebuild_v0_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[22.000000000000007,22.000000000000007,274.0]],"n":25}}}
 {"case":"surf_sphere150_rebuild_v0_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[16042,16361]],"n":31}},"topology":null,"values":{}}
 {"case":"surf_sphere150_rebuild_v0_topo","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,1.0,1.0,0.0,1.0,1.0,1.0,0.0]}}
-{"case":"surf_sphere150_rebuild_v3_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[20.0,20.0,242.0]],"n":25}}}
+{"case":"surf_sphere150_rebuild_v3_gaps","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[20.0,20.0,243.0]],"n":25}}}
 {"case":"surf_sphere150_rebuild_v3_q","deferred":null,"error":null,"ints":{"q":{"blocks":[[16044,16380]],"n":31}},"topology":null,"values":{}}
 {"case":"surf_sphere150_rebuild_v3_topo","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,1.0]}}
 {"case":"surf_sphere150_v0_common","deferred":null,"error":null,"ints":{"q":[2,0,1,2,0,1]},"topology":null,"values":{}}

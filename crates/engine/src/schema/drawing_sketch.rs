@@ -6,14 +6,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Create {
-    /// Exact sheet id in the open drawing, as returned by drawing.inspect.
+    /// Exact sheet or view id in the open drawing, as returned by drawing.inspect.
     pub owner: String,
     pub name: Option<String>,
+    /// Host Sheet tile displaying the owner's sheet; omitted in a headless session.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Edit {
     pub sketch: String,
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +41,12 @@ pub struct Point {
 pub struct Reading {
     pub drawing: String,
     pub sheet: String,
+    /// The view it belongs to; left out for a sheet's own sketch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Stable host Sheet tile; distinct from the drawing view owning the geometry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sketching_view: Option<u64>,
     pub sketch: String,
     pub name: String,
     pub editing: bool,
@@ -43,11 +56,14 @@ pub struct Reading {
     pub curves: Vec<String>,
     pub constraints: Vec<String>,
 }
-/// The sheet Cancel reply names its exact drawing, sheet and sketch by encoded ids.
+/// The sheet Cancel reply names its exact drawing, sheet, view (a view's sketch only) and sketch
+/// by encoded ids.
 #[derive(Serialize, JsonSchema)]
 pub struct Cancelled {
     pub drawing: String,
     pub sheet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     pub sketch: String,
     pub removed: bool,
 }
@@ -94,6 +110,8 @@ mod tests {
     #[test]
     fn cancel_authors_no_parameter_keys() {
         assert_keys(input_schema_for::<Empty>(), &[]);
+        assert_keys(input_schema_for::<super::Create>(), &["name", "owner", "view"]);
+        assert_keys(input_schema_for::<super::Edit>(), &["sketch", "view"]);
     }
 
     #[test]
@@ -111,6 +129,7 @@ mod tests {
             let mut sheet = Session { param_check: level, ..Session::default() };
             run(&mut sheet, "sketch.create", json!({"plane":"XY"}));
             run(&mut sheet, "sketch.finish", json!({}));
+            run(&mut sheet, "solid.box", json!({"length":10,"width":10,"height":10}));
             let drawing = run(&mut sheet, "drawing.create", json!({}));
             let made = run(&mut sheet, "drawing.sketch.create", json!({"owner":drawing["sheets"][0]["id"]}));
             let reply = run(&mut sheet, "sketch.cancel", json!({}));
@@ -118,6 +137,13 @@ mod tests {
             assert_eq!(reply["sheet"], made["sheet"]);
             assert_eq!(reply["sketch"], made["sketch"]);
             assert!(reply["sketch"].is_string() && reply["removed"] == true, "{reply}");
+            assert!(conforms(schema, schema, &reply), "{level:?}: {reply} does not match {schema}");
+
+            // A view's sketch: the reply names its view as well as its view's sheet.
+            let view = run(&mut sheet, "drawing.view.base", json!({"sheet":drawing["sheets"][0]["id"],"scale":"1:1"}))["view"].clone();
+            let made = run(&mut sheet, "drawing.sketch.create", json!({"owner":view}));
+            let reply = run(&mut sheet, "sketch.cancel", json!({}));
+            assert_eq!((&reply["sheet"], &reply["view"], &reply["removed"]), (&made["sheet"], &view, &json!(true)));
             assert!(conforms(schema, schema, &reply), "{level:?}: {reply} does not match {schema}");
         }
     }

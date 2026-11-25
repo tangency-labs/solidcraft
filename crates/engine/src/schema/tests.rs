@@ -79,6 +79,33 @@ fn axes_and_scale_factors_match_their_readers() {
     }
 }
 
+/// A cylinder's `AxisDirExpr` (#18822) takes what `AxisDir` takes, and `[x, y, z]` or
+/// `{x, y, z}` with expressions among the numbers; its schema agrees with its reader, except
+/// for the zero vector, which a schema can't refuse.
+#[test]
+fn an_expression_axis_matches_its_reader() {
+    let root = schemars::schema_for!(AxisDirExpr);
+    let root = root.as_value();
+    let given = [json!("X"), json!(" y "), json!([0, 0, 1]), json!([0, "-sin(t)", "-cos(t)"]), json!({"x": "a", "y": 0, "z": 1})];
+    for v in given {
+        assert!(crate::cmd::axis_expr_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!([1, 2]), json!([0, "", 1]), json!([0, true, "a"]), json!({"x": "a"}), json!(null), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_expr_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // Plain numbers are normalized, as `AxisDir` reads them; expressions are kept as given.
+    let d = crate::cmd::axis_expr_form(&json!([0, 0, 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "0", "1"]);
+    let d = crate::cmd::axis_expr_form(&json!([0, "-sin(t)", 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "-sin(t)", "2"]);
+}
+
 #[test]
 fn points_accept_what_the_point_readers_accept() {
     assert!(parse::<Point3>(json!([1, 2, 3])).is_some());
@@ -392,6 +419,28 @@ fn issues_are_read_from_the_commands_own_contract() {
 fn a_level_is_read_back_from_its_name() {
     for level in ParamCheck::ALL {
         assert_eq!(ParamCheck::parse(level.name()), Some(level));
+    }
+}
+
+#[test]
+fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
+    use super::ui_prefs::{BrowserScrollWheel, PrefsParams};
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["browser_scroll_wheel"].is_object());
+    for (id, expected) in
+        [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom), ("always_pan", BrowserScrollWheel::AlwaysPan)]
+    {
+        let value = json!({"browser_scroll_wheel":id});
+        let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
+        assert_eq!(parsed.browser_scroll_wheel, Some(expected));
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    assert_eq!(serde_json::from_value::<PrefsParams>(json!({})).unwrap().browser_scroll_wheel, None);
+    for invalid in [json!("future"), json!(42), json!(true), json!(null)] {
+        let value = json!({"browser_scroll_wheel":invalid});
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err());
+        assert!(!conforms(schema, schema, &value), "{value}");
     }
 }
 
@@ -1278,7 +1327,7 @@ fn plane_names_match_check_plane_name() {
 fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
     use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch"]);
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
     assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
     let mut s = crate::Session::default();
     let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
@@ -1305,6 +1354,61 @@ fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
         let r = run(&mut s, exit, json!({}));
         let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
         assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn step_and_component_link_schema_keys_and_replies() {
+    use super::{component_link::*, insert_step::InsertStepParams};
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
+    assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
+    assert_keys(input_schema_for::<LinksParams>(), &[]);
+    let examples = [
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "state": "not_allowed", "reason": "not allowed"}]}),
+        ),
+        (
+            "component.update_links",
+            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
+        ),
+        ("component.break_link", json!({"component": 1, "path": "part.step"})),
+        ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
+        (
+            "file.insert_step",
+            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft", "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
+        ),
+    ];
+    for (id, reply) in examples {
+        let spec = crate::find_command(id).unwrap();
+        let schema = spec.output.unwrap()();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{id}: {reply}");
+    }
+    let mut s = crate::Session { param_check: ParamCheck::Strict, ..Default::default() };
+    for (id, params) in [
+        ("file.insert_step", json!({"path": "part.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "part.step", "unknown": true})),
+        ("component.update_links", json!({"components": "all"})),
+        ("component.update_links", json!({"component": null})),
+        ("component.update_links", json!({"components": null})),
+        ("component.break_link", json!({"component": []})),
+        ("component.links", json!({"unknown": true})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &params).is_err(), "{id} {params}");
         assert_eq!(s.doc.to_json(), before);
     }
 }

@@ -43,7 +43,7 @@ fn native_studios_resolve_without_mutation_and_apply_one_complete_undo() {
         assert!(!saved.stage.is_empty());
         assert_eq!(s.doc.features.len(), 1);
         assert!(s.doc.materials.is_empty());
-        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render.setups["Shot"], *saved);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc.to_json(), before);
@@ -176,7 +176,7 @@ fn physical_backgrounds_preserve_geometry_lights_camera_and_one_undo() {
         super::super::staging::apply(&mut scene, after, "test").unwrap();
         assert!(Arc::ptr_eq(&first, &scene.meshes[0].mesh));
         assert_eq!(scene.meshes.len(), 1 + after.stage.iter().count());
-        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(&reopened.render.setups["Shot"], after);
         let snapshot = s.doc.to_json();
         assert!(s.execute("render.stage.backdrop", &json!({"name":"Shot","kind":kind,"expected_revision":s.revision,"set":{"stage":[]}})).is_err());
@@ -195,7 +195,7 @@ fn finishing_and_linear_master_saved_intent_survive_reopen_without_host_and_reje
         "backdrop":{"mode":"radial","first_srgb":[230,220,200],"second_srgb":[25,35,45],"center":[0.4,0.3],"radius":0.8}}});
     s.execute("render.settings.set", &json!({"name":"Shot","set":{"job":job}})).unwrap();
     let after = s.doc.to_json();
-    let reopened = solidcraft_doc::Document::from_json(&after).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
     assert_eq!(reopened.render, s.doc.render);
     for patch in [
         json!({"job":{"method":"gpu_path","transparent_background":true,"options":job["options"]}}),
@@ -377,7 +377,7 @@ fn cpu_native_studios_preserve_full_job_and_exact_hdr_rig_authority_for_all_twen
         assert_eq!(s.doc.features, before.features);
         assert_eq!(s.doc.materials, before.materials);
         let saved_json = s.doc.to_json();
-        let reopened = solidcraft_doc::Document::from_json(&saved_json).unwrap();
+        let reopened = solidcraft_io::read_design(&solidcraft_io::write_design_container(&s.doc).unwrap()).unwrap();
         assert_eq!(reopened.render.setups["Shot"], *saved);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc, before);

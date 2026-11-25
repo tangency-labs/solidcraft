@@ -1,5 +1,6 @@
 //! The Continuity Analysis toolbar tool (#770): the button shades every seam, a click on an edge
 //! pins its numbers, the button again turns the analysis off, and a legend names the colours.
+//! Also the labels of the other analysis markers (Mass Center).
 
 use super::*;
 
@@ -59,6 +60,21 @@ fn the_legend_shows_while_seams_are_shaded() {
     h.step(&json!({"start": "inspect.continuity"})).unwrap();
     h.frame();
     assert!(crate::scenario::rect_of("continuity_legend").is_none(), "gone with the analysis");
+}
+
+/// Mass Center's marker reads the centre's coordinates in the design's units, as Design
+/// Properties does, not only its name (#15233).
+#[test]
+fn the_mass_center_marker_shows_its_coordinates() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 40})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.center_of_mass"})).unwrap();
+    h.frame();
+    let at = |v: f64| crate::prefs::show_mm_bare(&h.app, v);
+    let unit = crate::prefs::unit_scale(&h.app.session.doc.units).1;
+    let want = format!("Center of mass ({}, {}, {}) {unit}", at(10.0), at(5.0), at(20.0));
+    assert_eq!(marks(), [want], "{:?}", h.app.status);
 }
 
 /// While the tool runs, only what its click takes lights up under the pointer: an edge, never
