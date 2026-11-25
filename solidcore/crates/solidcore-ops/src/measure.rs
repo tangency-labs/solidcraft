@@ -1605,7 +1605,8 @@ impl Body {
 
     /// The loops of record face `face`, each as the record edges it runs along (through `order`),
     /// in the order the loop runs: the loops as the kernel lists them on the face's primary use,
-    /// the outer loop first and then the holes. A loop of a lone vertex has no edges. An
+    /// the outer loop first and then the holes. An edge a loop runs along twice (a seam) is
+    /// listed once, where the loop first meets it. A loop of a lone vertex has no edges. An
     /// application that names a hole by a pick reads the hole's edges here, and measures them
     /// with [`Body::edge_closest_point`].
     ///
@@ -3940,6 +3941,26 @@ pub(crate) mod tests {
         assert_eq!(outer, vec![0, 1, 2, 3]);
         assert_eq!(loops[1], vec![4]);
         assert_eq!(b.face_loops(&o, o.faces.len()), Err(Error::Argument));
+        // each loop of the block's faces runs edge to edge: consecutive edges, the last and the
+        // first included, share a vertex (a loop with a closed edge, a circle or a seam's
+        // neighbours, is left out)
+        let (record, ro) = b.to_record().unwrap();
+        let ends = |e: usize| record.edges[e].vertices;
+        for f in 0..ro.faces.len() {
+            for l in b.face_loops(&ro, f).unwrap() {
+                if l.len() < 2 || l.iter().any(|&e| ends(e)[0] == ends(e)[1]) {
+                    continue;
+                }
+                for (i, &e) in l.iter().enumerate() {
+                    let next = l[(i + 1) % l.len()];
+                    let shared = ends(e).iter().any(|v| ends(next).contains(v));
+                    assert!(
+                        shared,
+                        "face {f}: edges {e} and {next} of {l:?} do not meet"
+                    );
+                }
+            }
+        }
         all_fixes();
         let bx = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
         let bo = kernel_order(&bx);
