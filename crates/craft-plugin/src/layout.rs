@@ -52,6 +52,16 @@ pub(crate) fn validate(schema: &Value, field: &str) -> Result<()> {
 
 /// A help link the dialog may open: `https`, with a host, no spaces or control characters.
 pub fn help_url(url: &str) -> bool {
-    let host = url.strip_prefix("https://").and_then(|rest| rest.split(['/', '?', '#']).next());
-    url.len() <= MAX_URL && host.is_some_and(|host| !host.is_empty()) && !url.chars().any(|c| c.is_whitespace() || c.is_control())
+    url.len() <= MAX_URL && !url.chars().any(|c| c.is_whitespace() || c.is_control()) && url_host(url).is_some_and(|host| !host.is_empty())
+}
+
+/// The host of an `https` URL: its authority without user info or port (an IPv6 host keeps its
+/// brackets). `None` when the URL is not `https`.
+fn url_host(url: &str) -> Option<&str> {
+    let authority = url.strip_prefix("https://")?.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+    Some(match host_port.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map(|(ip, _)| ip)?,
+        None => host_port.split(':').next()?,
+    })
 }

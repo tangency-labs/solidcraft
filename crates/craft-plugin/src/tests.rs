@@ -656,8 +656,22 @@ fn dialog_layout_annotations_are_checked_at_load() {
     for source in [json!("missing"), json!("width"), json!(1)] {
         assert!(refused(json!({}), json!({"x-solidcraft-unit-from":source}), "x-solidcraft-unit-from"), "{source}");
     }
-    assert!(layout::help_url("https://example.com/#topic"));
-    for url in ["http://example.com", "https://", "https:///path", "https://#topic", "https://?q", "https://example.com/a b", "javascript:alert(1)"] {
+    for url in ["https://example.com/#topic", "https://example.com/docs#x", "https://user@example.com:8443/a", "https://[::1]/"] {
+        assert!(layout::help_url(url), "{url}");
+    }
+    for url in [
+        "http://example.com",
+        "https://",
+        "https:///path",
+        "https://#topic",
+        "https://#x",
+        "https://?q",
+        "https://user@#topic",
+        "https://:443/",
+        "https://[]/",
+        "https://example.com/a b",
+        "javascript:alert(1)",
+    ] {
         assert!(refused(json!({}), json!({"x-solidcraft-help":url}), "x-solidcraft-help"), "{url}");
     }
 }
