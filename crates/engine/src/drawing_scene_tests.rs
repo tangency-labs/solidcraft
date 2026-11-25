@@ -7462,7 +7462,7 @@ fn centre_line_gap_follows_measured_dimension_text_and_deferred_publication() {
 
 #[test]
 fn centre_gap_pieces_keep_the_original_dash_phase() {
-    use solidcraft_geom::drawing_centre_mark::GapObstacles;
+    use solidcraft_kernel::drawing_centre_mark::GapObstacles;
     let original = marks::group(42, Vec2::ZERO, 5.0, 2.0).unwrap();
     let obstacles = GapObstacles { lines: vec![(Vec2::new(2.0, -1.0), Vec2::new(2.0, 1.0))], boxes: Vec::new() };
     let cut = marks::cut_gaps(original.clone(), &obstacles).unwrap();

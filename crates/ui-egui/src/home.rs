@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 
-use egui::Color32;
 use solidcraft_engine::Session;
 use solidcraft_viewport::{Camera, StandardView};
 
@@ -60,8 +59,10 @@ pub struct HomeState {
     /// the recent list from its stored designs (the web build, see `sync_recents`) does not add
     /// them back. Opening or saving a design clears it from here.
     pub forgotten: std::collections::BTreeSet<String>,
+    /// The Start page's recovery banner was closed (×): hidden until the next launch, while
+    /// Recover still lists the designs.
+    pub recovery_banner_hidden: bool,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
-    library_stamps: HashMap<String, crate::library::FileStamp>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
     /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
     /// (see `add_recent`), which asks for the picture again.
@@ -187,6 +188,26 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
+}
+
+/// A picture of the part alone over transparent pixels, for the parts library's tiles: no
+/// backdrop, grid or axes.
+#[cfg(not(target_arch = "wasm32"))]
+fn cutout(s: &Session) -> Option<egui::ColorImage> {
+    let mut cam = Camera::default();
+    cam.set_view(StandardView::Iso);
+    let b = solidcraft_engine::view::bounds(s).ok()?;
+    if b.is_empty() {
+        return None;
+    }
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
+    cam.distance *= 0.7;
+    let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+    let mut scene = solidcraft_engine::view::scene_with_guides(s, &cam, &s.section, guides).ok()?;
+    scene.transparent = true;
+    // Over transparent black, the edges come back premultiplied.
+    let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
+    Some(egui::ColorImage::from_rgba_premultiplied(THUMB, &picture.rgba))
 }
 
 /// File identity, not just its path: saving or replacing a design invalidates its picture.
@@ -377,6 +398,38 @@ pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Op
             h.failed.insert(key.to_string());
         }
     }
+}
+
+/// A file's picture for the parts library, made once by opening the file (on a worker thread);
+/// a file that can't be drawn shows its stored picture, if it has one.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn part_picture(key: &str) -> Option<egui::ColorImage> {
+    // Kept apart from Home's pictures, which have their backdrop.
+    let path = cache_path(key).map(|p| p.with_file_name(format!("part-{}", p.file_name().unwrap_or_default().to_string_lossy())));
+    if let Some(bytes) = path.as_ref().and_then(|p| std::fs::read(p).ok())
+        && let Some(img) = decode_thumbnail(bytes)
+    {
+        return Some(img);
+    }
+    let mut s = Session::default();
+    let drawn = s.execute("doc.open", &serde_json::json!({ "path": key })).ok().and_then(|_| cutout(&s));
+    let Some(img) = drawn else {
+        return picture(key);
+    };
+    let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    if let (Some(path), Some(bytes)) = (path, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba))
+        && let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = solidcraft_engine::io::write_atomic(&path, &bytes, false);
+    }
+    Some(img)
+}
+
+/// Upload a picture into a texture map (the parts library's).
+pub(crate) fn install_texture(map: &mut HashMap<String, Option<egui::TextureHandle>>, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
+    let tex = img.map(|i| ctx.load_texture(format!("library:{key}"), i, egui::TextureOptions::LINEAR));
+    map.insert(key.to_string(), tex);
 }
 
 /// Read a disposable picture without evaluating, importing or meshing a model.
@@ -624,67 +677,6 @@ fn want(h: &mut HomeState, key: &str) {
     }
 }
 
-/// Draw document-browser thumbnails with a neutral image tint.
-pub(crate) fn paint_document_thumbnail(painter: &egui::Painter, texture: &egui::TextureHandle, rect: egui::Rect, dim: bool) {
-    let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
-    painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
-}
-
-/// Invalidate changed paths using metadata already read by the folder worker.
-pub(crate) fn refresh_document_thumbnails(h: &mut HomeState, identities: &std::collections::BTreeMap<std::path::PathBuf, crate::library::FileStamp>) {
-    let changed: Vec<_> = identities
-        .iter()
-        .filter_map(|(path, stamp)| {
-            let key = path.to_str()?;
-            (h.library_stamps.get(key) != Some(stamp) && h.thumbs.contains_key(key)).then(|| key.to_owned())
-        })
-        .collect();
-    if !changed.is_empty() {
-        // Dropped receivers reject late results from before this scan. Requeue interrupted
-        // placeholders on demand, while retaining ready pictures for unchanged files.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            h.rx = None;
-            h.remembering = None;
-        }
-        h.queued.clear();
-        h.thumbs.retain(|key, image| image.is_some() || h.failed.contains(key) || key.starts_with("sample:"));
-        for key in changed {
-            h.thumbs.remove(&key);
-            h.failed.remove(&key);
-        }
-    }
-    h.library_stamps.retain(|key, _| h.thumbs.contains_key(key));
-    for (path, stamp) in identities {
-        if let Some(key) = path.to_str() {
-            h.library_stamps.insert(key.to_owned(), stamp.clone());
-        }
-    }
-}
-
-/// Share the existing background thumbnail cache with the document browser.
-pub(crate) fn document_thumbnail(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
-    poll(app, ctx);
-    if !app.home.thumbs.contains_key(path)
-        && let Some(i) = path.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())
-    {
-        install(&mut app.home, ctx, path, sample_picture(i));
-    }
-    if !app.home.thumbs.contains_key(path) {
-        // Library browsing can visit many files; retain Home's recents and samples.
-        if app.home.thumbs.len() >= 256 {
-            let discard: Vec<_> =
-                app.home.thumbs.keys().filter(|key| !key.starts_with("sample:") && !app.home.recent.contains(key)).take(128).cloned().collect();
-            for key in discard {
-                app.home.thumbs.remove(&key);
-            }
-        }
-        want(&mut app.home, path);
-        ctx.request_repaint();
-    }
-    app.home.thumbs.get(path).and_then(Clone::clone)
-}
-
 /// Open a built-in sample (a copy of the design made for its picture).
 pub fn open_sample(app: &mut SolveApp, i: usize) {
     match app.home.samples.get(&i) {
@@ -797,6 +789,10 @@ enum FileAction {
     Link(&'static str),
     /// Recover (true) or discard the recoverable design at this index.
     Recovery(usize, bool),
+    /// Ask, then discard every recoverable design (the banner's Discard all).
+    DiscardAllRecovery,
+    /// Close the recovery banner until the next launch; the designs stay recoverable.
+    HideRecoveryBanner,
     /// The recent design at this index in `HomeState::recent`.
     OpenRecent(usize),
     ForgetRecent(usize),
@@ -828,6 +824,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // question up, and does not close the page behind it.
         && app.mesh_units.is_none()
         && app.import_options.is_none()
+        // The recovery banner's Discard all asks on this page too: Escape cancels that question.
+        && !app.recovery_discard_all
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         app.home.open = false;
@@ -975,7 +973,7 @@ fn rail(app: &SolveApp) -> Vec<start_page::RailItem<'_, FileAction>> {
 }
 
 fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
-    let banner = app.recoverable.first().map(|entry| {
+    let banner = app.recoverable.first().filter(|_| !app.home.recovery_banner_hidden).map(|entry| {
         let filename = entry
             .path
             .as_deref()
@@ -989,7 +987,13 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             filename,
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
             recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
-            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
+            // One design is discarded at once; several ask first (#9299).
+            discard: Some(if single {
+                (app.tr_label("Discard").into(), FileAction::Recovery(0, false))
+            } else {
+                (app.tr("recovery.discard_all").into(), FileAction::DiscardAllRecovery)
+            }),
+            close: Some((app.tr("home.recovery_hide").into(), FileAction::HideRecoveryBanner)),
         }
     });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
@@ -1280,6 +1284,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 crate::recovery_ui::apply(app, entry, recover);
             }
         }
+        FileAction::DiscardAllRecovery => app.recovery_discard_all = true,
+        FileAction::HideRecoveryBanner => app.home.recovery_banner_hidden = true,
         FileAction::OpenRecent(index) => {
             if let Some(path) = app.home.recent.get(index).cloned() {
                 open_recent(app, &path);
@@ -1358,49 +1364,6 @@ mod tests {
         assert_ne!(ctime(&path), first, "the change time never moved");
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn library_refresh_invalidates_changed_previews_and_rejects_late_jobs() {
-        let mut h = crate::scenario::Harness::new();
-        let path = h.dir.join("changed.sc");
-        let key = path.to_str().unwrap();
-        let stamp = crate::library::FileStamp {
-            bytes: 1,
-            modified: None,
-            #[cfg(unix)]
-            changed: (1, 0),
-        };
-        let mut identities = std::collections::BTreeMap::from([(path.clone(), stamp.clone())]);
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        install(&mut h.app.home, &h.ctx, key, Some(egui::ColorImage::filled([2, 2], Color32::WHITE)));
-        let old = h.app.home.thumbs[key].as_ref().unwrap().id();
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        assert_eq!(h.app.home.thumbs[key].as_ref().unwrap().id(), old, "unchanged files retain their texture");
-        let (tx, rx) = std::sync::mpsc::channel();
-        h.app.home.rx = Some(rx);
-        want(&mut h.app.home, "interrupted.sc");
-        identities.insert(path.clone(), crate::library::FileStamp { bytes: 2, ..stamp });
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        assert!(!h.app.home.thumbs.contains_key(key));
-        assert!(!h.app.home.thumbs.contains_key("interrupted.sc"));
-        assert!(tx.send((key.into(), Some(egui::ColorImage::filled([2, 2], Color32::RED)), None)).is_err());
-        assert!(h.app.home.rx.is_none());
-        want(&mut h.app.home, key);
-        assert_eq!(h.app.home.queued, [key]);
-    }
-
-    #[test]
-    fn library_sample_previews_do_not_build_or_queue_models() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home = HomeState::default();
-        for i in 0..solidcraft_engine::sample::samples().len() {
-            assert!(document_thumbnail(&mut h.app, &h.ctx, &format!("sample:{i}")).is_some());
-        }
-        assert!(h.app.home.samples.is_empty());
-        assert!(h.app.home.queued.is_empty());
-        assert!(h.app.home.wanted.is_none());
     }
 
     #[test]
@@ -2099,6 +2062,42 @@ mod tests {
         assert_eq!(h.app.recoverable.len(), 1);
         assert!(h.app.status.as_ref().is_some_and(|(message, _, error)| *error && message.contains("save or discard")));
         assert!(crate::scenario::rect_of("dialog:report:home_status").is_some(), "the refusal is visible on File");
+    }
+
+    /// Several recovered designs: the banner offers Discard all (asking first) and a close (×)
+    /// that hides it for this launch while Recover still lists the designs.
+    #[test]
+    fn file_view_recovery_banner_discards_all_after_asking_and_closes_without_discarding() {
+        let entry =
+            |id: &str, name: &str| solidcraft_engine::recovery::Entry { id: id.into(), name: name.into(), path: None, saved_at: 0, features: 3 };
+        let mut h = crate::scenario::Harness::new();
+        h.app.recoverable = vec![entry("a", "Bracket"), entry("b", "Housing")];
+        h.app.home.show(0);
+        h.frames(3);
+        assert!(crate::scenario::handle_at("home:recovery:discard").is_some(), "several designs: Discard all");
+        assert!(crate::scenario::handle_at("home:recovery:close").is_some(), "the banner can be closed");
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all, "Discard all asks first");
+        assert!(h.widget("Discard 2 autosaves?").is_some(), "its confirmation opens over File view");
+        assert_eq!(h.app.recoverable.len(), 2, "nothing is discarded before the answer");
+        h.step(&serde_json::json!({"widget": "Cancel"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all);
+        assert_eq!(h.app.recoverable.len(), 2, "Cancel keeps every design");
+        // Escape answers the question, and does not close File view behind it.
+        click_file(&mut h, "home:recovery:discard");
+        assert!(h.app.recovery_discard_all);
+        h.step(&serde_json::json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(!h.app.recovery_discard_all, "Escape cancels Discard all");
+        assert!(h.app.home.open, "Escape leaves File view open");
+        assert_eq!(h.app.recoverable.len(), 2);
+        click_file(&mut h, "home:recovery:close");
+        assert!(h.app.home.recovery_banner_hidden);
+        assert!(crate::scenario::handle_at("home:recovery:recover").is_none(), "the banner is gone");
+        assert_eq!(h.app.recoverable.len(), 2, "closing discards nothing");
+        click_file(&mut h, "home:recover");
+        assert!(crate::scenario::handle_at("home:recovery:0:recover").is_some(), "Recover still lists them");
     }
 
     #[test]

@@ -54,6 +54,7 @@ use solidcraft_doc::drawing::centre_mark::CentreMark;
 use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
+use solidcraft_doc::drawing::measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{
@@ -66,14 +67,13 @@ use solidcraft_doc::drawing_view::{
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
-use solidcraft_geom::hlr::Visibility;
 use solidcraft_geom::paper::{MAX_COORDINATE_MM, MAX_SIDE_MM, Picture};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_io::paper::MAX_PICTURE_DPI;
+use solidcraft_kernel::hlr::Visibility;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
@@ -489,11 +489,11 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
         Ok(match m {
             MeasureParam::Linear { along, from, to } => {
                 let direction = if *along == AlongParam::X { LinearDirection::Horizontal } else { LinearDirection::Vertical };
-                let reading = drawing_measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, direction, Reading::Projected).map_err(invalid)?;
                 length("linear", reading, LabelKind::Length)
             }
             MeasureParam::Aligned { from, to } => {
-                let reading = drawing_measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
+                let reading = measure::linear(basis, from.0, to.0, LinearDirection::Aligned, Reading::Projected).map_err(invalid)?;
                 length("aligned", reading, LabelKind::Length)
             }
             MeasureParam::Angle { edge: [a, b], from } => {
@@ -502,7 +502,7 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
                     AngleFromParam::View(ViewLineParam::Vertical) => AngleFrom::Vertical,
                     AngleFromParam::Line([c, d]) => AngleFrom::Edge(c.0, d.0),
                 };
-                let reading = drawing_measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
+                let reading = measure::angle(basis, (a.0, b.0), line, Reading::Projected).map_err(invalid)?;
                 MeasurementResult { value_mm: None, paper_mm: None, value_rad: Some(reading.value), ..length("angle", reading, LabelKind::Angle) }
             }
             MeasureParam::Radius { edge } => {

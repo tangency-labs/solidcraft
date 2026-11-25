@@ -91,13 +91,13 @@ use solidcraft_doc::{DocError, Document, ModelState, ThreadInfo, expr::ParamDef,
 use solidcraft_geom::cell::{Part, Projection};
 use solidcraft_geom::drawing_detail::{Boundary, Shape};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame, is_paper_coordinate};
-use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun, font_in};
 use solidcraft_geom::paper::{Clip, DrawnFor, Group, Item, MAX_COORDINATE_MM, MAX_RECORDS, ObjectKind, Picture, Scene, check_path};
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
+use solidcraft_kernel::hlr::Source;
 use solidcraft_render::job::MAX_PICTURE_PIXEL_TESTS;
 use solidcraft_render::transmission::Transmission;
 use solidcraft_render::{FaceAppearance, ProductScene};
@@ -1565,7 +1565,7 @@ struct Assembly {
     dimensions: Vec<DimensionState>,
     notes: Vec<NoteState>,
     annotation_failures: Vec<AnnotationFailure>,
-    gap_obstacles: solidcraft_geom::drawing_centre_mark::GapObstacles,
+    gap_obstacles: solidcraft_kernel::drawing_centre_mark::GapObstacles,
     gap_checks: usize,
     balloons: Vec<BalloonState>,
     tags: Vec<TagState>,

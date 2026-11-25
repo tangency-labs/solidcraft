@@ -65,6 +65,7 @@ mod envelopes;
 mod face;
 mod features;
 mod features_more;
+mod hole_stacks;
 mod join_pieces;
 pub(crate) use bom::SAME_AS_COMPONENT;
 pub(crate) use bom::occurrence_bom_type;
@@ -89,6 +90,7 @@ pub use construct_auto::is_construct_tool;
 pub use design_link::LinkProblem;
 pub use design_link::LinkState;
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
+pub(crate) use drawing_sketch::refuse_outside_drawing;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use edit::pick_mode;
 pub(crate) use face::FaceRefForm;
@@ -133,6 +135,7 @@ pub use file::runs_plugin_importer;
 pub(crate) use file::up_form;
 pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
+pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
@@ -222,6 +225,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+mod remove_history;
 mod render;
 pub(crate) use render::PreparedCapture;
 pub(crate) use render::prepare_capture_with_metadata;
@@ -285,6 +289,7 @@ mod sketch_equation;
 mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
+mod sketch_links;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
@@ -602,6 +607,18 @@ pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
 
 /// Every command, in toolbar order.
 pub fn command_specs() -> Vec<&'static CommandSpec> {
+    all_command_specs().to_vec()
+}
+
+/// Every command, in toolbar order, gathered once: the window looks commands up by id many
+/// times a frame (its buttons, menus and shortcuts), and gathering them from every module each
+/// time was most of what a lookup cost.
+fn all_command_specs() -> &'static [&'static CommandSpec] {
+    static ALL: std::sync::OnceLock<Vec<&'static CommandSpec>> = std::sync::OnceLock::new();
+    ALL.get_or_init(gather_command_specs)
+}
+
+fn gather_command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
@@ -623,6 +640,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(surface_match::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
+    v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
@@ -642,6 +660,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(joints::COMMANDS.iter());
     v.extend(joints::constraint::COMMANDS.iter());
     v.extend(clearance::COMMANDS.iter());
+    v.extend(hole_stacks::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
     v.extend(motion_simulate::COMMANDS.iter());
     v.extend(panels::COMMANDS.iter());
@@ -650,6 +669,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(remove_history::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
@@ -714,9 +734,17 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
 /// classification, a host's check) decides on the id this returns, never the id as sent, so it
 /// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    static BY_ID: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static CommandSpec>> = std::sync::OnceLock::new();
     let id = normalize_command_id(id)?;
-    let all = command_specs();
-    all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
+    let by_id = BY_ID.get_or_init(|| {
+        let mut by_id = std::collections::HashMap::new();
+        // The first command of an id wins, as a search in toolbar order finds it.
+        for c in all_command_specs() {
+            by_id.entry(c.id).or_insert(*c);
+        }
+        by_id
+    });
+    by_id.get(id).copied().or_else(|| all_command_specs().iter().find(|c| c.id.eq_ignore_ascii_case(id)).copied())
 }
 
 /// Whether two ids use common alternative verbs in the same namespace. This only ranks

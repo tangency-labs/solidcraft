@@ -1180,7 +1180,9 @@ mod local_operation {
 
     include!("operand_trim_rows/local_operation.rs");
 
-    /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
+    /// Every `topology.brep_local_operation` row the copy moves (64: `gen0030` is not
+    /// listed, because main and this branch both refuse its edit and put its input back, so
+    /// it no longer moves, tangency-labs/solidcraft#21301): certified as the
     /// module docs say; none farther, and looser only the listed
     /// [`super::RAISED_TO_A_LOOSE_BOUND`] tolerances (counted). The rows were recorded before the kept-trim cover
     /// (#19295), which can raise these reads' edge tolerances. Each case runs with any
@@ -1198,10 +1200,21 @@ mod local_operation {
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
             let (out, _) = with_fitted_spheres(|| {
-                with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap())
+                with_trim_cover_put_back(|| {
+                    crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                        Runner.run_rust(&case)
+                    })
+                    .unwrap()
+                })
             });
-            let ((_, mut bodies), _) =
-                with_fitted_spheres(|| with_trim_cover_put_back(|| result_breps(&case).unwrap()));
+            let ((_, mut bodies), _) = with_fitted_spheres(|| {
+                with_trim_cover_put_back(|| {
+                    crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                        result_breps(&case)
+                    })
+                    .unwrap()
+                })
+            });
             let (_, b) = &mut bodies[0];
             for c in certify_row(row.case, &out, b, row.main, row.new, row.moved) {
                 match c {
@@ -1217,18 +1230,21 @@ mod local_operation {
              proved bound, #19784) {looser}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 65);
+        assert_eq!(ROWS.len(), 64);
         assert_eq!(looser, super::RAISED_TO_A_LOOSE_BOUND.len());
     }
 
     /// A trim off its edge's tolerance on an edge no moved value touches passes only as
-    /// main's own trim (#19318). `box_face0_in` moves no value; the first two trimmed uses of
-    /// its first edge with two swap their trims (each now in the other face's parameters),
-    /// so neither lies on its edge, and neither is main's (main's record holds no trim).
+    /// main's own trim (#19318). `gen0002` moves no value (its row lists none, its `main` and
+    /// `new` digests are equal, it is not in [`crate::wr495_rows`]' rows or this unit's
+    /// trim-tolerance ledger, and `OFF_TRIMS` lists none of its trims); the first two trimmed
+    /// uses of its first edge with two swap their trims (each now in the other face's
+    /// parameters), so neither lies on its edge, and neither is main's. (`box_face0_in`
+    /// served until WR-495's exact mate left its result with no trimmed edge use, #21301.)
     #[test]
     #[should_panic(expected = "not main's")]
     fn an_off_trim_that_is_not_main_s_fails() {
-        let case = crate::case::regression_case(&Runner, "box_face0_in");
+        let case = crate::case::regression_case(&Runner, "gen0002");
         let out = Runner.run_rust(&case).unwrap();
         let (_, mut bodies) = result_breps(&case).unwrap();
         let (_, b) = &mut bodies[0];
@@ -1249,17 +1265,7 @@ mod local_operation {
         let t1 = b.edgeuse(u1).unwrap().uv_trim_curve.clone();
         b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
-        super::certify_body(
-            "box_face0_in",
-            &out,
-            "",
-            b,
-            Some(&mut raw),
-            &[],
-            &[],
-            true,
-            &[],
-        );
+        super::certify_body("gen0002", &out, "", b, Some(&mut raw), &[], &[], true, &[]);
     }
 }
 
@@ -1294,7 +1300,10 @@ mod feature_executive {
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
-            let out = Runner.run_rust(&case).unwrap();
+            let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                Runner.run_rust(&case)
+            })
+            .unwrap();
             assert_eq!(
                 plain_digest(&out, row.moved, false),
                 row.new,
@@ -1307,7 +1316,10 @@ mod feature_executive {
                 "{}: more than the listed values moved",
                 row.case
             );
-            let (mut input, mut base, features) = result_breps(&case);
+            let (mut input, mut base, features) =
+                crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                    result_breps(&case)
+                });
             // the input model's own level 2: a trim this branch copies carries its warnings
             let operand = solidcore::topology::brep::validation::soundness(
                 &mut solidcore::kernel::Kernel::default(),
@@ -1447,7 +1459,11 @@ mod trim_blocks {
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
                     sink.borrow_mut().extend(c);
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(
@@ -1455,7 +1471,12 @@ mod trim_blocks {
                 row.new,
                 "{name}: not the row"
             );
-            let blind = with_hook(Box::new(clear_trims), || runner.run_rust(&case)).unwrap();
+            let blind = with_hook(Box::new(clear_trims), || {
+                crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                    runner.run_rust(&case)
+                })
+            })
+            .unwrap();
             assert_eq!(
                 digest(&blind.values, &blind.ints),
                 row.main,
@@ -1565,7 +1586,11 @@ mod trim_blocks {
                         sink.borrow_mut().push(c);
                     }
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(

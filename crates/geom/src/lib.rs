@@ -22,9 +22,7 @@ mod chain;
 pub mod compare;
 pub mod drawing_arrange;
 pub mod drawing_break;
-pub mod drawing_centre_mark;
 pub mod drawing_detail;
-pub mod drawing_measure;
 pub mod drawing_sheet;
 pub mod drawing_view;
 pub mod env;
@@ -33,13 +31,11 @@ pub mod fill_general;
 pub mod fill_iso;
 pub mod fill_matched;
 mod grid;
-pub mod hlr;
 pub mod ids;
 pub mod inertia;
 pub mod linkage;
 mod mesh;
 pub mod mesh_distance;
-pub mod network;
 pub mod paper;
 pub mod pixel_grid;
 mod plane;
@@ -50,37 +46,36 @@ pub mod simplify;
 pub mod spline_space;
 pub mod stderr;
 pub mod table;
-/// The plan evaluator, now the kernel's (`solidcore::eval::plan`), and the display plan, now
-/// solidcore-tess's (RFC 0003, item 1.1), under their old path.
+/// The plan evaluator and the display plan, solidcore-tess's (RFC 0003, items 1.1 and 1.8;
+/// `solidcore_tess::eval`), under their old path.
 pub mod tess {
-    pub use solidcore::eval::plan::*;
-    pub use solidcore_tess::FacePlan;
-    pub use solidcore_tess::TessPlan;
+    pub use solidcore_tess::eval::{MAX_EVAL_KNOTS, MAX_EVAL_POINTS, MAX_SPLINE_DEGREE, basis, basis_ders, span_of, uv};
+    pub use solidcore_tess::{EvalCurve, EvalSurface, FacePlan, TessPlan};
 
     use solidcore_record::Vec3;
 
     /// A vector of SolidCraft's as the kernel's.
-    pub fn to_kernel(v: Vec3) -> solidcore::Vec3 {
-        solidcore::Vec3::new(v.x, v.y, v.z)
+    pub fn to_kernel(v: Vec3) -> solidcore_tess::eval::Vec3 {
+        solidcore_tess::eval::Vec3::new(v.x, v.y, v.z)
     }
 
     /// A vector of the kernel's as SolidCraft's.
-    pub fn from_kernel(v: solidcore::Vec3) -> Vec3 {
+    pub fn from_kernel(v: solidcore_tess::eval::Vec3) -> Vec3 {
         Vec3::new(v.x, v.y, v.z)
     }
 
     /// A point and two derivatives of the kernel's as SolidCraft's.
-    pub fn from_kernel3((a, b, c): (solidcore::Vec3, solidcore::Vec3, solidcore::Vec3)) -> (Vec3, Vec3, Vec3) {
+    pub fn from_kernel3((a, b, c): (solidcore_tess::eval::Vec3, solidcore_tess::eval::Vec3, solidcore_tess::eval::Vec3)) -> (Vec3, Vec3, Vec3) {
         (from_kernel(a), from_kernel(b), from_kernel(c))
     }
 
-    /// The kernel's partial derivatives ([`solidcore::eval::plan::partials`]) in SolidCraft's
+    /// The kernel's partial derivatives ([`solidcore_tess::eval::partials`]) in SolidCraft's
     /// vectors.
     pub mod partials {
-        pub use solidcore::eval::plan::partials::MAX_PARTIAL_ORDER;
-        pub use solidcore::eval::plan::partials::orders;
-        pub use solidcore::eval::plan::partials::trig_derivative;
         use solidcore_record::Vec3;
+        pub use solidcore_tess::eval::partials::MAX_PARTIAL_ORDER;
+        pub use solidcore_tess::eval::partials::orders;
+        pub use solidcore_tess::eval::partials::trig_derivative;
 
         /// A surface's partial derivatives at a point: `d[i][j]` is `∂^(i+j) S / ∂u^i ∂v^j`, filled
         /// for `i + j ≤` [`MAX_PARTIAL_ORDER`] and zero past it.
@@ -97,7 +92,7 @@ pub mod tess {
         }
 
         /// The kernel's table in SolidCraft's vectors.
-        pub fn from_kernel(d: solidcore::eval::plan::partials::Partials) -> Partials {
+        pub fn from_kernel(d: solidcore_tess::eval::partials::Partials) -> Partials {
             d.map(|row| row.map(super::from_kernel))
         }
     }

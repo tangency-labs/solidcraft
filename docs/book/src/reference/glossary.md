@@ -90,6 +90,20 @@ The part of the 2D Timeline that lists a design's joints in order, with a row fo
 - **Elsewhere:** joint track.
 - **For translators:** not an assembly, which is a design with several components.
 
+### base feature
+
+A timeline feature that holds bodies as fixed B-rep, with no steps that rebuild them.
+
+A base feature has no parameters to edit. Its bodies are changed by direct edits after it, such as
+Press Pull, Delete Face and Move Face.
+
+- **In SolidCraft:** the Import feature that `file.insert_step` adds, and the one Remove History
+  (`body.remove_history`) puts in place of the features that built only that body. Its B-rep is
+  kept in the design file as a STEP part of its own.
+- **Don't use:** dumb solid, frozen feature.
+- **Elsewhere:** base feature, dumb solid, imported body.
+- **For translators:** not a base flange of sheet metal, and not a base sketch.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -778,13 +792,19 @@ The ordered list of a design's features, which SolidCraft computes from first to
 
 How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
 as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
-edge as a torus.
+edge as a torus, where the rolling ball can pass the edge and the rounds are one radius round a
+straight edge square to them.
 
-- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
-  (the default) or `swept`; the Fillet dialog's Turns row.
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key: `auto` (the
+  default for a new fillet, "Auto": swept where the swept turn is built, mitred
+  elsewhere), `mitre` (a fillet saved without the key, as older designs are) or `swept`; the
+  Fillet dialog's Turns row. A fillet at per-edge radii (`radii`) is the exception: it is
+  mitred when it names no turn, since a swept turn takes one radius, so a caller that wants
+  Auto there says `turn: auto`.
 - **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
-- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel;
+  "Auto" names the choice between them, made at each corner.
 
 ### view angles
 
@@ -845,7 +865,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Instance | one copy a pattern makes | *pattern instance* | pattern commands |
 | | one placed copy of a component | *occurrence* | "Paste (Instance)" on `occurrence.copy` |
 | History | the undo and redo history | history | Undo, Redo |
-| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker" |
+| | the list of features | *timeline* | "Feature history" (`ui.feature_history`), "Roll History Marker", "Remove History" (`body.remove_history`) |
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |

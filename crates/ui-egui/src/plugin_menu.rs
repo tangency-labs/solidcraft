@@ -53,8 +53,8 @@ pub(crate) struct State {
     y: Option<f32>,
     /// The plugins listed when the menu last opened.
     pub(crate) listed: Vec<Listed>,
-    /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
-    /// once rather than every frame).
+    /// `listed` has been read since the plugins last changed: by the background discovery, which
+    /// the ribbon and menus wait for rather than reading the plugin folders themselves.
     pub(crate) loaded: bool,
     /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
     /// title and field values, so several can be open at once.
@@ -253,8 +253,7 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
         return None;
     }
     let mut fields = properties.iter().map(|(key, property)| field(key, property, required.contains(&key.as_str()))).collect::<Option<Vec<_>>>()?;
-    // A JSON object has no order: the required fields come first in the order `required` names
-    // them, then the rest by name.
+    // The default remains required-first; open_entry applies declared order only on opt-in.
     let rank = |key: &str| required.iter().position(|r| *r == key).unwrap_or(usize::MAX);
     fields.sort_by(|(a, _), (b, _)| rank(&a.key).cmp(&rank(&b.key)).then_with(|| a.key.cmp(&b.key)));
     for (field, _) in &mut fields {
@@ -836,7 +835,8 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
     buttons
 }
 
-/// Read the installed plugins when they have not been read since they last changed.
+/// Read the installed plugins now when no discovery has listed them since they last changed. For
+/// a plugin's own request (a form to open): never from a frame, which waits for the discovery.
 pub(crate) fn ensure_listed(app: &mut SolveApp) {
     if !app.plugin_menu.loaded && !cfg!(target_arch = "wasm32") {
         refresh(app);
@@ -929,6 +929,20 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 pub(crate) fn refresh(app: &mut SolveApp) {
     solidcraft_engine::plugin::sync_panels(&mut app.session);
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
+    app.plugin_menu.loaded = true;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// Take a background discovery's plugins as the listed ones. No file is read here but the panel
+/// declarations of the plugins that have panels, and only when the installed plugins changed.
+pub(crate) fn adopt(app: &mut SolveApp, plugins: &[Listed]) {
+    solidcraft_engine::plugin::sync_panels(&mut app.session);
+    let mut listed = plugins.to_vec();
+    for plugin in &mut listed {
+        plugin.disabled = !crate::plugins::enabled(app, &plugin.id);
+    }
+    app.plugin_menu.listed = listed;
+    app.plugin_menu.loaded = true;
 }
 
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).
@@ -1205,6 +1219,8 @@ pub(crate) struct Running {
     ticket: std::sync::Arc<solidcraft_control::Ticket>,
     /// A successful reply waits here while another design tab is active.
     received: Option<Value>,
+    /// The design copied by the worker at dispatch, retained with any deferred reply.
+    source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>,
 }
 
 /// Open the dialog of entry `e` of listed plugin `p`.
@@ -1221,6 +1237,14 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         return;
     }
     let mut fields = form(&entry.input_schema);
+    if entry.input_schema.get("x-solidcraft-field-order").and_then(Value::as_str) == Some("declared")
+        && let Some(fields) = &mut fields
+        && let Some(order) = entry.input_property_order.get("")
+    {
+        // Stable sorting retains the usual order for keys absent from the recorded list.
+        // Condition evaluation uses its own indices and never changes these field positions.
+        fields.sort_by_key(|(field, _)| order.iter().position(|key| key == &field.key).unwrap_or(usize::MAX));
+    }
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
     let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
@@ -1292,6 +1316,18 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
 /// Open an entry's normal form with stored parameters. Shared by ui.start, deferred guest
 /// requests and future panel row actions (#19516); no plugin code runs here.
 pub(crate) fn open_form(app: &mut SolveApp, plugin_id: &str, entry_name: &str, values: &Value) -> Result<(), String> {
+    let guard =
+        solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+    open_form_with_guard(app, plugin_id, entry_name, values, guard)
+}
+
+fn open_form_with_guard(
+    app: &mut SolveApp,
+    plugin_id: &str,
+    entry_name: &str,
+    values: &Value,
+    guard: solidcraft_engine::schema::plugin::FormGuard,
+) -> Result<(), String> {
     ensure_listed(app);
     let (p, e) = app
         .plugin_menu
@@ -1318,10 +1354,10 @@ pub(crate) fn open_form(app: &mut SolveApp, plugin_id: &str, entry_name: &str, v
         return Err(app.tr("ui.plugin_edit_already_open").into());
     }
     open_entry(app, p, e);
-    let guard =
-        solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+    let changed = guard.document_id != app.session.document_id || guard.revision != app.session.design_revision();
     let Some(dialog) = app.plugin_menu.dialogs.last_mut() else { return Err(app.tr("ui.plugin_edit_unknown").into()) };
     dialog.form_guard = Some(guard);
+    dialog.changed = changed;
     // Opening a populated form only validates inputs. Preview is an explicit request.
     dialog.preview = false;
     dialog.prefill_extra = match values.as_object() {
@@ -1952,7 +1988,7 @@ fn queue(app: &mut SolveApp, id: u64, request: Value) {
     app.plugin_menu.pending.push((req.serial, session));
     app.control_held.push_back(req);
     if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
-        dialog.running = Some(Running { reply, ticket, received: None });
+        dialog.running = Some(Running { reply, ticket, received: None, source_guard: None });
         dialog.revalidated = false;
         dialog.error = None;
         dialog.result = None;
@@ -1979,7 +2015,11 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
     if session == app.session.uid {
         // Resolve the lazy design revision before the worker copies this session, so
         // validation and the unchanged live design share the same revision token.
-        app.session.design_revision();
+        let guard =
+            solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+        if let Some(running) = app.plugin_menu.dialogs.iter_mut().filter_map(|d| d.running.as_mut()).find(|r| Arc::ptr_eq(&r.ticket, &req.ticket)) {
+            running.source_guard = Some(guard);
+        }
         Ok(())
     } else {
         app.plugin_menu.pending.remove(at);
@@ -2033,6 +2073,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         running.received = Some(reply);
         return;
     }
+    let source_guard = running.source_guard.clone();
     dialog.running = None;
     if let Some(validation) = reply.pointer("/result/form_validation") {
         if let Some(revision) = validation.get("revision").and_then(Value::as_u64)
@@ -2068,21 +2109,27 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         if reopen {
             app.plugin_menu.dialogs.remove(at);
         }
-        open_requested_forms(app, &reply);
+        open_requested_forms(app, &reply, source_guard);
         return;
     }
     let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
     app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
-    open_requested_forms(app, &reply);
+    open_requested_forms(app, &reply, source_guard);
 }
 
-fn open_requested_forms(app: &mut SolveApp, reply: &Value) {
+fn open_requested_forms(app: &mut SolveApp, reply: &Value, source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>) {
     if let Some(forms) = reply.pointer("/result/forms").and_then(Value::as_array) {
+        let Some(guard) = source_guard else {
+            if !forms.is_empty() {
+                app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
+            }
+            return;
+        };
         for form in forms {
             if let (Some(plugin), Some(entry), Some(params)) =
                 (form.get("plugin").and_then(Value::as_str), form.get("entry").and_then(Value::as_str), form.get("params"))
-                && let Err(error) = open_form(app, plugin, entry, params)
+                && let Err(error) = open_form_with_guard(app, plugin, entry, params, guard.clone())
             {
                 app.set_status(error, true);
             }
@@ -2277,6 +2324,7 @@ fn body(
                         continue;
                     }
                     let before = input.clone();
+                    let tip = field.tip.clone();
                     ui.add_enabled_ui(field.enabled, |ui| {
                         let mut row = |ui: &mut egui::Ui| {
                             if let Input::Selection(items) = input {
@@ -2288,7 +2336,7 @@ fn body(
                                 browse = Some(field.key.clone());
                             }
                         };
-                        if let Some(tip) = field.tip.as_deref() {
+                        if let Some(tip) = tip.as_deref() {
                             ui_kit::with_row_label_tooltip(ui, tip, row);
                         } else {
                             row(ui);
@@ -2361,7 +2409,7 @@ fn selection_row(
     ui: &mut egui::Ui,
     id: u64,
     index: usize,
-    field: &Field,
+    field: &mut Field,
     picks: &mut Vec<Sel>,
     picker: &mut Option<crate::dialogs::Dialog>,
     claim: &mut Claim,
@@ -2372,18 +2420,30 @@ fn selection_row(
     let width = ui.available_width();
     let left = ui.cursor().left();
     crate::scenario::publish_handle(&format!("plugin_dialog:field:{}", field.key), egui::pos2(left + width * 0.8, top + row / 2.0));
-    if let Some(picker) = picker {
+    if let Some(picker) = picker.as_mut() {
         crate::dialogs::input_rows_range(picker, ui, &app.session, names, index..index + 1);
-        return;
+    } else {
+        let mut idle = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: id }, vec![selection_input(field, picks)]);
+        idle.active = usize::MAX;
+        crate::dialogs::input_rows_range(&mut idle, ui, &app.session, names, 0..1);
+        if let Some(input) = idle.inputs.first() {
+            picks.clone_from(&input.items);
+        }
+        if idle.active != usize::MAX || idle.listed.is_some() {
+            *claim = Some((index, idle.listed.is_some()));
+        }
     }
-    let mut idle = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: id }, vec![selection_input(field, picks)]);
-    idle.active = usize::MAX;
-    crate::dialogs::input_rows_range(&mut idle, ui, &app.session, names, 0..1);
-    if let Some(input) = idle.inputs.first() {
-        picks.clone_from(&input.items);
-    }
-    if idle.active != usize::MAX || idle.listed.is_some() {
-        *claim = Some((index, idle.listed.is_some()));
+    if !field.required && field.prefilled {
+        let unset = ui_kit::button(ui, app.tr("ui.plugin_edit_unset"), ui_kit::Button::Normal);
+        crate::scenario::publish_handle(&format!("plugin_dialog:unset:{}", field.key), unset.rect.center());
+        if unset.clicked() {
+            picks.clear();
+            field.prefilled = false;
+            field.edited = true;
+            if let Some(input) = picker.as_mut().and_then(|p| p.inputs.get_mut(index)) {
+                input.items.clear();
+            }
+        }
     }
 }
 
