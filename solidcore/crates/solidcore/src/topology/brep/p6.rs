@@ -1988,6 +1988,36 @@ fn fire_at_inner_shell(
     attempt
 }
 
+// Same as `fire_at_inner_shell`, reusing a prepared `ShellRayTarget` across repeated rays
+// against an unchanged inner shell.
+fn fire_at_inner_target(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    query: &qbrep::BrepQuery<'_>,
+    split: &SplitShells,
+    target: &mut shell::ShellRayTarget,
+    input: (Point3, Vec3, f64),
+    state: ShellRayState<CacheObject>,
+) -> ShellRayAttempt<CacheObject> {
+    let (start, direction, zone_tolerance) = input;
+    let editing = brep.editing_enabled();
+    brep.set_editing_enabled(false);
+    let attempt = target.ray_fire(
+        k,
+        brep,
+        query,
+        ShellRayInput {
+            start,
+            direction,
+            zone_tolerance,
+            sphere_bound: Some(split.brep_radius),
+            state,
+        },
+    );
+    brep.set_editing_enabled(editing);
+    attempt
+}
+
 // `SmTol::GetZoneTol3d(pEdge)`: the `SmTopology` branch of the `SmObject` overload,
 // `pEdge->GetTolerance()`.
 fn edge_zone_tol_3d(brep: &Brep, edge: EdgeId) -> Result<f64> {
@@ -2144,6 +2174,7 @@ fn distribute_wires(
     let wire_zone_tol = edge_zone_tol_3d(brep, split_link(wire)?)?;
     let mut connected = Vec::new();
 
+    let mut target = shell::ShellRayTarget::new(k, brep, query.identity().brep_id, rays.inner)?;
     // wires remain to classify and place
     while let Some(current) = wire {
         // increment Mark value
@@ -2161,12 +2192,12 @@ fn distribute_wires(
             region: None,
             classification: PointClassification::<CacheObject>::new(wire_zone_tol),
         };
-        let attempt = fire_at_inner_shell(
+        let attempt = fire_at_inner_target(
             k,
             brep,
             query,
             split,
-            rays,
+            &mut target,
             (point, Vec3::new(1.0, 0.0, 0.0), wire_zone_tol),
             state,
         );
@@ -2212,40 +2243,66 @@ fn nest_shells(
 ) -> Result<()> {
     // Keep track of whether we move any shells around.
     let mut moved_shell = false;
+    let mut target = shell::ShellRayTarget::new(k, brep, query.identity().brep_id, rays.inner)?;
+    let brep_zone_tol = brep.tolerance();
+    let ray = Vec3::new(1.0, 1.0, 1.0);
+    // (a unit diagonal: Unitize cannot fail; its status is not checked)
+    let ray = ray.unitize().unwrap_or(ray);
     for &shell_id in shells {
         // skip oldShell (and newShell should not be on the list)
         if shell_id == split.old_shell || shell_id == split.new_shell {
             continue;
         }
+        // O(1) vertex pre-cull: any shell nested inside `rays.inner` has every vertex inside
+        // `rays.inner`'s bounding box. If a vertex lies strictly outside, skip `shell_point`
+        // (which evaluates binormal step-offs) and skip `ray_fire`.
+        if let Some((vpt, vtol)) = shell_sample_vertex(brep, shell_id)? {
+            let v_margin = brep_zone_tol.max(vtol) * 4.0
+                + EFF_ZERO_SQRT * (1.0 + vpt.max_dimension());
+            if !target.may_contain(vpt, v_margin) {
+                let found = split_link(brep.shell(rays.other)?.region)?;
+                let old = split_link(brep.shell(shell_id)?.region)?;
+                if old != found {
+                    native(region_remove(brep, old, shell_id))?;
+                    shell::region_post_insert_shell(brep, found, shell_id)?;
+                    moved_shell = true;
+                }
+                continue;
+            }
+        }
         let mut point = shell_point(k, brep, shell_id)?;
 
         // Classify the point against InnerShell.
-        let brep_zone_tol = brep.tolerance();
         let tol = EFF_ZERO_SQRT * (1.0 + point.max_dimension());
-        let ray = Vec3::new(1.0, 1.0, 1.0);
-        // (a unit diagonal: Unitize cannot fail; its status is not checked)
-        let ray = ray.unitize().unwrap_or(ray);
         point += ray * tol;
-        let state = ShellRayState {
-            region: None,
-            classification: PointClassification::<CacheObject>::new(brep_zone_tol),
-        };
-        let attempt = fire_at_inner_shell(
-            k,
-            brep,
-            query,
-            split,
-            rays,
-            (point, ray, brep_zone_tol),
-            state,
-        );
-        attempt.status?;
+        // A point strictly outside the closed inner shell's bounding box lies in the outer
+        // (`rays.other`) region; skip building `Shape` and firing a ray when it is culled.
+        let cull_margin =
+            brep_zone_tol.max(tol) * 4.0 + EFF_ZERO_SQRT * (1.0 + point.max_dimension());
+        let found = if target.may_contain(point, cull_margin) {
+            let state = ShellRayState {
+                region: None,
+                classification: PointClassification::<CacheObject>::new(brep_zone_tol),
+            };
+            let attempt = fire_at_inner_target(
+                k,
+                brep,
+                query,
+                split,
+                &mut target,
+                (point, ray, brep_zone_tol),
+                state,
+            );
+            attempt.status?;
 
-        // Default to OtherShell: if the ray-fire didn't hit anything, the shell is in
-        // the OtherShell region.
-        let found = match attempt.state.region {
-            Some(region) => region,
-            None => split_link(brep.shell(rays.other)?.region)?,
+            // Default to OtherShell: if the ray-fire didn't hit anything, the shell is in
+            // the OtherShell region.
+            match attempt.state.region {
+                Some(region) => region,
+                None => split_link(brep.shell(rays.other)?.region)?,
+            }
+        } else {
+            split_link(brep.shell(rays.other)?.region)?
         };
         let old = split_link(brep.shell(shell_id)?.region)?;
         // skip the move when they are the same: it might break 'the region's 1st
@@ -2353,21 +2410,37 @@ pub(crate) fn nest_closed_shells_as_cavities(
         let brep_zone_tol = brep.tolerance();
         let ray = Vec3::new(1.0, 1.0, 1.0);
         let ray = ray.unitize().unwrap_or(ray);
+        let mut targets: Vec<shell::ShellRayTarget> = Vec::with_capacity(solids.len());
+        for &(_, inner, _) in &solids {
+            targets.push(shell::ShellRayTarget::new(
+                k,
+                brep,
+                query.identity().brep_id,
+                inner,
+            )?);
+        }
         for (i, &(_, _, outer)) in solids.iter().enumerate() {
             let mut point = shell_point(k, brep, outer)?;
-            point += ray * (EFF_ZERO_SQRT * (1.0 + point.max_dimension()));
+            let tol = EFF_ZERO_SQRT * (1.0 + point.max_dimension());
+            point += ray * tol;
+            let cull_margin =
+                brep_zone_tol.max(tol) * 4.0 + EFF_ZERO_SQRT * (1.0 + point.max_dimension());
             let mut inside = Vec::new();
-            for (j, &(region, inner, _)) in solids.iter().enumerate() {
+            for (j, &(region, _, _)) in solids.iter().enumerate() {
                 if i == j {
+                    continue;
+                }
+                let Some(target) = targets.get_mut(j) else {
+                    continue;
+                };
+                if !target.may_contain(point, cull_margin) {
                     continue;
                 }
                 let editing = brep.editing_enabled();
                 brep.set_editing_enabled(false);
-                let attempt = shell::ray_fire(
+                let attempt = target.ray_fire(
                     k,
                     brep,
-                    query.identity().brep_id,
-                    inner,
                     &query,
                     ShellRayInput {
                         start: point,
@@ -2421,6 +2494,51 @@ pub(crate) fn nest_closed_shells_as_cavities(
         }
     }
     Ok(())
+}
+
+// O(1) sample vertex of a shell (position and vertex tolerance) without evaluating curves or
+// surfaces, used as a conservative containment pre-check before `shell_point` and `ray_fire`.
+fn shell_sample_vertex(brep: &Brep, shell_id: ShellId) -> Result<Option<(Point3, f64)>> {
+    let shell = brep.shell(shell_id)?;
+    let vu = if shell.is_faceuse_shell() {
+        let Some(fu) = shell.first_faceuse()? else {
+            return Ok(None);
+        };
+        let Some(lu) = brep.faceuse(fu)?.loopuses.first().copied() else {
+            return Ok(None);
+        };
+        match crate::topology::loopuse::eu_or_vu(brep, lu)? {
+            Some(EntityRef::Edgeuse(eu_id)) => brep.edgeuse(eu_id)?.vertexuse,
+            Some(EntityRef::Vertexuse(vu_id)) => Some(vu_id),
+            _ => None,
+        }
+    } else if shell.is_wire_shell() {
+        match shell.wire_edge(brep)? {
+            Some(edge) => match eu::primary_edgeuse(brep, edge)? {
+                Some(eu_id) => brep.edgeuse(eu_id)?.vertexuse,
+                None => None,
+            },
+            None => None,
+        }
+    } else if shell.is_vertex_shell() {
+        return Ok(match shell.vertex(brep)? {
+            Some(v) => {
+                let rec = brep.vertex(v)?;
+                Some((rec.point, rec.tolerance))
+            }
+            None => None,
+        });
+    } else {
+        None
+    };
+    let Some(vu) = vu else {
+        return Ok(None);
+    };
+    let Some(v) = brep.vertexuse(vu)?.vertex else {
+        return Ok(None);
+    };
+    let rec = brep.vertex(v)?;
+    Ok(Some((rec.point, rec.tolerance)))
 }
 
 // A point on a shell to classify: a point stepped off the first edge use, in stored

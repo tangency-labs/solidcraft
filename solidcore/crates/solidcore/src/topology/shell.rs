@@ -1199,6 +1199,150 @@ pub trait ShellRayWorld<O> {
     }
 }
 
+/// Prepared boundary faces, bounding box, and lazily built ray [`Shape`] of a single shell,
+/// shared across repeated ray fires against that unchanged shell (e.g. `nest_shells` and
+/// `nest_closed_shells_as_cavities`).
+pub(crate) struct ShellRayTarget {
+    brep_id: crate::topology::BrepId,
+    shell_id: ShellId,
+    faces: Vec<crate::geom::object::FaceKey>,
+    bbox: Option<crate::geom::extent3d::Extent3d>,
+    shape: Option<Shape>,
+}
+
+impl ShellRayTarget {
+    /// Collect `shell_id`'s distinct boundary faces and their union bounding box once.
+    /// The spatial [`Shape`] is deferred until the first ray that passes the box filter.
+    pub(crate) fn new(
+        kernel: &mut Kernel,
+        brep: &mut Brep,
+        brep_id: crate::topology::BrepId,
+        shell_id: ShellId,
+    ) -> Result<Self> {
+        let faces = ray_faces(kernel, brep, brep_id, shell_id)?;
+        let mut bbox = crate::geom::extent3d::Extent3d::new();
+        let mut bbox_ok = true;
+        for &(_, face) in &faces {
+            match crate::query::face::p1::calculate_bounding_box(kernel, &mut *brep, face, false) {
+                Ok(fb) if fb.is_defined() && fb.is_bounded() => {
+                    bbox = bbox.union(&fb);
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Ok(_) | Err(_) => {
+                    bbox_ok = false;
+                    break;
+                }
+            }
+        }
+        Ok(Self {
+            brep_id,
+            shell_id,
+            faces,
+            bbox: bbox_ok.then_some(bbox),
+            shape: None,
+        })
+    }
+
+    /// Whether `point` lies within `tol` of this shell's boundary bounding box (or the box
+    /// could not be bounded). Returns `false` when the shell has no boundary faces or `point`
+    /// lies strictly outside the bounded box.
+    #[must_use]
+    pub(crate) fn may_contain(&self, point: crate::math::Point3, tol: f64) -> bool {
+        if self.faces.is_empty() {
+            return false;
+        }
+        match self.bbox {
+            Some(b) => b.is_init() && b.contains_point(point, tol),
+            None => true,
+        }
+    }
+
+    /// Fire a ray against this prepared shell, building its [`Shape`] at most once and reusing
+    /// it across subsequent rays.
+    pub(crate) fn ray_fire<O, W>(
+        &mut self,
+        kernel: &mut Kernel,
+        brep: &mut Brep,
+        world: &W,
+        input: ShellRayInput<O>,
+    ) -> ShellRayAttempt<O>
+    where
+        O: crate::geom::solution_array::SolutionObject + crate::intersect::point_class::ClassObject,
+        W: ShellRayWorld<O>,
+    {
+        if self.shape.is_none() {
+            match world.shell_ray_shape(kernel, (self.brep_id, &*brep), &self.faces) {
+                Ok(shape) => self.shape = Some(shape),
+                Err(err) => {
+                    return ShellRayAttempt {
+                        status: Err(err),
+                        state: input.state,
+                    };
+                }
+            }
+        }
+        let Some(shape) = self.shape.as_ref() else {
+            return ShellRayAttempt {
+                status: Err(SolidError::invalid_input(
+                    "topology::shell::ShellRayTarget::ray_fire",
+                    "missing prepared shell shape",
+                )),
+                state: input.state,
+            };
+        };
+        ray_fire_with_shape(kernel, brep, self.brep_id, self.shell_id, shape, world, input)
+    }
+}
+
+/// Distinct boundary faces of `shell_id` (excluding faces whose mate also lies in `shell_id`).
+fn ray_faces(
+    kernel: &mut Kernel,
+    brep: &Brep,
+    brep_id: crate::topology::BrepId,
+    shell_id: ShellId,
+) -> Result<Vec<crate::geom::object::FaceKey>> {
+    const OP: &str = "topology::shell::ray_fire";
+    // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
+    with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
+        let mut marks = Marks::default();
+        let mut faces = Vec::new();
+        for id in brep.shell(shell_id)?.get_faceuses()? {
+            let faceuse = brep.faceuse(id)?;
+            let face = faceuse.face.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "a face use of the shell names no face; the kernel makes a \
+                            face's two face uses with the face and never unlinks one from \
+                            it",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
+            if marks.is_marked(kernel, Entity::Face(face), mark) {
+                continue;
+            }
+            marks.mark(kernel, Entity::Face(face), mark);
+            let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
+                Failure::new(
+                    OP,
+                    TopologyFailure::Defect {
+                        why: "a face use of the shell has no mate; the kernel makes a face's \
+                            two face uses as a mated pair",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?)?;
+            if mate.shell != Some(shell_id) {
+                faces.push((brep_id, face));
+            }
+        }
+        Ok::<_, SolidError>(faces)
+    })?
+}
+
 /// Fire a sized ray at this shell's distinct boundary faces (`SmShell::RayFire`).
 /// Native partial output writes survive an error in the returned attempt.
 /// Missing geometry queries are explicit dependency errors.
@@ -1207,6 +1351,33 @@ pub fn ray_fire<O, W>(
     brep: &mut Brep,
     brep_id: crate::topology::BrepId,
     shell_id: ShellId,
+    world: &W,
+    input: ShellRayInput<O>,
+) -> ShellRayAttempt<O>
+where
+    O: crate::geom::solution_array::SolutionObject + crate::intersect::point_class::ClassObject,
+    W: ShellRayWorld<O>,
+{
+    let shape = match ray_faces(kernel, brep, brep_id, shell_id)
+        .and_then(|faces| world.shell_ray_shape(kernel, (brep_id, &*brep), &faces))
+    {
+        Ok(shape) => shape,
+        Err(err) => {
+            return ShellRayAttempt {
+                status: Err(err),
+                state: input.state,
+            };
+        }
+    };
+    ray_fire_with_shape(kernel, brep, brep_id, shell_id, &shape, world, input)
+}
+
+fn ray_fire_with_shape<O, W>(
+    kernel: &mut Kernel,
+    brep: &mut Brep,
+    brep_id: crate::topology::BrepId,
+    shell_id: ShellId,
+    shape: &Shape,
     world: &W,
     input: ShellRayInput<O>,
 ) -> ShellRayAttempt<O>
@@ -1252,52 +1423,12 @@ where
                     .caused_by(e)
                     .into_error()
             })?;
-        // `SmNewMarkAndLock` with the default (all marks) mask, released on every path.
-        let faces = with_mark_lock(kernel, ALL_MARKS, |kernel, mark| {
-            let mut marks = Marks::default();
-            let mut faces = Vec::new();
-            for id in brep.shell(shell_id)?.get_faceuses()? {
-                let faceuse = brep.faceuse(id)?;
-                let face = faceuse.face.ok_or_else(|| {
-                    Failure::new(
-                        OP,
-                        TopologyFailure::Defect {
-                            why: "a face use of the shell names no face; the kernel makes a \
-                                face's two face uses with the face and never unlinks one from \
-                                it",
-                        },
-                    )
-                    .with_status(SM_ERR_NULL_POINTER)
-                    .into_error()
-                })?;
-                if marks.is_marked(kernel, Entity::Face(face), mark) {
-                    continue;
-                }
-                marks.mark(kernel, Entity::Face(face), mark);
-                let mate = brep.faceuse(faceuse.mate.ok_or_else(|| {
-                    Failure::new(
-                        OP,
-                        TopologyFailure::Defect {
-                            why: "a face use of the shell has no mate; the kernel makes a face's \
-                                two face uses as a mated pair",
-                        },
-                    )
-                    .with_status(SM_ERR_NULL_POINTER)
-                    .into_error()
-                })?)?;
-                if mate.shell != Some(shell_id) {
-                    faces.push((brep_id, face));
-                }
-            }
-            Ok::<_, SolidError>(faces)
-        })??;
-        let shape = world.shell_ray_shape(kernel, (brep_id, brep), &faces)?;
         let vectors = [direction];
         let solutions = world.solve_shape_ray(
             &*kernel,
             brep,
             brep_id,
-            &shape,
+            shape,
             input.start,
             TopologySolveOptions {
                 operation: SolverOperation::Rayfire,
@@ -2326,5 +2457,58 @@ mod tests {
                 (21.0, "face")
             ]
         );
+    }
+
+    #[test]
+    fn shell_ray_target_culls_outside_points_and_reuses_shape() {
+        use crate::intersect::point_class::PointClassification;
+        use crate::math::{Point3, Vec3};
+        use crate::primitive::api_primitives::create_box;
+        use crate::query::brep::BrepQuery;
+        use crate::topology::brep_cache::CacheObject;
+        use crate::topology::BrepId;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        let solid_region = b
+            .regions
+            .iter()
+            .find(|&(id, r)| !r.is_infinite_region(&b, id))
+            .map(|(id, _)| id)
+            .unwrap();
+        let inner_shell = b.region(solid_region).unwrap().shells[0];
+        let mut target = ShellRayTarget::new(&mut k, &mut b, BrepId::from_index(0), inner_shell)
+            .unwrap();
+
+        // Point outside the [0, 10]^3 box is culled without building the Shape.
+        assert!(!target.may_contain(Point3::new(25.0, 5.0, 5.0), 1e-4));
+        assert!(target.shape.is_none());
+
+        // Point inside passes the box check and lazily builds Shape once across repeated rays.
+        let inside = Point3::new(5.0, 5.0, 5.0);
+        assert!(target.may_contain(inside, 1e-4));
+        let query = BrepQuery::of_brep(&b);
+        let dir = Vec3::new(1.0, 1.0, 1.0).unitize().unwrap();
+        let tol = b.tolerance();
+        for p in [inside, Point3::new(2.0, 3.0, 4.0)] {
+            let attempt = target.ray_fire(
+                &mut k,
+                &mut b,
+                &query,
+                ShellRayInput {
+                    start: p,
+                    direction: dir,
+                    zone_tolerance: tol,
+                    sphere_bound: Some(20.0),
+                    state: ShellRayState {
+                        region: None,
+                        classification: PointClassification::<CacheObject>::new(tol),
+                    },
+                },
+            );
+            attempt.status.unwrap();
+            assert_eq!(attempt.state.region, Some(solid_region));
+            assert!(target.shape.is_some());
+        }
     }
 }
