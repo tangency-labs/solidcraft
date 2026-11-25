@@ -7443,6 +7443,22 @@ fn named_pieces_of(
     out
 }
 
+/// Through All's signed distance: the `reach` on the side the kept Distance's sign picks
+/// (#10415). The extrude and the arrow in its window both take the side from here (#21844).
+pub fn through_all_side(reach: f64, kept_distance: Option<f64>) -> f64 {
+    if kept_distance.is_some_and(|d| d < 0.0) { -reach } else { reach }
+}
+
+/// Two Sides: the side of the sketch Distance 2 goes to, 1 along the normal or -1 against it.
+/// After an entered first distance the sides are the ones Direction gives (`negative`), whatever
+/// its sign; after a first side reached from the model (`follows_first`: To Object, Through All)
+/// the second goes the other way from where `first` went. The extrude and the second arrow in
+/// its window both take the side from here (#21844).
+pub fn second_side(first: f64, negative: bool, follows_first: bool) -> f64 {
+    let along = if follows_first { first < 0.0 } else { negative };
+    if along { 1.0 } else { -1.0 }
+}
+
 /// Distance that reaches through every target body from the plane `start` along the normal from
 /// the sketch plane (the From Object level plus any start offset), on either side.
 pub fn through_all_distance(st: &ModelState, plane: &Plane, start: f64, targets: &[String]) -> Result<f64> {
@@ -9947,7 +9963,7 @@ fn feature_tools_with_constructor(
                     // Measured from where the extrude starts, so an offset leaves no side short (#16556).
                     let start = from + extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
                     let reach = through_all_distance(st, &ss.plane, start, &crate::plain(targets))?;
-                    if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
+                    through_all_side(reach, val(vals, &extent.distance, Kind::Length).ok())
                 }
                 (None, _) => val(vals, &extent.distance, Kind::Length)?,
             };
@@ -11443,13 +11459,7 @@ pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Exten
             // and a sign only turns its own side over. A reach computed from the model (To
             // Object, Through All) has the sign of where the object is, so the other side
             // follows it.
-            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
-                if first < 0.0 { d2 } else { -d2 }
-            } else if negative {
-                d2
-            } else {
-                -d2
-            };
+            let second = d2 * second_side(first, negative, extent.second_follows_first || extent.to.is_some() || extent.through_all);
             (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
