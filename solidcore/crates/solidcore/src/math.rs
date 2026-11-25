@@ -496,22 +496,26 @@ impl Transform {
         Some([x, y])
     }
 
-    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `y` is `v` with
-    /// its part along `d` taken out, made unit, and `x = y × d`, an exact cross product of the two
-    /// unit axes (no turn, so no `cos(π/2)` left in it); `x × y` then runs along `d`. `None` when a
-    /// coordinate is not finite, `d` has no length, or no part of `v` is left square to `d` past
-    /// the rounding of taking its part along `d` out (64 ulps of `v`'s length).
+    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `x` is the unit
+    /// cross product of `v`'s part square to `d` with `d`, and `y = d × x`; so `x`, `y` and `d` are
+    /// unit and square to each other within a few ulps for any `v` taken, `x × y` runs along `d`,
+    /// and `y` runs along `v`'s part square to `d`. `d` and `v` are made unit first, at any finite
+    /// length (nothing is squared before it is scaled). `None` when a coordinate is not finite, `d`
+    /// or `v` has no length, or `v` leans within [`FRAME_LEAN`] of `d`: `y`'s direction is then
+    /// set by the rounding of taking `v`'s part along `d` out, not by `v`.
     #[must_use]
     pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
         if !(finite3(d) && finite3(v)) {
             return None;
         }
         let (_, d) = d.length_and_unit()?;
+        let (_, v) = v.length_and_unit()?;
         let (square, y) = (v - d * v.dot(d)).length_and_unit()?;
-        if square <= 64.0 * f64::EPSILON * v.length() {
+        if square <= FRAME_LEAN {
             return None;
         }
-        Some([y.cross(d), y])
+        let (_, x) = y.cross(d).length_and_unit()?;
+        Some([x, d.cross(x)])
     }
 
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
@@ -600,6 +604,12 @@ impl Transform {
 
 /// The operation name of the refusals of the maps built from their numbers.
 const OP_MAPS: &str = "math::Transform";
+
+/// The least sine of the angle between `v` and `d` that [`Transform::frame_axes`] takes. Taking
+/// `v`'s part along `d` out of the unit `v` leaves a remainder of length `sin` off by a few ulps of
+/// 1, so `y`'s direction is off `v`'s part square to `d` by about `4ε / sin`: at 1e-6 that is under
+/// 1e-9 rad, a millionth of a mm over a metre.
+pub const FRAME_LEAN: f64 = 1e-6;
 
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {

@@ -1889,13 +1889,13 @@ impl Body {
     }
 
     /// What record face `face` gives towards the direction a set of faces runs straight along
-    /// ([`straight_direction`]): its plane's normal, its cylinder's axis, or neither
-    /// ([`solidcore::prism::measure::face_run`]).
-    pub(crate) fn face_run(&self, order: &Order, face: usize) -> Result<FaceRun> {
+    /// ([`straight_direction`]), with its band for the zone tolerance `zone`: its plane's normal,
+    /// its cylinder's axis, or neither ([`solidcore::prism::measure::face_run`]).
+    pub(crate) fn face_run(&self, order: &Order, face: usize, zone: f64) -> Result<FaceRun> {
         let f = order::face(order, face)?;
-        read_body("face_run", self, |_, b| {
+        read_body("face_run", self, |k, b| {
             Ok(Ok::<FaceRun, Error>(solidcore::prism::measure::face_run(
-                b, f,
+                k, b, f, zone,
             )))
         })?
     }
@@ -1910,8 +1910,9 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::Argument`] for an index past the edges or faces, or an edge that does not bound
-    /// the face; the kernel's error (an edge use in no loop, no usable tangent or binormal, an
-    /// edge interval that is not finite).
+    /// the face; the kernel's error for a seam of the face (an edge it lies on both sides of, as
+    /// a cylinder's), an edge use in no loop, no usable tangent or binormal, or an edge interval
+    /// that is not finite.
     pub fn edge_inward(&self, order: &Order, edge: usize, face: usize) -> Result<[f64; 3]> {
         let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
         let v = with_body("edge_inward", self, |k, b| {
@@ -2209,14 +2210,16 @@ pub enum Straight {
     /// cylinder.
     Undetermined,
     /// Face `face` (an index into the faces passed) strays across the first direction tried by
-    /// more than the zone tolerance, and no other direction proves every face straight.
+    /// more than the zone tolerance, and no other candidate proves every face straight. When the
+    /// faces are planes and cylinders, no direction does (up to the kernel's octagon for a
+    /// cylinder's band, [`solidcore::prism::measure::straight_candidates`]).
     NotStraight {
         /// The face, as an index into the faces passed.
         face: usize,
     },
     /// No bound is proved for face `face` (an index into the faces passed) along the first
     /// direction tried (a surface kind [`Body::face_straying`] does not cover), and no other
-    /// direction proves every face straight.
+    /// candidate proves every face straight.
     Unproved {
         /// The face, as an index into the faces passed.
         face: usize,
@@ -2228,11 +2231,15 @@ pub enum Straight {
 ///
 /// The candidates are the kernel's ([`solidcore::prism::measure::straight_candidates`]): first the
 /// cross product of the two plane normals furthest from parallel, when they are proved apart (a
-/// plane pair wins), then each cylinder axis. The order of the faces and the senses of their
-/// normals change neither the candidates nor their order. Each candidate is tried in turn: the
+/// plane pair wins); when that one is outside a plane's or cylinder's band (how far a direction
+/// may lean for the face to stay within the zone), a direction inside every band; then each
+/// cylinder axis. The order of the faces and the senses of their normals change neither the
+/// candidates, their order, nor the faces they name. Each candidate is tried in turn: the
 /// first along which every face strays by no more than the zone tolerance
-/// ([`crate::sweep::zone_tolerance`]) is the answer. Faces of other kinds (an extruded spline
-/// surface) give no candidate but are proved along one when [`Body::face_straying`] covers them.
+/// ([`crate::sweep::zone_tolerance`]) is the answer. Faces of other kinds give no candidate and
+/// no band but are proved along one when [`Body::face_straying`] covers them (a ruled spline net);
+/// an extruded surface gives none, so faces of extrusions and parallel planes alone are
+/// [`Straight::Undetermined`].
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past a body's faces; the errors of the session and the zone
@@ -2241,7 +2248,7 @@ pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> 
     let zone = crate::sweep::zone_tolerance()?;
     let mut runs = Vec::with_capacity(faces.len());
     for &(body, order, face) in faces {
-        runs.push(body.face_run(order, face)?);
+        runs.push(body.face_run(order, face, zone)?);
     }
     let mut first = None;
     for (d, by) in solidcore::prism::measure::straight_candidates(&runs) {
