@@ -321,3 +321,77 @@ fn a_trim_that_needs_the_raise_keeps_it_written() {
     let r = read(&mut k, bytes);
     assert_eq!(trims(&r), kept);
 }
+
+/// A raise goes back to its tolerance from before only while that is no tighter than the
+/// B-rep's tolerance, or the B-rep still holds the tolerance the raise was made at: after
+/// the B-rep's tolerance is raised (only where larger) between a raised edge's two values,
+/// the edge still holds its raise but is written raised, not below the B-rep's tolerance
+/// (review of #21705).
+#[test]
+fn a_raise_is_not_written_below_a_later_body_tolerance() {
+    use solidcore::topology::brep::p2;
+    use solidcore::topology::brep_data::BrepData;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../upstream/TestFiles/pt_TestFiles/Fillet/sphere_diff_3cylinders.smb");
+    let Ok(bytes) = std::fs::read(&path) else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
+        eprintln!("unavailable upstream test file: {}", path.display());
+        return;
+    };
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, bytes);
+    let raises = b.trim_cover_raises().clone();
+    assert_eq!(raises.body_tolerance.to_bits(), b.tolerance().to_bits());
+    // the held raised edge with the largest raise
+    let (e, eb, ea) = bl::edges(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter_map(|e| {
+            let &(eb, ea) = raises.edges.get(&e)?;
+            let held = b.edge(e).unwrap().tolerance.to_bits() == ea.to_bits();
+            (held && eb < ea).then_some((e, eb, ea))
+        })
+        .max_by(|x, y| x.2.total_cmp(&y.2))
+        .expect("the input's read raises an edge");
+    let t = 0.5 * (eb + ea);
+    assert!(eb < t && t < ea && b.tolerance() < t);
+    p2::set_tolerance(&k, &mut b, t, true, true).unwrap();
+    assert_eq!(b.tolerance().to_bits(), t.to_bits());
+    assert_eq!(b.edge(e).unwrap().tolerance.to_bits(), ea.to_bits());
+    assert_eq!(b.trim_cover_raises().edges.get(&e), Some(&(eb, ea)));
+
+    let store = AttributeStore::new();
+    let records = NotifyRecords::new();
+    let key_of = |x: EntityRef| b.owner_identity(x);
+    let env = FromBrepEnv {
+        attributes: &store,
+        key_of: &key_of,
+        records: &records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    let bd = BrepData::from_brep(&k, &b, &env, &mut Vec::new()).unwrap();
+    let ie = bl::edges(&b, None)
+        .unwrap()
+        .iter()
+        .position(|&x| x == e)
+        .unwrap();
+    assert_eq!(bd.edges[ie].zone_tol_3d.to_bits(), ea.to_bits());
+    for ed in &bd.edges {
+        assert!(
+            ed.zone_tol_3d >= t,
+            "an edge written below the B-rep's tolerance"
+        );
+    }
+    for vd in &bd.vertices {
+        assert!(
+            vd.zone_tol_3d >= t,
+            "a vertex written below the B-rep's tolerance"
+        );
+    }
+}

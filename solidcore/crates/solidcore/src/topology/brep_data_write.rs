@@ -1244,6 +1244,9 @@ const NO_EDGEUSE_LOOPUSE: &str =
 /// The tolerances [`BrepData::from_brep_with`] writes in place of the held ones: for each
 /// edge and vertex whose end-checked trim-cover raise still holds
 /// ([`Brep::trim_cover_raises`]), the tolerance from before the raise, while
+/// - it is no tighter than the B-rep's tolerance, unless the B-rep still holds the
+///   tolerance the raise was made at (`TrimCoverRaises::body_tolerance`: the read's own
+///   entities below it are written as read),
 /// - a vertex is no tighter than any edge at it as written (an edge whose raise no longer
 ///   holds is written as it is, and the vertex stays above it), and
 /// - every UV trim the read of the written file end checks at those tolerances
@@ -1262,15 +1265,21 @@ fn written_tolerances(
     if !unraise || !raises.end_checked {
         return Ok((BTreeMap::new(), BTreeMap::new()));
     }
+    // (a tolerance from before a raise below the B-rep's goes back only while the B-rep
+    // holds the tolerance the raise was made at: a later raise of the B-rep's tolerance
+    // keeps the entity written at least at it)
+    let body_tolerance = b.tolerance();
+    let body_held = body_tolerance.to_bits() == raises.body_tolerance.to_bits();
+    let restorable = |before: f64| body_held || before >= body_tolerance;
     let mut edges = BTreeMap::new();
     for (&e, &(before, after)) in &raises.edges {
-        if b.edge(e)?.tolerance.to_bits() == after.to_bits() {
+        if b.edge(e)?.tolerance.to_bits() == after.to_bits() && restorable(before) {
             edges.insert(e, before);
         }
     }
     let mut vertices = BTreeMap::new();
     for (&v, &(before, after)) in &raises.vertices {
-        if b.vertex(v)?.tolerance.to_bits() == after.to_bits() {
+        if b.vertex(v)?.tolerance.to_bits() == after.to_bits() && restorable(before) {
             vertices.insert(v, before);
         }
     }
