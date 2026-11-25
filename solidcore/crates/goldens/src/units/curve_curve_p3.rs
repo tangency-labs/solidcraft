@@ -1727,6 +1727,10 @@ impl UnitDiff for Runner {
 }
 
 #[cfg(test)]
+#[path = "curve_curve_p3/area_normal.rs"]
+mod area_normal;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
@@ -1865,13 +1869,13 @@ mod tests {
     // ---- WR-587: every blessed `Normal` row is its loop's area normal ----------------
 
     /// Every committed `Normal` row (not only the ones the retirement moved) is certified by
-    /// [`crate::wr587_replay::certify`]: a success is the direction of the exact area vector
+    /// [`area_normal::certify`](super::area_normal::certify): a success is the direction of the exact area vector
     /// of the loop's samples within a derived rounding bound, a 1007 refusal an exact area
     /// vector shorter than `SM_EFF_ZERO`. So the rows are right by construction, not by
     /// comparison with the code that blessed them.
     #[test]
     fn wr587_every_normal_row_is_the_area_normal() {
-        use crate::wr587_replay::{certify, Answer, Cert};
+        use super::area_normal::{certify, Answer, Cert};
         let ctx = CaseContext {
             root: crate::case::repo_root(),
             seeds: 16,

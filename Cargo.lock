@@ -6418,6 +6418,7 @@ dependencies = [
 name = "solidcraft-kernel"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "log",
  "proptest",
  "rayon",
@@ -6442,6 +6443,7 @@ dependencies = [
 name = "solidcraft-kernel-api"
 version = "0.49.1"
 dependencies = [
+ "cadmpeg-ir",
  "serde",
  "serde_json",
  "solidcore-record",
@@ -6554,6 +6556,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
+ "winreg",
 ]
 
 [[package]]
@@ -6596,6 +6599,7 @@ name = "solidcraft-ui-egui"
 version = "0.49.1"
 dependencies = [
  "arboard",
+ "craft-plugin",
  "egui",
  "egui-wgpu",
  "flate2",
@@ -6608,6 +6612,7 @@ dependencies = [
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
+ "quote",
  "semver",
  "serde",
  "serde_json",

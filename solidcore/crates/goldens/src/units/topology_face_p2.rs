@@ -2214,6 +2214,62 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// The pole point on `sphere.smb` that `topology.face_p2` (`state[4..7]`) and
+    /// `topology.brep_p4` (`faces_values[9..12]`) record lies on the file's sphere (radius 5
+    /// about the origin) to `2.7e-15`, enclosed: `||p| - 5| = (|p|^2 - 25) / (|p| + 5)`, the
+    /// numerator summed exactly from exact squares, the rest in interval arithmetic. The
+    /// pole normal (`state[7..10]`) is the radial direction `p / |p|`, each component within
+    /// `gamma_5` (its rounding, at most 1 in magnitude).
+    #[test]
+    fn sphere_pole_points_lie_on_the_sphere() {
+        use crate::case::regression_case;
+        use crate::interval::{exact_sum, gamma_up, two_prod, Iv};
+        let off_sphere = |p: [f64; 3]| {
+            let mut terms: Vec<f64> = p
+                .iter()
+                .flat_map(|&c| <[f64; 2]>::from(two_prod(c, c)))
+                .collect();
+            terms.push(-25.0);
+            let [x, y, z] = p.map(Iv::exact);
+            let r = x.mul(x).add(y.mul(y)).add(z.mul(z)).sqrt();
+            exact_sum(&terms).div(r.add(Iv::exact(5.0))).mag()
+        };
+        let run = |runner: &dyn UnitDiff, case: &str| {
+            let out = runner
+                .run_rust(&regression_case(runner, case))
+                .expect("the run");
+            assert!(out.error.is_none(), "{case}: {:?}", out.error);
+            out
+        };
+        let mut points = Vec::new();
+        for case in [
+            "extra01050",
+            "points_file_sphere.smb_0",
+            "points_file_sphere.smb_1",
+            "points_file_sphere.smb_2",
+        ] {
+            let state = &run(&Runner, case).values["state"];
+            let p = [state[4], state[5], state[6]];
+            points.push((case, p));
+            let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+            for i in 0..3 {
+                let (n, radial) = (state[7 + i], p[i] / r);
+                assert!(
+                    (n - radial).abs() <= gamma_up(5),
+                    "{case}: normal[{i}] {n:e} against the radial {radial:e}"
+                );
+            }
+        }
+        for case in ["gen0000", "gen0009", "gen0042", "gen0043", "gen0142"] {
+            let faces = &run(&crate::units::topology_brep_p4::Runner, case).values["faces_values"];
+            points.push((case, [faces[9], faces[10], faces[11]]));
+        }
+        for (case, p) in points {
+            let off = off_sphere(p);
+            assert!(off < 2.7e-15, "{case}: {p:?} is {off:e} off the sphere");
+        }
+    }
+
     /// Nightly fuzz case `topology.face_p2/fuzz00020` (run 41040730716): a non-rational face
     /// surface (weights the marker `-f64::MAX`) with one weight set to 1, under a `best_uv`
     /// op, is refused instead of building the face on those weights.

@@ -1338,7 +1338,7 @@ fn rust_edgeuse_body(
 /// The edge-use op's B-rep and the selected edge use, before its body (`body` false) or
 /// after it, what the case's row reports (`None` where the op refuses before its body or
 /// its body reports `null_deref`, as the row does, so only states the row has are seen). For
-/// the WR-493 trim certificate (`refit::replay`).
+/// the rebuilt-trim certificate (`topology_edgeuse_p2::trim_bounds`).
 #[cfg(test)]
 pub(crate) fn eu_case(case: &Case, body: bool) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
     let Inputs::CrEu {

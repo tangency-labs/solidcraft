@@ -782,37 +782,6 @@ fn rust_err(e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| Output::kernel(e, format!("rust_error: {e}")))
 }
 
-/// The replayed model of a `point_classify` case whose point is on a UV trim (`at.mode`
-/// `trim`): the Rust B-rep with its edits applied, the face, and the edge use whose trim
-/// `point_of` evaluates (#18325's certificates, `tests/issue_18325_moved_rows.rs`). `None`
-/// for another op or point mode, or a model that does not build.
-///
-/// # Errors
-///
-/// A [`HarnessError`] for inputs that do not parse or a model the harness cannot read.
-pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessError> {
-    let i = case.parse::<Inputs>()?;
-    let OpIn::PointClassify { face, at, .. } = &i.op else {
-        return Ok(None);
-    };
-    if at.mode != "trim" {
-        return Ok(None);
-    }
-    let mut k = crate::runner_kernel();
-    let Ok(m) = rust_model(&mut k, &i)? else {
-        return Ok(None);
-    };
-    let f = face_of(&m, *face)?;
-    let eus = face_edgeuses(&m.brep, f)?;
-    let Some(eu) = usize::try_from(sel(at.sel, eus.len()))
-        .ok()
-        .and_then(|i| eus.get(i).copied())
-    else {
-        return Ok(None);
-    };
-    Ok(Some((m.brep, f, eu)))
-}
-
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = crate::runner_kernel();
     if let OpIn::ProtoVertex {

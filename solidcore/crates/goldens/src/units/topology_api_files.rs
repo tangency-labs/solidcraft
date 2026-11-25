@@ -772,7 +772,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                     records: &mut records,
                     next_key: WRITE_GEOMETRY_KEYS,
                 };
-                crate::refit::read_from_file(
+                solidcore::topology::brep::p7::read_from_file(
                     &mut k,
                     &mut b,
                     bytes,
@@ -782,10 +782,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                 )
             };
             return Ok(match read {
-                Ok(()) => {
-                    crate::tolsub::after_read(&mut b);
-                    write_rec(&k, &b, &write_file_key, &records, &attributes, ascii)
-                }
+                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
                 Err(e) => Output::unported(&e)
                     .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
             });

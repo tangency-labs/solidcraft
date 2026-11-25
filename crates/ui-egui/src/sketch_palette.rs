@@ -448,6 +448,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let image_tool = image_tool(app);
     let framing = app.preferences.frame_images_in_sketch;
     let mut frame_image = false;
+    // The 3-Point Arc's tangent snap (#20719): a mode of that tool, so it is here and not in
+    // Preferences; kept for the next time the tool runs.
+    let arc_snap = app.preferences.sketch_arc_tangent_snap;
+    let mut arc_snap_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -500,6 +504,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .collect();
                 let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                 crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                if current == "sketch.arc.three_point" {
+                    arc_snap_clicked =
+                        crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
                 section.inner
             });
             start = section.flatten();
@@ -626,6 +634,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if frame_image {
         app.preferences.frame_images_in_sketch = !framing;
+    }
+    if arc_snap_clicked {
+        app.preferences.sketch_arc_tangent_snap = !arc_snap;
     }
     if let Some(id) = start {
         app.start(id);

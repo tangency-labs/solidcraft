@@ -30,7 +30,9 @@ use solidcore_ops::sweep::{
     sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
     SweepFrame, SweepRoute, Verdict,
 };
-use solidcore_ops::sweep::{loft_with_ends, LoftEnd};
+use solidcore_ops::sweep::{
+    loft_with_ends, screw_sweep_with, LoftEnd, ScrewSweepOptions, ScrewWalls,
+};
 use solidcore_ops::{make_box, Body, CheckLevel, Error};
 
 const Z: [f64; 3] = [0.0, 0.0, 1.0];
@@ -557,6 +559,35 @@ fn check(name: &str) {
         }
         (want, got) => panic!("{name}: want {want:?}, got {got:?}"),
     }
+}
+
+/// A square thread with joined walls: its two flanks one face each across the half turns its
+/// cylinder walls come in, the same solid as its pieces (the same volume, every cylinder piece),
+/// and `screw_sweep` is the pieces.
+#[test]
+fn screw_sweep_joined_walls_are_the_pieces_solid() {
+    let thread = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let made = |walls| {
+        let options = ScrewSweepOptions {
+            law: None,
+            tolerance: 1e-5,
+            walls,
+        };
+        screw_sweep_with(&thread, [0.0; 3], Z, 2.0, 2.0, &options).unwrap()
+    };
+    let (pieces, joined) = (made(ScrewWalls::Pieces), made(ScrewWalls::Joined));
+    let plain = screw_sweep(&thread, [0.0; 3], Z, 2.0, 2.0, None, 1e-5).unwrap();
+    assert_eq!(plain.counts().unwrap(), pieces.counts().unwrap());
+    // 4 half turns of 4 walls and 2 caps; then 4 of the 2 cylinders, 2 flanks and 2 caps
+    assert_eq!(pieces.counts().unwrap()[0], 18);
+    assert_eq!(joined.counts().unwrap()[0], 12);
+    let (vp, vj) = (pieces.volume(1e-8).unwrap(), joined.volume(1e-8).unwrap());
+    assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
 macro_rules! cases {

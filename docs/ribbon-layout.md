@@ -28,7 +28,7 @@ SKETCH appears during sketch editing; with Preferences › Interface › **Keep 
 | INSERT | FILES | **`file.insert_step`**, **`file.insert_mesh`**, **`component.insert_design`**, `file.save_mesh` |
 | INSERT | IMAGES | **`canvas.insert`**, **`canvas.decal`**, **`canvas.edit`** |
 | INSERT | 2D | **`sketch.insert_dxf`**, **`sketch.insert_svg`** |
-| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert` |
+| INSERT | LIBRARY | **`parts.fastener`**, **`parts.library`**, **`parts.resize`**, `parts.insert`, `pulley.insert` |
 | INSERT | LINKS | **`component.update_links`**, **`component.break_link`** |
 | INSPECT | MEASURE | **`inspect.measure`**, **`inspect.center_of_mass`**, **`component.properties`** |
 | INSPECT | SECTION | **`inspect.section`** |

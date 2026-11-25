@@ -22,7 +22,6 @@ pub mod faces_continue;
 pub mod flush_contact;
 mod line_meeting;
 pub mod r#loop;
-pub mod member_turn;
 pub mod normal;
 pub mod point_identity;
 pub mod poly;
