@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{Color32, Mesh, Shape, TextureHandle, TextureId, pos2};
-use solidcraft_engine::doc::canvas::Canvas;
+use solidcraft_engine::doc::{blob::Blob, canvas::Canvas};
 
 use crate::SolveApp;
 use crate::gpu::GpuImage;
@@ -17,11 +17,17 @@ const MAX_SIDE: u32 = 2048;
 /// Grid cells per side, so perspective views bend the image only slightly (CPU path).
 const CELLS: usize = 8;
 
-/// Decoded pixels: (data length they came from, version, size, RGBA).
-type Decoded = (usize, u64, [u32; 2], Arc<Vec<u8>>);
+/// Decoded pixels: (version, size, RGBA).
+type Decoded = (u64, [u32; 2], Arc<Vec<u8>>);
+
+struct Cached {
+    /// Retain the immutable source so its allocation cannot be reused for a different picture.
+    data: Blob,
+    decoded: Option<Decoded>,
+}
 
 thread_local! {
-    static PIXELS: RefCell<HashMap<u64, Option<Decoded>>> = RefCell::new(HashMap::new());
+    static PIXELS: RefCell<HashMap<u64, Cached>> = RefCell::new(HashMap::new());
     /// egui textures for the CPU path, by canvas id, with the version they hold.
     static TEX: RefCell<HashMap<u64, (u64, TextureHandle)>> = RefCell::new(HashMap::new());
     static VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -39,21 +45,21 @@ fn decode_reference(bytes: &[u8]) -> Option<image::DynamicImage> {
 fn pixels(c: &Canvas) -> Option<Decoded> {
     PIXELS.with(|m| {
         let mut m = m.borrow_mut();
-        if let Some(d) = m.get(&c.id)
-            && d.as_ref().is_none_or(|d| d.0 == c.data.len())
+        if let Some(cached) = m.get(&c.id)
+            && std::ptr::eq(cached.data.as_bytes(), c.bytes())
         {
-            return d.clone();
+            return cached.decoded.clone();
         }
-        let d = c.bytes().and_then(|b| decode_reference(&b)).map(|i| {
+        let d = decode_reference(c.bytes()).map(|i| {
             let i = if i.width() > MAX_SIDE || i.height() > MAX_SIDE { i.thumbnail(MAX_SIDE, MAX_SIDE) } else { i };
             let rgba = i.to_rgba8();
             let v = VERSION.with(|v| {
                 v.set(v.get() + 1);
                 v.get()
             });
-            (c.data.len(), v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
+            (v, [rgba.width(), rgba.height()], Arc::new(rgba.into_raw()))
         });
-        m.insert(c.id, d.clone());
+        m.insert(c.id, Cached { data: c.data.clone(), decoded: d.clone() });
         d
     })
 }
@@ -79,7 +85,7 @@ pub fn gpu_images(app: &SolveApp) -> Vec<GpuImage> {
         .filter_map(|c| {
             // An anchored canvas follows its sketch's points.
             let corners = doc.canvas_corners(&vals, c, &state).ok()?;
-            let (_, version, size, rgba) = pixels(c)?;
+            let (version, size, rgba) = pixels(c)?;
             let corners = corners.map(|p| [p.x as f32, p.y as f32, p.z as f32]);
             Some(GpuImage { id: c.id, version, size, rgba, corners, opacity: c.opacity.clamp(0.0, 1.0) as f32 })
         })
@@ -87,7 +93,7 @@ pub fn gpu_images(app: &SolveApp) -> Vec<GpuImage> {
 }
 
 fn texture(ctx: &egui::Context, c: &Canvas) -> Option<TextureId> {
-    let (_, version, [w, h], rgba) = pixels(c)?;
+    let (version, [w, h], rgba) = pixels(c)?;
     TEX.with(|t| {
         let mut t = t.borrow_mut();
         if let Some((v, h)) = t.get(&c.id)
@@ -127,7 +133,7 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
             for i in 0..=CELLS {
                 let (s, t) = (i as f64 / CELLS as f64, j as f64 / CELLS as f64);
                 // The point on the image's quad, from the kernel.
-                let [x, y, z] = solidcore_ops::affine::parallelogram_point(corner, u, v, s, t);
+                let [x, y, z] = solidcraft_kernel::services::affine::parallelogram_point(corner, u, v, s, t);
                 let Some(q) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)) else {
                     ok = false;
                     continue;
@@ -156,13 +162,69 @@ mod codec_tests {
     use super::decode_reference;
 
     #[test]
+    fn design_tabs_keep_their_own_canvas_pixels() {
+        use serde_json::json;
+
+        let picture = |color| {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::RgbaImage::from_pixel(2, 2, image::Rgba(color)).write_to(&mut png, image::ImageFormat::Png).unwrap();
+            png.into_inner()
+        };
+        let red = picture([255, 0, 0, 255]);
+        let blue = picture([0, 0, 255, 255]);
+        assert_eq!(red.len(), blue.len(), "different pictures of equal byte length reproduce the cache collision");
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("canvas.insert", json!({"path": crate::scenario::image_file(&red), "plane": "XY"})).unwrap();
+        let first = super::gpu_images(&h.app).remove(0);
+        assert_eq!(&first.rgba[..4], &[255, 0, 0, 255]);
+        let first_texture = super::texture(&h.ctx, &h.app.session.doc.canvases[0]).unwrap();
+
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.run("canvas.insert", json!({"path": crate::scenario::image_file(&blue), "plane": "XY"})).unwrap();
+        let second = super::gpu_images(&h.app).remove(0);
+        assert_eq!(first.id, second.id, "each design starts with the same canvas id");
+        assert_eq!(&second.rgba[..4], &[0, 0, 255, 255], "the second tab must show its blue picture");
+        let second_texture = super::texture(&h.ctx, &h.app.session.doc.canvases[0]).unwrap();
+        assert_ne!(first.version, second.version);
+        assert_ne!(first_texture, second_texture);
+
+        h.app.run("view.previous_tab", json!({})).unwrap();
+        let restored = super::gpu_images(&h.app).remove(0);
+        assert_eq!(&restored.rgba[..4], &[255, 0, 0, 255], "returning to the first tab must restore its red picture");
+        assert_ne!(second.version, restored.version);
+        assert_ne!(second_texture, super::texture(&h.ctx, &h.app.session.doc.canvases[0]).unwrap());
+    }
+
+    #[test]
+    fn replaced_canvas_data_retries_a_failed_decode_and_clones_reuse_pixels() {
+        use serde_json::json;
+
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("canvas.insert", json!({"path": crate::scenario::image_file(png.get_ref())})).unwrap();
+        let valid = h.app.session.doc.canvases[0].clone();
+        let mut invalid = valid.clone();
+        invalid.data = vec![0; valid.data.len()].into();
+        assert!(super::pixels(&invalid).is_none());
+        assert!(super::pixels(&invalid.clone()).is_none());
+
+        let (version, size, rgba) = super::pixels(&valid).expect("different data must be decoded after a failure");
+        assert_eq!(size, [2, 2]);
+        assert_eq!(&rgba[..4], &[0, 0, 255, 255]);
+        let (reused_version, _, reused_rgba) = super::pixels(&valid.clone()).unwrap();
+        assert_eq!(version, reused_version, "document clones share the immutable image data");
+        assert!(std::sync::Arc::ptr_eq(&rgba, &reused_rgba));
+    }
+
+    #[test]
     fn gpu_images_include_canvases_on_model_planes() {
         use serde_json::json;
 
         let mut h = crate::scenario::Harness::new();
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgba8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
-        let data = solidcraft_engine::doc::canvas::base64_encode(png.get_ref());
+        let data = crate::scenario::image_file(png.get_ref());
         h.app
             .run(
                 "construct.plane.three_points",
@@ -170,7 +232,7 @@ mod codec_tests {
             )
             .unwrap();
         for plane in ["XY", "Three"] {
-            h.app.run("canvas.insert", json!({"data": data, "plane": plane, "name": plane, "width": 40})).unwrap();
+            h.app.run("canvas.insert", json!({"path": data, "plane": plane, "name": plane, "width": 40})).unwrap();
         }
         let images = super::gpu_images(&h.app);
         assert_eq!(images.len(), 2, "both visible canvases must reach the renderer");

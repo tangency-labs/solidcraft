@@ -18,7 +18,7 @@ const LOCALES: &str = "assets/locales";
 /// The catalogs the shared crates ship (the kit's Preferences words), merged into the app's
 /// catalogs for each language by the app's build (`crates/ui-egui/build.rs`).
 pub const SHARED_LOCALES: &str = "crates/ui-text/locales";
-const LOCALES_PENDING: &str = "assets/locales/pending";
+pub const LOCALES_PENDING: &str = "assets/locales/pending";
 const ATTRIBUTION_PENDING: &str = "attribution/pending";
 
 /// One pending locale file: its path and, per locale, the messages it adds.

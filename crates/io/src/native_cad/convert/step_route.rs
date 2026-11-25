@@ -84,12 +84,13 @@ fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
 }
 
 /// cadmpeg's STEP writer calls a product it has no name for `cadmpeg_model`; name it after the
-/// file instead (as plain STEP text: letters, digits, spaces, `-`, `_` and `.` only).
-fn name_unnamed_products(step: String, file: &str) -> String {
+/// file instead, written as a STEP string so quotes and letters such as `ü` come through.
+pub(crate) fn name_unnamed_products(step: String, file: &str) -> String {
     const PLACEHOLDER: &str = "'cadmpeg_model'";
-    let stem: String = std::path::Path::new(file)
-        .file_stem()
-        .map(|s| s.to_string_lossy().chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.')).collect())
-        .unwrap_or_default();
-    if stem.trim().is_empty() || !step.contains(PLACEHOLDER) { step } else { step.replace(PLACEHOLDER, &format!("'{stem}'")) }
+    let stem = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    if stem.trim().is_empty() || !step.contains(PLACEHOLDER) {
+        step
+    } else {
+        step.replace(PLACEHOLDER, &solidcraft_kernel::services::step::string(&stem))
+    }
 }

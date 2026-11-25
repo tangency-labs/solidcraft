@@ -16,7 +16,8 @@
 //! unported dependency still propagates. No recursion.
 
 use super::p1::{solve_original_brep_point, OriginalKeys};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{ignored, Failure, Result, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::vector2d::Point2;
 use crate::intersect::point_class::live_owned_surface_global_point_solve;
@@ -105,8 +106,16 @@ fn count_behind_ahead(
             let (surface, uv_domain) = {
                 let face_data = result.face(f)?;
                 let Some(surface) = face_data.surface.as_ref() else {
-                    // (NER on GetSurface: a face without one is a null pointer)
-                    return Err(SolidError::offset_missing(OP, "the face's surface"));
+                    // (NER on GetSurface: the null pointer's status, kept)
+                    return Err(Failure::new(
+                        OP,
+                        OffsetFailure::Defect {
+                            why: "a face of the merged offset has no surface, though the \
+                                  offset and the merge give every face they make one",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 };
                 (surface.clone_for_evaluation()?, face_data.uv_domain)
             };

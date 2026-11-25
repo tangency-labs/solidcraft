@@ -24,6 +24,8 @@
 //!   (left out when every pixel is opaque), placed on the lines' grid so they register, an opacity
 //!   below 1 as an ExtGState's `ca`, and cut by their clip (`W n`). Without pixels
 //!   ([`paper_pdf_pages`]) they are passed over and the page shows the rest.
+//! - **Printing:** with [`PdfOptions::actual_size`] the catalog's viewer preferences ask for
+//!   `/PrintScaling /None`, so a viewer that honours them prints the sheet at its true size.
 //! - **Layers:** nonempty groups share one PDF optional-content group for each
 //!   distinct paper object kind. Group order remains the original paint order,
 //!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
@@ -90,11 +92,14 @@ pub struct PdfOptions {
     /// Include optional-content layers by object kind (default true). False writes
     /// the same vector marks in paint order, without layer objects or markers.
     pub layers: bool,
+    /// Ask a viewer to print at actual size, never shrunk to fit (`/PrintScaling /None`; default
+    /// false).
+    pub actual_size: bool,
 }
 
 impl Default for PdfOptions {
     fn default() -> Self {
-        Self { title: None, output_time: None, layers: true }
+        Self { title: None, output_time: None, layers: true, actual_size: false }
     }
 }
 
@@ -173,6 +178,11 @@ pub fn paper_pdf_pages_with(scenes: &[Prepared], options: &PdfOptions, pictures:
     {
         let mut root = pdf.catalog(catalog);
         root.pages(tree);
+        if options.actual_size {
+            // A drawing prints at its true size: a viewer that honours this starts its print
+            // dialog at actual size, not shrunk to fit (ISO 32000-1, 12.2, table 150).
+            root.viewer_preferences().pair(Name(b"PrintScaling"), Name(b"None"));
+        }
         if !layers.is_empty() {
             // PDF 1.5 optional content: one group per used paper object kind.
             // The default configuration orders all layers and starts them ON.

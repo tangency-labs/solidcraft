@@ -13,7 +13,7 @@ fn tr(id: &str) -> String {
     solidcraft_ui_text::tr(id).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
-    DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
+    DetailSetting { id: id.into(), label: tr(label), value, enabled: true, stacked: false }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
     DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
@@ -55,6 +55,7 @@ pub(crate) fn primary(effect: &StatusItem) -> &'static str {
         StatusSetting::Curvature { .. } => "radius",
         StatusSetting::Section { .. } => "offset",
         StatusSetting::Continuity { .. } => "record",
+        StatusSetting::Isolate { .. } => "show",
         StatusSetting::Environment => "",
     }
 }
@@ -90,6 +91,19 @@ pub(crate) fn description(app: &SolveApp, effect: &StatusItem) -> Details {
             }
         }
         StatusSetting::Continuity { .. } => continuity_description(app, &mut details),
+        StatusSetting::Isolate { .. } => {
+            let shows = crate::viewport::ISOLATE_SHOWS;
+            let selected = shows.iter().position(|(show, _, _)| *show == app.preferences.isolate_others).unwrap_or(0);
+            let options = shows.iter().map(|(_, _, label)| tr(label)).collect();
+            // "Other parts display as" is longer than the label column: above its choice.
+            details.settings.push(DetailSetting { stacked: true, ..field("show", "ui.isolate_show", DetailValue::Choice { selected, options }) });
+            // Whether clicks select the parts drawn, only while they are drawn.
+            if app.preferences.isolate_others != solidcraft_engine::schema::view_navigation::IsolateShow::Hidden {
+                let selected = usize::from(!app.preferences.isolate_others_pick);
+                let options = vec![tr("ui.isolate_pick_select"), tr("ui.isolate_pick_through")];
+                details.settings.push(DetailSetting { stacked: true, ..field("pick", "ui.isolate_pick", DetailValue::Choice { selected, options }) });
+            }
+        }
         StatusSetting::Environment => {}
     }
     if effect.command != "inspect.continuity"
@@ -209,7 +223,7 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 "angle_tolerance_deg":if id=="angle"{scalar(value)?}else{row.angle_tolerance_deg},
                 "curvature_tolerance_per_mm":if id=="curvature"{scalar(value)?*scale}else{row.curvature_tolerance_per_mm}}))
         }
-        StatusSetting::Environment => None,
+        StatusSetting::Environment | StatusSetting::Isolate { .. } => None,
     }
 }
 fn scalar(value: &DetailValue) -> Option<f64> {
@@ -232,6 +246,24 @@ pub(crate) fn dispatch(app: &mut SolveApp, ctx: &egui::Context, owner: &str, eve
     match event {
         DetailEvent::Change(id, DetailValue::Choice { selected, .. }) if id == "record" && effect.command == "inspect.continuity" => {
             app.viewport_status.selected_record = app.session.continuity_details().get(selected).map(record_id);
+        }
+        // Whether clicks select the parts drawn: a display setting too.
+        DetailEvent::Change(id, DetailValue::Choice { selected, .. })
+            if id == "pick" && effect.id == solidcraft_engine::status_items::StatusId::Isolate =>
+        {
+            if let Err(error) = app.run("view.isolate_others", json!({ "pick": selected == 0 })) {
+                app.set_status(error, true);
+            }
+        }
+        // How the view shows what the Isolate hid: a display setting, not the Isolate's own command.
+        DetailEvent::Change(id, DetailValue::Choice { selected, .. })
+            if id == "show" && effect.id == solidcraft_engine::status_items::StatusId::Isolate =>
+        {
+            if let Some((_, show, _)) = crate::viewport::ISOLATE_SHOWS.get(selected)
+                && let Err(error) = app.run("view.isolate_others", json!({ "show": show }))
+            {
+                app.set_status(error, true);
+            }
         }
         DetailEvent::Change(id, value) => {
             if let Some(params) = edit_params(app, &effect, &id, &value)
@@ -288,7 +320,8 @@ pub(crate) fn legacy_description(app: &SolveApp) -> Details {
 }
 
 /// Compatibility placement uses the same description and renderer, never a second painter.
-pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::Rect) {
+/// Returns the rects the legends take, so the scale bar keeps clear of them (#375).
+pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::Rect) -> Vec<egui::Rect> {
     let mut descriptions = Vec::new();
     if !app.preferences.viewport_analysis_status {
         descriptions.push(("analysis:legend", legacy_description(app)));
@@ -322,11 +355,14 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
             }
         }
     }
+    let mut placed = Vec::new();
     for (id, description) in descriptions {
         if let Some(rect) = legacy_legend(app, ui, free, id, &description) {
+            placed.push(rect);
             free.max.y = (rect.top() - solidcraft_theme::Tokens::get().space_8).max(free.top());
         }
     }
+    placed
 }
 
 fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str, description: &Details) -> Option<egui::Rect> {

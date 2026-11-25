@@ -94,7 +94,10 @@
 
 use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
@@ -698,7 +701,13 @@ fn build_regions(
         // smiges_ReadIges: a single solid region; the infinite region and the void
         // regions are implied.
         let rr = data.regions.first().ok_or_else(|| {
-            SolidError::topology_failed(OP_MAKE, "the single solid region's record is not there")
+            SolidError::topology(
+                OP_MAKE,
+                TopologyFailure::Defect {
+                    why: "the single region record is not there, though the list was just \
+                          counted to hold one",
+                },
+            )
         })?;
         let solid = new_region(b, env, Region::default())?;
         add_attributes(env, EntityRef::Region(solid), &rr.topology.attributes)?;
@@ -794,9 +803,11 @@ fn build_regions(
                 *slot = Some(s);
             }
             if rs.shell_type > 2 {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_MAKE,
-                    "the shell record's type is not a known shell type",
+                    TopologyFailure::UnknownShellType {
+                        shell_type: rs.shell_type,
+                    },
                 ));
             }
             b.shell_mut(s)?.shell_type = match rs.shell_type {
@@ -979,11 +990,17 @@ fn face_surface(
                 OP_MAKE,
                 "data surface owned outside this B-rep",
             ))?;
-    let owner = b
-        .face(owner_face)?
-        .surface
-        .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner face's surface"))?;
+    let owner = b.face(owner_face)?.surface.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner face has no surface, though a face is listed as an owner \
+                          only once its surface is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut copy = owner.copy(k)?;
     let key = env.new_key()?;
     let copy_ref = ObjectRef {
@@ -1234,11 +1251,17 @@ fn edge_curve(
                 OP_MAKE,
                 "data curve owned outside this B-rep",
             ))?;
-    let owner = b
-        .edge(owner_edge)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner edge's curve"))?;
+    let owner = b.edge(owner_edge)?.curve.as_ref().ok_or_else(|| {
+        Failure::new(
+            OP_MAKE,
+            TopologyFailure::Defect {
+                why: "the owner edge has no curve, though an edge is listed as an owner \
+                          only once its curve is made",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let mut curve = owner.copy(k)?;
     let key = env.new_key()?;
     let curve_ref = ObjectRef {
@@ -1282,9 +1305,9 @@ fn build_edgeuses(
             // NER(pNewVU), NER(pNewVU->m_pNext): the next use of a non-empty
             // circular list is never null
             if list.is_empty() {
-                return Err(SolidError::topology_missing(
+                return Err(SolidError::topology(
                     OP_MAKE,
-                    "the vertex's next vertex use",
+                    TopologyFailure::VertexWithoutUses,
                 ));
             }
             continue;
@@ -1697,9 +1720,9 @@ fn link_loops(b: &mut Brep, data: &BrepData, built: &Built) -> Result<()> {
         }
         let Some((mut last1, mut last2)) = last else {
             // Big problems here
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP_MAKE,
-                "no edge use of the loop record was built",
+                TopologyFailure::LoopRecordWithoutEdgeuse,
             ));
         };
 
@@ -2433,10 +2456,9 @@ fn faces_to_delete(
             edges = face_edges(b, face)?;
             for &e in &edges {
                 let rec = b.edge(e)?;
-                let c = rec
-                    .curve
-                    .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_PROJECT, "the edge's curve"))?;
+                let c = rec.curve.as_ref().ok_or_else(|| {
+                    SolidError::topology(OP_PROJECT, TopologyFailure::EdgeWithoutCurve)
+                })?;
                 let tol1 = 5.0 * (rec.tolerance + tol);
                 let p = c.evaluate_point(k, rec.interval.evaluate(0.5))?;
                 if let Some(side) = side_vote(k, curve, p, direction, tol1)? {
@@ -2575,9 +2597,9 @@ fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: Verte
 pub fn remove_all_topology(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_REMOVE,
-            "editing is disabled on the B-rep",
+            TopologyFailure::EditingDisabled,
         ));
     }
     crate::topology::brep::p3::with_kernel_callbacks(k, b, remove_all_topology_notified)
@@ -2597,9 +2619,9 @@ pub fn remove_all_topology_notified(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP_REMOVE,
-            "editing is disabled on the B-rep",
+            TopologyFailure::EditingDisabled,
         ));
     }
 
@@ -2835,9 +2857,9 @@ fn subdivide_face_body(
             // Null segment at interior of curve: split the edge, both halves inspected
             let split = p9::make_vertex_split_edge(k, b, e, first, env, curve_ref)?;
             if !split.split {
-                return Err(SolidError::topology_failed(
+                return Err(SolidError::topology(
                     OP_SUBDIVIDE,
-                    "the edge could not be split at its null segment",
+                    TopologyFailure::EdgeNotSplit,
                 ));
             }
             let [e1, e2] = split.edges.ok_or(SolidError::invalid_input(
@@ -3382,11 +3404,11 @@ mod tests {
         ));
         let mut d = square(0);
         d.shells[0].shell_type = 7;
+        let e = build(&mut d, MakeTopologyOptions::default()).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(1001));
         assert_eq!(
-            build(&mut d, MakeTopologyOptions::default())
-                .err()
-                .and_then(|e| e.upstream_status()),
-            Some(1001)
+            e.topology_failure(),
+            Some(&TopologyFailure::UnknownShellType { shell_type: 7 })
         );
         let mut d = square(0);
         d.edgeuses[0].next_eu = 99;
@@ -3740,12 +3762,13 @@ mod tests {
             side(&narrow, on_curve),
             Ok(p1::SideOfCurve::Undecided(_))
         ));
-        let not_once = SolidError::topology_failed(
-            "topology::brep::p1",
-            "the point does not project onto the curve exactly once",
-        );
-        let status = p1::find_side_of_curve(&k, &narrow, below, Vec3::Z, 1e-6);
-        assert_eq!(status, Err(not_once));
+        // the projection's miss is a reviewed defect, of the status it had
+        let status = p1::find_side_of_curve(&k, &narrow, below, Vec3::Z, 1e-6).unwrap_err();
+        assert_eq!(status.sm_status(), Some(crate::error::SM_ERR));
+        assert!(matches!(
+            status.topology_failure(),
+            Some(TopologyFailure::Defect { .. })
+        ));
         assert!(p1::find_side_of_curve(&k, &narrow, on_curve, Vec3::Z, 1e-6).is_err());
         assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));
         assert_eq!(side_vote(&k, &wide, below, Vec3::Z, 1e-6), Ok(Some(1)));

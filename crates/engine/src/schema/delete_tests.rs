@@ -18,7 +18,18 @@ fn matches(schema: schemars::Schema, r: &Value) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SelectionDeleteParams>(),
-        &["canvases", "components", "dry_run", "items", "joints", "occurrences", "point_clouds"],
+        &[
+            "all_bodies",
+            "canvases",
+            "components",
+            "contents",
+            "dry_run",
+            "items",
+            "joints",
+            "occurrences",
+            "point_clouds",
+            "preserve_projection_link",
+        ],
     );
 }
 
@@ -104,6 +115,7 @@ fn the_schema_takes_every_selection_item() {
         Sel::Edge { body: "B".into(), index: 0, point },
         Sel::Face { body: "B".into(), index: 1, point },
         Sel::Feature { id: 4 },
+        Sel::Drawing { drawing: 7, object: 9 },
         Sel::SketchCurve { id: "c1".into(), sketch: None },
         Sel::SketchCurve { id: "c1".into(), sketch: Some(2) },
         Sel::SketchPoint { id: "p1".into() },
@@ -133,6 +145,9 @@ fn the_schema_takes_every_selection_item() {
     takes(json!({"items": "all"}), false);
     takes(json!({"joints": [true]}), false);
     takes(json!({"dry_run": "yes"}), false);
+    takes(json!({"contents": "delete"}), true);
+    takes(json!({"contents": "keep"}), false);
+    takes(json!({"items": [{"type": "drawing", "drawing": 7, "object": 9}]}), false);
     takes(json!({"colour": 1}), false);
 }
 
@@ -186,7 +201,7 @@ fn png() -> String {
     b.extend(400u32.to_be_bytes());
     b.extend(200u32.to_be_bytes());
     b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    solidcraft_doc::canvas::base64_encode(&b)
+    crate::tests::image_file(&b)
 }
 
 /// Every form of the command, in warn without warnings: the reply matches the output schema and
@@ -220,7 +235,7 @@ fn replies_match_the_output_schema() {
     assert_eq!(r["bodies"], json!([body]), "{r}");
     assert_eq!(r["skipped"], json!(["the origin planes can't be deleted"]), "{r}");
     // A canvas by id, with the other keys `null`.
-    run(&mut s, "canvas.insert", json!({"data": png()}));
+    run(&mut s, "canvas.insert", json!({"path": png()}));
     let canvas = s.doc.canvases[0].id;
     let r = run(&mut s, "selection.delete", json!({"canvases": [canvas], "items": null, "components": null, "joints": null, "dry_run": false}));
     check(&r);
@@ -270,4 +285,39 @@ fn a_misspelt_key_is_reported_in_warn_and_refused_in_strict() {
     s.param_check = ParamCheck::Strict;
     let error = s.execute("selection.delete", &json!({"items": [], "dryrun": true})).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`dryrun`"), "{error}");
+}
+
+#[test]
+fn projection_preservation_is_an_optional_boolean_and_invalid_values_are_atomic() {
+    for schema in [input_schema_for::<SelectionDeleteParams>(), input_schema_for::<crate::schema::sketch_session::DeleteParams>()] {
+        let key = if schema.as_value()["properties"].get("items").is_some() { "items" } else { "entities" };
+        let root = schema.as_value();
+        let mut p = if key == "items" { json!({"items":[{"type":"sketch_curve","id":"l1"}]}) } else { json!({"entities":["l1"]}) };
+        assert!(conforms(root, root, &p));
+        for policy in [json!(false), json!(true)] {
+            p["preserve_projection_link"] = policy;
+            assert!(conforms(root, root, &p));
+        }
+        for policy in [Value::Null, json!("true"), json!(1)] {
+            p["preserve_projection_link"] = policy;
+            assert!(!conforms(root, root, &p));
+        }
+    }
+    for level in [ParamCheck::Off, ParamCheck::Strict] {
+        let mut s = Session { param_check: level, ..Default::default() };
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].clone();
+        for command in ["sketch.delete", "selection.delete"] {
+            for policy in [Value::Null, json!("true"), json!(1)] {
+                let before = s.doc.to_json();
+                let p = if command == "sketch.delete" {
+                    json!({"entities":[line],"preserve_projection_link":policy})
+                } else {
+                    json!({"items":[{"type":"sketch_curve","id":line}],"preserve_projection_link":policy,"dry_run":true})
+                };
+                assert!(s.execute(command, &p).is_err());
+                assert_eq!(s.doc.to_json(), before);
+            }
+        }
+    }
 }

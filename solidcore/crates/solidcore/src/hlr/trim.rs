@@ -361,20 +361,18 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
         [false, true] => area_v,
         _ => area_u,
     };
-    // Loops that wind once around a periodic direction without coming back (a hemisphere's
-    // equator) close against the chart's own edge, so their area depends on where the chart
-    // starts: there the face is taken on the loops' left seen from the natural normal (the B-rep
-    // convention), and below the side within the surface's domain wins either way.
     let net = segs.iter().fold([0f64; 2], |n, (a, b)| {
         [n[0] + b[0] - a[0], n[1] + b[1] - a[1]]
     });
     let open = (0..2)
         .any(|k| super::vec::at(period, k).is_some_and(|p| super::vec::at(net, k).abs() > 0.5 * p));
-    let sigma = if open {
-        loops_left(face, surface)
-    } else {
-        area.signum()
-    };
+    // Loops are stored relative to the surface's natural normal, where the face is on
+    // the loops' left (the B-rep convention). `loops_left` returns +1 when the chart's
+    // normal is the natural normal (face is to the left) and -1 when reversed (face is
+    // to the right). We must not rely on `area.signum()`: for faces on closed surfaces
+    // with only inner hole loops (e.g. a sphere with a hole), the loop is clockwise so
+    // chart area is negative, which would erroneously flip sigma into the void.
+    let sigma = loops_left(face, surface);
     let dom = surface.domain();
     // Inside point: beside the longest non-seam segment, on the face's side.
     let mut inside = None;
