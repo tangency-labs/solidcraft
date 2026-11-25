@@ -22,5 +22,8 @@
   },
   "zh": {
     "ui.drawing_panel.compact": "SolidCraft · 紧凑"
+  },
+  "fr": {
+    "ui.drawing_panel.compact": "SolidCraft · compact"
   }
 }

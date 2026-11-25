@@ -1,7 +1,7 @@
 //! Frame Member (`frame.member`): structural members along the lines of a frame sketch and between
 //! pairs of points. Lines and points are picked in the view into the path, where consecutive points
 //! pair up in pick order; the section is a built-in profile with its dimensions, or the profiles
-//! picked in another sketch. Anchor, angle and mirror place the section on each member.
+//! picked in another sketch. Anchor, angle, mirror and the up axis place the section on each member.
 //!
 //! Trim/Extend (`frame.trim`): members picked in the view trimmed or extended to other members
 //! (butt joints), planar faces or planes, with the end that moves and a weld gap.
@@ -85,6 +85,9 @@ fn corner_index(corner: &CornerType) -> usize {
     CORNER_TYPES.iter().position(|c| name.as_ref().and_then(Value::as_str) == Some(c.0)).unwrap_or(NONE)
 }
 
+/// The up axes as `frame.member` names them, and their labels: world +Z (the default) first.
+const UP_AXES: &[(&str, &str)] = &[("Z", "Z"), ("Y", "Y"), ("X", "X"), ("-Z", "-Z"), ("-Y", "-Y"), ("-X", "-X")];
+
 /// The anchor at `index` in [`ANCHORS`], whose order is `Anchor::ALL`'s.
 pub(crate) fn anchor_at(index: usize) -> Option<Anchor> {
     Anchor::ALL.get(index).copied()
@@ -147,6 +150,8 @@ pub struct Member {
     params_applied: Option<String>,
     pub angle: String,
     pub mirror: bool,
+    /// The world axis that is up for the profile (an index into `UP_AXES`; 0, Z, is the default).
+    pub up: usize,
     pub name: String,
     pub groups: Vec<Group>,
     pub current: usize,
@@ -487,6 +492,7 @@ impl Member {
             params_applied: None,
             angle: String::new(),
             mirror: false,
+            up: 0,
             name: String::new(),
             groups: vec![Group::default()],
             current: 0,
@@ -1301,6 +1307,8 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &mut [
     enter |= hint_row(ui, "ui.frame_offset_b", b, "0 mm");
     enter |= hint_row(ui, "Angle", &mut m.angle, "0 deg");
     form_row(ui, "Mirror", |ui| check(ui, &mut m.mirror));
+    let ups: Vec<&str> = UP_AXES.iter().map(|a| a.1).collect();
+    choice_row(ui, "Up Axis", "frame_up", &mut m.up, &ups);
     enter |= text_row(ui, "Name", &mut m.name, tr("from the profile")).0;
     form_row(ui, "Ghost Frame Members", |ui| check(ui, &mut m.ghost));
     sync_offset(app, m, inputs, extra);
@@ -1711,6 +1719,11 @@ fn flat_commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<St
     if !corners.is_empty() {
         p["corners"] = json!(corners);
     }
+    if m.up != 0
+        && let Some((up, _)) = UP_AXES.get(m.up)
+    {
+        p["up"] = json!(up);
+    }
     if let Value::Object(o) = &mut p {
         for (key, v) in extra {
             o.entry(key.clone()).or_insert_with(|| v.clone());
@@ -1768,6 +1781,7 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
         locate,
         angle,
         mirror,
+        up,
         body_name,
         corner,
         flip,
@@ -1831,6 +1845,8 @@ pub fn for_feature(app: &SolveApp, feature: &solidcraft_engine::doc::Feature) ->
     m.anchor = anchor_index(*anchor).unwrap_or(0);
     m.angle = angle.as_deref().map(|a| shown_expr(a, ValueKind::Angle)).unwrap_or_default();
     m.mirror = *mirror;
+    let up = serde_json::to_value(up).ok();
+    m.up = UP_AXES.iter().position(|(a, _)| up.as_ref().and_then(Value::as_str) == Some(*a)).unwrap_or(0);
     m.locate = *locate;
     m.name = body_name.clone().unwrap_or_default();
     // A located point stays as the feature has it (`m.locate`: the member stays where it is

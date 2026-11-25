@@ -2741,6 +2741,46 @@ mod tests {
     }
 
     #[test]
+    fn a_trial_copy_keeping_definitions_keeps_every_face_s_definition() {
+        use crate::kernel::Kernel;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::sweep::screw::screw_sweep;
+
+        let mut k = Kernel::default();
+        let points = [
+            Vec3::new(4.1, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.9),
+            Vec3::new(4.1, 0.0, 0.9),
+        ];
+        let profile: Vec<Curve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let b = screw_sweep(&mut k, &profile, Vec3::ZERO, Vec3::Z, 1.5, 2.0, 1.5e-4).unwrap();
+        let defined = |b: &Brep| -> Vec<FaceId> {
+            b.faces()
+                .iter()
+                .filter(|(_, f)| {
+                    f.surface
+                        .as_ref()
+                        .is_some_and(|s| s.procedural_definition().is_some())
+                })
+                .map(|(id, _)| id)
+                .collect()
+        };
+        let kept = defined(&b);
+        assert!(!kept.is_empty(), "the thread keeps no definition");
+        assert_eq!(
+            defined(&b.clone_for_trial_keeping_definitions().unwrap()),
+            kept
+        );
+        // the copy without them drops them: the check above tells the two apart
+        assert!(defined(&b.clone_for_trial().unwrap()).is_empty());
+    }
+
+    #[test]
     fn rollback_preserves_iso_edge_sweep_definition() {
         use crate::curve::curve::CurveKind;
         use crate::curve::iso_curve::IsoCurve;

@@ -91,6 +91,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.offset_face" | "solid.shell" | "face.delete" => &[("faces", Picks), ("body", Body)],
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
+        "solid.dome" => &[("face", Pick), ("body", Body)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body), ("face_body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
@@ -101,6 +102,8 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
+        // Split Body's other surface bodies keep the names of further placements, as a combine's
+        // tools do (#20040).
         "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("tool_faces", ToolPicks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
