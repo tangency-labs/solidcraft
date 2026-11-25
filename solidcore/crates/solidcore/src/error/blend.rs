@@ -174,9 +174,9 @@ pub enum BlendFailure {
         speed: f64,
     },
     /// An input the planar-band contact query reads is not there (a support, an edge use, an
-    /// offset, a foot of a drop, ...): the input named. Status `SM_ERR_NULL_POINTER` and the
-    /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
-    /// so not a phrase cause ([`BlendFailure::is_phrase`]).
+    /// offset, a foot of a drop, ...): the input named. Status `SM_ERR_NULL_POINTER`, class
+    /// [`ErrorKind::InvalidInput`] as [`BlendFailure::InputMissing`]'s; typed, so not a phrase
+    /// cause ([`BlendFailure::is_phrase`]).
     BandInputMissing(BandInput),
     /// A vertex given to bevel is not a vertex of the filleted edges. A check of the
     /// caller's arguments ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`
@@ -235,7 +235,7 @@ pub enum BlendFailure {
     /// `SM_ERR_INVALID_INPUT`.
     ChamferSizeInvalid,
     /// A cliff face lacks geometry needed to trim the blend. Status `SM_ERR_NULL_POINTER`.
-    /// Its class is [`ErrorKind::Missing`].
+    /// Its class is [`ErrorKind::InvalidInput`], as [`BlendFailure::InputMissing`]'s.
     CliffInputMissing {
         /// The face that lacks the input.
         face: crate::topology::FaceId,
@@ -360,8 +360,9 @@ pub enum BlendFailure {
     CrossSectionTypeUnknown,
     /// An input a rail's crossing of an edge is judged from is not there (the crossing's
     /// budget, an edge use's radial, the side edge's curve, the crossing's place on it): the
-    /// input named. Status `SM_ERR_NULL_POINTER` and the kind of that status
-    /// ([`ErrorKind::Missing`]); typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
+    /// input named. Status `SM_ERR_NULL_POINTER`, class [`ErrorKind::InvalidInput`] as
+    /// [`BlendFailure::InputMissing`]'s; typed, so not a phrase cause
+    /// ([`BlendFailure::is_phrase`]).
     CrossingInputMissing(CrossingInput),
     /// What a rail's crossing of an edge is judged from (a face normal or binormal at the
     /// crossing) was not a finite number, so the crossing is neither classed concave nor
@@ -420,8 +421,8 @@ pub enum BlendFailure {
     /// `load_solver`, `calc_solver_geometry`, `create_fillet_brep`) alike, so the cause names
     /// what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
     /// does: status
-    /// `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
-    /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
+    /// `SM_ERR_NULL_POINTER` (upstream `NER`), class [`ErrorKind::InvalidInput`] as
+    /// [`BlendFailure::InputMissing`]'s, neither a defect nor a refusal.
     EaseInputMissing(EaseInput),
     /// The ease of a round before a setback stops where the geometry gives it nothing to
     /// build on ([`EaseStop`] says which, and gives the kind); status `SM_ERR`.
@@ -827,8 +828,9 @@ pub enum BlendFailure {
     /// creases and the kept features share, read the caller's body and the sheet the
     /// executive built alike, so the failure names no entity, and the cause
     /// names what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
-    /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
-    /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
+    /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`), class
+    /// [`ErrorKind::InvalidInput`] as [`BlendFailure::InputMissing`]'s, neither a defect nor a
+    /// refusal.
     OverflowInputMissing(OverflowInput),
     /// A point of the cliff overflow does not drop onto the geometry named
     /// ([`OverflowDrop`]): the closest-point search found no foot (within ten tolerances, for
@@ -1010,8 +1012,8 @@ pub enum BlendFailure {
     /// ([`RemovalInput`]). The removal reads the caller's body and the topology its own
     /// edits leave alike, so the cause names what is missing and leaves the blame open, as
     /// [`BlendFailure::EaseInputMissing`] does: status `SM_ERR_NULL_POINTER` (upstream
-    /// `NER`) and the kind of that status ([`ErrorKind::Missing`]), neither a defect nor a
-    /// refusal.
+    /// `NER`), class [`ErrorKind::InvalidInput`] as [`BlendFailure::InputMissing`]'s, neither
+    /// a defect nor a refusal.
     RemovalInputMissing(RemovalInput),
     /// A fillet removal refuses the face it is asked to remove, for the reason named
     /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
@@ -1612,7 +1614,7 @@ impl BlendFailure {
             Self::BadIntersections(_) => ErrorKind::Failed,
             Self::BallTriangleNotOnePatch { .. } => ErrorKind::Unsupported,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
-            Self::BandInputMissing(_) => ErrorKind::Missing,
+            Self::BandInputMissing(_) => ErrorKind::InvalidInput,
             Self::BevelVertexNotFilleted => ErrorKind::InvalidInput,
             Self::BlendingRailEndOffFace { .. } => ErrorKind::NotFound,
             Self::BlendingRailOffFace { .. } => ErrorKind::NotFound,
@@ -1620,7 +1622,7 @@ impl BlendFailure {
             Self::BoundSurfaceRemoved => ErrorKind::InvalidInput,
             Self::ChamferFaceNotOfEdge => ErrorKind::InvalidInput,
             Self::ChamferSizeInvalid => ErrorKind::InvalidInput,
-            Self::CliffInputMissing { .. } => ErrorKind::Missing,
+            Self::CliffInputMissing { .. } => ErrorKind::InvalidInput,
             Self::CliffRailEndsReversed { .. } => ErrorKind::Unsupported,
             Self::CliffSurfaceMissesEdge { .. } => ErrorKind::NotFound,
             Self::ClosedCliffWouldNotSplit { .. } => ErrorKind::Failed,
@@ -1638,14 +1640,14 @@ impl BlendFailure {
             Self::CreaseTrimNotBuilt(stop) => stop.class(),
             Self::CrossSectionOnOneGeometry => ErrorKind::Unsupported,
             Self::CrossSectionTypeUnknown => ErrorKind::InvalidInput,
-            Self::CrossingInputMissing(_) => ErrorKind::Missing,
+            Self::CrossingInputMissing(_) => ErrorKind::InvalidInput,
             Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::CurveKindNotBuilt { .. } => ErrorKind::Unsupported,
             Self::CurveProjectionEmpty { .. } => ErrorKind::NotFound,
             Self::CurveWithoutNet { .. } => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
-            Self::EaseInputMissing(_) => ErrorKind::Missing,
+            Self::EaseInputMissing(_) => ErrorKind::InvalidInput,
             Self::EaseNotBuilt(stop) => stop.class(),
             Self::EdgeNotFilletable { .. } => ErrorKind::InvalidInput,
             Self::EdgeNotInTarget { .. } => ErrorKind::InvalidInput,
@@ -1704,7 +1706,7 @@ impl BlendFailure {
             Self::NotConverged(_) => ErrorKind::NotConverged,
             Self::NotWithinTolerance(_) => ErrorKind::NotWithinTolerance,
             Self::OutsideDomain(_) => ErrorKind::OutsideDomain,
-            Self::OverflowInputMissing(_) => ErrorKind::Missing,
+            Self::OverflowInputMissing(_) => ErrorKind::InvalidInput,
             Self::OverflowPointDoesNotDrop(_) => ErrorKind::NotFound,
             Self::ParameterListSizes { .. } => ErrorKind::InvalidInput,
             // built by no library site, and deleted with the other phrase causes (#21566)
@@ -1725,7 +1727,7 @@ impl BlendFailure {
             Self::RailNotBlending { .. } => ErrorKind::InvalidInput,
             Self::RationalRoundOutOfTolerance { .. } => ErrorKind::NotWithinTolerance,
             Self::RationalWeightsUnavailable { .. } => ErrorKind::Unsupported,
-            Self::RemovalInputMissing(_) => ErrorKind::Missing,
+            Self::RemovalInputMissing(_) => ErrorKind::InvalidInput,
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::RemovalStopped(stop) => stop.class(),
             Self::RibFitCap { .. } => ErrorKind::NotWithinTolerance,
@@ -5032,7 +5034,7 @@ mod tests {
     }
 
     /// #19825: each cause the ease of a round before a setback names is no phrase, replaces
-    /// the status it keeps, has its class (a missing input is `Missing`, neither a defect
+    /// the status it keeps, has its class (a missing input is `InvalidInput`, neither a defect
     /// nor a refusal; a stop has its stop's kind), and is worded with its class.
     #[test]
     fn the_ease_causes_keep_their_status_and_class() {
@@ -5052,7 +5054,7 @@ mod tests {
         ] {
             rows.push((
                 BlendFailure::EaseInputMissing(input),
-                ErrorKind::Missing,
+                ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
             ));
         }
@@ -5123,7 +5125,7 @@ mod tests {
     }
 
     /// #19826: each cause the fillet removal names is no phrase, replaces the status it
-    /// keeps, has its class (a missing link of the topology it walks is `Missing`; a stop
+    /// keeps, has its class (a missing link of the topology it walks is `InvalidInput`; a stop
     /// has its stop's kind), is neither a defect nor a refusal, and is worded with its
     /// class.
     #[test]
@@ -5145,7 +5147,7 @@ mod tests {
         ] {
             rows.push((
                 BlendFailure::RemovalInputMissing(input),
-                ErrorKind::Missing,
+                ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
             ));
         }
@@ -5267,7 +5269,7 @@ mod tests {
             ),
             (
                 RemovalStop::UvTrimNotMade,
-                ErrorKind::Missing,
+                ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
             ),
             (
@@ -5308,7 +5310,7 @@ mod tests {
     }
 
     /// #19825: each cause the overflows name is no phrase, replaces the status it
-    /// keeps, has its class (a missing input is `Missing`, neither a defect nor a refusal:
+    /// keeps, has its class (a missing input is `InvalidInput`, neither a defect nor a refusal:
     /// the overflow's helpers read the caller's body and the executive's sheet alike), and
     /// is worded with its class.
     #[test]
@@ -5323,7 +5325,7 @@ mod tests {
         ] {
             rows.push((
                 BlendFailure::OverflowInputMissing(input),
-                ErrorKind::Missing,
+                ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
             ));
         }

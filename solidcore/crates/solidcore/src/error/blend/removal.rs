@@ -261,7 +261,7 @@ pub enum RemovalStop {
     /// The intersection of the two tangent faces through the new corners finds no curve
     /// ([`ErrorKind::NotFound`]).
     TangentIntersectionNotFound,
-    /// An edge use's UV trim curve is not made ([`ErrorKind::Missing`];
+    /// An edge use's UV trim curve is not made ([`ErrorKind::InvalidInput`];
     /// `SM_ERR_NULL_POINTER`).
     UvTrimNotMade,
     /// The vertex at which to join shells is not given ([`ErrorKind::InvalidInput`];
@@ -308,7 +308,7 @@ impl RemovalStop {
             Self::SideEdgeDropStopped => ErrorKind::NotConverged,
             Self::SideExtensionNotFound => ErrorKind::NotFound,
             Self::TangentIntersectionNotFound => ErrorKind::NotFound,
-            Self::UvTrimNotMade => ErrorKind::Missing,
+            Self::UvTrimNotMade => ErrorKind::InvalidInput,
             Self::VertexNotGiven => ErrorKind::InvalidInput,
             Self::VertexNotOnEdge => ErrorKind::InvalidInput,
         }
