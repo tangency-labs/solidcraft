@@ -51,8 +51,33 @@ impl RunnerState {
     }
 }
 
+/// `typed_value` when `GOLDENS_TYPED=1`, else `legacy`; with feature `call-log`, a write
+/// whose two values differ is logged against the helper's caller ([`crate::call_log`]).
+#[track_caller]
+fn pick<T: std::fmt::Debug>(helper: &str, legacy: T, typed_value: impl FnOnce() -> T) -> T {
+    #[cfg(feature = "call-log")]
+    {
+        let t = typed_value();
+        crate::call_log::note(helper, std::panic::Location::caller(), &legacy, &t);
+        if typed() {
+            t
+        } else {
+            legacy
+        }
+    }
+    #[cfg(not(feature = "call-log"))]
+    {
+        let _ = helper;
+        if typed() {
+            typed_value()
+        } else {
+            legacy
+        }
+    }
+}
+
 /// A numeric slot type.
-pub trait SlotValue: Copy {
+pub trait SlotValue: Copy + std::fmt::Debug {
     /// The slot value of `v`.
     fn from_i32(v: i32) -> Self;
 }
@@ -81,6 +106,7 @@ fn code(e: &SolidError) -> i32 {
 }
 
 /// One call's outcome: `0` for success, else the error's kind code.
+#[track_caller]
 pub fn slot<T, V: SlotValue>(r: &solidcore::Result<T>, legacy: V) -> V {
     match r {
         Ok(_) => ok_slot(legacy),
@@ -89,61 +115,45 @@ pub fn slot<T, V: SlotValue>(r: &solidcore::Result<T>, legacy: V) -> V {
 }
 
 /// A failed call's slot value: the error's kind code.
+#[track_caller]
 pub fn kind_slot<V: SlotValue>(e: &SolidError, legacy: V) -> V {
-    if typed() {
-        V::from_i32(code(e))
-    } else {
-        legacy
-    }
+    pick("kind_slot", legacy, || V::from_i32(code(e)))
 }
 
 /// Whether a match arm takes `e` as a kernel outcome: every error but an unported callee
 /// (which defers the case) when `GOLDENS_TYPED=1`, else the arm's own `legacy` guard (a
 /// test on the error's status number).
+#[track_caller]
 pub fn is_kernel(e: &SolidError, legacy: bool) -> bool {
-    if typed() {
+    pick("is_kernel", legacy, || {
         !matches!(e, SolidError::Unported { .. })
-    } else {
-        legacy
-    }
+    })
 }
 
 /// A successful call's slot value: `0`.
+#[track_caller]
 pub fn ok_slot<V: SlotValue>(legacy: V) -> V {
-    if typed() {
-        V::from_i32(0)
-    } else {
-        legacy
-    }
+    pick("ok_slot", legacy, || V::from_i32(0))
 }
 
 /// The slot value of a call the runner did not make.
+#[track_caller]
 pub fn state_slot<V: SlotValue>(s: RunnerState, legacy: V) -> V {
-    if typed() {
-        V::from_i32(s.value())
-    } else {
-        legacy
-    }
+    pick("state_slot", legacy, || V::from_i32(s.value()))
 }
 
 /// A record whose shape changes with kinds (a slot pair that becomes one kind, a text that
 /// was read back out of a slot): `typed` when `GOLDENS_TYPED=1`, else `legacy`. Goes with the
 /// `legacy` arguments.
-pub fn legacy_or<T>(legacy: T, typed_value: impl FnOnce() -> T) -> T {
-    if typed() {
-        typed_value()
-    } else {
-        legacy
-    }
+#[track_caller]
+pub fn legacy_or<T: std::fmt::Debug>(legacy: T, typed_value: impl FnOnce() -> T) -> T {
+    pick("legacy_or", legacy, typed_value)
 }
 
 /// The `error` text of a kernel failure: `kind_<code>`.
+#[track_caller]
 pub fn kernel_text(e: &SolidError, legacy: impl Into<String>) -> String {
-    if typed() {
-        format!("kind_{}", code(e))
-    } else {
-        legacy.into()
-    }
+    pick("kernel_text", legacy.into(), || format!("kind_{}", code(e)))
 }
 
 /// The largest size that works, for a refused extension that names one (recorded as

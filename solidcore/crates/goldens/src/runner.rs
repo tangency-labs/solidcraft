@@ -125,7 +125,11 @@ pub fn each_rust_output(
         } else {
             false
         };
+        #[cfg(feature = "call-log")]
+        crate::call_log::begin(unit.id(), &case.name);
         let out = guarded(|| unit.run_rust(case));
+        #[cfg(feature = "call-log")]
+        crate::call_log::end();
         if started {
             crate::dump::stop();
         }

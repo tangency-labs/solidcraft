@@ -101,7 +101,20 @@ impl Output {
     /// size that works as `values["largest_size"]` for a refused extension that names one;
     /// an unported callee defers the case. `legacy` is the text recorded before kinds,
     /// returned unless `GOLDENS_TYPED=1`.
+    #[track_caller]
     pub fn kernel(e: &SolidError, legacy: impl Into<String>) -> Self {
+        #[cfg(feature = "call-log")]
+        {
+            let at = std::panic::Location::caller();
+            let deferred = Self::unported(e).is_some();
+            crate::call_log::note("kernel_deferred", at, &false, &deferred);
+            let size = if deferred {
+                None
+            } else {
+                crate::status::largest_size(e)
+            };
+            crate::call_log::note("kernel_largest_size", at, &None::<f64>, &size);
+        }
         if !crate::status::typed() {
             return Self::err(legacy);
         }
@@ -128,6 +141,7 @@ impl Output {
 
     /// A rejection whose reason is a kernel failure: `<prefix>: kind_<code>`. `legacy` is the
     /// reason recorded before kinds, returned unless `GOLDENS_TYPED=1`.
+    #[track_caller]
     pub fn rejected_kernel(
         prefix: &'static str,
         e: &SolidError,
