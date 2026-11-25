@@ -65,7 +65,14 @@ mod tests {
     fn a_design_with_notes_survives_a_round_trip() {
         let mut doc = crate::Document::new("Noted");
         doc.notes.push(note(1));
-        doc.notes.push(Note { id: 2, anchor: Vec3::new(-4.0, 0.0, 6.5), text: "Adjust after the test print".into(), hidden: true, done: true, target: Some(NoteTarget { kind: "face".into(), body: "Plate".into(), index: Some(15) }) });
+        doc.notes.push(Note {
+            id: 2,
+            anchor: Vec3::new(-4.0, 0.0, 6.5),
+            text: "Adjust after the test print".into(),
+            hidden: true,
+            done: true,
+            target: Some(NoteTarget { kind: "face".into(), body: "Plate".into(), index: Some(15) }),
+        });
         let json = serde_json::to_string(&doc).unwrap();
         let back: crate::Document = serde_json::from_str(&json).unwrap();
         assert_eq!(back, doc);

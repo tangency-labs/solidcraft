@@ -10,7 +10,10 @@ use solidcraft_doc::Note;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, req_vec3, str_};
-use crate::schema::notes::{NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NoteTargetItem, NoteUpdateParams, NotesList, NotesPanelParams, NotesPanelResult};
+use crate::schema::notes::{
+    NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NoteTargetItem, NoteUpdateParams, NotesList, NotesPanelParams,
+    NotesPanelResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 

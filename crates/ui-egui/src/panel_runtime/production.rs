@@ -1044,10 +1044,8 @@ pub(crate) fn toggle_notes(app: &mut crate::SolveApp, force_open: bool) -> Panel
     let mutations = match layout.instance(&id) {
         Ok(panel) => {
             let section = layout.containing(&id).ok();
-            let reveal = force_open
-                || !app.ui.show_notes
-                || !panel.requested_open
-                || section.is_some_and(|section| section.collapsed || section.active != id);
+            let reveal =
+                force_open || !app.ui.show_notes || !panel.requested_open || section.is_some_and(|section| section.collapsed || section.active != id);
             if reveal {
                 let section_id = section.map_or_else(|| panel.memory.section.clone(), |section| section.id.clone());
                 let mut mutations = Vec::new();

@@ -109,13 +109,8 @@ fn new_note(app: &mut SolveApp, ui: &mut egui::Ui, t: &solidcraft_theme::Tokens)
     ui.label(RichText::new(on).color(t.text_dim).size(t.font_caption));
     let id = egui::Id::unique("notes-panel-draft");
     let mut draft = std::mem::take(&mut app.notes.draft);
-    let field = ui.add(
-        egui::TextEdit::multiline(&mut draft)
-            .id(id)
-            .hint_text(tr("ui.notes_draft_hint"))
-            .desired_rows(3)
-            .desired_width(ui.available_width()),
-    );
+    let field =
+        ui.add(egui::TextEdit::multiline(&mut draft).id(id).hint_text(tr("ui.notes_draft_hint")).desired_rows(3).desired_width(ui.available_width()));
     crate::panel_runtime::register_content_focus(ui.ctx(), &field);
     if std::mem::take(&mut app.notes.focus_draft) {
         field.request_focus();
