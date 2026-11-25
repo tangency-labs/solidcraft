@@ -2456,7 +2456,7 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
         // joints can move or constrain it, avoiding oversized ancestor loop groups.
         if !has_children.contains(occ)
             && let Some(&(from, parent_joint, _)) = tree.parent.get(occ)
-            && let Some(leaf_reach) = fixed_leaf_reach(tree, *occ, from, parent_joint, incident, dof, &linked_joints)
+            && let Some(leaf_reach) = fixed_leaf_reach(tree, (*occ, from, parent_joint), incident, dof, &linked, &linked_joints)
         {
             let scale = loop_scale(tree, &leaf_reach.around, vals);
             if let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &leaf_reach, scale, Watched::Occurrence(*occ)) {
@@ -2536,11 +2536,10 @@ type SingleLoop = (u64, BTreeSet<u64>, Vec<(u64, usize)>);
 /// DOF depends solely on its own incident joints.
 fn fixed_leaf_reach(
     tree: &Tree,
-    occ: u64,
-    from: u64,
-    parent_joint: u64,
+    (occ, from, parent_joint): (u64, u64, u64),
     incident_closers: &[u64],
     dof: &BTreeMap<u64, usize>,
+    linked: &BTreeSet<(u64, usize)>,
     linked_joints: &BTreeSet<u64>,
 ) -> Option<LoopReach> {
     if incident_closers.is_empty() || dof.get(&from) != Some(&0) || linked_joints.contains(&parent_joint) {
@@ -2563,7 +2562,7 @@ fn fixed_leaf_reach(
     around.extend(incident_closers.iter().copied());
     let mut values = Vec::new();
     for j in around.iter().filter_map(|id| tree.joints.get(id)) {
-        values.extend((0..j.kind.dofs().len()).map(|i| (j.id, i)));
+        values.extend((0..j.kind.dofs().len()).map(|i| (j.id, i)).filter(|v| !linked.contains(v)));
     }
     (values.len() <= MAX_LOOP_VALUES && incident_closers.len() <= MAX_LOOPS).then(|| LoopReach { values, closers: incident_closers.to_vec(), around })
 }

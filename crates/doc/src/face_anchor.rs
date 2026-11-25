@@ -236,17 +236,17 @@ impl Document {
                 let old = before.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
                 old_doc.configuration_face_indices(old, target)?;
                 let new = after.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
-                let indices = crate::naming::faces_with_stem(new, &name);
                 // A linked face told from its siblings only by a positional tie number (`#k`)
                 // must be that exact face after the update, never a sibling sharing its stem.
                 let tie_numbered = linked && crate::naming::is_tie_numbered_link_face(&name, feature);
+                let indices: Vec<usize> = crate::naming::faces_with_stem(new, &name)
+                    .into_iter()
+                    .filter(|&index| !tie_numbered || crate::naming::face_has_name(new, index, &name))
+                    .collect();
                 let mut certificate = None;
                 for index in indices {
                     if !matches!(new.body.face_sources().and_then(|sources| sources.get(index)), Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(id), .. })) if *id == feature)
                     {
-                        return Err(missing());
-                    }
-                    if tie_numbered && !crate::naming::face_has_name(new, index, &name) {
                         return Err(missing());
                     }
                     let current = doc.configuration_face_certificate(new, index)?.ok_or_else(missing)?;
