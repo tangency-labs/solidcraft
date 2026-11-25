@@ -374,6 +374,8 @@ fn for_space(tool: &Traced, k: u32) -> Traced {
                 _ => op.clone(),
             })
             .collect(),
+        // The same body, so the same faces: what a feature split them into stays as it is.
+        pieces: l.pieces.clone(),
     });
     Traced { body: tool.body.clone(), lineage, recipe: None }
 }
@@ -738,7 +740,7 @@ fn also_from(st: &mut ModelState, body: &str, role: &str, face: Option<usize>) {
         return;
     };
     let origin = kernel::history::FaceOrigin::Face { operand: own, face };
-    let crate::lineage::Lineage { history, operands } = &mut lineage;
+    let crate::lineage::Lineage { history, operands, pieces: _ } = &mut lineage;
     let of_role = |operand: usize, tool_face: usize| {
         operands.get(operand).is_some_and(|op| {
             matches!(op.as_ref(), crate::lineage::Operand::Made(roles) if roles.get(tool_face).and_then(|names| names.first()).is_some_and(|name| name == role))
