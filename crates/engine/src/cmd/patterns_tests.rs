@@ -3589,6 +3589,40 @@ fn face_pattern_attractors_scale_copies_by_distance() {
     assert!(copies.iter().any(|(_, min, _)| min.z > 12.0), "the nearest copies are lifted");
 }
 
+/// The pattern's own scale, offset and rotation change every copy alike, with no attractors; with
+/// attractors, a near or far value left out is the pattern's own.
+#[test]
+fn a_face_pattern_scales_offsets_and_rotates_every_copy() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let face = json!({"face": [50, 30, 10]});
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": face, "count1": 3, "count2": 2, "scale": 1.5, "offset": "2 mm"}));
+    let copies = pin_heights(&s, &r);
+    assert_eq!(copies.len(), 6);
+    for (at, height) in &copies {
+        assert!((height - 9.0).abs() < 1e-6 && (at.z - 12.0).abs() < 1e-6, "1.5 times as tall, 2 mm off the face: {at:?} {height}");
+    }
+    // A bar 8 by 2 turned a quarter turn about the face's normal: its extents swap.
+    run(&mut s, "solid.box", json!({"length": 8, "width": 2, "height": 2, "center": [0, -40, 1], "body_name": "Bar"}));
+    let extents = |s: &Session, r: &Value| copies_of(s, r).iter().map(|(_, min, max)| (max.x - min.x, max.y - min.y)).collect::<Vec<_>>();
+    let plain = run(&mut s, "solid.pattern.face", json!({"bodies": ["Bar"], "face": face, "count1": 2, "count2": 2}));
+    let turned = run(&mut s, "solid.pattern.face", json!({"bodies": ["Bar"], "face": face, "count1": 2, "count2": 2, "rotate": "90 deg"}));
+    for ((x, y), (tx, ty)) in extents(&s, &plain).into_iter().zip(extents(&s, &turned)) {
+        assert!((x - ty).abs() < 1e-6 && (y - tx).abs() < 1e-6, "turned a quarter turn: {x} × {y} against {tx} × {ty}");
+    }
+    // Scale near 2 and the pattern's 0.5 for the far copies: heights from 12 to 3 mm, as with both
+    // given.
+    let r = run(
+        &mut s,
+        "solid.pattern.face",
+        json!({"bodies": ["Pin"], "face": face, "count1": 5, "count2": 3, "scale": 0.5,
+               "attract": {"geometry": [{"point": [0, 0, 10]}], "scale_near": 2}}),
+    );
+    let heights: Vec<f64> = pin_heights(&s, &r).iter().map(|(_, h)| *h).collect();
+    let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+    assert!((hi - 12.0).abs() < 1e-6 && (lo - 3.0).abs() < 1e-6, "heights from 12 to 3 mm: {heights:?}");
+}
+
 /// The face is found again on each evaluation: when the plate grows taller, the copies move up
 /// with its top face.
 #[test]
@@ -3623,6 +3657,9 @@ fn a_face_pattern_refuses_bad_input() {
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Nope"]}}),
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Plate"], "margin": -1}}),
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Plate"], "margin": "5 deg"}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "scale": 0}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "offset": "5 deg"}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "rotate": "5 mm"}),
     ] {
         let before = s.doc.features.len();
         assert!(s.execute("solid.pattern.face", &p).is_err(), "{p}");

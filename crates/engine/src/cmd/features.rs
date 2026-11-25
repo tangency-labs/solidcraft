@@ -280,7 +280,10 @@ pub static COMMANDS: &[CommandSpec] = &[
             "flip?: bool (the other side of the face); ",
             "anchor?: [x,y,z] (the point of the bodies that lands on the face, default the centre of the bottom of their bounding box; their +Z stands along the face's normal, their X along the grid); ",
             "group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); ",
-            "attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, rotate_near?, rotate_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0)",
+            "scale?: expr (every copy's scale about its anchor, default 1); ",
+            "offset?: expr (every copy moved out along the face's normal, negative into it, default 0); ",
+            "rotate?: expr (every copy turned about the face's normal, default 0); ",
+            "attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, rotate_near?, rotate_far?, cutoff?, falloff?: linear|smooth} (near/far modifiers: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0; a near or far value left out is the pattern's scale, offset or rotate)",
         )),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
@@ -3719,6 +3722,22 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         Some(a) => Some(Box::new(avoid_param(s, a, cmd)?)),
     };
     let anchor = point_param(s, p, "anchor", cmd)?;
+    // Every copy's scale, offset and rotation, and the attractors' values where they give none.
+    let own = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+        let e = expr(p, key);
+        if let Some(e) = &e {
+            check_expr(s, e, kind, cmd, key)?;
+        }
+        Ok(e)
+    };
+    let scale = own("scale", Kind::Unitless)?;
+    if let Some(e) = &scale
+        && s.doc.eval(e, Kind::Unitless).is_ok_and(|k| !(k > 0.0))
+    {
+        return Err(bad(cmd, "`scale` must be above zero"));
+    }
+    let offset = own("offset", Kind::Length)?;
+    let rotate = own("rotate", Kind::Angle)?;
     let attract = match p.get("attract") {
         None | Some(Value::Null) => None,
         Some(a) => Some(Box::new(attract_param(s, a, cmd)?)),
@@ -3738,6 +3757,9 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         avoid,
         flip: bool_(p, "flip").unwrap_or(false),
         anchor,
+        scale,
+        offset,
+        rotate,
         attract,
     };
     let reply = finish_pattern(s, p, Vec::new(), pattern, (bodies, Vec::new()))?;

@@ -1175,7 +1175,19 @@ pub struct PatternFaceParams {
     /// Default: true.
     #[serde(default)]
     pub group: Option<bool>,
-    /// Advanced: change each copy with its distance to attractors.
+    /// Every copy's scale about its anchor, above zero. Default: 1. With `attract`, the near and
+    /// far scales it leaves out.
+    #[serde(default)]
+    pub scale: Option<NumberExpr>,
+    /// How far every copy moves out along the face's normal (negative: into the face). Default:
+    /// 0. With `attract`, the near and far offsets it leaves out.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// How far every copy rotates about the face's normal. Default: 0. With `attract`, the near
+    /// and far rotations it leaves out.
+    #[serde(default)]
+    pub rotate: Option<AngleExpr>,
+    /// Near/far modifiers: change each copy with its distance to attractors.
     #[serde(default)]
     pub attract: Option<AttractParams>,
     #[serde(flatten, deserialize_with = "feature_common")]
@@ -1228,23 +1240,24 @@ pub struct AttractParams {
     /// zone: copies within this of the far attractors take the far values in full (default 0).
     #[serde(default)]
     pub far: Option<LengthExpr>,
-    /// A copy's scale at the near distance. Default: 1.
+    /// A copy's scale at the near distance. Default: the pattern's `scale` (1).
     #[serde(default)]
     pub scale_near: Option<NumberExpr>,
-    /// A copy's scale at the far distance. Default: 1.
+    /// A copy's scale at the far distance. Default: the pattern's `scale` (1).
     #[serde(default)]
     pub scale_far: Option<NumberExpr>,
     /// How far a copy moves out along the face's normal at the near distance (negative: into
-    /// the face). Default: 0.
+    /// the face). Default: the pattern's `offset` (0).
     #[serde(default)]
     pub offset_near: Option<LengthExpr>,
-    /// The same at the far distance. Default: 0.
+    /// The same at the far distance. Default: the pattern's `offset` (0).
     #[serde(default)]
     pub offset_far: Option<LengthExpr>,
-    /// How far a copy rotates about the face's normal at the near distance. Default: 0.
+    /// How far a copy rotates about the face's normal at the near distance. Default: the
+    /// pattern's `rotate` (0).
     #[serde(default)]
     pub rotate_near: Option<AngleExpr>,
-    /// The same at the far distance. Default: 0.
+    /// The same at the far distance. Default: the pattern's `rotate` (0).
     #[serde(default)]
     pub rotate_far: Option<AngleExpr>,
     /// No copy farther than this from every attractor point.

@@ -81,11 +81,12 @@ attractor, measured on the exact geometry. With *far attractors* as well, the va
 the two sets instead: the near setting on the near attractors, the far one on the far attractors.
 Two opposite edges of a face, one in each set, make the values run straight across it. The near
 and far distances are then hold zones: within them of their set, a copy takes that set's values
-in full.
+in full. A near or far value left unset is the pattern's own scale, rotation or offset.
 
 - **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
   `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,
-  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Advanced section of Pattern on Face.
+  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Near objects and Far objects of Pattern on
+  Face's Near/Far modifiers section.
 - **Don't use:** magnet, driver, influence point.
 - **Elsewhere:** attractor point, attractor curve.
 - **For translators:** what draws an effect towards it, not a physical force or a magnet.

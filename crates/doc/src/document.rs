@@ -3316,7 +3316,23 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
         anchor: Option<PointExpr>,
-        /// Advanced: each copy's size, height and rotation follow its distance to attractor points.
+        /// Every copy's scale about its anchor (default 1), and with `attract` the near and far
+        /// scales it leaves unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Scale")]
+        scale: Option<Expr>,
+        /// How far every copy moves out along the face's normal (negative: into it; default 0),
+        /// and with `attract` the near and far offsets it leaves unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset from face")]
+        offset: Option<Expr>,
+        /// How far every copy rotates about the face's normal (default 0), and with `attract` the
+        /// near and far rotations it leaves unset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Rotate")]
+        rotate: Option<Expr>,
+        /// Near/far modifiers: each copy's size, height and rotation follow its distance to
+        /// attractor points.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attract: Option<Box<Attract>>,
     },
@@ -3346,7 +3362,8 @@ pub struct Avoid {
 /// attractors, blended by the share of its distance to the near set in the sum of both. The near
 /// and far distances are then hold zones: a copy within `near` of the near set takes the near
 /// values, one within `far` of the far set the far values (both default 0), and the blend runs
-/// between the zones' edges.
+/// between the zones' edges. A near or far value left unset is the pattern's own `scale`, `offset`
+/// or `rotate` (1, 0 and 0 without them).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct Attract {
     /// Geometry the distances are measured to: fixed points, vertices, sketch points,
@@ -3367,21 +3384,22 @@ pub struct Attract {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Far distance")]
     pub far: Option<Expr>,
-    /// Scale of a copy at the near distance, and at the far one (default 1).
+    /// Scale of a copy at the near distance, and at the far one (default: the pattern's scale).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(unitless = "Scale near")]
     pub scale_near: Option<Expr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(unitless = "Scale far")]
     pub scale_far: Option<Expr>,
-    /// How far a copy moves out along the face's normal (negative: into it).
+    /// How far a copy moves out along the face's normal (negative: into it; default: the
+    /// pattern's offset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Offset from face near")]
     pub offset_near: Option<Expr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Offset from face far")]
     pub offset_far: Option<Expr>,
-    /// How far a copy rotates about the face's normal.
+    /// How far a copy rotates about the face's normal (default: the pattern's rotation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(angle = "Rotate near")]
     pub rotate_near: Option<Expr>,

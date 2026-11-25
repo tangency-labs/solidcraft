@@ -1,22 +1,27 @@
 //! The Face type of the pattern dialog (`solid.pattern.face`): copies of bodies standing on a
-//! face, on a grid across it, kept clear of the face's edges and of what the Avoid pick holds. Its
-//! attractors, which change each copy with its distance to
-//! points, sit behind the Advanced section: switching them on adds the Attractors pick and
-//! their near and far values.
+//! face, on a grid across it, kept clear of the face's edges and of what the Avoid pick holds, each
+//! scaled, rotated and offset from the face by the main section's values. The Near/Far modifiers
+//! section holds the attractors, which change each copy with its distance to them: the Near and
+//! Far objects picks and the near and far values, each left empty the main section's. While
+//! objects are picked there, they set the copies and the main section's values are greyed out.
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{Attract, Avoid, FaceLayout, Falloff, Noise, PatternKind};
 
 use crate::SolveApp;
-use crate::dialogs::{Dialog, Kind, form_row, set_object_accepting};
+use crate::dialogs::{Dialog, Kind, form_row, input_rows_range, set_object_accepting};
 use crate::selection::{self, BODIES, FACES, SelInput, SelectionExt as _, point_value as pt};
 use crate::ui_kit::{self, choice_row, expr_row, hint_row};
 
-/// The pick inputs the attractors go into, present while attractors are on: the near set, and
-/// the optional far set the values blend towards.
-pub(crate) const ATTRACTORS: &str = "Attractors";
-pub(crate) const FAR_ATTRACTORS: &str = "Far attractors";
+/// The pick inputs the attractors go into, drawn in the Near/Far modifiers section while it is
+/// open or they hold picks: the near set, and the optional far set the values blend towards.
+pub(crate) const ATTRACTORS: &str = "Near objects";
+pub(crate) const FAR_ATTRACTORS: &str = "Far objects";
+
+/// The inputs drawn at the top of the dialog; the attractor picks, added after them, are drawn in
+/// the Near/Far modifiers section.
+pub(crate) const TOP_INPUTS: std::ops::Range<usize> = 0..3;
 
 /// The pick for what no copy may come near.
 pub(crate) const AVOID: &str = "Avoid";
@@ -29,7 +34,8 @@ pub(crate) const AVOID_PICKS: selection::Accept = selection::VERTICES | selectio
 pub(crate) const ATTRACTOR_PICKS: selection::Accept =
     selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::EDGES | FACES | BODIES;
 
-/// Add or remove the attractor picks.
+/// Add or remove the attractor picks: added as the Near/Far modifiers section opens (or a pattern
+/// with attractors is edited), picks going to Near objects first.
 pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
     for label in [ATTRACTORS, FAR_ATTRACTORS] {
         set_object_accepting(&mut d.inputs, &mut d.active, label, ATTRACTOR_PICKS, on);
@@ -37,7 +43,6 @@ pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
             i.multi = true;
         }
     }
-    // Picks go to the near set first.
     if on && let Some(i) = d.inputs.iter().position(|i| i.label == ATTRACTORS) {
         d.active = i;
     }
@@ -76,8 +81,11 @@ pub struct Form {
     pub flip: bool,
     /// The instances go into a browser group (on by default).
     pub group: bool,
-    /// The Advanced section's switch.
-    pub attract: bool,
+    /// Every instance's scale, rotation and offset from the face, and the near and far values
+    /// left empty.
+    pub scale: String,
+    pub rotate: String,
+    pub offset: String,
     pub near: String,
     pub far: String,
     pub scale_near: String,
@@ -90,7 +98,7 @@ pub struct Form {
     /// 0: linear; 1: smooth.
     pub falloff: usize,
     /// When editing: the saved face and attractor references, sent while nothing is picked
-    /// in their place.
+    /// in their place (only those the dialog could not show as picks).
     pub saved_face: Option<Value>,
     pub saved_more_faces: Vec<Value>,
     pub saved_geometry: Vec<Value>,
@@ -122,11 +130,13 @@ impl Default for Form {
             fit_edges: true,
             flip: false,
             group: true,
-            attract: false,
+            scale: "1".into(),
+            rotate: String::new(),
+            offset: String::new(),
             near: String::new(),
             far: String::new(),
-            scale_near: "1".into(),
-            scale_far: "1".into(),
+            scale_near: String::new(),
+            scale_far: String::new(),
             offset_near: String::new(),
             offset_far: String::new(),
             rotate_near: String::new(),
@@ -149,6 +159,7 @@ impl Default for Form {
 const LAYOUTS: [&str; 7] = ["Grid", "Staggered", "Random", "Spacing", "Spiral", "Even fill", "Geodesic"];
 
 /// The Face pick takes several faces of one body: one region, copies across the edges they share.
+/// The near and far attractors are added after these ([`set_attractor_inputs`]).
 pub(crate) fn inputs() -> Vec<SelInput> {
     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Face", FACES, true), SelInput::new(AVOID, AVOID_PICKS, true)]
 }
@@ -160,11 +171,12 @@ pub(crate) fn kind() -> Kind {
 
 /// The fields under the picks. Returns whether Enter was pressed in one.
 pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
-    // With far attractors, the near and far distances are hold zones round each set.
-    let between = d.inputs.iter().any(|i| i.label == FAR_ATTRACTORS && !i.items.is_empty());
-    let avoiding = d.inputs.iter().any(|i| i.label == AVOID && !i.items.is_empty());
+    let picked = |d: &Dialog, label: &str| d.inputs.iter().any(|i| i.label == label && !i.items.is_empty());
+    let (near_picked, far_picked, avoiding) = (picked(d, ATTRACTORS), picked(d, FAR_ATTRACTORS), picked(d, AVOID));
     let Kind::FacePattern(f) = &mut d.kind else { return false };
-    let between = between || !f.saved_far_geometry.is_empty() || !f.saved_far_bodies.is_empty();
+    // With far attractors, the near and far distances are hold zones round each set.
+    let between = far_picked || !f.saved_far_geometry.is_empty() || !f.saved_far_bodies.is_empty();
+    let attracting = between || near_picked || !f.saved_geometry.is_empty() || !f.saved_bodies.is_empty();
     let avoiding = avoiding || !f.saved_avoid_geometry.is_empty() || !f.saved_avoid_bodies.is_empty();
     let doc = &app.session.doc;
     let mut enter = false;
@@ -200,42 +212,70 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     if avoiding {
         enter |= hint_row(ui, "Avoid margin", &mut f.avoid_margin, "none");
     }
+    // Every instance's own scale, rotation and offset; while near or far objects are picked they
+    // set these instead, from the values below, so these are greyed out.
+    enter |= ui
+        .add_enabled_ui(!attracting, |ui| {
+            let mut enter = expr_row(ui, "Scale", &mut f.scale);
+            enter |= hint_row(ui, "Rotate", &mut f.rotate, "none");
+            enter | hint_row(ui, "Offset from face", &mut f.offset, "none")
+        })
+        .inner;
     form_row(ui, "", |ui| {
         ui_kit::checkbox(ui, "Flip", &mut f.flip);
     });
     form_row(ui, "", |ui| {
         ui_kit::checkbox(ui, "Group Instances", &mut f.group);
     });
-    let mut attract = f.attract;
-    ui_kit::section(ui, "face_pattern_advanced", "Advanced", f.attract, |ui| {
-        form_row(ui, "", |ui| {
-            ui_kit::checkbox(ui, "Attractors", &mut attract);
-        });
-        if attract {
-            if between {
-                ui_kit::status_line(ui, "Instances change from the attractors to the far attractors", ui_kit::StatusTone::Dim);
-                enter |= hint_row(ui, "Near distance", &mut f.near, "hold near values within");
-                enter |= hint_row(ui, "Far distance", &mut f.far, "hold far values within");
-            } else {
-                ui_kit::status_line(ui, "Each instance changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
-                enter |= hint_row(ui, "Near distance", &mut f.near, "nearest instance");
-                enter |= hint_row(ui, "Far distance", &mut f.far, "farthest instance");
-            }
-            enter |= expr_row(ui, "Scale near", &mut f.scale_near);
-            enter |= expr_row(ui, "Scale far", &mut f.scale_far);
-            enter |= hint_row(ui, "Rotate near", &mut f.rotate_near, "none");
-            enter |= hint_row(ui, "Rotate far", &mut f.rotate_far, "none");
-            enter |= hint_row(ui, "Offset from face near", &mut f.offset_near, "none");
-            enter |= hint_row(ui, "Offset from face far", &mut f.offset_far, "none");
-            enter |= hint_row(ui, "Cutoff", &mut f.cutoff, "none");
-            choice_row(ui, "Falloff", "fp_falloff", &mut f.falloff, &["Linear", "Smooth"]);
+    let names = app.preferences.origin_plane_names;
+    let shown = ui_kit::section(ui, "face_pattern_near_far", "Near/Far modifiers", attracting, |ui| {
+        if !d.inputs.iter().any(|i| i.label == ATTRACTORS) {
+            set_attractor_inputs(d, true);
         }
+        if let Some(at) = d.inputs.iter().position(|i| i.label == ATTRACTORS) {
+            input_rows_range(d, ui, &app.session, names, at..at + 2);
+        }
+        let Kind::FacePattern(f) = &mut d.kind else { return false };
+        let mut enter = false;
+        if between {
+            ui_kit::status_line(ui, "Instances change from the near objects to the far objects", ui_kit::StatusTone::Dim);
+            enter |= hint_row(ui, "Near distance", &mut f.near, "hold near values within");
+            enter |= hint_row(ui, "Far distance", &mut f.far, "hold far values within");
+        } else {
+            ui_kit::status_line(ui, "Each instance changes with its distance to the nearest near object", ui_kit::StatusTone::Dim);
+            enter |= hint_row(ui, "Near distance", &mut f.near, "nearest instance");
+            enter |= hint_row(ui, "Far distance", &mut f.far, "farthest instance");
+        }
+        // Each value left empty is the main section's, which its hint shows.
+        let main = |v: &str, none: &'static str| if v.trim().is_empty() { none.to_string() } else { v.trim().to_string() };
+        let (scale, rotate, offset) = (main(&f.scale, "1"), main(&f.rotate, "none"), main(&f.offset, "none"));
+        enter |= hint_row(ui, "Scale near", &mut f.scale_near, &scale);
+        enter |= hint_row(ui, "Scale far", &mut f.scale_far, &scale);
+        enter |= hint_row(ui, "Rotate near", &mut f.rotate_near, &rotate);
+        enter |= hint_row(ui, "Rotate far", &mut f.rotate_far, &rotate);
+        enter |= hint_row(ui, "Offset from face near", &mut f.offset_near, &offset);
+        enter |= hint_row(ui, "Offset from face far", &mut f.offset_far, &offset);
+        enter |= hint_row(ui, "Cutoff", &mut f.cutoff, "none");
+        choice_row(ui, "Falloff", "fp_falloff", &mut f.falloff, &["Linear", "Smooth"]);
+        enter
     });
-    if attract != f.attract {
-        f.attract = attract;
-        set_attractor_inputs(d, attract);
+    // Folded away, the section's picks go while empty, and take no more picks.
+    if shown.is_none() {
+        if !attracting {
+            set_attractor_inputs(d, false);
+        }
+        if d.inputs.get(d.active).is_some_and(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS) {
+            d.active = 0;
+        }
     }
-    enter
+    enter | shown.unwrap_or(false)
+}
+
+/// Put `v` under `key` unless it is empty.
+fn put_value(p: &mut Value, key: &str, v: &str) {
+    if !v.trim().is_empty() {
+        p[key] = json!(v.trim());
+    }
 }
 
 /// The command's parameters.
@@ -308,6 +348,12 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if !f.group {
         p["group"] = json!(false);
     }
+    // Every instance's scale, rotation and offset; a scale of 1 is the default.
+    if f.scale.trim() != "1" {
+        put_value(&mut p, "scale", &f.scale);
+    }
+    put_value(&mut p, "rotate", &f.rotate);
+    put_value(&mut p, "offset", &f.offset);
     // One set of picks: geometry references and whole bodies; while nothing is picked, the set as
     // saved.
     let set = |label: &str, saved_geometry: &[Value], saved_bodies: &[String]| -> Result<(Vec<Value>, Vec<String>), String> {
@@ -339,12 +385,14 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         }
         p["avoid"] = a;
     }
-    if f.attract {
-        let (geometry, bodies) = set(ATTRACTORS, &f.saved_geometry, &f.saved_bodies)?;
-        if geometry.is_empty() && bodies.is_empty() {
-            return Err("select the attractors, or switch Attractors off".into());
-        }
-        let (far_geometry, far_bodies) = set(FAR_ATTRACTORS, &f.saved_far_geometry, &f.saved_far_bodies)?;
+    // Near/Far modifiers, while near or far objects are picked.
+    let (geometry, bodies) = set(ATTRACTORS, &f.saved_geometry, &f.saved_bodies)?;
+    let (far_geometry, far_bodies) = set(FAR_ATTRACTORS, &f.saved_far_geometry, &f.saved_far_bodies)?;
+    let far_only = geometry.is_empty() && bodies.is_empty();
+    if far_only && (!far_geometry.is_empty() || !far_bodies.is_empty()) {
+        return Err("select the near objects as well as the far ones".into());
+    }
+    if !far_only {
         let mut a = json!({});
         for (key, list) in
             [("geometry", json!(geometry)), ("bodies", json!(bodies)), ("far_geometry", json!(far_geometry)), ("far_bodies", json!(far_bodies))]
@@ -393,6 +441,9 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         avoid,
         flip,
         anchor: _,
+        scale,
+        offset,
+        rotate,
         attract,
     } = pattern
     else {
@@ -408,6 +459,9 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         overhang: *overhang,
         fit_edges: *fit_edges,
         flip: *flip,
+        scale: scale.as_deref().unwrap_or("1").to_string(),
+        rotate: s(rotate),
+        offset: s(offset),
         saved_face: serde_json::to_value(face).ok(),
         saved_more_faces: more_faces.iter().filter_map(|g| serde_json::to_value(g).ok()).collect(),
         ..Form::default()
@@ -466,15 +520,14 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
             cutoff,
             falloff,
         } = a;
-        f.attract = true;
         f.saved_geometry = geometry.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
         f.saved_bodies = bodies.iter().map(|b| b.0.clone()).collect();
         f.saved_far_geometry = far_geometry.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
         f.saved_far_bodies = far_bodies.iter().map(|b| b.0.clone()).collect();
         f.near = s(near);
         f.far = s(far);
-        f.scale_near = scale_near.as_deref().unwrap_or("1").to_string();
-        f.scale_far = scale_far.as_deref().unwrap_or("1").to_string();
+        f.scale_near = s(scale_near);
+        f.scale_far = s(scale_far);
         f.offset_near = s(offset_near);
         f.offset_far = s(offset_far);
         f.rotate_near = s(rotate_near);

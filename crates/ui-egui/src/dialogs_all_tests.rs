@@ -954,38 +954,56 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
 form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Edge margin"]);
 
-/// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
-/// no attractor picks; on, it has Attractors and Far attractors, which take points, edges, faces
+/// Pattern on Face's attractors are its Near/Far modifiers: with no near or far objects picked,
+/// the dialog sends a plain pattern with the main section's scale, rotation and offset; with them,
+/// it sends them as attractors, the near and far values left empty taking the main section's.
+/// Near objects and Far objects take points, edges, faces
 /// and bodies. Two opposite edges of the face, one in each, make the values ramp between them.
 #[test]
-fn face_pattern_attractors_come_from_the_advanced_option() {
+fn face_pattern_attractors_come_from_the_near_far_modifiers() {
     use crate::dialogs_face_pattern::{ATTRACTORS, FAR_ATTRACTORS, set_attractor_inputs};
     let h = fixture();
     let mut d = representative(&h, "solid.pattern.face");
-    assert!(!d.inputs.iter().any(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS), "no attractor picks until switched on");
+    assert!(!d.inputs.iter().any(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS), "no near or far picks until the section opens");
+    // Opened, as the Near/Far modifiers section does as it unfolds.
+    set_attractor_inputs(&mut d, true);
+    for label in [ATTRACTORS, FAR_ATTRACTORS] {
+        let pick = d.inputs.iter().find(|i| i.label == label).expect("the near and far picks");
+        assert!(pick.multi && pick.accept & EDGES != 0 && pick.accept & BODIES != 0, "{label}: {:?}", pick.accept);
+    }
     let (command, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
     assert_eq!(command, "solid.pattern.face");
     assert!(plain.get("attract").is_none() && plain.get("group").is_none(), "{plain}");
+    assert!(plain.get("scale").is_none() && plain.get("rotate").is_none() && plain.get("offset").is_none(), "{plain}");
     assert_eq!(plain["bodies"], json!(["Body1"]));
     assert!(plain["face"]["face"].is_array(), "{plain}");
-    // Switched on under Advanced (as the checkbox does): two opposite edges of the face, and a body.
+    // The main section's scale, rotation and offset, sent for every instance.
     if let Kind::FacePattern(f) = &mut d.kind {
-        f.attract = true;
+        f.scale = "1.5".into();
+        f.rotate = "10 deg".into();
+        f.offset = "1 mm".into();
+    }
+    let (_, own) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!((&own["scale"], &own["rotate"], &own["offset"]), (&json!("1.5"), &json!("10 deg"), &json!("1 mm")), "{own}");
+    // Far objects alone are refused: the values blend from the near ones.
+    let far = edge_sel(&h.app.session, Vec3::new(-10.0, 0.0, 5.0)).unwrap();
+    d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far.clone()];
+    assert!(apply_commands(&h.app, &d).is_err(), "far objects need near ones");
+    // Two opposite edges of the face, and a body; Scale far left empty takes the main scale.
+    if let Kind::FacePattern(f) = &mut d.kind {
         f.scale_near = "2".into();
-        f.scale_far = "0.5".into();
         f.falloff = 1;
         f.group = false;
         // The fixture's cylinders, 20 mm across, stand on a side face 5 mm tall: they hang over it.
         f.overhang = true;
     }
-    set_attractor_inputs(&mut d, true);
     let near = edge_sel(&h.app.session, Vec3::new(10.0, 0.0, 5.0)).unwrap();
-    let far = edge_sel(&h.app.session, Vec3::new(-10.0, 0.0, 5.0)).unwrap();
     d.inputs.iter_mut().find(|i| i.label == ATTRACTORS).unwrap().items = vec![near, Sel::Body { name: "Body2".into() }];
     d.inputs.iter_mut().find(|i| i.label == FAR_ATTRACTORS).unwrap().items = vec![far];
     let (_, params) = apply_commands(&h.app, &d).unwrap().remove(0);
     let a = &params["attract"];
     assert_eq!(a["scale_near"], json!("2"), "{params}");
+    assert!(a.get("scale_far").is_none() && params["scale"] == json!("1.5"), "{params}");
     assert_eq!(a["falloff"], json!("smooth"));
     assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{params}");
     assert_eq!(a["bodies"], json!(["Body2"]));
@@ -1009,6 +1027,14 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
     let a = &again["params"]["attract"];
     assert_eq!(a["bodies"], json!(["Body2"]), "{again}");
     assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
+    assert_eq!(again["params"]["scale"], json!("1.5"), "{again}");
+    // Clearing the near and far picks takes the attractors away.
+    let mut cleared = edit.clone();
+    for i in cleared.inputs.iter_mut().filter(|i| i.label == ATTRACTORS || i.label == FAR_ATTRACTORS) {
+        i.items.clear();
+    }
+    let (_, plain_again) = apply_commands(&h.app, &cleared).unwrap().remove(0);
+    assert!(plain_again["params"].get("attract").is_none(), "{plain_again}");
     h.app.run(&redefine, again).unwrap();
 }
 

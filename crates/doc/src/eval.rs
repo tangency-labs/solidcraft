@@ -10950,6 +10950,9 @@ fn pattern_transforms(
             avoid,
             flip,
             anchor,
+            scale,
+            offset,
+            rotate,
             attract,
         } => {
             out = face_pattern(
@@ -10972,6 +10975,9 @@ fn pattern_transforms(
                     avoid,
                     flip: *flip,
                     anchor,
+                    scale,
+                    offset,
+                    rotate,
                     attract,
                     sources,
                 },
@@ -10998,15 +11004,21 @@ struct FaceGrid<'a> {
     avoid: &'a Option<Box<crate::Avoid>>,
     flip: bool,
     anchor: &'a Option<crate::PointExpr>,
+    /// Every copy's scale, offset along the normal and rotation about it, and the attractors'
+    /// near and far values where they give none.
+    scale: &'a Option<crate::Expr>,
+    offset: &'a Option<crate::Expr>,
+    rotate: &'a Option<crate::Expr>,
     attract: &'a Option<Box<crate::Attract>>,
     /// The bodies the pattern copies, for the default anchor.
     sources: &'a [crate::BodyName],
 }
 
 /// Where a face pattern puts each copy: a placement at each grid point on the face, the copied
-/// bodies' `anchor` on the face, their +Z along its normal and their X along the grid; with
-/// attractors, each copy scaled, moved along the normal and rotated about it by its distance to
-/// the nearest attractor point.
+/// bodies' `anchor` on the face, their +Z along its normal and their X along the grid, each copy
+/// scaled, moved along the normal and rotated about it by the pattern's `scale`, `offset` and
+/// `rotate`; with attractors, by its distance to the nearest attractor point instead, from the
+/// near values to the far ones (each unset one the pattern's own).
 fn face_pattern(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -11028,6 +11040,13 @@ fn face_pattern(
     if margin < 0.0 {
         return Err(DocError::Invalid("the pattern's margin must not be negative".into()));
     }
+    // Every copy's own scale, offset and rotation: the values attractors start from.
+    let base_scale = g.scale.as_ref().map_or(Ok(1.0), |e| val(vals, e, Kind::Unitless))?;
+    if !(base_scale.is_finite() && base_scale > 1e-6) {
+        return Err(DocError::Invalid(format!("the pattern's scale came to {base_scale}; it must stay above zero")));
+    }
+    let base_offset = length(g.offset, 0.0)?;
+    let base_spin = g.rotate.as_ref().map_or(Ok(0.0), |e| val(vals, e, Kind::Angle))?;
     let cst = construction_state(doc, st, component)?;
     let crate::construct::GeoRef::Face { at, name } = g.face else { return Err(DocError::Invalid("a face pattern needs a face".into())) };
     let (body, index, _) = crate::construct::face_of(&cst, *at, name)?;
@@ -11193,7 +11212,7 @@ fn face_pattern(
     };
     // Each random place where a copy, as placed before any attractor changes it, keeps clear.
     let mut failed = None;
-    let mut keep = |s: &kernel::FaceStation| match placement(s, 1.0, 0.0, 0.0).and_then(|m| clear.too_close(&m)) {
+    let mut keep = |s: &kernel::FaceStation| match placement(s, base_scale, base_offset, base_spin).and_then(|m| clear.too_close(&m)) {
         Ok(near) => !near,
         Err(e) => {
             failed.get_or_insert(e);
@@ -11226,7 +11245,7 @@ fn face_pattern(
     let (lo, hi) = distances.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), d| (a.min(*d), b.max(*d)));
     let mut out = Vec::new();
     for (k, (s, d)) in stations.iter().zip(&distances).enumerate() {
-        let (mut scale, mut offset, mut spin) = (1.0, 0.0, 0.0);
+        let (mut scale, mut offset, mut spin) = (base_scale, base_offset, base_spin);
         if let Some((a, _, far_d)) = &effects {
             if let Some(c) = &a.cutoff
                 && *d > val(vals, c, Kind::Length)?
@@ -11250,9 +11269,9 @@ fn face_pattern(
                 let f = f.as_ref().map_or(Ok(default), |e| val(vals, e, kind))?;
                 Ok(kernel::ramp(n, f, t))
             };
-            scale = ramp(&a.scale_near, &a.scale_far, Kind::Unitless, 1.0)?;
-            offset = ramp(&a.offset_near, &a.offset_far, Kind::Length, 0.0)?;
-            spin = ramp(&a.rotate_near, &a.rotate_far, Kind::Angle, 0.0)?;
+            scale = ramp(&a.scale_near, &a.scale_far, Kind::Unitless, base_scale)?;
+            offset = ramp(&a.offset_near, &a.offset_far, Kind::Length, base_offset)?;
+            spin = ramp(&a.rotate_near, &a.rotate_far, Kind::Angle, base_spin)?;
             if !(scale.is_finite() && scale > 1e-6) {
                 return Err(DocError::Invalid(format!("attractors: a copy's scale came to {scale}; scales must stay above zero")));
             }

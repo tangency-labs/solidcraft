@@ -9188,13 +9188,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 PatternKind::Face { face, .. } => {
                     let mut d = start("solid.pattern.face")?;
-                    let form = crate::dialogs_face_pattern::form_of(pattern).unwrap_or_default();
-                    if form.attract {
+                    let mut form = crate::dialogs_face_pattern::form_of(pattern).unwrap_or_default();
+                    if let PatternKind::Face { attract: Some(_), .. } = pattern {
                         crate::dialogs_face_pattern::set_attractor_inputs(&mut d, true);
                     }
                     // The face, and each attractor set, as picks where they are now. A set with a
                     // reference that can't be shown stays empty, and its saved references go back
-                    // unchanged.
+                    // unchanged; an attractor set shown as picks drops its saved references, so
+                    // clearing the picks takes the attractors away.
                     if let (Some(pick), Some(inp)) = (model_axis_sel(s, face), d.inputs.get_mut(1)) {
                         inp.items = vec![pick];
                     }
@@ -9222,6 +9223,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         for (label, geometry, bodies) in sets {
                             if let (Some(picks), Some(inp)) = (set(geometry, bodies), d.inputs.iter_mut().find(|i| i.label == label)) {
                                 inp.items = picks;
+                                if label == crate::dialogs_face_pattern::ATTRACTORS {
+                                    form.saved_geometry.clear();
+                                    form.saved_bodies.clear();
+                                } else if label == crate::dialogs_face_pattern::FAR_ATTRACTORS {
+                                    form.saved_far_geometry.clear();
+                                    form.saved_far_bodies.clear();
+                                }
                             }
                         }
                     }

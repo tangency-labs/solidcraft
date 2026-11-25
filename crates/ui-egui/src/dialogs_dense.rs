@@ -479,6 +479,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
+    } else if matches!(d.kind, Kind::FacePattern(_)) {
+        // Near and Far objects show in Pattern on Face's Near/Far modifiers section.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, crate::dialogs_face_pattern::TOP_INPUTS);
+        crate::command_sketch::offer_row(app, d, ui);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
         crate::command_sketch::offer_row(app, d, ui);
