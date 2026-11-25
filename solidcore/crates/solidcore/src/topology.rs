@@ -1390,7 +1390,25 @@ impl Brep {
     /// Those of [`Brep::clone_standing_for_self`] and of the cache copies (a trimmed
     /// surface cache in use).
     pub(crate) fn clone_for_trial(&self) -> Result<Self> {
-        let mut copy = self.clone_standing_for_self()?;
+        self.trial_copy(false)
+    }
+
+    /// [`Brep::clone_for_trial`] with every face surface's definition kept, as
+    /// [`Brep::clone_standing_for_self_keeping_definitions`] keeps it: a copy a query that
+    /// edits its B-reps runs on in place of this B-rep, so that it reads the same faces this
+    /// B-rep has, a round by its definition.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_for_trial`].
+    pub(crate) fn clone_for_trial_keeping_definitions(&self) -> Result<Self> {
+        self.trial_copy(true)
+    }
+
+    /// [`Brep::clone_for_trial`], keeping the face surfaces' definitions when
+    /// `keep_definitions` says so.
+    fn trial_copy(&self, keep_definitions: bool) -> Result<Self> {
+        let mut copy = self.standing_copy(keep_definitions)?;
         let ids: Vec<FaceId> = copy.faces.ids().collect();
         for &id in &ids {
             if let Some(surface) = copy.face_mut(id)?.surface.as_mut() {

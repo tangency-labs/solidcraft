@@ -134,7 +134,8 @@ pub struct Clearance {
     pub overlaps: Vec<Overlap>,
     /// Pairs closer than `clearance`, nearest first; a pair in contact is at 0.
     pub near: Vec<NearPair>,
-    /// With `nearest`: each body of `bodies`, with its nearest others.
+    /// With `nearest`: each body of `bodies`, with its nearest others (pairs in `unchecked` are
+    /// omitted).
     pub nearest: BTreeMap<String, Vec<Neighbour>>,
     /// Pairs whose overlap couldn't be worked out, and each mesh body, which isn't measured
     /// (`b` is then `null`).

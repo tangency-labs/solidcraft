@@ -1207,6 +1207,64 @@ fn common_point(surfaces: [&Surface; 3], start: Point3) -> Option<Point3> {
     None
 }
 
+/// The largest curvature of `a` at `x`, a bound on how fast its normal turns along it: none
+/// for a plane, one over the radius there for a cylinder or cone (a cone's normal turns by
+/// less, its radius's cosine over it), one over the radius for a sphere; infinite at a cone's
+/// apex, `None` for a torus.
+fn curvature_bound(a: &crate::surface::implicit::Implicit, x: Point3) -> Option<f64> {
+    use crate::surface::implicit::Implicit;
+    Some(match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let r = (radius + tan_angle * (x - origin).dot(axis)).abs();
+            if r > 0.0 {
+                1.0 / r
+            } else {
+                f64::INFINITY
+            }
+        }
+        Implicit::Sphere { radius, .. } => 1.0 / radius.abs(),
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// Whether surfaces `a` and `b` are tangent at `x` as far as a point within `tol` of it can
+/// tell (`None` where one is not a plane, cylinder, cone or sphere). Where two surfaces touch
+/// along a line, at a point `d` off it each one's normal has turned from the shared one by at
+/// most its curvature times `d`: within `tol`, their normals differ by up to `tol` times the
+/// sum of the curvatures. Tangent there, the two do not cross at `x`, and with a third surface
+/// they have no one common point: their equations meet in a double root, which rounding moves
+/// along the line (a sheet's web running into its bend: 2.8e-6 at a hole across their line).
+fn tangent_within(a: &Surface, b: &Surface, x: Point3, tol: f64) -> Option<bool> {
+    use crate::surface::implicit::AnalyticSupport;
+    implicits_tangent_within(
+        &AnalyticSupport::of(a)?.implicit(),
+        &AnalyticSupport::of(b)?.implicit(),
+        x,
+        tol,
+    )
+}
+
+/// [`tangent_within`] on the surfaces' implicit equations.
+fn implicits_tangent_within(
+    a: &crate::surface::implicit::Implicit,
+    b: &crate::surface::implicit::Implicit,
+    x: Point3,
+    tol: f64,
+) -> Option<bool> {
+    let (_, ga) = implicit_value(a, x)?;
+    let (_, gb) = implicit_value(b, x)?;
+    let sine = ga.cross(gb).length() / (ga.length() * gb.length());
+    let turn = tol * (curvature_bound(a, x)? + curvature_bound(b, x)?);
+    // (a NaN sine, from a zero gradient, is not a crossing either)
+    Some(sine.is_nan() || sine <= turn)
+}
+
 impl<O: ClassObject> VertexDefinition<O> {
     /// Not upstream (#3062): where this definition is a crossing of an edge of one B-rep
     /// (between two faces) and a face of the other, all three on planes, cylinders, cones or
@@ -1247,6 +1305,11 @@ impl<O: ClassObject> VertexDefinition<O> {
         ) else {
             return Ok(false);
         };
+        // An edge whose two faces are tangent where it is crossed (a flat running into a
+        // round) is not a crease the three surfaces fix a point on: left where the crossing put it.
+        if tangent_within(sa, sb, self.position, self.tolerance(k)) != Some(false) {
+            return Ok(false);
+        }
         let Some(x) = common_point([sa, sb, sf], self.position) else {
             return Ok(false);
         };
@@ -4154,6 +4217,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         tolerance: f64,
         region: Option<&DeclaredContact>,
     ) -> Result<Option<ProtoVertexId>> {
+        self.find_proto_vertex_within_if(k, position, tolerance, region, |_| Ok(true))
+    }
+
+    /// The closest reachable proto vertex satisfying an additional incidence predicate.
+    pub(crate) fn find_proto_vertex_within_if(
+        &self,
+        k: &Kernel,
+        position: Point3,
+        tolerance: f64,
+        region: Option<&DeclaredContact>,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
+    ) -> Result<Option<ProtoVertexId>> {
         let point = DeclaredContact::of_point(position, tolerance);
         let region = region.unwrap_or(&point);
         let mut ret_val = None;
@@ -4190,7 +4265,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             {
                 continue;
             }
-            if this_dist < min_dist {
+            if this_dist < min_dist && compatible(id)? {
                 ret_val = Some(id);
                 min_dist = this_dist;
             }
@@ -4218,6 +4293,36 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on, as the
     /// combine of `SplitIntersectingProtoEdges`).
     pub fn combine_proto_vertices_not_proved_apart(&mut self, k: &Kernel) -> Result<()> {
+        self.combine_proto_vertices_if(k, |_, _, _| Ok(true))
+    }
+
+    /// Coalesces reachable events whose native vertex/face incidences are compatible.
+    pub(crate) fn combine_proto_vertices_with_incidence(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl super::super::p2::ProtoBrep<O>,
+    ) -> Result<()> {
+        self.combine_proto_vertices_if(k, |this, of, id| {
+            for &def in this.pv(Some(of))?.vertex_definitions() {
+                let def = this.vd(def)?;
+                if this.proto_vertex_incidence_conflicts(
+                    k,
+                    geometry,
+                    id,
+                    [def.brep_point_classif(1), def.brep_point_classif(2)],
+                )? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        })
+    }
+
+    fn combine_proto_vertices_if(
+        &mut self,
+        k: &Kernel,
+        compatible: impl Fn(&Self, ProtoVertexId, ProtoVertexId) -> Result<bool>,
+    ) -> Result<()> {
         // sweeps over the regions until one combines nothing (each combine removes a
         // listed proto vertex, so there are at most as many as proto vertices)
         let mut combined = true;
@@ -4226,7 +4331,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let mut i = 0;
             while let Some(&(of, region)) = self.regions.get(i) {
                 let other = if self.pvs.contains(&of) {
-                    self.proto_vertex_not_apart_from(k, of, &region)?
+                    self.proto_vertex_not_apart_from(k, of, &region, |id| compatible(self, of, id))?
                 } else {
                     None
                 };
@@ -4256,6 +4361,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         k: &Kernel,
         of: ProtoVertexId,
         region: &DeclaredContact,
+        compatible: impl Fn(ProtoVertexId) -> Result<bool>,
     ) -> Result<Option<ProtoVertexId>> {
         let centre = region.a + (region.b - region.a) * 0.5;
         for &id in &self.pvs {
@@ -4273,6 +4379,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     .iter()
                     .any(|(at, r)| *at == id && region.overlaps(k, r))
             {
+                if !compatible(id)? {
+                    continue;
+                }
                 return Ok(Some(id));
             }
         }
@@ -5024,5 +5133,54 @@ mod tests {
         assert_eq!(coinc(&m, f2), vec![kept]);
         assert!(m.proto_edge(other).unwrap().overlapping_pes().is_empty());
         assert_eq!(m.proto_edge(kept).unwrap().overlapping_pes(), &[other]);
+    }
+
+    /// A cylinder of radius 5.25 touching the plane z = 0 along the x axis (a web running into
+    /// its bend): 1.7e-6 off that line, still within a tolerance of 2.2e-4, the normals differ
+    /// by 1.7e-6 / 5.25 = 3.2e-7, under the 2.2e-4 / 5.25 = 4.2e-5 a point that close can see:
+    /// tangent. Two planes at right angles, and the cylinder cut by a plane through its axis's
+    /// height, cross.
+    #[test]
+    fn a_crossing_of_a_flat_and_the_round_it_runs_into_is_not_a_crease() {
+        use crate::surface::implicit::Implicit;
+        let r = 5.25;
+        let flat = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        let round = Implicit::Cone {
+            origin: Point3::new(0.0, 0.0, r),
+            axis: Vec3::new(1.0, 0.0, 0.0),
+            radius: r,
+            tan_angle: 0.0,
+        };
+        let near = Point3::new(10.0, 1.7e-6, 0.0);
+        assert_eq!(
+            implicits_tangent_within(&flat, &round, near, 2.2e-4),
+            Some(true)
+        );
+        let side = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, 0.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&flat, &side, Point3::new(0.0, 3.0, 0.0), 2.2e-4),
+            Some(false)
+        );
+        let across = Implicit::Plane {
+            origin: Point3::new(0.0, 0.0, r),
+            normal: Vec3::new(0.0, 0.0, 1.0),
+        };
+        assert_eq!(
+            implicits_tangent_within(&across, &round, Point3::new(10.0, r, r), 2.2e-4),
+            Some(false)
+        );
+        let torus = Implicit::Torus {
+            centre: Point3::new(0.0, 0.0, 0.0),
+            axis: Vec3::new(0.0, 0.0, 1.0),
+            major: 10.0,
+            minor: 1.0,
+        };
+        assert_eq!(implicits_tangent_within(&flat, &torus, near, 2.2e-4), None);
     }
 }
