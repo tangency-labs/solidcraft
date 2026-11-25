@@ -761,6 +761,24 @@ fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
 /// swapped for another), and the reference asks again. A face whose feature made nothing on the
 /// body was removed with it, and so is the name. The point must be the
 /// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
+/// Whether feature `fid` that made/modified body `b` is a revolve feature.
+fn feature_is_revolve(b: &ModelBody, fid: u64) -> bool {
+    let mut origin = b.names.origin.as_deref();
+    while let Some(o) = origin {
+        if o.feature.id == fid {
+            return matches!(o.feature.kind, FeatureKind::Revolve { .. } | FeatureKind::SurfaceRevolve { .. });
+        }
+        origin = o
+            .before
+            .bodies
+            .iter()
+            .find(|prev| prev.name == b.name)
+            .and_then(|prev| prev.names.origin.as_deref())
+            .or_else(|| o.before.bodies.iter().find_map(|prev| prev.names.origin.as_deref()));
+    }
+    false
+}
+
 fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     let count = faces.faces.len();
     let found = |x: &str| {
@@ -768,29 +786,41 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
         hits.next().filter(|_| hits.next().is_none())
     };
     let lost = |y: &str| {
-        crate::persistent_name::made_by(y)
-            .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
-            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
+        let id = crate::persistent_name::made_by(y)?;
+        let has_feature = faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(id));
+        if !has_feature {
+            return None;
+        }
+        let is_revolve = feature_is_revolve(b, id);
+        let lost_face = if is_revolve {
+            (0..count).all(|f| !crate::history_names::matches(faces, f, y).is_some_and(exactly))
+        } else {
+            (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none())
+        };
+        lost_face.then_some(id)
     };
     // Every way the name splits into two face names (a face name may hold `|` itself); they must
     // agree on the face still found.
-    let mut kept: Vec<(usize, u64)> = Vec::new();
+    let mut kept: Vec<(usize, u64, &str)> = Vec::new();
     for (i, _) in wanted.match_indices('|') {
         let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
         for (x, y) in [(x, y), (y, x)] {
-            if let Some(hit) = found(x).filter(|f| kept.iter().all(|(k, _)| k != f)).zip(lost(y)) {
-                kept.push(hit);
+            if let Some((hit_f, hit_id)) = found(x).filter(|f| kept.iter().all(|(k, _, _)| k != f)).zip(lost(y)) {
+                kept.push((hit_f, hit_id, y));
             }
         }
     }
-    let &[(face, lost_by)] = kept.as_slice() else { return None };
+    let &[(face, lost_by, lost_name)] = kept.as_slice() else { return None };
     let edge = edge_through(b, m, near)?;
     let uses = &b.body.record().edges.get(edge)?.uses;
-    // The edge's other face is not one of the lost face's feature: where that feature made the
-    // face at the pick, its face was replaced there (a sketch line swapped for another), not renamed.
     let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
     let bounds_face = uses.iter().any(|u| u.face as usize == face);
-    let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
+    let other = uses.iter().find(|u| u.face as usize != face).map(|u| u.face as usize);
+    let same_feature = other.and_then(made_by) == Some(lost_by);
+    let is_revolve = feature_is_revolve(b, lost_by);
+    let side_migration =
+        same_feature && is_revolve && (qualified(lost_name) || other.and_then(|f| faces.faces.get(f)).is_some_and(|n| n.contains(":side:")));
+    let replaced = same_feature && !side_migration;
     (bounds_face && !replaced).then_some(edge)
 }
 
@@ -1012,30 +1042,15 @@ impl FaceHit {
 
 impl FaceHit {
     /// Where the line through `p` along `dir` meets the face found (the hit nearest `p`, on
-    /// either side of it), `None` when the line misses the face or runs along it. A place on
-    /// a face follows the face this way, along its own axis, instead of sliding sideways to
-    /// [`point`](Self::point), the face's nearest point.
-    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
-        let b = st.bodies.get(self.body)?;
-        let d = dir.normalized()?;
-        let m = b.mesh();
-        let slack = (b.body.size() * 1e-9).max(1e-9);
-        let mut best: Option<f64> = None;
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            if *f as usize != self.face {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            // A hair's width around each triangle, so a place on the seam of two is on the face.
-            let centre = (a + bb + c) * (1.0 / 3.0);
-            let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
-            if let Some(hit) = naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
-                && best.is_none_or(|old| hit.abs() < old.abs())
-            {
-                best = Some(hit);
-            }
-        }
-        best.map(|t| p + d * t)
+    /// either side of it), `None` when the line misses the face or runs along it, or the body
+    /// is gone; `Err` when the kernel fails to meet them. A place on a face follows the face
+    /// this way, along its own axis, instead of sliding sideways to [`point`](Self::point), the
+    /// face's nearest point. Decided on the face's exact surface and trim
+    /// ([`solidcraft_kernel::Body::face_line_hit`]), never its display mesh: from a facet of a
+    /// curved face a hole would start inside the surface (#20741).
+    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> solidcraft_kernel::Result<Option<Vec3>> {
+        let Some(b) = st.bodies.get(self.body) else { return Ok(None) };
+        b.body.face_line_hit(self.face, p, dir)
     }
 
     /// A point that picks the face found again by itself: [`point`](Self::point) when the

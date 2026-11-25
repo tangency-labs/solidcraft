@@ -139,7 +139,7 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
             for i in 0..=CELLS {
                 let (s, t) = (i as f64 / CELLS as f64, j as f64 / CELLS as f64);
                 // The point on the image's quad, from the kernel.
-                let [x, y, z] = solidcore_ops::affine::parallelogram_point(corner, u, v, s, t);
+                let [x, y, z] = solidcraft_kernel::services::affine::parallelogram_point(corner, u, v, s, t);
                 let Some(q) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)) else {
                     ok = false;
                     continue;

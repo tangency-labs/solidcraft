@@ -762,12 +762,15 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
 fn the_window_place_is_given_once_when_it_opens() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 686.0]);
-    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let owner = egui::ViewportId::from_hash_of("chat owner");
+    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(first.native_owner, Some(owner));
     assert_eq!(first.position, Some(egui::pos2(1967.0, 160.0)));
     assert_eq!(first.inner_size, Some(egui::vec2(569.0, 686.0)));
     app.agent_chat.window_placed = true;
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 687.0]);
-    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(later.native_owner, Some(owner));
     assert_eq!((later.position, later.inner_size), (None, None), "nothing to move or resize once it is open");
     assert!(later.title.is_some());
     // Docked or closed, the next pop-out opens at the saved place again.
@@ -1667,7 +1670,7 @@ fn a_change_by_hand_between_messages_is_told_to_the_agent() {
     let (mut app, script, ctx) = app_with_script();
     let (tx, rx) = channel();
     app.agent_chat.tools_rx = Some(rx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
 
     send(&mut app, &ctx, "a box and a parameter w".into());
@@ -3910,13 +3913,14 @@ fn box_selection(app: &mut SolveApp) -> Vec<solidcraft_engine::Sel> {
 fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversation() {
     let (mut app, script, ctx) = app_with_script();
     app.session.selection = box_selection(&mut app);
-    // Off: the message is just the message.
+    // Off (the box starts ticked, so a person has to untick it): the message is just the message.
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "plain".into());
     assert_eq!(script.calls(), ["prompt: plain"]);
     ended(&script, "");
     poll(&mut app, &ctx);
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "round this".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
@@ -3936,13 +3940,25 @@ fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversa
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: nothing"));
 }
 
+/// The owner made Attach selection on by default (2026-11-24): a new chat sends what is selected
+/// with the first message, with no box ticked.
+#[test]
+fn attach_selection_starts_on() {
+    assert!(*AgentChat::default().attach_selection);
+    let (mut app, script, ctx) = app_with_script();
+    app.session.selection = box_selection(&mut app);
+    send(&mut app, &ctx, "round this".into());
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
+}
+
 /// A queued message keeps the selection of the moment it was typed; queued messages go as one
 /// prompt with all their items.
 #[test]
 fn queued_messages_keep_the_selection_they_were_typed_with() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "first".into());
     app.session.selection = vec![Sel::Body { name: "Alpha".into() }];
     send(&mut app, &ctx, "second".into());
@@ -4507,7 +4523,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     pick_pill(&mut app, 5, &sels[..1]);
     assert_eq!(app.agent_chat.pills.len(), 2);
     app.session.selection = vec![sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4527,7 +4543,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     // The next message carries nothing of it.
     ended(&script, "");
     poll(&mut app, &ctx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "and now?".into());
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
 }
@@ -4655,7 +4671,7 @@ fn a_picked_thing_that_is_also_selected_is_listed_once() {
     let sels = box_selection(&mut app);
     pick_pill(&mut app, 0, &sels[3..]);
     app.session.selection = vec![sels[3].clone(), sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4676,7 +4692,7 @@ fn a_face_picked_and_selected_at_another_point_is_listed_once() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[..1]);
     app.session.selection = vec![elsewhere];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let queued = app.agent_chat.pending.last().expect("queued");
@@ -4694,7 +4710,7 @@ fn a_pick_that_was_also_attached_stays_once_when_its_pill_is_taken_out() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[3..]);
     app.session.selection = vec![sels[3].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let bodies = |p: &Pending| p.context.items.iter().filter(|i| i.kind == context::Kind::Body).map(|i| i.group).collect::<Vec<_>>();
@@ -4836,7 +4852,7 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     assert_eq!(app.session.selection.len(), 2, "two clicks selected the two rims");
     assert_eq!(selected_count(&mut app), 2, "the checkbox counts the two clicks");
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "these two rims".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("2 item(s)"), "{prompt}");
@@ -4869,9 +4885,9 @@ fn a_split_wall_clicked_once_is_one_item() {
         false,
         false,
     );
-    assert!(!app.session.selection.is_empty());
+    assert!(app.session.has_selection());
     assert_eq!(selected_count(&mut app), 1, "one click, however many patches it selected: {:?}", app.session.selection);
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
@@ -6394,6 +6410,50 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
 
+/// A task the agent could not finish (the provider's usage limit, or any other error) is kept,
+/// so the user can continue it when the agent can work again (#16318).
+#[test]
+fn a_task_interrupted_by_the_providers_usage_limit_can_be_continued() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::Error("usage limit reached, try again later".into()));
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert!(app.agent_chat.unfinished.is_some(), "the task waits to be continued");
+    // The user continues it: the task goes again, with a note that says it was cut short.
+    continue_task(&mut app);
+    assert_eq!(script.calls(), ["prompt: make a gearbox".to_string(), format!("prompt: {CONTINUE_NOTE}\n\nmake a gearbox")]);
+    assert!(app.agent_chat.unfinished.is_none(), "the task is under way again");
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    let users = app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count();
+    assert_eq!(users, 1, "the conversation does not repeat the task");
+}
+
+/// A turn that ends badly leaves the task to be continued; a turn that ends well leaves nothing
+/// to continue, and a task the user sends in between replaces the one that waits.
+#[test]
+fn only_a_failed_turn_leaves_a_task_to_continue() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_none(), "a turn that ended well has nothing to continue");
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    // Another task replaces the one that waits.
+    send(&mut app, &ctx, "make a lid".into());
+    assert!(app.agent_chat.unfinished.is_none(), "the new task replaces the one that waited");
+    // New chat throws it away.
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    new_chat(&mut app);
+    assert!(app.agent_chat.unfinished.is_none(), "a new chat keeps nothing to continue");
+}
+
 #[test]
 fn plugin_runs_always_keep_per_run_consent() {
     for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
@@ -6494,4 +6554,31 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Denying a held call tells the agent plainly that nothing ran.
+#[test]
+fn a_denied_call_says_it_was_not_run() {
+    let (mut app, tx) = app_in_a_turn();
+    let denied = ask(&tx, "engine.execute", json!({"command": "file.save", "params": {"path": "/tmp/never.solidcraft"}, "allow_paths": ["/tmp"]}));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    approve(&mut app, id, false);
+    let r = denied.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(r["error"], "not run: the user declined this call", "{r}");
+    assert!(!r["error"].as_str().unwrap().contains("may have run"), "{r}");
+}
+
+/// The header offers Stop only while a turn (or the start) can be stopped, and the agent's own
+/// sign-in label only while it needs a login.
+#[test]
+fn the_header_shows_stop_and_login_only_when_they_apply() {
+    for state in [State::Off, State::Ready, State::NeedsAuth, State::Exited, State::Failed] {
+        assert!(!state.shows_stop(), "{state:?} has nothing to stop");
+    }
+    assert!(State::Busy.shows_stop() && State::Starting.shows_stop());
+    for state in [State::Off, State::Starting, State::Ready, State::Busy, State::Exited, State::Failed] {
+        assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
+    }
+    assert!(State::NeedsAuth.shows_auth_status());
 }
