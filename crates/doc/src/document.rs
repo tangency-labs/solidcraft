@@ -1226,6 +1226,11 @@ pub enum FeatureKind {
         /// Hole keeps it.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_surface_start: bool,
+        /// Press-in hardware this hole is the mounting hole of (#17752): a self-clinching nut,
+        /// stud or standoff in a sheet. The hole is a plain through hole of the hardware's
+        /// size; it has no `thread` of its own, the hardware has the thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware: Option<Hardware>,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.
@@ -3382,6 +3387,20 @@ pub enum HoleKind {
         #[walk(angle = "Tip angle")]
         tip_angle: Option<Expr>,
     },
+}
+
+/// The press-in hardware a sheet metal hole is for (#17752), kept so that a drawing's hole
+/// callout or table can name it: its kind, its thread as written (`M3`), its length when it has
+/// one (a stud's or a standoff's) and the id of the part (`nut.m3`, see
+/// [`crate::hardware_catalog::HardwareSize::part`]) that a component can stand for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Hardware {
+    pub kind: crate::hardware_catalog::HardwareKind,
+    pub thread: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Hardware length")]
+    pub length: Option<Expr>,
+    pub part: String,
 }
 
 /// A Single hole's reference edge (#37): a point on a straight edge of the hole's face, and the

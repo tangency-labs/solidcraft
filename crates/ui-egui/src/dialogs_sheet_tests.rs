@@ -2295,3 +2295,237 @@ fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
     );
     assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
 }
+
+/// A 100 x 60 sheet with a base flange, and the Press-in Hardware dialog open with a place on its top face.
+fn hardware_dialog_on(place: Option<[f64; 3]>) -> (SolveApp, Dialog) {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.session.selection = place.into_iter().filter_map(|p| face_sel(&app.session, Vec3::new(p[0], p[1], p[2]))).collect();
+    app.start("sheet.hardware");
+    let dialog = app.dialog.clone().expect("Press-in Hardware opens a dialog");
+    (app, dialog)
+}
+
+fn the_hardware_of(app: &SolveApp, id: u64) -> solidcraft_engine::doc::Hardware {
+    match app.session.doc.feature(id).map(|f| f.kind.clone()) {
+        Some(FeatureKind::Hole { hardware: Some(h), .. }) => h,
+        other => panic!("not a hardware hole: {other:?}"),
+    }
+}
+
+/// #17752: the toolbar opens the dialog and runs nothing until OK; the place picked and the kind,
+/// thread and length chosen make the commands; a nut takes no length.
+#[test]
+fn press_in_hardware_dialog_places_the_hardware_where_the_picks_are() {
+    let (mut app, empty) = hardware_dialog_on(None);
+    let features = app.session.doc.features.len();
+    assert!(empty.previews());
+    assert_eq!(app.session.doc.features.len(), features, "nothing is run by opening it");
+    let refusal = apply_commands(&app, &empty).expect_err("no place picked");
+    assert!(refusal.contains("select where the hardware goes"), "{refusal}");
+
+    let (placed_app, mut d) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+    app = placed_app;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c.len(), c[0].0.as_str()), (1, "sheet.hardware"));
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"]), (&json!("nut"), &json!("M3")));
+    assert!(c[0].1.get("length").is_none(), "a nut has no length: {}", c[0].1);
+    let at = |v: &Value| [0, 1, 2].map(|i| v["position"][i].as_f64().unwrap_or(f64::NAN));
+    assert!((at(&c[0].1)[0] - 50.0).abs() < 1e-6 && (at(&c[0].1)[1] - 30.0).abs() < 1e-6, "{}", c[0].1);
+
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (2, "M4".into(), "8 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"], &c[0].1["length"]), (&json!("stud"), &json!("M4"), &json!("8 mm")));
+    run_all(&mut app, c);
+    let hole = app.session.doc.features.last().unwrap().id;
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.thread.as_str(), h.part.as_str(), h.length.as_ref().map(|e| e.to_string())), ("M4", "stud.m4", Some("8 mm".to_string())));
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!(flat["hardware"][0]["length"], 8.0, "{flat}");
+
+    // A stud without its length is not run.
+    if let Kind::Sheet(Sm::Hardware { length, .. }) = &mut d.kind {
+        length.clear();
+    }
+    assert!(apply_commands(&app, &d).unwrap_err().contains("needs its length"));
+}
+
+/// Sketch points are placed with one command for their sketch, every point picked; Edit Feature
+/// brings the hardware, its length and the points back, and rebuilds it in place with the same command.
+#[test]
+fn press_in_hardware_dialog_takes_sketch_points_and_edits_them() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.point", json!({"point": [80, 30], "id": "b"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.session.selection = ["a", "b"].iter().map(|id| Sel::SketchPoint { id: format!("{sketch}:{id}") }).collect();
+    app.start("sheet.hardware");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (3, "M3".into(), "6 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c.len(), 1, "one command for the sketch: {c:?}");
+    assert_eq!((&c[0].1["sketch"], &c[0].1["points"], &c[0].1["kind"]), (&json!(sketch), &json!(["a", "b"]), &json!("standoff")));
+    run_all(&mut app, c);
+    assert_eq!(app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["hardware"].as_array().map(Vec::len), Some(2));
+
+    let hole = app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&app, hole, None).expect("a hardware hole is edited in the Hardware window");
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Hardware { kind: 3, thread, length }) if thread == "M3" && length == "6 mm"), "{:?}", e.kind);
+    assert_eq!(e.inputs[0].items.len(), 2);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["command"].as_str()), ("timeline.redefine", Some("sheet.hardware")));
+    assert_eq!((&c[0].1["params"]["points"], &c[0].1["params"]["length"]), (&json!(["a", "b"]), &json!("6 mm")));
+    run_all(&mut app, c);
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.kind.name(), h.thread.as_str()), ("standoff", "M3"), "the hardware is kept by the edit");
+}
+
+/// The form: a nut has no length row and a stud has one; its thread is one the table has for the
+/// kind (a thread the new kind lacks falls back to its first); the table's numbers show.
+#[test]
+fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
+    let texts_of = |kind: usize, thread: &str| {
+        let (mut app, mut dialog) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+        let ctx = crate::fonts::test_context();
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, .. }) = &mut dialog.kind {
+            (*k, *t) = (kind, thread.into());
+        }
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            if let Kind::Sheet(k) = &mut dialog.kind {
+                rows(&mut app, ui, k, &mut dialog.inputs);
+            }
+        });
+        let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        let Kind::Sheet(Sm::Hardware { thread, .. }) = dialog.kind else { panic!("not the hardware form") };
+        (texts, thread)
+    };
+    let (nut, thread) = texts_of(0, "M3");
+    assert_eq!(thread, "M3");
+    for label in ["Type", "Nut", "Thread", "M3", "Mounting hole 4.25 mm. Sheet at least 0.8 mm thick. Center at least 4.8 mm from an edge or bend."] {
+        assert!(nut.iter().any(|t| t == label), "missing {label}: {nut:?}");
+    }
+    assert!(!nut.iter().any(|t| t == "Length"), "a nut has no length: {nut:?}");
+    let (stud, thread) = texts_of(2, "M8");
+    assert_eq!(thread, "M8", "a stud comes in M8");
+    assert!(stud.iter().any(|t| t == "Length"), "{stud:?}");
+    // The standoffs stop at M5: an M8 left over from a stud is M3.
+    let (standoff, thread) = texts_of(3, "M8");
+    assert_eq!(thread, "M3");
+    assert!(standoff.iter().any(|t| t == "Length"), "{standoff:?}");
+}
+
+/// A sheet too thin is the preview's error, a centre too near an edge its warning, and a good place
+/// has neither: the dialog says why before OK (the form shows both, see the form test).
+#[test]
+fn press_in_hardware_preview_says_what_the_sheet_cannot_hold() {
+    let colors = || crate::preview::Colors {
+        body: [1; 4],
+        added: [2; 4],
+        new_body: [3; 4],
+        removed: [4; 4],
+        lost: [6; 4],
+        selected: [7; 4],
+        mirrored: [6; 4],
+        edge: [5; 4],
+        ghost: false,
+        glass_new: false,
+        tint_new: true,
+        cut_tint: true,
+        replaced_ghost: true,
+    };
+    let preview = |place: [f64; 3], kind: usize, thread: &str| {
+        let (app, mut d) = hardware_dialog_on(Some(place));
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, length }) = &mut d.kind {
+            (*k, *t, *length) = (kind, thread.into(), "8 mm".into());
+        }
+        let commands = crate::dialogs::preview_commands(&app, &d).expect("the inputs make a command");
+        crate::preview::compute(&app.session, &commands, colors())
+    };
+    let good = preview([50.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(good.warning.is_none() && good.error.is_none(), "{:?} {:?}", good.warning, good.error);
+    let near = preview([3.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(near.warning.as_deref().is_some_and(|w| w.contains("3 mm from the nearest edge, cut-out or other hole")), "{:?}", near.warning);
+    // The 2.5 mm sheet is thinner than a flush M6 nut's 3.2 mm.
+    let Err(thin) = preview([50.0, 30.0, 2.5], 1, "M6") else { panic!("a sheet too thin is refused") };
+    assert!(thin.contains("is 2.5 mm thick") && thin.contains("an M6 flush nut") && thin.contains("at least 3.2 mm"), "{thin}");
+    // That refusal says what to change: no Create Issue under it. A kernel failure is no such refusal.
+    assert!(crate::dialogs_sheet::hardware_refusal(&thin));
+    assert!(!crate::dialogs_sheet::hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// The window shows a refusal that says what to change (no Create Issue) by reading the engine's
+/// words, so each refusal `sheet.hardware` makes for a choice in the window is built here and must
+/// be one it recognises: rewording one in the engine fails this test and not silently the display.
+#[test]
+fn every_choice_refusal_of_sheet_hardware_is_shown_as_guidance() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("solid.box", json!({"corner": [200, 0, 0], "length": 50, "width": 50, "height": 2.5, "body_name": "Block"})).unwrap();
+    let place = |extra: Value| {
+        let mut q = json!({"position": [50, 30, 2.5]});
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        q
+    };
+    for (what, params) in [
+        ("a size the table lacks", place(json!({"kind": "nut", "thread": "M7"}))),
+        ("a hole off the table's size", place(json!({"kind": "nut", "thread": "M3", "diameter": "4.5 mm"}))),
+        ("a stud without its length", place(json!({"kind": "stud", "thread": "M4"}))),
+        ("a nut with a length", place(json!({"kind": "nut", "thread": "M4", "length": "5 mm"}))),
+        ("a length of nothing", place(json!({"kind": "stud", "thread": "M4", "length": "0 mm"}))),
+        ("a sheet too thin", place(json!({"kind": "flush_nut", "thread": "M6"}))),
+        ("a place that is no sheet", json!({"kind": "nut", "thread": "M3", "position": [225, 25, 2.5]})),
+    ] {
+        let error = app.session.execute("sheet.hardware", &params).expect_err(what).to_string();
+        assert!(hardware_refusal(&error), "{what} is not shown as guidance: {error}");
+    }
+    // A failure of the design is no guidance: it keeps its Create Issue.
+    assert!(!hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// Edit Feature carries a custom hole diameter (4.3 mm for an M3 nut) while the size is the one it
+/// was made for; changed to another kind or thread it is the table's again, since the window has no
+/// diameter field and the old one would be refused for the new size.
+#[test]
+fn editing_hardware_keeps_a_custom_hole_only_for_the_size_it_was_made_for() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    let hole = app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "diameter": "4.3 mm", "position": [50, 30, 2.5]})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["diameter"], "4.3 mm", "kept for its own size: {}", c[0].1);
+    if let Kind::Sheet(Sm::Hardware { thread, .. }) = &mut e.kind {
+        *thread = "M4".into();
+    }
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("diameter").is_none(), "an M4's hole is the table's, not the M3's 4.3 mm: {}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(the_hardware_of(&app, hole).thread, "M4", "and the edit is accepted");
+}
+
+/// An edit rebuilds one feature: a place added on a face to a hole made at sketch points makes two
+/// commands, which an edit refuses rather than quietly applying the first.
+#[test]
+fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "sketch": sketch, "points": ["a"]})).unwrap();
+    let hole = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    assert!(apply_commands(&app, &e).is_ok(), "as it was");
+    e.inputs[0].items.push(face_sel(&app.session, Vec3::new(70.0, 30.0, 2.5)).expect("a face place"));
+    let error = apply_commands(&app, &e).expect_err("two commands in an edit");
+    assert!(error.contains("edit changes one feature"), "{error}");
+}

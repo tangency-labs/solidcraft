@@ -176,6 +176,12 @@ hole_references
     Reference distance = hole.reference1 (Length)
     Reference distance = hole.reference2 (Length)
   expressions: hole.diameter, hole.depth, hole.reference1, hole.reference2
+hole_hardware
+  inputs:
+    Diameter = hole.diameter (Length)
+    Depth = hole.depth (Length)
+    Hardware length = hole.hardware_length (Length)
+  expressions: hole.diameter, hole.depth, hole.hardware_length
 thread
   inputs:
     Length = thread.length (Length)

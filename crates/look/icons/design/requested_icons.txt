@@ -285,6 +285,7 @@ prefs_plugins	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false
+press_in_hardware	false
 presspull	false
 print_face	false
 project	false

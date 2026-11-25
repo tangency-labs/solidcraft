@@ -441,6 +441,32 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
 
+/// How far `p` is from `seg`, exactly, for a line or a circular arc ([`kp::Seg2::distance_to`]):
+/// the foot clamped to a line's ends; on an arc the radial distance where `p` is within its angles,
+/// else the distance to the nearer end. `None` for a free-form segment or a point that is no number.
+#[must_use]
+pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
+    convert::seg2(seg).distance_to(convert::vec2(p))
+}
+
+/// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their radii
+/// each less than `tol` apart ([`solidcore::develop::same_circle`]).
+#[must_use]
+pub fn same_circle(a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+    solidcore::develop::same_circle((convert::vec2(a.0), a.1), (convert::vec2(b.0), b.1), tol)
+}
+
+/// Where a note `height` high stands to name the circle `at` (centre and radius), level with its
+/// centre and clear of its rim on the right: its lower left corner
+/// ([`solidcore::develop::note_beside`]).
+#[must_use]
+pub fn note_beside(at: (Vec2, f64), height: f64) -> Vec2 {
+    convert::record_vec2(solidcore::develop::note_beside(
+        (convert::vec2(at.0), at.1),
+        height,
+    ))
+}
+
 /// Counter-clockwise angle between two planar rays, in radians modulo one turn.
 /// Equal rays give zero. Nonfinite and zero rays have no angle.
 #[must_use]

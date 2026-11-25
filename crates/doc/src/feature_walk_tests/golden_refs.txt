@@ -68,6 +68,7 @@ hole_countersink
   sketches: [3]
   remap_refs: points.sketch
 hole_references
+hole_hardware
 thread
 loft
   sketches: [4, 5, 6]

@@ -298,6 +298,63 @@ fn clockwise_quarters(c: Point2, r: f64) -> Loop2 {
     }
 }
 
+/// The distance from a point to a line or an arc is closed form: the foot clamped to the line's
+/// ends, the radial distance on an arc where the point is within its angles (and from its centre
+/// any point of the circle), else the nearer end; a free-form segment and a point that is no number
+/// have none.
+#[test]
+fn distance_to_a_line_or_an_arc_is_exact_and_a_curve_has_none() {
+    let line = Seg2::Line {
+        a: p(0.0, 0.0),
+        b: p(10.0, 0.0),
+    };
+    assert_eq!(line.distance_to(p(5.0, 3.0)), Some(3.0));
+    assert_eq!(line.distance_to(p(5.0, 0.0)), Some(0.0));
+    // Past an end: the distance to the end, 3-4-5.
+    assert_eq!(line.distance_to(p(-3.0, 4.0)), Some(5.0));
+    assert_eq!(line.distance_to(p(13.0, -4.0)), Some(5.0));
+    // A quarter arc of radius 5 about the origin, from the +x axis to the +y axis.
+    let arc = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    };
+    assert_eq!(
+        arc.distance_to(p(10.0, 0.0)),
+        Some(5.0),
+        "within its angles, radially"
+    );
+    assert_eq!(arc.distance_to(p(1.0, 0.0)), Some(4.0), "inside the circle");
+    assert_eq!(
+        arc.distance_to(p(0.0, 0.0)),
+        Some(5.0),
+        "from its centre, any point of it"
+    );
+    // Outside its angles: the nearer end, (5, 0): sqrt(5^2 + 5^2) from (0, -5).
+    let d = arc.distance_to(p(0.0, -5.0)).unwrap();
+    assert!((d - 50.0_f64.sqrt()).abs() < 1e-12, "{d}");
+    // A clockwise arc measures the same way.
+    let back = Seg2::Arc {
+        center: p(0.0, 0.0),
+        radius: 5.0,
+        start: FRAC_PI_2,
+        sweep: -FRAC_PI_2,
+    };
+    assert_eq!(back.distance_to(p(10.0, 0.0)), Some(5.0));
+    // Free-form: none.
+    let curve = Seg2::Cubic {
+        p0: p(0.0, 0.0),
+        p1: p(1.0, 2.0),
+        p2: p(3.0, 2.0),
+        p3: p(4.0, 0.0),
+    };
+    assert_eq!(curve.distance_to(p(2.0, 5.0)), None);
+    // Not a number: none, never a NaN.
+    assert_eq!(line.distance_to(p(f64::NAN, 1.0)), None);
+    assert_eq!(arc.distance_to(p(f64::INFINITY, 0.0)), None);
+}
+
 #[test]
 fn placement_decides_inside_outside_along_and_crossing_with_arcs_exact() {
     let tol = 1e-7;

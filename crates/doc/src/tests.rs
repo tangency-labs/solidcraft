@@ -3279,6 +3279,32 @@ fn a_closed_control_spline_design_saves_and_reopens_unchanged() {
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
 }
 
+/// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
+/// set (a hole without it saves as before), with the kind as its name, and an older design reads
+/// with none. The hardware's length is an expression a parameter rename follows.
+#[test]
+fn a_hole_saves_its_press_in_hardware_only_when_set() {
+    let plain = serde_json::json!({"type": "hole", "position": [0, 0, 0], "direction": [0, 0, 1], "diameter": "4.25 mm", "hole": {"type": "simple"}});
+    let kind: FeatureKind = serde_json::from_value(plain.clone()).unwrap();
+    let FeatureKind::Hole { hardware, .. } = &kind else { panic!("not a hole") };
+    assert_eq!(*hardware, None);
+    assert!(serde_json::to_value(&kind).unwrap().get("hardware").is_none(), "a hole without hardware saves no key");
+
+    let mut with = plain;
+    with["hardware"] = serde_json::json!({"kind": "flush_nut", "thread": "M4", "part": "flush-nut.m4"});
+    let kind: FeatureKind = serde_json::from_value(with.clone()).unwrap();
+    let FeatureKind::Hole { hardware: Some(h), .. } = &kind else { panic!("hardware lost") };
+    assert_eq!((h.kind, h.thread.as_str(), h.part.as_str()), (crate::hardware_catalog::HardwareKind::FlushNut, "M4", "flush-nut.m4"));
+    assert!(h.length.is_none());
+    // Saved as it was read: the hardware object is the same, and has no length key when it has none.
+    assert_eq!(serde_json::to_value(&kind).unwrap()["hardware"], with["hardware"]);
+
+    // A stud's length is an expression: the feature's inputs name it, so a parameter rename reaches it.
+    with["hardware"] = serde_json::json!({"kind": "stud", "thread": "M3", "length": "pin_len", "part": "stud.m3"});
+    let kind: FeatureKind = serde_json::from_value(with).unwrap();
+    assert!(kind.inputs().iter().any(|(label, e, _)| *label == "Hardware length" && e == "pin_len"), "{:?}", kind.inputs());
+}
+
 /// An extrude with a start offset names its parallel caps top#1 (lower) and top#2 (upper),
 /// reliably ordered by height. Area-weighted face centroids guarantee delta-X and delta-Y
 /// are zero between identical planar caps regardless of triangulation winding or vertex rotation,

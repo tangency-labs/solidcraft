@@ -639,6 +639,14 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
 
+### press-in hardware
+
+A nut, stud or standoff that is pressed into a punched hole in sheet metal and holds there without welding or a loose nut.
+
+- **In SolidCraft:** `sheet.hardware` cuts its mounting hole and records it in a Hole's `hardware` (`kind`: `nut`, `flush_nut`, `stud`, `standoff`; `thread`; `length`; `part`); sizes in `docs/hardware-catalogue.md`.
+- **Don't use:** insert, and a maker's product names.
+- **For translators:** a fastener fixed in the sheet itself, not a loose screw or a standard part inserted as a component (`parts.fastener`).
+
 ### print face
 
 The flat face of a body that lies on the print bed when the body is sent to a slicer.

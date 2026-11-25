@@ -2146,6 +2146,10 @@ impl SurfaceSheet {
             b.base.x = -b.base.x;
             b.axis.x = -b.axis.x;
         }
+        // The press-in hardware's holes lie in the flat: turned over with it (#17752).
+        for h in &mut self.hardware {
+            h.center = f(h.center);
+        }
         // Each panel's own sketch lines as its own layout would keep them: each edge where its
         // chart turned it, the material still on its left.
         for (_, _, a, b) in &mut self.sketch_curves {

@@ -495,6 +495,26 @@ pub struct SheetPerforation {
     pub outline: Option<Vec<Region2>>,
 }
 
+/// The mounting hole of press-in hardware (a self-clinching nut, stud or standoff) in the flat
+/// (#17752): the hardware the hole is for, and the hole's circle, in the flat's own coordinates as
+/// the sheet keeps them (`SurfaceSheet::shown` reads them as the flat pattern is read).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetHardware {
+    /// The hole feature that cut it (or the pattern or mirror that copied it).
+    pub feature: u64,
+    pub kind: crate::hardware_catalog::HardwareKind,
+    /// The thread as written (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length (mm); none for a nut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The id of the part that stands for it (`nut.m3`).
+    pub part: String,
+    pub center: Vec2,
+    /// The hole's radius (mm).
+    pub radius: f64,
+}
+
 /// A pocket in the flat: `region` recessed from `z0` to `z1` through the thickness, z 0 the
 /// bottom and z t the top. A sheet made from surfaces is an oriented surface: the input surfaces
 /// with their outward normals, continuous across every bend. Its top is the normal side,

@@ -1,0 +1,109 @@
+{
+  "ar": {
+    "cmd.sheet_hardware": "عناصر التثبيت بالكبس",
+    "help.sheet.hardware": "يقص ثقب التركيب لصامولة ذاتية التثبيت أو مسمار أو دعامة في صفيحة معدنية ويسجل عنصر التثبيت عليه. استخدمه لوضع عناصر التثبيت بالكبس مع فحص سماكة الصفيحة والمسافات إلى الحواف.",
+    "ui.hardware_kind_flush_nut": "صامولة مسطحة",
+    "ui.hardware_kind_nut": "صامولة",
+    "ui.hardware_kind_standoff": "دعامة",
+    "ui.hardware_kind_stud": "مسمار",
+    "ui.hardware_limits": "ثقب التركيب {hole} مم. سماكة الصفيحة لا تقل عن {sheet} مم. المركز على بعد {edge} مم على الأقل من حافة أو ثنية.",
+    "ui.hardware_notes": "ملاحظات عناصر التثبيت",
+    "ui.hardware_place": "وجه أو نقاط رسم",
+    "ui.hardware_thread": "اللولب",
+    "ui.hardware_title": "عناصر التثبيت بالكبس"
+  },
+  "de": {
+    "cmd.sheet_hardware": "Einpresselement",
+    "help.sheet.hardware": "Schneidet das Montageloch für eine Einpressmutter, einen Einpressbolzen oder einen Abstandshalter in ein Blech und merkt sich das Element. Zum Setzen von Einpresselementen, mit Prüfung von Blechdicke und Randabständen.",
+    "ui.hardware_kind_flush_nut": "Bündige Mutter",
+    "ui.hardware_kind_nut": "Mutter",
+    "ui.hardware_kind_standoff": "Abstandshalter",
+    "ui.hardware_kind_stud": "Bolzen",
+    "ui.hardware_limits": "Montageloch {hole} mm. Blech mindestens {sheet} mm dick. Mitte mindestens {edge} mm von einer Kante oder Biegung entfernt.",
+    "ui.hardware_notes": "Hinweise zu Einpresselementen",
+    "ui.hardware_place": "Fläche oder Skizzenpunkte",
+    "ui.hardware_thread": "Gewinde",
+    "ui.hardware_title": "EINPRESSELEMENT"
+  },
+  "en": {
+    "cmd.sheet_hardware": "Press-in Hardware",
+    "help.sheet.hardware": "Cuts the mounting hole of a self-clinching nut, stud or standoff in a sheet and records the hardware on it. Use it to place press-in hardware with the sheet's thickness and the edge distances checked.",
+    "ui.hardware_kind_flush_nut": "Flush nut",
+    "ui.hardware_kind_nut": "Nut",
+    "ui.hardware_kind_standoff": "Standoff",
+    "ui.hardware_kind_stud": "Stud",
+    "ui.hardware_limits": "Mounting hole {hole} mm. Sheet at least {sheet} mm thick. Center at least {edge} mm from an edge or bend.",
+    "ui.hardware_notes": "Hardware notes",
+    "ui.hardware_place": "Face or sketch points",
+    "ui.hardware_thread": "Thread",
+    "ui.hardware_title": "PRESS-IN HARDWARE"
+  },
+  "en-GB": {
+    "ui.hardware_limits": "Mounting hole {hole} mm. Sheet at least {sheet} mm thick. Centre at least {edge} mm from an edge or bend."
+  },
+  "he": {
+    "cmd.sheet_hardware": "חומרת הצמדה בלחיצה",
+    "help.sheet.hardware": "חותך את חור ההרכבה של אום, פין או דיסטנס שנלחצים לתוך הפח, ורושם עליו את החומרה. מתאים להצבת חומרה בלחיצה, עם בדיקת עובי הפח והמרחקים מהקצוות.",
+    "ui.hardware_kind_flush_nut": "אום שטוח",
+    "ui.hardware_kind_nut": "אום",
+    "ui.hardware_kind_standoff": "דיסטנס",
+    "ui.hardware_kind_stud": "פין",
+    "ui.hardware_limits": "חור הרכבה {hole} מ״מ. עובי הפח לפחות {sheet} מ״מ. המרכז במרחק של {edge} מ״מ לפחות מקצה או מכיפוף.",
+    "ui.hardware_notes": "הערות חומרה",
+    "ui.hardware_place": "פן או נקודות סקיצה",
+    "ui.hardware_thread": "הברגה",
+    "ui.hardware_title": "חומרת הצמדה בלחיצה"
+  },
+  "ja": {
+    "cmd.sheet_hardware": "圧入ハードウェア",
+    "help.sheet.hardware": "板金に圧入するナット、スタッド、スタンドオフの取り付け穴を開け、そのハードウェアを穴に記録します。板厚と端からの距離を確認しながら圧入部品を配置するときに使います。",
+    "ui.hardware_kind_flush_nut": "フラッシュナット",
+    "ui.hardware_kind_nut": "ナット",
+    "ui.hardware_kind_standoff": "スタンドオフ",
+    "ui.hardware_kind_stud": "スタッド",
+    "ui.hardware_limits": "取り付け穴 {hole} mm。板厚は {sheet} mm 以上。中心は端または曲げから {edge} mm 以上。",
+    "ui.hardware_notes": "ハードウェアの注記",
+    "ui.hardware_place": "面またはスケッチ点",
+    "ui.hardware_thread": "ねじ",
+    "ui.hardware_title": "圧入ハードウェア"
+  },
+  "ko": {
+    "cmd.sheet_hardware": "압입 하드웨어",
+    "help.sheet.hardware": "판금에 압입하는 너트, 스터드, 스탠드오프의 장착 구멍을 뚫고 그 부품을 구멍에 기록합니다. 판 두께와 가장자리까지의 거리를 확인하며 압입 부품을 배치할 때 사용합니다.",
+    "ui.hardware_kind_flush_nut": "플러시 너트",
+    "ui.hardware_kind_nut": "너트",
+    "ui.hardware_kind_standoff": "스탠드오프",
+    "ui.hardware_kind_stud": "스터드",
+    "ui.hardware_limits": "장착 구멍 {hole} mm. 판 두께 {sheet} mm 이상. 중심은 가장자리나 굽힘에서 {edge} mm 이상.",
+    "ui.hardware_notes": "하드웨어 주석",
+    "ui.hardware_place": "면 또는 스케치 점",
+    "ui.hardware_thread": "나사산",
+    "ui.hardware_title": "압입 하드웨어"
+  },
+  "vi": {
+    "cmd.sheet_hardware": "Phụ kiện ép chặt",
+    "help.sheet.hardware": "Cắt lỗ lắp cho đai ốc, chốt hoặc trụ đỡ tự ép vào tấm kim loại và ghi lại phụ kiện trên lỗ. Dùng để đặt phụ kiện ép chặt, có kiểm tra độ dày tấm và khoảng cách tới mép.",
+    "ui.hardware_kind_flush_nut": "Đai ốc phẳng",
+    "ui.hardware_kind_nut": "Đai ốc",
+    "ui.hardware_kind_standoff": "Trụ đỡ",
+    "ui.hardware_kind_stud": "Chốt",
+    "ui.hardware_limits": "Lỗ lắp {hole} mm. Tấm dày ít nhất {sheet} mm. Tâm cách mép hoặc đường uốn ít nhất {edge} mm.",
+    "ui.hardware_notes": "Ghi chú phụ kiện",
+    "ui.hardware_place": "Mặt hoặc điểm phác thảo",
+    "ui.hardware_thread": "Ren",
+    "ui.hardware_title": "PHỤ KIỆN ÉP CHẶT"
+  },
+  "zh": {
+    "cmd.sheet_hardware": "压铆件",
+    "help.sheet.hardware": "在钣金上切出压铆螺母、压铆螺柱或压铆隔离柱的安装孔，并在孔上记录该五金件。用于放置压铆件，并检查板厚和到边的距离。",
+    "ui.hardware_kind_flush_nut": "平齐压铆螺母",
+    "ui.hardware_kind_nut": "压铆螺母",
+    "ui.hardware_kind_standoff": "压铆隔离柱",
+    "ui.hardware_kind_stud": "压铆螺柱",
+    "ui.hardware_limits": "安装孔 {hole} mm。板厚至少 {sheet} mm。中心距边或折弯至少 {edge} mm。",
+    "ui.hardware_notes": "五金件标注",
+    "ui.hardware_place": "面或草图点",
+    "ui.hardware_thread": "螺纹",
+    "ui.hardware_title": "压铆件"
+  }
+}
