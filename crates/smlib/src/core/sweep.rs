@@ -26,6 +26,7 @@
 
 use std::f64::consts::{PI, TAU};
 
+use solidcore::curve::curve::p3::compute_crvs_normal;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
@@ -41,7 +42,10 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::surface::Surface;
-use solidcore::sweep::api_brep::{create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep};
+use solidcore::sweep::api_brep::{
+    CornerRefusal, OffsetCornerType, TaperExtrude, create_curve_sweep_with_placements, create_linear_sweep, create_rotational_sweep,
+    create_taper_extrude_with_corner,
+};
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2::{ArenaNotifyState, is_manifold_solid};
@@ -271,24 +275,68 @@ pub(crate) fn extrude(profile: &[Profile], direction: [f64; 3], distance: f64, d
     if !direction.iter().all(|x| x.is_finite()) {
         return Err(Error::Argument);
     }
-    const CALL: &str = "smlib_extrude";
-    let mut curves = ops_curves(profile);
-    if draft == 0.0 {
-        let tol = super::call::ops_as(CALL, &[], sweep_error, solidcore_ops::sweep::zone_tolerance)?;
-        curves = super::call::ops_as(CALL, &[], sweep_error, || solidcore_ops::sweep::join_circle_runs(&curves, tol))?;
+    if draft != 0.0 {
+        return drafted(profile, direction, distance, draft, corner, cap);
     }
-    let rule = match corner {
-        DraftCorner::Curvature => solidcore_ops::sweep::DraftCorner::Curvature,
-        DraftCorner::Tangent => solidcore_ops::sweep::DraftCorner::Tangent,
-        DraftCorner::Round => solidcore_ops::sweep::DraftCorner::Round,
-    };
-    super::call::ops_as(CALL, &[], sweep_error, || solidcore_ops::sweep::extrude(&curves, direction, distance, draft, rule, cap))
+    const CALL: &str = "smlib_extrude";
+    let curves = ops_curves(profile);
+    let tol = super::call::ops_as(CALL, &[], sweep_error, solidcore_ops::sweep::zone_tolerance)?;
+    let curves = super::call::ops_as(CALL, &[], sweep_error, || solidcore_ops::sweep::join_circle_runs(&curves, tol))?;
+    super::call::ops_as(CALL, &[], sweep_error, || {
+        solidcore_ops::sweep::extrude(&curves, direction, distance, 0.0, solidcore_ops::sweep::DraftCorner::default(), cap)
+    })
+}
+
+/// A drafted `smlib_extrude` (`SmApiCreateTaperExtrude`): the profile's one loop of curves, the
+/// direction used only for the side the taper goes (the sign of its dot with the profile's
+/// normal), as the capi takes it; still smlib's own, since solidcore-ops' drafted extrusion
+/// asks the profile to be square to the direction.
+fn drafted(profile: &[Profile], direction: [f64; 3], distance: f64, draft: f64, corner: DraftCorner, cap: bool) -> Result<Body> {
+    making("smlib_extrude", |k| {
+        let Some(dir) = unit(direction) else { return Ok(Err(Error::Argument)) };
+        let curves = match parse(k, profile) {
+            Ok(c) => c,
+            Err(e) => return Ok(Err(e)),
+        };
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        // SMLib's draft extrusion takes a single chain of curves, square to the extrusion: the
+        // height's sign picks the side, matched to `direction` here.
+        if !one_loop(k, &curves, 1e-6)? {
+            return Ok(Err(Error::Argument));
+        }
+        let Ok(normal) = compute_crvs_normal(k, &curves) else { return Ok(Err(Error::Argument)) };
+        let along = normal.dot(dir);
+        if along.abs() < 1.0 - 1e-9 {
+            return Ok(Err(Error::Argument));
+        }
+        let height = if along > 0.0 { distance } else { -distance };
+        let angle = draft * 180.0 / PI;
+        // The fork's corner rules (54148db, e8f23e0): the curvature rule continues each wall as
+        // itself, the tangent rule a profile of lines and arcs as their tangent planes
+        // (WR-521), and a corner either cannot close is refused,
+        // with why and where (`SmTaperCornerRefusal`, `pOptRefusedCorner`), as the capi passes it on.
+        let rule = match corner {
+            DraftCorner::Curvature => OffsetCornerType::CurveExtension,
+            DraftCorner::Tangent => OffsetCornerType::LinearExtension,
+            DraftCorner::Round => OffsetCornerType::FilletCorner,
+        };
+        match create_taper_extrude_with_corner(k, &refs, height, angle, if cap { 3 } else { 0 }, rule) {
+            Ok(TaperExtrude::Solid(r)) => finish(r, cap),
+            Ok(TaperExtrude::Refused(r)) => Ok(Err(refused(r))),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })
 }
 
 /// The capi's statuses for a draft corner whose continued curves do not meet, and for a wall that
 /// closes before the far end.
 const ERR_CORNER_APART: i32 = -1108;
 const ERR_WALL_CLOSES: i32 = -1109;
+
+/// A refused draft corner of the kernel's drafted extrusion, as [`corner_refused`] words it.
+fn refused(r: CornerRefusal) -> Error {
+    corner_refused(r.reason, Some([r.corner.x, r.corner.y, r.corner.z]))
+}
 
 /// A refused draft corner, `why` at `at`, as the capi reports it: [`Error::Corner`] where the
 /// point is finite, else the reason's own error.
