@@ -24,9 +24,9 @@ use std::f64::consts::{PI, TAU};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::UnitVec3;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::Visibility;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::validate_plane;
+use solidcraft_kernel::hlr::Visibility;
 
 use crate::ThreadInfo;
 

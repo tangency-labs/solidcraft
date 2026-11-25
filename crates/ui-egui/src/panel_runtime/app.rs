@@ -549,8 +549,15 @@ impl AppPanelRuntime {
         Ok(())
     }
 
+    /// `drawn`: the windows that drew the open menu (#19364).
     #[cfg(not(target_arch = "wasm32"))]
-    fn show_desktop_windows(&mut self, app: &mut crate::SolveApp, ctx: &egui::Context, enabled: bool) -> PanelResult<()> {
+    fn show_desktop_windows(
+        &mut self,
+        app: &mut crate::SolveApp,
+        ctx: &egui::Context,
+        enabled: bool,
+        drawn: &mut Vec<egui::ViewportId>,
+    ) -> PanelResult<()> {
         use super::native_ui::WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
@@ -573,6 +580,7 @@ impl AppPanelRuntime {
             .collect();
         let mut failure = None;
         for (host, section) in windows {
+            let drawn = &mut *drawn;
             let paint = (|| -> PanelResult<()> {
                 let layout = self.runtime.layout();
                 let available = section.tabs.iter().map(|id| (id.clone(), layout.availability(id))).collect();
@@ -607,6 +615,7 @@ impl AppPanelRuntime {
                             }
                             desktop.observe(ui.ctx(), &host, active);
                             let _blur = content.app.blur.begin(ui.ctx());
+                            let before = crate::semantic_content::presented_owners(content.app);
                             let painted = solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             });
@@ -644,6 +653,14 @@ impl AppPanelRuntime {
                                 } else {
                                     ui.ctx().request_repaint();
                                 }
+                            }
+                            // This window is drawn after the frame's rows opened their menus: it
+                            // opens and draws its own rows' menu (#19364).
+                            if let Some((at, target)) = crate::semantic_content::take_late_menu(content.app, &before) {
+                                crate::context_menu::open_in_window(content.app, ui.ctx().viewport_id(), at, target);
+                            }
+                            if crate::context_menu::show_in_window(content.app, ui.ctx()) {
+                                drawn.push(ui.ctx().viewport_id());
                             }
                             painted
                         });
@@ -1446,11 +1463,15 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
 pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Context) {
     let Some(mut integration) = app.panel_runtime.take() else { return };
     let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
-    if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
+    let mut drawn = Vec::new();
+    let shown = integration.show_desktop_windows(app, ctx, enabled, &mut drawn);
+    crate::context_menu::close_unshown_window(app, &drawn);
+    if let Err(reason) = shown {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);
+    crate::context_menu::run_deferred(app);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
