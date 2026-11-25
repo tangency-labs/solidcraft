@@ -151,7 +151,11 @@ fn drop_on_edge(
         SolverOperation::Intersect,
     ) {
         Ok(d) => Ok(d.success.then_some(d.parameter)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -258,7 +262,11 @@ fn local_minimize(
     match trim.local_point_solve::<()>(k, interval, SolverOperation::Minimize, point, &opts, guess)
     {
         Ok((true, sol)) => Ok(Ok(Some(sol))),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         Err(_) => Ok(Err(())),
         Ok((false, _)) => Ok(Ok(None)),
     }

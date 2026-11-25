@@ -100,6 +100,16 @@
   "params": {"item": "Customize Toolbar…"}
  },
  {
+  "note": "The list scrolls. Sphere is far down it, below the Sketch panel's rows, so bring its row into view before the click."
+ },
+ {
+  "call": "ui.scroll",
+  "params": {"x": 800, "y": 400, "delta": -200}
+ },
+ {
+  "frames": 3
+ },
+ {
   "click": {"handle": "customize:solid.sphere"}
  },
  {

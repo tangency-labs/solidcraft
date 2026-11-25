@@ -17,7 +17,7 @@ use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::sizes::{self, Family};
 use solidcraft_doc::frame::{
     self, Anchor, CornerOverride, CornerType, MemberGroup, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimMemberRef,
-    TrimTarget,
+    TrimTarget, UpAxis,
 };
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SketchId};
 use solidcraft_sketch::Sketch;
@@ -30,7 +30,7 @@ use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
     CORNER_ENTRY, CreatedIds, FrameMemberParams, MemberFeatureDeleted, MultiTrimParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo,
     ProfileListParams, ProfileListResult, ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, RemoveMemberParams,
-    RemoveMemberResult, SizeFamilyInfo, TRIM_KIND, TrimParams, corner_entry, removed_members, trim_kind, trim_members,
+    RemoveMemberResult, SizeFamilyInfo, TRIM_KIND, TrimParams, UP_MESSAGE, corner_entry, removed_members, trim_kind, trim_members,
 };
 use crate::schema::frame_plate::{BoltPattern, PlateOutline, PlateParams};
 use crate::schema::{TypedContract, output_schema_for};
@@ -68,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "sketch?: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); pairs?: [{a, b}] (one straight member from point a to point b each, after the lines' members, found again whenever the design changes; a and b are point references: {vertex: [x,y,z]}, {sketch, point} (a 3D sketch node as `wire:index`), {construct_point: name}, a snap point or the origin, as saved ({type, …}) too; typed coordinates are not points here; each pair is named pair1, pair2… and a pair's id is never given again; Edit Feature gives back the pairs it keeps with their `id` and `next_pair`, and an `id` without `next_pair` is refused); give `sketch`, `pairs` or both; ",
         "continuous?: bool (default false; one member along explicitly selected lines and circular arcs in connected tangent path order, curves reversed as needed, stable member id `$path`; corner None only, without overrides, Fit Ends, Coped, Flip, gap or point pairs); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); corner?: auto|none|mitre|butt (how members ending at one point are cut; default none); flip?: bool (a butt's other member runs through); fit_ends?: bool (fit free ends to earlier Frame Members' tubes; default false); coped?: bool (cut every butt joint to the other tube's real shape, radii kept: butts, ends on a tube's middle, crossings, overlaps and fitted ends, mitres left as they are; not under none; default false; an older `coped_butt`, the frame's or an override's, reads as butt with coped); corners?: [{members: [2 to 1000 line or pair ids, or {line}], kind: auto|none|mitre|butt, gap?: length expr}] (that corner's, crossing's or overlap's own type, and its own weld gap; the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner; an older script's `corner` reads as `kind`, and its `flip` is saved as the order today's rules give with the first two swapped; an overlap takes no gap); gap?: length expr (the weld gap at every welded end, 0…1000 mm, default 0: each mitre plane half of it back, a butting or fitted end, a crossing's pieces' included, that far off the member it meets; through members keep their length, overlaps are notched without it); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); locate?: [x,y] (the profile point that sits on each line, in mm from the profile's own origin: a bar's or an angle's bottom-left corner, a channel's web back at mid-height, the centre of other profiles; takes precedence over `anchor` and keeps the member attached at that point when the profile size changes); corner?: auto|none|mitre|butt (how members ending at one point are cut; default none); flip?: bool (a butt's other member runs through); fit_ends?: bool (fit free ends to earlier Frame Members' tubes; default false); coped?: bool (cut every butt joint to the other tube's real shape, radii kept: butts, ends on a tube's middle, crossings, overlaps and fitted ends, mitres left as they are; not under none; default false; an older `coped_butt`, the frame's or an override's, reads as butt with coped); corners?: [{members: [2 to 1000 line or pair ids, or {line}], kind: auto|none|mitre|butt, gap?: length expr}] (that corner's, crossing's or overlap's own type, and its own weld gap; the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner; an older script's `corner` reads as `kind`, and its `flip` is saved as the order today's rules give with the first two swapped; an overlap takes no gap); gap?: length expr (the weld gap at every welded end, 0…1000 mm, default 0: each mitre plane half of it back, a butting or fitted end, a crossing's pieces' included, that far off the member it meets; through members keep their length, overlaps are notched without it); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); up?: X|-X|Y|-Y|Z|-Z (the world axis that is up for the profile, default Z; a part drawn with Y up takes Y, so its members need no angle and lines along Y are its vertical members, their x along world X, or world Y when X is up); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the size's name, `RSC 203x89`, the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line or pair id: name} (names to keep, as Edit Feature keeps them). One body per line or pair, from its start to its end; each member keeps its name when other lines or pairs are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.trim", "Trim/Extend", crate::checked!("frame.trim", trim)).contract(&TRIM_CONTRACT).output(output_schema_for::<FeatureResult>).at("WELDMENTS", "MODIFY").icon("frame_trim").enabled(not_in_sketch).params(concat!(
         "members: [member…] (the members to trim or extend: each a member's body name, or {feature: the frame member feature (name or id), line: its line's id}); ",
@@ -660,7 +660,7 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
             let a = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`locate` must be [x, y] in the profile's own coordinates"))?;
             let x = a[0].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` x must be a finite length"))?;
             let y = a[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` y must be a finite length"))?;
-            if x.abs() > frame::MAX_PROFILE_SIZE || y.abs() > frame::MAX_PROFILE_SIZE {
+            if !(frame::within_profile_size(x) && frame::within_profile_size(y)) {
                 return Err(bad(cmd, "`locate` is outside the largest profile"));
             }
             Some([x, y])
@@ -718,6 +718,10 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
         None | Some(Value::Null) => false,
         Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, "`mirror` must be true or false"))?,
     };
+    let up: UpAxis = match p.get("up") {
+        None | Some(Value::Null) => UpAxis::default(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| bad(cmd, UP_MESSAGE))?,
+    };
     let kept: BTreeMap<String, String> = match p.get("names") {
         None | Some(Value::Null) => BTreeMap::new(),
         Some(Value::Object(m)) if m.len() <= frame::MAX_MEMBERS => m
@@ -745,6 +749,7 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
         gap,
         angle,
         mirror,
+        up,
         body_name,
         names: BTreeMap::new(),
         pairs,

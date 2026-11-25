@@ -695,6 +695,14 @@ pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<
 /// Evaluates the design. Returns the features made and the component.
 pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, name: &str) -> Result<(Vec<u64>, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    let made = add_design_in(s, design, top)?;
+    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+}
+
+/// Add a design rebuilt from a file (as [`add_design`] does) inside component `top`, which
+/// already exists. Evaluates the design. Returns the features made.
+pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesign, top: u64) -> Result<Vec<u64>> {
     let source = &design.doc;
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -762,8 +770,7 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
     if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
-    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
-    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+    Ok(made)
 }
 
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.

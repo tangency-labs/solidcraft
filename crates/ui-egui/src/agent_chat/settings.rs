@@ -430,6 +430,44 @@ pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) 
     s.confirm_insecure_http = None;
 }
 
+/// The host and port of an address a user typed (scheme, path and credentials left out).
+fn host_and_port(url: &str) -> (String, Option<u16>) {
+    let rest = url.trim().split_once("://").map_or(url.trim(), |(_, r)| r);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.ends_with(']') || host.starts_with('[') => match port.parse() {
+            Ok(port) => (host.to_string(), Some(port)),
+            Err(_) => (authority.to_string(), None),
+        },
+        _ => (authority.to_string(), None),
+    }
+}
+
+/// The address no longer says what the chosen preset does (the user edited it): the preset becomes
+/// Custom, and a name that was still the preset's own goes (the host is suggested), so "Ollama"
+/// does not stay on another endpoint. A name the user typed is never touched, and the Ollama
+/// preset stays for an address on Ollama's own port (another computer's Ollama, which `ollama`
+/// records).
+pub(super) fn follow_url_edit(s: &mut AddState) {
+    let presets = agents::presets(s.protocol);
+    let Some(preset) = presets.get(s.preset) else { return };
+    let same = |a: &str, b: &str| match (agents::normalize_url(a), agents::normalize_url(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a.trim().trim_end_matches('/') == b.trim().trim_end_matches('/'),
+    };
+    if same(&s.base_url, preset.base_url) {
+        return;
+    }
+    if s.protocol == Protocol::OpenAi && s.preset == 0 && host_and_port(&s.base_url).1 == host_and_port(preset.base_url).1 {
+        return;
+    }
+    s.preset = presets.len();
+    if s.name == preset.name {
+        s.name = host_and_port(&s.base_url).0;
+    }
+}
+
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
 /// for its models).
 #[cfg(not(target_arch = "wasm32"))]
@@ -541,6 +579,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 agents_section(app, ui);
             }
             instructions_section(app, ui);
+            allowed_folders_section(app, ui);
             panel_section(app, ui);
             connecting_section(app, ui);
         });
@@ -584,6 +623,64 @@ fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         solidcraft_ui_registry::publish_target("prefs:agent_instructions", response.rect);
         ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
+    });
+}
+
+/// Extra folders the built-in Assistant's MCP server may reach (`agent_allowed_paths`, #20326).
+fn allowed_folders_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    ui_kit::settings_section(ui, "allowed_folders", tr("ai.prefs.allowed_folders"), |ui| {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_note")));
+        if app.preferences.agent_allowed_paths.is_empty() {
+            ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_none")));
+        } else {
+            let mut remove = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+                for (i, folder) in app.preferences.agent_allowed_paths.iter().enumerate() {
+                    let chip = ui_kit::SettingsChip {
+                        key: Some(folder),
+                        monospace: true,
+                        remove: Some(tr("ai.prefs.allowed_folders_remove")),
+                        ..Default::default()
+                    };
+                    let button = ui_kit::settings_chip(ui, folder, chip);
+                    let key = format!("prefs:agent_allowed_folder:{i}:remove");
+                    solidcraft_ui_registry::publish_target(&key, button.rect);
+                    solidcraft_ui_registry::publish_handle(&key, button.rect.center());
+                    if button.clicked() {
+                        remove = Some(i);
+                    }
+                }
+            });
+            if let Some(i) = remove.filter(|i| *i < app.preferences.agent_allowed_paths.len()) {
+                app.preferences.agent_allowed_paths.remove(i);
+            }
+        }
+        ui.horizontal(|ui| {
+            let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
+            let add = ui.add_enabled_ui(can_browse, |ui| ui_kit::button(ui, tr("ai.prefs.allowed_folders_add"), ui_kit::Button::Normal)).inner;
+            solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:add", add.rect);
+            solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:add", add.rect.center());
+            if add.clicked() {
+                let start = app.preferences.agent_allowed_paths.last().cloned().unwrap_or_default();
+                app.pick_folder(&start, |app, folder| {
+                    if let Some(folder) = folder.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+                        && !app.preferences.agent_allowed_paths.contains(&folder)
+                    {
+                        app.preferences.agent_allowed_paths.push(folder);
+                    }
+                });
+            }
+            if !app.preferences.agent_allowed_paths.is_empty() {
+                let clear = ui_kit::button(ui, tr("ai.prefs.allowed_folders_clear"), ui_kit::Button::Normal);
+                solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:clear", clear.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:clear", clear.rect.center());
+                if clear.clicked() {
+                    app.preferences.agent_allowed_paths.clear();
+                }
+            }
+        });
     });
 }
 
@@ -661,13 +758,23 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
+        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_tabs"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             ui_kit::row(ui, tr("ui.assistant"), |ui| {
                 ui_kit::checkbox(ui, tr("ui.agent_chat_own_window"), &mut app.preferences.agent_chat_popped);
+            });
+            ui_kit::row(ui, tr("ui.agent_chat_tabs"), |ui| {
+                let was = app.preferences.agent_shared_session;
+                let response = ui_kit::checkbox(ui, tr("ui.agent_shared_session"), &mut app.preferences.agent_shared_session)
+                    .backing_on_hover_text(tr("ui.agent_shared_session_note"));
+                solidcraft_ui_registry::publish_target("prefs:agent_shared_session", response.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_shared_session", response.rect.center());
+                if !was && app.preferences.agent_shared_session {
+                    crate::documents::disconnect_background_chats(app, false);
+                }
             });
             ui_kit::row(ui, tr("ui.agent_chat_thinking"), |ui| {
                 let response = ui_kit::checkbox(ui, tr("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)
@@ -1292,6 +1399,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
                         s.list_again |= r.lost_focus();
                         if r.changed() {
+                            follow_url_edit(s);
                             s.insecure_http_url = None;
                             s.confirm_insecure_http = None;
                             s.listing = None;
@@ -1600,7 +1708,16 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in [
+                "assistant_availability",
+                "permissions",
+                "agents",
+                "instructions",
+                "allowed_folders",
+                "panel",
+                "assistant_connecting",
+                "agent_pointer",
+            ] {
                 let section = solidcraft_ui_registry::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);
@@ -2664,5 +2781,34 @@ mod card_tests {
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));
         assert_eq!(h.app.preferences.agent_models.get("api-1").map(String::as_str), Some("vendor/own"));
         assert_eq!(seen.lock().unwrap().len(), 1, "listed once");
+    }
+
+    /// Editing the Base URL away from a preset's address makes the preset Custom, and a name that
+    /// was still the preset's own gives way to the host; a name the user typed stays.
+    #[test]
+    fn editing_the_url_away_from_a_preset_follows_it() {
+        let ollama =
+            |url: &str, name: &str| AddState { kind: AddKind::Api, preset: 0, name: name.into(), base_url: url.into(), ..Default::default() };
+        let custom = agents::presets(Protocol::OpenAi).len();
+        let mut s = ollama("http://localhost:11434/v1", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (0, "Ollama"), "an unchanged address keeps the preset");
+        s.base_url = "http://localhost:11434/v1/".into();
+        follow_url_edit(&mut s);
+        assert_eq!(s.preset, 0, "a trailing slash is the same address");
+        s.base_url = "https://api.example.com/v1".into();
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, "api.example.com"), "another endpoint is Custom, named by its host");
+        let mut s = ollama("https://api.example.com/v1", "My server");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, "My server"), "a typed name is never overwritten");
+        let mut s = ollama("http://192.168.1.20:11434/v1", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (0, "Ollama"), "another computer's Ollama is still Ollama");
+        let mut s = ollama("", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, ""), "an emptied address leaves no stale name");
+        follow_url_edit(&mut s);
+        assert_eq!(s.preset, custom, "Custom stays Custom");
     }
 }

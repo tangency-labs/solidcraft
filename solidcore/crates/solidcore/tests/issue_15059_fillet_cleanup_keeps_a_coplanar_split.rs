@@ -1,17 +1,17 @@
-//! tangency-labs/solidcraft#15059 (WR-459): the fillet clean-up's keep
-//! (`Kernel::fixes.fillet_cleanup_keeps_target_faces`) still keeps something since WR-602
-//! made the clean-up check a kept slit: an edge of the target between two different faces
+//! tangency-labs/solidcraft#15059 (WR-459): the fillet clean-up's keep (the default since
+//! its flag was retired, #17169) still keeps something since WR-602 made the clean-up check
+//! a kept slit: an edge of the target between two different faces
 //! on coincident surfaces.
 //!
 //! The body: a prism of side 10 whose front side is two coplanar faces (its profile's front
 //! edge drawn as two collinear lines), so the edge between them has a face on each side, both
 //! in the plane y = 0. `DoFilleting`'s `BooleanPostProcess(TRUE)` checks every edge of the
 //! target; without the keep `IsTopological` takes that edge as removable and merges the two
-//! faces. A round on the back top edge, far from it:
-//! - with the keep, the edge stays: 8 faces (the prism's 7 and the round), 18 edges;
-//! - without it, the edge goes and the front is one face: 7 faces, 15 edges.
+//! faces. A round on the back top edge, far from it, keeps the edge: 8 faces (the prism's 7
+//! and the round), 18 edges. (Before the keep was the default, the edge went and the front
+//! was one face: 7 faces, 15 edges.)
 //!
-//! The volume is the closed form's either way, `S^3 - (1 - pi / 4) r^2 S`, within the
+//! The volume is the closed form's, `S^3 - (1 - pi / 4) r^2 S`, within the
 //! relative accuracy the volume is asked to (`brep_volume`'s 1e-6). The clean-up alone
 //! (`boolean_post_process` over every edge, as `fork_cac11ea` runs it) does the same: with
 //! every edge and face kept the edge stays, with nothing kept it goes.
@@ -112,10 +112,9 @@ fn counts(b: &Brep) -> (usize, usize) {
     )
 }
 
-/// The prism rounded r 1 on its back top edge with the keep as `keep` says.
-fn rounded(keep: bool) -> (Kernel, Brep) {
+/// The prism rounded r 1 on its back top edge.
+fn rounded() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_cleanup_keeps_target_faces = keep;
     let mut b = prism(&mut k);
     let e = back_top(&b);
     fillet_edges(&mut k, &mut b, &[e], R, 1, 1, 1.0).unwrap();
@@ -135,23 +134,11 @@ fn the_prism_has_a_two_face_edge_between_coplanar_faces() {
 #[test]
 fn the_keep_keeps_the_target_s_coplanar_split_after_a_round() {
     let want = S * S * S - (1.0 - core::f64::consts::FRAC_PI_4) * R * R * S;
-    let (k, mut kept) = rounded(true);
+    let (k, mut kept) = rounded();
     let split = split_edge(&kept).expect("the keep keeps the split edge");
     assert_eq!(edge::faces(&kept, split, None).unwrap().len(), 2);
     assert_eq!(counts(&kept), (8, 18));
     let v = volume(&k, &mut kept);
-    assert!(
-        (v - want).abs() <= VOLUME_TOL * want,
-        "volume {v}, want {want}"
-    );
-
-    let (k, mut merged) = rounded(false);
-    assert!(
-        split_edge(&merged).is_none(),
-        "without the keep the split goes"
-    );
-    assert_eq!(counts(&merged), (7, 15));
-    let v = volume(&k, &mut merged);
     assert!(
         (v - want).abs() <= VOLUME_TOL * want,
         "volume {v}, want {want}"

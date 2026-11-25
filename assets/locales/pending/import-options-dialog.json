@@ -150,5 +150,24 @@
     "import_options.up_z": "保留文件的坐标轴（Z 轴向上）",
     "import_options.usd_meshes": "网格",
     "import_options.usd_exact": "文件中有精确 B-rep 时使用它"
+  },
+  "fr": {
+    "import_options.body_names": "Noms des corps",
+    "import_options.names_solid": "Nom propre du solide",
+    "import_options.names_product": "Pièce qui le contient",
+    "import_options.names_instance": "Occurrence de l’assemblage",
+    "import_options.freecad_history": "Historique FreeCAD",
+    "import_options.history_features": "Reconstruire ses esquisses et ses fonctions",
+    "import_options.history_solids": "Solides uniquement",
+    "import_options.kicad_board": "Carte",
+    "import_options.kicad_solid": "Solide",
+    "import_options.title_open": "Ouvrir {format}",
+    "import_options.title_insert": "Insérer {format}",
+    "settings.ask_import_options": "Demander les options d’importation d’un fichier lors de son ouverture ou de son insertion",
+    "import_options.up_axis": "Axe vertical",
+    "import_options.up_y": "Le fichier utilise Y comme axe vertical",
+    "import_options.up_z": "Conserver les axes du fichier (Z vertical)",
+    "import_options.usd_meshes": "Maillages",
+    "import_options.usd_exact": "B-rep exacte lorsque le fichier la contient"
   }
 }
