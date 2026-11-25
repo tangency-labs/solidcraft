@@ -2541,7 +2541,7 @@ mod tests {
         assert!((v - 32000.0).abs() <= 1e-9 * 32000.0, "{v}");
     }
 
-    /// Second review, finding 11: with the exact analytic mate opt-in, the analytic copies
+    /// Second review, finding 11: with the exact analytic mate (WR-495), the analytic copies
     /// of the faces' surfaces are extended by each face's derived reach (not five offset
     /// distances, 2.5 times the body's bounding radius in a local operation): a cylinder's
     /// top raised 0.5 meets its side on the exact circle there, a sound solid of the
@@ -2550,7 +2550,6 @@ mod tests {
     fn a_raised_cylinder_top_mates_on_its_exact_circle_within_the_derived_reach() {
         use crate::primitive::api_primitives as ap;
         let mut k = Kernel::default();
-        k.fixes.offset_analytic_mate_edges = true;
         let mut b = ap::create_cylinder(&mut k, Point3::ZERO, 5.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 20.5), Vec3::Z));
@@ -3758,7 +3757,7 @@ mod tests {
                 assert!(reports.add_unique_delete_duplicate(report(t, owner)));
             }
             validation::BrepCheck {
-                pointers_status: crate::error::SM_SUCCESS,
+                pointers: validation::PointerCheck::Passed,
                 pointer_reports: AssertArray::new(),
                 assert_valid: Some(tests.is_empty()),
                 reports,
@@ -3820,7 +3819,7 @@ mod tests {
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
-    /// one (as an application turns them on, `offset_analytic_mate_edges` among them).
+    /// one (as an application turns them on).
     fn tangent_edge_fixes() -> [UpstreamFixes; 2] {
         [UpstreamFixes::default(), UpstreamFixes::all()]
     }

@@ -7,6 +7,7 @@ mod app_geometry;
 mod app_icons;
 mod assets;
 mod book;
+mod ci;
 mod external_corpus;
 mod fast;
 mod features;
@@ -168,10 +169,15 @@ commands:
                   units (a kernel change without it prints a hint). -p names the packages to
                   test instead; --list only prints what would run. Every step runs; the failures
                   are listed at the end. CI runs the full gate
-  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, app-geometry, clippy -D warnings, then the tests
-                  with the wasm check alongside, then web-offline-test when Chrome is installed
-                  (stops at the first failing step)
+  ci [--all] [--base REF]
+                  the check before a push: runs what the change needs. Always fmt --check,
+                  assets, icons, licences --check, lists, skills, layers, shared, ui-containers,
+                  mesh-decisions, app-geometry, clippy -D warnings, then the tests with the wasm
+                  check alongside, then web-offline-test when Chrome is installed; and, when the
+                  branch (against the merge-base with REF, default origin/main) changes their
+                  paths, i18n --check, kernel-cases --coverage, plugin-examples and the
+                  design-format pending check (xtask/src/ci.rs, PATH_GATES). Prints what it runs
+                  and skips and why; --all runs everything (stops at the first failing step)
 ";
 
 fn main() -> ExitCode {
@@ -214,7 +220,7 @@ fn main() -> ExitCode {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
             test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
         }
-        Some("ci") => cmd_ci(),
+        Some("ci") => ci::run(&root(), &rest),
         Some("fast") => fast::run(&root(), &rest),
         Some("plugin-examples") => plugin_examples::run(&root(), rest.contains(&"--run")),
         Some("wasm") => cmd_wasm(),
@@ -540,30 +546,6 @@ fn wasm_check() -> Result<(Command, usize), String> {
         c.args(["-p", p]);
     }
     Ok((c, set.len()))
-}
-
-/// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
-/// binaries do, which leaves cargo's build lock free.
-fn cmd_ci() -> Result<(), String> {
-    rustfmt::run(&root(), true)?;
-    assets::run(&root())?;
-    icons::run(&root())?;
-    licences::run(&root(), true)?;
-    lists::run(&root(), false)?;
-    skills::run(&root())?;
-    cmd_layers()?;
-    shared::run(&root())?;
-    ui_containers::run(&root())?;
-    mesh_decisions::run(&root())?;
-    app_geometry::run(&root(), &[])?;
-    let mut c = cargo();
-    c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
-    run(c, "cargo clippy -D warnings")?;
-    let (wasm, n) = wasm_check()?;
-    test_nextest::run_selected(vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
-    web_offline_test::run(&root(), None, false)?;
-    eprintln!("ci: all gates passed");
-    Ok(())
 }
 
 #[cfg(test)]
