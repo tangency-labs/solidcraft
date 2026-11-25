@@ -16,7 +16,7 @@ use solidcore::math::{Point2, Vec2};
 use solidcore::prism::fill::{
     fill, Channel, Contour, FillFailure, FillNote, FillOptions, FillSide, Filled,
 };
-use solidcore::prism::profile::Seg2;
+use solidcore::prism::profile::{loop_crosses, Seg2};
 use solidcore::{Kernel, SolidError};
 
 /// Gap between the plates in every example.
@@ -387,7 +387,7 @@ fn blended_toes_run_out_tangentially_past_the_groove() {
         let (d1, d2) = (tangent_at(pair[0], 1.0), tangent_at(pair[1], 0.0));
         assert!(pair[0].end().distance(pair[1].start()) < 1e-12);
         assert!(
-            (d1.x * d2.y - d1.y * d2.x).abs() < 1e-9,
+            (d1.x * d2.y - d1.y * d2.x).abs() < 1e-9 && d1.x * d2.x + d1.y * d2.y > 0.0,
             "a kink where arcs meet"
         );
     }
@@ -1018,6 +1018,94 @@ fn blended_toes_where_the_sides_beyond_do_not_run_along_the_chord_are_refused() 
             side: FillSide::Second
         }
     );
+    // below the blended toes' height floor (about 5 here, 2e5 wide) without a depth normal:
+    // refused as off the chord, not with a height fit that would be refused off the chord
+    // (CodeRabbit on #18947)
+    let wide = 1e5;
+    let (why, fit) = refused(&Case {
+        face: blended,
+        ..channel(
+            vec![line(p(-wide, 0.0), p(-(wide - 1.0), -6.0))],
+            vec![line(p(wide, 0.0), p(wide - 1.0, -6.0))],
+        )
+    });
+    assert_eq!(
+        why,
+        FillFailure::BlendedToesOffChord {
+            side: FillSide::Face
+        }
+    );
+    assert_eq!(fit, None);
+}
+
+#[test]
+fn an_overlap_within_the_zone_tolerance_is_built_with_sharp_toes() {
+    // a blend that runs 1e-6 past the toe (the zone tolerance is 1e-5): its end is one point
+    // with the toe, and its arcs build at no height; built as the sharp convex face, with a
+    // note, also without a depth normal
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    for depth_normal in [Some(Vec2::new(0.0, 1.0)), None] {
+        let w = Case {
+            depth_normal,
+            ..channel(l.clone(), r.clone())
+        };
+        let blended = section(&Case {
+            face: Contour::ConvexBlended {
+                height: 1.0,
+                overlap: 1e-6,
+            },
+            ..w.clone()
+        });
+        let sharp = section(&Case {
+            face: Contour::Convex { height: 1.0 },
+            ..w
+        });
+        assert_eq!(blended.region, sharp.region);
+        assert_eq!(
+            blended.notes,
+            vec![FillNote::SharpToes {
+                side: FillSide::Face,
+                overlap: 1e-6
+            }]
+        );
+    }
+}
+
+#[test]
+fn the_crossing_check_flags_a_corner_within_its_tolerance_of_a_side() {
+    // the corner (4, 0.005) comes 0.005 from the bottom side without crossing it, and the lines
+    // through its two sides meet the bottom 0.05 from it (CodeRabbit on #18947)
+    let corners = [
+        p(0.0, 0.0),
+        p(10.0, 0.0),
+        p(10.0, 5.0),
+        p(5.0, 0.105),
+        p(4.0, 0.005),
+        p(3.0, 0.105),
+        p(0.0, 5.0),
+    ];
+    let segs: Vec<Seg2> = (0..corners.len())
+        .map(|i| line(corners[i], corners[(i + 1) % corners.len()]))
+        .collect();
+    assert!(loop_crosses(&segs, &[0; 7], 0.01));
+    assert!(!loop_crosses(&segs, &[0; 7], 0.001));
+}
+
+#[test]
+fn a_section_past_the_profile_budget_is_refused_before_the_crossing_check() {
+    // a wall of 10 000 steps: refused on its count, at once (not after some 5e7 pairs)
+    let n = 10_000;
+    let right: Vec<Seg2> = (0..n)
+        .map(|i| {
+            let y = |j: usize| -6.0 * j as f64 / n as f64;
+            line(p(3.0, y(i)), p(3.0, y(i + 1)))
+        })
+        .collect();
+    let err = run(&channel(mirror(&right), right)).unwrap_err();
+    assert!(
+        matches!(err, SolidError::InvalidInput { reason, .. } if reason.contains("MAX_SEGMENTS")),
+        "{err:?}"
+    );
 }
 
 /// How far `fill` grows each side towards a concave face: twice the crossing check's
@@ -1037,12 +1125,13 @@ fn grown(c: &Case) -> f64 {
 /// Where a concave face between the toes (-a, 0) and (a, 0) stops against a straight wall
 /// leaving the toe (a, 0) at `angle` degrees below the chord: the circle through the toes and
 /// the point of the wall's line `grown` back past the toe, the wall grown like every side.
-/// Its centre (0, k) is read from the three points (not the fill's tangency quadratics).
+/// Its centre (0, k) is read from the three points (not the fill's tangency quadratics), with
+/// `x² - a²` as `dx (2a + dx)`: no cancellation however close the point is to the toe.
 fn toe_touch(c: &Case, a: f64, angle: f64) -> f64 {
     let b = grown(c);
     let t = angle.to_radians();
-    let (x, y) = (a + b * t.cos(), b * t.sin());
-    let k = (x * x + y * y - a * a) / (2.0 * y);
+    let (dx, y) = (b * t.cos(), b * t.sin());
+    let k = (dx * (2.0 * a + dx) + y * y) / (2.0 * y);
     a * a / (a.hypot(k) + k)
 }
 
@@ -1498,6 +1587,9 @@ fn toe_arc(t: f64, rho: f64, down: bool) -> Seg2 {
     }
 }
 
+/// An arc wall of the sweep by (angle, radius, curving down); `None` for the others.
+type WallName = Option<(f64, f64, bool)>;
+
 #[test]
 fn concave_fits_build_when_retried_on_every_scale() {
     // V walls of several slopes (down to 0.002 degrees), arc walls leaving the toe at shallow
@@ -1524,13 +1616,16 @@ fn concave_fits_build_when_retried_on_every_scale() {
             })
             .collect()
     };
+    let sizes = [1.0, 10.0, 100.0, 1e3, 1e4, 1e5];
     let mut refused_fits = Vec::new();
-    let mut flat_refused = 0;
-    for f in [1.0, 10.0, 100.0, 1e3, 1e4, 1e5] {
-        let mut walls = vec![
-            u_right(),
-            vec![line(p(3.0, 0.0), p(3.0, -6.0))],
-            step_wall(),
+    // the walls whose flat channel is refused: the arc walls by (angle, radius, down), the
+    // others as None
+    let mut flat_refused = Vec::new();
+    for f in sizes {
+        let mut walls: Vec<(WallName, Vec<Seg2>)> = vec![
+            (None, u_right()),
+            (None, vec![line(p(3.0, 0.0), p(3.0, -6.0))]),
+            (None, step_wall()),
         ];
         for (dx, dy) in [
             (0.01, -0.02),
@@ -1542,14 +1637,14 @@ fn concave_fits_build_when_retried_on_every_scale() {
             (0.5, -0.043_744),
             (0.5, -0.017_455),
         ] {
-            walls.push(vec![line(p(1.0, 0.0), p(1.0 - dx, dy))]);
+            walls.push((None, vec![line(p(1.0, 0.0), p(1.0 - dx, dy))]));
         }
         for t in [0.5_f64, 0.05, 0.002] {
             let t = t.to_radians();
-            walls.push(vec![line(
-                p(1.0, 0.0),
-                p(1.0 - 0.5 * t.cos(), -0.5 * t.sin()),
-            )]);
+            walls.push((
+                None,
+                vec![line(p(1.0, 0.0), p(1.0 - 0.5 * t.cos(), -0.5 * t.sin()))],
+            ));
         }
         // arc walls leaving the toe: down at 5, 1, 0.05 and 0.01 degrees, up at 5, 1, 0.2,
         // 0.05, 0.01 and 0.002 (walls whose flat channel is refused are skipped below)
@@ -1593,17 +1688,17 @@ fn concave_fits_build_when_retried_on_every_scale() {
                 if !down && no_area.contains(&(t, rho, f)) {
                     continue;
                 }
-                walls.push(vec![toe_arc(t, rho, down)]);
+                walls.push((Some((t, rho, down)), vec![toe_arc(t, rho, down)]));
             }
         }
-        for right in walls {
+        for (name, right) in walls {
             let right = grow(right, f);
             let top = right.first().map_or(f, |s| s.start().x);
             // a wall whose channel is refused even flat is not one a concave face can be asked
             // of (a wall too short or too tight to run away from the face at this size): counted
-            // below, so a change that starts refusing other flat channels fails here
+            // below by name, so a change that refuses another or builds one of these fails
             if run(&channel(mirror(&right), right.clone())).is_err() {
-                flat_refused += 1;
+                flat_refused.push((name, f));
                 continue;
             }
             for want in [0.5, 0.9, 2.0] {
@@ -1613,23 +1708,23 @@ fn concave_fits_build_when_retried_on_every_scale() {
                         depth,
                         ..channel(mirror(&right), right.clone())
                     };
-                    let mut built = false;
-                    for _ in 0..3 {
-                        match run(&w) {
-                            Ok(_) => {
-                                built = true;
-                                break;
-                            }
-                            Err(err) => {
-                                let Some(fit) = err.fit() else {
-                                    break;
-                                };
-                                w.face = Contour::Concave { depth: fit.size };
-                            }
+                    // asked past the half circle (2 top deep, the toes 2 top apart): refused.
+                    // A refusal's own fit builds at the first retry, or the case fails.
+                    let err = match run(&w) {
+                        Ok(_) if want < 1.0 => continue,
+                        Ok(_) => {
+                            refused_fits.push((f, want, depth, None));
+                            continue;
                         }
-                    }
-                    if !built {
-                        refused_fits.push((f, want, depth, run(&w).err()));
+                        Err(err) => err,
+                    };
+                    let Some(fit) = err.fit() else {
+                        refused_fits.push((f, want, depth, Some(err)));
+                        continue;
+                    };
+                    w.face = Contour::Concave { depth: fit.size };
+                    if let Err(err) = run(&w) {
+                        refused_fits.push((f, want, depth, Some(err)));
                     }
                 }
             }
@@ -1638,7 +1733,22 @@ fn concave_fits_build_when_retried_on_every_scale() {
     assert!(refused_fits.is_empty(), "{refused_fits:?}");
     // the walls curving up whose flat channel is refused, at each of the six sizes: at 0.01
     // degrees radius 0.5, 2 and 5, at 0.002 degrees radius 0.5, 2, 5, 10, 30 and 100
-    assert_eq!(flat_refused, 9 * 6);
+    let up_refused = [
+        (0.01, 0.5),
+        (0.01, 2.0),
+        (0.01, 5.0),
+        (0.002, 0.5),
+        (0.002, 2.0),
+        (0.002, 5.0),
+        (0.002, 10.0),
+        (0.002, 30.0),
+        (0.002, 100.0),
+    ];
+    let want: Vec<_> = sizes
+        .iter()
+        .flat_map(|&f| up_refused.map(|(t, rho)| (Some((t, rho, false)), f)))
+        .collect();
+    assert_eq!(flat_refused, want);
 }
 
 #[test]

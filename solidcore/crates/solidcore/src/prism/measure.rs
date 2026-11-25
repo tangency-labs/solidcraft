@@ -180,12 +180,8 @@ fn wall_error(
         return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
     }
     if let SurfaceKind::SurfOfExtrusion(x) = surface.kind() {
-        let e = x.extrusion_vec;
-        let length = e.length();
-        if !(e.x.is_finite() && e.y.is_finite() && e.z.is_finite() && length > 0.0) {
-            return None;
-        }
-        let a = e * (1.0 / length);
+        // made unit scaled first: a direction of any finite length, none past f64::MAX squared
+        let (_, a) = x.extrusion_vec.length_and_unit()?;
         return Some((a.cross(d).length() + 1024.0 * f64::EPSILON) * height * 4.0);
     }
     let (points, _, _) = net_of(surface)?;

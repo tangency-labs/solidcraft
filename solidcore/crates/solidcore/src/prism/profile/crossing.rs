@@ -28,7 +28,10 @@ pub fn near_miss(eps: f64) -> f64 {
 /// `group` (a face's pieces) are one side: they are not checked against each other, and the
 /// side joins its neighbours at its own ends. Lines and arcs only (other segments are not
 /// looked at). It decides at `tol`, not at a proved bound: two sides within `tol` of each
-/// other meet. The caller passes finite segments (a NaN compares as no meeting).
+/// other meet: where they cross, and where an end of one comes within `tol` of the other. The
+/// caller passes finite segments (a NaN compares as no meeting), each starting where the one
+/// before ends to within rounding (the last ending where the first starts): a join is taken as
+/// a point of both sides, and their other meeting is read from it.
 #[must_use]
 pub fn loop_crosses(segs: &[Seg2], group: &[usize], tol: f64) -> bool {
     // each segment's side, and each side's two ends
@@ -74,8 +77,9 @@ pub fn loop_crosses(segs: &[Seg2], group: &[usize], tol: f64) -> bool {
     false
 }
 
-/// Where two lines or arcs meet (where they overlap, the ends of the overlap). Where both
-/// end at one of `joins`, that join is one meeting and the other comes from it.
+/// Where two lines or arcs meet (where they overlap, the ends of the overlap), and their ends
+/// within `tol` of the other. Where both end at one of `joins`, that join is one meeting and
+/// the other comes from it.
 fn meets(a: &Seg2, b: &Seg2, joins: &[Point2], tol: f64) -> Vec<Point2> {
     let ends_at = |s: &Seg2, j: Point2| s.start().distance(j) <= tol || s.end().distance(j) <= tol;
     let join = joins
@@ -112,8 +116,11 @@ fn meets(a: &Seg2, b: &Seg2, joins: &[Point2], tol: f64) -> Vec<Point2> {
         }
         _ => Vec::new(),
     };
+    // and an end of one within `tol` of the other (a corner that comes near a side without
+    // crossing it: the closest two lines come, where they do not cross, is at an end)
     candidates
         .into_iter()
+        .chain([a.start(), a.end(), b.start(), b.end()])
         .filter(|&p| on_seg(a, p, tol) && on_seg(b, p, tol))
         .collect()
 }

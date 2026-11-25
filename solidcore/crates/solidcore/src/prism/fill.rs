@@ -53,6 +53,9 @@
 //! than half the distance between its toes is refused. The blend runs along the chord's line,
 //! so it is built only where the sides beyond the toes on that side do: [`Channel::depth_normal`]
 //! given and square to the chord. Elsewhere it is refused ([`FillFailure::BlendedToesOffChord`]).
+//! An overlap no longer than the zone tolerance is built with sharp toes
+//! ([`FillNote::SharpToes`]): its end is one point with the toe, and its arcs build only at
+//! some heights.
 //!
 //! **Depth `s`.** Measured from the deeper toe along `-depth_normal` where
 //! [`Channel::depth_normal`] is given, and the fill's bottom runs square to it; else from the
@@ -90,7 +93,7 @@ use crate::math::{Point2, Vec2};
 use crate::prism::path_export::{bulge_arc, Vertex};
 use crate::prism::profile::{
     check_regions, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
-    ProfileRefusal, Region2, Seg2, MAX_ARC_RADIUS,
+    ProfileRefusal, Region2, Seg2, MAX_ARC_RADIUS, MAX_SEGMENTS,
 };
 
 pub use crate::error::fill::{FillFailure, FillSide};
@@ -176,6 +179,14 @@ pub enum FillNote {
         side: FillSide,
         /// The height or depth asked for.
         asked: f64,
+    },
+    /// Blended toes asked with an overlap no longer than the kernel's zone tolerance: built with
+    /// sharp toes (the blend's end is one point with the toe).
+    SharpToes {
+        /// Which side.
+        side: FillSide,
+        /// The overlap asked for.
+        overlap: f64,
     },
     /// A concave contour dips below the chord between its toes.
     BelowToes {
@@ -342,32 +353,56 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
             });
         }
     }
-    // the two faces: what each would be, its own limits first
+    // the two faces: what each would be, its own limits first (blended toes before the
+    // heights: a height fit cannot make blended toes build where the sides do not allow them)
     let second_used = through && !cut;
     let zone = k.tolerances.zone_tol_3d;
     let mut shallow_options = *options;
+    // the sides beyond a face's toes run along its chord: the depth normal given, square to it
+    let along = |p: Point2, q: Point2| normal.is_some_and(|n| (q - p).dot(n).abs() <= eps);
+    shallow_options.face = toes(
+        FillSide::Face,
+        options.face,
+        along(l0, r0),
+        zone,
+        &mut notes,
+    )?;
+    if second_used {
+        shallow_options.second_face = Some(toes(
+            FillSide::Second,
+            second(options),
+            along(rb, lb),
+            zone,
+            &mut notes,
+        )?);
+    }
     let face_floor;
-    (shallow_options.face, face_floor) =
-        shallow(FillSide::Face, l0, r0, options.face, zone, &mut notes)?;
+    (shallow_options.face, face_floor) = shallow(
+        FillSide::Face,
+        l0,
+        r0,
+        shallow_options.face,
+        zone,
+        &mut notes,
+    )?;
     let mut second_floor = 0.0;
     if second_used {
-        let (contour, floor) =
-            shallow(FillSide::Second, rb, lb, second(options), zone, &mut notes)?;
+        let (contour, floor) = shallow(
+            FillSide::Second,
+            rb,
+            lb,
+            second(&shallow_options),
+            zone,
+            &mut notes,
+        )?;
         shallow_options.second_face = Some(contour);
         second_floor = floor;
     }
     let options = &shallow_options;
     if second_used {
-        check_face(
-            FillSide::Second,
-            rb,
-            lb,
-            second(options),
-            normal.map(|n| -n),
-            eps,
-        )?;
+        check_face(FillSide::Second, rb, lb, second(options), eps)?;
     }
-    check_face(FillSide::Face, l0, r0, options.face, normal, eps)?;
+    check_face(FillSide::Face, l0, r0, options.face, eps)?;
     let second_path = if second_used {
         close(rb, lb, second(options))
     } else {
@@ -453,6 +488,13 @@ fn build(k: &Kernel, section: &Channel, options: &FillOptions) -> Result<Filled>
     group.extend(right_wall.iter().map(|_| 0));
     group.extend(bottom.iter().map(|_| if second_used { 2 } else { 0 }));
     group.extend(left_wall.iter().map(|_| 0));
+    // the profile's budget before the pairwise check (long walls cut short count only as cut)
+    if segs.len() > MAX_SEGMENTS {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a section of more lines and arcs than a profile takes (MAX_SEGMENTS)",
+        ));
+    }
     if loop_crosses(&segs, &group, near_miss(eps)) {
         return Err(SolidError::invalid_input(
             OP,
@@ -763,32 +805,46 @@ fn shallow(
     Ok((contour, floor))
 }
 
+/// Blended toes, before a face's heights are sized. An overlap no longer than the zone
+/// tolerance is built with sharp toes and a note says so: the blend's end is one point with the
+/// toe, and no height fit makes its arcs build (a blend arc is `o (1 + u²) atan(u) / u` long,
+/// `u = h / x`: from `o` to `π o / 2` whatever the height, so at or below `2 zone / π` none
+/// builds). A longer overlap only where the sides beyond the toes run along the chord (`along`),
+/// else refused whatever the height (a height at or below the zone tolerance is built flat, and
+/// has no toes).
+fn toes(
+    side: FillSide,
+    contour: Contour,
+    along: bool,
+    zone: f64,
+    notes: &mut Vec<FillNote>,
+) -> Result<Contour> {
+    let Contour::ConvexBlended { height, overlap } = contour else {
+        return Ok(contour);
+    };
+    if height <= zone || overlap <= 0.0 {
+        return Ok(contour);
+    }
+    if overlap <= zone {
+        notes.push(FillNote::SharpToes { side, overlap });
+        return Ok(Contour::Convex { height });
+    }
+    if !along {
+        return Err(
+            Failure::new(OP, Reason::Fill(FillFailure::BlendedToesOffChord { side })).into_error(),
+        );
+    }
+    Ok(contour)
+}
+
 /// A face's own limits, before it is built: a convex face no higher than half a circle allows
 /// (its fit `a + o`, half the toe distance plus the blend's overlap: the main arc's half sweep
-/// `2 atan(h / (a + o))` reaches a quarter turn there), blended toes only where the sides
-/// beyond the toes run along the chord (`out`, the depth normal, square to it).
-fn check_face(
-    side: FillSide,
-    p: Point2,
-    q: Point2,
-    contour: Contour,
-    out: Option<Vec2>,
-    eps: f64,
-) -> Result<()> {
+/// `2 atan(h / (a + o))` reaches a quarter turn there).
+fn check_face(side: FillSide, p: Point2, q: Point2, contour: Contour, eps: f64) -> Result<()> {
     let a = 0.5 * p.distance(q);
     let (height, overlap) = match contour {
         Contour::Convex { height } => (height, 0.0),
-        Contour::ConvexBlended { height, overlap } => {
-            let along = out.is_some_and(|n| (q - p).dot(n).abs() <= eps);
-            if overlap > 0.0 && !along {
-                return Err(Failure::new(
-                    OP,
-                    Reason::Fill(FillFailure::BlendedToesOffChord { side }),
-                )
-                .into_error());
-            }
-            (height, overlap.max(0.0))
-        }
+        Contour::ConvexBlended { height, overlap } => (height, overlap.max(0.0)),
         Contour::Flat | Contour::Concave { .. } => return Ok(()),
     };
     let fit = a + overlap;
@@ -836,14 +892,16 @@ fn unbuilt(side: FillSide, p: Point2, q: Point2, contour: Contour) -> SolidError
 /// twice the near-miss tolerance, so an arc short of the limit is never flagged by
 /// [`loop_crosses`]; a side that leaves a toe (`p` or `q`) is grown the same way back past the
 /// toe. A vertex of `others` between `eps` and that growth below the chord, between the toes,
-/// leaves no arc clear of it: the limit is 0 (touched). It decides at that tolerance, not at
-/// a proved bound; a caller keeps a depth margin below the limit. `p` and `q` at one point (or
-/// not finite) give `(0, false)`; the sides are the caller's to pass finite. Closed form: the
-/// arcs through `p` and `q` are a pencil of circles, each deeper one below the one before, so the
-/// first that reaches a grown side does so at a vertex's circle or where it is tangent to the
-/// side. The circle of dip `s` has its centre `m + n (R - s)`, `R = (a² + s²) / 2s` (`m` the
-/// chord's middle, `a` half of it, `n` its normal on the outside); tangency with a line or a
-/// circle is a quadratic in `s`.
+/// leaves no arc clear of it: the limit is 0 (touched). A side that crosses the chord between
+/// the toes and runs on below the half circle meets every arc and is not looked for: the
+/// caller's to refuse (`fill`'s crossing check refuses such a section). It decides at that
+/// tolerance, not at a proved bound; a caller keeps a depth margin below the limit. `p` and `q`
+/// at one point (or not finite) give `(0, false)`; the sides are the caller's to pass finite.
+/// Closed form: the arcs through `p` and `q` are a pencil of circles, each deeper one below the
+/// one before, so the first that reaches a grown side does so at a vertex's circle or where it
+/// is tangent to the side. The circle of dip `s` has its centre `m + n (R - s)`,
+/// `R = (a² + s²) / 2s` (`m` the chord's middle, `a` half of it, `n` its normal on the
+/// outside); tangency with a line or a circle is a quadratic in `s`.
 #[must_use]
 pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, bool) {
     let chord = q - p;
@@ -872,6 +930,8 @@ pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, b
         }
     };
     let at_toe = |x: Point2| x.distance(p).min(x.distance(q)) <= tol;
+    // |x - m|² - a², read as (x - p) . (x - q): no cancellation for a point near a toe
+    let power = |x: Point2| (x - p).dot(x - q);
     for seg in others {
         let (s0, s1) = (seg.start(), seg.end());
         // a side leaving a toe at the angle t: the arc leaves the toe 2 atan(s / a) below the
@@ -888,10 +948,13 @@ pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, b
             let toward = (other - toe) * (1.0 / (2.0 * a));
             let angle = (-dir.dot(n)).atan2(dir.dot(toward));
             if angle > 0.0 && angle < PI {
-                let w = m - (toe - dir * off);
-                let wn = w.dot(n);
+                // read from the step back past the toe, not from the point's coordinates (whose
+                // rounding is large beside a step of `off`)
+                let back = -(dir * off);
+                let wn = (m - toe).dot(n) - back.dot(n);
+                let toe_power = (toe - other + back).dot(back);
                 let mut found = false;
-                for s in roots(-wn, w.dot(w) - a * a, wn * a * a) {
+                for s in roots(-wn, toe_power, wn * a * a) {
                     if s > eps && s <= a + eps {
                         take(s);
                         found = true;
@@ -916,9 +979,8 @@ pub fn arc_clearance(p: Point2, q: Point2, others: &[Seg2], eps: f64) -> (f64, b
                 continue;
             }
             // the first arc within `off` of the vertex: centre distance R + off
-            let w = m - x;
-            let wn = w.dot(n);
-            for s in roots(-wn - off, w.dot(w) - a * a - off * off, (wn - off) * a * a) {
+            let wn = (m - x).dot(n);
+            for s in roots(-wn - off, power(x) - off * off, (wn - off) * a * a) {
                 if s > eps && s <= a + eps {
                     take(s);
                 }
