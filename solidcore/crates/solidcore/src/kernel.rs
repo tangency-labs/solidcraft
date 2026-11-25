@@ -146,6 +146,12 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
 }
 
 impl Default for Caches {
@@ -153,16 +159,18 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
             ..Self::default()
         };
     }
@@ -205,6 +213,8 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    band_face_solves: Cell<u64>,
+    band_edge_solves: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -432,11 +442,28 @@ impl WorkCounters {
     }
 
     /// Certified bounds on a new UV trim's distance from its edge
-    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
-    /// costly part of building a trim. Not the fork's (#21105).
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
     #[must_use]
     pub fn trim_deviation_bounds(&self) -> u64 {
         self.trim_deviation_bounds.get()
+    }
+
+    /// Intersections of a convex blend's section with a face of the part, run to learn whether
+    /// the blend cuts the part or breaks through it
+    /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
+    #[must_use]
+    pub fn band_face_solves(&self) -> u64 {
+        self.band_face_solves.get()
+    }
+
+    /// Intersections of an edge of the part with a station's plane, run to learn whether a
+    /// convex blend cuts the part (`blend::fillet_executive::session::band_cuts`). Not the
+    /// fork's (#21434).
+    #[must_use]
+    pub fn band_edge_solves(&self) -> u64 {
+        self.band_edge_solves.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).
@@ -467,6 +494,20 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.band_face_solves.set(0);
+        self.band_edge_solves.set(0);
+    }
+
+    /// Counts one intersection of a blend's section with a face.
+    pub(crate) fn add_band_face_solve(&self) {
+        self.band_face_solves
+            .set(self.band_face_solves.get().saturating_add(1));
+    }
+
+    /// Counts one intersection of an edge with a station's plane.
+    pub(crate) fn add_band_edge_solve(&self) {
+        self.band_edge_solves
+            .set(self.band_edge_solves.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
@@ -992,17 +1033,12 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
-    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
-    /// then it changes nothing. Shared with the kernel copies an operation makes for its
+    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
+    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
+    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
-    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
-    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
-    /// and then it changes nothing. Shared with the kernel copies an operation makes.
-    #[cfg(feature = "wr469-replay")]
-    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1078,8 +1114,6 @@ impl Kernel {
             strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
-            #[cfg(feature = "wr469-replay")]
-            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
     }
 
@@ -1102,6 +1136,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 

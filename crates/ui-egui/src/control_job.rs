@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -124,6 +125,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_step",
     "file.export_stl",
     "file.export_urdf",
+    "file.export_urdf_options",
     "file.save_mesh",
 ];
 
