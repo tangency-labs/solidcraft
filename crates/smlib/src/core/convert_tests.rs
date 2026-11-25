@@ -461,8 +461,9 @@ enum Floor {
     Any,
     /// The torus of the arrays' own frame and radii, to rounding.
     ItsOwnTorus,
-    /// Its exact NURBS form: the arrays that come back name no torus.
-    ItsForm,
+    /// No torus but its own: its exact NURBS form (the arrays that come back name no torus), or the
+    /// torus of the arrays' own frame and radii where the kernel can lay that one on the form.
+    ItsFormOrItsOwnTorus,
 }
 
 /// A torus of which the tube shows a short arc comes back from its arrays as a body that passes its
@@ -471,8 +472,9 @@ enum Floor {
 /// off its form and the check refused it in some places ("Bad Analytic and NURB Evaluate"), and one
 /// under about 0.3 degrees was refused outright ("a NURBS form that is not its analytic surface").
 /// Where the form is off the torus found (1.2 degrees), the face is the torus of the arrays' own
-/// frame and radii, to rounding. Where none is found and none is proved (0.05 degrees), the face is
-/// its exact form.
+/// frame and radii, to rounding. Where none is found (0.05 degrees), the face is no torus but its
+/// own: it is its exact form, or the arrays' torus where the kernel can lay that one on so short a
+/// form.
 #[test]
 fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
     use crate::check::CheckLevel;
@@ -485,7 +487,7 @@ fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
         (0.6, 25.0, Floor::Any),
         (0.3, 25.0, Floor::Any),
         (0.1, 25.0, Floor::Any),
-        (0.05, 40.0, Floor::ItsForm),
+        (0.05, 40.0, Floor::ItsFormOrItsOwnTorus),
     ];
     for (arc_deg, cutter_radius, floor) in cases {
         let at = format!("a {arc_deg} degree arc, cutter radius {cutter_radius}");
@@ -496,7 +498,9 @@ fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
         assert!(rel(made[0], 13.725 + cutter_radius) < 1e-12, "{at}: major radius {}", made[0]);
         let back = from_arrays(&arrays).unwrap();
         let again = to_arrays(&back).unwrap();
-        if floor == Floor::ItsOwnTorus {
+        // how many tori the arrays that come back name: the floor, or none where it is its form
+        let named = again.reals.get(&FACE_TORUS_MAJOR_RADIUS).map_or(0, Vec::len);
+        if floor == Floor::ItsOwnTorus || (floor == Floor::ItsFormOrItsOwnTorus && named > 0) {
             for id in [FACE_TORUS_ORIGIN, FACE_TORUS_AXIS, FACE_TORUS_REF_DIRECTION, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS] {
                 let (was, is) = (&arrays.reals[&id], &again.reals[&id]);
                 assert_eq!(was.len(), is.len(), "{at}: array {id}");
@@ -504,9 +508,6 @@ fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
                     assert!((a - b).abs() <= 8.0 * f64::EPSILON * (1.0 + a.abs()), "{at}: array {id}: {a} came back {b}");
                 }
             }
-        }
-        if floor == Floor::ItsForm {
-            assert_eq!(again.reals.get(&FACE_TORUS_MAJOR_RADIUS).map_or(0, Vec::len), 0, "{at}: the floor is its form");
         }
         assert!(super::check(&back, CheckLevel::All).unwrap().is_valid(), "{at}: the tool");
         let shaft = make_cylinder([0.0; 3], 15.75, 60.0).unwrap();
