@@ -29,6 +29,7 @@
 # intersect.curve_class_p1, surface.surface_p4, surface.surface_point_solve_p3: #21504 (#20438) drops a global minimise answer farther than the target, and a dropped minimise falls back to the tree solve; each moved row is certified empty over its domain (target_bounded_solves_are_certified_empty in surface_surface_p4 and surface_surface_point_solve_p3) or replayed to main's row with the drops kept and each drop certified (target_bounded_rows_moved_only_through_certified_drops); the digests are the branch files
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
+# offset.offset_geometry_creation: ExtendTrimEdges refuses a UV curve off the extended domain (#21743): the digest is this branch's file. 12 lines moved, each first moving at an ExtendTrimEdges (direct or inside EdgeuseOffset) whose kept UV piece lies outside the extended surface's domain, with every earlier op unchanged: gen0274, gen0329, gen0473, gen0484 and gen0577 go from success to SM_ERR; gen0163, gen0306, gen0666 and gen0705 stay SM_ERR but no longer leave the clamped lift on their edges; gen0248, gen0308 and gen0642 keep EdgeuseOffset's status with the edges keeping their input. Each is replayed by extend_trim_edges_refuses_a_uv_curve_off_the_extended_domain (the refusal, and the edge states bit for bit unchanged). gen0308's and gen0642's rows are removed: their edges keep their input tolerance instead of the rows' moved ones (gen0308 state[83]: 0.007446299247768298 -> 4.0511335586128185e-3 against this main); gen0642's 10 UNCOVERED lines leave the open list, the off-domain trim at u = 71.94 they recorded being this lift's
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -203,7 +204,7 @@ nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
 offset.offset_executive_p2	fcb52935cecf554f
-offset.offset_geometry_creation	e8c98d82f6680670
+offset.offset_geometry_creation	2881691915a96d6d
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
 primitive.api_primitives	135f2a1c6d123a62
