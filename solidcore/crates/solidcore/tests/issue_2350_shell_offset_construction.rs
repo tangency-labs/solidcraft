@@ -348,11 +348,20 @@ fn blind_hole_block(k: &mut Kernel) -> Brep {
 /// `do_solid_offset`, as the goldens unit `offset.offset_executive_p2` runs it), the planar
 /// face at `open` (axis, value) left in place.
 fn unmerged_inset(wall: f64, open: (usize, f64)) -> solidcore::Result<Brep> {
+    unmerged_inset_of(blind_hole_block, wall, open)
+}
+
+/// [`unmerged_inset`] of the part `build` makes.
+fn unmerged_inset_of(
+    build: fn(&mut Kernel) -> Brep,
+    wall: f64,
+    open: (usize, f64),
+) -> solidcore::Result<Brep> {
     use offset_fixture::planar_faces_at;
     use solidcore::offset::offset_executive::p1::OffsetOperation;
     use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
     let mut k = Kernel::default();
-    let mut part = blind_hole_block(&mut k);
+    let mut part = build(&mut k);
     let faces = planar_faces_at(&k, &part, open.0, open.1);
     assert_eq!(faces.len(), 1, "{open:?}");
     let mut executive = OffsetExecutive::new(OffsetOperation::SolidOffset, wall, part.tolerance());
@@ -389,6 +398,50 @@ fn unmerged_inset_whose_floors_cross_is_refused_naming_half_the_floor() {
     assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
     for (wall, open) in [(5.0, (1, -100.0)), (10.0, (2, -40.0))] {
         let result = unmerged_inset(wall, open);
+        assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
+    }
+}
+
+/// A 200 x 200 x 40 block (z -40..0) on a boss 130 x 180 x 40 under it (x -90..40,
+/// y -90..90, z -80..-40), with a blind pocket 60 x 60 (x 0..60, y -30..30) from the top
+/// down to z = -29. The pocket's floor lies 11 above the block's bottom over x 40..60 only
+/// (the strip beside the boss) and 51 above the boss's bottom over the rest: the floor and
+/// the bottom overlap, seen from above, in a strip that is a strict part of each.
+fn pocket_over_strip_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+    let block = create_box(k, Point3::new(-100.0, -100.0, -40.0), 200.0, 200.0, 40.0).unwrap();
+    let boss = create_box(k, Point3::new(-90.0, -90.0, -80.0), 130.0, 180.0, 40.0).unwrap();
+    let pocket = create_box(k, Point3::new(0.0, -30.0, -29.0), 60.0, 60.0, 40.0).unwrap();
+    let body = boolean_union(k, block, boss).unwrap();
+    let mut part = boolean_difference(k, body, pocket).unwrap();
+    part.refresh_cached_topology();
+    part
+}
+
+/// #21674 (review): the unmerged inset by 10 of [`pocket_over_strip_block`] with a side
+/// (y = -100) left in place moves the bottom up to z = -30 and the pocket's floor down to
+/// z = -39 over the strip x 40..70 where the floor is 11 thick, so the insets cross there
+/// though neither offset face's interior point lies over the other face (the floor's is
+/// over the boss, the bottom's away from the pocket): a single interior point per face
+/// misses it. The crossing is found on the faces' boundaries and
+/// refused, naming half the floor. At 5 (the insets 1 apart) and with the bottom left in
+/// place it builds.
+#[test]
+fn unmerged_inset_whose_floor_partly_crosses_the_bottom_is_refused() {
+    let err = unmerged_inset_of(pocket_over_strip_block, 10.0, (1, -100.0)).unwrap_err();
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross {
+        distance, largest, ..
+    })) = err.failure().map(|f| &f.reason)
+    else {
+        panic!("wall 10: not walls meeting across the floor: {err}");
+    };
+    assert!((largest - 5.5).abs() <= 1e-9, "{largest}");
+    assert!((distance - 10.0).abs() <= 1e-12, "{distance}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    for (wall, open) in [(5.0, (1, -100.0)), (10.0, (2, -40.0))] {
+        let result = unmerged_inset_of(pocket_over_strip_block, wall, open);
         assert!(result.is_ok(), "wall {wall} open {open:?}: {result:?}");
     }
 }

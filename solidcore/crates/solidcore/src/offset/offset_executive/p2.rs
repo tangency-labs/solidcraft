@@ -519,6 +519,240 @@ fn planar_walls(
     Ok(planar)
 }
 
+/// The most steps (one pair of edges' crossings found, one point classified) that
+/// [`refuse_crossing_planar_insets`] takes over a body. Past them it stops without refusing,
+/// leaving the inset as the build made it (what it did before the check): a budget that runs
+/// out never becomes a refusal.
+const CROSSING_WITNESS_STEPS: usize = 20_000;
+
+/// Takes one of the steps `left`; false when none remains.
+fn spend_steps(left: &mut usize) -> bool {
+    let Some(rest) = left.checked_sub(1) else {
+        return false;
+    };
+    *left = rest;
+    true
+}
+
+/// `result`'s value, or `None` where the query failed: a failed witness query finds no
+/// witness. A cancellation or an unported step is passed on.
+fn witness_query<T>(result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The edges of face `f` of `b`, each its curve over its interval (an edge without a curve
+/// is left out).
+fn face_boundary(
+    b: &Brep,
+    f: FaceId,
+) -> Result<Vec<(crate::curve::curve::Curve, crate::geom::extent1d::Extent1d)>> {
+    let mut out = Vec::new();
+    for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
+        let edge = b.edge(e)?;
+        if let Some(curve) = edge.curve.as_ref() {
+            out.push((curve.clone(), edge.interval));
+        }
+    }
+    Ok(out)
+}
+
+/// What [`crossing_witness`] found.
+enum Witness {
+    /// A point of the offset face within less than the wall of the opposite face.
+    Found,
+    /// No such point among those tested.
+    None,
+    /// The steps ran out first.
+    OutOfSteps,
+}
+
+/// Points on two boundaries `first` and `second` to classify against the other face, seen
+/// along `along`: each edge's start (the faces' vertices) and the middle of each piece of an
+/// edge between its ends and the points where, seen along `along`, it meets the other
+/// boundary (`curve_crossings`). The inside of such a piece meets the other boundary nowhere,
+/// so it lies wholly inside the other face or wholly outside it, and its middle decides which.
+/// `None` when the steps ran out.
+#[allow(clippy::type_complexity)] // two lists of points
+fn boundary_samples(
+    kernel: &mut Kernel,
+    first: &[(crate::curve::curve::Curve, crate::geom::extent1d::Extent1d)],
+    second: &[(crate::curve::curve::Curve, crate::geom::extent1d::Extent1d)],
+    along: Vec3,
+    tolerance: f64,
+    left: &mut usize,
+    operation: &'static str,
+) -> Result<Option<(Vec<crate::math::Point3>, Vec<crate::math::Point3>)>> {
+    use crate::intersect::api_intersectors::curve_crossings;
+    let inside = |ivl: &crate::geom::extent1d::Extent1d, t: f64| ivl.min() < t && t < ivl.max();
+    let mut cuts_first: Vec<Vec<f64>> = first.iter().map(|_| Vec::new()).collect();
+    let mut cuts_second: Vec<Vec<f64>> = second.iter().map(|_| Vec::new()).collect();
+    for ((c1, i1), cuts1) in first.iter().zip(cuts_first.iter_mut()) {
+        for ((c2, i2), cuts2) in second.iter().zip(cuts_second.iter_mut()) {
+            kernel.check_cancelled(operation)?;
+            if !spend_steps(left) {
+                return Ok(None);
+            }
+            let found = witness_query(curve_crossings(
+                kernel,
+                c1,
+                i1,
+                c2,
+                i2,
+                Some(along),
+                tolerance,
+            ))?;
+            for (t1, t2) in found.unwrap_or_default() {
+                if inside(i1, t1) {
+                    cuts1.push(t1);
+                }
+                if inside(i2, t2) {
+                    cuts2.push(t2);
+                }
+            }
+        }
+    }
+    let points = |edges: &[(crate::curve::curve::Curve, crate::geom::extent1d::Extent1d)],
+                  cuts: Vec<Vec<f64>>|
+     -> Result<Vec<crate::math::Point3>> {
+        let mut out = Vec::new();
+        for ((curve, ivl), mut at) in edges.iter().zip(cuts) {
+            at.push(ivl.min());
+            at.push(ivl.max());
+            at.sort_by(f64::total_cmp);
+            let mut ts = vec![ivl.min()];
+            ts.extend(at.windows(2).filter_map(|w| match w {
+                [lo, hi] if lo < hi => Some(0.5 * (lo + hi)),
+                _ => None,
+            }));
+            for t in ts {
+                if let Some(p) = witness_query(curve.evaluate_point(kernel, t))? {
+                    out.push(p);
+                }
+            }
+        }
+        Ok(out)
+    };
+    let on_first = points(first, cuts_first)?;
+    let on_second = points(second, cuts_second)?;
+    Ok(Some((on_first, on_second)))
+}
+
+/// Whether the offset face `offset_face` of `built` has a point within less than `wall -
+/// tolerance` of the planar face `a` of `input` (opposite it, offset too), tested at the
+/// points [`refuse_crossing_planar_insets`] names: a point `x` of the offset face is a witness
+/// where its distance `|h|` from `a`'s plane is below that and its projection onto the plane
+/// classifies strictly inside `a`; a point `p` of `a` (closed) is one where its foot `x` on the
+/// offset face's plane classifies strictly inside the offset face and `|x - p|` is below it.
+#[allow(clippy::too_many_arguments)] // the pair, its two bodies, the wall, the steps
+fn crossing_witness(
+    kernel: &mut Kernel,
+    input: &mut Brep,
+    a: &PlanarWall,
+    built: &mut Brep,
+    offset_face: FaceId,
+    wall: f64,
+    left: &mut usize,
+    operation: &'static str,
+) -> Result<Witness> {
+    use crate::intersect::point_class::PointClassType;
+    use crate::query::api_queries::{face_bounding_box, face_classify_uv, face_internal_point};
+    let tolerance = input.tolerance();
+    let limit = wall - tolerance;
+    let n = a.inward;
+    // the offset face's box: past the limit from a's plane all along, or apart from a's
+    // box seen along a's normal (on either axis of the plane, by more than the tolerance),
+    // it has no witness
+    let Some(extent) = witness_query(face_bounding_box(kernel, built, offset_face, false))? else {
+        return Ok(Witness::None);
+    };
+    let [low, high] = extent.span_along(a.at, n);
+    if low >= limit || high <= -limit {
+        return Ok(Witness::None);
+    }
+    let seed = if n.x.abs() <= n.y.abs() && n.x.abs() <= n.z.abs() {
+        Vec3::X
+    } else if n.y.abs() <= n.z.abs() {
+        Vec3::Y
+    } else {
+        Vec3::Z
+    };
+    let u = seed.cross(n);
+    let u = u * (1.0 / u.length());
+    let v = n.cross(u);
+    let apart = [u, v].into_iter().any(|d| {
+        let [l1, h1] = extent.span_along(a.at, d);
+        let [l2, h2] = a.extent.span_along(a.at, d);
+        !(l1 < h2 - tolerance && l2 < h1 - tolerance)
+    });
+    if apart {
+        return Ok(Witness::None);
+    }
+    let offset_boundary = face_boundary(built, offset_face)?;
+    let a_boundary = face_boundary(input, a.face)?;
+    let Some((on_offset, on_a)) = boundary_samples(
+        kernel,
+        &offset_boundary,
+        &a_boundary,
+        n,
+        tolerance,
+        left,
+        operation,
+    )?
+    else {
+        return Ok(Witness::OutOfSteps);
+    };
+    // points of the offset face (its interior point, its vertices, the middles of its
+    // edges' pieces) over a's interior
+    let interior = witness_query(face_internal_point(kernel, built, offset_face))?;
+    for x in interior.into_iter().chain(on_offset) {
+        if (x - a.at).dot(n).abs() >= limit {
+            continue;
+        }
+        let Some(uv) = plane_uv(input, a.face, x)? else {
+            continue;
+        };
+        kernel.check_cancelled(operation)?;
+        if !spend_steps(left) {
+            return Ok(Witness::OutOfSteps);
+        }
+        if let Some(PointClassType::Face) =
+            witness_query(face_classify_uv(kernel, input, a.face, uv))?
+        {
+            return Ok(Witness::Found);
+        }
+    }
+    // points of a (its interior point, its vertices, the middles of its edges' pieces)
+    // under the offset face's interior
+    for p in core::iter::once(a.at).chain(on_a) {
+        let Some(uv) = plane_uv(built, offset_face, p)? else {
+            continue;
+        };
+        let Some(surface) = built.face(offset_face)?.surface.as_ref() else {
+            continue;
+        };
+        let Some(x) = witness_query(surface.evaluate_point(kernel, uv))? else {
+            continue;
+        };
+        if (x - p).length() >= limit {
+            continue;
+        }
+        kernel.check_cancelled(operation)?;
+        if !spend_steps(left) {
+            return Ok(Witness::OutOfSteps);
+        }
+        if let Some(PointClassType::Face) =
+            witness_query(face_classify_uv(kernel, built, offset_face, uv))?
+        {
+            return Ok(Witness::Found);
+        }
+    }
+    Ok(Witness::None)
+}
+
 /// Not upstream (#21674): refuses an unmerged inset of `wall` of the closed solid `original`
 /// (its faces `open` left open) where the inset of a planar face has crossed the inset of a
 /// planar face opposite it, across material thinner than twice the wall (a blind hole whose
@@ -530,16 +764,38 @@ fn planar_walls(
 /// [`OffsetFailure::WallsMeetAcross`], naming half the narrowest such gap: the largest wall at
 /// which the two insets do not cross.
 ///
-/// The witness is exact and is read on the built faces (`built`, the offset before it is
-/// stitched, and `offsets`, each original face with its offset faces there): an interior
-/// point `q` of an offset face of a planar face `b` lies at a distance `|h| < wall - tolerance`
-/// from the plane of a planar face `a` that is offset too, whose inward normal is opposite
-/// `b`'s to within the B-rep's tolerance over the faces' extent, and `q`'s projection onto
-/// that plane lies strictly inside `a` (`face_classify_uv`), so `q` is within `|h|` of `a`.
-/// Every point of an inset's boundary lies at least the wall from each face that is offset,
-/// so a body with such a point is not the inset. An offset face the build removed (an extinct
-/// branch) is not in `offsets`, and a pair whose insets meet exactly (`|h|` the wall) is
-/// [`refuse_meeting_planar_insets`]' to decide.
+/// The pairs: two planar faces `a` and `b`, both offset, whose inward normals are opposite to
+/// within the B-rep's tolerance over the faces' extent, `b` ahead of `a` along `a`'s inward
+/// normal by a gap `g` at which their insets cross (`tolerance < g`, `|g - wall| < wall -
+/// tolerance`). Each pair is judged as it is found (only the narrowest refusal is kept), on
+/// the built faces (`built`, the offset before it is stitched, and `offsets`, each original
+/// face with its offset faces there), skipping one whose offset face's box lies past the wall
+/// from `a`'s plane or apart from `a`'s box seen along the normal.
+///
+/// The witness is exact: a point of an offset face `b'` of `b` within less than `wall -
+/// tolerance` of `a`. Every point of an inset's boundary lies at least the wall from each face
+/// that is offset, so a body with such a point is not the inset. The points tested
+/// ([`crossing_witness`]) are, both ways round, each face's interior point, its vertices, and
+/// the middle of each piece of its edges cut where, seen along the normal, they meet the other
+/// face's boundary (`curve_crossings`, exact on lines, circles and splines); a point of `b'`
+/// counts where its projection classifies strictly inside `a` (`face_classify_uv`, the exact
+/// trims, never a mesh) and a point of `a` where its foot on `b'`'s plane classifies strictly
+/// inside `b'`. Seen along the normal, two faces whose regions overlap in a positive area
+/// either have a point of `a`'s boundary inside `b'` (and so a whole piece of an edge of `a`
+/// with its middle there) or have `b'` inside `a` (a face's inside is connected), where `b'`'s
+/// interior point is inside `a`: the test finds every such overlap except
+/// - an overlap thinner than the classifier's tolerance, whose points classify on a boundary;
+/// - one reached only along a piece of an edge that runs on the other face's boundary for part
+///   of its length (collinear or concentric edges): the curve intersection reports an overlap
+///   by its start, so the piece's middle can fall on the shared run;
+/// - one at an edge without a curve, or where a query fails (a crossing, a point, a
+///   classification), which counts as no witness;
+/// - one on an offset face the build removed (an extinct branch, not in `offsets`).
+///
+/// A pair whose insets meet exactly (`|h|` the wall) is [`refuse_meeting_planar_insets`]' to
+/// decide. The pairs scanned are each two planar faces (a few operations each); the queries
+/// are bounded by [`CROSSING_WITNESS_STEPS`]: when they run out the check stops without
+/// refusing, as the inset was before it.
 fn refuse_crossing_planar_insets(
     kernel: &mut Kernel,
     original: &mut Brep,
@@ -549,72 +805,67 @@ fn refuse_crossing_planar_insets(
     built: &Brep,
     operation: &'static str,
 ) -> Result<()> {
-    use crate::intersect::point_class::PointClassType;
-    use crate::query::api_queries::{face_classify_uv, face_internal_point};
     if !(wall.is_finite() && wall > 0.0 && brep_is_manifold_solid(original)?) {
         return Ok(());
     }
     let tolerance = original.tolerance();
     let planar = planar_walls(kernel, original, open, operation)?;
-    // the pairs (b, a, gap) of offset faces opposite to within the tolerance over both
-    // faces' extent, b ahead of a along a's inward normal by a gap at which their insets
-    // cross (`|gap - wall| < wall - tolerance`, the distance of b's inset from a)
-    let mut pairs = Vec::new();
+    // the solid's sense and the queries are found on copies, made at the first pair, leaving
+    // the input and the offset's faces as they are
+    let mut copies: Option<(Brep, Brep)> = None;
+    let mut left = CROSSING_WITNESS_STEPS;
+    // the narrowest gap between two faces whose insets cross, and the face whose inset
+    // crossed
+    let mut narrowest: Option<(FaceId, f64)> = None;
     for b in planar.iter().filter(|w| w.offset) {
+        kernel.check_cancelled(operation)?;
+        let Some((_, built_faces)) = offsets.iter().find(|(f, _)| *f == b.face) else {
+            continue;
+        };
         for a in planar.iter().filter(|w| w.offset && w.face != b.face) {
             if (a.inward + b.inward).length() * a.extent.union(&b.extent).max_dimension()
                 > tolerance
             {
                 continue;
             }
+            // b's distance ahead of a along a's inward normal
             let gap = (b.at - a.at).dot(a.inward);
-            if gap > tolerance && (gap - wall).abs() < wall - tolerance {
-                pairs.push((b, a, gap));
-            }
-        }
-    }
-    if pairs.is_empty() {
-        return Ok(());
-    }
-    // the solid's sense, the interior points and the classifications are found on copies,
-    // leaving the input and the offset's faces as they are
-    let mut input = original.clone_standing_for_self()?;
-    if !crate::topology::brep::is_outward_solid(kernel, &mut input)? {
-        return Ok(());
-    }
-    let mut built = built.clone_standing_for_self()?;
-    // the narrowest gap between two faces whose insets cross, and the face whose inset
-    // crossed
-    let mut narrowest: Option<(FaceId, f64)> = None;
-    for (b, a, gap) in pairs {
-        if narrowest.is_some_and(|(_, g)| g <= gap) {
-            continue;
-        }
-        let Some((_, built_faces)) = offsets.iter().find(|(f, _)| *f == b.face) else {
-            continue;
-        };
-        for &offset_face in built_faces {
-            kernel.check_cancelled(operation)?;
-            let q = match face_internal_point(kernel, &mut built, offset_face) {
-                Ok(q) => q,
-                Err(e) if e.sm_status().is_some() => continue,
-                Err(e) => return Err(e),
-            };
-            // q's distance from a's plane, measured on the built face
-            if (q - a.at).dot(a.inward).abs() >= wall - tolerance {
+            if !(gap > tolerance && (gap - wall).abs() < wall - tolerance) {
                 continue;
             }
-            let Some(uv) = plane_uv(&input, a.face, q)? else {
+            if narrowest.is_some_and(|(_, g)| g <= gap) {
                 continue;
-            };
-            match face_classify_uv(kernel, &mut input, a.face, uv) {
-                Ok(PointClassType::Face) => {
-                    narrowest = Some((b.face, gap));
-                    break;
+            }
+            if copies.is_none() {
+                let mut input = original.clone_standing_for_self()?;
+                if !crate::topology::brep::is_outward_solid(kernel, &mut input)? {
+                    return Ok(());
                 }
-                Ok(_) => {}
-                Err(e) if e.sm_status().is_some() => {}
-                Err(e) => return Err(e),
+                copies = Some((input, built.clone_standing_for_self()?));
+            }
+            let Some((input, built)) = copies.as_mut() else {
+                continue;
+            };
+            for &offset_face in built_faces {
+                match crossing_witness(
+                    kernel,
+                    input,
+                    a,
+                    built,
+                    offset_face,
+                    wall,
+                    &mut left,
+                    operation,
+                )? {
+                    Witness::Found => {
+                        narrowest = Some((b.face, gap));
+                        break;
+                    }
+                    Witness::None => {}
+                    // out of steps: no refusal (a refusal found so far may not be the
+                    // narrowest), the inset as before the check
+                    Witness::OutOfSteps => return Ok(()),
+                }
             }
         }
     }
