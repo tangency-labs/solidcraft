@@ -1774,22 +1774,29 @@ fn reparent_carries_a_joint_on_the_moved_placements_origin_plane() {
         "joint.create",
         json!({"name": "J1", "type": "rigid", "a": {"occurrence": a, "plane": "XY"}, "b": {"occurrence": b, "plane": "XY"}, "offset": 5}),
     );
-    let joint = |s: &mut Session| run(s, "joint.inspect", json!({"joint": "J1"}))["joints"][0].clone();
-    let side_b = |s: &mut Session| joint(s)["b"].clone();
-    let before = side_b(&mut s);
-    assert_eq!(before["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")), "{before}");
+    // A plane built on the datum (an offset of it) names the same path, one level down.
+    let offset = json!({"type": "offset", "base": {"type": "datum", "datum": format!("o:{b}/origin/XZ")}, "distance": "2 mm"});
+    run(
+        &mut s,
+        "joint.create",
+        json!({"name": "J2", "type": "planar", "a": {"occurrence": a, "plane": "XZ"}, "b": {"occurrence": b, "plane": offset}}),
+    );
+    let joint = |s: &mut Session, name: &str| run(s, "joint.inspect", json!({"joint": name}))["joints"][0].clone();
+    let datums = |s: &mut Session| {
+        let (j1, j2) = (joint(s, "J1"), joint(s, "J2"));
+        for j in [&j1, &j2] {
+            assert_eq!(j["b"]["resolves"], json!(true), "{j}");
+            assert!(j["errors"].as_array().is_none_or(Vec::is_empty), "{j}");
+        }
+        (j1["b"]["snap"]["plane"]["datum"].clone(), j2["b"]["snap"]["plane"]["base"]["datum"].clone())
+    };
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": group_component}));
-    let moved = side_b(&mut s);
-    assert_eq!(moved["resolves"], json!(true), "{moved}");
-    assert_eq!(moved["snap"]["plane"]["datum"], json!(format!("o:{group}/{b}/origin/XY")));
-    let errors = joint(&mut s)["errors"].clone();
-    assert!(errors.as_array().is_none_or(Vec::is_empty), "{errors}");
+    assert_eq!(datums(&mut s), (json!(format!("o:{group}/{b}/origin/XY")), json!(format!("o:{group}/{b}/origin/XZ"))));
 
     run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": "root"}));
-    let back = side_b(&mut s);
-    assert_eq!(back["resolves"], json!(true), "{back}");
-    assert_eq!(back["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")));
+    assert_eq!(datums(&mut s), (json!(format!("o:{b}/origin/XY")), json!(format!("o:{b}/origin/XZ"))));
 }
 
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
