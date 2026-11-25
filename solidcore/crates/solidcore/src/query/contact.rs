@@ -34,7 +34,7 @@
 //! Deviations: none (no upstream counterpart). No recursion: the pairs wait on a heap.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::error::query::QueryFailure;
 use crate::geom::certified::{gamma, Verdict};
@@ -43,15 +43,18 @@ use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::geom::vector2d::Point2;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::mass::integrator::properties::region_material;
-use crate::math::Point3;
+use crate::mass::integrator::properties::{no_unsure_region, region_material};
+use crate::math::{Point3, Vec3};
 use crate::query::api_queries::{
     edge_closest_point, face_bounding_box, face_classify_uv, surface_closest_point,
 };
 use crate::query::brep::BrepClassifier;
 use crate::query::distance_bound::{pieces_about, Piece};
-use crate::surface::surface::Surface;
-use crate::topology::{edgeuse::p1 as eu1, loopuse, Brep, FaceId};
+use crate::query::planar_disjoint::planar_interiors_disjoint;
+use crate::surface::surface::{Surface, SurfaceKind};
+use crate::topology::brep::p2::is_manifold_solid;
+use crate::topology::face::p2::faceuses;
+use crate::topology::{edgeuse::p1 as eu1, loopuse, Brep, FaceId, ShellId};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "query::contact::meets";
@@ -459,9 +462,16 @@ fn bracket(
     let mut heap = BinaryHeap::new();
     let mut made = 0_usize;
     for (ia, fa) in pa.faces.iter().enumerate() {
+        k.check_cancelled(OP)?;
         for (ib, fb) in pb.faces.iter().enumerate() {
             for x in &fa.pieces {
                 for y in &fb.pieces {
+                    if made >= MAX_PAIRS {
+                        return Ok((0.0, f64::INFINITY, None, false));
+                    }
+                    if made.trailing_zeros() >= 8 {
+                        k.check_cancelled(OP)?;
+                    }
                     let lower = (pair_lower(x, y, None)? - fa.slack - fb.slack).max(0.0);
                     heap.push(Pair {
                         lower,
@@ -479,6 +489,7 @@ fn bracket(
     let mut first: Vec<&Pair> = heap.iter().filter(|p| p.lower <= seed).collect();
     first.sort_by(|x, y| x.lower.total_cmp(&y.lower));
     for pair in first {
+        k.check_cancelled(OP)?;
         let (Some(fa), Some(fb)) = (pa.faces.get(pair.a.0), pb.faces.get(pair.b.0)) else {
             return Err(SolidError::query(OP, QueryFailure::Defect { why: "a pair's face indices are those of the prepared faces it was made from, enumerated, so each is among them" }));
         };
@@ -592,12 +603,30 @@ fn witness_from(
     Ok(())
 }
 
-/// A point of `inner`'s boundary classified in `outer`: `Some(true)` inside its material,
-/// `Some(false)` outside it, `None` when none of `inner`'s points tried (its pieces'
-/// centres, where their faces hold them: [`on_face`]) is proved more than twice the
+/// Canonical shell-pair key for a face, grouping faces that belong to the same connected
+/// boundary surface (outer lump boundary or inner cavity wall).
+fn face_shell_key(b: &Brep, f: FaceId) -> Result<Option<(Option<u32>, Option<u32>)>> {
+    let (fu0, fu1) = faceuses(b, f)?;
+    let s0 = match fu0 {
+        Some(fu) => b.faceuse(fu)?.shell.map(ShellId::index),
+        None => None,
+    };
+    let s1 = match fu1 {
+        Some(fu) => b.faceuse(fu)?.shell.map(ShellId::index),
+        None => None,
+    };
+    if s0.is_none() && s1.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(if s0 <= s1 { (s0, s1) } else { (s1, s0) }))
+}
+
+/// Classifies every boundary shell of `inner` against `outer`: `Some(true)` if any shell has
+/// a point inside `outer`'s material, `Some(false)` only when every distinct shell of `inner`
+/// (every lump boundary and every cavity wall) has a point proved more than twice the
 /// classification's tolerance from `outer`'s boundary
-/// ([`crate::query::distance_bound::face_distance_lower_bound`] over `outer`'s faces), or
-/// its classification is not decided.
+/// ([`crate::query::distance_bound::face_distance_lower_bound`] over `outer`'s faces) and
+/// classified outside `outer`, or `None` when any shell cannot be sampled or decided.
 fn point_in(
     k: &Kernel,
     inner: &mut Brep,
@@ -607,37 +636,61 @@ fn point_in(
     use crate::query::distance_bound::face_distance_lower_bound;
     let tol = brep_zone_tol_3d(k, outer, SmallTopoType::NormalSize);
     let clear = 2.0 * tol;
-    for fp in &p_inner.faces {
-        for piece in &fp.pieces {
-            let (_, uv) = piece.centre();
-            let Some(p) = on_face(k, inner, fp, Point2::new(uv[0], uv[1]))? else {
-                continue;
+    let mut shells: BTreeMap<(Option<u32>, Option<u32>), Vec<usize>> = BTreeMap::new();
+    for (idx, fp) in p_inner.faces.iter().enumerate() {
+        let Some(key) = face_shell_key(inner, fp.face)? else {
+            return Ok(None);
+        };
+        shells.entry(key).or_default().push(idx);
+    }
+    if shells.is_empty() {
+        return Ok(None);
+    }
+    let mut classifier = BrepClassifier::of_brep(outer);
+    for face_indices in shells.into_values() {
+        let mut shell_outside = false;
+        'shell: for idx in face_indices {
+            let Some(fp) = p_inner.faces.get(idx) else {
+                return Ok(None);
             };
-            let mut far = true;
-            for &g in outer.face_list() {
-                if face_distance_lower_bound(k, outer, g, p, clear)? <= clear {
-                    far = false;
-                    break;
+            for piece in &fp.pieces {
+                k.check_cancelled(OP)?;
+                let (_, uv) = piece.centre();
+                let Some(p) = on_face(k, inner, fp, Point2::new(uv[0], uv[1]))? else {
+                    continue;
+                };
+                let mut far = true;
+                for &g in outer.face_list() {
+                    if face_distance_lower_bound(k, outer, g, p, clear)? <= clear {
+                        far = false;
+                        break;
+                    }
+                }
+                if !far {
+                    continue;
+                }
+                let pc = match classifier.point_3d_classify(k, p, tol, true) {
+                    Ok(pc) => pc,
+                    Err(e) if e.is_cancelled() => return Err(e),
+                    Err(_) => return Ok(None),
+                };
+                match (pc.point_class(), pc.object()) {
+                    (PointClassType::Region, Some(EntityRef::Region(r))) => {
+                        if region_material(classifier.brep(), r)? {
+                            return Ok(Some(true));
+                        }
+                        shell_outside = true;
+                        break 'shell;
+                    }
+                    _ => return Ok(None),
                 }
             }
-            if !far {
-                continue;
-            }
-            let mut classifier = BrepClassifier::of_brep(outer);
-            let pc = match classifier.point_3d_classify(k, p, tol, true) {
-                Ok(pc) => pc,
-                Err(e) if e.is_cancelled() => return Err(e),
-                Err(_) => return Ok(None),
-            };
-            return Ok(match (pc.point_class(), pc.object()) {
-                (PointClassType::Region, Some(EntityRef::Region(r))) => {
-                    Some(region_material(classifier.brep(), r)?)
-                }
-                _ => None,
-            });
+        }
+        if !shell_outside {
+            return Ok(None);
         }
     }
-    Ok(None)
+    Ok(Some(false))
 }
 
 /// Whether `a` and `b` meet at `tol` (module docs), `a` prepared once for several `b`s.
@@ -725,4 +778,173 @@ pub fn boundary_distance(k: &Kernel, a: &mut Brep, b: &mut Brep, width: f64) -> 
         upper,
         witness,
     })
+}
+
+/// Certified non-boolean test for whether two closed manifold solids share no interior
+/// volume (pure contact or disjoint, never penetrating).
+///
+/// Runs certified stages in order:
+/// 0. Certified body-box separation before building Bézier pieces.
+/// 1. Strict separation via [`meets`] at `1e-9`: proves disjointness when boundaries stay
+///    apart and every boundary shell of each solid lies outside the other.
+/// 2. Certified separating plane from planar face normals and each body's Bézier hulls:
+///    proves strictly zero hull overlap along a separating normal.
+/// 3. Exact planar-overlap-region proof when every face meeting the overlap box is a plane
+///    with straight edges (covers multi-face flush contacts such as a tenon in a slot).
+///
+/// Returns [`Verdict::Yes`] only when zero interior overlap (`int(a) ∩ int(b) == ∅`) is
+/// certified, [`Verdict::No`] when real interior overlap is proved, and
+/// [`Verdict::Undecided`] whenever any ambiguity remains or a work budget is exhausted.
+///
+/// # Errors
+///
+/// `InvalidInput` for a body without faces; those of the underlying queries and cancellation
+/// checks.
+pub fn interiors_disjoint(k: &Kernel, a: &mut Brep, b: &mut Brep) -> Result<Verdict> {
+    if !is_manifold_solid(a)?
+        || !is_manifold_solid(b)?
+        || no_unsure_region(a).is_err()
+        || no_unsure_region(b).is_err()
+    {
+        return Ok(Verdict::Undecided);
+    }
+
+    let box_a = body_box(k, a)?;
+    let box_b = body_box(k, b)?;
+    // Stage 0: fast box-separation check before constructing Bézier hulls or piece heaps.
+    if boxes_strictly_apart(k, a, b, box_a, box_b) {
+        return Ok(Verdict::Yes);
+    }
+
+    let mid = |x: f64, y: f64, z: f64, w: f64| 0.5 * (x.min(z) + y.max(w));
+    let origin = Point3::new(
+        mid(box_a.0.x, box_a.1.x, box_b.0.x, box_b.1.x),
+        mid(box_a.0.y, box_a.1.y, box_b.0.y, box_b.1.y),
+        mid(box_a.0.z, box_a.1.z, box_b.0.z, box_b.1.z),
+    );
+    let pa = Prepared::new(k, a, origin)?;
+
+    // Stage 1: certified strict separation (disjoint boundaries and no containment).
+    if meets_prepared(k, a, &pa, b, 1e-9)?.verdict == Verdict::No {
+        return Ok(Verdict::Yes);
+    }
+
+    // Stage 2: certified separating plane along any planar face normal of `a` or `b`.
+    let pb = Prepared::new(k, b, origin)?;
+    if separating_plane_certifies_disjoint(k, a, &pa, b, &pb)? {
+        return Ok(Verdict::Yes);
+    }
+
+    // Stage 3: exact planar-overlap-region interior-disjointness proof.
+    planar_interiors_disjoint(k, a, b, box_a, box_b)
+}
+
+/// Whether `box_a` and `box_b` are separated by more than a conservative tolerance and
+/// rounding margin along at least one coordinate axis, ruling out both boundary contact and
+/// containment without building Bézier pieces.
+fn boxes_strictly_apart(
+    k: &Kernel,
+    a: &Brep,
+    b: &Brep,
+    box_a: (Point3, Point3),
+    box_b: (Point3, Point3),
+) -> bool {
+    let union_lo = Point3::new(
+        box_a.0.x.min(box_b.0.x),
+        box_a.0.y.min(box_b.0.y),
+        box_a.0.z.min(box_b.0.z),
+    );
+    let union_hi = Point3::new(
+        box_a.1.x.max(box_b.1.x),
+        box_a.1.y.max(box_b.1.y),
+        box_a.1.z.max(box_b.1.z),
+    );
+    let scale = (union_hi - union_lo).length().max(1.0);
+    if !scale.is_finite() {
+        return false;
+    }
+    let tol = brep_zone_tol_3d(k, a, SmallTopoType::NormalSize)
+        + brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+    let margin = 2.0 * tol + gamma(8) * scale;
+    box_a.1.x + margin < box_b.0.x
+        || box_b.1.x + margin < box_a.0.x
+        || box_a.1.y + margin < box_b.0.y
+        || box_b.1.y + margin < box_a.0.y
+        || box_a.1.z + margin < box_b.0.z
+        || box_b.1.z + margin < box_a.0.z
+}
+
+/// Maximum number of deduplicated candidate separating-plane normals tested in Stage 2.
+const MAX_SEPARATING_NORMALS: usize = 64;
+
+/// Collects deduplicated unit normals of planar faces in `a` and `b`.
+fn planar_face_normals(a: &Brep, b: &Brep) -> Result<Vec<Vec3>> {
+    let mut normals: Vec<Vec3> = Vec::new();
+    for brep in [a, b] {
+        for &f in brep.face_list() {
+            if normals.len() >= MAX_SEPARATING_NORMALS {
+                return Ok(normals);
+            }
+            let Some(SurfaceKind::Plane(plane)) = brep.face(f)?.surface.as_ref().map(Surface::kind)
+            else {
+                continue;
+            };
+            let Ok(n) = plane.position().z_axis().unitize() else {
+                continue;
+            };
+            if !(n.x.is_finite() && n.y.is_finite() && n.z.is_finite()) {
+                continue;
+            }
+            if !normals.iter().any(|m| m.dot(n).abs() > 1.0 - 1e-6) {
+                normals.push(n);
+            }
+        }
+    }
+    Ok(normals)
+}
+
+/// Certified range `[lo, hi]` of `(x - origin) · n` over all pieces of `prepared`.
+fn prepared_extent_along(prepared: &Prepared, n: Vec3) -> Result<Option<(f64, f64)>> {
+    let u = [n.x, n.y, n.z];
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for fp in &prepared.faces {
+        for piece in &fp.pieces {
+            let (p0, p1) = piece.extent_along(u)?;
+            lo = lo.min(p0 - fp.slack);
+            hi = hi.max(p1 + fp.slack);
+        }
+    }
+    if lo <= hi && lo.is_finite() && hi.is_finite() {
+        Ok(Some((lo, hi)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Whether a planar face normal of `a` or `b` strictly separates the certified Bézier hulls
+/// of `a` and `b` with zero overlap (`depth == 0.0`).
+fn separating_plane_certifies_disjoint(
+    k: &Kernel,
+    a: &Brep,
+    pa: &Prepared,
+    b: &Brep,
+    pb: &Prepared,
+) -> Result<bool> {
+    let normals = planar_face_normals(a, b)?;
+    for n in normals {
+        k.check_cancelled(OP)?;
+        let (Some((a0, a1)), Some((b0, b1))) =
+            (prepared_extent_along(pa, n)?, prepared_extent_along(pb, n)?)
+        else {
+            continue;
+        };
+        // Both orientations (+n and -n): depth of overlap between [a0, a1] and [b0, b1]
+        // rounded up. Only a proved zero overlap certifies separation here.
+        let depth_ab = ((a1 - b0) + gamma(2) * (a1.abs() + b0.abs())).max(0.0);
+        let depth_ba = ((b1 - a0) + gamma(2) * (b1.abs() + a0.abs())).max(0.0);
+        if depth_ab.min(depth_ba) == 0.0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
