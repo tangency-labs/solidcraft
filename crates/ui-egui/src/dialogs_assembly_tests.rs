@@ -1841,6 +1841,82 @@ fn as_built_animation_drives_the_new_shared_id_and_handles_exhaustion() {
     assert!(result.is_err() && !matches!(result, Err(solidcraft_engine::EngineError::Internal(..))), "{result:?}");
 }
 
+/// Two boxes as separate bodies of the design (Body1, Body2), no component, and the New Component
+/// window opened on `picked` with the Name `name` and Activate `activate`.
+fn new_component_window(picked: &[&str], name: &str, activate: bool) -> (SolveApp, crate::dialogs::Dialog) {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for x in [0, 40] {
+        app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "operation": "new"})).unwrap();
+    }
+    app.session.selection = picked.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
+    app.start("component.create");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::NewComponent { name: typed, activate: active }) = &mut d.kind else { panic!("expected New Component") };
+    *typed = name.into();
+    *active = activate;
+    (app, d)
+}
+
+/// New Component with bodies picked makes ONE component with the typed name, moves the bodies
+/// into it and activates it (#21840), as one undo step whose History is one folder named after
+/// the component.
+#[test]
+fn new_component_with_bodies_picked_puts_them_in_one_named_component() {
+    let (mut app, d) = new_component_window(&["Body1", "Body2"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Holder"]);
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "{body} is in Holder");
+    }
+    assert_eq!(app.session.active_component, doc.find_component("Holder").unwrap(), "Activate made it active");
+    assert_eq!(app.session.undo.len(), undo + 1, "one undo step");
+    let folders: Vec<_> = doc.timeline_groups.iter().map(|g| (g.name.as_str(), g.features.len())).collect();
+    assert_eq!(folders, [("Holder", 2)], "the two moves are one History folder");
+
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.to_json(), before, "one Undo takes it all back");
+    assert_eq!(app.session.active_component, 0);
+    app.run("edit.redo", json!({})).unwrap();
+    let holder = occ(&app, "Holder");
+    for body in ["Body1", "Body2"] {
+        assert_eq!(occurrence_of_body(&app.session, body), Some(holder), "Redo puts {body} back in Holder");
+    }
+}
+
+/// With the default name and Activate off, one picked body goes into a new component that is not
+/// made active, and its move is one History item.
+#[test]
+fn new_component_with_a_body_picked_and_activate_off_keeps_the_active_component() {
+    let (mut app, d) = new_component_window(&["Body2"], "", false);
+    let undo = app.session.undo.len();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let doc = &app.session.doc;
+    assert_eq!(doc.components.len(), 1, "{:?}", doc.components);
+    let made = &doc.components[0].name;
+    assert_eq!(made, "Component1", "the default name the window shows");
+    assert_eq!(occurrence_of_body(&app.session, "Body2"), Some(occ(&app, made)));
+    assert_eq!(occurrence_of_body(&app.session, "Body1"), Some(0), "the body not picked stays in the design");
+    assert_eq!(app.session.active_component, 0, "Activate off");
+    assert_eq!(app.session.undo.len(), undo + 1);
+    assert!(doc.timeline_groups.is_empty(), "one move needs no folder");
+}
+
+/// A move the engine refuses leaves no empty component and no undo step behind, and the window
+/// gets the reason.
+#[test]
+fn new_component_whose_move_is_refused_leaves_nothing_behind() {
+    let (mut app, d) = new_component_window(&["Body1", "Nope"], "Holder", true);
+    let (before, undo) = (app.session.doc.to_json(), app.session.undo.len());
+    let redo = app.session.redo.len();
+    assert!(crate::dialogs::run_dialog(&mut app, &d).is_err());
+    assert_eq!(app.session.doc.to_json(), before);
+    assert_eq!((app.session.undo.len(), app.session.redo.len()), (undo, redo));
+    assert_eq!(app.session.active_component, 0);
+}
+
 /// As-built joints and rigid groups take components from body picks; New Component makes one
 /// from bodies when bodies are picked.
 #[test]

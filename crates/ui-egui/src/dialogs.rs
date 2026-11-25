@@ -6067,6 +6067,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         let prepared = DialogComputation::new(app, d)?.compute()?;
         return adopt_dialog(app, prepared, d);
     }
+    if let Kind::Assembly(k) = &d.kind
+        && let Some(made) = crate::dialogs_assembly::run_new_component(app, k, &d.inputs)
+    {
+        return made;
+    }
     let commands = apply_commands(app, d)?;
     if let Some((_, marker)) = d.editing {
         // Record the actual pre-edit timeline state in the command's undo snapshot.

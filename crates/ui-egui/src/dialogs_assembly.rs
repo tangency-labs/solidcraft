@@ -847,6 +847,44 @@ pub struct SnapPt {
 }
 
 /// The occurrence placing a world body (0: the root design), the instance its name says.
+/// New Component with bodies picked: makes the component, then moves the bodies into it as
+/// part of the same undo step, with the moves in one History folder named after the component
+/// when there are two or more (#21840). `None` when the window has no bodies picked, so it runs
+/// as any other window. A refused move takes the new component back out.
+pub(crate) fn run_new_component(app: &mut SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<Result<(), String>> {
+    if !matches!(k, Asm::NewComponent { .. }) {
+        return None;
+    }
+    let commands = commands(app, k, inputs).ok()?;
+    let [(create, create_params), (moving, move_params)] = commands.as_slice() else { return None };
+    Some((|| {
+        let made = app.run(create, create_params.clone())?;
+        let mut move_params = move_params.clone();
+        if let Some(id) = made.get("component") {
+            move_params["component"] = id.clone();
+        }
+        let history = std::mem::take(&mut app.session.undo);
+        let moved = match app.run(moving, move_params) {
+            Ok(moved) => moved,
+            Err(error) => {
+                app.session.undo = history;
+                if app.run("edit.undo", json!({})).is_ok() {
+                    app.session.redo.pop();
+                }
+                return Err(error);
+            }
+        };
+        let features = moved.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        if features.len() > 1 {
+            if let Err(error) = app.run("timeline.group", json!({ "name": made["name"], "features": features })) {
+                app.set_status(error, true);
+            }
+        }
+        app.session.undo = history;
+        Ok(())
+    })())
+}
+
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
 }
@@ -2501,15 +2539,17 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::NewComponent { name, activate } => {
             let bodies: Vec<String> = sel_items(inputs, 0).body_names();
-            if bodies.is_empty() {
-                let mut p = json!({ "activate": activate });
-                if !name.trim().is_empty() {
-                    p["name"] = json!(name.trim());
-                }
-                cmd("component.create", p)
-            } else {
-                cmd("component.from_bodies", json!({ "bodies": bodies }))
+            let mut p = json!({ "activate": activate });
+            if !name.trim().is_empty() {
+                p["name"] = json!(name.trim());
             }
+            let mut out = cmd("component.create", p);
+            // The picked bodies go into the component just made (#21840); `run_new_component`
+            // sends the move with the id the create returned.
+            if !bodies.is_empty() {
+                out.push(("component.move_bodies".into(), json!({ "bodies": bodies, "component": s.doc.next_id.max(1) })));
+            }
+            out
         }
         Asm::Joint(f) => {
             let alignment = alignment_params(s, f, inputs)?;
