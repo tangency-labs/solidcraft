@@ -69,6 +69,54 @@ fn dimension_editor_names_and_reference_picks_drive_new_and_existing_dimensions(
     crate::dim_view::cancel();
 }
 
+#[test]
+fn dimensioning_another_sketchs_curve_requires_the_projection_ui_option() {
+    use solidcraft_engine::sketch::ConstraintKind;
+    for enhanced in [false, true] {
+        crate::dim_view::cancel();
+        let mut h = Harness::new();
+        h.app.ui.project_link_tools = enhanced;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-10,-10],[-10,10]],"infer":false})).unwrap();
+        h.app.finish_sketch();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        // Both sketches contain l1, at different places.
+        h.app.run("sketch.line", json!({"points":[[20,20],[60,40]],"infer":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 120.0;
+        h.app.cam.target = solidcore_record::Vec3::new(15.0, 10.0, 0.0);
+        h.settle();
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        // An off-midpoint line pick measures its angle to the next line. A midpoint pick
+        // intentionally measures a point-to-line distance instead.
+        h.step(&json!({"click":{"world":[30,25,0]}})).unwrap();
+        let tool = h.app.tool.as_ref().unwrap();
+        assert_eq!(tool.picks, vec!["l1"]);
+        assert!(tool.point_picks.is_empty(), "the first pick is the line, not its midpoint");
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"world":[-10,0,0]}})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        if enhanced {
+            assert_eq!(h.app.session.doc.sketch(sid).unwrap().links.len(), 1, "the foreign line is projected");
+            assert!(crate::dim_view::editing(), "the two lines give a dimension draft: {:?}", h.app.status);
+            type_value(&mut h, "70 deg");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            let sk = h.app.session.doc.sketch(sid).unwrap();
+            let local = sk.curve_index("l1").unwrap();
+            let projected = sk.link_curves(&sk.links[0].id)[0];
+            assert_ne!(local, projected, "the foreign l1 has its own projected identity");
+            let angle = sk.constraints.iter().find_map(|c| {
+                let ConstraintKind::Angle { a, b, value, .. } = c.kind else { return None };
+                ((a == local && b == projected) || (a == projected && b == local)).then_some(value)
+            });
+            assert!(angle.is_some_and(|value| (value.to_degrees() - 70.0).abs() < 1e-6), "the angle uses both lines: {:?}", h.app.status);
+        } else {
+            assert_eq!(h.app.session.doc.to_json(), before, "the foreign l1 is not projected or mistaken for the local l1");
+        }
+        crate::dim_view::cancel();
+    }
+}
+
 /// Two dimensioned lines, editing `d2` with `typed` in its value field.
 fn editing_d2(typed: &str) -> Harness {
     let mut h = line([20., 0.]);
@@ -642,7 +690,7 @@ fn escape_invalid_correction_and_seed_enter_do_not_create_partial_dimensions() {
     assert_eq!(h.app.session.doc.to_json(), original);
     assert_eq!(h.app.session.undo.len(), undo);
     place(&mut h, &[[0., 0.], [20., 0.]], [10., 5.]);
-    type_value(&mut h, "unknown_length");
+    type_value(&mut h, "unknown_length + 5 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), original);
@@ -2336,6 +2384,98 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     assert!(h.app.status.as_ref().is_some_and(|s| !s.2 && s.0.contains("`width`")), "{:?}", h.app.status);
     let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
+}
+
+/// #18721: mistyping an unknown parameter must preserve the error. A single explicit
+/// Create variable action then seeds the new parameter with the dimension's value, in
+/// one undo step; cancelling instead creates nothing.
+#[test]
+fn dimension_create_variable_requires_an_explicit_click_after_the_error() {
+    // New dimension: entering an unknown name refuses it without modifying the sketch.
+    let mut h = line([25., 0.]);
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    let before = h.app.session.undo.len();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "unknown name must remain a correctable error");
+    assert!(h.app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("unknown parameter")), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("breite").is_none());
+    assert_eq!(h.app.session.undo.len(), before);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some(), "error offers Create variable");
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    let doc = &h.app.session.doc;
+    assert!(doc.param("breite").is_some());
+    let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(sk.constraints.iter().any(|c| c.param.as_deref().and_then(|p| doc.param(p)).is_some_and(|p| p.expr == "breite")
+        && c.kind.value().is_some_and(|v| (v - 25.0).abs() < 1e-6)));
+
+    // Existing dimension: no implicit rename, and explicit click retains the old size.
+    let mut h = line([30., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"30 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing(), "the typo must be refused");
+    assert!(h.app.session.doc.param("breite").is_none());
+    assert!(h.app.session.doc.param("d1").is_some());
+    assert_eq!(h.app.session.undo.len(), before);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some());
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("d1").is_none());
+    assert_eq!(h.app.session.doc.param("breite").map(|p| p.expr.as_str()), Some("30 mm"));
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    crate::dim_view::cancel();
+
+    // A typo cancelled without clicking the fix must not add a variable or undo step.
+    let mut h = line([20., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "widht");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert!(h.app.session.doc.param("widht").is_none());
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    assert!(h.app.session.doc.param("widht").is_none());
+    assert_eq!(h.app.session.undo.len(), before);
+    crate::dim_view::cancel();
+}
+
+/// The separate dimension window offers the same explicit fix after an unknown-name error.
+#[test]
+fn window_dimension_create_variable_is_opt_in() {
+    let mut h = windowed([30., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"30 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert!(h.app.session.doc.param("breite").is_none());
+    h.frames(2);
+    assert!(crate::scenario::rect_of("dim:create_variable").is_some());
+    h.step(&json!({"click":{"handle":"dim:create_variable"}})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.param("breite").map(|p| p.expr.as_str()), Some("30 mm"));
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    crate::dim_view::cancel();
 }
 
 /// The status line after a dimension is applied reads in the interface language (#8863): a
