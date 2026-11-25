@@ -13,6 +13,7 @@ use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, 
 mod cell_grid;
 mod curves;
 mod exchange;
+mod frames;
 mod modelling;
 
 use crate::body::Body;
