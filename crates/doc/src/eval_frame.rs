@@ -580,10 +580,11 @@ fn one_solid(mut bodies: Vec<kernel::Body>, id: &str) -> Result<kernel::Body> {
     }
 }
 
-/// A member's cut end: its plane cut (`None`: a coped end, built out but not cut by a plane), how
-/// far past the end it is built, and whether an End Cap may go on it (a through member's end of
-/// a Butt or Coped corner, cut square to its own line).
-type CutEnd = (Option<Cut>, f64, bool);
+/// A member's cut end: its plane cut (`None`: a coped or fitted end, built out but not cut by a plane), how
+/// far past the end it is built, whether an End Cap may go on it (a through member's end of
+/// a Butt or Coped corner, cut square to its own line), and whether the member as built keeps that length (a plane
+/// cut or fitted end does; a coped end is trimmed back to the tube it meets), so its cutting tool does too.
+type CutEnd = (Option<Cut>, f64, bool, bool);
 
 /// Each member's cut at its [start, end] and each Coped corner's (T, U, corner point, n, weld gap). Shared
 /// by [`cut_members`] and [`member_section`], so both see the same corners.
@@ -595,7 +596,7 @@ type Tie<'a> = (Option<Vec3>, &'a [usize]);
 
 /// Stage 1's ends ([`frame_corners::find_corners`], each corner finished as the frame or its override says), and under
 /// Mitre, Butt and Coped those at each point where three or more members end ([`crowded`]): its corner finished as the
-/// frame's, every other end there fitted (`(None, 0, false)`, as Auto's), with the fits in laying order, and each end on
+/// frame's, every other end there fitted (`(None, reach, false, true)`, [`fit_reach`], as Auto's), with the fits in laying order, and each end on
 /// another member's middle fitted to it ([`tees`]). `planes`: each
 /// member's plane, for the laying order. `crossing`: the frame's crossings ([`plans`]), whose pieces `segments` are:
 /// each end where a crossing cuts a line is fitted as Auto fits it ([`crossing_fits`]), a piece ranks by its whole
@@ -672,7 +673,7 @@ fn corner_ends(
         if let Some(e) = out.0.get_mut(f.member).and_then(|e| e.get_mut(usize::from(!f.at_start)))
             && e.is_none()
         {
-            *e = Some((None, fit_reach(segments, regions, placed, f), false));
+            *e = Some((None, fit_reach(segments, regions, placed, f), false, true));
         }
     }
     Ok((out, fits))
@@ -832,7 +833,7 @@ fn add_corner(
         // A butt's first cut is T's, square to its line: the one cut end a cap may go on.
         let cap = k == 0 && butt;
         if let Some(end) = ends.get_mut(m).and_then(|e| e.get_mut(usize::from(!at_start))) {
-            *end = Some((Some(cut), ext, cap));
+            *end = Some((Some(cut), ext, cap, true));
         }
     }
     let Some((t, u)) = cope else { return Ok(()) };
@@ -854,7 +855,7 @@ fn add_corner(
         return Err(DocError::Invalid(format!("the member on line `{}` was cut away completely", id(u))));
     }
     if let Some(end) = ends.get_mut(u).and_then(|e| e.get_mut(usize::from(!ue.1))) {
-        *end = Some((None, ext, false));
+        *end = Some((None, ext, false, false));
     }
     copes.push((t, u, c.point, n, gap));
     Ok(())
@@ -879,7 +880,7 @@ fn cut_members(
         let (lo, hi) = (start.map_or(0.0, |c| c.1), end.map_or(0.0, |c| c.1));
         let mut t = member_body(placed(m, *a), unreversed(m, *a), regions, *b - *a, (-lo, a.dist(*b) + hi), id)?;
         for (cut, role) in [(start, "corner_start"), (end, "corner_end")] {
-            let Some((Some(cut), _, _)) = cut else { continue };
+            let Some((Some(cut), _, _, _)) = cut else { continue };
             let plane =
                 Plane::from_normal(cut.origin, cut.normal).ok_or_else(|| DocError::Invalid(format!("line `{id}`: a corner cut has no plane")))?;
             let (part, tool) = kernel::half_space(&t.body, &plane, true)?;
@@ -1475,7 +1476,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
 /// Auto's ends (#4003 spec A4-A6), as [`corner_ends`] gives stage 1's, and the ends cut to fit, in laying order:
 /// [`frame_layout::plan`]'s corners jointed by the table (an angled butt, a mitre, or a butt whose short tube is
 /// fitted to the long one) or by their override; its chained corners as stage 1 finishes them; its fits. A fitted
-/// end is built to its line's end and not plane cut, as `(None, 0, false)`. Under `coped` ([`copes`]) every butt,
+/// end is built to its line's end, or on an open section to the far face it meets ([`fit_reach`]), and not plane cut, as `(None, reach, false, true)`. Under `coped` ([`copes`]) every butt,
 /// the table's or an override's, is cut as Coped Butt: its short tube coped to the long one, not fitted.
 fn auto_ends(
     segments: &[(String, Vec3, Vec3)],
@@ -1544,7 +1545,7 @@ fn auto_ends(
         if let Some(e) = out.0.get_mut(f.member).and_then(|e| e.get_mut(usize::from(!f.at_start)))
             && e.is_none()
         {
-            *e = Some((None, fit_reach(segments, regions, placed, f), false));
+            *e = Some((None, fit_reach(segments, regions, placed, f), false, true));
         }
     }
     Ok((out, fits))
@@ -1637,7 +1638,8 @@ fn fit_members(
 }
 
 /// Member m's cutting tool ([`frame_multi_trim::fit_tool`], or under `coped` its real shape, [`frame_multi_trim::coped_tool`]) as
-/// its plane cuts (`ends`) build it: a fitted or coped end stops at its line's end, inside the tube it meets. Grown by
+/// its ends (`ends`) build it: out to a plane cut or fitted end's length (on an open section, a fit reaches the far
+/// face of the member it meets), but a coped end stops at its line's end, inside the tube it meets. Grown by
 /// the weld gap `gap` of the end it cuts.
 fn member_tool(
     segments: &[(String, Vec3, Vec3)],
@@ -1651,9 +1653,9 @@ fn member_tool(
     let (_, a, b) = segments.get(m).ok_or_else(|| DocError::Invalid(format!("no member {m}")))?;
     // No ends listed: a frame with no corners to finish, its members square.
     let [start, end] = ends.get(m).copied().unwrap_or([None, None]);
-    let cut = |e: Option<CutEnd>| e.and_then(|(cut, ext, _)| Some((cut?, ext)));
-    let (start, end) = (cut(start), cut(end));
-    let cuts: Vec<Cut> = [start, end].into_iter().flatten().map(|c| c.0).collect();
+    let kept = |e: Option<CutEnd>| e.filter(|e| e.3).map(|(cut, ext, _, _)| (cut, ext));
+    let (start, end) = (kept(start), kept(end));
+    let cuts: Vec<Cut> = [start, end].into_iter().flatten().filter_map(|c| c.0).collect();
     let (plane, regions) = along(placed(m, *a), regions, *b - *a);
     let tool = if coped { frame_multi_trim::coped_tool } else { frame_multi_trim::fit_tool };
     tool(&plane, &regions, -start.map_or(0.0, |c| c.1), a.dist(*b) + end.map_or(0.0, |c| c.1), &cuts, gap)
@@ -2186,7 +2188,7 @@ fn untrimmed_member_section(
     let dir = (b - a).normalized().ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
     let [start, end] = ends.get(m).copied().unwrap_or([None, None]);
     let square = |e: Option<CutEnd>, p: Vec3| match e {
-        Some((Some(c), _, _)) if c.normal.dot(dir).abs() > 1.0 - 1e-9 => (c.origin - p).dot(dir),
+        Some((Some(c), _, _, _)) if c.normal.dot(dir).abs() > 1.0 - 1e-9 => (c.origin - p).dot(dir),
         _ => 0.0,
     };
     let (lo, hi) = (square(start, a), square(end, b));
