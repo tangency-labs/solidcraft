@@ -489,7 +489,7 @@ fn check_with_keys_counted(
     let ran = check_once(k, b, level, keys, scope);
     let after = match (&ran, salt) {
         (Ok((c, _, true)), Some(salt))
-            if c.pointers_status == SUCCESS
+            if c.pointers.is_passed()
                 && c.assert_valid == Some(true)
                 && c.pointer_reports.is_empty()
                 && c.reports.is_empty() =>
