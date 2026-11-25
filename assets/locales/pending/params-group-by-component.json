@@ -1,0 +1,13 @@
+{
+  "ar": { "parameters.group_by_component": "تجميع معلمات النموذج حسب المكوّن" },
+  "de": { "parameters.group_by_component": "Modellparameter nach Komponente gruppieren" },
+  "en": { "parameters.group_by_component": "Group model parameters by component" },
+  "en-GB": { "parameters.group_by_component": "Group model parameters by component" },
+  "es": { "parameters.group_by_component": "Agrupar los parámetros del modelo por componente" },
+  "he": { "parameters.group_by_component": "קיבוץ פרמטרי המודל לפי רכיב" },
+  "ja": { "parameters.group_by_component": "モデルパラメーターをコンポーネントごとにまとめる" },
+  "ko": { "parameters.group_by_component": "모델 매개변수를 구성 요소별로 묶기" },
+  "uk": { "parameters.group_by_component": "Групувати параметри моделі за компонентами" },
+  "vi": { "parameters.group_by_component": "Nhóm tham số mô hình theo thành phần" },
+  "zh": { "parameters.group_by_component": "按组件分组模型参数" }
+}

@@ -175,15 +175,8 @@ fn dropped_refusal(e: solidcraft_smlib::Error) -> KernelError {
 /// `CalculateAnInternalPoint`). Once the tool has cut the body each piece lies on one side, so
 /// one such point says which.
 fn face_sides(body: &Body, side: &ToolSide) -> Result<Vec<f64>> {
-    let (sm, order) = crate::native::smlib_body_ordered(body)?;
-    let order = order.ok_or_else(|| KernelError::Failed("trim: SMLib numbers the pieces' faces differently from their record".into()))?;
-    let points = sm.face_points().map_err(|e| KernelError::smlib("SMLib trim: a point inside each piece", e))?;
-    let mut sides = vec![f64::NAN; points.len()];
-    for (i, p) in points.iter().enumerate() {
-        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
-        let slot = sides.get_mut(face).ok_or_else(|| KernelError::Failed("trim: a piece's face lies outside the body".into()))?;
-        *slot = side.at(Vec3::new(p[0], p[1], p[2]));
-    }
+    let points = crate::splitface::inner_points(body)?;
+    let sides: Vec<f64> = points.iter().map(|p| p.map_or(f64::NAN, |p| side.at(p))).collect();
     if sides.iter().any(|x| !x.is_finite()) {
         return Err(KernelError::Failed("trim: the side of a piece can't be told".into()));
     }

@@ -240,6 +240,10 @@ pub struct OffsetParams {
     /// How far a fitted face may stray from the true offset. Default: 0.01 mm.
     #[serde(default)]
     pub tolerance: Option<LengthExpr>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -510,6 +514,10 @@ pub struct SurfaceExtendParams {
     /// sides run square to the edge. Default: true.
     #[serde(default)]
     pub neighbours: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -847,6 +855,10 @@ pub struct SurfaceLoftParams {
     /// surface's normal, as surface lofts saved before it build.
     #[serde(default)]
     pub faced: Option<bool>,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

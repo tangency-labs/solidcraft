@@ -306,6 +306,71 @@ fn seam_only_torus_imports_as_a_whole_ring() {
     }
 }
 
+/// A whole ring torus (major radius 5, minor 2, about Z) whose one face is bounded by its two
+/// seams, each a SEAM_CURVE with a pcurve on either side, used out and back in one loop as
+/// SEAM_EDGEs (ISO 10303-42: an oriented edge that names the pcurve of its use), the way AP214
+/// and AP242 writers write a closed face. Read like ORIENTED_EDGEs, in either order round the
+/// loop or with one use of each seam written as an ORIENTED_EDGE: one closed body, volume 2π²Rr²
+/// (394.784 mm³) and area 4π²Rr.
+#[test]
+fn a_torus_bounded_by_seam_edges_imports_as_a_whole_ring() {
+    use std::f64::consts::PI;
+    let (major, minor) = (5.0_f64, 2.0_f64);
+    let outer = major + minor;
+    let tau = 2.0 * PI;
+    // Geometry: the torus, its tube circle at u = 0 and its ring circle at v = 0, each the 3D
+    // curve of a SEAM_CURVE with its two pcurves, lines in (u, v) at u = 0, 2π and v = 0, 2π.
+    let mut geometry = String::from(
+        "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n",
+    );
+    geometry +=
+        &format!("#5=TOROIDAL_SURFACE('',#4,{major:.16},{minor:.16});\n#10=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#11=VERTEX_POINT('',#10);\n");
+    geometry += &format!(
+        "#14=CARTESIAN_POINT('',({major:.16},0.,0.));\n#15=DIRECTION('',(0.,-1.,0.));\n#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);\n#17=CIRCLE('',#16,{minor:.16});\n#18=CIRCLE('',#4,{outer:.16});\n"
+    );
+    geometry += "#40=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\n";
+    geometry += "#41=DIRECTION('',(0.,1.));\n#42=VECTOR('',#41,1.);\n#43=DIRECTION('',(1.,0.));\n#44=VECTOR('',#43,1.);\n";
+    // (id of the pcurve, its line's origin in (u, v), the vector along it)
+    for (pc, (u, v), along) in [(50, (0.0, 0.0), 42), (51, (tau, 0.0), 42), (52, (0.0, 0.0), 44), (53, (0.0, tau), 44)] {
+        let (pt, line, rep) = (pc + 10, pc + 20, pc + 30);
+        geometry += &format!(
+            "#{pt}=CARTESIAN_POINT('',({u:.16},{v:.16}));\n#{line}=LINE('',#{pt},#{along});\n#{rep}=DEFINITIONAL_REPRESENTATION('',(#{line}),#40);\n#{pc}=PCURVE('',#5,#{rep});\n"
+        );
+    }
+    geometry += "#24=SEAM_CURVE('',#17,(#50,#51),.PCURVE_S1.);\n#25=SEAM_CURVE('',#18,(#52,#53),.PCURVE_S1.);\n";
+    geometry += "#20=EDGE_CURVE('',#11,#11,#24,.T.);\n#19=EDGE_CURVE('',#11,#11,#25,.T.);\n";
+    // Each use of a seam names the pcurve on its side of the face.
+    let seam =
+        |id: u64, edge: u64, along: bool, pcurve: u64| format!("#{id}=SEAM_EDGE('',*,*,#{edge},{},#{pcurve});\n", if along { ".T." } else { ".F." });
+    let all_seams = format!("{}{}{}{}", seam(21, 20, true, 50), seam(22, 19, true, 52), seam(23, 20, false, 51), seam(26, 19, false, 53));
+    let mixed =
+        format!("{}{}#23=ORIENTED_EDGE('',*,*,#20,.F.);\n#26=ORIENTED_EDGE('',*,*,#19,.F.);\n", seam(21, 20, true, 50), seam(22, 19, true, 52));
+    let cases = [
+        ("tube then ring", all_seams.clone(), "#30=EDGE_LOOP('',(#21,#22,#23,#26));\n"),
+        ("ring then tube", all_seams, "#30=EDGE_LOOP('',(#22,#21,#26,#23));\n"),
+        ("seam and oriented edges", mixed, "#30=EDGE_LOOP('',(#21,#22,#23,#26));\n"),
+    ];
+    for (what, uses, edge_loop) in cases {
+        let mut t = String::from(HEAD);
+        t += &geometry;
+        t += &uses;
+        t += edge_loop;
+        t += "#31=FACE_OUTER_BOUND('',#30,.T.);\n#32=ADVANCED_FACE('',(#31),#5,.T.);\n#33=CLOSED_SHELL('',(#32));\n#34=MANIFOLD_SOLID_BREP('Ring',#33);\n";
+        t += "#35=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#34),#170);\n";
+        t += &context(170, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(imp.warnings.is_empty(), "{what}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{what}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        let (volume, area) = (2.0 * PI * PI * major * minor * minor, 4.0 * PI * PI * major * minor);
+        assert!((volume - 394.784).abs() < 1e-3, "analytic volume {volume}");
+        assert!(rel(m.volume, volume) < 1e-3, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-3, "{what}: area {} vs {area}", m.area);
+    }
+}
+
 /// A torus (R 12, r 2) as SolidCraft 0.30.1 wrote it (#17930): two faces sharing one loop, a
 /// patch a third of the way round and half way round the tube, and the rest of the torus round
 /// it, each on its own TOROIDAL_SURFACE, both as written. The rest runs clockwise round the
