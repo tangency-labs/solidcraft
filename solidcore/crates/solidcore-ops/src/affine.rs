@@ -6,7 +6,8 @@
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
-//! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
+//! ([`distance_along`], [`span_along`]), whether a forward ray meets a padded box
+//! ([`ray_meets_box`]), as the kernel measures it, a point under a map
 //! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
 //! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
 //! ([`same_sense`]).
@@ -54,6 +55,28 @@ pub fn translation(by: [f64; 3]) -> Result<Matrix> {
 /// [`Error::Argument`] for a point, axis or angle not finite, or an axis of no length.
 pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
+}
+
+/// Whether a map is a rotation or reflection and a translation, with the caller's
+/// axis and homogeneous-entry tolerances. Non-finite maps or invalid tolerances are false.
+pub fn is_rigid(matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {
+    Transform { m: *matrix }.is_rigid(axis_tol, affine_tol)
+}
+
+/// The change between two source placements in a sketch's orthonormal plane frame.
+/// Returns none for an unchanged map, a singular source frame, a tilt or an in-plane
+/// reflection. A normal translation does not change the projected shape.
+pub fn projection_motion(
+    seen: &Matrix,
+    now: &Matrix,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+) -> Option<([[f64; 2]; 2], [f64; 2])> {
+    let inverse = Transform { m: *seen }.inverse().ok()?;
+    let moved = inverse.concat(&Transform { m: *now });
+    let (a, b) = moved.plane_motion(vec3(origin), vec3(x), vec3(y), 1e-9, 1e-12)?;
+    Some((a, b.to_array()))
 }
 
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
@@ -309,6 +332,26 @@ pub fn span_along(
     Ok(span)
 }
 
+/// Whether the forward ray from `origin` along `direction` (`t >= 0`) meets the box from `min` to
+/// `max` inflated by a conservative margin derived from its size and `tolerance`, through
+/// [`Extent3d::meets_ray`]. Conservative on non-finite inputs (returns `true`).
+#[must_use]
+pub fn ray_meets_box(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> bool {
+    let [min_x, min_y, min_z] = min;
+    let [max_x, max_y, max_z] = max;
+    Extent3d::from_bounds(min_x, min_y, min_z, max_x, max_y, max_z).meets_ray(
+        vec3(origin),
+        vec3(direction),
+        tolerance,
+    )
+}
+
 /// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
 /// [`Transform::transformed_box`]: it holds the moved box, a little larger for a turn. An empty box
 /// (`lo` above `hi` on an axis) comes back as it is.
@@ -365,6 +408,25 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
     Some([d.x, d.y, d.z])
 }
 
+/// Express a planar point in units of an axis-aligned chord, with its nose at x = 0, through the
+/// kernel's [`solidcore::prism::transform::chord_coordinates`].
+///
+/// # Errors
+/// [`crate::Error::Refused`] for a non-finite input, invalid chord or non-finite result.
+pub fn chord_coordinates(
+    point: solidcore_record::Vec2,
+    leading_x: f64,
+    trailing_x: f64,
+) -> Result<solidcore_record::Vec2> {
+    solidcore::prism::transform::chord_coordinates(
+        solidcore_convert::vec2(point),
+        leading_x,
+        trailing_x,
+    )
+    .map(solidcore_convert::record_vec2)
+    .map_err(crate::error::status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,6 +447,38 @@ mod tests {
             axis_squared_axes([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1e-12),
             None
         );
+    }
+
+    #[test]
+    fn projection_motion_undoes_seen_before_applying_now() {
+        let seen = translation([3.0, 4.0, 0.0]).unwrap();
+        let now = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 0.0, 1.0],
+        ];
+        let motion = |seen: &Matrix, now: &Matrix| {
+            projection_motion(seen, now, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        };
+        let (a, b) = motion(&seen, &now).unwrap();
+        // Old point (3,4) is the source origin. It now projects to (10,20).
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, [14.0, 17.0]);
+        assert_eq!(
+            [
+                a[0][0] * 3.0 + a[0][1] * 4.0 + b[0],
+                a[1][0] * 3.0 + a[1][1] * 4.0 + b[1]
+            ],
+            [10.0, 20.0]
+        );
+        assert!(motion(&seen, &seen).is_none());
+        let mut singular = seen;
+        singular[0] = [0.0; 4];
+        assert!(motion(&singular, &now).is_none());
+        let mut hostile = now;
+        hostile[3][1] = f64::INFINITY;
+        assert!(motion(&seen, &hostile).is_none());
     }
 
     #[test]
@@ -748,5 +842,46 @@ mod tests {
         assert_eq!(unit_axis_direction([1e-10, 0.0, 0.0], 1e-9), None);
         assert_eq!(unit_axis_direction([f64::NAN, 1.0, 0.0], 1e-9), None);
         assert_eq!(unit_axis_direction([f64::INFINITY, 0.0, 0.0], 1e-9), None);
+    }
+
+    #[test]
+    fn ray_meets_box_handles_hits_misses_and_non_finite_inputs() {
+        let (min, max) = ([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 5.0],
+            [1.0, 0.0, 0.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, 1.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [25.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        let nan_min = [f64::NAN, 0.0, 0.0];
+        assert!(ray_meets_box(
+            nan_min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
     }
 }

@@ -445,6 +445,7 @@ impl crate::Feature {
                     checked_geo(&p.b, 0)?;
                 }
             }
+            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => checked_geo(at, 0)?,
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -544,6 +545,7 @@ impl crate::Feature {
                     remap_geo(&mut p.b, ids, bodies, 0, placements)?;
                 }
             }
+            K::Scale { about: Some(crate::ScaleAbout::Pick { at }), .. } => remap_geo(at, ids, bodies, 0, occurrences, doc)?,
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {
