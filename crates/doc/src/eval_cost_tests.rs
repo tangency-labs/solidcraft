@@ -5057,3 +5057,657 @@ fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() 
     assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
     assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
 }
+
+/// Snapshot of a model's evaluated state for verifying cached incremental replay matches a cold
+/// `no_cache` evaluation identically (bodies, geometry, face names, cosmetic threads, body
+/// counter, and resolved named face points).
+fn full_eval_snapshot(model: &Model) -> (Vec<(String, u64, i64, usize, Vec<String>)>, Vec<ThreadInfo>, usize, Vec<(u64, Vec<[u64; 3]>)>) {
+    let st = model.state();
+    let bodies = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let vol = (kernel::measure(&b.body).unwrap().volume * 1e6).round() as i64;
+            (b.name.clone(), b.component, vol, b.body.face_count(), (*crate::naming::face_names(b)).clone())
+        })
+        .collect();
+    let named_faces =
+        st.named_faces.iter().map(|(&id, pts)| (id, pts.iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect())).collect();
+    (bodies, st.threads.clone(), st.body_counter, named_faces)
+}
+
+fn cold_model(doc: &Document) -> Model {
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(doc);
+    fresh
+}
+
+/// Editing, adding, or deleting an unrelated earlier component or body must skip recomputing
+/// downstream modeled threads — both grouped body-qualified threads with `face_names` and legacy
+/// threads without `target_bodies`, in-session and on the first edit after opening a saved design.
+/// Editing a threaded body or moving an unread body to overlap it must recompute cleanly and stay
+/// identical to a cold evaluation.
+#[test]
+fn unrelated_earlier_edits_and_deletes_skip_downstream_modeled_threads() {
+    let mut doc = Document::new("modeled thread cache");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    doc.set_param("B_len", "4 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    // Component B at x = 60..90: a plate with 4 M6 shafts and a grouped modeled Thread with
+    // explicit target_bodies and stored face_names.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let plate_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(60.0, -15.0, 0.0)),
+                length: "30".into(),
+                width: "30".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["PlateB".into()];
+    }
+    let mut b_faces = Vec::new();
+    for (x, y) in [(67.0, -8.0), (83.0, -8.0), (67.0, 8.0), (83.0, 8.0)] {
+        let shaft = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(x, y, 2.0)),
+                    axis: crate::dir_expr(Vec3::Z),
+                    radius: "3".into(),
+                    height: "B_len".into(),
+                    operation: Operation::Join,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(shaft).unwrap().component = comp_b;
+        b_faces.push(FacePick(Vec3::new(x + 3.0, y, 5.0)));
+    }
+    let mut b_thread_kind = marking(b_faces.remove(0).0);
+    if let FeatureKind::Thread { additional_faces, modeled, designation, target_bodies, continuous_flanks, .. } = &mut b_thread_kind {
+        *additional_faces = b_faces;
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+        *target_bodies = vec!["PlateB".into(); 4];
+        *continuous_flanks = true;
+    }
+    // Capture face_names on PlateB before adding the thread, as the command does.
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    assert!(seed.results.iter().all(|r| r.error.is_none()), "{:?}", seed.results.iter().find(|r| r.error.is_some()));
+    let b_face_names = face_point_names(&doc, &seed.state(), &b_thread_kind, comp_b).unwrap();
+    assert!(b_face_names.iter().all(|n| !n.is_empty()), "{b_face_names:?}");
+    let thread_b = doc.add_feature(b_thread_kind, Some("ThreadB")).unwrap();
+    {
+        let f = doc.feature_mut(thread_b).unwrap();
+        f.component = comp_b;
+        f.face_names = b_face_names;
+    }
+
+    // Component C at x = 140..160: a single shaft with a legacy modeled Thread (empty target_bodies).
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let shaft_c = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(150.0, 0.0, 0.0)),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("ShaftC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(shaft_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["ShaftC".into()];
+    }
+    let mut c_thread_kind = marking(Vec3::new(153.0, 0.0, 2.0));
+    if let FeatureKind::Thread { modeled, designation, continuous_flanks, .. } = &mut c_thread_kind {
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+        *continuous_flanks = true;
+    }
+    let thread_c = doc.add_feature(c_thread_kind, Some("ThreadC")).unwrap();
+    doc.feature_mut(thread_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(initial.thread_cuts >= 2, "initial evaluation cuts both modeled threads: {initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // 1. Unrelated earlier edit (PartA height): only BlockA recomputes; zero thread cuts.
+    doc.set_param("A_h", "14 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.thread_cuts, 0, "{what}: unrelated edit must not recut threads: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only BlockA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}: cached replay must match cold eval");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting unrelated earlier PartA: zero features recomputed, zero thread cuts.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 0, "deleting PartA must not recut downstream threads: {work:?}");
+    assert_eq!(model.last_recomputed, 0, "deleting PartA must recompute zero features");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Adding an unrelated earlier component before PartB & PartC: only the new box recomputes.
+    let mut with_d = without_a.clone();
+    let comp_d = with_d.add_component(Some("PartD"), 0).unwrap();
+    let box_d = with_d
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-80.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockD"),
+        )
+        .unwrap();
+    {
+        let f = with_d.feature_mut(box_d).unwrap();
+        f.component = comp_d;
+        f.body_names = vec!["BlockD".into()];
+    }
+    with_d.features.rotate_right(1);
+    let work = counted(|| model.evaluate(&with_d));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 0, "adding far PartD must not recut downstream threads: {work:?}");
+    assert_eq!(model.last_recomputed, 1, "only BlockD should recompute");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&with_d)));
+
+    // 4. Soundness: editing PartB's shaft height must recompute PartB's thread (while PartC stays cached).
+    let mut edited_b = doc.clone();
+    model.evaluate(&edited_b);
+    edited_b.set_param("B_len", "5 mm", None, None).unwrap();
+    let work = counted(|| model.evaluate(&edited_b));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 1, "only PartB's grouped thread should recut: {work:?}");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&edited_b)));
+
+    // 5. Soundness: adding an unread body overlapping PartB must invalidate PartB's geometric
+    //    face-naming clearance and match a cold evaluation identically.
+    let mut overlapping = doc.clone();
+    model.evaluate(&overlapping);
+    let comp_o = overlapping.add_component(Some("Overlap"), 0).unwrap();
+    let box_o = overlapping
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(62.0, -12.0, 0.0)),
+                length: "26".into(),
+                width: "24".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("OverlapBlock"),
+        )
+        .unwrap();
+    {
+        let f = overlapping.feature_mut(box_o).unwrap();
+        f.component = comp_o;
+        f.body_names = vec!["OverlapBlock".into()];
+    }
+    overlapping.features.rotate_right(1);
+    let work = counted(|| model.evaluate(&overlapping));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 1, "overlapping unread body must invalidate PartB's thread clearance: {work:?}");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&overlapping)));
+}
+
+/// Cosmetic threads (both body-qualified with `face_names` and legacy) and patterns of cosmetic
+/// threads must stay cached across unrelated earlier edits and deletes — both in-session and after
+/// opening a saved design — while recomputing when an unrelated body moves into a legacy thread's
+/// cylinder reach.
+#[test]
+fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached() {
+    let mut doc = Document::new("cosmetic thread cache");
+    doc.set_param("A_x", "0 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: [Expr::from("A_x"), Expr::from("0"), Expr::from("0")],
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("PinA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["PinA".into()];
+    }
+
+    // Component B at x = 60: plate with two bosses, a body-qualified cosmetic Thread on the first
+    // boss with stored face_names, and a rectangular Pattern copying that Thread onto the second.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let plate_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(50.0, -10.0, 0.0)),
+                length: "30".into(),
+                width: "20".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["PlateB".into()];
+    }
+    for x in [58.0, 72.0] {
+        let boss = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(x, 0.0, 2.0)),
+                    axis: crate::dir_expr(Vec3::Z),
+                    radius: "3".into(),
+                    height: "6".into(),
+                    operation: Operation::Join,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(boss).unwrap().component = comp_b;
+    }
+    let mut b_thread_kind = marking(Vec3::new(61.0, 0.0, 5.0));
+    if let FeatureKind::Thread { target_bodies, .. } = &mut b_thread_kind {
+        *target_bodies = vec!["PlateB".into()];
+    }
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let b_face_names = face_point_names(&doc, &seed.state(), &b_thread_kind, comp_b).unwrap();
+    assert_eq!(b_face_names.len(), 1);
+    assert!(!b_face_names[0].is_empty());
+    let thread_b = doc.add_feature(b_thread_kind, Some("CosmeticB")).unwrap();
+    {
+        let f = doc.feature_mut(thread_b).unwrap();
+        f.component = comp_b;
+        f.face_names = b_face_names;
+    }
+    let pattern_b = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(thread_b)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "14".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: Vec::new(),
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+            },
+            Some("PatternB"),
+        )
+        .unwrap();
+    doc.feature_mut(pattern_b).unwrap().component = comp_b;
+
+    // Component C at x = 140: legacy cosmetic thread without target_bodies.
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let pin_c = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(140.0, 0.0, 0.0)),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("PinC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(pin_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["PinC".into()];
+    }
+    let thread_c = doc.add_feature(marking(Vec3::new(143.0, 0.0, 4.0)), Some("CosmeticC")).unwrap();
+    doc.feature_mut(thread_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().threads.len(), 3);
+
+    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+
+    // 1. Editing PinA away from B & C: only PinA recomputes; zero cylinder searches.
+    doc.set_param("A_x", "5 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.cylinder_search, 0, "{what}: unrelated edit must skip cosmetic threads: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only PinA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting PartA: zero features recomputed, all 3 cosmetic threads preserved identically.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.cylinder_search, 0, "{work:?}");
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Soundness: moving PinA right onto Component C's legacy pick must invalidate CosmeticC.
+    doc.set_param("A_x", "140 mm", None, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert!(model.last_recomputed >= 2, "PinA and legacy CosmeticC must recompute when PinA enters reach");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+}
+
+/// Independent downstream Shell (with `face_names`), Scale, Mirror of bodies, OffsetFace (with
+/// `face_names`), Fillet, and Pattern of Extrude must stay cached across unrelated earlier edits
+/// and component deletes (in-session and after `Model::adopt`), and recompute when their own
+/// inputs change.
+#[test]
+fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_pattern_cached() {
+    let mut doc = Document::new("multi-feature independent cache");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    doc.set_param("B_w", "20 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    // Component B at x = 40: box -> Shell (with face_names) -> Scale -> Mirror of body.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(40.0, 0.0, 0.0)),
+                length: "B_w".into(),
+                width: "20".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["BlockB".into()];
+    }
+    let shell_kind = FeatureKind::Shell {
+        faces: vec![FacePick(Vec3::new(50.0, 10.0, 12.0))],
+        thickness: "2".into(),
+        body: Some("BlockB".into()),
+        direction: String::new(),
+        tangent_chain: false,
+    };
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let shell_names = face_point_names(&doc, &seed.state(), &shell_kind, comp_b).unwrap();
+    assert_eq!(shell_names.len(), 1);
+    assert!(!shell_names[0].is_empty());
+    let shell_b = doc.add_feature(shell_kind, Some("ShellB")).unwrap();
+    {
+        let f = doc.feature_mut(shell_b).unwrap();
+        f.component = comp_b;
+        f.face_names = shell_names;
+    }
+    let scale_b = doc
+        .add_feature(
+            FeatureKind::Scale {
+                bodies: vec!["BlockB".into()],
+                origin: Position(Vec3::ZERO),
+                about: Some(ScaleAbout::Centre),
+                factor: "1.1".into(),
+                factors: None,
+            },
+            Some("ScaleB"),
+        )
+        .unwrap();
+    doc.feature_mut(scale_b).unwrap().component = comp_b;
+    let mirror_b = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "10 mm".into() },
+                bodies: vec!["BlockB".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            Some("MirrorB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(mirror_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["BlockB_Mirror".into()];
+    }
+
+    // Component C at x = 100: plate -> Sketch -> Extrude cut -> Pattern of Extrude -> OffsetFace
+    // (with face_names) -> Fillet.
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let plate_c = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "40".into(),
+                width: "20".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["PlateC".into()];
+    }
+    let mut sk = Sketch::new();
+    let p = [Vec2::new(106.0, 7.0), Vec2::new(112.0, 7.0), Vec2::new(112.0, 13.0), Vec2::new(106.0, 13.0)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch_c = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SketchC")).unwrap();
+    doc.feature_mut(sketch_c).unwrap().component = comp_c;
+    let cut_c = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                thin: None,
+                sketch: SketchId(sketch_c),
+                profiles: ProfileSel::All,
+                extent: serde_json::from_value(serde_json::json!({"distance": "10"})).unwrap(),
+                operation: Operation::Cut,
+                targets: vec!["PlateC".into()],
+            },
+            Some("CutC"),
+        )
+        .unwrap();
+    doc.feature_mut(cut_c).unwrap().component = comp_c;
+    let pat_c = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(cut_c)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                },
+                bodies: Vec::new(),
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+            },
+            Some("PatternC"),
+        )
+        .unwrap();
+    doc.feature_mut(pat_c).unwrap().component = comp_c;
+    let offset_kind =
+        FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(140.0, 10.0, 4.0))], distance: "2".into(), body: Some("PlateC".into()) };
+    seed.evaluate(&doc);
+    let offset_names = face_point_names(&doc, &seed.state(), &offset_kind, comp_c).unwrap();
+    assert_eq!(offset_names.len(), 1);
+    assert!(!offset_names[0].is_empty());
+    let offset_c = doc.add_feature(offset_kind, Some("OffsetC")).unwrap();
+    {
+        let f = doc.feature_mut(offset_c).unwrap();
+        f.component = comp_c;
+        f.face_names = offset_names;
+    }
+    let fillet_c = doc
+        .add_feature(
+            FeatureKind::Fillet {
+                edges: vec![Position(Vec3::new(100.0, 10.0, 8.0))],
+                radius: "1".into(),
+                body: Some("PlateC".into()),
+                style: Default::default(),
+                fit: Default::default(),
+                corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: false,
+                edge_radii: Vec::new(),
+            },
+            Some("FilletC"),
+        )
+        .unwrap();
+    doc.feature_mut(fillet_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+
+    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+
+    // 1. Unrelated edit to PartA: only BlockA recomputes; zero blends or downstream work.
+    doc.set_param("A_h", "16 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.blends, 0, "{what}: unrelated edit must skip FilletC: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only BlockA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting PartA: zero features recomputed across all of PartB and PartC.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.blends, 0, "{work:?}");
+    assert_eq!(model.last_recomputed, 0, "deleting PartA must recompute zero features");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Soundness: editing PartB's width recomputes BlockB + ShellB + ScaleB + MirrorB (4
+    //    features) while leaving PartC's entire chain cached!
+    model.evaluate(&doc);
+    doc.set_param("B_w", "24 mm", None, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.blends, 0, "editing PartB must keep PartC's Fillet cached: {work:?}");
+    assert_eq!(model.last_recomputed, 4, "BlockB, ShellB, ScaleB, MirrorB should recompute");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+}

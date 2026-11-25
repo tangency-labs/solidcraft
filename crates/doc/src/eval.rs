@@ -3041,6 +3041,12 @@ impl EvalKey {
             for &i in &read.bodies {
                 let b = st.bodies.get(i);
                 b.map(|b| (&b.name, b.key, b.feature, b.component, b.transferred)).hash(&mut h);
+                if let Some(b) = b {
+                    let owner = doc.model_body_component(b);
+                    if owner != b.component {
+                        owner.hash(&mut h);
+                    }
+                }
                 names.extend(b.map(|b| b.name.as_str()));
             }
             for id in &read.sketches {
@@ -3228,11 +3234,22 @@ impl Feature {
     /// a fillet or chamfer; everything else may read anything (faces, To Object, `*` for every
     /// body).
     fn reads(&self, doc: &Document, st: &ModelState) -> Option<Reads> {
-        let by_name = |f: &Feature| f.face_names.iter().all(String::is_empty) && f.edge_names.iter().all(String::is_empty) && f.edge_refs.is_empty();
+        let no_edge_names = |f: &Feature| f.edge_names.iter().all(String::is_empty) && f.edge_refs.is_empty();
+        let no_face_names = |f: &Feature| f.face_names.iter().all(String::is_empty);
+        let by_name = |f: &Feature| no_face_names(f) && no_edge_names(f);
         let blend = matches!(self.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. });
-        // A fillet or chamfer finds its edges by name on its own body alone.
-        let faces_by_name = self.face_names.iter().any(|n| !n.is_empty());
-        if faces_by_name || (!blend && !by_name(self)) {
+        let scoped_faces = matches!(
+            self.kind,
+            FeatureKind::Thread { .. }
+                | FeatureKind::Shell { body: Some(_), .. }
+                | FeatureKind::Draft { body: Some(_), .. }
+                | FeatureKind::OffsetFace { body: Some(_), .. }
+                | FeatureKind::DeleteFace { body: Some(_), .. }
+                | FeatureKind::Dome { body: Some(_), .. }
+        );
+        // A fillet or chamfer finds its edges by name on its own body alone; a thread or a
+        // body-scoped face feature may name faces on its target bodies alone.
+        if (!scoped_faces && !no_face_names(self)) || (!blend && !no_edge_names(self)) {
             return None;
         }
         // An import reads only the file or records it holds and nothing of the model's geometry,
@@ -3256,6 +3273,23 @@ impl Feature {
             // A name evaluation may refuse as ambiguous, for other bodies of this component
             // ([`named_target`]): what it finds is not all that is read.
             names.iter().map(|n| named_target(doc, st, self, n).ok()).collect()
+        };
+        // A single named body whose named face picks (if any) resolve directly on that body
+        // without falling back to scanning other bodies in `st`.
+        let body_with_scoped_faces = |n: &str| -> Option<Vec<usize>> {
+            let i = st.bodies.iter().position(|b| b.name == n)?;
+            if st.bodies.iter().skip(i + 1).any(|b| b.name == n) {
+                return None;
+            }
+            if !no_face_names(self) {
+                let pts = self.kind.face_points();
+                for (p, name) in pts.into_iter().zip(&self.face_names) {
+                    if !name.is_empty() && !crate::name_lookup::face_resolved_on_body(st, i, name, p) {
+                        return None;
+                    }
+                }
+            }
+            Some(vec![i])
         };
         // The bodies a tool operates on, as `apply_traced` picks them.
         let operated = |(op, targets): (Operation, Vec<String>)| -> Option<Vec<usize>> {
@@ -3282,27 +3316,130 @@ impl Feature {
                 bodies(named(&crate::plain::<String, _>(copied))?)
             }
             FeatureKind::Pattern { features, pattern, .. } if !features.is_empty() && fixed_pattern(pattern) => {
-                let mut read = Vec::new();
+                let mut read = Reads::default();
                 for id in features {
-                    let src =
-                        source_feature(doc, *id).ok().filter(|src| numeric_tool(&src.kind) && hole_references(src).is_empty() && by_name(src))?;
-                    // As `replay` picks them: the source's targets, else its participants.
-                    let (op, targets) = feature_op(src);
-                    let targets = if targets.is_empty() { src.participants.clone() } else { targets };
-                    read.extend(operated((op, targets))?);
+                    let src = source_feature(doc, *id).ok()?;
+                    match &src.kind {
+                        k if numeric_tool(k) && hole_references(src).is_empty() && by_name(src) => {
+                            // As `replay` picks them: the source's targets, else its participants.
+                            let (op, targets) = feature_op(src);
+                            let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+                            read.bodies.extend(operated((op, targets))?);
+                        }
+                        FeatureKind::Extrude { sketch: s, extent, .. }
+                            if src.component == self.component
+                                && by_name(src)
+                                && extent.to.is_none()
+                                && extent.from.is_none()
+                                && !extent.through_all
+                                && extent.taper.is_none()
+                                && doc.feature(s.0).is_some_and(|x| x.component == self.component) =>
+                        {
+                            let (op, targets) = feature_op(src);
+                            let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+                            read.bodies.extend(operated((op, targets))?);
+                            read.sketches.push(s.0);
+                        }
+                        FeatureKind::Revolve { sketch: s, axis, to: None, .. }
+                            if src.component == self.component
+                                && by_name(src)
+                                && !matches!(axis, crate::AxisRef::Model { .. })
+                                && doc.feature(s.0).is_some_and(|x| x.component == self.component) =>
+                        {
+                            let (op, targets) = feature_op(src);
+                            let targets = if targets.is_empty() { src.participants.clone() } else { targets };
+                            read.bodies.extend(operated((op, targets))?);
+                            read.sketches.push(s.0);
+                        }
+                        FeatureKind::Thread { modeled: false, target_bodies, up_to: None, .. }
+                            if src.component == self.component
+                                && !target_bodies.is_empty()
+                                && kept_in(doc, st, self.component, src).is_none()
+                                && thread_target_bodies(doc, st, &src.kind).ok().flatten().is_some_and(|tb| {
+                                    tb.iter().all(|b| doc.model_body_component(b) == self.component && body_in(doc, self.component, b).is_none())
+                                }) =>
+                        {
+                            for n in target_bodies {
+                                read.bodies.push(st.bodies.iter().position(|b| b.name == n.as_ref())?);
+                            }
+                        }
+                        _ => return None,
+                    }
                 }
-                read.sort_unstable();
-                read.dedup();
-                bodies(read)
+                read.bodies.sort_unstable();
+                read.bodies.dedup();
+                read.sketches.sort_unstable();
+                read.sketches.dedup();
+                Some(read)
+            }
+            FeatureKind::Mirror { features, bodies: mirrored, plane, placements, .. }
+                if features.is_empty() && !mirrored.is_empty() && placements.is_empty() && fixed_plane(plane) =>
+            {
+                bodies(named(&crate::plain::<String, _>(mirrored))?)
             }
             // A turn about an edge or round face of the model reads that geometry too (#17974).
             FeatureKind::Move { rotate_about: Some(_), .. } => None,
             FeatureKind::Move { bodies: moved, .. } => bodies(named(&crate::plain::<String, _>(moved))?),
+            FeatureKind::Scale { bodies: scaled, about: None | Some(crate::ScaleAbout::Centre), .. } => {
+                bodies(named(&crate::plain::<String, _>(scaled))?)
+            }
             FeatureKind::Combine { target, tools, .. } => {
                 let mut names = vec![target.0.clone()];
                 names.extend(crate::plain::<String, _>(tools));
                 bodies(named(&names)?)
             }
+            FeatureKind::Thread { face, additional_faces, target_bodies, up_to, .. } => {
+                if additional_faces.len() >= 1024 {
+                    return None;
+                }
+                let up_to_ok = match up_to {
+                    None => true,
+                    Some(crate::ThreadLimit::Plane(pl)) => fixed_plane(pl),
+                    Some(crate::ThreadLimit::Face(_)) => self.face_names.get(1).is_none_or(String::is_empty),
+                };
+                if !up_to_ok {
+                    return None;
+                }
+                if !target_bodies.is_empty() {
+                    let face_pts = self.kind.face_points();
+                    if self
+                        .face_names
+                        .iter()
+                        .enumerate()
+                        .take(face_pts.len())
+                        .any(|(k, n)| !n.is_empty() && self.kind.thread_target_body(k).is_none())
+                    {
+                        return None;
+                    }
+                    thread_target_bodies(doc, st, &self.kind).ok()??;
+                    let mut read: Vec<usize> =
+                        target_bodies.iter().map(|n| st.bodies.iter().position(|b| b.name == n.as_ref())).collect::<Option<_>>()?;
+                    read.sort_unstable();
+                    read.dedup();
+                    return bodies(read);
+                }
+                if !no_face_names(self) {
+                    return None;
+                }
+                // Legacy thread without `target_bodies`: `thread_on_in` only inspects bodies not
+                // rejected by `beyond_cylinder_reach`.
+                let mut read = Vec::new();
+                for p in std::iter::once(face.0).chain(additional_faces.iter().map(|q| q.0)) {
+                    let before_len = read.len();
+                    read.extend(st.bodies.iter().enumerate().filter(|(_, b)| !more::beyond_cylinder_reach(b, p)).map(|(i, _)| i));
+                    if read.len() == before_len {
+                        return None;
+                    }
+                }
+                read.sort_unstable();
+                read.dedup();
+                bodies(read)
+            }
+            FeatureKind::Shell { body: Some(n), .. }
+            | FeatureKind::OffsetFace { body: Some(n), .. }
+            | FeatureKind::DeleteFace { body: Some(n), .. }
+            | FeatureKind::Dome { body: Some(n), .. } => bodies(body_with_scoped_faces(n)?),
+            FeatureKind::Draft { body: Some(n), neutral, .. } if fixed_plane(neutral) => bodies(body_with_scoped_faces(n)?),
             FeatureKind::Sketch { plane, sketch } if fixed_plane(plane) => {
                 let mut read = Reads::default();
                 for link in &sketch.links {
@@ -3366,6 +3503,13 @@ struct ModelChange {
     pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
+    /// Cosmetic threads appended by this feature (`t.feature == feature`), in order.
+    added_threads: Arc<[ThreadInfo]>,
+    /// Inflated exact bounds of bodies this feature made or changed whose face names may fall
+    /// back to geometry: replaying is sound only while no unread non-mesh body overlaps them.
+    clear_of: Arc<[solidcraft_geom::Aabb3]>,
+    /// Body indices read from `before` when `clear_of` is non-empty, for [`ModelState::with_change`].
+    clear_read_indices: Arc<[usize]>,
     /// The same change whatever the bodies the feature did not read, when it can be told so.
     relative: Option<Arc<Relative>>,
 }
@@ -3423,7 +3567,7 @@ impl Change {
                         Changed::Kept(_) => 0,
                     })
                     .sum();
-                made + c.bodies.len() * 64 + c.sketch.as_ref().map_or(0, |s| s.retained_bytes())
+                made + c.bodies.len() * 64 + c.sketch.as_ref().map_or(0, |s| s.retained_bytes()) + c.added_threads.len() * 128
             }
             Change::Import(c) => {
                 let made: usize = c.bodies.iter().map(|b| b.body.retained_bytes()).sum();
@@ -3497,7 +3641,7 @@ impl Relative {
     /// its own name or removed in place, and the bodies it made under the names it stores come
     /// after all of them (only when it changed none: pieces of a split stand by their body).
     /// `None` when the change is not of that form.
-    fn of(before: &ModelState, after: &ModelState, f: &Feature, read: &Reads) -> Option<Relative> {
+    fn of(before: &ModelState, after: &ModelState, f: &Feature, read: &Reads, clear_checked: bool) -> Option<Relative> {
         let mut is_read = vec![false; before.bodies.len()];
         for &i in &read.bodies {
             *is_read.get_mut(i)? = true;
@@ -3536,7 +3680,7 @@ impl Relative {
             Fate::Changed(b) => Some(b.as_ref()),
             Fate::Kept | Fate::Removed => None,
         });
-        if unnamed_edges(f) || !made.iter().chain(changes).all(|b| names_alone(b, f)) {
+        if unnamed_edges(f) || (!clear_checked && !made.iter().chain(changes).all(|b| names_alone(b, f))) {
             return None;
         }
         // Counted only by a stored `BodyN` name: a body numbered from the counter is named by
@@ -3591,6 +3735,65 @@ fn names_alone(b: &ModelBody, f: &Feature) -> bool {
         return true;
     }
     b.lineage().map_or(b.names.is_saved(), |l| exact(&l))
+}
+
+/// Whether `f`'s geometric face-naming fallback (`crate::naming::geometric_names`) reads only
+/// non-mesh bodies in `before` whose bounding boxes overlap the output body (empty instance
+/// transforms and `role_name` reads nothing from `before`).
+fn local_geometric_naming(f: &Feature) -> bool {
+    matches!(
+        f.kind,
+        FeatureKind::Thread { .. }
+            | FeatureKind::Shell { .. }
+            | FeatureKind::Draft { .. }
+            | FeatureKind::OffsetFace { .. }
+            | FeatureKind::DeleteFace { .. }
+            | FeatureKind::Dome { .. }
+            | FeatureKind::Scale { .. }
+            | FeatureKind::Fillet { .. }
+            | FeatureKind::Chamfer { .. }
+            | FeatureKind::Box { .. }
+            | FeatureKind::Cylinder { .. }
+            | FeatureKind::Sphere { .. }
+            | FeatureKind::Torus { .. }
+            | FeatureKind::Coil { .. }
+            | FeatureKind::Combine { .. }
+    )
+}
+
+/// Inflated exact bounding box of output body `after` for geometric-naming overlap checks. For a
+/// Thread feature, `before_body` already bounds the grooved output (even when a wide bore is
+/// narrowed inside the part's wall) without measuring tight NURBS bounds of every helical flank.
+fn naming_bounds(f: &Feature, before_body: Option<&ModelBody>, after: &ModelBody) -> Option<solidcraft_geom::Aabb3> {
+    if matches!(f.kind, FeatureKind::Thread { .. })
+        && let Some(prev) = before_body
+        && let Some(bb) = more::exact_box(&prev.body)
+    {
+        let tol = (prev.body.size().max(1e-6) * 1e-4).max(1e-6) + 1.0;
+        return Some(bb.inflated(tol));
+    }
+    let bb = more::exact_box(&after.body)?;
+    let tol = (after.body.size().max(1e-6) * 1e-4).max(1e-6) + 1e-3;
+    Some(bb.inflated(tol))
+}
+
+/// Whether every unread non-mesh body in `bodies` is strictly outside every box in `clear_of`.
+fn unread_bodies_clear<'a>(bodies: impl Iterator<Item = &'a ModelBody>, clear_of: &[solidcraft_geom::Aabb3]) -> bool {
+    if clear_of.is_empty() {
+        return true;
+    }
+    for x in bodies {
+        if x.body.is_mesh() {
+            continue;
+        }
+        let Some(bx) = more::exact_box(&x.body) else {
+            return false;
+        };
+        if clear_of.iter().any(|bb| !more::boxes_apart(&Some(*bb), &Some(bx))) {
+            return false;
+        }
+    }
+    true
 }
 
 impl ModelState {
@@ -3652,18 +3855,23 @@ impl ModelState {
             && kept.len() == others.clone().count()
             && kept.iter().zip(others).all(|(a, b)| Arc::ptr_eq(a, b))
             && (sketch.is_some() || kept.len() == before.sketches.len())
-            && self.sketch_keys == before.sketch_keys
+            && if sketch.is_some() { others_same(&self.sketch_keys, &before.sketch_keys, feature) } else { self.sketch_keys == before.sketch_keys }
             && self.construct == before.construct
             && others_same(&self.blend_edges, &before.blend_edges, feature)
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
             && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
-            && others_same(&self.named_faces, &before.named_faces, feature)
-            && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
+            && others_same(&self.named_faces, &before.named_faces, feature);
         if !same_rest {
             return None;
         }
+        let added_threads: &[ThreadInfo] = self
+            .threads
+            .get(..before.threads.len())
+            .filter(|prefix| prefix.iter().zip(&before.threads).all(|(a, b)| a.same_bits(b)))
+            .and_then(|_| self.threads.get(before.threads.len()..))
+            .filter(|added| added.iter().all(|t| t.feature == feature))?;
         // Bodies passed through keep their order: each is looked for after the last one found.
         let mut from = 0;
         let mut untouched = vec![false; before.bodies.len()];
@@ -3682,20 +3890,48 @@ impl ModelState {
             }
         }
         let only_read = untouched.iter().enumerate().all(|(j, u)| *u || read.bodies.contains(&j));
-        only_read.then(|| {
-            Change::Model(Box::new(ModelChange {
-                bodies: bodies.into(),
-                sketch,
-                body_counter: self.body_counter,
-                blend: self.blend_edges.get(&feature).cloned(),
-                fitted: self.fitted.get(&feature).cloned(),
-                tapered: self.tapered.get(&feature).cloned(),
-                kept_separate: self.kept_separate.get(&feature).copied(),
-                pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
-                named_faces: self.named_faces.get(&feature).cloned(),
-                relative: Relative::of(before, self, f, read).map(Arc::new),
-            }))
-        })
+        if !only_read {
+            return None;
+        }
+        let needs_clearance = |b: &ModelBody| !names_alone(b, f) || matches!(f.kind, FeatureKind::Thread { modeled: true, .. });
+        let mut clear_boxes = Vec::new();
+        let mut any_needs_clearance = false;
+        for changed in &bodies {
+            if let Changed::Made(b) = changed
+                && needs_clearance(b)
+            {
+                any_needs_clearance = true;
+                if local_geometric_naming(f) {
+                    let bb = naming_bounds(f, before.body(&b.name), b)?;
+                    clear_boxes.push(bb);
+                }
+            }
+        }
+        let clear_checked = if any_needs_clearance && local_geometric_naming(f) {
+            let unread = before.bodies.iter().enumerate().filter(|(j, _)| !read.bodies.contains(j)).map(|(_, b)| b);
+            if !unread_bodies_clear(unread, &clear_boxes) {
+                return None;
+            }
+            true
+        } else {
+            false
+        };
+        let clear_read_indices: Arc<[usize]> = if clear_boxes.is_empty() { Arc::from([]) } else { Arc::from(read.bodies.as_slice()) };
+        Some(Change::Model(Box::new(ModelChange {
+            bodies: bodies.into(),
+            sketch,
+            body_counter: self.body_counter,
+            blend: self.blend_edges.get(&feature).cloned(),
+            fitted: self.fitted.get(&feature).cloned(),
+            tapered: self.tapered.get(&feature).cloned(),
+            kept_separate: self.kept_separate.get(&feature).copied(),
+            pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
+            named_faces: self.named_faces.get(&feature).cloned(),
+            added_threads: Arc::from(added_threads.to_vec()),
+            clear_of: Arc::from(clear_boxes),
+            clear_read_indices,
+            relative: Relative::of(before, self, f, read, clear_checked).map(Arc::new),
+        })))
     }
 
     /// This state with `change` (feature `feature`'s) made to it: its bodies, those it kept taken
@@ -3722,6 +3958,14 @@ impl ModelState {
             }
             Change::Model(c) => c,
         };
+        if !change.clear_of.is_empty()
+            && !unread_bodies_clear(
+                self.bodies.iter().enumerate().filter(|(j, _)| !change.clear_read_indices.contains(j)).map(|(_, b)| b),
+                &change.clear_of,
+            )
+        {
+            return None;
+        }
         let bodies = change
             .bodies
             .iter()
@@ -3744,14 +3988,20 @@ impl ModelState {
         };
         let relative = change.relative.as_deref()?;
         let fates: std::collections::HashMap<&str, &Fate> = relative.read.iter().map(|(n, fate)| (n.as_str(), fate)).collect();
-        let mut found = 0;
+        if !change.clear_of.is_empty() && !unread_bodies_clear(self.bodies.iter().filter(|b| !fates.contains_key(b.name.as_str())), &change.clear_of)
+        {
+            return None;
+        }
+        let mut seen = std::collections::HashSet::with_capacity(relative.read.len());
         let mut bodies = Vec::with_capacity(self.bodies.len() + relative.made.len());
         for b in &self.bodies {
             let before = || ModelBody { made: crate::lineage::Made::Before, ..b.clone() };
             match fates.get(b.name.as_str()) {
                 None => bodies.push(before()),
                 Some(fate) => {
-                    found += 1;
+                    if !seen.insert(b.name.as_str()) {
+                        return None;
+                    }
                     match fate {
                         Fate::Kept => bodies.push(before()),
                         Fate::Changed(c) => bodies.push((**c).clone()),
@@ -3761,7 +4011,7 @@ impl ModelState {
             }
         }
         // Each body it read once, and no body under a name it made.
-        if found != relative.read.len() || relative.made.iter().any(|m| self.body(&m.name).is_some()) {
+        if seen.len() != relative.read.len() || relative.made.iter().any(|m| self.body(&m.name).is_some()) {
             return None;
         }
         bodies.extend(relative.made.iter().cloned());
@@ -3776,6 +4026,9 @@ impl ModelState {
             sketches.push(s.clone());
         }
         let mut next = ModelState { bodies, sketches, body_counter, ..self.clone() };
+        if !change.added_threads.is_empty() {
+            next.threads.extend(change.added_threads.iter().cloned());
+        }
         next.blend_edges.remove(&feature);
         next.fitted.remove(&feature);
         next.tapered.remove(&feature);
@@ -5376,7 +5629,7 @@ impl Model {
                 // feature names, when it names one and the face is there).
                 let renamed;
                 let mut frame_error: Option<String> = None;
-                let f = match with_named_face_points(doc, &vals, &state, f) {
+                let f = match if cached.is_some() { Ok(None) } else { with_named_face_points(doc, &vals, &state, f) } {
                     Ok(Some((g, notes))) => {
                         if !notes.is_empty() {
                             warning = Some(notes.join("; "));
