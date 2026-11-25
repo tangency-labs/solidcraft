@@ -463,6 +463,70 @@ impl Transform {
         }
     }
 
+    /// Whether this finite affine map is a rotation or reflection and a translation.
+    /// Axis lengths and mutual dot products use `axis_tol`; the homogeneous entries use
+    /// `affine_tol`. Both tolerances must be finite and positive.
+    #[must_use]
+    pub fn is_rigid(&self, axis_tol: f64, affine_tol: f64) -> bool {
+        let [x, y, z, t] = &self.m;
+        let (a, b, c) = (self.x_axis(), self.y_axis(), self.z_axis());
+        axis_tol.is_finite()
+            && axis_tol > 0.0
+            && affine_tol.is_finite()
+            && affine_tol > 0.0
+            && self.m.iter().flatten().all(|v| v.is_finite())
+            && [x, y, z].iter().all(|r| r[3].abs() < affine_tol)
+            && (t[3] - 1.0).abs() < affine_tol
+            && [a, b, c]
+                .iter()
+                .all(|v| (v.length() - 1.0).abs() < axis_tol)
+            && a.dot(b).abs() < axis_tol
+            && b.dot(c).abs() < axis_tol
+            && c.dot(a).abs() < axis_tol
+    }
+
+    /// The orientation-preserving 2D map induced on an orthonormal plane frame.
+    /// Translation normal to the plane is discarded, as for an orthogonal projection.
+    /// Returns none for an identity within `identity_tol`, a changed normal, or a 2D
+    /// determinant differing from one by at least `tol`. The caller establishes rigidity.
+    #[must_use]
+    pub fn plane_motion(
+        &self,
+        origin: Point3,
+        x: Vec3,
+        y: Vec3,
+        tol: f64,
+        identity_tol: f64,
+    ) -> Option<([[f64; 2]; 2], Vec2)> {
+        if !(tol.is_finite()
+            && tol > 0.0
+            && identity_tol.is_finite()
+            && identity_tol > 0.0
+            && finite3(origin)
+            && finite3(x)
+            && finite3(y)
+            && self.m.iter().flatten().all(|v| v.is_finite()))
+            || self
+                .m
+                .iter()
+                .flatten()
+                .zip(Self::IDENTITY.m.iter().flatten())
+                .all(|(a, b)| (a - b).abs() < identity_tol)
+        {
+            return None;
+        }
+        let n = x.cross(y);
+        if (self.transform_vector(n) - n).length() > tol {
+            return None;
+        }
+        let (rx, ry) = (self.transform_vector(x), self.transform_vector(y));
+        let shift = self.transform_point(origin) - origin;
+        let a = [[rx.dot(x), ry.dot(x)], [rx.dot(y), ry.dot(y)]];
+        let det = a[0][0] * a[1][1] - a[0][1] * a[1][0];
+        let b = Vec2::new(shift.dot(x), shift.dot(y));
+        ((det - 1.0).abs() < tol && b.x.is_finite() && b.y.is_finite()).then_some((a, b))
+    }
+
     /// The unit, orthogonal frame axes nearest to `x` and `y`: `x` normalized, and `y` made
     /// perpendicular to it and normalized (the kernel picks a perpendicular when `y` is parallel to
     /// `x` or has no length). Restores a frame carried through a rigid motion to exactly unit and
@@ -568,6 +632,35 @@ impl Transform {
             v.x * tx.y + v.y * ty.y + v.z * tz.y,
             v.x * tx.z + v.y * ty.z + v.z * tz.z,
         )
+    }
+
+    /// Map a point on a line and its direction. Translation affects only the point.
+    #[must_use]
+    pub fn transform_line(&self, point: Point3, direction: Vec3) -> (Point3, Vec3) {
+        (
+            self.transform_point(point),
+            self.transform_vector(direction),
+        )
+    }
+
+    /// Map an undirected axis to this frame and orient its unit direction here.
+    ///
+    /// # Errors
+    /// Refuses a non-finite point or a direction with length at most 1e-9.
+    pub fn transform_canonical_axis(
+        &self,
+        point: Point3,
+        direction: Vec3,
+    ) -> crate::Result<(Point3, Vec3)> {
+        let (point, direction) = self.transform_line(point, direction);
+        let length = direction.length();
+        if !finite3(point) || !length.is_finite() || length <= 1e-9 {
+            return Err(crate::SolidError::InvalidInput {
+                operation: OP_MAPS,
+                reason: "the axis has no finite point and direction",
+            });
+        }
+        Ok((point, (direction / length).canonical_axis_direction()))
     }
 
     /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
@@ -832,6 +925,38 @@ impl Transform {
         ))
     }
 
+    /// The rigid map from world coordinates into the frame of the plane through `origin` with
+    /// x axis along `x` and y axis on `y`'s side in the plane of the two (each any length):
+    /// the unit axes `x̂`, `n = unit(x̂ × y)` and `ŷ = n × x̂` become X, Z and Y, and `origin`
+    /// the origin. A point's Z after the map is its level above the plane along its normal.
+    /// The linear part's columns are `x̂`, `ŷ` and `n` (the transpose of the frame's rows),
+    /// its translation `-(origin·x̂, origin·ŷ, origin·n)`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an origin or axis not finite, or an `x` or `x̂ × y` whose squared
+    /// length is below [`EFF_ZERO_SQ`] (an axis of no length, or axes along one line).
+    pub fn into_plane_frame(origin: Point3, x: Vec3, y: Vec3) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(origin) && finite3(x) && finite3(y)) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a plane's numbers not finite",
+            ));
+        }
+        let none =
+            |_| SolidError::invalid_input(OP_MAPS, "a plane's axes of no length or along one line");
+        let x = x.unitize().map_err(none)?;
+        let n = x.cross(y).unitize().map_err(none)?;
+        let y = n.cross(x);
+        Ok(Self::from_axes(
+            Vec3::new(x.x, y.x, n.x),
+            Vec3::new(x.y, y.y, n.y),
+            Vec3::new(x.z, y.z, n.z),
+            Vec3::new(-origin.dot(x), -origin.dot(y), -origin.dot(n)),
+        ))
+    }
+
     /// The map that undoes this one: `p = (p' - t) A⁻¹`, its linear part `A⁻¹` (the adjugate
     /// over the determinant: with `a`, `b`, `c` the rows of `A`, row `i` holds the `i`-th
     /// components of `b × c`, `c × a` and `a × b`, over `a · (b × c)`) and its translation
@@ -907,6 +1032,51 @@ mod tests {
         for noise in [-1.0, f64::INFINITY, f64::NAN] {
             assert_eq!(Transform::axis_squared_frame(Vec3::X, Vec3::Y, noise), None);
         }
+    }
+
+    #[test]
+    fn rigid_maps_include_reflections_but_reject_scale_shear_and_hostile_entries() {
+        let rigid = |m: Transform| m.is_rigid(1e-6, 1e-12);
+        assert!(rigid(Transform::IDENTITY));
+        assert!(rigid(Transform::translation(Vec3::new(3.0, -4.0, 5.0))));
+        assert!(rigid(
+            Transform::rotation(Point3::ZERO, Vec3::Z, 0.7).unwrap()
+        ));
+        assert!(rigid(Transform::reflection(Point3::ZERO, Vec3::X).unwrap()));
+        for (row, col, value) in [
+            (0, 0, 2.0),
+            (1, 0, 0.01),
+            (0, 3, 1e-6),
+            (3, 3, 0.0),
+            (3, 0, f64::INFINITY),
+            (2, 1, f64::NAN),
+        ] {
+            let mut m = Transform::IDENTITY;
+            m.m[row][col] = value;
+            assert!(!rigid(m), "{row} {col} {value}");
+        }
+        assert!(!Transform::IDENTITY.is_rigid(f64::NAN, 1e-12));
+        assert!(!Transform::IDENTITY.is_rigid(1e-6, 0.0));
+    }
+
+    #[test]
+    fn plane_motion_uses_the_plane_origin_and_axes_and_rejects_tilts_and_reflections() {
+        // Plane normal X, with local axes Y and Z, away from the world origin.
+        // A quarter turn about X maps (10, 20, 30) to (10, -30, 20).
+        let origin = Point3::new(10.0, 20.0, 30.0);
+        let motion = |m: Transform| m.plane_motion(origin, Vec3::Y, Vec3::Z, 1e-9, 1e-12);
+        let turn = Transform::from_axes(Vec3::X, Vec3::Z, -Vec3::Y, Vec3::ZERO);
+        let (a, b) = motion(turn).unwrap();
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, Vec2::new(-50.0, -10.0));
+        assert!(motion(Transform::IDENTITY).is_none());
+        assert!(motion(Transform::rotation(Point3::ZERO, Vec3::Y, 0.2).unwrap()).is_none());
+        assert!(motion(Transform::reflection(Point3::ZERO, Vec3::Y).unwrap()).is_none());
+        // A normal displacement leaves every projected coordinate unchanged.
+        let (a, b) = motion(Transform::translation(Vec3::X * 5.0)).unwrap();
+        assert_eq!(a, [[1.0, 0.0], [0.0, 1.0]]);
+        assert_eq!(b, Vec2::ZERO);
+        assert!(motion(Transform::translation(Vec3::new(f64::NAN, 0.0, 0.0))).is_none());
     }
 
     #[test]
@@ -1098,6 +1268,51 @@ mod tests {
             Point3::ZERO,
             Vec3::new(f64::NAN, 1.0, 0.0)
         )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::ZERO,
+            Vec3::Y
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::new(-3.0, 0.0, 0.0)
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::new(f64::NAN, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y
+        )));
+    }
+
+    /// Into a plane's frame: the plane's origin goes to the origin, a point along its x axis
+    /// to X, along its normal to Z (its level above the plane), and the map is rigid. The
+    /// plane through (3, 4, 5) with x = 2Z and y = (1, -1, 0) has the unit normal
+    /// x̂ × ŷ = (1, 1, 0)/√2; a skew `y` in that plane gives the same frame.
+    #[test]
+    fn into_a_planes_frame_its_normal_is_z() {
+        let o = Point3::new(3.0, 4.0, 5.0);
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let n = Vec3::new(s, s, 0.0);
+        let skew = Vec3::new(1.0, -1.0, 7.0);
+        for y in [Vec3::new(1.0, -1.0, 0.0), skew] {
+            let t = Transform::into_plane_frame(o, Vec3::new(0.0, 0.0, 2.0), y).unwrap();
+            let near = |a: Point3, b: Point3| (a - b).length() < 1e-12;
+            assert!(near(t.transform_point(o), Point3::ZERO));
+            assert!(near(
+                t.transform_point(o + Vec3::Z * 2.5),
+                Point3::new(2.5, 0.0, 0.0)
+            ));
+            assert!(near(
+                t.transform_point(o + n * 4.0),
+                Point3::new(0.0, 0.0, 4.0)
+            ));
+            assert!(near(
+                t.transform_point(o + Vec3::new(s, -s, 0.0)),
+                Point3::new(0.0, 1.0, 0.0)
+            ));
+            assert!(t.is_regular(0.0).is_yes());
+        }
     }
 
     #[test]

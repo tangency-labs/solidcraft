@@ -33,6 +33,9 @@ macro_rules! layout_preferences {
             browser_rows_start_closed: bool = false, PAGE_LAYOUT;
             /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
             clear_view_tabs: bool = true, PAGE_LAYOUT;
+            /// Search commands opens centred over the view instead of in the ribbon's top-right corner
+            /// (#18309); the shortcut, results and keys are the same. Off by default: it opens in place.
+            command_search_centred: bool = false, PAGE_LAYOUT;
             /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
             construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
             /// A design opens with the views it had when it was last closed.
@@ -99,8 +102,14 @@ macro_rules! layout_preferences {
             layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
             /// Restore the former Surface Create and Convert sections.
             legacy_surface_toolbar: bool = false, PAGE_LAYOUT => check_id("prefs.legacy_surface_toolbar");
-            /// Preview card density in the document browser; Large preserves the existing layout.
-            library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
+            /// The parts library panel (`library`, shown and hidden by the app bar's documents button):
+            /// its folder (a local folder or a server share; empty: none chosen), whether it shows, the
+            /// card size and the subfolder last browsed into
+            /// (relative to the folder).
+            library_folder: String = String::new(), PAGE_LAYOUT;
+            library_open: bool = false, PAGE_LAYOUT;
+            library_size: LibrarySize = LibrarySize::default(), PAGE_LAYOUT;
+            library_subfolder: String = String::new(), PAGE_LAYOUT;
             /// Preview panel placement and reflow while dragging. Off shows the drop outline.
             live_panel_drag_preview: bool = true, PAGE_LAYOUT;
             /// Ordered view controls and their appearance.
@@ -143,8 +152,6 @@ macro_rules! layout_preferences {
             /// and entering Render opens a view of its own, as in 0.43.0. Off: the tab looks as
             /// it did before design views, with no switcher until the user opens a second view.
             show_design_view_switcher: bool = false, PAGE_LAYOUT;
-            /// Show the optional document browser beside the design.
-            show_document_browser: bool = false, PAGE_LAYOUT;
             /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
             /// tools then start a sketch first (#7904).
             sketch_tab_always: bool = false, PAGE_LAYOUT;
