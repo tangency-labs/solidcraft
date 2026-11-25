@@ -395,6 +395,29 @@ fn rejects_malformed_and_wrong_root_documents() {
 }
 
 #[test]
+fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
+    let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..500_100 {
+        board.push_str("\t\t(zz 1)\n");
+    }
+    board.push(')');
+    assert!(board.len() < MAX_KICAD_BYTES);
+    assert!(tokenize(&board).map(|t| t.len() > MIN_TOKEN_CAP).unwrap_or(false));
+    assert!(parse_kicad_board(board.as_bytes(), "big.kicad_pcb").is_ok());
+}
+
+#[test]
+fn the_token_cap_follows_the_size_and_still_refuses_dense_junk() {
+    assert_eq!(token_cap(0), MIN_TOKEN_CAP);
+    assert_eq!(token_cap(MAX_KICAD_BYTES), MAX_KICAD_BYTES / 2);
+    // One token per byte is denser than any board: refused by count, quickly.
+    let junk = format!("(kicad_pcb {})", "()".repeat(MIN_TOKEN_CAP));
+    assert!(parse_kicad_board(junk.as_bytes(), "junk.kicad_pcb").is_err());
+}
+
+#[test]
 fn handles_escaped_model_paths_and_kicad_extensions_case_insensitively() {
     let source = r#"(kicad_pcb
       (footprint "part" (at 0 0)

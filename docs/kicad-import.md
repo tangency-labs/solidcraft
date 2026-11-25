@@ -63,7 +63,7 @@ File → Open… and choose a board (the picker lists KiCad PCB files), or drop 
 
 ## Limits
 
-The board file is untrusted input: its size (128 MB), token count, nesting, footprints, models, pads, tracks, vias, zones, graphics, vertices and triangles are capped, numbers must be finite and bounded, and the kernel calls that build the bodies are guarded. Passing a limit becomes a warning and skips the remaining items; a board that cannot be built fails the command.
+The board file is untrusted input: its size (128 MB), token count (at most one token per two bytes, never fewer than 2 000 000, so a board as KiCad writes it is not refused for its token count below the size limit), nesting, footprints, models, pads, tracks, vias, zones, graphics, vertices and triangles are capped, numbers must be finite and bounded, and the kernel calls that build the bodies are guarded. Passing a limit becomes a warning and skips the remaining items; a board that cannot be built fails the command.
 
 Not modelled yet:
 
