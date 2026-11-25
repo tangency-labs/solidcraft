@@ -14,11 +14,11 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
 use super::profile::{axes, curve_on_frame, halves, point_of, to_world, Region2, Seg2, H2};
-use crate::geom::vector3d::Point3;
-use crate::math::{Point2, Vec2};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
+use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
+use crate::math::{Point2, Vec2};
 use crate::sweep::api_brep::create_linear_sweep;
 use crate::topology::Brep;
 
@@ -104,7 +104,7 @@ pub fn level_on_plane(frame: &Frame, point: Point3, plane: &Frame) -> Option<f64
 
 /// The least and the most level of `plane` above `frame` ([`level_on_plane`]) over the outer
 /// loops of `regions` (in `frame`'s coordinates): the rise of a plane at a slant to the
-/// extrusion across the profiles. Exact for lines and arcs; a free-form piece is enclosed to a
+/// extrusion across the profiles. Exact for lines and arcs; a free-form piece is searched to a
 /// hair ([`affine_extremes`]). `None` with no outer segment, for a plane along the normal, or for
 /// a malformed segment.
 #[must_use]
@@ -118,9 +118,9 @@ pub fn plane_rise(frame: &Frame, plane: &Frame, regions: &[Region2]) -> Option<(
 /// `way`) somewhere over the outer loops of `regions`: the two planes cross over the profiles,
 /// so part of them would have no extent. The gap between the planes changes linearly across
 /// the sketch, so its least value lies at a line's end or at an arc's end or its point
-/// farthest the gap's way down; a free-form piece is enclosed to a hair
-/// ([`affine_extremes`]). A crossing within `1e-9 (1 + reach)` of a loop, `reach` the gap's
-/// largest size over the loops, does not count. `None` as [`plane_rise`].
+/// farthest the gap's way down; a free-form piece is searched to a hair ([`affine_extremes`]).
+/// A crossing within `1e-9 (1 + reach)` of a loop, `reach` the gap's largest size over the
+/// loops, does not count. `None` as [`plane_rise`].
 #[must_use]
 pub fn planes_cross_over(
     frame: &Frame,
@@ -140,22 +140,27 @@ pub fn planes_cross_over(
     Some(least < -1e-9 * (1.0 + reach))
 }
 
-/// Halvings of a free-form span past which [`affine_extremes`] stops refining it.
+/// Halvings of a free-form span past which [`affine_extremes`] stops refining it: a piece
+/// 2^-48 of its span's parameter, far below what the hair below can tell apart.
 const MAX_HALVINGS: u32 = 48;
+
+/// How close, relative to the values' size, a free-form piece's enclosure must come to the
+/// extremes found on it before [`affine_extremes`] stops halving it. It is a stop rule, not a
+/// bound: what is returned is always a value the curve takes, so the hair only decides how close
+/// to the true extreme the search goes, a thousand times under the `1e-9` a crossing in
+/// [`planes_cross_over`] must clear.
+const HAIR: f64 = 1e-12;
 
 /// The least and the most of `g` over the outer loops of `regions`, `g` affine over the sketch
 /// (a plane's level, or the gap between two). Its extremes over a line lie at the line's ends,
 /// over an arc at its ends or at its points farthest along and against `g`'s gradient where the
-/// arc passes them, all evaluated exactly. Over a free-form piece (cubic, conic, Bézier) `g`'s
-/// values at its homogeneous control points enclose it (the convex hull property, the weights
-/// positive), so each span is halved until its enclosure lies within a hair (`1e-12` of the
-/// values' size) of the extremes found at the ends of its pieces, which lie on the curve: the
-/// extremes returned are values `g` takes. `None` with no outer segment, where `g` is `None` or
+/// arc passes them, `g` evaluated at exactly those points. Over a free-form piece (cubic, conic,
+/// Bézier) `g`'s values at its homogeneous control points enclose it (the convex hull property,
+/// the weights positive), so each span is halved until its enclosure lies within [`HAIR`] of
+/// the extremes found at the ends of its pieces, which lie on the curve: the extremes returned
+/// are values `g` takes. `None` with no outer segment, where `g` is `None` or
 /// not finite, or for a malformed segment.
-fn affine_extremes(
-    regions: &[Region2],
-    g: impl Fn(Point2) -> Option<f64>,
-) -> Option<(f64, f64)> {
+fn affine_extremes(regions: &[Region2], g: impl Fn(Point2) -> Option<f64>) -> Option<(f64, f64)> {
     let g = |q: Point2| g(q).filter(|v| v.is_finite());
     let at0 = g(Vec2::new(0.0, 0.0))?;
     let slope = Vec2::new(g(Vec2::new(1.0, 0.0))? - at0, g(Vec2::new(0.0, 1.0))? - at0);
@@ -234,7 +239,7 @@ fn span_extremes(span: Vec<H2>, g: &impl Fn(Point2) -> Option<f64>) -> Option<(f
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
                 (l.min(*v), h.max(*v))
             });
-        let hair = 1e-12 * (1.0 + hull_lo.abs().max(hull_hi.abs()));
+        let hair = HAIR * (1.0 + hull_lo.abs().max(hull_hi.abs()));
         if (hull_lo >= least - hair && hull_hi <= most + hair) || depth >= MAX_HALVINGS {
             continue;
         }

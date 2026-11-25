@@ -3077,7 +3077,10 @@ fn a_plane_meets_the_line_along_the_extrusion_at_its_closed_form_level() {
         y_axis: [0.0, 0.0, 1.0],
     };
     assert_eq!(level_on_plane(&xy(), Vec3::new(1.0, 0.0, 0.0), &wall), None);
-    assert_eq!(plane_rise(&xy(), &wall, &[rectangle(p(0.0, 0.0), p(1.0, 1.0))]), None);
+    assert_eq!(
+        plane_rise(&xy(), &wall, &[rectangle(p(0.0, 0.0), p(1.0, 1.0))]),
+        None
+    );
 }
 
 #[test]
@@ -3140,7 +3143,8 @@ fn a_free_form_pieces_extremes_are_values_it_takes() {
 
 #[test]
 fn two_planes_cross_over_a_profile_only_where_the_gap_turns_negative() {
-    let crosses = |r: Region2, way: f64| planes_cross_over(&xy(), &xy(), &half_slope(), &[r], way).unwrap();
+    let crosses =
+        |r: Region2, way: f64| planes_cross_over(&xy(), &xy(), &half_slope(), &[r], way).unwrap();
     // From z = 0 to z = 1 + x / 2, running up: the gap is 1 + x / 2.
     // Over x in [-1, 1] it stays positive; running down it is negative everywhere.
     assert!(!crosses(rectangle(p(-1.0, 0.0), p(1.0, 1.0)), 1.0));
@@ -3154,14 +3158,26 @@ fn two_planes_cross_over_a_profile_only_where_the_gap_turns_negative() {
     assert!(crosses(outer(circle(p(0.0, 0.0), 2.5)), 1.0));
     // The right half of a unit circle about (-1.5, 0) spans x in [-1.5, -0.5]: the gap stays at
     // 1/4 or more, though the full circle's leftmost point (x = -2.5) would give -1/4.
-    assert!(!crosses(arc_and_chord(p(-1.5, 0.0), 1.0, -FRAC_PI_2, PI), 1.0));
+    assert!(!crosses(
+        arc_and_chord(p(-1.5, 0.0), 1.0, -FRAC_PI_2, PI),
+        1.0
+    ));
     // An ellipse of semi-axes 2 and 1 touches at x = -2; of semi-axes 2.2 and 1 it reaches -0.1.
     assert!(!crosses(outer(ellipse(p(0.0, 0.0), 2.0, 1.0)), 1.0));
     assert!(crosses(outer(ellipse(p(0.0, 0.0), 2.2, 1.0)), 1.0));
     // No profile, or a way that is not a number, has no answer.
-    assert_eq!(planes_cross_over(&xy(), &xy(), &half_slope(), &[], 1.0), None);
     assert_eq!(
-        planes_cross_over(&xy(), &xy(), &half_slope(), &[rectangle(p(0.0, 0.0), p(1.0, 1.0))], f64::NAN),
+        planes_cross_over(&xy(), &xy(), &half_slope(), &[], 1.0),
+        None
+    );
+    assert_eq!(
+        planes_cross_over(
+            &xy(),
+            &xy(),
+            &half_slope(),
+            &[rectangle(p(0.0, 0.0), p(1.0, 1.0))],
+            f64::NAN
+        ),
         None
     );
 }
