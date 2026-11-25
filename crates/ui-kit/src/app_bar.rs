@@ -3510,7 +3510,10 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
+        // A plain tab's × sits inside its drag area; over the × the pointer is the button's arrow.
+        let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
+        let over_close = plain && ui.rect_contains_pointer(xr);
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() && !over_close {
             ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
         }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
@@ -3606,7 +3609,6 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 plus_button(ui, strip, pr, 12.0, &mut pen);
             }
             // ×
-            let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
             let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
             let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
             solidcraft_ui_registry::publish_target(&format!("{}{i}", h.close), xr);

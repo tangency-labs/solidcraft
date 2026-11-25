@@ -1326,6 +1326,20 @@ fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
     }
 }
 
+/// The × on a design tab is a button, not part of the tab's drag handle: over it the pointer is the
+/// plain arrow, on the shown design's tab and on the others alike.
+#[test]
+fn a_design_tabs_close_button_shows_the_arrow_not_the_drag_hand() {
+    for close in ["t:close:0", "t:close:1"] {
+        let rig = TabsRig::new();
+        let at = rig.at(close);
+        for _ in 0..3 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default, "{close}");
+        }
+    }
+}
+
 /// A click selects a tab, its × closes it, + asks for a new one, a row of a tab's menu returns its
 /// id, and a tab dragged past another is moved there.
 #[test]
