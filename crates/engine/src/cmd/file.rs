@@ -1390,7 +1390,8 @@ type KicadRead = (solidcraft_io::KicadImport, String, Vec<u8>);
 fn read_board(path: &str, options: &solidcraft_io::KicadOptions) -> Result<KicadRead> {
     let board_path = solidcraft_io::kicad_board_path(std::path::Path::new(path)).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let board_path = board_path.to_string_lossy().into_owned();
-    let bytes = solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
+    let bytes =
+        solidcraft_io::vfs::read(&board_path, solidcraft_io::MAX_KICAD_BYTES).map_err(|e| EngineError::Other(format!("{board_path}: {e}")))?;
     let model_dir = std::path::Path::new(&board_path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let paths = KicadPaths::current();
     let mut load = |model: &str| {

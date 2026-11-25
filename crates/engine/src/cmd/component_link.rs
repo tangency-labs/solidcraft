@@ -877,7 +877,12 @@ pub(super) fn allow_linked_file(s: &mut Session, file: &Path) {
 /// Read the KiCad board a link names again, when its file changed. Whether the component's
 /// bodies were replaced (`true`) or the board is the one the link read (`false`). Nothing
 /// changes when the board can't be read.
-fn update_kicad_link(s: &mut Session, comp: u64, link: &DesignLink, importer: &solidcraft_doc::LinkImporter) -> std::result::Result<(bool, Vec<String>), String> {
+fn update_kicad_link(
+    s: &mut Session,
+    comp: u64,
+    link: &DesignLink,
+    importer: &solidcraft_doc::LinkImporter,
+) -> std::result::Result<(bool, Vec<String>), String> {
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
     if let Some(why) = importer_file_refusal(s, &file) {
