@@ -1386,8 +1386,9 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
     } else {
-        match p.get("face").and_then(vec3) {
-            Some(fp) => {
+        match p.get("face") {
+            Some(value) => {
+                let fp = vec3(value).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z]"))?;
                 let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
                 (id, Some(ProfileSel::Points { points: vec![inside] }), Some(body))
             }
@@ -3223,6 +3224,18 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
+    copy_keeps_appearance_for(s, id, sources, None, cmd)
+}
+
+/// Copy each source body's body-level appearance and physical material onto its copies created by
+/// feature `id`. Bodies in `preserve` keep any explicit assignment they already have (#21245).
+pub(super) fn copy_keeps_appearance_for(
+    s: &mut Session,
+    id: u64,
+    sources: &[String],
+    preserve: Option<&std::collections::HashSet<String>>,
+    cmd: &str,
+) -> Result<()> {
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
     let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
     let Some(each) = each else {
@@ -3230,11 +3243,18 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
     };
     for (source, copies) in sources.iter().zip(copies.chunks(each)) {
         for copy in copies {
+            if preserve.is_some_and(|existing| existing.contains(copy)) {
+                continue;
+            }
             if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            } else {
+                s.doc_mut().appearances.bodies.remove(copy);
             }
             if let Some(material) = s.doc.materials.get(source).cloned() {
                 s.doc_mut().materials.insert(copy.clone(), material);
+            } else {
+                s.doc_mut().materials.remove(copy);
             }
             if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
                 s.doc_mut().collision_shapes.insert(copy.clone(), shape);
