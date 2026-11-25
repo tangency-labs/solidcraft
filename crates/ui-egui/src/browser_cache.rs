@@ -20,6 +20,9 @@ pub(super) struct Node {
     pub tooltip: String,
     pub grounded: bool,
     pub first: bool,
+    /// A further placement of its component: the component's name and the placement path of its
+    /// first placement, the one whose row lists the contents (#21458).
+    pub instance_of: Option<(String, String)>,
     pub children: Vec<Vec<u64>>,
     pub hover_bodies: Option<Vec<String>>,
     pub folders: [Option<Folder>; 3],
@@ -189,14 +192,18 @@ impl Cache {
         let occurrence = doc.occurrences.get(*self.ids.get(path.last()?)?)?;
         let index = self.components.get_mut(&component)?;
         let definition = doc.components.get(index.definition?)?;
-        let first = index.first.get_or_insert_with(|| doc.first_path(component)) == path;
+        let first_path = index.first.get_or_insert_with(|| doc.first_path(component));
+        let first = first_path == path;
+        // A placement path as the tooltip names it: `Frame:1 / Bracket:2`.
+        let placement_name = |path: &[u64]| -> Option<String> {
+            let names: Option<Vec<&str>> = path.iter().map(|id| Some(doc.occurrences.get(*self.ids.get(id)?)?.name.as_str())).collect();
+            Some(names?.join(" / "))
+        };
+        // A component whose first placement can't be named (none, or a broken path) has no
+        // placement to point to: its rows stay as they were.
+        let instance_of = if first || first_path.is_empty() { None } else { placement_name(first_path).map(|p| (definition.name.clone(), p)) };
         let mut tooltip = format!("Component: {}\nPlacement: ", definition.name);
-        for (i, id) in path.iter().enumerate() {
-            if i != 0 {
-                tooltip.push_str(" / ");
-            }
-            tooltip.push_str(&doc.occurrences.get(*self.ids.get(id)?)?.name);
-        }
+        tooltip.push_str(&placement_name(path)?);
         tooltip.push_str("\nGeometry edits apply to every instance of this component.");
         let children = self.children(app, component, path, solidcraft_engine::doc::MAX_PLACEMENTS.saturating_sub(self.scheduled));
         self.scheduled += children.len();
@@ -211,6 +218,7 @@ impl Cache {
                 tooltip,
                 grounded: occurrence.grounded,
                 first,
+                instance_of,
                 children,
                 hover_bodies: None,
                 folders: Default::default(),

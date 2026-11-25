@@ -78,6 +78,9 @@ pub struct Row<'a> {
     /// A badge on the icon's lower right corner, for a state of what the row names (a component
     /// linked to another design file, #14024).
     pub icon_badge: Option<IconBadge<'a>>,
+    /// A second badge, beside `icon_badge` on its left, or in its place when there is none (a
+    /// further placement of a component, which may also be linked, #21458).
+    pub icon_badge_beside: Option<IconBadge<'a>>,
     /// The row's tooltip (a sketch's solve state), after its full name when that is cut short.
     pub tip: Option<&'a str>,
     /// Component rows: is it the active one?
@@ -202,9 +205,11 @@ pub fn eye_drag_id() -> egui::Id {
 /// The badge on a row icon's lower right corner: a small circle standing past the icon's edge, kept
 /// clear of the icon by a ring in the panel colour, with the glyph centred in it. A faded row fades
 /// its badge with its label.
-fn paint_icon_badge(p: &egui::Painter, icon: Rect, badge: IconBadge<'_>, opacity: f32) {
+/// `slot` 1 stands one badge to the left of slot 0, its ring overlapping slot 0's edge.
+fn paint_icon_badge(p: &egui::Painter, icon: Rect, badge: IconBadge<'_>, opacity: f32, slot: u8) {
     let t = Tokens::get();
-    let centre = pos2(icon.right() + BADGE_PAST_RIGHT - BADGE / 2.0, icon.bottom() + BADGE_PAST_BOTTOM - BADGE / 2.0);
+    let left = f32::from(slot) * (BADGE - BADGE_RING * 2.0);
+    let centre = pos2(icon.right() + BADGE_PAST_RIGHT - BADGE / 2.0 - left, icon.bottom() + BADGE_PAST_BOTTOM - BADGE / 2.0);
     let radius = BADGE / 2.0;
     let ink = badge.ink.gamma_multiply(opacity);
     if badge.outlined {
@@ -405,8 +410,12 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
             Some(ink) => icons::paint_ink(ui.painter(), ir, row.icon, ink.gamma_multiply(opacity)),
             None => icons::paint_icon(ui.painter(), ir, row.icon, opacity),
         }
+        // The badge beside goes first, so the main badge's ring keeps the two apart.
+        if let Some(badge) = row.icon_badge_beside {
+            paint_icon_badge(ui.painter(), ir, badge, opacity, u8::from(row.icon_badge.is_some()));
+        }
         if let Some(badge) = row.icon_badge {
-            paint_icon_badge(ui.painter(), ir, badge, opacity);
+            paint_icon_badge(ui.painter(), ir, badge, opacity, 0);
         }
         x += 21.0;
     }

@@ -601,6 +601,18 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "browser_body_features",
                 );
             });
+            // Whether a component's further placements list its contents again (#21458), in a row
+            // of its own: one more box in the row above widens it past the page at narrow windows.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_instances_list_contents"),
+                    app.tr("prefs.browser_instances_list_contents_note"),
+                    &mut app.preferences.browser_instances_list_contents,
+                    "browser_instances_list_contents",
+                );
+            });
             // A folder's icon from its features (#12514) and the History controls' steps (#11430), in
             // a row of their own: one more box in the row above widens it past the page at narrow
             // windows.

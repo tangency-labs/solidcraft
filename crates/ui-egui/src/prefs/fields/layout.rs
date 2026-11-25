@@ -19,6 +19,10 @@ macro_rules! layout_preferences {
             /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
             /// column at the rows' right end. Off by default.
             browser_eye_left: bool = false, PAGE_LAYOUT;
+            /// Every placement of a component lists the component's contents in the Browser, as
+            /// before #21458. Off by default: only the first placement lists them, and each further
+            /// placement has an instance badge and lists just its own placements and joints.
+            browser_instances_list_contents: bool = false, PAGE_LAYOUT;
             /// Folders in the Browser start closed, and placements too whatever "Components start open"
             /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
             /// Browser, which opens just the rows down to its body and closes again the ones the last find

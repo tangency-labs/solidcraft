@@ -4937,6 +4937,7 @@ mod tests {
             ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
             ("browser_eye_left", "prefs.browser_eye_left"),
             ("browser_body_features", "prefs.browser_body_features"),
+            ("browser_instances_list_contents", "prefs.browser_instances_list_contents"),
         ];
         for width in [1600, 1100, 960, 800, 640] {
             let mut h = crate::scenario::Harness::new();
@@ -6674,6 +6675,7 @@ mod tests {
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
+            ("browser_instances_list_contents", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),

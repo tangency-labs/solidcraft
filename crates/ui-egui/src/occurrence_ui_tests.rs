@@ -308,6 +308,8 @@ fn fixture() -> (Harness, u64, u64, u64) {
     let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
     // These rows are read with every placement open, as placements started before #9274.
     h.app.preferences.browser_components_open = true;
+    // And with each placement listing its own bodies, as before #21458: they act on one copy.
+    h.app.preferences.browser_instances_list_contents = true;
     h.frames(3);
     (h, component, first, second)
 }
@@ -596,6 +598,8 @@ fn occurrence_nested_shared_child_has_distinct_rows_and_scope() {
     let mut h = Harness::new();
     // These rows are read with every placement open, as placements started before #9274.
     h.app.preferences.browser_components_open = true;
+    // And each copy of the shared child listing its contents, as before #21458, so its row folds.
+    h.app.preferences.browser_instances_list_contents = true;
     let parent = h.app.run("component.create", json!({"name":"Assembly"})).unwrap();
     let parent_component = parent["component"].as_u64().unwrap();
     let parent_occurrence = parent["occurrence"].as_u64().unwrap();
