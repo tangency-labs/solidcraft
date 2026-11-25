@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.49.0"
+version = "0.49.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -141,6 +141,10 @@ cadmpeg-registry = { version = "=0.6.12", default-features = false, features = [
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
+
+# The installed fonts, for a character no bundled face has (#20005; MIT, pure Rust). Without
+# fontconfig, its other dependencies are already in the tree.
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "memmap"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
 nix = { version = "0.31", default-features = false, features = ["signal", "user"] }

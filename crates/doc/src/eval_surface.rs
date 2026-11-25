@@ -699,7 +699,7 @@ fn push_sheet(st: &mut ModelState, f: &Feature, traced: crate::lineage::Traced) 
 }
 
 /// The most curves one direction of a network may list (the kernel's own cap).
-const MAX_NETWORK_CURVES: usize = solidcraft_geom::network::MAX_NETWORK_CURVES;
+const MAX_NETWORK_CURVES: usize = solidcraft_kernel::network::MAX_NETWORK_CURVES;
 
 /// A loop of three or four sketch curves as one patch: four give the Coons patch of opposite pairs
 /// (the first and third one way, the second and fourth the other); three collapse the side

@@ -770,6 +770,11 @@ fn value_cell(
     let mut text = rule_editor.drafts.get(&key).cloned().unwrap_or_else(|| shown.clone());
     let id = ui.make_persistent_id(&key);
     let (response, choice) = value_control(ui, id, &mut text, kind, materials);
+    // Escape blurs the editor before widgets render; discard rather than commit the draft.
+    if ui_kit::text_edit_escape_owner(ui.ctx()) == Some(response.id) {
+        rule_editor.drafts.remove(&key);
+        return;
+    }
     if let Some(choice) = choice {
         run(app, json!({"name":name,"values":{column:choice}}));
     }

@@ -776,7 +776,8 @@ fn target_observation(target: &HostControlTarget) -> Value {
             HostPointerTarget::Sash { first, second } => json!({"type":"sash","first":first,"second":second}),
             HostPointerTarget::Resize { section, edge } => json!({"type":"resize","section":section,"edge":match edge {
                 HostResizeEdge::Left => "left", HostResizeEdge::Right => "right", HostResizeEdge::Top => "top",
-                HostResizeEdge::Bottom => "bottom", HostResizeEdge::BottomRight => "bottom_right",
+                HostResizeEdge::Bottom => "bottom", HostResizeEdge::TopLeft => "top_left", HostResizeEdge::TopRight => "top_right",
+                HostResizeEdge::BottomLeft => "bottom_left", HostResizeEdge::BottomRight => "bottom_right",
             }}),
             HostPointerTarget::Overflow { zone } => json!({"type":"overflow","zone":zone}),
             HostPointerTarget::OverflowAll => json!({"type":"overflow_all"}),
