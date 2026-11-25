@@ -1397,7 +1397,7 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 /// A new sketch on `plane`, as `sketch.create` replies.
-fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+pub(super) fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
     let sketching_view = s.requested_sketch_view(p, "sketch.create")?;
     let before = entry_point(s);
     if face::is_face(p) {
