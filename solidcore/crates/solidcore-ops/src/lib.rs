@@ -11,6 +11,8 @@
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
 //! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
+//! - [`fuel`]: a deterministic work budget per call, so a call going nowhere stops early
+//!   ([`Error::OutOfFuel`]);
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -67,6 +69,7 @@ pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
+pub mod fuel;
 pub mod heal;
 pub mod history;
 pub mod hlr;

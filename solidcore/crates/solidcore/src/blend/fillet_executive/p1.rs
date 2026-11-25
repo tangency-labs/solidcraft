@@ -1862,6 +1862,7 @@ pub(crate) fn remove_topo_edges_with_notifications(
                     if let Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }
                         | SolidError::NotFound { .. }),
