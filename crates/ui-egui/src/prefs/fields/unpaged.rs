@@ -22,6 +22,9 @@ macro_rules! unpaged_preferences {
             /// Agents the user added (the installed ones are found by themselves). API keys are never
             /// here: they live in the system keychain.
             agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
+            /// The local appearance library the Appearance panel loads whenever it opens (#20361); empty:
+            /// none, the panel opens with no library, as it always has. Set by the panel's own checkbox.
+            appearance_library: String = String::new();
             /// The programs the user added to the slicer list, newest first.
             custom_slicers: Vec<String> = Vec::new();
             /// Imported theme files (`theme_files`), kept here so they also work in the browser.
