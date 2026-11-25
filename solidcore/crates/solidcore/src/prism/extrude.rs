@@ -6,17 +6,20 @@
 //! sweep (`SmApiCreateLinearSweep`) of the region's curves.
 //!
 //! The levels of an extrude's ends on planes at a slant to it ([`level_on_plane`],
-//! [`plane_rise`], [`planes_cross_over`]) were SolidCraft's extrude From/To code, moved into the
-//! kernel the same way (#21934).
+//! [`plane_rise`], [`plane_gap`]) were SolidCraft's extrude From/To code, moved into the kernel
+//! the same way (#21934).
 //!
-//! Deviations: none (no upstream counterpart). No recursion.
+//! Deviations: none (no upstream counterpart). No recursion; the search over a free-form span
+//! is bounded by [`MAX_HALVINGS`] and [`MAX_PIECES`] and refuses past them.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
-use super::profile::{axes, curve_on_frame, halves, point_of, to_world, Region2, Seg2, H2};
+use std::f64::consts::{PI, TAU};
+
+use super::profile::{axes, curve_on_frame, gamma, halves, point_of, Region2, Seg2, H2};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
 use crate::sweep::api_brep::create_linear_sweep;
@@ -85,97 +88,157 @@ pub fn symmetric_offset_probe_points(
     ]
 }
 
+const OP_LEVEL: &str = "prism::extrude::level_on_plane";
+const OP_RISE: &str = "prism::extrude::plane_rise";
+const OP_GAP: &str = "prism::extrude::plane_gap";
+
+/// Halvings of a free-form span past which [`span_extremes`] refuses: at 2^-60 of the span's
+/// parameter a piece's enclosure has long reached its rounding (it shrinks to about a quarter
+/// with each halving), so a span still apart there is not one the search can settle.
+const MAX_HALVINGS: u32 = 60;
+
+/// Pieces of one free-form span [`span_extremes`] looks at before it refuses. It keeps only the
+/// pieces near an extreme, a few at each halving, so this bounds the work and is not reached by
+/// a span whose enclosures settle.
+const MAX_PIECES: u32 = 4096;
+
+/// A plane's level above a frame, which changes linearly across the frame's sketch:
+/// `at0 + slope · q` at sketch point `q`.
+#[derive(Clone, Copy, Debug)]
+struct Level {
+    at0: f64,
+    slope: Vec2,
+}
+
+impl Level {
+    /// The level above `frame` of the point of `plane` on the line along `frame`'s normal `n`
+    /// (`x × y`) through each sketch point: `(P - o)·n + t (n·n)` at `P = o + x q.x + y q.y`,
+    /// where the line `P + t n` meets `plane` (`t = (p - P)·m / (n·m)`, `p` and `m` the plane's
+    /// origin and normal). Whether the line meets the plane is decided only past the rounding of
+    /// the normals' dot product, `gamma(3) |n| |m|` (Higham §3.1), and the origins are
+    /// subtracted before anything is scaled, so the rounding follows the part's size, not its
+    /// distance from the world origin.
+    fn of(frame: &Frame, plane: &Frame, op: &'static str) -> Result<Self> {
+        let (o, x, y, n) = axes(frame);
+        let (p, _, _, m) = axes(plane);
+        let across = meeting(n, m, op)?;
+        let nn = n.dot(n);
+        let level = Self {
+            at0: (p - o).dot(m) / across * nn,
+            slope: Vec2::new(
+                x.dot(n) - x.dot(m) / across * nn,
+                y.dot(n) - y.dot(m) / across * nn,
+            ),
+        };
+        if !(level.at0.is_finite() && level.slope.x.is_finite() && level.slope.y.is_finite()) {
+            return Err(SolidError::invalid_input(op, "a level that is not finite"));
+        }
+        Ok(level)
+    }
+
+    /// The level at sketch point `q`.
+    fn at(self, q: Point2) -> f64 {
+        self.at0 + self.slope.dot(q)
+    }
+}
+
+/// `n·m`, refused where its sign is within its rounding, `gamma(3) |n| |m|`: there the line
+/// along `n` may run along the plane of normal `m` and never meet it.
+fn meeting(n: Vec3, m: Vec3, op: &'static str) -> Result<f64> {
+    let across = n.dot(m);
+    if !(across.abs() > gamma(3) * n.length() * m.length()) {
+        return Err(SolidError::invalid_input(
+            op,
+            "the plane runs along the extrusion",
+        ));
+    }
+    Ok(across)
+}
+
 /// Where the line along `frame`'s normal through `point` meets `plane` (the plane through
 /// `plane`'s origin square to its normal `x × y`), as a level along that normal measured from
-/// `frame`'s origin: the meet's [`super::profile::height`]. `None` when the plane runs along the
-/// normal (their dot product under 1e-9), which the line never meets, or for a level that is
-/// not finite.
-#[must_use]
-pub fn level_on_plane(frame: &Frame, point: Point3, plane: &Frame) -> Option<f64> {
+/// `frame`'s origin: `(point - o)·n + t (n·n)`, the line `point + t n` meeting the plane
+/// ([`Level::of`] for the rounding).
+///
+/// # Errors
+///
+/// `InvalidInput` for a plane that runs along the normal, which the line never meets, or a
+/// level that is not finite.
+pub fn level_on_plane(frame: &Frame, point: Point3, plane: &Frame) -> Result<f64> {
     let (o, _, _, n) = axes(frame);
-    let (plane_origin, _, _, m) = axes(plane);
-    let across = n.dot(m);
-    if !(across.abs() >= 1e-9) {
-        return None;
+    let (p, _, _, m) = axes(plane);
+    let across = meeting(n, m, OP_LEVEL)?;
+    let level = (point - o).dot(n) + (p - point).dot(m) / across * n.dot(n);
+    if !level.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP_LEVEL,
+            "a level that is not finite",
+        ));
     }
-    let level = (point + n * ((plane_origin - point).dot(m) / across) - o).dot(n);
-    level.is_finite().then_some(level)
+    Ok(level)
 }
 
-/// The least and the most level of `plane` above `frame` ([`level_on_plane`]) over the outer
-/// loops of `regions` (in `frame`'s coordinates): the rise of a plane at a slant to the
-/// extrusion across the profiles. Exact for lines and arcs; a free-form piece is searched to a
-/// hair ([`affine_extremes`]). `None` with no outer segment, for a plane along the normal, or for
-/// a malformed segment.
-#[must_use]
-pub fn plane_rise(frame: &Frame, plane: &Frame, regions: &[Region2]) -> Option<(f64, f64)> {
-    affine_extremes(regions, |q| {
-        level_on_plane(frame, to_world(frame, q, 0.0), plane)
-    })
+/// The least and the most level of `plane` above `frame` over the outer loops of `regions` (in
+/// `frame`'s coordinates): the rise of a plane at a slant to the extrusion across the profiles
+/// ([`affine_extremes`]).
+///
+/// # Errors
+///
+/// `InvalidInput` for a plane along the extrusion, no outer segment or a malformed segment;
+/// `NotConverged` for a free-form piece whose search does not settle.
+pub fn plane_rise(frame: &Frame, plane: &Frame, regions: &[Region2]) -> Result<(f64, f64)> {
+    affine_extremes(Level::of(frame, plane, OP_RISE)?, regions, OP_RISE)
 }
 
-/// Whether `to` lies before `from` along the extrusion (`frame`'s normal times the sign of
-/// `way`) somewhere over the outer loops of `regions`: the two planes cross over the profiles,
-/// so part of them would have no extent. The gap between the planes changes linearly across
-/// the sketch, so its least value lies at a line's end or at an arc's end or its point
-/// farthest the gap's way down; a free-form piece is searched to a hair ([`affine_extremes`]).
-/// A crossing within `1e-9 (1 + reach)` of a loop, `reach` the gap's largest size over the
-/// loops, does not count. `None` as [`plane_rise`].
-#[must_use]
-pub fn planes_cross_over(
+/// The least and the most of `to`'s level above `frame` less `from`'s, over the outer loops of
+/// `regions`: the gap an extrude From one plane To another runs across the profiles
+/// ([`affine_extremes`]). Where the gap changes sign over the profiles the planes cross over
+/// them, and part of the profiles would have no extent; how close to zero still counts as
+/// touching is the caller's to choose.
+///
+/// # Errors
+///
+/// As [`plane_rise`].
+pub fn plane_gap(
     frame: &Frame,
     from: &Frame,
     to: &Frame,
     regions: &[Region2],
-    way: f64,
-) -> Option<bool> {
-    if !way.is_finite() {
-        return None;
-    }
-    let (least, most) = affine_extremes(regions, |q| {
-        let q = to_world(frame, q, 0.0);
-        Some((level_on_plane(frame, q, to)? - level_on_plane(frame, q, from)?) * way.signum())
-    })?;
-    let reach = least.abs().max(most.abs());
-    Some(least < -1e-9 * (1.0 + reach))
+) -> Result<(f64, f64)> {
+    let (from, to) = (
+        Level::of(frame, from, OP_GAP)?,
+        Level::of(frame, to, OP_GAP)?,
+    );
+    let gap = Level {
+        at0: to.at0 - from.at0,
+        slope: to.slope - from.slope,
+    };
+    affine_extremes(gap, regions, OP_GAP)
 }
 
-/// Halvings of a free-form span past which [`affine_extremes`] stops refining it: a piece
-/// 2^-48 of its span's parameter, far below what the hair below can tell apart.
-const MAX_HALVINGS: u32 = 48;
-
-/// How close, relative to the values' size, a free-form piece's enclosure must come to the
-/// extremes found on it before [`affine_extremes`] stops halving it. It is a stop rule, not a
-/// bound: what is returned is always a value the curve takes, so the hair only decides how close
-/// to the true extreme the search goes, a thousand times under the `1e-9` a crossing in
-/// [`planes_cross_over`] must clear.
-const HAIR: f64 = 1e-12;
-
-/// The least and the most of `g` over the outer loops of `regions`, `g` affine over the sketch
-/// (a plane's level, or the gap between two). Its extremes over a line lie at the line's ends,
-/// over an arc at its ends or at its points farthest along and against `g`'s gradient where the
-/// arc passes them, `g` evaluated at exactly those points. Over a free-form piece (cubic, conic,
-/// Bézier) `g`'s values at its homogeneous control points enclose it (the convex hull property,
-/// the weights positive), so each span is halved until its enclosure lies within [`HAIR`] of
-/// the extremes found at the ends of its pieces, which lie on the curve: the extremes returned
-/// are values `g` takes. `None` with no outer segment, where `g` is `None` or
-/// not finite, or for a malformed segment.
-fn affine_extremes(regions: &[Region2], g: impl Fn(Point2) -> Option<f64>) -> Option<(f64, f64)> {
-    let g = |q: Point2| g(q).filter(|v| v.is_finite());
-    let at0 = g(Vec2::new(0.0, 0.0))?;
-    let slope = Vec2::new(g(Vec2::new(1.0, 0.0))? - at0, g(Vec2::new(0.0, 1.0))? - at0);
-    // the angles of the sketch directions along which `g` falls and rises fastest
-    let fall = (slope.x != 0.0 || slope.y != 0.0).then(|| (-slope.y).atan2(-slope.x));
+/// The least and the most of `level` over the outer loops of `regions`. Over a line they lie at
+/// its ends; over an arc at its ends or at its points farthest along and against the level's
+/// slope where the arc passes them. Over a free-form piece (cubic, conic, Bézier) they are
+/// searched for by [`span_extremes`], which returns values the curve takes.
+fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Result<(f64, f64)> {
+    let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
+    // the angle of the sketch direction along which the level rises fastest
+    let rise = (level.slope.x != 0.0 || level.slope.y != 0.0)
+        .then(|| level.slope.y.atan2(level.slope.x));
     let mut range: Option<(f64, f64)> = None;
-    let mut take = |v: f64| {
+    let mut take = |v: f64| -> Result<()> {
+        if !v.is_finite() {
+            return Err(malformed());
+        }
         let (lo, hi) = range.unwrap_or((v, v));
         range = Some((lo.min(v), hi.max(v)));
+        Ok(())
     };
     for seg in regions.iter().flat_map(|r| &r.outer.segs) {
         match *seg {
             Seg2::Line { a, b } => {
-                take(g(a)?);
-                take(g(b)?);
+                take(level.at(a))?;
+                take(level.at(b))?;
             }
             Seg2::Arc {
                 center,
@@ -183,69 +246,89 @@ fn affine_extremes(regions: &[Region2], g: impl Fn(Point2) -> Option<f64>) -> Op
                 start,
                 sweep,
             } => {
-                take(g(seg.start())?);
-                take(g(seg.end())?);
-                for angle in fall.into_iter().flat_map(|f| [f, f + std::f64::consts::PI]) {
+                take(level.at(seg.start()))?;
+                take(level.at(seg.end()))?;
+                for angle in rise.into_iter().flat_map(|r| [r, r + PI]) {
                     // The arc's point at angle `t` is `center + (cos t, sin t) radius`, so with a
                     // negative radius the point farthest along a direction lies at the opposite
                     // angle. Whether the arc passes that angle, going from `start` by `sweep`:
-                    let toward = if radius < 0.0 {
-                        angle + std::f64::consts::PI
-                    } else {
-                        angle
-                    };
+                    let toward = if radius < 0.0 { angle + PI } else { angle };
                     let turn = (toward - start) * sweep.signum();
-                    if turn.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
-                        take(g(center + Vec2::new(toward.cos(), toward.sin()) * radius)?);
+                    if turn.rem_euclid(TAU) <= sweep.abs() {
+                        take(level.at(center + Vec2::new(toward.cos(), toward.sin()) * radius))?;
                     }
                 }
             }
             _ => {
-                for span in seg.spans()? {
-                    let (lo, hi) = span_extremes(span, &g)?;
-                    take(lo);
-                    take(hi);
+                for span in seg.spans().ok_or_else(malformed)? {
+                    let (lo, hi) = span_extremes(level, span, op)?;
+                    take(lo)?;
+                    take(hi)?;
                 }
             }
         }
     }
-    range
+    range.ok_or_else(|| SolidError::invalid_input(op, "no outer profile segment"))
 }
 
-/// The least and the most of `g` over one homogeneous Bézier span, as values `g` takes at
-/// points of it, found by halving ([`affine_extremes`]).
-fn span_extremes(span: Vec<H2>, g: &impl Fn(Point2) -> Option<f64>) -> Option<(f64, f64)> {
-    let ends = |c: &[H2]| -> Option<(f64, f64)> {
-        let (a, b) = (g(point_of(*c.first()?))?, g(point_of(*c.last()?))?);
-        Some((a.min(b), a.max(b)))
+/// The least and the most of `level` over one homogeneous Bézier span, as values it takes at
+/// points of the span. The level's values at the span's control points enclose it (the convex
+/// hull property, the weights positive), so a piece is halved (de Casteljau) until its
+/// enclosure lies within the rounding of those values of the extremes found at the ends of its
+/// pieces, which lie on the curve. That rounding is `gamma(8)` of the largest
+/// `|slope.x q.x| + |slope.y q.y|` over the piece's control points `q` (a coordinate's division
+/// by its weight, then a dot product of two, Higham §3.1). What is returned is a value the
+/// curve takes, within that rounding of its true extreme.
+///
+/// # Errors
+///
+/// `InvalidInput` for a weight not positive or a control point not finite; `NotConverged` past
+/// [`MAX_HALVINGS`] or [`MAX_PIECES`].
+fn span_extremes(level: Level, span: Vec<H2>, op: &'static str) -> Result<(f64, f64)> {
+    let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
+    let ends = |c: &[H2]| -> Result<(f64, f64)> {
+        let first = c.first().ok_or_else(malformed)?;
+        let last = c.last().ok_or_else(malformed)?;
+        let (a, b) = (level.at(point_of(*first)), level.at(point_of(*last)));
+        Ok((a.min(b), a.max(b)))
     };
-    let (mut least, mut most) = ends(&span)?;
     let mut todo = vec![(span, 0u32)];
+    let (mut least, mut most) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut pieces = 0u32;
     while let Some((c, depth)) = todo.pop() {
+        pieces += 1;
+        if pieces > MAX_PIECES || depth > MAX_HALVINGS {
+            return Err(SolidError::NotConverged {
+                operation: op,
+                iterations: pieces,
+            });
+        }
         if c.iter()
             .any(|q| !(q[2] > 0.0 && q.iter().all(|x| x.is_finite())))
         {
-            return None;
+            return Err(malformed());
         }
         let (lo, hi) = ends(&c)?;
         least = least.min(lo);
         most = most.max(hi);
-        let values = c
-            .iter()
-            .map(|q| g(point_of(*q)))
-            .collect::<Option<Vec<_>>>()?;
-        let (hull_lo, hull_hi) = values
-            .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
-                (l.min(*v), h.max(*v))
-            });
-        let hair = HAIR * (1.0 + hull_lo.abs().max(hull_hi.abs()));
-        if (hull_lo >= least - hair && hull_hi <= most + hair) || depth >= MAX_HALVINGS {
+        let (mut hull_lo, mut hull_hi, mut scale) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+        for q in &c {
+            let q = point_of(*q);
+            let v = level.at(q);
+            hull_lo = hull_lo.min(v);
+            hull_hi = hull_hi.max(v);
+            scale = scale.max((level.slope.x * q.x).abs() + (level.slope.y * q.y).abs());
+        }
+        let rounding = gamma(8) * scale;
+        if hull_lo >= least - rounding && hull_hi <= most + rounding {
             continue;
         }
         let (l, r) = halves(&c);
         todo.push((l, depth + 1));
         todo.push((r, depth + 1));
     }
-    Some((least, most))
+    if !(least.is_finite() && most.is_finite()) {
+        return Err(malformed());
+    }
+    Ok((least, most))
 }

@@ -13242,7 +13242,7 @@ pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3, 
     if level_start_reason(&slope, n, &ends).is_some() {
         return None;
     }
-    kernel::level_on_plane(plane, centre, &slope)
+    kernel::level_on_plane(plane, centre, &slope).ok()
 }
 
 /// The plane a To Object end `face` (found as the build finds it, `None` for a point or an edge
@@ -13796,9 +13796,9 @@ fn slanted_plane(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> Option<P
 
 /// How far `slope` lies along `plane`'s normal over the profiles, measured from `level`: the
 /// least and the most over the regions' outer loops ([`kernel::plane_rise`]), widened to hold 0
-/// as the old sampled fold did, since the prism it sizes runs from `level` too.
+/// as the sampled fold before the move did, since the prism it sizes runs from `level` too.
 fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> Result<(f64, f64)> {
-    let (lo, hi) = kernel::plane_rise(plane, slope, regions).ok_or_else(along_the_extrusion)?;
+    let (lo, hi) = kernel::plane_rise(plane, slope, regions)?;
     Ok(((lo - level).min(0.0), (hi - level).max(0.0)))
 }
 
@@ -13843,21 +13843,20 @@ fn trim_between_planes(tools: Vec<Traced>, from: &Plane, to: &Plane, n: Vec3, si
 }
 
 /// Whether `to` lies before `from` along the extrusion (`plane`'s normal times the sign of `d`)
-/// somewhere over the profiles' outer loops: the two planes cross over them
-/// ([`kernel::planes_cross_over`]).
+/// somewhere over the profiles' outer loops: the gap between the planes ([`kernel::plane_gap`])
+/// turns negative over them. A crossing within a hair of a loop, `1e-9` of the gap's largest
+/// size (plus 1e-9 mm), does not count: the planes only touch there.
 fn planes_cross_over(from: &Plane, to: &Plane, plane: &Plane, regions: &[Region2], d: f64) -> Result<bool> {
-    kernel::planes_cross_over(plane, from, to, regions, d).ok_or_else(along_the_extrusion)
+    let (lo, hi) = kernel::plane_gap(plane, from, to, regions)?;
+    let (least, most) = if d < 0.0 { (-hi, -lo) } else { (lo, hi) };
+    Ok(least < -1e-9 * (1.0 + least.abs().max(most.abs())))
 }
 
 /// Where the line along `plane`'s normal through `centre` meets `face_plane`, as a level along
 /// that normal ([`kernel::level_on_plane`]). Refused for a face plane that runs along the
 /// normal, which the line never meets.
 fn level_on(plane: &Plane, centre: Vec3, face_plane: &Plane) -> Result<f64> {
-    kernel::level_on_plane(plane, centre, face_plane).ok_or_else(along_the_extrusion)
-}
-
-fn along_the_extrusion() -> DocError {
-    DocError::Invalid("the From or To face runs along the extrusion".into())
+    Ok(kernel::level_on_plane(plane, centre, face_plane)?)
 }
 
 /// `input`'s part on one side of `plane` ([`kernel::half_space`]), its history carried through

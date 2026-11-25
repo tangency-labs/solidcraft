@@ -560,42 +560,53 @@ pub fn symmetric_offset_probe_points(
 
 /// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
 /// normal from `sketch`'s origin ([`extrude::level_on_plane`]): an extrude's end on a flat face
-/// at a slant to it. `None` for a plane along the normal.
-#[must_use]
-pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Option<f64> {
+/// at a slant to it.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal or a level that is not finite.
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
     extrude::level_on_plane(
         &convert::plane(sketch),
         convert::vec3(point),
         &convert::plane(plane),
     )
+    .map_err(crate::error::status)
 }
 
 /// The least and the most level of `plane` above `sketch` over the outer loops of `regions`
-/// ([`extrude::plane_rise`]). `None` with no outer segment, for a plane along the normal or for
-/// a malformed segment.
-#[must_use]
-pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Option<(f64, f64)> {
+/// ([`extrude::plane_rise`]): how far a flat face at a slant to an extrude rises across its
+/// profiles.
+///
+/// # Errors
+///
+/// [`Error::Refused`] for a plane along the normal, no outer segment or a malformed segment;
+/// [`Error::Status`] for a free-form piece whose search does not settle.
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
     let regions: Vec<_> = regions.iter().map(convert::region2).collect();
     extrude::plane_rise(&convert::plane(sketch), &convert::plane(plane), &regions)
+        .map_err(crate::error::status)
 }
 
-/// Whether `to` lies before `from` along `sketch`'s normal times the sign of `way` somewhere
-/// over the outer loops of `regions` ([`extrude::planes_cross_over`]): an extrude From one flat
-/// face To another would leave part of its profiles with no extent. `None` as [`plane_rise`].
-#[must_use]
-pub fn planes_cross_over(
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the outer loops of
+/// `regions` ([`extrude::plane_gap`]): the gap an extrude From one flat face To another runs
+/// across its profiles.
+///
+/// # Errors
+///
+/// As [`plane_rise`].
+pub fn plane_gap(
     sketch: &Plane,
     from: &Plane,
     to: &Plane,
     regions: &[Region2],
-    way: f64,
-) -> Option<bool> {
+) -> Result<(f64, f64)> {
     let regions: Vec<_> = regions.iter().map(convert::region2).collect();
-    extrude::planes_cross_over(
+    extrude::plane_gap(
         &convert::plane(sketch),
         &convert::plane(from),
         &convert::plane(to),
         &regions,
-        way,
     )
+    .map_err(crate::error::status)
 }
