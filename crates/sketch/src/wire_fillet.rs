@@ -1,22 +1,19 @@
 //! Sketch Fillet on two drawn 3D lines (#21319): the corner where they meet is rounded with a
 //! drawn 3D arc, for the bends of a tube or pipe path.
 //!
-//! Two lines that meet lie in one plane, so the round is the arc in that plane tangent to both.
+//! Two lines that meet lie in one plane, so the round is the arc in that plane tangent to both:
+//! the kernel computes it ([`constraint::corner_round`]).
 //! Each line is shortened to its tangent point and held there by a Tangent with the arc, so the
 //! bend follows the lines when the 3D constraints are solved. What held the sharp corner (a Fix,
 //! a dimension to it, a third curve joined there) goes to a 3D point kept at the corner on both
 //! lines, the way the planar Fillet keeps a virtual corner.
 
-use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::constraint;
 
 use crate::model::{Result, Sketch, SketchError};
 use crate::wire::{arc_from_3_points, drawn_polyline};
 use crate::wire_solve::{ACCEPT, MEET, WireConstraintKind, WirePoint};
-
-/// Lines closer than this (radians) to one straight line, or to lying on each other, have no
-/// corner to round.
-const NO_CORNER: f64 = 1e-6;
 
 /// What [`Sketch::fillet_drawn_lines`] made.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -31,39 +28,13 @@ pub struct DrawnFillet {
     pub moved: Vec<String>,
 }
 
-/// The round of a corner: where the arc leaves each line, the point of the arc nearest the
-/// corner, and the length it takes off each line.
-struct Round {
-    on_a: Vec3,
-    middle: Vec3,
-    on_b: Vec3,
-    setback: f64,
-}
-
-/// The arc of radius `r` that rounds the corner at `corner` between the lines running to
-/// `far_a` and `far_b`. With θ the angle between the lines at the corner, it leaves each line
-/// r / tan(θ/2) from the corner, and its centre is r / sin(θ/2) from the corner along the
-/// bisector. Refused, with the reason, where the lines make no corner.
-fn round(corner: Vec3, far_a: Vec3, far_b: Vec3, r: f64) -> std::result::Result<Round, &'static str> {
-    let (Some(u), Some(v)) = ((far_a - corner).normalized(), (far_b - corner).normalized()) else {
-        return Err("a 3D line of no length has no corner to round");
-    };
-    let angle = u.cross(v).len().atan2(u.dot(v));
-    if angle > std::f64::consts::PI - NO_CORNER {
-        return Err("the lines continue each other in one straight line: there is no corner to round");
-    }
-    if angle < NO_CORNER {
-        return Err("the lines lie on each other: there is no corner to round");
-    }
-    let half = 0.5 * angle;
-    let bisector = (u + v).normalized().ok_or("the lines continue each other in one straight line: there is no corner to round")?;
-    let setback = r / half.tan();
-    let center = corner + bisector * (r / half.sin());
-    let round = Round { on_a: corner + u * setback, middle: center - bisector * r, on_b: corner + v * setback, setback };
-    if [round.on_a, round.middle, round.on_b].iter().all(|p| p.is_finite()) && setback.is_finite() {
-        Ok(round)
-    } else {
-        Err("that radius is out of range for the corner")
+/// Why the kernel finds no corner to round, in the sketch's words.
+fn no_corner(why: constraint::NoCorner) -> &'static str {
+    match why {
+        constraint::NoCorner::NoLength => "a 3D line of no length has no corner to round",
+        constraint::NoCorner::Straight => "the lines continue each other in one straight line: there is no corner to round",
+        constraint::NoCorner::Overlapping => "the lines lie on each other: there is no corner to round",
+        constraint::NoCorner::OutOfRange => "that radius is out of range for the corner",
     }
 }
 
@@ -154,26 +125,27 @@ impl Sketch {
                 _ => {}
             }
         }
-        let round = round(corner, far_a, far_b, r).map_err(|why| bad(why.to_string()))?;
+        // Where the arc leaves each line, its middle point, and the length it takes off each.
+        let ([on_a, middle, on_b], setback) = constraint::corner_round(corner, far_a, far_b, r).map_err(|why| bad(no_corner(why).to_string()))?;
         for (id, far) in [(a, far_a), (b, far_b)] {
             let length = corner.dist(far);
-            if round.setback >= length - 1e-7 * (1.0 + length) {
+            if setback >= length - 1e-7 * (1.0 + length) {
                 return Err(bad(format!(
                     "the radius is too large for that corner (it needs {:.3} mm of each line, and must leave some of `{id}`, which is {length:.3} mm long)",
-                    round.setback
+                    setback
                 )));
             }
         }
         // Lines that barely turn give an arc of almost no length, whose three points no longer
         // say what circle it is on: such a round is not made.
         let slight = || bad("the lines are too nearly in one straight line there for a round of that radius".into());
-        if arc_from_3_points(round.on_a, round.middle, round.on_b).is_none() {
+        if arc_from_3_points(on_a, middle, on_b).is_none() {
             return Err(slight());
         }
         // Built on a copy, so a step that fails leaves the sketch as it was.
         let mut sk = self.clone();
-        let arc = sk.add_drawn_arc_in(&[round.on_a, round.middle, round.on_b], space)?;
-        for (id, index, to) in [(a, ia, round.on_a), (b, ib, round.on_b)] {
+        let arc = sk.add_drawn_arc_in(&[on_a, middle, on_b], space)?;
+        for (id, index, to) in [(a, ia, on_a), (b, ib, on_b)] {
             let Some(w) = sk.wires.iter_mut().find(|w| w.id == id) else { continue };
             if let Some(at) = w.fit.get_mut(index) {
                 *at = to;
@@ -247,6 +219,7 @@ impl Sketch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore_record::Vec3;
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)
