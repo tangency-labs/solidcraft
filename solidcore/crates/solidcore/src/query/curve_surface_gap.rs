@@ -33,8 +33,8 @@ use core::cell::RefCell;
 use std::collections::{btree_map::Entry, BTreeMap};
 
 use crate::blend::fillet_section::certificate::{
-    below_continuity, curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull,
-    past_one_low_line, EndContinuation, NurbsCurve,
+    below_continuity, curve_derivs_over, curve_derivs_over_about, knot_cuts,
+    nurbs_partials_over_piece, partials_hull, past_one_low_line, EndContinuation, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::offset_box::offset_and_base_partials_over_piece;
@@ -775,7 +775,7 @@ fn piece(
     }
     let span = Ivl::new(a, b);
     let cd = curve_derivs_over(cn, span, 2, None)?;
-    let wd = curve_derivs_over(wn, span, 2, None)?;
+    let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1), cd.get(2)) else {
         return Ok(None);
     };
@@ -803,6 +803,68 @@ fn psi_over(psi: &NurbsCurve, t: Ivl, ld: usize, [lo, hi]: [f64; 2]) -> Result<O
         *r = Ivl::new(a, b);
     }
     Ok(Some(out))
+}
+
+/// Not upstream (#22037): a UV curve's value and derivatives up to `ld` over `s`, each
+/// enclosed both as [`curve_derivs_over`] gives it and about the curve's point at the middle
+/// of `s` ([`curve_derivs_over_about`], that point added back to the value), and the two
+/// intersected: each holds the curve's, so their intersection does.
+///
+/// The value is the box the surface's partials are enclosed over, and its overshoot past the
+/// net's end is the slack the bisection adds ([`NetSurface::partials`]). Enclosed from the
+/// origin, a rational curve's quotient by its weight widens the box by the weights' change
+/// times the curve's distance from the origin, to first order in the piece: a circle trim
+/// tangent to its patch's side runs past it by about `0.76 h` at `(0, -10)` (`cylinder.smb`'s
+/// cap, a piece `h = 1.9e-3` long past by `1.4e-3`), so the slack shrank only as fast as the
+/// pieces, and the bisection ran out of pieces about each tangency with the bound at `0.097`.
+/// About the middle the quotient carries the curve's distance from that point instead, of the
+/// order of the piece: the box is within a second-order term of the curve's range, and its
+/// overshoot past a side the curve is tangent to is of the order of `h^2` (#22037).
+fn uv_derivs_over(wn: &NurbsCurve, s: Ivl, ld: usize) -> Result<Vec<V3<Ivl>>> {
+    let plain = curve_derivs_over(wn, s, ld, None)?;
+    if s.lo >= s.hi {
+        return Ok(plain);
+    }
+    let middle = curve_derivs_over(wn, Ivl::from(s.mid()), 0, None)?;
+    let Some(c) = middle.first().map(|p| [p.x.mid(), p.y.mid(), p.z.mid()]) else {
+        return Ok(plain);
+    };
+    if !c.iter().all(|x| x.is_finite()) {
+        return Ok(plain);
+    }
+    let about = curve_derivs_over_about(wn, s, ld, None, c)?;
+    let meet = |a: Ivl, b: Ivl| {
+        let m = Ivl::new(a.lo.max(b.lo), a.hi.min(b.hi));
+        // (each holds the curve's: they meet, but where either is not finite, or not an
+        // interval, the one from the origin stands)
+        if a.is_finite() && b.is_finite() && m.lo <= m.hi {
+            m
+        } else {
+            a
+        }
+    };
+    let [cx, cy, cz] = c;
+    Ok(plain
+        .iter()
+        .zip(&about)
+        .enumerate()
+        .map(|(d, (p, q))| {
+            let q = if d == 0 {
+                V3 {
+                    x: q.x + Ivl::from(cx),
+                    y: q.y + Ivl::from(cy),
+                    z: q.z + Ivl::from(cz),
+                }
+            } else {
+                *q
+            };
+            V3 {
+                x: meet(p.x, q.x),
+                y: meet(p.y, q.y),
+                z: meet(p.z, q.z),
+            }
+        })
+        .collect())
 }
 
 /// The curve, the trim and the reparametrisation [`trim_image_gap_bound`] compares, with
@@ -889,7 +951,7 @@ fn piece_reparametrised(
         return Ok(None);
     };
     let cd = curve_derivs_over(cn, r0, 2, None)?;
-    let wd = curve_derivs_over(wn, span, 2, None)?;
+    let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2), Some(w1)) = (cd.get(1), cd.get(2), wd.get(1)) else {
         return Ok(None);
     };
@@ -4146,8 +4208,8 @@ pub fn crv_on_surf_trim_gap_bound(
         let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
             return Ok(None);
         };
-        let wcd = curve_derivs_over(&wc, r0, 2, None)?;
-        let wd = curve_derivs_over(&wn, span, 2, None)?;
+        let wcd = uv_derivs_over(&wc, r0, 2)?;
+        let wd = uv_derivs_over(&wn, span, 2)?;
         let (Some(c1w), Some(c2w), Some(w1)) = (wcd.get(1), wcd.get(2), wd.get(1)) else {
             return Ok(None);
         };
@@ -7166,5 +7228,189 @@ mod tests {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
             assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
         }
+    }
+
+    /// #22037: `cylinder.smb`'s cap 1 (a bilinear B-spline patch over the circle's bounding
+    /// square, `u` in `[-5, 5]`, `v` in `[-10, 0]`), its edge 0 (a radius-5 circle of four
+    /// rational quadratic quarters) and its UV trim, as the file stores them.
+    fn flat_bspline_cap() -> (Kernel, Surface, Curve, Curve, [f64; 2]) {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let k = Kernel::default();
+        let net = vec![
+            vec![
+                CPoint::new(0.0, 4.999999999999999, -5.0, NOW),
+                CPoint::new(0.0, 4.999999999999999, 5.0, NOW),
+            ],
+            vec![
+                CPoint::new(0.0, -5.000000000000001, -5.0, NOW),
+                CPoint::new(0.0, -5.000000000000001, 5.0, NOW),
+            ],
+        ];
+        let surface = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![-4.999999999999999, -4.999999999999999, 5.0, 5.0],
+            vec![-10.0, -10.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(surface, false));
+        let knots = vec![
+            0.0,
+            0.0,
+            0.0,
+            7.653668647301794,
+            7.653668647301794,
+            15.30733729460359,
+            15.30733729460359,
+            22.96100594190538,
+            22.96100594190538,
+            30.61467458920718,
+            30.61467458920718,
+            30.61467458920718,
+        ];
+        let c = |x: f64, y: f64, z: f64, w: f64| CPoint::new(x, y, z, w);
+        let curve = vec![
+            c(0.0, 0.0, 5.0, 1.0),
+            c(
+                0.0,
+                -3.5355339059327373,
+                3.5355339059327378,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ),
+            c(0.0, -5.0, 0.0000000000000014, 1.0),
+            c(
+                0.0,
+                -3.5355339059327373,
+                -3.535533905932736,
+                0.7071067811865475,
+            ),
+            c(0.0, -0.0000000000000008, -4.999999999999998, 1.0),
+            c(
+                0.0,
+                3.535533905932737,
+                -3.535533905932737,
+                0.7071067811865475,
+            ),
+            c(0.0, 4.999999999999999, 0.0000000000000006, 1.0),
+            c(
+                0.0,
+                3.535533905932737,
+                3.535533905932737,
+                0.7071067811865475,
+            ),
+            c(0.0, 0.0, 5.0, 1.0),
+        ];
+        let curve = NurbCurve::new(curve, 2, knots.clone()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(curve, 3, false));
+        let trim = vec![
+            c(0.0, 0.0, 0.0, 1.0),
+            c(
+                3.5355339059327373,
+                0.0,
+                0.0,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ),
+            c(5.0, -4.999999999999998, 0.0, 1.0),
+            c(
+                3.5355339059327373,
+                -7.071067811865474,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(0.0000000000000008, -9.999999999999998, 0.0, 1.0),
+            c(
+                -3.535533905932737,
+                -7.071067811865475,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(-4.999999999999999, -4.999999999999999, 0.0, 1.0),
+            c(
+                -3.535533905932737,
+                -0.0000000000000006,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(0.0, 0.0, 0.0, 1.0),
+        ];
+        let trim = NurbCurve::new(trim, 2, knots).unwrap();
+        let trim = Curve::from(BSplineCurve::from_nurb(trim, 2, false));
+        (k, surface, curve, trim, [0.0, 30.61467458920718])
+    }
+
+    /// #22037: the circle trims of `cylinder.smb`'s flat B-spline cap are bounded below the
+    /// bisection's floor, at least their sampled distance. The trim is tangent to the patch's
+    /// four sides; its UV box over a piece, enclosed from the origin, ran past the side at
+    /// `(0, -10)` by about `0.76 h` (the rational quotient's widening, first order in the
+    /// piece), and that overshoot is the slack the bisection adds: it shrank only as fast as
+    /// the pieces, and the pieces about each tangency ran out with the bound at `0.097` for
+    /// the whole circle, `7.2e-4` for a quarter and no bound at all at equal parameters. Each
+    /// piece closes once its second term with the slack is at most the floor `1e-7`, so the
+    /// bound is at most the floor plus the largest end value (about `2e-13` here): `2e-7`.
+    #[test]
+    fn a_circle_trim_tangent_to_its_patchs_sides_is_bounded_below_the_floor() {
+        let (k, s, curve, trim, range) = flat_bspline_cap();
+        let knots = [
+            range[0],
+            7.653668647301794,
+            15.30733729460359,
+            22.96100594190538,
+            range[1],
+        ];
+        let mut ranges = vec![range];
+        ranges.extend(knots.windows(2).map(|w| [w[0], w[1]]));
+        for r in ranges {
+            let mut sampled = 0.0_f64;
+            for i in 0..=1000 {
+                let t = r[0] + (r[1] - r[0]) * f64::from(i) / 1000.0;
+                let uv = trim.evaluate_point(&k, t).unwrap();
+                let on = s.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                sampled = sampled.max((on - curve.evaluate_point(&k, t).unwrap()).length());
+            }
+            let image = trim_image_gap_bound(&k, &s, &curve, &trim, r, 1e-7)
+                .unwrap()
+                .unwrap();
+            let same = trim_same_parameter_gap_bound_within(
+                &k,
+                &s,
+                &curve,
+                &trim,
+                r,
+                1e-7,
+                [f64::NEG_INFINITY, f64::INFINITY],
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            for g in [image, same] {
+                assert!(
+                    sampled <= g && g <= 2e-7,
+                    "{r:?}: {g:e} against {sampled:e}"
+                );
+            }
+        }
+    }
+
+    /// #22037: the trim's UV box over a piece `h = 1.9e-3` long from its tangency with the
+    /// patch's side `v = -10` (the knot `15.307...`, where `v' = 0`): enclosed from the
+    /// origin it runs past the side by more than `0.5 h`; about the piece's middle
+    /// ([`uv_derivs_over`]) by at most the curve's second-order term, `|v''| h^2 / 4` with
+    /// `|v''|` about `0.2` (the UV circle of radius 5 at about unit speed), below `h^2`. The
+    /// true trim stays within the side there (its control points do, and it is their convex
+    /// combination), so either box holds it.
+    #[test]
+    fn a_trims_box_runs_past_the_side_it_touches_by_second_order() {
+        let (_, _, _, trim, range) = flat_bspline_cap();
+        let (wn, _) = exact_curve_data(&trim, true).unwrap().unwrap();
+        let a = 15.30733729460359;
+        let h = range[1] / 16384.0;
+        let span = Ivl::new(a, a + h);
+        let past = |w: &[V3<Ivl>]| (-10.0 - w[0].y.lo).max(0.0);
+        let plain = past(&curve_derivs_over(&wn, span, 2, None).unwrap());
+        let about = past(&uv_derivs_over(&wn, span, 2).unwrap());
+        assert!(plain > 0.5 * h, "{plain:e} at h {h:e}");
+        assert!(about <= h * h, "{about:e} at h {h:e}");
     }
 }
