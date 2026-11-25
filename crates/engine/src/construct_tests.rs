@@ -1245,6 +1245,85 @@ fn a_construction_plane_keeps_the_size_it_is_given() {
     assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
 }
 
+/// #6074: a tangent plane on a face that is not a plane, cylinder, cone, sphere or torus, here
+/// a sheet extruded from a spline. The spline's control points (0, 0), (10, 0), (20, 0),
+/// (30, 30) make one cubic Bézier with x = 30t and y = 30t³, so the wall is y = x³/900 for
+/// every z, its slope is x²/300 and its normal runs along (-x²/300, 1, 0).
+#[test]
+fn plane_tangent_to_a_spline_wall_takes_its_exact_normal() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Curve"}));
+    let cubic = run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 30]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Curve", "curves": [cubic], "distance": 10, "body_name": "Wall"}));
+    let wall = |x: f64| (x * x * x / 900.0, Vec3::new(-x * x / 300.0, 1.0, 0.0));
+    let touches = |t: &Plane, x: f64| {
+        let (y, n) = wall(x);
+        // The plane's origin is the touching point: on the wall itself, not only on the plane.
+        parallel(t.normal(), n) && (t.origin.x - x).abs() < 1e-6 && (t.origin.y - y).abs() < 1e-6
+    };
+    // At x = 15: y = 3.75, slope 0.75, unit normal (-0.6, 0.8, 0).
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15, 3.75, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(touches(&t, 15.0) && parallel(t.normal(), Vec3::new(-0.6, 0.8, 0.0)), "{t:?}");
+    // A pick 0.02 mm off the wall along that normal, as one on the display mesh is: the same
+    // plane, through the wall and not through the pick.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15.0 - 0.012, 3.75 + 0.016, 5]}, "name": "Off"}));
+    let off = plane(&s, "Off");
+    assert!(touches(&off, 15.0), "{off:?}");
+    // `at` moves the touching point along the face: at x = 24, y = 15.36 and the slope is 1.92.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15, 3.75, 5]}, "at": [24, 15.36, 2], "name": "At"}));
+    let at = plane(&s, "At");
+    assert!(touches(&at, 24.0) && (at.origin.z - 2.0).abs() < 1e-6, "{at:?}");
+
+    // A reference turns the plane about a round face's axis, which this face has not: refused
+    // with that reason, and nothing is added.
+    for extra in [json!({"reference": {"plane": "XZ"}}), json!({"reference": {"plane": "XZ"}, "angle": "30 deg"})] {
+        let mut p = json!({"face": {"face": [15, 3.75, 5]}, "name": "R"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let err = s.execute("construct.plane.tangent", &p).expect_err("no axis to turn about").to_string();
+        assert!(err.contains("reference") && err.contains("cylinder, cone, sphere or torus"), "{err}");
+    }
+    assert!(construction_planes(&s).iter().all(|p| p.1 != "R"));
+}
+
+/// #6074 on a solid: the wall of an extruded ellipse x²/400 + y²/100 = 1. Its outward normal is
+/// the gradient (x/200, y/50, 0); at (12, 8), a point of the ellipse (0.36 + 0.64 = 1), that is
+/// (0.06, 0.16, 0), along (3, 8, 0). The plane faces out of the material, as it does on a
+/// cylinder.
+#[test]
+fn plane_tangent_to_an_elliptic_wall_faces_out_of_the_solid() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Oval"}));
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Oval", "distance": 10, "body_name": "Post"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [12, 8, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    let out = Vec3::new(3.0, 8.0, 0.0);
+    assert!(parallel(t.normal(), out) && t.normal().dot(out) > 0.0 && near(t.origin, Vec3::new(12.0, 8.0, 5.0)), "{t:?}");
+}
+
+/// #6074 on a loft: between the line (0, 0, 0)…(10, 0, 0) and the line (0, 0, 10)…(10, 10, 10)
+/// a loft of two sections is ruled, S(u, v) = (10u, 10uv, 10v): the saddle y = xz/10. Its normal
+/// runs along the gradient of xz/10 - y, (z/10, -1, x/10); at (5, 2.5, 5) that is
+/// (0.5, -1, 0.5), along (1, -2, 1).
+#[test]
+fn plane_tangent_to_a_loft_face() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Upper"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "A"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "Upper", "name": "B"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]], "ids": ["b"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.loft", json!({"sections": [{"sketch": "A", "curves": ["a"]}, {"sketch": "B", "curves": ["b"]}], "body_name": "Saddle"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [5, 2.5, 5]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), Vec3::new(1.0, -2.0, 1.0)) && near(t.origin, Vec3::new(5.0, 2.5, 5.0)), "{t:?}");
+}
+
 /// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick
 /// had missed. A mesh body has no faces to pick; the error says the pick lies on one and what
 /// gives it faces (Convert Mesh), and a pick in empty space keeps the plain message.
