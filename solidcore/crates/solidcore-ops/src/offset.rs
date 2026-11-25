@@ -34,7 +34,7 @@ use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
 use crate::order::{self, Order};
-use crate::session::with_body;
+use crate::session::{read_body, with_body};
 use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
 
 /// A face a draft of plane faces would cut through without meeting it (a hole's wall within the
@@ -86,6 +86,19 @@ pub fn refuse_draft_closing_wall(
     let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
     let the_draft = Draft::new(v(neutral_origin), v(neutral_normal), v(pull), angle)?;
     refuse_closing_wall(k, b, faces, &the_draft)
+}
+
+impl Body {
+    /// Where a face of this body has an outline that touches itself ([`outline_touch`]): a
+    /// loop through one vertex twice (not a seam's end), or a vertex of one loop on another
+    /// loop of the face; the first such vertex's point, or `None`. What a shell that failed
+    /// without saying why can be told: an offset cannot keep such a face's outline.
+    ///
+    /// # Errors
+    /// The kernel's error; [`Error::Internal`] for a body a panic left unfinished.
+    pub fn outline_touch(&self) -> Result<Option<[f64; 3]>> {
+        read_body("outline_touch", self, |k, b| outline_touch(k, b))
+    }
 }
 
 /// (#18568) For a shell that failed without saying why: where a face of `b` has an outline
