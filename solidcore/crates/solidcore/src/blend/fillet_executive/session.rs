@@ -9300,13 +9300,19 @@ mod tests {
     fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
         let run = |stale: bool| {
             let mut k = Kernel::default();
-            let mut body =
-                crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
-                    .unwrap();
+            let mut body = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                20.0,
+                30.0,
+            )
+            .unwrap();
             let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
             let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+            let law = FilletLaw::linear(0.5, STALE_CASE_RADIUS, None);
             session
-                .prepare_constant_radius_edges(&mut k, &[edge], STALE_CASE_RADIUS, 1, 1, 1.0)
+                .prepare_variable_radius_edges(&mut k, &[edge], 0.5, law, 1, 1)
                 .unwrap();
             if stale {
                 session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
@@ -9318,9 +9324,14 @@ mod tests {
             (e.code, e.comment.clone(), e.no_room, e.vertex)
         };
         let baseline = run(false);
-        // the fillet surface computation failure (code 4): neither a no-room refusal nor
-        // an unsupported corner
-        assert_eq!(baseline.0, 4, "{baseline:?}");
+        // a failure that is neither a no-room refusal nor an unsupported corner
+        assert_ne!(baseline.0, 0, "{baseline:?}");
+        assert_ne!(baseline.0, FilletErrorType::NoRoom as i32, "{baseline:?}");
+        assert_ne!(
+            baseline.0,
+            FilletErrorType::CornerUnsupported as i32,
+            "{baseline:?}"
+        );
         assert_eq!(baseline.2, None, "{baseline:?}");
         assert_eq!(run(true), baseline);
     }
@@ -9378,10 +9389,12 @@ mod tests {
         }
     }
 
-    /// The radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round on one
-    /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
-    /// not a no-room refusal) and the edge has no corner to note.
-    const STALE_CASE_RADIUS: f64 = 5.0;
+    /// The end radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round, a
+    /// linear law from 0.5 on one edge of a 10 x 20 x 30 box: over thirty times the box, so
+    /// the round fails (not a no-room refusal) and the edge has no corner to note. (The
+    /// unit cube's r 5 that was the case is now refused as no room: the round trims at its
+    /// creases and keeps nothing, `OverflowKeepsNothing`.)
+    const STALE_CASE_RADIUS: f64 = 1000.0;
 
     /// What a fillet of the three edges at the unit cube's corner at the origin, rounded by
     /// 0.2, reports when `spoil` is done to its session once it is prepared: the returned
