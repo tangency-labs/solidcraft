@@ -11,6 +11,8 @@
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
 //! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
+//! - [`fuel`]: a deterministic work budget per call, so a call going nowhere stops early
+//!   ([`Error::OutOfFuel`]);
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -34,6 +36,7 @@
 
 pub mod affine;
 pub mod axial_section;
+pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -56,6 +59,7 @@ pub mod develop;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
+pub mod face_pair;
 pub mod face_surface;
 pub mod faceted;
 pub mod facing_trough;
@@ -63,19 +67,25 @@ pub mod file;
 pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
+pub mod frame_trim;
+pub mod fuel;
 pub mod hatch;
 pub mod heal;
 pub mod history;
 pub mod hlr;
+pub mod hole_stacks;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
 pub mod member_turn;
+pub mod mid_joint;
+pub mod mid_sheet;
 pub mod network;
 pub mod offset;
 pub mod order;
 pub mod outline;
+pub mod paper_gaps;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
@@ -145,6 +155,7 @@ pub use body::TurnedOver;
 pub use boolean::BooleanOp;
 pub use check::CheckLevel;
 pub use check::CheckReport;
+pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
 pub use error::FailureCode;
@@ -157,10 +168,14 @@ pub use error::SolidTest;
 pub use error::Unblendable;
 pub use error::Unsoundness;
 pub use faceted::faceted_volume;
+pub use measure::centroid_and_mean_radius;
+pub use measure::distance_across_surface;
+pub use measure::nearer_line_meeting;
+pub use measure::point_along_line;
 pub use measure::point_displacement;
 pub use measure::point_distance;
-pub use measure::point_set_summary;
 pub use measure::points_meet;
+pub use measure::unit_direction;
 pub use measure::ClassifiedPoint;
 pub use measure::Distance;
 pub use measure::EdgeCurve;

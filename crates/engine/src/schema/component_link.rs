@@ -383,6 +383,17 @@ pub struct UpdateLinksKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentList")]
     pub components: Option<ComponentList>,
+    /// For a linked design that was itself saved without the bodies of its linked designs: which
+    /// of those files are read for them. `all` (the default): every file the caller may read.
+    /// `folder`: only files in this design's folder or the linked design's own; a linked design
+    /// reaching further is not read, and is named in `failed` or refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
+}
+
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    schemars::json_schema!({"type": "string", "enum": ["all", "folder"]})
 }
 
 /// `component.update_links`' parameters: [`UpdateLinksKeys`], with `component` and `components`
@@ -562,6 +573,8 @@ pub enum LinkInfo {
         found: Option<bool>,
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
+        /// True also for a link that has no bodies yet: the design was saved without them and
+        /// has not read the file since it opened.
         changed: Option<bool>,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.

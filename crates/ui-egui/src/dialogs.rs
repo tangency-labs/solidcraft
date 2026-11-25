@@ -434,6 +434,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 feature: u64,
                 name: String,
             },
+            RenameGroup {
+                group: u64,
+                name: String,
+            },
             /// Delete a feature that others depend on.
             ConfirmDelete {
                 features: Vec<u64>,
@@ -460,6 +464,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             SaveMesh(crate::dialogs_save_mesh::SaveMesh),
             /// The Custom View Navigator panel (`view_gizmo`): the app's navigator, not the design.
             ViewNavigator(crate::view_gizmo::Form),
+            UrdfExport(crate::dialogs_urdf::UrdfExport),
             ViewDxf {
                 dashed: bool,
                 tolerance: f64,
@@ -478,6 +483,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             EndCap(crate::dialogs_end_cap::EndCap),
             /// Rotate Member (`dialogs_rotate_member`).
             RotateMember(crate::dialogs_rotate_member::RotateMember),
+            /// Trim/Extend of frame members (`dialogs_frame`).
+            FrameTrim(crate::dialogs_frame::Trim),
             Gusset(crate::dialogs_gusset::Gusset),
             FramePlate(crate::dialogs_frame_plate::Plate),
             /// Appearance (`dialogs_appearance`).
@@ -890,6 +897,8 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
+        // A point on another copy of a part: a joint's origin there.
+        Sel::PlacedSketchPoint { .. } => a & selection::SNAP_POINTS != 0,
         Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
 }
@@ -1307,7 +1316,10 @@ impl Dialog {
         let preselection: Vec<Sel> = if matches!(d.kind, Kind::Text(_)) {
             Vec::new()
         } else if hole_points.is_empty() {
-            s.selection.clone()
+            // A whole-body selection is a scope (`Session::selection_all_bodies`): resolve it into
+            // the bodies, so Move and the other dialogs start with all of them (about 5 ms at
+            // 56,000 bodies, once when the dialog opens).
+            s.selected_items().unwrap_or_default()
         } else {
             hole_points
         };
@@ -1317,6 +1329,9 @@ impl Dialog {
         {
             input.multi = true;
         }
+        // Select All's bodies are distinct already: each is taken without scanning those before it
+        // (56,000 bodies would otherwise be over a billion comparisons as the dialog opens).
+        let distinct_bodies = s.all_bodies_selected();
         for sel in &preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
@@ -1427,7 +1442,7 @@ impl Dialog {
                     _ => vec![sel.clone()],
                 };
                 for x in picked {
-                    if !inp.items.iter().any(|y| selection::same_item(y, &x)) {
+                    if (distinct_bodies && matches!(x, Sel::Body { .. })) || !inp.items.iter().any(|y| selection::same_item(y, &x)) {
                         inp.items.push(x);
                     }
                 }
@@ -1516,6 +1531,10 @@ impl Dialog {
         Dialog::new(Kind::Rename { feature, name: name.to_string() }, vec![])
     }
 
+    pub fn rename_group(group: u64, name: &str) -> Dialog {
+        Dialog::new(Kind::RenameGroup { group, name: name.to_string() }, vec![])
+    }
+
     #[cfg(test)]
     pub fn confirm_delete(feature: u64, with: Vec<String>, fail: Vec<String>) -> Dialog {
         Dialog::confirm_delete_many(vec![feature], Vec::new(), with, fail)
@@ -1561,7 +1580,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::Gusset(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) | Kind::RotateMember(_) | Kind::FramePlate(_) | Kind::FrameTrim(_) | Kind::Gusset(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -3064,6 +3083,7 @@ fn tr(text: &str) -> &str {
     solidcraft_ui_text::tr_label(text)
 }
 
+/// Publishes accessibility widget information for a dialog checkbox.
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
@@ -3119,11 +3139,13 @@ fn title(k: &Kind) -> &'static str {
         Kind::Combine { .. } => "COMBINE",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
+        Kind::RenameGroup { .. } => "RENAME GROUP",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
         Kind::Assembly(k) => k.title(),
         Kind::Sheet(k) => k.title(),
         Kind::Surface(k) => k.title(),
         Kind::SaveMesh(_) => "SAVE AS MESH",
+        Kind::UrdfExport(_) => "Export URDF",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
@@ -3132,6 +3154,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
+        Kind::FrameTrim(_) => "TRIM/EXTEND",
         Kind::Gusset(_) => "ui.gusset_title",
         Kind::FramePlate(_) => "ui.mounting_plate_title",
         Kind::Appearance(_) => "APPEARANCE",
@@ -3584,7 +3607,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::ExternalSketchCurve { sketch, id } => {
             solidcraft_ui_text::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
         }
-        Sel::ExternalSketchPoint { sketch, id } => external_point(*sketch, id),
+        Sel::ExternalSketchPoint { sketch, id } | Sel::PlacedSketchPoint { sketch, id, .. } => external_point(*sketch, id),
         Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
         Sel::Profile { sketch, index } => solidcraft_ui_text::format(
             "dialog.selection_profile",
@@ -3893,7 +3916,6 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     d.sync_thread(s);
 }
 
-/// Feature patterns use the same source-fixed slot ordering and controls as sketch patterns.
 /// A rectangular pattern direction's distance type (`index` 0 or 1), from the dialog's extra
 /// parameters (#8523); count and spacing until one is chosen.
 pub(crate) fn pattern_distance(extra: &serde_json::Map<String, Value>, index: usize) -> PatternDistance {
@@ -3914,7 +3936,8 @@ fn pattern_values(p: &mut Value, k: &str, distance: PatternDistance, count: &str
     }
 }
 
-fn feature_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
+/// Solid patterns use the same source-fixed slot ordering and controls as sketch patterns.
+fn solid_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
     use solidcraft_engine::sketch::PatternAlignment;
     let (label, alignment_key, reversed_key) =
         if index == 0 { ("Alignment", "alignment", "reversed") } else { ("Alignment 2", "alignment2", "reversed2") };
@@ -4524,6 +4547,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::Measure { .. } => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
+        Kind::UrdfExport(_) => ("Export URDF…", "Cancel"),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
@@ -5015,6 +5039,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if let Some(distance) = remembered_extrude_distance(app, &d) {
             app.preferences.extrude_last_distance = distance;
         }
+        if let Some(radius) = remembered_fillet_radius(app, &d) {
+            app.last_fillet_radius = radius;
+        }
     }
     // Cancel while computing: the result goes (its worker stops at its next feature).
     if cancel && !applied && app.applying.take().is_some() {
@@ -5399,12 +5426,12 @@ fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
 }
 
-fn to_object_on(inputs: &[SelInput]) -> bool {
+pub(crate) fn to_object_on(inputs: &[SelInput]) -> bool {
     inputs.iter().any(|i| i.label == TO_OBJECT)
 }
 
 /// Add or remove the To Object input; the active input moves to it when it is added.
-fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+pub(crate) fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
     set_object(inputs, active, TO_OBJECT, on);
 }
 
@@ -5519,7 +5546,7 @@ fn object_target(s: &Session, reference: &solidcore_record::Plane, sel: &Sel) ->
 }
 
 /// The picked To Object place.
-fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
+pub(crate) fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
     object_point(inputs, TO_OBJECT)
 }
 
@@ -5672,12 +5699,33 @@ pub(crate) fn remembered_extrude_distance(app: &SolveApp, d: &Dialog) -> Option<
     usable_extrude_distance(app, distance).map(|v| format!("{v} mm"))
 }
 
-/// A new Solid Fillet's radius: the size the tool ships with (2 mm), shown in the design's unit
-/// ("0.07874 in" in an inch design). A radius is bound by the faces beside its edges, and the
-/// number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
-/// preference keeps the old default.
+/// A new Solid Fillet's radius: the last new Fillet applied this session, or the size the tool
+/// ships with (2 mm) shown in the design's unit. A radius is bound by the faces beside its edges,
+/// and the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
+/// preference keeps the old default when nothing has been applied yet.
 fn fillet_radius_default(app: &SolveApp) -> String {
+    if let Some(text) = usable_fillet_radius(app, app.last_fillet_radius.trim()) {
+        return text;
+    }
     if app.preferences.fillet_legacy_radius { length_default(&app.session, "2") } else { crate::length_input::shown(&app.session.doc, 2.0) }
+}
+
+/// `text` as a length a new Fillet can start at (finite, greater than zero).
+fn usable_fillet_radius(app: &SolveApp, text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    let v = app.session.doc.eval(text, ValueKind::Length).ok()?;
+    (v.is_finite() && v > 1e-9).then_some(text.to_string())
+}
+
+/// The radius a new (not edited) constant Fillet was applied with, for the next new Fillet.
+fn remembered_fillet_radius(app: &SolveApp, d: &Dialog) -> Option<String> {
+    let Kind::Fillet { radius, chamfer, .. } = &d.kind else { return None };
+    if d.editing.is_some() || *chamfer {
+        return None;
+    }
+    usable_fillet_radius(app, radius)
 }
 
 /// A feature's length as its edit field shows it. A bare number is kept in millimetres: where the
@@ -6003,6 +6051,9 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    if let Kind::UrdfExport(f) = &d.kind {
+        return crate::dialogs_urdf::run(app, f);
+    }
     if let Kind::ViewDxf { dashed, tolerance, zero_origin } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance, *zero_origin);
     }
@@ -7439,6 +7490,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p.insert("references".into(), json!(references));
                 }
             }
+            // Flip winds the coil the other way along its axis, downward from a sketch profile
+            // (#17870): the reversed axis keeps the coil's hand, where a negative pitch mirrors it.
+            if *cmd == "solid.coil" && coil_flipped(&d.extra) {
+                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(solidcraft_engine::params::vec3).unwrap_or(Vec3::Z);
+                p.insert("axis".into(), pt3(-axis));
+            }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
         }
@@ -7465,6 +7522,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
+        Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
         Kind::SketchIntersect { projection_link, .. } => {
             need(0, "geometry or bodies")?;
@@ -7492,13 +7550,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
-        Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
+        Kind::UrdfExport(_) | Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
+        Kind::FrameTrim(k) => return crate::dialogs_frame::trim_commands(app, k, &d.inputs, &d.extra),
         Kind::Gusset(k) => return crate::dialogs_gusset::commands(app, k, &d.inputs, &d.extra),
         Kind::FramePlate(k) => return crate::dialogs_frame_plate::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
@@ -7513,6 +7572,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     if let Value::Object(m) = &mut params {
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let coil_from_sketch = coil && m.contains_key("sketch");
         // The dialog has no end cut control to clear one an edited coil kept.
         let profile_coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && m.contains_key("sketch");
         for (k, v) in &d.extra {
@@ -7524,6 +7585,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            // Flip is the dialog's own (it reverses the axis); a sketch profile brings its own
+            // section, so the primitive section's options are never sent with it (#17870).
+            if coil && (k == "flip" || (coil_from_sketch && COIL_SECTION_OPTIONS.contains(&k.as_str()))) {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -8394,6 +8460,15 @@ fn pt3(v: Vec3) -> Value {
     json!([v.x, v.y, v.z])
 }
 
+/// The Coil dialog's options that shape the primitive section, which `solid.coil` refuses with a
+/// sketch profile (#17870).
+const COIL_SECTION_OPTIONS: [&str; 3] = ["section", "section_position", "start_angle"];
+
+/// Whether the Coil dialog's Flip is on: the coil winds the other way along its axis (#17870).
+fn coil_flipped(extra: &serde_json::Map<String, Value>) -> bool {
+    extra.get("flip").and_then(Value::as_bool).unwrap_or(false)
+}
+
 /// The reference edges of cylinder `id`, as OK sends them when the window didn't place it on its
 /// face: each edge found by its name where it is now, as `hole_refs::restore` finds them (else
 /// at its saved point), with its saved distance. `None` when it has none.
@@ -8581,10 +8656,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             {
                 d.extra.insert("corner".into(), json!("g2"));
             }
-            if let FeatureKind::Fillet { turn, .. } = &f.kind
-                && !turn.is_mitre()
-            {
-                d.extra.insert("turn".into(), json!("swept"));
+            // the fillet's own turn, so editing it keeps it: Auto, the dialog's default, is not sent
+            if let FeatureKind::Fillet { turn, .. } = &f.kind {
+                use solidcraft_engine::doc::FilletTurn;
+                match turn {
+                    // Auto is the default, so it is not sent.
+                    FilletTurn::Auto => {
+                        d.extra.remove("turn");
+                    }
+                    FilletTurn::Mitre => {
+                        d.extra.insert("turn".into(), json!("mitre"));
+                    }
+                    FilletTurn::Swept => {
+                        d.extra.insert("turn".into(), json!("swept"));
+                    }
+                }
             }
             // A fillet that reduces or tapers a radius too large for its edges.
             if let FeatureKind::Fillet { fit, .. } = &f.kind {
@@ -9621,6 +9707,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
+                .or_else(|| crate::dialogs_frame::trim_for_feature(app, other))
                 .or_else(|| crate::dialogs_gusset::for_feature(app, other, f.component, &feature_frame(s, f.component)))
                 .or_else(|| crate::dialogs_frame_plate::for_feature(app, other, f.component, &feature_frame(s, f.component)))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;

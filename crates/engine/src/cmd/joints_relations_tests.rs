@@ -259,6 +259,7 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
+                dynamics: Vec::new(),
             };
             if let Some(q) = solidcraft_doc::joints::relation_values(&s.doc, &s.model.state(), &j) {
                 j.values = q;
@@ -537,6 +538,67 @@ fn concentric_and_insert_leave_a_slide_and_a_turn_or_a_turn() {
     assert_eq!(dof_of(&r, &s, "Collar"), Some(1), "{r}");
     assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0)), Vec3::new(0.0, 0.0, 20.0), 1e-6));
     assert!(near(place(&s, "Collar", Vec3::new(50.0, 10.0, 40.0)), Vec3::new(0.0, 0.0, 30.0), 1e-6), "standing on the shaft, not through it");
+}
+
+/// A round face given as a `face` (a point on its wall, or its name) is its axis where the rule
+/// needs one, as the Constrain dialog takes a click on it (#21549): concentric takes the shaft's
+/// and the collar's walls, and a planar face is still refused. A rule that takes a plane keeps
+/// the plane a cylinder's `face` meant before.
+#[test]
+fn a_round_face_given_as_a_face_is_its_axis_where_the_rule_needs_one() {
+    let shaft = || {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Shaft"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 5, "height": 20, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "Collar"}));
+        run(&mut s, "solid.cylinder", json!({"base": [50, 10, 30], "axis": [0, 0, 1], "radius": 5, "height": 10, "operation": "new"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let o = occ(&s, "Shaft");
+        run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+        s
+    };
+    let shaft_wall = json!({"occurrence": "Shaft", "face": [5, 0, 10]});
+    let collar_wall = json!({"occurrence": "Collar", "face": [55, 10, 35]});
+    let mut s = shaft();
+    let r = constrain(&mut s, "concentric", shaft_wall.clone(), collar_wall.clone(), json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");
+    let c = place(&s, "Collar", Vec3::new(50.0, 10.0, 30.0));
+    assert!(c.x.abs() < 1e-6 && c.y.abs() < 1e-6, "on the shaft's axis: {c:?}");
+    // Each side keeps the face the roundness check saw, as a round origin.
+    let st = s.model.state();
+    let wall =
+        |s: &Session, part: &str, p: Vec3| solidcraft_doc::joints::face_name_at(&s.doc, &st, s.doc.find_component(part).unwrap(), p, false).unwrap();
+    let (shaft_name, collar_name) = (wall(&s, "Shaft", Vec3::new(5.0, 0.0, 10.0)), wall(&s, "Collar", Vec3::new(55.0, 10.0, 35.0)));
+    let j = s.doc.assembly.joints.first().unwrap();
+    let kept: Vec<_> = [&j.a, &j.b]
+        .iter()
+        .map(|o| match &o.snap {
+            solidcraft_doc::joints::Snap::CircleCenter { face, .. } => face.clone(),
+            other => panic!("a round origin, not {other:?}"),
+        })
+        .collect();
+    assert_eq!(kept, vec![Some(shaft_name), Some(collar_name.clone())], "{r}");
+    // The wall by its name, as `model.faces` lists it.
+    let mut s = shaft();
+    let name = collar_name;
+    let r = constrain(&mut s, "concentric", shaft_wall.clone(), json!({"occurrence": "Collar", "face": name}), json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(dof_of(&r, &s, "Collar"), Some(2), "{r}");
+    // A cylinder's end cap is planar: still refused, and nothing is added.
+    let mut s = shaft();
+    let cap = json!({"occurrence": "Collar", "face": [52, 10, 40]});
+    let e =
+        s.execute("assembly.constraint.create", &json!({"type": "concentric", "a": shaft_wall.clone(), "b": cap})).expect_err("a cap").to_string();
+    assert!(e.contains("two round faces"), "{e}");
+    assert!(s.doc.assembly.joints.is_empty());
+    // A mate takes planes: the collar's wall as a `face` means the planar face it meant before.
+    let mut s = shaft();
+    let top = json!({"occurrence": "Shaft", "face": [2, 0, 20]});
+    let r = constrain(&mut s, "mate", top, collar_wall, json!({}));
+    assert!(clean(&r), "{r}");
+    assert_eq!(s.doc.assembly.joints.first().map(|j| j.kind), Some(solidcraft_doc::joints::JointKind::Planar), "{r}");
 }
 
 /// The rules' remaining freedoms: parallel 4, perpendicular and angle 5, point on axis 4, tangent

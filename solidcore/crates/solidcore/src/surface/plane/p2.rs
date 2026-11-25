@@ -370,6 +370,7 @@ impl Plane {
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(e),
                 Err(e) => return Err(unmeasurable.caused_by(e).into_error()),

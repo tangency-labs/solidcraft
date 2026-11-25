@@ -3263,6 +3263,37 @@ fn raw_host_shared_move_menu_is_a_pointer_independent_alternative_to_drag() {
     }
 }
 
+/// Float lifts a listed panel (the 2D Timeline) off where it shows, at its shown size and a
+/// step up and in; any other panel floats at the free area's top-left corner at its saved size.
+#[test]
+fn raw_host_float_puts_a_listed_panel_where_it_showed_and_others_at_the_corner() {
+    for in_place in [true, false] {
+        let mut h = PanelMountHarness::new(false).unwrap();
+        open_editor(&mut h);
+        let mut raw = RawPanelHost::new(h, 1.0);
+        raw.host.set_float_in_place(if in_place { vec![id("editor")] } else { Vec::new() });
+        raw.frame(Vec::new(), false);
+        let docked = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let frame = raw.host.frame().unwrap();
+        let shown = frame.layout.sections.iter().find(|card| card.section == docked.id).unwrap().outer;
+        let capacity = frame.layout.capacity;
+        raw.menu(id("editor"));
+        raw.click(HostControlTarget::Shared { instance: id("editor"), action: HostSharedAction::Move(Zone::Floating) }, true);
+        raw.frame(Vec::new(), false);
+        let floated = raw.content.runtime.layout().layout().containing(&id("editor")).unwrap().clone();
+        let step = solidcraft_theme::Tokens::get().space_24;
+        if in_place {
+            let origin = Point { x: shown.origin.x + step, y: shown.origin.y - step };
+            assert_eq!(floated.location, SectionLocation::Floating { origin });
+            let width = shown.size.width.min(capacity.size.width - 2.0 * step);
+            assert_eq!(floated.size, Size { width, height: shown.size.height });
+        } else {
+            assert_eq!(floated.location, SectionLocation::Floating { origin: capacity.origin });
+            assert_eq!(floated.size, docked.size);
+        }
+    }
+}
+
 #[test]
 fn raw_host_move_entries_say_they_move_only_the_tab_in_a_section_with_tabs() {
     // History joined with the Browser: "Bottom" read as moving both tabs (#17217).

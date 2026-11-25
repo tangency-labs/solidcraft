@@ -40,6 +40,7 @@ const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
 const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
 const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
 const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
+const SCALE_BAR_CONTRACT: TypedContract<crate::schema::view_navigation::ScaleBarParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -77,11 +78,12 @@ CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser",
     .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
     .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
 CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
-    .icon("fit").key("F6").noundo().doc_only().any_part()
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
 CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
-    .icon("home").noundo().doc_only().any_part()
+    .icon("home").key("Home").noundo().doc_only().any_part()
     .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
     .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
 CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
@@ -182,6 +184,8 @@ CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole V
     .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
 CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
     .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.scale_bar", "Scale Bar", crate::checked!("view.scale_bar", scale_bar))
+    .icon("measure").noundo().doc_only().contract(&SCALE_BAR_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::ScaleBarResult>).params("enabled: bool → enabled; show a bar in the view's bottom left corner and the round length it stands for in the design's units (at the view's centre in perspective), or hide it when false; display only, never opens a dialog"),
 CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
     .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
@@ -498,8 +502,8 @@ fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
 fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderSelect = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
     let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
-    if !s.selection.is_empty() {
-        s.selection.clear();
+    if s.has_selection() {
+        s.clear_selection();
         s.refresh_display();
     }
     Ok(result)
@@ -1327,6 +1331,13 @@ fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
 }
 
+/// The scale bar in the view's bottom left corner (#375): an application preference, not a design edit.
+fn scale_bar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.scale_bar";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::ScaleBarResult { enabled, param_warnings: Vec::new() })
+}
+
 fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
     tab_step(1)
 }
@@ -1354,6 +1365,22 @@ mod ambient_occlusion_tests {
             }
             for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
                 assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
+
+    #[test]
+    fn scale_bar_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.scale_bar", &params).is_err(), "{param_check:?}: {params}");
             }
             assert_eq!(s.doc.to_json(), design);
             assert!(s.undo.is_empty() && s.camera.is_none());

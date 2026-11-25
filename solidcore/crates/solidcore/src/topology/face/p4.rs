@@ -49,7 +49,10 @@
 //!   every handle naming `surface` ([`SurfaceCache::map_handles`]: the line solve
 //!   reads only node classes, boxes and the cache surface), its `sm_IsPointValid`
 //!   runs the trimmed cache's `PointTest` (a face classification,
-//!   [`TrimSrfCache::point_test_in`]), and `SmFace::PointClassify` of the single values gets the trimmed cache
+//!   [`TrimSrfCache::point_test_in`]), its coincidence check's point solve (a line that may
+//!   lie on the surface) runs the fast drop's trim test on the face
+//!   (`live_face_fast_drop_test`; upstream's surface reaches its face through `GetFace`),
+//!   and `SmFace::PointClassify` of the single values gets the trimmed cache
 //!   itself (upstream finds it on the surface). The held variant and
 //!   `sm_FaceClassifyUVLine` classify without it. `SmFace::PointClassify` gets the face's tolerance
 //!   options as `query.face_p2`'s callers pass them; its status is ignored as
@@ -175,6 +178,7 @@ const fn must_propagate(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -583,6 +587,9 @@ struct FaceLineCache<'b, O> {
     /// The face surface's cache, once fetched; given back to the surface after the
     /// solve.
     trim: Option<FaceSurfaceCache>,
+    /// Whether the fast drop's trim test runs, once decided
+    /// ([`crate::intersect::point_class::live_face_fast_drop_test`]).
+    fast_drop_on: Option<bool>,
 }
 
 impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
@@ -620,6 +627,30 @@ impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
             None,
         )?;
         Ok(ok)
+    }
+
+    fn fast_drop_test(&mut self, k: &Kernel, uv: Point2, src_tol: f64) -> Result<bool> {
+        // the test runs as the cache the solve holds says (the face's surface has no cache
+        // to look at while the solve holds it)
+        if self.fast_drop_on.is_none() {
+            if let Some(lease) = &self.trim {
+                let base = lease.cache.base();
+                self.fast_drop_on = Some(
+                    !self.b.is_surface_owner_cleared(self.f)
+                        && lease.trimmed
+                        && base.point_test_enabled
+                        && !base.face_was_modified,
+                );
+            }
+        }
+        crate::intersect::point_class::live_face_fast_drop_test(
+            k,
+            self.b,
+            self.f,
+            &mut self.fast_drop_on,
+            uv,
+            src_tol,
+        )
     }
 }
 
@@ -675,6 +706,7 @@ fn global_line_intersect_with<O: SolutionObject>(
             f,
             surface,
             trim: None,
+            fast_drop_on: None,
         };
         let solutions = face_surface.global_line_intersect_built(
             k,
@@ -3540,5 +3572,84 @@ mod tests {
             .start
             .set_class_object(PointClassType::Vertex, Some(vertex));
         assert!(touches_seam_boundary(&objects, &class, &[touch(0)], &mut excludes).unwrap());
+    }
+
+    /// The face surface's handle in the line solve of
+    /// [`a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure`]: its natural (u, v) domain.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct SideHandle(Extent2d);
+
+    impl SolutionObject for SideHandle {
+        fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+            crate::geom::solution_array::ObjectKind::Surface
+        }
+        fn natural_uv_domain(&self) -> Option<Extent2d> {
+            Some(self.0)
+        }
+    }
+
+    /// A line lying on a face's surface (a ruling of a cylinder's side, here through (3, 4) on the
+    /// radius-5 cylinder about +Z, z 0..10, and on its seam through (5, 0)) is the surface's range
+    /// solution, which the face then keeps where it classifies to the face. The surface's
+    /// coincidence check solves for a point on the face's own surface, whose face it reaches
+    /// through the caller holding the face, as upstream's surface reaches its face: the answer is
+    /// no single place (no `SingleValue`) and never a failure of the face binding.
+    #[test]
+    fn a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)
+                .unwrap();
+        let side = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|f| {
+                matches!(
+                    crate::topology::face::surface(&b, *f)
+                        .unwrap()
+                        .map(Surface::kind),
+                    Some(crate::surface::surface::SurfaceKind::Cone(_))
+                )
+            })
+            .unwrap();
+        let s = crate::topology::face::surface(&b, side).unwrap().unwrap();
+        let handle = SideHandle(s.natural_uv_domain_with_nurb(&k).unwrap());
+        let domain = crate::topology::face::uv_domain(&b, side).unwrap();
+        let tol = crate::topology::face::tolerance(&b, side).unwrap();
+        for through in [Point3::new(3.0, 4.0, 5.0), Point3::new(5.0, 0.0, 5.0)] {
+            let solutions = global_line_intersect(
+                &k,
+                &mut b,
+                side,
+                handle,
+                &domain,
+                through,
+                Vec3::Z,
+                None,
+                false,
+                tol,
+            );
+            let solutions = match solutions {
+                Ok(s) => s,
+                Err(e) => panic!("through {through:?}: {e:?}"),
+            };
+            // a ruling on the seam is also the face's boundary edge: the face solve may leave
+            // it to the edge solves, so only a ruling inside the face must be the range
+            assert!(
+                through.y == 0.0
+                    || solutions
+                        .as_slice()
+                        .iter()
+                        .any(|s| s.solution_type == SolutionType::RangeOfValues),
+                "through {through:?}: the ruling must come back as a range: {solutions:?}"
+            );
+            assert!(
+                solutions
+                    .as_slice()
+                    .iter()
+                    .all(|s| s.solution_type != SolutionType::SingleValue),
+                "through {through:?}: {solutions:?}"
+            );
+        }
     }
 }
