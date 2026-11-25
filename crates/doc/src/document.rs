@@ -2329,7 +2329,8 @@ pub enum FeatureKind {
         in_place: bool,
     },
     /// A surface body turned about an axis from open curve chains and the boundaries of
-    /// profiles: walls only, no caps (a solid where a full turn closes them).
+    /// profiles: walls only, no caps; a full turn that closes them is a closed surface body
+    /// (`stays_surface`), or a solid in designs saved before it.
     SurfaceRevolve {
         sketch: SketchId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2352,6 +2353,10 @@ pub enum FeatureKind {
         /// save it; designs saved before it keep each face along its surface's own normal.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         faced: bool,
+        /// A full turn that closes the walls stays a surface body (#21969). New surface revolves
+        /// save it; designs saved before it make a solid of a closed full turn, as they always did.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stays_surface: bool,
     },
     /// A surface body swept along a chain of sketch curves from open curve chains and the
     /// boundaries of profiles: walls only, no caps.

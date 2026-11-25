@@ -1711,6 +1711,18 @@ fn importer_with_expected_options(h: &mut crate::scenario::Harness, expected: se
     path.to_string_lossy().into_owned()
 }
 
+/// Join the dialog's bounded file reader, so its form is ready to run.
+fn wait_for_file_facts(h: &mut crate::scenario::Harness) {
+    for _ in 0..500 {
+        h.frames(1);
+        if h.app.plugin_menu.dialog().is_some_and(|dialog| dialog.file.is_some()) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the file's facts never arrived");
+}
+
 /// Turn the sample importer entry's own **Remember these options** choice on or off.
 fn remember_importer(h: &mut crate::scenario::Harness, on: bool) {
     h.app.preferences.plugin_importer_options.get_mut("sample").unwrap().get_mut("convert").unwrap().remember = on;
@@ -1723,11 +1735,13 @@ fn file_open_and_drop_share_the_remembered_importer_dialog_and_run_its_options()
     let path = importer_with_expected_options(&mut h, json!({"size":7}));
     remember_importer(&mut h, true);
     h.app.open_chosen_file(&path);
+    wait_for_file_facts(&mut h);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":7}));
     assert!(h.app.file_load.idle(), "choosing a file only opens the form");
     h.app.plugin_menu.dialogs.clear();
     h.app.drop_path(&path);
-    assert_eq!(h.app.plugin_menu.dialog().unwrap().import_path.as_deref(), Some(path.as_str()));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().source.as_deref(), Some(path.as_str()));
+    wait_for_file_facts(&mut h);
     assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"size":7}));
     crate::plugin_menu::run(&mut h.app).unwrap();
     assert_eq!(h.app.file_load.current_request().unwrap().options["options"], json!({"size":7}));
@@ -1751,7 +1765,7 @@ fn file_open_and_drop_import_directly_until_remembering_is_enabled() {
                 remember_importer(&mut h, false);
             }
             let memory = h.app.preferences.plugin_importer_options.clone();
-            assert!(!crate::plugin_menu::open_importer_file(&mut h.app, &path));
+            assert!(!crate::plugin_menu::offer_import(&mut h.app, &path));
             if dropped {
                 h.app.drop_path(&path);
             } else {
@@ -1780,7 +1794,7 @@ fn unrenderable_importer_schemas_keep_file_open_and_drop_on_the_direct_route() {
         assert!(crate::plugin_menu::form(schema).is_none(), "pattern is valid for an importer but unsupported by the form");
         std::fs::write(manifest_path, manifest.to_string()).unwrap();
 
-        assert!(!crate::plugin_menu::open_importer_file(&mut h.app, &path), "an unsupported form must not claim the file");
+        assert!(!crate::plugin_menu::offer_import(&mut h.app, &path), "an unsupported form must not claim the file");
         assert!(h.app.plugin_menu.dialogs.is_empty());
         assert!(h.app.file_load.idle());
         if dropped {
