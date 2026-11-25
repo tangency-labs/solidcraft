@@ -34,5 +34,11 @@
     "ui.ai_openai_responses": "使用 OpenAI Responses API",
     "ui.ai_openai_responses_hint": "将请求发送到 /responses。OpenAI 模型需要通过 Responses API 结合工具进行推理时，请启用此选项。",
     "ui.ai_responses_reasoning_effort_hint": "可选。请使用模型支持的推理强度，例如 medium。留空则使用提供商的默认值。"
+  },
+  "fr": {
+    "ui.ai_invalid_responses_reply": "Le point de terminaison a renvoyé une réponse Responses API non valide.",
+    "ui.ai_openai_responses": "Utiliser l’API Responses d’OpenAI",
+    "ui.ai_openai_responses_hint": "Envoyer les requêtes à /responses. Utilisez cette option pour les modèles OpenAI qui ont besoin de Responses pour le raisonnement avec des outils.",
+    "ui.ai_responses_reasoning_effort_hint": "Facultatif. Utilisez un niveau d’effort pris en charge par le modèle, par exemple medium. Laissez vide pour utiliser la valeur par défaut du fournisseur."
   }
 }

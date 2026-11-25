@@ -277,7 +277,7 @@ new versions on its card. Older versions refuse a manifest with this field.
 ## Removing
 
 Each installed plugin card in **Preferences > Plugins** has an enable switch and **Remove** action.
-Remove asks for confirmation, then deletes the package folder and its stored grants. Cancelling
+Remove asks for confirmation, then deletes the package folder, its stored grants and remembered importer options. Cancelling
 Preferences does not restore a removed package. Removing a plugin preserves its data in saved designs.
 Approved grants and removal survive closing or resetting Preferences. Grants are host preferences,
 never design data; preferences retain at most 256 plugin ids, four command groups and 32 folders per id.
@@ -366,6 +366,52 @@ The Design tab names are Model, Surface, Assemble, Insert, Inspect, Manage, View
 Sheet Metal and Weldments. Existing tab visibility and workspace rules still apply.
 For example, `{"kind":"menu","name":"File"}` places an entry in File;
 `{"kind":"ribbon","name":"Model"}` places it in Model.
+
+### Grouping ribbon buttons
+
+By default, every entry has its own button in the Model tab's **Plugins** group, including a
+plugin with several entries. A plugin can explicitly put selected entries behind one button
+by adding `ribbon_groups` to its `runtime`:
+
+```json
+"runtime": {
+  "module": "gears.wasm",
+  "commands": [],
+  "entries": ["spur", "bevel", "worm", "inspect"],
+  "ribbon_groups": [
+    {
+      "label": "Gears",
+      "icon": "icons/gears.svg",
+      "entries": ["spur", "bevel", "worm"]
+    }
+  ]
+}
+```
+
+This gives one **Gears** ribbon button with a drop-down listing `spur`, `bevel` and `worm` in
+that order, and an individual button for `inspect`. Clicking either the button or its arrow opens
+the menu; choosing an entry opens its usual input dialog. Opening the menu runs no plugin code.
+Menu rows use each entry's usual title and icon. Entries that a user pinned individually to the
+ribbon keep their own button as well as their place in the group menu.
+
+`ribbon_groups` is optional; omitting it or declaring `[]` preserves the existing ribbon
+behaviour. It affects only the Model tab's Plugins buttons: the full Plugins menu, declared
+File/Help items, other ribbon-tab slots and programmatic command ids remain available as before.
+Several groups are allowed and appear in declaration order, followed by individual entries.
+Each group has:
+
+- `label`: 1 to 80 printable characters on one line, with a non-blank label. Surrounding spaces
+  are ignored when displaying the label and checking for duplicate labels.
+- `icon` (optional): a package-relative `.svg` path, following the same path rules, size limit,
+  SVG subset and theme palette as [entry icons](#icons-and-pictures). A missing or
+  invalid SVG falls back to the generic plugin icon; an unsafe or malformed path is refused.
+- `entries`: 1 to 32 names from this plugin's `runtime.entries`, in menu order. Use the local
+  entry name (`spur`), without the plugin id.
+
+At most 32 groups are accepted. Unknown entry names, empty groups, duplicate labels, repeated
+entry names within a group and entries included in more than one group are refused with an
+`invalid_manifest` error naming the field and the problem. Unknown fields in a group are also
+refused. Group icons are optional and do not need a new capability.
 
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
@@ -512,6 +558,26 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
   {"const": "stand_up", "title": "Stand up (Y-up to Z-up)"}
 ]}
 ```
+
+### Font fields
+
+Mark a string property with `"x-solidcraft-font": true` to offer installed font families in the
+entry dialog:
+
+```json
+"font": {"type": "string", "title": "Font", "x-solidcraft-font": true,
+         "default": "Liberation Sans"}
+```
+
+Open the dropdown and type part of a name to filter it, ignoring case. Up/Down and Enter, or a
+click, choose a match. The plugin receives the full family name. The list includes the built-in
+Liberation Sans and usable installed families discovered by sketch text, cached after a background
+scan. Plugins need no folder grant to offer or use installed family names.
+
+The annotation must be `true` on a string property. It is a dialog hint: over MCP and scripts the
+value is still an ordinary string, and input checking accepts unknown names. The operation that
+uses the font reports an unknown font as usual. Other declared string constraints still apply.
+Use an ordinary `enum` or `oneOf` dropdown for a fixed list of names.
 
 ### Edit a stored operation through its normal form
 
@@ -805,8 +871,9 @@ at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
 
 Declarative conditions run first, then the validated patch, then the same input check used by
 programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
-write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
-memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+write grants, in a fresh sandbox. It reads the design with the read commands (`component.list`
+maps bodies to components) and the plugin's own data with `storage.get {}`. Its independent
+budgets are at most 10,000,000 fuel, 16 MiB memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
 The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
@@ -925,6 +992,24 @@ recommended.** A package may name at most 256 distinct swatches. The host draws 
 tiles and loads and decodes each distinct image once
 when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
 swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+An option may instead name a picture of the thing it stands for, such as a manufacturer's part,
+with `x-solidcraft-image`:
+
+```json
+{"const": "elbow90", "title": "Elbow 90° PVC d63", "x-solidcraft-image": "parts/elbow90.png"}
+```
+
+It follows the swatch rules (a plain relative path inside the package, no `.`, `..`, absolute path
+or link, nothing fetched from the network, `.png`, `.jpg` or `.jpeg`, colours kept as they are)
+with bigger limits: at most **512 KiB** and **1024 × 1024** decoded pixels. The host keeps each
+picture at most 512 pixels on a side, decodes each distinct file once when it loads the package,
+and caches its texture. The choice list shows the picture as a thumbnail beside the option, and a
+larger one of the highlighted option (the chosen one when none is highlighted). If an option names
+both, the picture is used, and if that picture is missing or refused, the swatch. A package may name at most 256 distinct swatches and pictures together.
+Decoded swatches and pictures share a budget of 128 MiB per package. When the total would exceed it, the host omits that entry, every later swatch and picture, and records a warning.
+A missing, corrupt, wrongly typed or oversized picture is omitted with a warning in `plugin check`
+and the install review; the plugin still works, and the value sent is still the option's `const`.
 
 A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
 available option has a usable swatch, the dialog offers a grid with a search box; search matches a
@@ -1281,6 +1366,28 @@ Only an importer may say `open`.
    "permissions": {"input_folder": true}}}
 ```
 
+An importer's options dialog has a **Remember these options** checkbox next to **Restore defaults**.
+It is off by default and belongs to that one entry (a plugin id and entry name). When you start an
+import with it on, the entry keeps the values you used, in the app's user preferences
+(`plugin_importer_options`), outside every design. With it off the entry keeps nothing.
+The next dialog keeps remembered fields that still satisfy the current input schema; missing or
+invalid fields start from the schema defaults. Changing a field or cancelling the dialog or file
+picker does not change the stored values. **Restore defaults** resets the values and leaves the
+checkbox as it is; the stored values change only when the next import starts.
+
+With the checkbox off, the entry's dialog starts from schema defaults, and **File > Open** and
+drag-and-drop start the import directly, as before; an entry with `file_first` still shows its
+dialog for the chosen file, from schema defaults. With it on, File > Open and drag-and-drop show
+that entry's dialog, filled in with the remembered values, for the file just chosen. The dialog's
+**Open file** button opens that file without asking for it again. If the form cannot render the
+importer's schema, the file still opens directly with schema defaults. Native readers retain
+priority for formats SolidCraft already supports.
+Removing a plugin forgets all of its entries' remembered values, including when Preferences is cancelled.
+
+Scripts, CLI and MCP opens never read or update this memory and never open an options dialog.
+They receive only their explicit `options`, with schema defaults filling omitted fields; explicit
+values always take precedence. Automated imports therefore do not depend on earlier interactive runs.
+
 - **Opening.** `doc.open` opens a file SolidCraft does not read itself with the installed, enabled
   importer that claims its extension. `file.import` always uses an importer, and `format`
   (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
@@ -1340,7 +1447,14 @@ Only an importer may say `open`.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again.
+  without compiling again. Return `unsupported(reason)` for a
+  deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
+  Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
+  background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
+  alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
+  their error responses carry the readable text, not a stable importer refusal kind. Control
+  responses use `ok` and `error`; MCP tool responses use `isError` and text content.
 - **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
   code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
   (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
@@ -1404,9 +1518,9 @@ are listed in `runtime.commands`:
 ## Errors
 
 Every plugin failure starts with the plugin's name, and an importer's or exporter's with the file's name too.
-Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
-text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
-and MCP give the English.
+Rust engine callers get the structured error (`kind` and its fields) as well as the text; script
+and MCP responses flatten importer errors to text as described above. The text comes from the
+message catalog (`plugin_error.*`) in the window's language; the command line and MCP give the English.
 
 | What happened | What the user reads |
 |---|---|

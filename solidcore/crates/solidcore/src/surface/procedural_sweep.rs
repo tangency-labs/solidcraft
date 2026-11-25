@@ -16,9 +16,11 @@
 //! `S(w, t) = o + R_k(theta) (P(w) - o + e delta(theta)) + k pitch theta / (2 pi)`.
 //!
 //! On the span `[t_i, t_i+1]`, with `s = 2 (t - t_i) / (t_i+1 - t_i) - 1` and
-//! `tau = tan(h / 2)` (`h` the spans' half angle), `theta = mid_i + 2 atan(tau s)`: the
-//! angle the net's rational quadratic arc turns a point to at the same parameter, so S
-//! and B are compared point for point.
+//! `tau_i = tan(h_i / 2)` (`h_i` the span's half angle), `theta = mid_i + 2 atan(tau_i s)`:
+//! the angle the net's rational quadratic arc turns a point to at the same parameter, so S
+//! and B are compared point for point. Each span keeps its own half angle: a wall joined
+//! from pieces of different span widths ([`crate::sweep::screw`]'s joined walls) has
+//! spans of more than one.
 //!
 //! **The bound.** The net is the profile's NURBS across, and across the turns each control
 //! point's path: an exact rational quadratic arc (weights `1, cos h, 1`), its lift and
@@ -38,7 +40,9 @@
 //! Both are enclosed in rounded interval arithmetic ([`Ivl`], `atan` by its alternating
 //! series with its remainder), never sampled. The bound is
 //! `sqrt((lambda E_l*)^2 + (D / 2 E_o*)^2)` plus a floor ([`ProceduralSweep::floor`]), a
-//! forward error bound of computing the net and of evaluating B and S.
+//! forward error bound of computing the net and of evaluating B and S; with spans of more
+//! than one half angle, the largest of that over the half angles, each with the largest
+//! `|D|` of its spans.
 //!
 //! **Two motions, one kind (slice 2).** A wall swept along a general path ([`path`],
 //! [`PathMotion`]) is the same definition with another motion: the profile carried along the
@@ -326,8 +330,10 @@ pub struct ProceduralSweep {
     profile: BSplineCurve,
     motion: Motion,
     stations: Vec<f64>,
-    half: f64,
-    tau: f64,
+    /// Each span's half angle (one per span; empty for a path motion).
+    halves: Vec<f64>,
+    /// `tan(h_i / 2)` of each span's half angle.
+    taus: Vec<f64>,
     bound: f64,
     map: SweepMap,
 }
@@ -449,20 +455,21 @@ fn offset_error_bound(tau: f64) -> f64 {
 
 impl ProceduralSweep {
     /// The definition of the wall `sweep::screw` builds from `profile` over `stations`
-    /// (the net's knots across the turns, radians, ascending) with spans of half angle
-    /// `half`, under `motion`; its bound certified ([`ProceduralSweep::certify`]).
+    /// (the net's knots across the turns, radians, ascending) with spans of half angles
+    /// `halves` (one per span, in order), under `motion`; its bound certified
+    /// ([`ProceduralSweep::certify`]).
     ///
     /// # Errors
     ///
     /// `InvalidInput` for a profile not of dimension 3 or with numbers not finite or
     /// weights not positive, fewer than two stations, stations not finite or not strictly
-    /// ascending, a half angle out of `(0, MAX_HALF_ANGLE]`, or a bound not certified
-    /// finite; those of reading the profile.
+    /// ascending, not one half angle per span, a half angle out of `(0, MAX_HALF_ANGLE]`,
+    /// or a bound not certified finite; those of reading the profile.
     pub(crate) fn create(
         profile: &BSplineCurve,
         motion: ScrewMotion,
         stations: &[f64],
-        half: f64,
+        halves: &[f64],
     ) -> Result<Self> {
         let c = profile.canonical()?;
         let finite = c
@@ -485,7 +492,13 @@ impl ProceduralSweep {
                 "a wall's stations are at least two finite angles, strictly ascending",
             ));
         }
-        if !(half > 0.0 && half <= MAX_HALF_ANGLE) {
+        if halves.len() + 1 != stations.len() {
+            return Err(SolidError::invalid_input(
+                OP_CREATE,
+                "a wall has one half angle per span",
+            ));
+        }
+        if !halves.iter().all(|&h| h > 0.0 && h <= MAX_HALF_ANGLE) {
             return Err(SolidError::invalid_input(
                 OP_CREATE,
                 "a span turns more than nothing and at most an eighth of a turn",
@@ -497,8 +510,8 @@ impl ProceduralSweep {
             profile,
             motion: Motion::Screw(motion),
             stations: stations.to_vec(),
-            half,
-            tau: (0.5 * half).tan(),
+            halves: halves.to_vec(),
+            taus: halves.iter().map(|h| (0.5 * h).tan()).collect(),
             bound: 0.0,
             map: SweepMap::default(),
         };
@@ -543,10 +556,17 @@ impl ProceduralSweep {
         &self.stations
     }
 
-    /// The spans' half angle.
+    /// The spans' largest half angle (nought for a path motion).
     #[must_use]
-    pub const fn half_angle(&self) -> f64 {
-        self.half
+    pub fn half_angle(&self) -> f64 {
+        self.halves.iter().fold(0.0_f64, |m, &h| m.max(h))
+    }
+
+    /// Each span's half angle, in order: one per span of [`ProceduralSweep::stations`]
+    /// for a screw motion, none for a path motion.
+    #[must_use]
+    pub fn half_angles(&self) -> &[f64] {
+        &self.halves
     }
 
     /// The net's certified distance from the definition.
@@ -602,11 +622,12 @@ impl ProceduralSweep {
         let (Some(&t0), Some(&t1)) = (self.stations.get(i), self.stations.get(i + 1)) else {
             return (t, 1.0);
         };
+        let tau = self.taus.get(i).copied().unwrap_or(0.0);
         let width = t1 - t0;
         let s = 2.0 * (t - t0) / width - 1.0;
-        let x = self.tau * s;
+        let x = tau * s;
         let theta = 0.5 * (t0 + t1) + 2.0 * x.atan();
-        let rate = 2.0 * self.tau / (1.0 + x * x) * (2.0 / width);
+        let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
         (theta, rate)
     }
 
@@ -767,14 +788,18 @@ impl ProceduralSweep {
             return Ok(self.bound);
         };
         let lam = Ivl::from(m.pitch.abs()) / Ivl::from(TAU);
-        let lift = lam * Ivl::from(lift_error_bound(self.tau));
-        let change = self.largest_change_per_span();
-        let offset = if change > 0.0 {
-            Ivl::from(0.5 * change) * Ivl::from(offset_error_bound(self.tau))
-        } else {
-            Ivl::from(0.0)
-        };
-        let exact = (lift * lift + offset * offset).sqrt().hi;
+        // Spans of one half angle share its error bounds: each distinct one is enclosed
+        // once, with the largest change across its spans.
+        let mut exact = 0.0_f64;
+        for (tau, change) in self.changes_per_half() {
+            let lift = lam * Ivl::from(lift_error_bound(tau));
+            let offset = if change > 0.0 {
+                Ivl::from(0.5 * change) * Ivl::from(offset_error_bound(tau))
+            } else {
+                Ivl::from(0.0)
+            };
+            exact = exact.max((lift * lift + offset * offset).sqrt().hi);
+        }
         let bound = round_up(exact + self.floor()?);
         if bound.is_finite() && bound > 0.0 {
             Ok(bound)
@@ -786,29 +811,45 @@ impl ProceduralSweep {
         }
     }
 
-    /// An upper bound of the law's change across one span, `|D|`.
-    fn largest_change_per_span(&self) -> f64 {
-        let Motion::Screw(m) = &self.motion else {
-            return 0.0;
+    /// Each distinct `tau` of the spans, in the order first met, with an upper bound of
+    /// the law's change across any one of its spans, `|D|` (nought without a law).
+    fn changes_per_half(&self) -> Vec<(f64, f64)> {
+        let slope = match (&self.motion, self.stations.first(), self.stations.last()) {
+            (Motion::Screw(m), Some(&first), Some(&last)) => m
+                .law
+                .as_ref()
+                .map(|law| law.largest_slope_over(first, last)),
+            _ => None,
         };
-        let Some(law) = m.law.as_ref() else {
-            return 0.0;
-        };
-        let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
-            return 0.0;
-        };
-        let width = self.stations.windows(2).fold(0.0_f64, |m, w| match w {
-            [a, b] => m.max((Ivl::from(*b) - Ivl::from(*a)).hi),
-            _ => m,
-        });
-        (Ivl::from(law.largest_slope_over(first, last)) * Ivl::from(width)).hi
+        let mut widths: Vec<(f64, f64)> = Vec::new();
+        for (w, &tau) in self.stations.windows(2).zip(&self.taus) {
+            let width = match w {
+                [a, b] => (Ivl::from(*b) - Ivl::from(*a)).hi,
+                _ => 0.0,
+            };
+            match widths
+                .iter_mut()
+                .find(|(t, _)| t.to_bits() == tau.to_bits())
+            {
+                Some((_, most)) => *most = most.max(width),
+                None => widths.push((tau, width)),
+            }
+        }
+        widths
+            .into_iter()
+            .map(|(tau, width)| {
+                let change = slope.map_or(0.0, |s| (Ivl::from(s) * Ivl::from(width)).hi);
+                (tau, change)
+            })
+            .collect()
     }
 
     /// The floor of the bound: a forward error bound of how the net is computed and B
     /// and S are evaluated, `G gamma_K (A + (R + lambda) Theta + R)`:
     ///
     /// - A bounds the coordinates of the net's points, `|o| + (max |P_l - o| + delta*) /
-    ///   cos h + lambda Theta` (a mid-span control point is moved out by `1 / cos h`);
+    ///   cos h + lambda Theta` (a mid-span control point is moved out by `1 / cos h`; `h`
+    ///   the spans' largest half angle);
     ///   each coordinate is the sum of a few products of numbers of at most that size;
     /// - `(R + lambda) Theta`: an angle of at most `Theta` (the stations' largest) is
     ///   rounded relative to its size, which turns a point at reach `R` (the profile's
@@ -839,7 +880,7 @@ impl ProceduralSweep {
                     (lo.min(w), hi.max(w))
                 })
         };
-        let cos_h = self.half.cos();
+        let cos_h = self.half_angle().cos();
         let mut dist = 0.0_f64;
         let mut reach = 0.0_f64;
         for &p in &c.control_points {
@@ -1033,8 +1074,8 @@ impl ProceduralSweep {
             profile,
             motion: Motion::Path(motion),
             stations,
-            half: 0.0,
-            tau: 0.0,
+            halves: Vec::new(),
+            taus: Vec::new(),
             bound,
             map: SweepMap {
                 swapped: true,
@@ -1058,8 +1099,8 @@ impl ProceduralSweep {
             profile,
             motion: Motion::Path(motion),
             stations,
-            half: 0.0,
-            tau: 0.0,
+            halves: Vec::new(),
+            taus: Vec::new(),
             bound,
             map: SweepMap {
                 swapped,
@@ -1255,18 +1296,21 @@ mod tests {
         .unwrap();
         let z = Vec3::new(0.0, 0.0, 1.0);
         let motion = ScrewMotion::new(Point3::ZERO, z, 1.5, None).unwrap();
-        let ok = ProceduralSweep::create(&line, motion.clone(), &[0.0, 0.5, 1.0], 0.25);
+        let ok = ProceduralSweep::create(&line, motion.clone(), &[0.0, 0.5, 1.0], &[0.25, 0.25]);
         assert!(ok.is_ok_and(|s| s.bound() > 0.0));
-        for (stations, half) in [
-            (vec![0.0], 0.25),
-            (vec![0.0, 0.0], 0.25),
-            (vec![1.0, 0.0], 0.25),
-            (vec![0.0, f64::NAN], 0.25),
-            (vec![0.0, 1.0], 0.0),
-            (vec![0.0, 1.0], 1.0),
-            (vec![0.0, 1.0], f64::NAN),
+        for (stations, halves) in [
+            (vec![0.0], vec![]),
+            (vec![0.0, 0.0], vec![0.25]),
+            (vec![1.0, 0.0], vec![0.25]),
+            (vec![0.0, f64::NAN], vec![0.25]),
+            (vec![0.0, 1.0], vec![0.0]),
+            (vec![0.0, 1.0], vec![1.0]),
+            (vec![0.0, 1.0], vec![f64::NAN]),
+            (vec![0.0, 1.0], vec![]),
+            (vec![0.0, 1.0], vec![0.25, 0.25]),
+            (vec![0.0, 0.5, 1.0], vec![0.25, 0.0]),
         ] {
-            assert!(ProceduralSweep::create(&line, motion.clone(), &stations, half).is_err());
+            assert!(ProceduralSweep::create(&line, motion.clone(), &stations, &halves).is_err());
         }
         assert!(ScrewMotion::new(Point3::ZERO, Vec3::ZERO, 1.0, None).is_err());
         assert!(ScrewMotion::new(Point3::ZERO, z, 0.0, None).is_err());
@@ -1275,5 +1319,45 @@ mod tests {
         assert!(RadialLaw::new(Vec3::X, vec![1.0, 0.0], vec![0.0, 0.0]).is_err());
         assert!(RadialLaw::new(Vec3::X, vec![0.0], vec![f64::NAN]).is_err());
         assert!(RadialLaw::new(Vec3::ZERO, vec![0.0], vec![0.0]).is_err());
+    }
+
+    /// Spans of different half angles: each turns by its own (the angle at a span's end
+    /// is its station), and the bound is the larger half angle's, which a definition of
+    /// that half angle alone has.
+    #[test]
+    fn each_span_keeps_its_own_half_angle() {
+        let line = BSplineCurve::create_line_segment(
+            3,
+            Point3::new(4.0, 0.0, 0.0),
+            Point3::new(5.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let law = RadialLaw::new(Vec3::X, vec![0.0, 2.0], vec![0.0, 0.5]).unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, z, 1.5, Some(law)).unwrap();
+        // a span of 0.2 then two of 0.1: half angles 0.1 and 0.05
+        let stations = [0.0, 0.2, 0.3, 0.4];
+        let mixed =
+            ProceduralSweep::create(&line, motion.clone(), &stations, &[0.1, 0.05, 0.05]).unwrap();
+        assert_eq!(mixed.half_angles(), &[0.1, 0.05, 0.05]);
+        assert_eq!(mixed.half_angle(), 0.1);
+        for (t, want) in [(0.0, 0.0), (0.2, 0.2), (0.3, 0.3), (0.4, 0.4)] {
+            assert!((mixed.turn_at(t).0 - want).abs() < 1e-15, "{t}");
+        }
+        // mid-span, the arc turns as a span of its own half angle does
+        for (t0, t1, half) in [(0.0_f64, 0.2_f64, 0.1_f64), (0.2, 0.3, 0.05)] {
+            let t = t0 + 0.3 * (t1 - t0);
+            let s = 2.0 * (t - t0) / (t1 - t0) - 1.0;
+            let want = 0.5 * (t0 + t1) + 2.0 * ((0.5 * half).tan() * s).atan();
+            assert!((mixed.turn_at(t).0 - want).abs() < 1e-15, "{t}");
+        }
+        let wide = ProceduralSweep::create(&line, motion.clone(), &[0.0, 0.2], &[0.1]).unwrap();
+        let narrow =
+            ProceduralSweep::create(&line, motion, &[0.2, 0.3, 0.4], &[0.05, 0.05]).unwrap();
+        assert!(narrow.bound() < wide.bound());
+        // the floor grows with the stations' largest angle: the wide span alone has the
+        // same error terms over smaller angles
+        assert!(mixed.bound() >= wide.bound());
+        assert!(mixed.bound() <= wide.bound() * (1.0 + 1e-6));
     }
 }
