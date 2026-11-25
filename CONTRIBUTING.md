@@ -25,6 +25,19 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `.agents/skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
+Since 0.40 the kernel operations still in SolidCraft's own crates are migrating to solidcore. The split:
+
+- **SolidCraft** is the application: commands, the timeline, sketches, the UI, file handling. A new
+  feature calls the solidcore API and builds on the operations it offers.
+- **solidcore** holds the geometry: evaluators, intersections, booleans, blends, shells, sweeps,
+  tessellation and the rest of the math. If a feature needs kernel functionality solidcore does not
+  have yet, add it in `solidcore/` first, then use it from the app.
+
+Work started before 0.40 was written against the earlier kernel. It is still welcome: port it onto
+today's code, calling solidcore for the geometry, before it can land. Expect a substantial rework
+for anything that touched the kernel. Designs keep opening and rebuilding on the new kernel; where a
+result changes, the PR says so and why.
+
 A kernel pull request targets `main` like any other; there is no kernel branch, and the
 [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) repository is a mirror, so don't open pull requests there.
 A change that touches the kernel and the app is one pull request. A big feature in several steps goes
