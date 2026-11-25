@@ -387,10 +387,15 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
         Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
             let state = crate::open_meshing::session_world(session);
             let sk = &state.sketch(active)?.sketch;
-            if sk.is_spatial_corner_curve(id) {
-                return None;
+            // Fillet rounds the corner of two drawn 3D lines (#21319); it takes no other 3D
+            // curve, and Chamfer takes none.
+            let line_3d = matches!(d.kind, Kind::SketchModify(Mod::Corner { chamfer: false, .. })) && sk.is_drawn_line(id);
+            if !line_3d {
+                if sk.is_spatial_corner_curve(id) {
+                    return None;
+                }
+                sk.curve_index(id)?;
             }
-            sk.curve_index(id)?;
             d.active_input()?.accepts(hit, Some(active), |_, _| false)
         }
         // Once the picked curves close a shape, Offset takes no curve that meets it at a corner:

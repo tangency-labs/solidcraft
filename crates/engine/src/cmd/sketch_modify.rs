@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids). In a 3D sketch, `a` and `b` (alone or as `points` entries) may be two drawn 3D lines that share an end point, for a tube bend: both are shortened and a 3D arc in their plane joins them, tangent to both, its radius a dimension with a parameter of its own; what held the sharp corner holds a 3D point kept there on both lines (`virtual_corners`). Refused there, with the reason: lines that share no end point or lie in one straight line, a radius that needs a whole line, 3D arcs, 3D splines and linked curves, and 3D corners mixed with planar ones", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
         .in_sketch_part()
         .contract(&CHAMFER_EQUAL_CONTRACT)
@@ -2102,8 +2102,10 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
 
 fn refuse_spatial_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
     if ["a", "b"].iter().any(|key| str_(p, key).is_some_and(|id| sk.is_spatial_corner_curve(id))) {
-        let action = if cmd == "sketch.fillet" { "filleting" } else { "chamfering" };
-        return Err(bad(cmd, format!("not supported yet: {action} 3D or linked sketch curves")));
+        if cmd == "sketch.fillet" {
+            return Err(bad(cmd, "not supported yet: filleting 3D or linked sketch curves, other than two drawn 3D lines that share an end point"));
+        }
+        return Err(bad(cmd, "not supported yet: chamfering 3D or linked sketch curves"));
     }
     Ok(())
 }
@@ -2684,6 +2686,10 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
     let corners = corner_list(p, cmd)?;
+    // Corners of two drawn 3D lines are rounded with 3D arcs (#21319).
+    if let Some(rounded) = super::sketch_3d::fillet_3d(s, p, cmd, &r_expr, &corners)? {
+        return reply(cmd, rounded);
+    }
     let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
