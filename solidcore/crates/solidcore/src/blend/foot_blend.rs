@@ -73,14 +73,6 @@ fn defect(why: &'static str) -> SolidError {
 /// The most Newton steps a foot takes.
 const NEWTON_STEPS: usize = 40;
 
-/// The sagitta that fits, as a share of its bound: the bound is open (at it the arc lies along
-/// its support at a toe), so the fit is a thousand-millionth below it. Not the float below, as
-/// the exact bead's is: this bound is read from solved feet, which another start gives to
-/// rounding only, so the float below could be past the bound the build reads at the same
-/// station. A thousand-millionth is chosen, not derived (how far the feet's rounding moves
-/// the bound is not bounded here): far below what a weld is measured to.
-const BELOW_OPEN_BOUND: f64 = 1.0 - 1e-9;
-
 /// The most halvings the search for a leg that fits takes: they take a leg of 1e6 down to well
 /// under the bracket's stop, `1e-7 (1 + hi)` with `hi` its upper end; past a leg of about
 /// `1e-7 * 2^64` they end first.
@@ -866,11 +858,12 @@ impl FootBlend {
     /// own stations, and another piece may take a smaller one. For no toe at the leg, the
     /// largest leg on that side, up to the size named, whose foot is found at every one of
     /// [`FootBlend::check_stations`] of `within` (the weld's spans as leader parameters; none:
-    /// the whole interval); for an arc that cuts into a face, the least bound over them, where
-    /// it is below the size named. A toe off its face is searched over those stations as it is
-    /// ([`FootBlend::toes_on_faces`]). The sizes are those of the stations (sampled), and a
-    /// leg's is its own side's: the other side's refusal comes once this one's size is asked.
-    /// Any other error is returned as it is.
+    /// the whole interval); for an arc that cuts into a face, the sagitta that fits over all
+    /// the spans ([`FootBlend::sagitta_that_fits`], proved), where it is below the size named.
+    /// A toe off its face is searched over those stations as it is
+    /// ([`FootBlend::toes_on_faces`]). A leg's size is that of the stations (sampled), and it
+    /// is its own side's: the other side's refusal comes once this one's size is asked. Any
+    /// other error is returned as it is.
     ///
     /// # Errors
     ///
@@ -909,7 +902,8 @@ impl FootBlend {
                     _ => fit.size,
                 }
             }
-            FitMeasure::Sagitta => fit
+            // (one span's size is the weld's already)
+            FitMeasure::Sagitta if within.len() > 1 => fit
                 .size
                 .min(self.sagitta_that_fits(k, legs, sagitta, within)?),
             _ => fit.size,
@@ -919,14 +913,21 @@ impl FootBlend {
     }
 
     /// The largest sagitta (a magnitude, on `sagitta`'s side) this joint's bead takes with the
-    /// legs `legs` over [`FootBlend::check_stations`] of `within`: a hair below the least bound
-    /// over them, as the bound is open (`BELOW_OPEN_BOUND`). Infinite where no station is made.
+    /// legs `legs` over `within` (the weld's spans as leader parameters; none: the whole
+    /// interval): just below the lower end [`FootBlend::bound_over`] encloses the bound's
+    /// least with (the bound is open, and every sagitta below that lower end is below the
+    /// bound at every parameter). It is named only once the feet are proved over `within`
+    /// ([`FootBlend::prove_within`]): the build proves them too, and a size it could not
+    /// build is not a fit. The build reads the same lower end over the same pieces
+    /// ([`FootBlend::add_span`]), so a bead at this sagitta is not refused for its sagitta.
     ///
     /// # Errors
     ///
     /// [`crate::error::blend::WeldGap::ConcaveNotProved`] for a concave arc on a support where
     /// the bound is not proved (any but a plane and the outside of a cylinder, a cone or a
-    /// sphere); those of the evaluations.
+    /// sphere); the refusal of a station of `within` that is not made at the legs; those of
+    /// [`FootBlend::prove_feet`]; [`BlendFailure::NotCertified`] where the feet are proved
+    /// and the bound is still not enclosed; those of the evaluations.
     pub fn sagitta_that_fits(
         &self,
         k: &Kernel,
@@ -934,9 +935,98 @@ impl FootBlend {
         sagitta: f64,
         within: &[[f64; 2]],
     ) -> Result<f64> {
+        let (fit, _) = self.sagitta_bound(k, legs, sagitta, within)?;
+        self.prove_within(k, legs, within)?;
+        Ok(fit)
+    }
+
+    /// The sagitta that fits over `within` by [`FootBlend::bound_over`] (the float below its
+    /// lower end, a magnitude) and the leader's parameter the least bound is near; the feet's
+    /// chains are not proved here ([`FootBlend::sagitta_that_fits`] proves them before it
+    /// names the size).
+    ///
+    /// # Errors
+    ///
+    /// As [`FootBlend::sagitta_that_fits`].
+    fn sagitta_bound(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        within: &[[f64; 2]],
+    ) -> Result<(f64, f64)> {
+        use crate::blend::fillet_section::interval::round_down;
+        let Ok((lower, at)) = self.bound_over(k, legs, sagitta, within)? else {
+            // why: a station's or the feet's proof's own refusal, where they have one
+            let stations = self.prove_within(k, legs, within)?;
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::NotCertified {
+                    halvings: BOUND_HALVINGS,
+                    stations,
+                },
+            ));
+        };
+        Ok((round_down(lower).max(0.0), at))
+    }
+
+    /// Proves the feet at the legs `legs` over `within` (the weld's spans as leader
+    /// parameters; none: the whole interval), between [`FootBlend::check_stations`] of each
+    /// span ([`FootBlend::prove_feet`]): the stations made.
+    ///
+    /// # Errors
+    ///
+    /// The refusal of a station that is not made ([`FootBlend::refusal`]); those of
+    /// [`FootBlend::prove_feet`].
+    pub fn prove_within(&self, k: &Kernel, legs: [f64; 2], within: &[[f64; 2]]) -> Result<usize> {
+        let whole = [[self.interval.min(), self.interval.max()]];
+        let spans: &[[f64; 2]] = if within.is_empty() { &whole } else { within };
+        let mut made = 0;
+        for span in spans {
+            let ts = self.check_stations(core::slice::from_ref(span))?;
+            let mut solved: Vec<FootStation> = Vec::new();
+            for &t in &ts {
+                match self.try_station(k, t, legs, solved.last())? {
+                    Ok(s) => solved.push(s),
+                    Err(miss) => return Err(self.refusal(k, miss, &ts, legs)?),
+                }
+            }
+            self.prove_feet(k, legs, &solved)?;
+            made += solved.len();
+        }
+        Ok(made)
+    }
+
+    /// The open bound on `|sagitta|` at the leader's parameter `t` with the legs `legs`
+    /// ([`FootBlend::station_bound`]); `None` where the station is not made.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FootBlend::station_bound`].
+    pub fn bound_at(
+        &self,
+        k: &Kernel,
+        t: f64,
+        legs: [f64; 2],
+        sagitta: f64,
+    ) -> Result<Option<f64>> {
+        Ok(match self.try_station(k, t, legs, None)? {
+            Ok(s) => Some(self.station_bound(k, &s, sagitta)?),
+            Err(_) => None,
+        })
+    }
+
+    /// Refuses a concave arc on a support where its bound is not proved
+    /// ([`FootBlend::concave_unproved`]), at [`FootBlend::check_stations`] of `within`
+    /// (stations not made are skipped: their own refusal comes with the build).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::blend::WeldGap::ConcaveNotProved`]; those of the evaluations.
+    pub fn concave_gate(&self, k: &Kernel, legs: [f64; 2], within: &[[f64; 2]]) -> Result<()> {
         let ts = self.check_stations(within)?;
-        let bound = self.sagitta_fit(k, &ts, legs, sagitta)?;
-        Ok((bound * BELOW_OPEN_BOUND).max(0.0))
+        self.sagitta_fit(k, &ts, legs, -1.0)?;
+        Ok(())
     }
 
     /// A lower end of the bound on `|sagitta|` ([`FootBlend::station_bound`], on `sagitta`'s
@@ -953,8 +1043,9 @@ impl FootBlend {
     /// them ([`toe_bound_over`]). The normals are those of the supports' forms, the surfaces
     /// the feet are proved on.
     ///
-    /// `Err` with the reason where no bound is proved: a station is not made, a support has
-    /// no form, a piece stays unproved or a part unenclosed after the halvings.
+    /// With the lower end, the middle of the part of the leader it was found on. `Err` with
+    /// the reason where no bound is proved: a station is not made, a support has no form, a
+    /// piece stays unproved or a part unenclosed after the halvings.
     ///
     /// # Errors
     ///
@@ -966,7 +1057,7 @@ impl FootBlend {
         legs: [f64; 2],
         sagitta: f64,
         within: &[[f64; 2]],
-    ) -> Result<std::result::Result<f64, &'static str>> {
+    ) -> Result<std::result::Result<(f64, f64), &'static str>> {
         use crate::blend::fillet_section::certificate::NurbsCurve;
         check_legs(legs)?;
         let leader = NurbsCurve::of(&self.leader)?;
@@ -996,9 +1087,8 @@ impl FootBlend {
                     continue;
                 };
                 // the span's pieces, each and its halves from a work list
-                let count = (before.root.distance(s.root) / reach)
-                    .ceil()
-                    .clamp(1.0, MAX_PIECES) as usize;
+                let cuts = (before.root.distance(s.root) / reach).ceil().max(1.0) as usize;
+                let count = cuts.min(MAX_PIECES as usize);
                 let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
                 let mut from = before;
                 for j in 1..=count {
@@ -1344,7 +1434,8 @@ impl FootBlend {
     /// Native invalid input for a leg that is not positive; the refusals of a station, typed,
     /// with the size that builds over the stations of the refinement refused: a foot with no
     /// toe at its leg on its face's side (the largest leg on that side that finds its toe), an
-    /// arc that would cut into a face (the sagitta's least bound); a Newton that does not
+    /// arc that would cut into a face somewhere along the joint (the sagitta that fits,
+    /// [`FootBlend::sagitta_within`]); a Newton that does not
     /// converge ([`BlendFailure::StationDidNotConverge`]); a net that does not hold within
     /// `tol` after its refinements ([`BlendFailure::SkinPastStationCap`]); feet not proved
     /// between its stations ([`FootBlend::prove_feet`]); those of the arcs and the
@@ -1356,10 +1447,50 @@ impl FootBlend {
         sagitta: f64,
         tol: f64,
     ) -> Result<Surface> {
-        let (lo, hi) = (self.interval.min(), self.interval.max());
         Ok(Surface::from(
-            self.segment(k, legs, sagitta, tol, lo, hi)?.face,
+            self.whole_segment(k, legs, sagitta, tol)?.face,
         ))
+    }
+
+    /// The segment over the whole interval ([`FootBlend::segment`]), its sagitta below the
+    /// bound at every parameter first ([`FootBlend::sagitta_within`]).
+    fn whole_segment(&self, k: &Kernel, legs: [f64; 2], sagitta: f64, tol: f64) -> Result<Segment> {
+        let (lo, hi) = (self.interval.min(), self.interval.max());
+        self.sagitta_within(k, legs, sagitta, [lo, hi])?;
+        self.segment(k, legs, sagitta, tol, lo, hi)
+    }
+
+    /// Refuses a sagitta above the one that fits over `span`: the arc is below its bound at
+    /// every parameter of the span where `|sagitta|` is no more than the float below the
+    /// lower end proved over the span's own pieces ([`FootBlend::sagitta_bound`]), the ones
+    /// a fit is named from ([`FootBlend::sagitta_that_fits`]). The refusal names that size,
+    /// once the feet are proved over the span ([`FootBlend::prove_within`]).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::blend::fillet_executive::NoRoomReason::BeadCutsFace`] with the sagitta that
+    /// fits, at the leader's point the least bound is near; as
+    /// [`FootBlend::sagitta_that_fits`].
+    fn sagitta_within(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        span: [f64; 2],
+    ) -> Result<()> {
+        if sagitta == 0.0 {
+            return Ok(());
+        }
+        let within = core::slice::from_ref(&span);
+        let (fit, at) = self.sagitta_bound(k, legs, sagitta, within)?;
+        if sagitta.abs() <= fit {
+            return Ok(());
+        }
+        self.prove_within(k, legs, within)?;
+        let (root, _) = self.root_at(k, at)?;
+        Err(self
+            .miss_error(Miss::Cuts { t: at, root }, Some(fit))
+            .into_error())
     }
 
     /// The proof of the feet ([`FootBlend::prove_feet`]) between the stations of
@@ -1375,8 +1506,7 @@ impl FootBlend {
         sagitta: f64,
         tol: f64,
     ) -> Result<FeetProof> {
-        let (lo, hi) = (self.interval.min(), self.interval.max());
-        Ok(self.segment(k, legs, sagitta, tol, lo, hi)?.proof)
+        Ok(self.whole_segment(k, legs, sagitta, tol)?.proof)
     }
 
     /// The proved distance of [`Self::section_face`]'s net (with the same arguments) from the
@@ -1393,8 +1523,7 @@ impl FootBlend {
         sagitta: f64,
         tol: f64,
     ) -> Result<Option<f64>> {
-        let (lo, hi) = (self.interval.min(), self.interval.max());
-        Ok(self.segment(k, legs, sagitta, tol, lo, hi)?.bound)
+        Ok(self.whole_segment(k, legs, sagitta, tol)?.bound)
     }
 
     /// [`Self::section_face`] over the leader's parameters `a..b` inside its interval, with
@@ -1448,7 +1577,7 @@ impl FootBlend {
                         roots.push(s.root);
                         solved.push(s);
                     }
-                    Err(miss) => return Err(self.refusal(k, miss, &stations, legs, sagitta)?),
+                    Err(miss) => return Err(self.refusal(k, miss, &stations, legs)?),
                 }
             }
             // the net certified where its feet's series are enclosed; else the net through the
@@ -1480,7 +1609,7 @@ impl FootBlend {
                 let (row, s) = match self.section_rows(k, t, legs, sagitta, solved.get(j))? {
                     Ok(made) => made,
                     Err(miss) => {
-                        return Err(self.refusal(k, miss, &stations, legs, sagitta)?);
+                        return Err(self.refusal(k, miss, &stations, legs)?);
                     }
                 };
                 let (Some(&first), Some(&last)) = (row.0.first(), row.0.last()) else {
@@ -1522,20 +1651,13 @@ impl FootBlend {
         ))
     }
 
-    /// The refusal of `miss`, met among the stations at `ts` with the legs `legs` and the
-    /// sagitta `sagitta`, with the size that builds over those stations where it is a size's.
+    /// The refusal of `miss`, met among the stations at `ts` with the legs `legs`, with the
+    /// leg that finds its toes over those stations where it is a leg's.
     ///
     /// # Errors
     ///
     /// Those of the evaluations of the fit's search.
-    fn refusal(
-        &self,
-        k: &Kernel,
-        miss: Miss,
-        ts: &[f64],
-        legs: [f64; 2],
-        sagitta: f64,
-    ) -> Result<SolidError> {
+    fn refusal(&self, k: &Kernel, miss: Miss, ts: &[f64], legs: [f64; 2]) -> Result<SolidError> {
         let fit = match miss {
             Miss::Foot {
                 t,
@@ -1549,17 +1671,9 @@ impl FootBlend {
                 let z = legs.get(side).copied().unwrap_or(0.0);
                 Some(self.leg_fit(k, side, &along, z)?)
             }
-            Miss::Cuts { t, .. } => {
-                let mut along: Vec<f64> = ts.to_vec();
-                along.push(t);
-                along.sort_by(f64::total_cmp);
-                along.dedup();
-                let bound = self.sagitta_fit(k, &along, legs, sagitta)?;
-                bound
-                    .is_finite()
-                    .then(|| (bound * BELOW_OPEN_BOUND).max(0.0))
-            }
-            Miss::Foot { .. } => None,
+            // (an arc past its bound is refused with its size where the bound is proved,
+            // `add_span`)
+            Miss::Cuts { .. } | Miss::Foot { .. } => None,
         };
         Ok(self.miss_error(miss, fit).into_error())
     }
@@ -1581,8 +1695,9 @@ impl FootBlend {
 
     /// One station's section as control rows across, and the station: the chord's two feet
     /// (weights 1), or the arc's five rows of [`BeadArc::rows`] with their weights; or the
-    /// miss: a foot not found, or an arc that would cut into a face there (its sagitta past
-    /// the station's bound, [`FootBlend::station_bound`]).
+    /// miss: a foot not found. The sagitta is not read against its bound here: a span's is
+    /// below the bound at every parameter before its stations are made
+    /// ([`FootBlend::add_span`]).
     ///
     /// [`BeadArc::rows`]: crate::surface::procedural_blend::bead::BeadArc::rows
     fn section_rows(
@@ -1601,9 +1716,6 @@ impl FootBlend {
         let [a, b] = s.feet;
         if sagitta == 0.0 {
             return Ok(Ok(((vec![a, b], vec![1.0, 1.0]), s)));
-        }
-        if sagitta.abs() >= self.station_bound(k, &s, sagitta)? {
-            return Ok(Err(Miss::Cuts { t, root: s.root }));
         }
         let convex = (a + (b - a) * 0.5) - s.root;
         let arc = BeadArc::new(a, b, s.tangent, convex, sagitta)?;
@@ -1828,6 +1940,8 @@ impl FootBlend {
                 "a span not inside its joint edge",
             ));
         }
+        // the arc below its bound at every parameter of the span, before a station is made
+        self.sagitta_within(k, legs, sagitta, span)?;
         let whole = (lo - a).abs() <= gap && (hi - b).abs() <= gap;
         let ring = self.closed && whole;
         let pieces = if ring { CLOSED_SEGMENTS } else { 1 };
@@ -1963,7 +2077,7 @@ impl FootBlend {
         use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
         let ((row, weights), full) = match self.section_rows(k, t, legs, sagitta, None)? {
             Ok(made) => made,
-            Err(miss) => return Err(self.refusal(k, miss, &[t], legs, sagitta)?),
+            Err(miss) => return Err(self.refusal(k, miss, &[t], legs)?),
         };
         let rung = |points: &[Point3]| {
             BSplineCurve::create_interpolating_curve_with_params(
@@ -2408,7 +2522,8 @@ impl FootBlendDefinition {
     }
 
     /// The net the definition gives: the foot blend's section face over the piece, then each
-    /// motion.
+    /// motion. The sagitta is not read against its bound here: the bead was built below it
+    /// over its span ([`FootBlend::add_span`]), whose pieces are not this piece's.
     ///
     /// # Errors
     ///
@@ -3109,7 +3224,7 @@ fn part_bound(
 }
 
 /// A lower end of the bound on `|sagitta|` over the pieces `pieces` of a joint, within
-/// [`BOUND_SHARE`] of the least bound on them: each piece's bound is enclosed over it
+/// [`BOUND_SHARE`] of the least bound on them, and the middle of the part it was found on: each piece's bound is enclosed over it
 /// ([`part_bound`]), and a part whose lower end is further than that share below the least
 /// upper end found (the bound at some parameter, so no less than the least bound) is halved
 /// and enclosed again: only the parts near the least bound are cut fine. A part is halved
@@ -3122,12 +3237,13 @@ fn least_bound(
     sides: &[BoundSide<'_>; 2],
     leader: &crate::blend::fillet_section::certificate::NurbsCurve,
     sagitta: f64,
-) -> Result<std::result::Result<f64, &'static str>> {
+) -> Result<std::result::Result<(f64, f64), &'static str>> {
     // (piece, from, to, halvings)
     let mut work: Vec<(&BoundPiece, f64, f64, usize)> =
         pieces.iter().map(|p| (p, p.from, p.to, 0)).collect();
     let mut open: Vec<(&BoundPiece, f64, f64, usize, f64)> = Vec::new();
-    let (mut least, mut upper) = (f64::INFINITY, f64::INFINITY);
+    // the least lower end and the middle of its part, and the least upper end
+    let (mut least, mut upper) = ((f64::INFINITY, f64::NAN), f64::INFINITY);
     let mut parts = 0_usize;
     while !work.is_empty() {
         while let Some((piece, from, to, depth)) = work.pop() {
@@ -3146,10 +3262,12 @@ fn least_bound(
             }
         }
         let spent = parts >= BOUND_PARTS * pieces.len();
-        for (piece, from, to, depth, lower) in open.drain(..) {
+        for (piece, from, to, depth, lower) in std::mem::take(&mut open) {
             let near = upper.is_infinite() || lower >= upper - BOUND_SHARE * upper.abs();
             if spent || depth >= BOUND_HALVINGS || near {
-                least = least.min(lower);
+                if lower < least.0 {
+                    least = (lower, 0.5 * (from + to));
+                }
             } else {
                 let mid = 0.5 * (from + to);
                 work.push((piece, from, mid, depth + 1));
@@ -3157,7 +3275,7 @@ fn least_bound(
             }
         }
     }
-    Ok(if least.is_finite() {
+    Ok(if least.0.is_finite() {
         Ok(least)
     } else {
         Err("the joint has no piece to enclose the bound over")
@@ -3340,7 +3458,7 @@ impl FootBlend {
                         Ok(s) => s,
                         Err(miss) => {
                             let ts: Vec<f64> = solved.iter().map(|s| s.t).collect();
-                            return Err(self.refusal(k, miss, &ts, legs, 0.0)?);
+                            return Err(self.refusal(k, miss, &ts, legs)?);
                         }
                     }
                 };
@@ -3421,7 +3539,7 @@ impl FootBlend {
                 Ok(s) => s,
                 Err(miss) => {
                     let ts: Vec<f64> = solved.iter().map(|s| s.t).collect();
-                    return Err(self.refusal(k, miss, &ts, legs, 0.0)?);
+                    return Err(self.refusal(k, miss, &ts, legs)?);
                 }
             };
             proof.halvings += 1;
@@ -3977,7 +4095,7 @@ impl FootBlend {
                         side: i,
                         kind: MissKind::NoToe,
                     };
-                    return self.refusal(k, miss, &ts, legs, 0.0);
+                    return self.refusal(k, miss, &ts, legs);
                 }
             }
         }
