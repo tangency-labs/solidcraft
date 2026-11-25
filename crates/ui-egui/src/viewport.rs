@@ -1829,7 +1829,7 @@ pub(crate) const INSTANCE_ALONE: usize = 50_000;
 
 /// Pack a complete imported mesh from its indexed geometry when the facets supply their own
 /// normals. B-reps, authored normals and subsets for individual looks use the shared vertex weld.
-fn build_shared_tris(
+pub(crate) fn build_shared_tris(
     mesh: &solidcraft_engine::geom::Mesh,
     body: Option<&solidcraft_engine::doc::ModelBody>,
 ) -> std::sync::Arc<crate::gpu::SharedTris> {

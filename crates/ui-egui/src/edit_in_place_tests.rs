@@ -174,7 +174,7 @@ fn update_links_in_the_part_refreshes_the_assembly_around_it() {
     // Still in the part, the assembly's tab updated and the picture around the part with it
     assert!(showing(&f.app, &f.plate_file));
     let after = context(&f.app);
-    assert!(!Arc::ptr_eq(&before.triangles, &after.triangles));
+    assert!(!Arc::ptr_eq(&before.meshes, &after.meshes));
     assert!((after.bounds.max.z - 20.0).abs() < 1e-6, "the post's new box shows: {:?}", after.bounds);
     let assembly = crate::documents::session_at(&f.app, &after.assembly).unwrap();
     assert!((volume_of(assembly, "") - 7250.0).abs() < 1e-6, "{}", volume_of(assembly, ""));
@@ -896,4 +896,101 @@ fn a_refresh_taken_up_in_the_assemblys_tab_redraws_the_parts_tab_too() {
     settle(&mut f.app);
     crate::documents::switch(&mut f.app, 1);
     assert!((context(&f.app).bounds.max.z - 20.0).abs() < 1e-6, "the post's new box shows: {:?}", context(&f.app).bounds);
+}
+
+#[test]
+fn repeated_assembly_instances_share_one_instanced_context_mesh() {
+    let mut f = assembly("instanced-copies");
+    // Nine more placed copies of the same post (ten total around the plate).
+    for i in 1..10 {
+        f.app.run("component.insert_design", json!({"path": f.post_file, "translate": [-100, i * 20, 0], "reuse": true})).unwrap();
+    }
+    f.app.run("file.save", json!({})).unwrap();
+    double_click_component(&mut f.app, json!({"component": f.plate}));
+    settle(&mut f.app);
+    let c = context(&f.app);
+    assert_eq!(c.bodies, 10);
+    assert_eq!(c.meshes.len(), 1, "all ten placed copies share one SharedTris group");
+    assert_eq!(c.meshes[0].placements.len(), 10);
+    assert_eq!(c.meshes[0].key, Arc::as_ptr(&c.meshes[0].tris) as usize as u64);
+    assert!(!c.meshes[0].tris.indices.is_empty());
+    // Extent in the plate's frame (plate sits at x=50): x in -150..-140, y in 0..190, z in 0..10.
+    assert!((c.bounds.min.x - -150.0).abs() < 1e-6 && (c.bounds.max.x - -140.0).abs() < 1e-6, "{:?}", c.bounds);
+    assert!((c.bounds.min.y - 0.0).abs() < 1e-6 && (c.bounds.max.y - 190.0).abs() < 1e-6, "{:?}", c.bounds);
+    assert!((c.bounds.min.z - 0.0).abs() < 1e-6 && (c.bounds.max.z - 10.0).abs() < 1e-6, "{:?}", c.bounds);
+    let sc = crate::viewport::build_scene(&f.app);
+    assert!(sc.ghost.is_empty(), "assembly context is drawn GPU-instanced, not flattened into sc.ghost");
+    let faded: Vec<_> = sc.instanced.iter().filter(|m| m.look == InstanceLook::Faded).collect();
+    assert_eq!(faded.len(), 1, "one faded InstancedMesh for the ten repeated posts");
+    assert_eq!(faded[0].count(), 10);
+    assert_eq!(faded[0].key, c.meshes[0].key);
+    assert!(Arc::ptr_eq(&faded[0].tris, &c.meshes[0].tris));
+    assert!(faded[0].edges.is_none() && !faded[0].closed);
+    let expected_verts = c.meshes[0].tris.indices.len() * 10;
+    assert_eq!(sc.merged().trans.len(), expected_verts * crate::gpu::TRI_SIZE);
+}
+
+#[test]
+fn editing_the_part_reuses_context_shared_tris_and_key_without_rebuilding() {
+    let mut f = assembly("reuse-on-edit");
+    for i in 1..5 {
+        f.app.run("component.insert_design", json!({"path": f.post_file, "translate": [-100, i * 25, 0], "reuse": true})).unwrap();
+    }
+    f.app.run("file.save", json!({})).unwrap();
+    double_click_component(&mut f.app, json!({"component": f.plate}));
+    settle(&mut f.app);
+    let key_before = scene_key(&f.app);
+    let before_sc = crate::viewport::build_scene(&f.app);
+    let before_inst = before_sc.instanced.iter().find(|m| m.look == InstanceLook::Faded).expect("faded context mesh");
+    let before_tris = before_inst.tris.clone();
+    let before_inst_key = before_inst.key;
+    assert_eq!(before_inst.count(), 5);
+    // Edit the part in place: scene rebuilds, but context SharedTris Arc and key stay identical so GPU buffers are retained.
+    f.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 0, 30], "operation": "new"})).unwrap();
+    assert_eq!(scene_key(&f.app), key_before);
+    let after_sc = crate::viewport::build_scene(&f.app);
+    assert!(after_sc.ghost.is_empty());
+    let after_inst = after_sc.instanced.iter().find(|m| m.look == InstanceLook::Faded).expect("faded context mesh after edit");
+    assert_eq!(after_inst.count(), 5);
+    assert_eq!(after_inst.key, before_inst_key);
+    assert!(Arc::ptr_eq(&after_inst.tris, &before_tris), "editing the part keeps the same SharedTris Arc");
+    // Refreshing assembly links replaces the context snapshot and its SharedTris.
+    save_box(&f.post_file, [10.0, 10.0, 10.0], true);
+    refresh(&mut f.app);
+    settle(&mut f.app);
+    assert_ne!(scene_key(&f.app), key_before);
+    let refreshed_sc = crate::viewport::build_scene(&f.app);
+    let refreshed_inst = refreshed_sc.instanced.iter().find(|m| m.look == InstanceLook::Faded).expect("faded context mesh after refresh");
+    assert_eq!(refreshed_inst.count(), 5);
+    assert!(!Arc::ptr_eq(&refreshed_inst.tris, &before_tris));
+    assert!((context(&f.app).bounds.max.z - 20.0).abs() < 1e-6, "{:?}", context(&f.app).bounds);
+}
+
+#[test]
+fn context_visibility_filtering_and_non_pickability_stay_exact() {
+    let mut f = assembly("vis-and-pick");
+    let hidden_file = f.folder.join("hidden.solidcraft");
+    save_box(&hidden_file, [10.0, 10.0, 10.0], false);
+    let hidden_comp =
+        f.app.run("component.insert_design", json!({"path": hidden_file, "translate": [200, 0, 0]})).unwrap()["component"].as_u64().unwrap();
+    f.app.run("file.save", json!({})).unwrap();
+    let hidden_body = f.app.session.world_state().unwrap().bodies.iter().find(|b| b.component == hidden_comp).map(|b| b.name.clone()).unwrap();
+    f.app.session.visibility.hidden_bodies.push(hidden_body);
+    double_click_component(&mut f.app, json!({"component": f.plate}));
+    settle(&mut f.app);
+    let c = context(&f.app);
+    assert_eq!(c.bodies, 1, "hidden assembly body is excluded from context");
+    assert_eq!(c.meshes.len(), 1);
+    assert_eq!(c.meshes[0].placements.len(), 1);
+    assert!((c.bounds.min.x - -150.0).abs() < 1e-6 && (c.bounds.max.x - -140.0).abs() < 1e-6, "hidden body at +150 excluded: {:?}", c.bounds);
+    // Picking over the faded context post hits nothing, while picking the edited plate hits it.
+    f.app.open_meshing = None;
+    f.app.set_origin_shown(false);
+    let _ = f.app.run("view.fit", json!({}));
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let proj = crate::viewport::projection(&f.app, rect);
+    let post_screen = proj.to_screen(Vec3::new(-145.0, 5.0, 5.0)).expect("context post on screen");
+    assert!(crate::viewport::pick(&f.app, &proj, post_screen).is_empty(), "assembly context is out of reach of picks");
+    let plate_screen = proj.to_screen(Vec3::new(5.0, 10.0, 30.0)).expect("edited plate on screen");
+    assert!(!crate::viewport::pick(&f.app, &proj, plate_screen).is_empty(), "edited part remains pickable");
 }
