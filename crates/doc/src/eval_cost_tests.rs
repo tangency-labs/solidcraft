@@ -56,6 +56,7 @@ pub(crate) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub run_on_probes: usize,
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
@@ -63,6 +64,8 @@ pub(crate) struct Counts {
     pub hole_points: usize,
     /// Contact tests a join made to find which bodies its tool meets.
     pub contact_tests: usize,
+    /// Kernel union calls (`union` or `union_all`) made by `join`.
+    pub join_unions: usize,
 }
 
 thread_local! {
@@ -93,12 +96,14 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            run_on_probes: 0,
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
             classifications: 0,
             hole_points: 0,
             contact_tests: 0,
+            join_unions: 0,
         })
     };
 }
@@ -1193,7 +1198,16 @@ fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are
     let st = model.state();
     let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
     let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
-    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let kind = FeatureKind::Combine {
+        target: board.clone().into(),
+        tools: vec![tool.into()],
+        operation: Operation::Cut,
+        keep_tools: true,
+        offset: None,
+        offset_edges: OffsetEdges::Sharp,
+        offset_faces: Vec::new(),
+        offset_radius: None,
+    };
     let combine = doc.add_feature(kind, None).unwrap();
     model.evaluate(&doc);
     assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
@@ -3726,6 +3740,8 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     assert_eq!(volumes.len(), 2, "{volumes:?}");
     assert!((volumes[0] - 400.0).abs() < 1e-6, "{volumes:?}");
     assert!((volumes[1] - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
+    // Each block piece already lies in the full-width run-on of the first tool.
+    assert_eq!(work.run_on_probes, 0, "{work:?}");
     // The three copies under the block build theirs, and so does a copy in the clear after one.
     assert!(work.hole_tools > 4 && work.hole_tools < 90, "{work:?}");
 }
@@ -4053,6 +4069,29 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     assert!(near.is_empty());
 }
 
+/// A cover can shorten the run-on below a nearer piece. The hole still checks whether its
+/// shortened tool reaches the piece before subtracting it.
+#[test]
+fn a_shortened_run_on_checks_its_first_piece() {
+    let mut state = ModelState::default();
+    for (name, low, high) in [("Plate", -5.0, 0.0), ("Near", 0.15, 0.18), ("Cover", 0.25, 0.5)] {
+        let body = kernel::box_solid(Vec3::new(-50.0, -50.0, low), Vec3::new(50.0, 50.0, high)).unwrap();
+        state.bodies.push(ModelBody::new(name.into(), body, 0));
+    }
+    let vals = Default::default();
+    let depth = Some("2".into());
+    let reach = super::hole_reach(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, false, &[]).unwrap();
+    assert!((reach.top - 0.125).abs() < 1e-6);
+    assert_eq!(reach.above.len(), 1);
+    let work = counted(|| {
+        let tools = super::hole_tools_reaching(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, &reach).unwrap();
+        let volume = kernel::measure(&tools[0].0.body).unwrap().volume;
+        let expected = std::f64::consts::PI * 1.5_f64.powi(2) * (2.0 + reach.top);
+        assert!((volume - expected).abs() < 1e-6, "{volume}");
+    });
+    assert_eq!(work.run_on_probes, 1);
+}
+
 /// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one
 /// Combine: the model, and the Combine.
 fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
@@ -4080,6 +4119,10 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 tools: tools.iter().map(|t| t.clone().into()).collect(),
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -4766,4 +4809,191 @@ fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
     assert!(result.error.is_none(), "{result:?}");
     assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("9 of 9 cut copies remove no material")), "{result:?}");
     assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// Add a sketch on XY with disjoint rectangles `(x, y, w, h)` and extrude all of them to `height`
+/// with `Operation::Join`.
+fn join_rects(doc: &mut Document, rects: &[(f64, f64, f64, f64)], height: f64) -> u64 {
+    let mut sk = Sketch::new();
+    for &(x, y, w, h) in rects {
+        let pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)].map(|(px, py)| sk.add_point(Vec2::new(px, py), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(pts[k], pts[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": height.to_string()})).unwrap(),
+        operation: Operation::Join,
+        targets: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// Multi-target join batches all tools hitting each target into one kernel union per target,
+/// preserving body names, exact volumes, and exact traced face lineage.
+#[test]
+fn multi_target_join_batches_tools_per_target() {
+    let mut doc = Document::new("multi-target batch");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [40.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [40.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    // Three bosses on A and three bosses on B in one feature: 6 tools across 2 targets.
+    let rects =
+        [(2.0, 3.0, 4.0, 4.0), (14.0, 3.0, 4.0, 4.0), (26.0, 3.0, 4.0, 4.0), (2.0, 33.0, 4.0, 4.0), (14.0, 33.0, 4.0, 4.0), (26.0, 33.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 2, "one batched union per target: {work:?}");
+    assert!(work.contact_tests > 0, "{work:?}");
+
+    let st = model.state();
+    let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["A", "B"]);
+    assert!((volume(&model, "A") - 4192.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - 4192.0).abs() < 1e-6, "{}", volume(&model, "B"));
+    for b in &st.bodies {
+        assert!((0..b.body.face_count()).all(|i| crate::naming::face_name_exact(b, i)), "exact lineage lost on {}", b.name);
+    }
+}
+
+/// A bridging tool meeting two or more targets merges them in one batched union call, preserving
+/// exact volume, thread re-attribution, and face lineage; a chain of overlapping tools in one
+/// feature also bridges targets cleanly.
+#[test]
+fn multi_target_join_batches_bridging_tool_with_threads_and_lineage() {
+    let mut doc = Document::new("bridge three targets");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(30.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(60.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(40.0, 5.0, 10.0)),
+            axis: crate::dir_expr(Vec3::Z),
+            radius: "3".into(),
+            height: "6".into(),
+            operation: Operation::Join,
+            references: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    doc.add_feature(marking(Vec3::new(43.0, 5.0, 13.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().threads.len(), 1);
+    assert_eq!(model.state().threads[0].body, "B");
+    let before_sum = volume(&model, "A") + volume(&model, "B") + volume(&model, "C");
+
+    // One bar spanning from A across B into C merges all three into A in one batched union.
+    let bridge = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(15.0, 2.0, 2.0)),
+                length: "50".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(bridge).is_some_and(|r| r.error.is_none()), "{:?}", model.result(bridge));
+    assert_eq!(work.join_unions, 1, "bridging A, B, and C must run one batched union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - (before_sum + 720.0)).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert_eq!(st.threads.len(), 1);
+    assert_eq!(st.threads[0].body, "A", "thread on absorbed B must move to A");
+    assert!((0..st.bodies[0].body.face_count()).all(|i| crate::naming::face_name_exact(&st.bodies[0], i)));
+
+    // A chain of two overlapping tools in one pattern feature: copy 1 extends A, copy 2 meets
+    // copy 1 and B (without touching A's base body), so both merge A and B into one body.
+    let mut doc = Document::new("chained bridge");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(26.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let seed = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(8.0, 2.0, 2.0)),
+                length: "8".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [seed],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "6"},
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pattern, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "chained bridge merges A, queued copy, bridging copy, and B in one union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - 2576.0).abs() < 1e-4, "{}", volume(&model, "A"));
+}
+
+/// Multi-target join fast-paths apart tools that miss every target via `union_all_apart`, and
+/// batches multiple tools hitting one target while keeping a sheet metal body's identity intact.
+#[test]
+fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() {
+    // Four apart bosses that miss both A and B fall back to A and join without any kernel union.
+    let mut doc = Document::new("apart fallback");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    let apart_rects = [(40.0, 0.0, 4.0, 4.0), (50.0, 0.0, 4.0, 4.0), (60.0, 0.0, 4.0, 4.0), (70.0, 0.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &apart_rects, 4.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.joined_apart, 1, "apart fallback tools must join without intersection work: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.body("A").unwrap().body.lumps().unwrap().len(), 5);
+    assert!((volume(&model, "A") - 1256.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert_eq!(st.body("B").unwrap().body.lumps().unwrap().len(), 1);
+    assert!((volume(&model, "B") - 1000.0).abs() < 1e-6, "{}", volume(&model, "B"));
+
+    // Sheet metal identity rule: multiple tools meeting A (including one reaching across a sheet
+    // metal body) batch into A without absorbing the sheet.
+    let mut doc = Document::new("sheet kept");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 20.0, 10.0]);
+    flat_sheet(&mut doc, Vec2::new(25.0, 0.0), 20.0, 20.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let sheets = sheet_bodies(&model);
+    assert_eq!(sheets.len(), 1);
+    let sheet_name = sheets[0].clone();
+    let sheet_vol = volume(&model, &sheet_name);
+
+    let rects = [(2.0, 2.0, 4.0, 4.0), (10.0, 2.0, 4.0, 4.0), (18.0, 12.0, 10.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 1, "all three tools joining A must batch into one union: {work:?}");
+    assert_eq!(sheet_bodies(&model), vec![sheet_name.clone()]);
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
 }

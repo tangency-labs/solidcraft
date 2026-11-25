@@ -270,6 +270,9 @@ pub struct MenuState {
     pub section_plane: Option<u64>,
     /// The face under the cursor when the viewport menu opened: Section View cuts on its plane.
     pub face: Option<Sel>,
+    /// The construction axis under the cursor when the viewport menu opened. A right-click leaves
+    /// it unselected, as it does a plane; the menu offers Find in Browser for it (#15355).
+    pub axis: Option<String>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -851,11 +854,13 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let dimensions = act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
     let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
         // Off without a reason for a feature that has no profile sketch: selecting one feature
         // would not turn it on.
         if sketch.is_some() { one(profile) } else { profile },
+        if sketch.is_some() { one(dimensions) } else { dimensions },
         one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
     ];
     if is_construction {
@@ -877,6 +882,16 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         zoom_item(vec![Sel::Feature { id }], exists),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists),
     ]);
+    // With the history in the browser its rows put features in timeline folders, as the
+    // History's feature menu does (#7221).
+    if app.preferences.history_in_browser {
+        let parent = crate::timeline_folders::group_parent(&app.session.doc.timeline_groups, &targets);
+        items.push(
+            act("ui.groupFeatures", "Group Features", "feature_group")
+                .with(json!({ "features": targets, "parent": parent }))
+                .on(exists && app.session.group_refusal(&targets, parent).is_none()),
+        );
+    }
     items
 }
 
@@ -1024,6 +1039,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        v.push(act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
@@ -1099,6 +1115,15 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         {
             v.push(reset_plane_size(app, f.id, plane));
         }
+        // A construction plane or axis under the pointer, or one picked, or a construction point
+        // picked, has a row in its component's Construction folder (#15355).
+        let picked = match sel {
+            [Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }] => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(id) = app.menu.plane.as_deref().or(app.menu.axis.as_deref()).or(picked).and_then(|name| construction_feature(app, name)) {
+            v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "construction": id })));
+        }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
         v.push(act("ui.nav", "Zoom", "zoom").with(json!({ "mode": "zoom" })));
@@ -1133,6 +1158,25 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.clear", "Clear Selection", "close").key("Esc"));
     }
     v
+}
+
+/// The construction plane, axis or point named `name` (a viewport pick names it so), by feature id.
+/// The origin planes and axes are not features: they have none.
+fn construction_feature(app: &SolveApp, name: &str) -> Option<u64> {
+    app.session
+        .doc
+        .features
+        .iter()
+        .find(|f| {
+            f.name == name
+                && matches!(
+                    f.kind,
+                    solidcraft_engine::doc::FeatureKind::ConstructionPlane { .. }
+                        | solidcraft_engine::doc::FeatureKind::ConstructionAxis { .. }
+                        | solidcraft_engine::doc::FeatureKind::ConstructionPoint { .. }
+                )
+        })
+        .map(|f| f.id)
 }
 
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
@@ -1261,6 +1305,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "sketch").with(json!({ "sketch": id })),
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
+        act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": id })).on(!editing),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         zoom_item(vec![Sel::Feature { id }], true),
@@ -1571,6 +1616,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
@@ -1847,6 +1893,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         v.push(Item::sep());
         v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
+        v.push(act("ui.pasteInPlace", "Paste in Place", "paste").key("Ctrl+Shift+V").on(crate::edit_clipboard::can_paste_sketch(app)));
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
@@ -1947,6 +1994,18 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|index| ss.sketch.curves.get(index))
+            .is_some_and(|c| c.link.is_none() && matches!(c.kind, CurveKind::Spline { control: true, .. }))
+        && !ss.sketch.curves.iter().any(|c| c.spline_control_polygon_of.as_deref() == Some(curve.as_str()))
+    {
+        v.push(
+            cmd(app, "sketch.spline.control_polygon", solidcraft_ui_text::tr("cmd.sketch_spline_control_polygon")).with(json!({ "curve": curve })),
+        );
+    }
     // #6502: a selected fit point spline shows its tangent handles and a drag stores them; the
     // spline, or one of its tangent guides, puts edited handles back where they started.
     if let [curve] = curves.as_slice()
@@ -1983,6 +2042,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
+    v.push(act("ui.pasteInPlace", "Paste in Place", "paste").key("Ctrl+Shift+V").on(crate::edit_clipboard::can_paste_sketch(app)));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
     let mut dimension = json!({ "entities": ents });
     crate::dim_view::ellipse_as_before(app.preferences.ellipse_axes, &mut dimension);
@@ -2206,6 +2266,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.copy" => drop(crate::edit_clipboard::copy(app)),
         "ui.copyDesign" => drop(crate::edit_clipboard::copy_design(app)),
         "ui.cut" => drop(crate::edit_clipboard::cut(app)),
+        "ui.pasteInPlace" => drop(crate::edit_clipboard::paste_sketch(app, None, crate::edit_clipboard::SketchPaste::InPlace)),
         "ui.paste" | "ui.pasteNew" => {
             // A component's menu pastes into it (that placement); the others into the active one.
             let into = id_of(&p, "component").map(|c| {
@@ -2349,6 +2410,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(id) = id_of(&p, "construction") {
+                crate::browser::reveal_construction(app, id);
             } else if let Some(features) = ids_of(&p, "features") {
                 crate::timeline::find_in_browser(app, &features);
             } else if let Some(f) = id_of(&p, "feature") {
@@ -2484,6 +2547,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
             }
         }
+        "ui.editDimensions" => app.viewport.edit_dimensions = id_of(&p, "sketch"),
         "ui.sketchProfile" => {
             if let Some(id) = id_of(&p, "sketch") {
                 if app.session.visibility.hidden_profiles.contains(&id) {
@@ -3135,13 +3199,17 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
-    app.menu.face =
-        app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel).filter(|s| matches!(s, Sel::Face { .. }));
+    let under = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel);
+    app.menu.face = under.clone().filter(|s| matches!(s, Sel::Face { .. }));
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
-    app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
-        Sel::Plane { name } => Some(name),
+    app.menu.plane = match &under {
+        Some(Sel::Plane { name }) => Some(name.clone()),
         _ => None,
-    });
+    };
+    app.menu.axis = match under {
+        Some(Sel::Axis { name }) => Some(name),
+        _ => None,
+    };
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
         select_under(app, at, before, sel);

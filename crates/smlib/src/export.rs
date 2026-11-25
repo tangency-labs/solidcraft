@@ -38,7 +38,7 @@
 use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use solidcore_record::Vec3;
 use solidcore_record::brep as b;
@@ -1065,6 +1065,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
     // record shell (the edges and vertices they share are split below). A sheet's one shell holds
     // both uses of each face: the `same` one is kept.
     let mut groups: Vec<Group> = Vec::new();
+    let mut omitted_faces: HashSet<usize> = HashSet::new();
     for (s, uses) in shell_faceuses.iter().enumerate() {
         for fu in uses.clone() {
             let (f, same) = faceuse(fu)?;
@@ -1081,7 +1082,11 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                     match (material(here), material(there)) {
                         (false, true) => Side::Solid(other),
                         (true, false) => continue,
-                        _ => return Err(unsupported("a face between two material regions or two empty ones")),
+                        (false, false) => {
+                            omitted_faces.insert(f);
+                            continue;
+                        }
+                        _ => return Err(unsupported("a face between two material regions")),
                     }
                 }
                 _ => return Err(invalid("a face without its two uses")),
@@ -1124,7 +1129,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         face_uses.iter().map(|uses| uses.iter().find(|(s, _)| material(region_of.get(*s).copied().unwrap_or(0))).map(|(_, same)| *same)).collect();
     let radial = radial(flat, n_edgeuses, n_edges, material_same)?;
 
-    let parts = Parts { faces, edges, shells, regions, radial };
+    let parts = Parts { faces, edges, shells, regions, radial, omitted_faces };
     let made = match canonical(parts.clone(), n_vertices, flat, &tolerances) {
         // SMLib's own tolerance for an edge or vertex can understate what its approximated
         // geometry needs here (a blend's end curve 2.3e-5 mm off its plane at 2e-5): then the
@@ -1271,6 +1276,9 @@ fn record_regions(
                 }
             }
         }
+        if r > 0 && !material(r) && listed.is_empty() {
+            continue;
+        }
         regions.push(b::Region { shells: listed, void: r > 0 && !material(r) });
     }
     Ok(regions)
@@ -1284,6 +1292,7 @@ struct Parts {
     shells: Vec<Vec<(u32, bool)>>,
     regions: Vec<b::Region>,
     radial: Option<Radial>,
+    omitted_faces: HashSet<usize>,
 }
 
 /// SMLib's order of the faces round each edge (`EDGEUSE_NEXT_RADIAL`, `EDGEUSE_RADIAL_ENTRY`),
@@ -1358,11 +1367,11 @@ impl Tolerances {
 
 fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerances) -> Res<(b::Brep, Order, usize)> {
     let tolerance = tolerances.body;
-    let Parts { mut faces, mut edges, shells, regions, radial } = parts;
+    let Parts { mut faces, mut edges, shells, regions, radial, omitted_faces } = parts;
     let n_edges = edges.len();
     // A copy made by the splits keeps the tolerance of the array edge or vertex it copies.
     let (mut edge_source, vertex_source) = split_shared(&mut faces, &mut edges, &shells, n_vertices)?;
-    let split = split_touching(&mut faces, &mut edges, &mut edge_source, radial.as_ref())?;
+    let split = split_touching(&mut faces, &mut edges, &mut edge_source, radial.as_ref(), &shells)?;
     let n_vertices = vertex_source.len();
     let mut face_new: Vec<Option<u32>> = vec![None; faces.len()];
     let (mut face_order, mut direction) = (Vec::new(), Vec::new());
@@ -1376,8 +1385,10 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             }
         }
     }
-    if face_order.len() != faces.len() {
-        return Err(invalid("a face no shell uses"));
+    for (f, mapped) in face_new.iter().enumerate() {
+        if mapped.is_none() && !omitted_faces.contains(&f) {
+            return Err(invalid("a face no shell uses"));
+        }
     }
     let mut edge_new: Vec<Option<u32>> = vec![None; edges.len()];
     let mut edge_order = Vec::new();
@@ -1406,8 +1417,24 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             }
         }
     }
-    if edge_order.len() != edges.len() {
-        return Err(unsupported("wire edges from SMLib"));
+    let mut omitted_edges: HashSet<usize> = HashSet::new();
+    for &f in &omitted_faces {
+        if let Some(face) = faces.get(f) {
+            for l in &face.loops {
+                let Loop::Edges(uses) = l else { continue };
+                for &(e, _) in uses {
+                    let e = e as usize;
+                    if edge_new.get(e).copied().flatten().is_none() {
+                        omitted_edges.insert(e);
+                    }
+                }
+            }
+        }
+    }
+    for (e, mapped) in edge_new.iter().enumerate() {
+        if mapped.is_none() && !omitted_edges.contains(&e) {
+            return Err(unsupported("wire edges from SMLib"));
+        }
     }
     if edge_uses.iter().any(|u| u.len() > 2) {
         return Err(unsupported("a solid touching itself along an edge"));
@@ -1439,8 +1466,32 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             }
         }
     }
-    if vertex_order.len() != n_vertices {
-        return Err(unsupported("vertices no edge or vertex loop uses"));
+    let mut omitted_vertices: HashSet<usize> = HashSet::new();
+    for &e in &omitted_edges {
+        if let Some(edge) = edges.get(e) {
+            for &v in &edge.vertices {
+                let v = v as usize;
+                if vertex_new.get(v).copied().flatten().is_none() {
+                    omitted_vertices.insert(v);
+                }
+            }
+        }
+    }
+    for &f in &omitted_faces {
+        if let Some(face) = faces.get(f) {
+            for l in &face.loops {
+                let Loop::Vertex(v) = *l else { continue };
+                let v = v as usize;
+                if vertex_new.get(v).copied().flatten().is_none() {
+                    omitted_vertices.insert(v);
+                }
+            }
+        }
+    }
+    for (v, mapped) in vertex_new.iter().enumerate() {
+        if mapped.is_none() && !omitted_vertices.contains(&v) {
+            return Err(unsupported("vertices no edge or vertex loop uses"));
+        }
     }
     let edge_id = |e: u32| edge_new.get(e as usize).copied().flatten().ok_or_else(|| invalid("edge"));
 
@@ -1513,13 +1564,33 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
     solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
-    let placed = |new: &[Option<u32>]| {
-        new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
+    let placed_faces = |new: &[Option<u32>]| -> Res<Vec<usize>> {
+        new.iter()
+            .enumerate()
+            .map(|(f, i)| match i {
+                Some(idx) => Ok(*idx as usize),
+                None if omitted_faces.contains(&f) => Ok(usize::MAX),
+                None => Err(invalid("an entity outside the canonical walk")),
+            })
+            .collect()
     };
-    let edge_new = placed(&edge_new)?;
+    let placed_edges = |new: &[Option<u32>]| -> Res<Vec<usize>> {
+        new.iter()
+            .enumerate()
+            .map(|(e, i)| match i {
+                Some(idx) => Ok(*idx as usize),
+                None if omitted_edges.contains(&e) => Ok(usize::MAX),
+                None => Err(invalid("an entity outside the canonical walk")),
+            })
+            .collect()
+    };
+    let edge_new = placed_edges(&edge_new)?;
     // SMLib's edges split where solids touch: every piece, with the faces it bounds.
     let mut pieces = Vec::new();
     for (e, &canonical) in edge_new.iter().enumerate() {
+        if canonical == usize::MAX {
+            continue;
+        }
         let edge = edge_source.get(e).copied().ok_or_else(|| invalid("edge"))?;
         if edge_source.iter().filter(|s| **s == edge).count() > 1 {
             let record = brep.edges.get(canonical).ok_or_else(|| invalid("edge"))?;
@@ -1530,10 +1601,16 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
     pieces.sort_by_key(|p| (p.edge, p.canonical));
     let mut edges_out = Vec::with_capacity(n_edges);
     for e in 0..n_edges {
-        edges_out
-            .push(pieces.iter().find(|p| p.edge == e).map_or_else(|| edge_new.get(e).copied().ok_or_else(|| invalid("edge")), |p| Ok(p.canonical))?);
+        let canonical_edge = match pieces.iter().find(|p| p.edge == e) {
+            Some(p) => p.canonical,
+            None => match edge_new.get(e).copied() {
+                Some(idx) => idx,
+                None => return Err(invalid("edge")),
+            },
+        };
+        edges_out.push(canonical_edge);
     }
-    let order = Order { faces: placed(&face_new)?, edges: edges_out, pieces };
+    let order = Order { faces: placed_faces(&face_new)?, edges: edges_out, pieces };
     Ok((brep, order, split))
 }
 
@@ -1633,11 +1710,21 @@ fn split_shared(faces: &mut [Face], edges: &mut Vec<Edge>, shells: &[Vec<(u32, b
 /// where the boundary meets itself: copies would give a face whose loop passes the point twice two
 /// coincident vertices, which SMLib also refuses (test 32). The geometry is unchanged; each copy
 /// is added to `edge_source` with its original's source.
-fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut Vec<usize>, radial: Option<&Radial>) -> Res<usize> {
+fn split_touching(
+    faces: &mut [Face],
+    edges: &mut Vec<Edge>,
+    edge_source: &mut Vec<usize>,
+    radial: Option<&Radial>,
+    shells: &[Vec<(u32, bool)>],
+) -> Res<usize> {
+    let in_shell = |f: usize| shells.iter().any(|s| s.iter().any(|&(sf, _)| sf as usize == f));
     // The records using each edge, and where each record is: (face, loop, position).
     let mut records_of: Vec<Vec<usize>> = vec![Vec::new(); edges.len()];
     let mut place: HashMap<usize, (usize, usize, usize)> = HashMap::new();
     for (f, face) in faces.iter().enumerate() {
+        if !in_shell(f) {
+            continue;
+        }
         for (li, (l, records)) in face.loops.iter().zip(&face.records).enumerate() {
             let Loop::Edges(uses) = l else { continue };
             if records.len() != uses.len() {

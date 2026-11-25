@@ -11,13 +11,16 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
+use super::extrude::{
+    extrude_region, level_on_plane, plane_gap, plane_rise, symmetric_offset_intervals,
+    symmetric_offset_probe_points,
+};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
-    Loop2, ProfileRefusal, Region2, Seg2,
+    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, Loop2, ProfileRefusal,
+    Region2, Seg2,
 };
 use super::read::{
     arc_before_line, circular_boundary, planar_curves, planar_pieces, PlanarPiece, Run,
@@ -1418,26 +1421,6 @@ fn discontinuous_splines_are_not_read() {
         assert!(read(&k, &c, c.natural_interval(), true, &xy(), 1e-5).is_none());
     }
     assert_eq!(refused, 2, "both jumps refused where they are made");
-}
-
-#[test]
-fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
-    // No slope: the given thickness at both ends.
-    assert_eq!(tapered_flange_ends(80.0, 14.0, 0.0), (14.0, 14.0));
-    // 45 degrees over an 80 mm inside length: 40 mm thinner at the toe, 40 mm thicker at the root.
-    let (toe, root) = tapered_flange_ends(80.0, 50.0, 45.0);
-    assert!(
-        (toe - 10.0).abs() < 1e-12 && (root - 90.0).abs() < 1e-12,
-        "{toe} {root}"
-    );
-    // A 5 degree taper flange channel (203 x 89, web 8.9, flange 14.2): the ends are the mean
-    // thickness less and plus 40.05 tan 5°, and they average back to it.
-    let (toe, root) = tapered_flange_ends(89.0 - 8.9, 14.2, 5.0);
-    let change = 40.05 * 5.0_f64.to_radians().tan();
-    assert!((toe - (14.2 - change)).abs() < 1e-12 && (root - (14.2 + change)).abs() < 1e-12);
-    assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
-    // A non-finite input gives a non-finite answer, never a panic.
-    assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }
 
 #[test]
@@ -3064,6 +3047,267 @@ fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
     );
     let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
     assert_eq!(neg_start_probes, pos_start_probes);
+}
+
+/// The plane `z = 1 + a x + b y` as a frame: through `(0, 0, 1)`, its x axis `(1, 0, a)`
+/// normalised, its normal `(-a, -b, 1)` normalised and its y axis normal × x, so `x × y` is the
+/// normal. Its level above the xy frame at sketch point `(x, y)` is `1 + a x + b y`.
+fn sloped(a: f64, b: f64) -> Frame {
+    let unit = |v: [f64; 3]| {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [v[0] / l, v[1] / l, v[2] / l]
+    };
+    let x = unit([1.0, 0.0, a]);
+    let n = unit([-a, -b, 1.0]);
+    let y = [
+        n[1] * x[2] - n[2] * x[1],
+        n[2] * x[0] - n[0] * x[2],
+        n[0] * x[1] - n[1] * x[0],
+    ];
+    Frame {
+        origin: [0.0, 0.0, 1.0],
+        x_axis: x,
+        y_axis: y,
+    }
+}
+
+/// `z = 1 + x / 2`.
+fn half_slope() -> Frame {
+    sloped(0.5, 0.0)
+}
+
+/// `frame` moved by `dz` along the world z axis.
+fn raised(frame: &Frame, dz: f64) -> Frame {
+    let [x, y, z] = frame.origin;
+    Frame {
+        origin: [x, y, z + dz],
+        ..*frame
+    }
+}
+
+/// The circular arc about `c` of radius `r` from angle `start` by `sweep`, closed by its chord.
+fn arc_and_chord(c: Point2, r: f64, start: f64, sweep: f64) -> Region2 {
+    let arc = Seg2::Arc {
+        center: c,
+        radius: r,
+        start,
+        sweep,
+    };
+    let chord = Seg2::Line {
+        a: arc.end(),
+        b: arc.start(),
+    };
+    outer(Loop2 {
+        segs: vec![arc, chord],
+    })
+}
+
+/// The cubic from `p0` by `p1` and `p2` to `p3`, closed by the line back.
+fn cubic_and_chord(p0: Point2, p1: Point2, p2: Point2, p3: Point2) -> Region2 {
+    let back = Seg2::Line { a: p3, b: p0 };
+    outer(Loop2 {
+        segs: vec![Seg2::Cubic { p0, p1, p2, p3 }, back],
+    })
+}
+
+fn outer(lp: Loop2) -> Region2 {
+    Region2 {
+        outer: lp,
+        holes: vec![],
+    }
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-12 * (1.0 + b.abs())
+}
+
+/// `(lo, hi)` is `want` to 1e-12, and `lo` no lower and `hi` no higher than `want` past a few
+/// roundings (1e-14): the extremes found are values the profile takes, not its enclosure's.
+fn is_range((lo, hi): (f64, f64), want: (f64, f64)) -> bool {
+    let past = |w: f64| 1e-14 * (1.0 + w.abs());
+    close(lo, want.0)
+        && close(hi, want.1)
+        && lo >= want.0 - past(want.0)
+        && hi <= want.1 + past(want.1)
+}
+
+#[test]
+fn a_plane_meets_the_line_along_the_extrusion_at_its_closed_form_level() {
+    use crate::geom::vector3d::Vec3;
+    // At (4, 7, -3) the line along +z meets z = 1 + 4 / 2 = 3, whatever the point's own height.
+    let level = level_on_plane(&xy(), Vec3::new(4.0, 7.0, -3.0), &half_slope()).unwrap();
+    assert!(close(level, 3.0), "{level}");
+    // Measured from a frame two above the origin: 3 - 2.
+    let level =
+        level_on_plane(&raised(&xy(), 2.0), Vec3::new(4.0, 7.0, 0.0), &half_slope()).unwrap();
+    assert!(close(level, 1.0), "{level}");
+    // The same part 1e8 above the world origin: the origins cancel first, so the level is as
+    // exact as near the origin (a sum of `point` and the step along the normal before taking
+    // off the frame's origin rounds to 1.5e-8 there).
+    let far = 1e8;
+    let level = level_on_plane(
+        &raised(&xy(), far),
+        Vec3::new(4.0, 7.0, far - 3.0),
+        &raised(&half_slope(), far),
+    )
+    .unwrap();
+    assert!(close(level, 3.0), "{level}");
+    // A plane along the extrusion (x = 0) is never met.
+    let wall = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    assert!(level_on_plane(&xy(), Vec3::new(1.0, 0.0, 0.0), &wall).is_err());
+    let square = [rectangle(p(0.0, 0.0), p(1.0, 1.0))];
+    assert!(plane_rise(&xy(), &wall, &square).is_err());
+    assert!(plane_gap(&xy(), &xy(), &wall, &square).is_err());
+}
+
+#[test]
+fn a_slanted_planes_rise_over_a_profile_is_exact_at_lines_and_arcs() {
+    let rise = |plane: Frame, r: Region2| plane_rise(&xy(), &plane, &[r]).unwrap();
+    // x over [-2, 4]: 1 + x / 2 over [0, 3].
+    let r = rise(half_slope(), rectangle(p(-2.0, 0.0), p(4.0, 1.0)));
+    assert!(is_range(r, (0.0, 3.0)), "{r:?}");
+    // A circle about (1, 0) of radius 2 spans x in [-1, 3], reached between the arc's ends.
+    let r = rise(half_slope(), outer(circle(p(1.0, 0.0), 2.0)));
+    assert!(is_range(r, (0.5, 2.5)), "{r:?}");
+    // The right half of the unit circle (from -90° by 180°) spans x in [0, 1]: its leftmost
+    // point on the full circle, x = -1, is not on the arc.
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), 1.0, -FRAC_PI_2, PI),
+    );
+    assert!(is_range(r, (1.0, 1.5)), "{r:?}");
+    // The same arc running back (from 90° by -180°), and with a negative radius (the left half,
+    // its points at the opposite angles).
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), 1.0, FRAC_PI_2, -PI),
+    );
+    assert!(is_range(r, (1.0, 1.5)), "{r:?}");
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), -1.0, -FRAC_PI_2, PI),
+    );
+    assert!(is_range(r, (0.5, 1.0)), "{r:?}");
+    // A plane sloping along y, z = 1 + y / 2, over a circle of radius 2: [0, 2].
+    let r = rise(sloped(0.0, 0.5), outer(circle(p(0.0, 0.0), 2.0)));
+    assert!(is_range(r, (0.0, 2.0)), "{r:?}");
+    // Sloping along both, z = 1 + (x + y) / 2, over a circle of radius √2 about (1, -1): x + y
+    // there is ±2, at 45° and 225° off the axes, so [0, 2].
+    let r = rise(
+        sloped(0.5, 0.5),
+        outer(circle(p(1.0, -1.0), 2.0_f64.sqrt())),
+    );
+    assert!(is_range(r, (0.0, 2.0)), "{r:?}");
+}
+
+#[test]
+fn a_free_form_pieces_extremes_are_values_it_takes() {
+    // The ellipse of semi-axes 3 and 1 as four exact conics, under z = 1 + (x + y) / 2: x + y
+    // reaches ±√10 at (±9, ±1) / √10, inside two of the quarter conics, not at their ends.
+    let r = plane_rise(
+        &xy(),
+        &sloped(0.5, 0.5),
+        &[outer(ellipse(p(0.0, 0.0), 3.0, 1.0))],
+    );
+    let half = 10.0_f64.sqrt() / 2.0;
+    let r = r.unwrap();
+    assert!(is_range(r, (1.0 - half, 1.0 + half)), "{r:?}");
+    // The cubic from (0, 0) by (-3, 0) and (0, 1) to (0, 2) runs along x = -9 t (1 - t)², least
+    // at t = 1/3, where x = -4/3: under z = 1 + x / 2 the least level is 1/3, though its control
+    // points say 1 - 3/2 = -1/2, and t = 1/3 is never an end of a halved piece.
+    let lopsided = cubic_and_chord(p(0.0, 0.0), p(-3.0, 0.0), p(0.0, 1.0), p(0.0, 2.0));
+    let r = plane_rise(&xy(), &half_slope(), &[lopsided]).unwrap();
+    assert!(is_range(r, (1.0 / 3.0, 1.0)), "{r:?}");
+    // A conic whose middle weight is not positive is no curve the search can enclose.
+    let bad = outer(Loop2 {
+        segs: vec![
+            Seg2::Conic {
+                a: p(0.0, 0.0),
+                apex: p(-1.0, 1.0),
+                b: p(0.0, 2.0),
+                w: -1.0,
+            },
+            Seg2::Line {
+                a: p(0.0, 2.0),
+                b: p(0.0, 0.0),
+            },
+        ],
+    });
+    assert!(plane_rise(&xy(), &half_slope(), &[bad]).is_err());
+}
+
+#[test]
+fn a_free_form_piece_that_touches_a_zero_level_settles_at_any_size() {
+    // Under z = x the level is x. The cubic from (1, 0) by (-1, 0) and (0, 1) to (4, 1) runs
+    // along x = (1 - 3t)², so its level spans [0, 4], touching 0 at t = 1/3, never an end of a
+    // halved piece. Near there a piece's controls, its level and its coordinates all shrink as
+    // its width squared, so a rounding taken from the piece's own coordinates shrinks with its
+    // enclosure and never lets the search settle. Scaled by `s` the level spans [0, 4 s]; the
+    // part also sits 1e8 above the world origin.
+    let far = 1e8;
+    let plane = raised(&sloped(1.0, 0.0), far - 1.0);
+    for s in [1e-3, 1.0, 1e6] {
+        let touching = cubic_and_chord(p(s, 0.0), p(-s, 0.0), p(0.0, s), p(4.0 * s, s));
+        let (lo, hi) = plane_rise(&raised(&xy(), far), &plane, &[touching])
+            .unwrap_or_else(|e| panic!("s = {s}: {e:?}"));
+        let size = 4.0 * s;
+        assert!(
+            (-1e-14 * size..=1e-12 * size).contains(&lo),
+            "s = {s}: least {lo}"
+        );
+        assert!(
+            (hi - size).abs() <= 1e-12 * size && hi <= size * (1.0 + 1e-14),
+            "s = {s}: most {hi}"
+        );
+    }
+}
+
+#[test]
+fn the_gap_between_two_planes_over_a_profile_turns_negative_only_where_they_cross() {
+    // From z = 0 to z = 1 + x / 2: the gap is 1 + x / 2.
+    let gap = |r: Region2| plane_gap(&xy(), &xy(), &half_slope(), &[r]).unwrap();
+    let g = gap(rectangle(p(-1.0, 0.0), p(1.0, 1.0)));
+    assert!(is_range(g, (0.5, 1.5)), "{g:?}");
+    // Over x in [-2, 1] it only touches 0, at the loop.
+    let g = gap(rectangle(p(-2.0, 0.0), p(1.0, 1.0)));
+    assert!(is_range(g, (0.0, 1.5)), "{g:?}");
+    // A circle about the origin of radius 2.5 reaches x = -2.5, a gap of -1/4.
+    let g = gap(outer(circle(p(0.0, 0.0), 2.5)));
+    assert!(is_range(g, (-0.25, 2.25)), "{g:?}");
+    // The right half of a unit circle about (-1.5, 0) spans x in [-1.5, -0.5]: the gap stays at
+    // 1/4 or more, though the full circle's leftmost point (x = -2.5) would give -1/4.
+    let g = gap(arc_and_chord(p(-1.5, 0.0), 1.0, -FRAC_PI_2, PI));
+    assert!(is_range(g, (0.25, 0.75)), "{g:?}");
+    // An ellipse of semi-axes 2.2 and 1 reaches x = -2.2, a gap of -0.1.
+    let g = gap(outer(ellipse(p(0.0, 0.0), 2.2, 1.0)));
+    assert!(is_range(g, (-0.1, 2.1)), "{g:?}");
+    // The cubic from (0, 0) by (-8/3, 0) and (-8/3, 1) to (0, 1) runs along x = -8 t (1 - t),
+    // reaching x = -2 at t = 1/2: the gap only touches 0 there, though its control points lie
+    // past it (x = -8/3, a gap of -1/3).
+    let touch = cubic_and_chord(
+        p(0.0, 0.0),
+        p(-8.0 / 3.0, 0.0),
+        p(-8.0 / 3.0, 1.0),
+        p(0.0, 1.0),
+    );
+    let (lo, _) = gap(touch);
+    assert!(lo.abs() <= 1e-14, "{lo}");
+    // Both planes and the sketch 1e8 above the origin: the same gap.
+    let far = 1e8;
+    let g = plane_gap(
+        &raised(&xy(), far),
+        &raised(&xy(), far),
+        &raised(&half_slope(), far),
+        &[rectangle(p(-2.0, 0.0), p(1.0, 1.0))],
+    )
+    .unwrap();
+    assert!(is_range(g, (0.0, 1.5)), "{g:?}");
+    // No profile has no gap.
+    assert!(plane_gap(&xy(), &xy(), &half_slope(), &[]).is_err());
 }
 
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to

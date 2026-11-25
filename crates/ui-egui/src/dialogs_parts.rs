@@ -174,6 +174,13 @@ fn default_length(f: &Family, size: usize, lengths: &[f64]) -> usize {
         .unwrap_or(0)
 }
 
+/// Where the Size list opens for a family: the size `parts.library` marks `default_size` (the
+/// button head, countersunk and set screws open on M3, the size they opened on before M2 and M2.5
+/// came first), or the first.
+fn default_size(f: &Family) -> usize {
+    f.sizes.iter().position(|(_, row)| row.get("default_size") == Some(&Value::Bool(true))).unwrap_or(0)
+}
+
 /// A picture of the part alone.
 fn picture(p: &Value) -> Option<egui::ColorImage> {
     let mut s = Session::default();
@@ -223,7 +230,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         && let Some(first) = lib.iter().position(|f| f.system == system_id)
     {
         k.family = first;
-        k.size = 0;
+        k.size = lib.get(first).map_or(0, default_size);
         k.length = None;
     }
     let shown: Vec<usize> = (0..lib.len()).filter(|i| lib.get(*i).is_some_and(|f| f.system == system_id)).collect();
@@ -240,7 +247,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         && let Some(i) = shown.get(pick)
     {
         k.family = *i;
-        k.size = 0;
+        k.size = lib.get(*i).map_or(0, default_size);
         k.length = None;
     }
     let Some(f) = lib.get(k.family) else { return false };
@@ -293,7 +300,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         && let Some(o) = row.as_object()
     {
         // `default_length` picks the Length list's opening value; it is not a dimension.
-        for (key, v) in o.iter().filter(|(key, _)| !matches!(key.as_str(), "size" | "default_length")) {
+        // `default_size` only picks where the Size list opens; `in_standard` is said in words below
+        // the table.
+        for (key, v) in o.iter().filter(|(key, _)| !matches!(key.as_str(), "size" | "default_length" | "default_size" | "in_standard")) {
             let label = dimension_label(key).map_or_else(|| key.replace('_', " "), str::to_string);
             form_row(ui, &label, |ui| {
                 crate::ui_kit::text(
@@ -303,6 +312,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
                 );
             });
         }
+    }
+    if f.sizes.get(k.size).is_some_and(|(_, row)| row.get("in_standard") == Some(&Value::Bool(false))) {
+        ui.vertical(|ui| {
+            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.size_not_in_standard"), crate::ui_kit::Text::Note("parts_not_in_standard"));
+        });
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
@@ -401,6 +415,19 @@ mod tests {
         assert_eq!(default_length(&l[0], 1, &ls), 2, "M6 opens on 20");
         assert_eq!(default_length(&l[1], 0, &ls), 0, "a size without one opens on the first length");
         assert_eq!(default_length(&l[0], 99, &ls), 0, "so does a size that is not there");
+    }
+
+    /// The Size list opens on the size the library marks `default_size`, and on the first size
+    /// of a family that marks none.
+    #[test]
+    fn the_size_list_opens_on_the_family_s_default() {
+        let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap_or_default());
+        let opens = |id: &str| l.iter().find(|f| f.id == id).and_then(|f| f.sizes.get(default_size(f))).map(|s| s.0.clone());
+        for id in ["button_head_cap_screw", "countersunk_socket_screw", "set_screw"] {
+            assert_eq!(opens(id).as_deref(), Some("M3"), "{id}");
+        }
+        assert_eq!(opens("socket_head_cap_screw").as_deref(), Some("M2"));
+        assert_eq!(default_size(&lib()[1]), 0, "a family that marks none opens on its first size");
     }
 
     /// A hole pick seats the part (`at`), several picks seat it in each hole (#9341); without one
@@ -523,7 +550,12 @@ mod tests {
         assert!(l.len() >= 7, "{}", l.len());
         for f in &l {
             for (size, row) in &f.sizes {
-                for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
+                for key in row
+                    .as_object()
+                    .into_iter()
+                    .flat_map(|o| o.keys())
+                    .filter(|k| !matches!(k.as_str(), "size" | "default_length" | "default_size" | "in_standard"))
+                {
                     let label = dimension_label(key).map(solidcraft_ui_text::tr);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),

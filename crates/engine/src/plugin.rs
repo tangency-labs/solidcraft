@@ -445,6 +445,18 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Who a plugin's storage reads and writes are for during its run: the plugin itself, when it has
+/// the storage capability and says which data format it writes.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn storage_caller(manifest: &Manifest, rt: &RuntimeManifest) -> Option<storage::StorageCaller> {
+    rt.data_format.filter(|_| manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@"))).map(|data_format| storage::StorageCaller {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        data_format,
+    })
+}
+
 /// The shared hook path for a dialog worker and plugin.run. Hook code receives a scratch host
 /// with no file or edit grants. Complete calls propagate execution failures; a form retains its
 /// declarative state and shows a quiet note instead.
@@ -486,9 +498,12 @@ fn update_dialog_with_schema(
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
+        // The hook reads the plugin's own data the way its entry does: `storage.get {}` is its own
+        // (#22038). It runs as a read entry, so a write is still refused.
         let mut scratch = session.scratch();
         scratch.plugin_state.user.user_storage_caller =
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
             input_folders: Vec::new(),
@@ -501,6 +516,7 @@ fn update_dialog_with_schema(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         let (_, result) = craft_plugin_wasm::dialog_fields(
@@ -595,15 +611,7 @@ fn run_package(
             package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         // Only `doc.info` reads it, and only with `doc`: skip the dirty check for every other run.
         scratch.plugin_state.caller_design = groups.contains("doc").then(|| session.doc_info());
-        scratch.plugin_state.storage_caller = rt
-            .data_format
-            .filter(|_| package.manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@")))
-            .map(|data_format| storage::StorageCaller {
-                id: package.manifest.id.clone(),
-                name: package.manifest.name.clone(),
-                version: package.manifest.version.clone(),
-                data_format,
-            });
+        scratch.plugin_state.storage_caller = storage_caller(&package.manifest, rt);
         let host = SolidCraftHost {
             session: scratch,
             input_folders,
@@ -616,6 +624,7 @@ fn run_package(
             evaluation: None,
             forms: Vec::new(),
             form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
+            messages: Vec::new(),
             user_data: None,
         };
         let approved = host.granted_folders();
@@ -652,6 +661,7 @@ fn run_package(
             sketch_exits: host.sketch_exits,
             view: host.view,
             param_warnings: vec![],
+            messages: host.messages,
         })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
@@ -712,6 +722,7 @@ pub struct SolidCraftHost {
     evaluation: Option<Box<Session>>,
     forms: Vec<crate::schema::plugin::FormRequest>,
     form_source: Option<(String, Vec<Entry>)>,
+    messages: Vec<crate::schema::plugin::PluginMessage>,
     /// User settings staged for this call; never copied into a document or undo snapshot.
     user_data: Option<user_storage::Pending>,
 }
@@ -1058,9 +1069,14 @@ impl PluginHost for SolidCraftHost {
         grant_covers(&self.input_folders, path, false)
     }
     fn log(&mut self, message: &str) {
+        self.log_level(craft_plugin::LogLevel::Info, message);
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
         if let Some(s) = self.transaction.as_mut() {
-            s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
+            s.echo(format!("plugin: {clean}"));
         }
+        self.messages.push(crate::schema::plugin::PluginMessage { level, message: clean });
     }
     fn progress(&mut self, fraction: f32, message: &str) {
         solidcraft_doc::progress::item(Some((message, (fraction.clamp(0., 1.) * 100.) as usize, 100)));

@@ -1,8 +1,8 @@
-//! `drawing.note.add`, `.edit` and `.inspect` (W19e, #4896): a note on a sheet, a view, or an edge or
+//! `drawing.note.add`, `.edit`, `.delete` and `.inspect` (W19e, #4896): a note on a sheet, a view, or an edge or
 //! corner of a view's model, and where it stands with the model now. What it points at is picked as
 //! a dimension's is and saved by name ([`solidcraft_doc::Document::edge_reference`]). Adding and
 //! editing are one undo step of the drawing each, and none of the commands evaluates the model. A
-//! note is deleted as a drawing's other objects are (`selection.delete`).
+//! note is deleted by `drawing.note.delete`, or as a drawing's other objects are (`selection.delete`).
 
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use serde_json::Value;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
-use solidcraft_doc::drawing::{ByNumber, kept_by_number};
+use solidcraft_doc::drawing::{ByNumber, OnSheet, kept_by_number};
 use solidcraft_doc::{DocError, ids};
 use solidcraft_geom::cell::{Content, HAlign, Part};
 
@@ -19,13 +19,16 @@ use super::drawing_dimension::status_words;
 use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
 use crate::schema::drawing_note::{
-    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, EditParams, EditResult, FieldResult, InspectParams, NoteResult,
+    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, DeleteParams, DeleteResult, EditParams, EditResult, FieldResult, InspectParams,
+    NoteResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const ADD: &str = "drawing.note.add";
 const ADD_CONTRACT: TypedContract<AddParams> = TypedContract::new();
+const DELETE: &str = "drawing.note.delete";
+const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const EDIT: &str = "drawing.note.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const INSPECT: &str = "drawing.note.inspect";
@@ -46,6 +49,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
         ),
+    CommandSpec::new(DELETE, "Delete Note", crate::checked!("drawing.note.delete", delete)).begins_edit()
+        .icon("delete")
+        .in_drawing()
+        .doc_only()
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<DeleteResult>)
+        .params("note: its id → {note}. One undo step; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Note", crate::checked!("drawing.note.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
@@ -113,6 +123,17 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+fn delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: DeleteParams = crate::schema::read(DELETE, p)?;
+    let id = request.note.0;
+    s.edit_drawing(DELETE, |d| {
+        d.notes.by_id(id).ok_or_else(|| bad(DELETE, format!("the drawing has no note {}", ids::encode(id))))?;
+        d.remove_objects(&OnSheet { notes: vec![id], ..Default::default() });
+        Ok(())
+    })?;
+    serde_json::to_value(DeleteResult { note: ids::encode(id) }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {

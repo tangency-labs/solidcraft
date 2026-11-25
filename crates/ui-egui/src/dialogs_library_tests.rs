@@ -317,3 +317,83 @@ fn catalog_clicked_material_import_renames_conflicts_and_closing_never_assigns_b
         assert_eq!(reopened.user_materials, h.app.session.doc.user_materials);
     }
 }
+
+/// #20361: the panel's checkbox keeps a loaded local library, so the panel opens with it loaded
+/// again; cleared, the panel opens with no library, as it did before.
+#[test]
+fn a_kept_local_library_is_loaded_again_when_the_panel_opens() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1600,"height":1400}));
+    let path = h.dir.join("filaments.json").to_string_lossy().into_owned();
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    source.execute("appearance.assign", &json!({"bodies":["Body1"],"appearance":"PLA - Jade","color":[40,160,120],"opacity":1.0})).unwrap();
+    source.execute("library.export", &json!({"path":path})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let open = |h: &mut Harness| {
+        h.app.dialog = None;
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.app.start("appearance.assign");
+        h.frames(3);
+    };
+    let loaded = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Appearance(k) => (k.local.path.clone(), k.local.catalog.as_ref().map(|c| c.entries.len())),
+        _ => panic!("appearance editor"),
+    };
+    open(&mut h);
+    assert!(h.app.preferences.appearance_library.is_empty(), "nothing is kept by default");
+    if let Some(Kind::Appearance(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        k.local.path = path.clone();
+    }
+    h.frames(2);
+    h.step(&json!({"widget":"Load library"})).unwrap();
+    h.step(&json!({"click":{"handle":"library:keep"}})).unwrap();
+    assert_eq!(h.app.preferences.appearance_library, path);
+    open(&mut h);
+    assert_eq!(loaded(&h), (path.clone(), Some(1)), "loaded with no click");
+    h.step(&json!({"click":{"handle":"library:keep"}})).unwrap();
+    assert!(h.app.preferences.appearance_library.is_empty());
+    open(&mut h);
+    assert_eq!(loaded(&h), (String::new(), None));
+    // A kept library that no longer reads says so, and the panel still opens.
+    h.app.preferences.appearance_library = h.dir.join("gone.json").to_string_lossy().into_owned();
+    open(&mut h);
+    assert_eq!(loaded(&h).1, None);
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Appearance(k) if k.note.is_some()));
+}
+
+/// #20361: Library > Favorites shows the looks `appearance.favorite` marked, from the built-in
+/// library and from the loaded local library, under the key that command keeps them by.
+#[test]
+fn favorites_show_the_marked_library_and_local_looks() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1600,"height":1400}));
+    let path = h.dir.join("filaments.json").to_string_lossy().into_owned();
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    source.execute("appearance.assign", &json!({"bodies":["Body1"],"appearance":"PETG - Amber","color":[200,120,20],"opacity":0.9})).unwrap();
+    source.execute("library.export", &json!({"path":path})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let catalog = h.app.run("appearance.library", json!({})).unwrap();
+    let plain = catalog["appearances"].as_array().unwrap().iter().find(|e| e.get("id").is_none()).unwrap().clone();
+    h.app.run("appearance.favorite", json!({"look":plain,"favorite":true})).unwrap();
+    h.app.run("appearance.favorite", json!({"look":{"name":"PETG - Amber","color":"#c87814","opacity":0.9},"favorite":true})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    h.app.start("appearance.assign");
+    if let Some(Kind::Appearance(k)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        k.local.path = path;
+        k.category = crate::dialogs_appearance::FAVORITES;
+    }
+    h.frames(3);
+    assert!(h.widget("Favorites").is_some(), "the Library choice");
+    let names = |h: &mut Harness| {
+        let lib = crate::dialogs_appearance::library(&mut h.app);
+        let Some(Kind::Appearance(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("appearance editor") };
+        crate::dialogs_appearance::favorites(&h.app, lib, k).into_iter().map(|l| l.name).collect::<Vec<_>>()
+    };
+    assert_eq!(names(&mut h), [plain["name"].as_str().unwrap()], "the local library isn't loaded yet");
+    h.step(&json!({"widget":"Load library"})).unwrap();
+    assert_eq!(names(&mut h), [plain["name"].as_str().unwrap(), "PETG - Amber"]);
+    h.app.run("appearance.favorite", json!({"look":plain,"favorite":false})).unwrap();
+    assert_eq!(names(&mut h), ["PETG - Amber"]);
+}

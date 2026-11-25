@@ -179,6 +179,7 @@ fn deferred_forms_are_scoped_to_interactive_plugin_entries_and_rollback() {
         evaluation: None,
         forms: vec![],
         form_source: Some(("sample".into(), parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "sample").unwrap().runtime.unwrap().entries)),
+        messages: vec![],
     };
     assert!(matches!(host.open_form("make", &json!({})), Err(HostError::InteractiveRequired { .. })));
     host.session.plugin_forms_interactive = true;
@@ -359,6 +360,7 @@ fn panel_host() -> SolidCraftHost {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
     }
 }
 
@@ -503,6 +505,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
@@ -537,6 +540,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     let catalog = host.command_catalog();
@@ -574,6 +578,39 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     assert!(refused.contains("needs \"file\" in runtime.permissions.command_groups"), "{refused}");
     m["runtime"]["permissions"] = json!({"command_groups":["file"]});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
+}
+
+#[test]
+fn plugin_log_messages_accumulate_with_levels_and_appear_in_run_result() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
+        evaluation: None,
+        input_folders: Vec::new(),
+        forms: Vec::new(),
+        form_source: None,
+        messages: Vec::new(),
+        user_data: None,
+    };
+    host.begin_transaction().unwrap();
+    craft_plugin::PluginHost::log_level(&mut host, craft_plugin::LogLevel::Warn, "mortise cheek 6.0 mm under 8 mm");
+    craft_plugin::PluginHost::log_level(&mut host, craft_plugin::LogLevel::Info, "27 joints updated");
+    host.commit_transaction().unwrap();
+
+    assert_eq!(
+        host.messages,
+        vec![
+            crate::schema::plugin::PluginMessage { level: craft_plugin::LogLevel::Warn, message: "mortise cheek 6.0 mm under 8 mm".into() },
+            crate::schema::plugin::PluginMessage { level: craft_plugin::LogLevel::Info, message: "27 joints updated".into() },
+        ]
+    );
+    assert!(host.session.log.iter().any(|l| l == "plugin: mortise cheek 6.0 mm under 8 mm"));
+    assert!(host.session.log.iter().any(|l| l == "plugin: 27 joints updated"));
 }
 /// A read-only folder must pass the importer's scope check without granting write access.
 /// Both the user's grant and the package's manifest must allow the intended operation.
@@ -637,6 +674,7 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     host.begin_transaction().unwrap();
@@ -674,6 +712,7 @@ fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
         forms: Vec::new(),
         form_source: None,
         input_folders: Vec::new(),
+        messages: Vec::new(),
         user_data: None,
     };
     host.session.plugin_state.file_grants = vec![
@@ -725,6 +764,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     host.begin_transaction().unwrap();
@@ -760,6 +800,7 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
         file_folders: vec![folder.0.clone()],
         file_read_folders: Vec::new(),
         evaluation: None,
+        messages: Vec::new(),
         user_data: None,
     };
     let before = host.session.design_token();
@@ -803,6 +844,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     host.begin_transaction().unwrap();
@@ -1546,6 +1588,46 @@ mod native {
         assert!(s.undo.is_empty());
     }
 
+    /// Hook code that runs `command` with `args` through `commands.run` and ignores the reply: the
+    /// strings are stored at 2200 and 2400, below the realloc heap, and the result goes to 2600.
+    fn hook_runs(command: &str, args: &str) -> String {
+        let mut code = String::new();
+        for (base, text) in [(2200, command), (2400, args)] {
+            for (i, byte) in text.bytes().enumerate() {
+                code.push_str(&format!("i32.const {} i32.const {byte} i32.store8\n", base + i));
+            }
+        }
+        code + &format!("i32.const 2200 i32.const {} i32.const 2400 i32.const {} i32.const 2600 call $run\n", command.len(), args.len())
+    }
+
+    /// #22038: a dialog hook runs as a read entry. It can list the components and read its own
+    /// data, and a write is still refused.
+    #[test]
+    fn a_dialog_hook_lists_components_and_reads_its_own_data() {
+        let code = hook_runs("component.list", r#"{"compact":true,"bodies":true}"#) + &hook_runs("storage.get", "{}");
+        let f = dialog_fixture(&code);
+        let path = f.0.join("sample/plugin.json");
+        let mut m: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        m["capabilities"] = json!(["commands@0.1", "dialog@0.1", "storage@0.1"]);
+        m["runtime"]["data_format"] = json!(1);
+        m["runtime"]["commands"] = json!(["component.list", "storage.get", "storage.set"]);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Bracket"})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let reply = f.run(&mut s).unwrap();
+        assert_eq!(reply["result"]["width"], 24, "the hook ran and filled the default: {reply}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo), "the hook changed nothing");
+
+        // A write from the hook is still refused, and fails the run.
+        let write = dialog_fixture(&hook_runs("storage.set", r#"{"document":{"teeth":24}}"#));
+        std::fs::write(write.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let error = write.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
+    }
+
     #[test]
     fn plugin_run_dialog_hook_timeout_is_typed_and_never_runs_the_entry() {
         let f = dialog_fixture("(loop $forever br $forever)");
@@ -2198,6 +2280,7 @@ mod native {
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            messages: Vec::new(),
             user_data: None,
         };
         assert_eq!(catalog_command("pointcloud.deviation").unwrap().effect, Effect::Read);
@@ -2371,6 +2454,7 @@ mod native {
                     evaluation: None,
                     forms: Vec::new(),
                     form_source: None,
+                    messages: Vec::new(),
                     user_data: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
@@ -3373,10 +3457,13 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     let catalog = host.command_catalog();
-    for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
+    // `component.links` notes each linked file it looked at for the link-change events, so it is
+    // not a plain read.
+    for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf", "component.links"] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Edit, "{command}");
     }
     for command in [
@@ -3390,6 +3477,15 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         "sketch.inspect",
         "sketch.solve",
         "doc.info",
+        // Listings of the design that change nothing (#22038).
+        "component.list",
+        "component.metadata",
+        "contact.list",
+        "explode.list",
+        "joint.list",
+        "motion.list",
+        "note.list",
+        "parameters.list",
     ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
@@ -3431,6 +3527,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         evaluation: None,
         forms: Vec::new(),
         form_source: None,
+        messages: Vec::new(),
         user_data: None,
     };
     solidcraft_io::vfs::scoped(None, || {
@@ -3468,6 +3565,7 @@ fn a_write_may_reach_a_missing_folder_exactly_when_its_nearest_existing_folder_i
         forms: Vec::new(),
         form_source: None,
         input_folders: Vec::new(),
+        messages: Vec::new(),
         user_data: None,
     };
     solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([root.clone()])), || {
@@ -3987,6 +4085,23 @@ mod importers {
             error.to_string(),
             "Sample Importer could not open slow.smp: it ran longer than its time limit of 0.05 s and was stopped. Ask its author to raise its time limit."
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importer_refusals_return_the_typed_message_without_changing_the_design() {
+        let (mut s, root) = installed("refusal", &[("smp", &["smp"], false)]);
+        let path = put(&root, "refused.smp", b"U");
+        let before = s.doc.to_json();
+        for command in ["doc.open", "file.import"] {
+            let error = s.execute(command, &json!({"path": path})).unwrap_err();
+            let EngineError::PluginFailed(failure) = &error else { panic!("{error:?}") };
+            assert_eq!(failure.plugin, "Sample Importer");
+            assert_eq!(failure.file.as_deref(), Some("refused.smp"));
+            assert_eq!(error.host_error(), Some(&HostError::Unsupported { reason: "the model has no solids".into() }));
+            assert_eq!(serde_json::to_value(error.host_error()).unwrap(), json!({"kind":"unsupported","reason":"the model has no solids"}));
+            assert_eq!(s.doc.to_json(), before);
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -4962,6 +5077,7 @@ fn user_storage_host(root: &Path, id: &str) -> SolidCraftHost {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        messages: Vec::new(),
         user_data: None,
     }
 }
@@ -5399,6 +5515,7 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
     let grant = FileGrant { name: "library".into(), folder: library.clone(), read: true, write: false };
     let consent = folders::DialogFolders { plugin: "sample".into(), approval: "reviewed".into(), entry: "make".into(), folders: vec![grant.clone()] };
     let host = SolidCraftHost {
+        messages: Vec::new(),
         user_data: None,
         session: Session::default(),
         input_folders: vec![grant.clone()],
