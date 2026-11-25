@@ -1,21 +1,21 @@
-//! Rib, Web, Emboss, Replace Face, Align and Remove.
+//! Rib, Web, Emboss, Dome, Replace Face, Align and Remove.
 
 use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{AlignFrame, FeatureKind};
 use solidcraft_doc::{BodyName, SketchId};
-use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_doc::{Dir, DomeShape, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{
-    add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
+    add_face_feature, add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
 };
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
 use crate::schema::align::AlignParams;
 use crate::schema::features::FeatureResult;
-use crate::schema::features_more::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
+use crate::schema::features_more::{BoundaryFillParams, CoilParams, DomeParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -26,6 +26,7 @@ const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
 const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
 const COIL_CONTRACT: TypedContract<CoilParams> = TypedContract::new();
 const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
+const DOME_CONTRACT: TypedContract<DomeParams> = TypedContract::new();
 const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -62,6 +63,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+    CommandSpec::new("solid.dome", "Dome", crate::checked!("solid.dome", dome)).begins_edit()
+        .at("SOLID", "CREATE")
+        .icon("dome")
+        .contract(&DOME_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .from_selection(super::model_selection::body_faces)
+        .params(
+            "face: [x,y,z] on a planar face, or a face name from model.faces; height: expr (along the face's outward normal); shape?: elliptical|spherical (default elliptical: a quarter ellipse, on a circle a half ellipsoid; spherical: the sphere through the rim and the apex, on a circle); reverse?: bool (cut into the body: not supported yet, refused); body? (the face's body when the name alone does not say)",
+        ),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face)).begins_edit()
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -228,6 +238,24 @@ fn rib(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn web(s: &mut Session, p: &Value) -> Result<Value> {
     rib_like(s, p, "solid.web", true)
+}
+
+/// `solid.dome`: a dome on one planar face of a body (#19532). The face is a point on it or a
+/// name, found on the body as `solid.shell`'s faces are.
+fn dome(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.dome";
+    let raw = p.get("face").ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the face or a face name"))?;
+    let face = super::face::face_ref(s, raw, str_(p, "body"), cmd)?;
+    let picked = super::face::faces_body(s, p, std::slice::from_ref(raw), &[face]);
+    let height = req_expr(cmd, p, "height")?;
+    check_expr(s, &height, Kind::Length, cmd, "height")?;
+    let shape = match str_(p, "shape").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("elliptical") => DomeShape::Elliptical,
+        Some("spherical") => DomeShape::Spherical,
+        Some(m) => return Err(bad(cmd, format!("unknown shape `{m}` (elliptical or spherical)"))),
+    };
+    let reverse = bool_(p, "reverse").unwrap_or(false);
+    add_face_feature(&picked, s, p, FeatureKind::Dome { face: FacePick(face), height, shape, reverse, body: picked.body.clone().map(BodyName) })
 }
 
 fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
