@@ -184,11 +184,14 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 
 /// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
 /// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
-/// for any other form of `axis`.
+/// for any other form of `axis`. The pick is named in the world, where the axis is found now and
+/// on each evaluation: on a moved component, another edge can pass through the picked point
+/// before the move (#20492).
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
-    let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &*s.world_state()?, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let state = s.world_state()?;
+    let g = geo_in(s, Some(v), cmd, "axis", &state)?;
+    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
 }
 
@@ -267,6 +270,11 @@ pub(crate) fn geo_form(v: &Value) -> std::result::Result<GeoForm<'_>, GeoFormErr
 
 /// A reference from its JSON form.
 pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
+    geo_in(s, v, cmd, what, &s.model.state())
+}
+
+/// [`geo`], with its picked faces and edges named in `st`: the state the reference is found in.
+fn geo_in(s: &Session, v: Option<&Value>, cmd: &str, what: &str, st: &solidcraft_doc::ModelState) -> Result<GeoRef> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{what}` is required: {REF}")))?;
     let mut g = match geo_form(v) {
         Ok(GeoForm::Saved(g)) => g,
@@ -326,7 +334,7 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };
-    g.name_picks(&s.model.state());
+    g.name_picks(st);
     Ok(g)
 }
 
