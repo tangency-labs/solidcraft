@@ -285,6 +285,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.boundary_fill",
     "solid.bounding_solid",
     "solid.box",
+    "solid.cell_grid",
     "solid.chamfer",
     "solid.coil",
     "solid.combine",

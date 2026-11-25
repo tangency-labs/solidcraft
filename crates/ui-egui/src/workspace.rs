@@ -570,7 +570,8 @@ pub const SECTIONS: &[Section] = &[
             "sketch.point3d",
         ],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    // Cell Grid cuts a sketch's area into a part, as Hole and Emboss do: it follows Hole in the menu.
+    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.cell_grid"] },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
@@ -2129,6 +2130,9 @@ mod tests {
         assert!(ids("MANAGE", "RULES").contains(&"plastic.manage_rules"));
         let create = ids("MODEL", "CREATE");
         assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
+        // Cell Grid cuts a sketch's area into a part, as Hole does: it comes right after Hole.
+        let hole = create.iter().position(|id| *id == "solid.hole");
+        assert_eq!(hole.and_then(|i| create.get(i + 1)).copied(), Some("solid.cell_grid"), "{create:?}");
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
         // The former sketch/solid INSPECT panels now share a global INSPECT tab.

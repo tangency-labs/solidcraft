@@ -186,6 +186,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } | D::Emboss { depth: length, .. } => vec![length],
         D::Rib { thickness, depth, .. } => vec![thickness, depth],
+        D::CellGrid(c) => vec![&mut c.size, &mut c.web, &mut c.depth, &mut c.margin],
         D::PathPattern { spacing, start, fraction: false, .. } => vec![spacing, start],
         D::PathPattern { spacing, .. } => vec![spacing],
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],

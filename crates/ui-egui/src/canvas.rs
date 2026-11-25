@@ -773,7 +773,7 @@ pub(crate) fn format_len(doc: &solidcraft_engine::doc::Document, v: f64) -> Stri
 }
 
 /// Where a sketch point picked as "<sketch id>:<point id>" (or a bare id of the active sketch) is.
-fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: &str) -> Option<Vec3> {
+pub(crate) fn sketch_point_at(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, id: &str) -> Option<Vec3> {
     let (sketch, point) = match id.split_once(':') {
         Some((sketch, point)) => (sketch.parse().ok()?, point),
         None => (app.session.active_sketch?, id),
