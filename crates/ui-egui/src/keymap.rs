@@ -1172,6 +1172,22 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     chosen
 }
 
+/// Opens Preferences › Keyboard Shortcuts on one command, already waiting for its new key.
+pub fn open_for(app: &mut SolveApp, id: &str) {
+    if solidcraft_engine::find_command(id).is_none() {
+        return;
+    }
+    app.prefs_window.shell.clear_search();
+    crate::prefs::open_at(app, crate::prefs::PAGE_SHORTCUTS);
+    app.keymap.read_only = false;
+    app.keymap.filter = id.to_string();
+    app.keymap.recorder = Recorder::default();
+    app.keymap.capturing = Some(id.to_string());
+    app.keymap.slot = 0;
+    app.keymap.conflict = None;
+    app.keymap.message = None;
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
@@ -1451,6 +1467,17 @@ mod tests {
 
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
+    }
+
+    #[test]
+    fn open_for_leaves_any_preferences_search_and_filters_to_the_command() {
+        let mut a = app();
+        a.prefs_window.shell.filter = "grid".into();
+        open_for(&mut a, "solid.extrude");
+        assert!(a.prefs_window.shell.filter.is_empty());
+        assert_eq!(a.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
+        assert_eq!(a.keymap.filter, "solid.extrude");
+        assert_eq!(a.keymap.capturing.as_deref(), Some("solid.extrude"));
     }
 
     #[test]

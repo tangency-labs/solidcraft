@@ -137,6 +137,8 @@ CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("vie
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.parts_library", "Parts library", parts_library)
+    .icon("folder").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the parts library card (window setting)"),
 CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
     .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
     .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
@@ -434,6 +436,9 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn review(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.review", "visible")
+}
+fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.parts_library", "visible")
 }
 
 /// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
@@ -808,6 +813,7 @@ mod tests {
             ("view.grid", "on"),
             ("view.ground_shadow", "on"),
             ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
             ("view.review", "visible"),
         ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
@@ -832,6 +838,7 @@ mod tests {
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.parts_library",
             "view.review",
         ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
