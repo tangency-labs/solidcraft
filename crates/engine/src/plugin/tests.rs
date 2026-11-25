@@ -1233,6 +1233,16 @@ mod native {
     fn sync_panels_for_test(session: &mut Session, fixture: &Fixture) {
         panels::register_package(session, &read_package(&fixture.path()).unwrap()).unwrap();
     }
+    /// The ui fixture's describe reply with one workspace (`manufacture`: part, builtin browser, hooks `make`):
+    /// the header at 3000 points at the record at 5000, whose strings and lists follow it.
+    const WORKSPACE_DESCRIPTION: &str = concat!(
+        r#"(data (i32.const 3000) "\01\00\00\00\1c\0c\00\00\01\00\00\00\88\13\00\00\01\00\00\00")"#,
+        r#"(data (i32.const 5000) "\ec\13\00\00\0b\00\00\00\f8\13\00\00\0b\00\00\00\04\14\00\00\06\00\00\00\14\14\00\00\01\00\00\00"#,
+        r#"\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\28\14\00\00\01\00\00\00"#,
+        r#"\01\00\00\00\32\14\00\00\04\00\00\00\01\00\00\00\32\14\00\00\04\00\00\00")"#,
+        r#"(data (i32.const 5100) "manufacture")(data (i32.const 5112) "Manufacture")(data (i32.const 5124) "wrench")(data (i32.const 5140) "\00")"#,
+        r#"(data (i32.const 5144) "browser")(data (i32.const 5160) "\18\14\00\00\07\00\00\00")(data (i32.const 5170) "make")"#,
+    );
     /// A ui@0.1 plugin whose `make` entry is read-only and runs `command` once, then posts to its panel.
     fn workspace_fixture(command: &str, args: &str) -> Fixture {
         workspace_fixture_running(command, args, "call $box")
@@ -1258,6 +1268,10 @@ mod native {
             .replace("__ARGS_LEN__", &args.len().to_string())
             .replacen("      call $box\n      i32.const 6016", &format!("      {code}\n      i32.const 6016"), 1);
         assert!(source.contains(code), "the entry body is replaced");
+        // describe must repeat the manifest's one workspace, so it points `workspaces` at a record in memory.
+        let (empty, declared) = (r#"(data (i32.const 3000) "\01\00\00\00\1c\0c\00\00\01\00\00\00\00\00\00\00\00\00\00\00")"#, WORKSPACE_DESCRIPTION);
+        assert!(source.contains(empty), "the fixture describes no workspace");
+        let source = source.replacen(empty, declared, 1);
         std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
         std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
         fixture
