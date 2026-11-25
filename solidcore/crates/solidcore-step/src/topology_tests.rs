@@ -4764,3 +4764,20 @@ fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
         .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+#[test]
+fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
+    // A cube 10 x 20 x 30: its shortest edge is 10 mm. Read finer, an edge that lies off its
+    // faces keeps its gap as its tolerance; once a gap is as long as the shortest edge, the finer
+    // read tells nothing apart that the stated one did not (issue #18848: an Inventor plate read at
+    // 1.6e-6 mm for an edge of 6.2e-6 mm kept gaps of 2.6e-4 mm, and the next boolean on its face
+    // failed SMLib's coincident-edge test).
+    let mut brep = one_solid(&cube(BoxStyle::default())).brep;
+    let shortest = shortest_edge(&brep);
+    assert_eq!(shortest, 10.0);
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 9.99;
+    assert!(fine_read_holds(&brep, shortest));
+    brep.edges[3].tolerance = 10.0;
+    assert!(!fine_read_holds(&brep, shortest));
+}

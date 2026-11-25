@@ -186,7 +186,7 @@ fn curve_patches(plane: &Plane, segs: &[Seg2], sweep: Vec3, reach: &Aabb3) -> Re
     if !segs.iter().all(|s| ok(s.start()) && ok(s.end())) {
         return Err(invalid("split curves need finite segments"));
     }
-    let closed = (first.start() - last.end()).len() <= 1e-9 * (1.0 + first.start().len());
+    let closed = chain_closed(segs);
     let far = reach.diagonal() + (plane.origin - (reach.min + reach.max) * 0.5).len();
     let mut out = Vec::new();
     let line = |a: Vec2, b: Vec2, out: &mut Vec<Patch>| -> Result<()> {
@@ -361,6 +361,95 @@ impl ToolSide {
     pub(crate) fn at(&self, p: Vec3) -> f64 {
         self.0.iter().filter_map(|m| m.near(p)).min_by(|a, b| a.0.total_cmp(&b.0)).map_or(f64::NAN, |(_, side)| side)
     }
+}
+
+/// Whether a sketch curve's chain of segments closes on itself (its end on its start).
+fn chain_closed(segs: &[Seg2]) -> bool {
+    match (segs.first(), segs.last()) {
+        (Some(first), Some(last)) => (first.start() - last.end()).len() <= 1e-9 * (1.0 + first.start().len()),
+        _ => false,
+    }
+}
+
+/// What one field of a split tool is, which says what its two sides are called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKind {
+    /// A plane: the side its normal points to, or the other.
+    Plane,
+    /// Another body's face: outside that body (the face's outward side), or inside.
+    Face,
+    /// A sketch curve that closes on itself: inside it, or outside.
+    Loop,
+    /// An open sketch curve: on its left (looking down the sketch normal), or its right.
+    Curve,
+}
+
+/// The pieces of a Split Face told apart by the tool: what each field of the tool is, and for
+/// each face asked about, which side of each field it lies on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PieceSides {
+    pub fields: Vec<FieldKind>,
+    /// By face asked about, then by field: `Some(true)` on the field's first side (a plane's
+    /// normal side, outside a tool face, inside a closed curve, left of an open one), `Some(false)`
+    /// on the other, `None` where it can't be told.
+    pub sides: Vec<Vec<Option<bool>>>,
+}
+
+/// Which side of each field of `tool` each of the faces `faces` of `split` (a body `tool` split
+/// with [`split_faces`]) lies on: the tool's field at a point inside the face, on its surface and
+/// inside its trims (SMLib's `CalculateAnInternalPoint`). Each piece of a split face lies wholly
+/// on one side of every field, so one point says which; a face that lies on a field says nothing.
+pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Result<PieceSides> {
+    let fields: Vec<ToolSide> = cutters(tool, &reach_of(split))?
+        .iter()
+        .map(|g| g.iter().map(Measured::new).collect::<Result<Vec<_>>>().map(ToolSide))
+        .collect::<Result<_>>()?;
+    // Each patch's positive side is a sketch curve's left: inside a counter-clockwise loop,
+    // outside a clockwise one.
+    let kinds: Vec<(FieldKind, bool)> = match tool {
+        SplitTool::Plane(_) => vec![(FieldKind::Plane, true)],
+        SplitTool::Face { .. } => vec![(FieldKind::Face, true)],
+        SplitTool::Curves { curves, .. } => curves
+            .iter()
+            .map(|c| if chain_closed(c) { (FieldKind::Loop, solidcore_record::Loop2 { segs: c.clone() }.is_ccw()) } else { (FieldKind::Curve, true) })
+            .collect(),
+    };
+    if kinds.len() != fields.len() {
+        return Err(invalid("a split tool's fields and curves differ"));
+    }
+    let points = inner_points(split)?;
+    let tol = (split.size() * 1e-6).max(1e-9);
+    let sides = faces
+        .iter()
+        .map(|f| {
+            let p = points.get(*f).copied().flatten();
+            fields
+                .iter()
+                .zip(&kinds)
+                .map(|(field, (_, ahead))| {
+                    let side = field.at(p?);
+                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == *ahead)
+                })
+                .collect()
+        })
+        .collect();
+    Ok(PieceSides { fields: kinds.into_iter().map(|(k, _)| k).collect(), sides })
+}
+
+/// A point inside each face of `body` (in its face order), on its surface and inside its trims
+/// (SMLib's `CalculateAnInternalPoint`); `None` for a face SMLib numbers outside the record.
+pub(crate) fn inner_points(body: &Body) -> Result<Vec<Option<Vec3>>> {
+    let (sm, order) = crate::native::smlib_body_ordered(body)?;
+    let order = order.ok_or_else(|| KernelError::Failed("SMLib numbers the body's faces differently from its record".into()))?;
+    let points = sm.face_points().map_err(|e| KernelError::smlib("SMLib: a point inside each face", e))?;
+    let mut out = vec![None; body.face_count()];
+    for (i, p) in points.iter().enumerate() {
+        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
+        if let Some(slot) = out.get_mut(face) {
+            *slot = Some(Vec3::new(p[0], p[1], p[2]));
+        }
+    }
+    Ok(out)
 }
 
 /// How many fields a tool is (a sketch tool: one per curve).

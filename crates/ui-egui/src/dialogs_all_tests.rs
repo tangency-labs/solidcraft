@@ -178,6 +178,15 @@ fn feature_inputs_reject_external_sketch_geometry() {
     }
 }
 
+/// Boundary Fill's Tools also take planes, and still start from the body of a selected vertex.
+#[test]
+fn boundary_fill_tools_keep_the_body_of_a_preselected_vertex() {
+    let mut h = Harness::new();
+    h.app.session.selection = vec![Sel::Vertex { body: "Box".into(), point: Vec3::ZERO }];
+    let d = Dialog::for_command(&h.app, "solid.boundary_fill").unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Box".into() }]);
+}
+
 #[test]
 fn point_at_edge_and_plane_accepts_preselected_axes() {
     for (name, expected) in [("TestAxis", Vec3::new(20.0, 10.0, 0.0)), ("Z", Vec3::ZERO)] {
@@ -649,7 +658,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
-        "Inset By" => Role::ComboBox,
+        "Inset By" | "Extent Type" => Role::ComboBox,
         "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
         "Outline" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
@@ -1102,7 +1111,7 @@ form_case!(surface_stitch, "surface.stitch", ["Tolerance"]);
 form_case!(surface_fair, "surface.fair", ["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
 form_case!(surface_match, "surface.match", ["Continuity"]);
 form_case!(thicken, "surface.thicken", ["Thickness", "Direction", "Operation"]);
-form_case!(surface_extend, "surface.extend", ["Distance"]);
+form_case!(surface_extend, "surface.extend", ["Extent Type", "Distance"]);
 form_case!(surface_trim, "surface.trim", []);
 form_case!(surface_untrim, "surface.untrim", ["Holes"]);
 form_case!(split_face, "solid.split_face", []);
