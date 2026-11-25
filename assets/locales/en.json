@@ -5554,7 +5554,6 @@
   "sketch_finish.edit": "Edit sketch",
   "sketch_finish.finished": "{name} finished",
   "sketch_mode.announcement": "{view}, sketch mode",
-  "sketch_mode.editing": "Editing",
   "sketch_mode.model_card_unavailable": "Open a Model view before starting a sketch here",
   "sketch_mode.view_name": "{view} · {sketch}",
   "sketch_panel.attached": "Attached to {body} / {path}",

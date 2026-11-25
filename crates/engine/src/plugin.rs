@@ -4,8 +4,8 @@ use crate::{EngineError, Result, Session};
 pub use craft_plugin::ui;
 pub use craft_plugin::{
     API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
-    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog,
-    directory_read_fields, images, shader, swatches, theme, valid_id,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RibbonGroup, RuntimeManifest, UiSlot, check_input, conditions,
+    dialog, directory_read_fields, images, shader, swatches, theme, valid_icon_path, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};

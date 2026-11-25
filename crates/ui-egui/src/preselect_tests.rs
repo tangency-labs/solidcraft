@@ -3173,6 +3173,109 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert_eq!(counts, [1, 0, 1, 1, 1]);
 }
 
+/// Extend's Extent Type takes To Object (#16537): the window adds the To Object input, which
+/// takes a face or a plane, and OK extends the edge up to it. Editing the feature again shows
+/// To Object with the pick, and Distance replaces it.
+#[test]
+fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
+    // A flat sheet from x = 5 to x = 20 (y 0..10) on XY, and a box whose near face is at x = 30.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"F"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[20,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.patch", json!({"sketch":"F","body_name":"Sheet"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[30,-5,-5],"length":5,"width":20,"height":10,"body_name":"Block"})).unwrap();
+    h.frames(4);
+    let x_span = |h: &crate::scenario::Harness| {
+        let b = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+        (b.min.x, b.max.x)
+    };
+    let to_object = |h: &crate::scenario::Harness| {
+        matches!(&h.app.dialog, Some(Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Extend { to_object: true, .. }), .. }))
+    };
+    let up_to = |h: &crate::scenario::Harness| match h.app.session.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtend { up_to, .. }) => up_to.clone(),
+        _ => panic!("the last feature is an extend"),
+    };
+    let open = |h: &mut crate::scenario::Harness, edge: Vec3| {
+        h.app.session.selection = vec![crate::dialogs::edge_sel(&h.app.session, edge).expect("the sheet's edge")];
+        h.app.start("surface.extend");
+        h.frames(2);
+    };
+    let choose = |h: &mut crate::scenario::Harness, extent: &str| {
+        h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+        h.step(&json!({"click": {"handle": format!("dialog:Extent Type:{extent}")}})).unwrap();
+        h.frames(2);
+    };
+
+    // The edge at x = 20 up to the box's face at x = 30.
+    open(&mut h, Vec3::new(20.0, 5.0, 0.0));
+    assert!(!to_object(&h), "a new Extend starts with Distance");
+    choose(&mut h, "To Object");
+    assert!(to_object(&h));
+    let face = crate::dialogs::face_sel_on(&h.app.session, Some("Block"), Vec3::new(30.0, 5.0, 0.0)).expect("the box's face");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "To Object needs a pick");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
+        let active = d.active;
+        d.inputs[active].items = vec![face];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Face(t)) if t.body.as_ref() == "Block"));
+    let (lo, hi) = x_span(&h);
+    assert!((lo - 5.0).abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 5 to 30: {lo} to {hi}");
+
+    // Editing it shows To Object with the face; Distance (4 mm) replaces it: 20 + 4 = 24.
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+    h.frames(4);
+    assert!(to_object(&h), "editing shows To Object");
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1), "with the face picked");
+    // A target the window can't show as a pick is kept unseen; Distance drops it, so going back
+    // to To Object needs a new pick rather than bringing the old target back.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("up_to".into(), json!({"body": "Block", "point": [30.0, 5.0, 0.0]}));
+        for i in d.inputs.iter_mut().filter(|i| i.label == "To Object") {
+            i.items.clear();
+        }
+    }
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_ok(), "the kept target stands in for the pick");
+    choose(&mut h, "Distance");
+    choose(&mut h, "To Object");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "Distance dropped the kept target");
+    choose(&mut h, "Distance");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(d.inputs.iter().all(|i| i.label != "To Object"), "Distance takes the To Object input away");
+        if let Kind::Surface(crate::dialogs_surface::Surf::Extend { distance, .. }) = &mut d.kind {
+            *distance = "4 mm".into();
+        }
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(up_to(&h), None);
+    let (_, hi) = x_span(&h);
+    assert!((hi - 24.0).abs() < 1e-6, "the sheet ends at 24: {hi}");
+
+    // The edge at x = 5 up to the YZ plane (x = 0).
+    open(&mut h, Vec3::new(5.0, 5.0, 0.0));
+    choose(&mut h, "To Object");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        d.inputs[active].items = vec![Sel::Plane { name: "YZ".into() }];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Plane(_))));
+    let (lo, hi) = x_span(&h);
+    assert!(lo.abs() < 1e-6 && (hi - 24.0).abs() < 1e-6, "the sheet runs from 0 to 24: {lo} to {hi}");
+}
+
 /// A trim whose curves are projected along the surface's normal is made by a script (the
 /// dialog has no control for it). Edit Feature keeps the choice: the dialog sends
 /// `direction: "face_normal"` again, so OK does not turn the trim into a sweep along the

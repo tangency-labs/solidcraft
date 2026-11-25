@@ -127,8 +127,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         )),
     CommandSpec::new("solid.loft", "Loft", loft).begins_edit().at("SOLID", "CREATE").icon("loft").params(concat!(
         "sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); ",
-        "rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); ",
-        "rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
+        "rails?: [{sketch, curves: [ids in order]}] (1…16 guide rails from the first section to the last, through every section's outline: the loft follows them between the sections, passing through every rail; not with sections that have holes; one or two to an apex); ",
+        "rail_fit?: scale|stretch (one or two rails; with three or more it has no effect: each section is warped between them to pass through them all; default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); ",
         "operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?",
     )),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box)).begins_edit()
@@ -5128,7 +5128,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option
     Ok((rails, rail_fit))
 }
 
-/// A sweep's or a loft's (`what`) `rails` (one or two `{sketch?, curves}`, each rail's sketch
+/// A sweep's or a loft's (`what`) `rails` (a sweep's one or two, a loft's 1…16 `{sketch?, curves}`, each rail's sketch
 /// `default_sketch` when it names none) and `rail_fit` (scale | stretch).
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
@@ -5138,9 +5138,14 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
     let given = match p.get("rails") {
         None | Some(Value::Null) => return Ok((Vec::new(), rail_fit)),
         Some(Value::Array(a)) => a,
-        Some(_) => return Err(bad(cmd, "`rails` must list one or two rails: [{sketch, curves: [ids]}]")),
+        Some(_) => return Err(bad(cmd, "`rails` must list guide rails: [{sketch, curves: [ids]}]")),
     };
-    if !(1..=2).contains(&given.len()) {
+    if what == "loft" {
+        let most = solidcraft_kernel::MAX_LOFT_RAILS;
+        if !(1..=most).contains(&given.len()) {
+            return Err(bad(cmd, format!("a loft takes 1…{most} guide rails")));
+        }
+    } else if !(1..=2).contains(&given.len()) {
         return Err(bad(cmd, format!("a {what} takes one or two guide rails")));
     }
     let mut rails = Vec::with_capacity(given.len());
