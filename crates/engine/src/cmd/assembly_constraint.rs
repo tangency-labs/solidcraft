@@ -6,9 +6,9 @@
 //! others: several constraints between one pair add up, and b keeps every motion they leave free.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape};
+use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape, Snap};
 
-use super::{CommandSpec, add_joint, joint_id, new_joint, origin_param, value};
+use super::{CommandSpec, add_joint, component_of, joint_id, new_joint, origin_param, round_origin, value};
 use crate::params::{bad, bool_, str_};
 use crate::schema::joints::{CreateConstraintParams, EditConstraintParams, EditJointResult, JointAddedResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
             "type: mate|flush|distance|concentric|insert|parallel|perpendicular|angle|tangent|point_on_axis; a, b: references, as joint.create's \
-         origins (a face or a datum plane for a plane, a circle or an axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
+         origins (a face or a datum plane for a plane, a circle or an axis for an axis, a point; a round face given as a face is its axis where the rule needs one; b moves); offset?: the gap (mm or an expression; needed for distance); \
          angle?: deg or an expression (needed for angle); flip?: turn b over; name? (default: the rule and a number, Mate1); quiet?. \
          Kept as a joint of the kind the rule needs (mate and flush planar, distance planar or point on plane, concentric cylindrical, \
          insert revolute, tangent line on plane, point on axis point on line), made where the parts are, so b moves no further than the \
@@ -49,6 +49,38 @@ pub static COMMANDS: &[CommandSpec] = &[
 /// The shape of a joint origin, for the table of rules (`Constraint::fit`).
 fn shape(o: &JointOrigin) -> RefShape {
     RefShape::of(&o.snap)
+}
+
+/// A reference given as a `face` that is round (a cylinder): that face as a circle origin (its
+/// axis), as the Constrain dialog sends a click on a round face (#21549). `None` for any other
+/// reference: a planar face, a named origin, an edge, a point.
+fn round_face(s: &Session, o: &JointOrigin, v: Option<&Value>, cmd: &str) -> Result<Option<JointOrigin>> {
+    let Snap::FaceCenter { pick, face: Some(name), .. } = &o.snap else { return Ok(None) };
+    let Some(given) = v.and_then(Value::as_object).filter(|m| m.contains_key("face")) else { return Ok(None) };
+    if !solidcraft_doc::joints::face_is_round(&s.doc, &s.model.state(), component_of(s, o.occurrence), *pick, name) {
+        return Ok(None);
+    }
+    // The face the check saw, at the point it was picked: no second search by the point.
+    Ok(round_origin(s, o.occurrence, *pick, name, &Value::Object(given.clone()), cmd).ok())
+}
+
+/// The references as rule `c` takes them: as given where they fit it, else with a round face given
+/// as a `face` taken as its axis (a `circle`), where that fits. A pair that fits as given is kept
+/// as given, so a mate on a cylinder's `face` keeps the planar face it meant before.
+fn fitting_refs(s: &Session, c: Constraint, a: JointOrigin, b: JointOrigin, p: &Value, cmd: &str) -> Result<(JointOrigin, JointOrigin)> {
+    if c.fit(shape(&a), shape(&b)).is_some() {
+        return Ok((a, b));
+    }
+    let ra = round_face(s, &a, p.get("a"), cmd)?;
+    let rb = round_face(s, &b, p.get("b"), cmd)?;
+    let tries = [(ra.as_ref(), rb.as_ref()), (ra.as_ref(), None), (None, rb.as_ref())];
+    for (x, y) in tries.into_iter().filter(|(x, y)| x.is_some() || y.is_some()) {
+        let (x, y) = (x.unwrap_or(&a), y.unwrap_or(&b));
+        if c.fit(shape(x), shape(y)).is_some() {
+            return Ok((x.clone(), y.clone()));
+        }
+    }
+    Ok((a, b))
 }
 
 /// How rule `c` is kept between references of shapes `a` and `b`, or why it is refused.
@@ -188,6 +220,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
             value(s, v, angle, cmd)?;
         }
     }
+    let (a, b) = fitting_refs(s, c, a, b, p, cmd)?;
     let rule = kept(c, shape(&a), shape(&b), cmd)?;
     let (a, b) = if rule.swap { (b, a) } else { (a, b) };
     if c == Constraint::Distance && p.get("offset").is_none() {

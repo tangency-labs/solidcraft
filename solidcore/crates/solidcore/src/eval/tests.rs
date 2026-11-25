@@ -676,6 +676,68 @@ fn hostile_parameters_give_none() {
     assert!(c.derivatives(0.5, 2).is_none());
 }
 
+/// A piece from the float below a knot up to the knot is taken from the span it starts in: its
+/// middle rounds onto the knot, whose span on the right is another polynomial. Here x is
+/// `1 - t` on `[0, 1]` and `0` on `[1, 2]`, so the piece's start is `2^-53`, not `0`.
+#[test]
+fn a_bezier_piece_ending_at_a_knot_is_its_own_spans() {
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 2.0, 2.0],
+        vec![
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    );
+    let below = 1.0 - f64::EPSILON / 2.0;
+    assert_eq!(
+        0.5 * (below + 1.0),
+        1.0,
+        "the piece's middle rounds onto the knot"
+    );
+    let piece = c.bezier(below, 1.0).unwrap();
+    let ([x, ..], [e, ..]) = piece[0];
+    assert!((x - f64::EPSILON / 2.0).abs() <= e, "x {x}, bound {e}");
+    assert_eq!(piece[1].0[0], 0.0);
+    // Either side of the knot, and the range's very end, still have their pieces.
+    assert!(c.bezier(1.0, 1.5).is_some_and(|p| p[0].0[0] == 0.0));
+    assert!(c.bezier(2.0, 2.0).is_some());
+    // A piece across the knot is not one span's.
+    assert!(c.bezier(0.5, 1.5).is_none());
+}
+
+/// A control point whose exact coordinate lies below the least subnormal rounds to zero, and its
+/// bound still encloses it; a knot span whose width overflows has no piece.
+#[test]
+fn a_bezier_bound_counts_underflow_and_an_overflowing_span_has_no_piece() {
+    let least = f64::from_bits(1);
+    // x is `least · t` on [0, 1]: at 0.5 it is half the least subnormal.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [least, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(0.5, 1.0).unwrap()[0];
+    // The exact x, half of `least`, is no float: the bound reaches past it from what came back.
+    assert!(x.abs() + least <= e, "x {x}, bound {e}");
+    // x is `t` on [0, 2]: at the least subnormal it is that, and `least / 2` rounds to zero.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 2.0, 2.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(least, 1.0).unwrap()[0];
+    assert!((x - least).abs() <= e, "x {x}, bound {e}");
+    // Knots 2e308 apart: the width is not a number a step can divide by.
+    let c = EvalCurve::new(
+        1,
+        vec![-1e308, -1e308, 1e308, 1e308],
+        vec![[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]],
+    );
+    assert!(c.bezier(0.0, 1.0).is_none());
+}
+
 #[test]
 fn plane_point_and_normal() {
     let s = EvalSurface::Plane {

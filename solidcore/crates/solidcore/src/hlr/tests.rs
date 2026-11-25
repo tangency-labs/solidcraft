@@ -5262,6 +5262,54 @@ fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
 }
 
 #[test]
+fn a_sphere_with_an_inner_hole_loop_keeps_its_interior_and_outlines() {
+    // Issue #20602: a hole cut into a closed sphere face has no outer boundary loop,
+    // so its chart area is negative (inner hole loop runs clockwise). Walking the loop,
+    // the face's material is on the left, so sigma must follow loops_left (+1.0) rather
+    // than area.signum() (-1.0).
+    let tau = std::f64::consts::TAU;
+    let half = std::f64::consts::FRAC_PI_2;
+    let label = k::Surface::Sphere {
+        frame: frame_at([0.; 3]),
+        radius: 10.,
+    };
+    let chart = S3::bounded(&label, [[0., tau], [-half, half]]).unwrap();
+    // A circle at x = 9.0 on the sphere of radius 10: y^2 + z^2 = 100 - 81 = 19.
+    let r_hole = 19.0_f64.sqrt();
+    let circle = k::Curve::Circle {
+        frame: k::Frame {
+            origin: [9., 0., 0.],
+            x_axis: [0., 1., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r_hole,
+    };
+    let (edge_form, interval) = form::curve(&circle, [0., tau]).unwrap();
+    let edge = bounded_edge(circle, Some(edge_form), interval);
+    let curves = vec![C3::of_edge(&edge).unwrap().0];
+    let hole_loop = k::Loop::Edges {
+        edges: vec![k::OrientedEdge {
+            edge: 0,
+            forward: false,
+        }],
+    };
+    let (form, domain) = form::surface(&label, [[0., tau], [-half, half]]).unwrap();
+    let holed_sphere = k::Face {
+        surface: label,
+        nurbs: Some(form),
+        domain,
+        loops: vec![hole_loop],
+    };
+    let trimmed = trim::build(&holed_sphere, &curves, &chart, 64);
+    assert!(trimmed.unsupported.is_none());
+    // (u, v) near [0., 0.] is inside the hole -> contains should be false.
+    // (u, v) away from [0., 0.] (e.g. at the back [pi, 0.] or [1.5, 0.5]) is face material -> contains should be true.
+    assert_eq!(trimmed.contains([0., 0.]), Some(false));
+    assert_eq!(trimmed.contains([std::f64::consts::PI, 0.]), Some(true));
+    assert_eq!(trimmed.contains([1.5, 0.5]), Some(true));
+}
+
+#[test]
 fn an_edge_no_face_uses_is_drawn_like_any_other() {
     // A wire beside a box, in the box's shell.
     let mut b = cuboid([0.; 3], [1.; 3]);
@@ -6150,4 +6198,51 @@ fn spline_points_and_hulls_come_from_their_own_knot_spans() {
             );
         }
     }
+}
+
+#[test]
+fn a_ball_corner_is_its_labels_sphere_and_needs_its_form() {
+    let face = |center: [f64; 3], radius: f64| k::Face {
+        surface: k::Surface::BallPatch { center, radius },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    // The sphere is the label's, as it is.
+    let sphere = surface::ball_sphere(&face([1., 2., 3.], 2.));
+    assert!(matches!(
+        sphere,
+        Ok(Some(Analytic::Sphere { c, r })) if [c.x, c.y, c.z, r] == [1., 2., 3., 2.]
+    ));
+    // Its parameters are its form's: without one there is no chart.
+    assert!(matches!(
+        S3::of_face(&face([1., 2., 3.], 2.)),
+        Err(HlrError::Invalid("ball patch without its form"))
+    ));
+    // A sphere that is no sphere is refused with its reason.
+    for (center, radius) in [
+        ([f64::NAN, 0., 0.], 1.),
+        ([0., f64::INFINITY, 0.], 1.),
+        ([0.; 3], 0.),
+        ([0.; 3], -1.),
+        ([0.; 3], f64::NAN),
+        ([0.; 3], f64::INFINITY),
+    ] {
+        assert!(matches!(
+            surface::ball_sphere(&face(center, radius)),
+            Err(HlrError::Invalid("ball patch sphere"))
+        ));
+    }
+    // Every other face has no ball sphere.
+    let plane = k::Face {
+        surface: k::Surface::Plane {
+            origin: [0.; 3],
+            u_axis: [1., 0., 0.],
+            v_axis: [0., 1., 0.],
+        },
+        nurbs: None,
+        domain: [[0., 1.], [0., 1.]],
+        loops: Vec::new(),
+    };
+    assert!(matches!(surface::ball_sphere(&plane), Ok(None)));
 }

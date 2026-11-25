@@ -20,6 +20,19 @@ enum Condition {
     Not(Box<Self>),
 }
 impl Condition {
+    fn fields<'a>(&'a self, fields: &mut BTreeSet<&'a str>) {
+        match self {
+            Self::Eq(field, _) | Self::In(field, _) => {
+                fields.insert(field);
+            }
+            Self::All(conditions) | Self::Any(conditions) => {
+                for condition in conditions {
+                    condition.fields(fields);
+                }
+            }
+            Self::Not(condition) => condition.fields(fields),
+        }
+    }
     fn matches(&self, values: &Map<String, Value>) -> bool {
         match self {
             Self::Eq(field, value) => values.get(field).is_some_and(|v| scalar_equal(v, value)),
@@ -59,7 +72,8 @@ impl FieldConditions {
     pub fn enabled(&self, values: &Map<String, Value>) -> bool {
         self.enabled.as_ref().is_none_or(|c| c.matches(values))
     }
-    pub(crate) fn has_choice_filter(&self) -> bool {
+    /// Whether any choice has an availability condition to evaluate.
+    pub fn has_choice_filter(&self) -> bool {
         self.options.iter().any(Option::is_some)
     }
     pub fn option_available(&self, index: usize, values: &Map<String, Value>) -> bool {
@@ -140,18 +154,65 @@ impl InputConditions {
         Ok(Self { fields, order })
     }
 
-    /// Scalar controller values in dependency order. Hidden controllers cannot affect another
-    /// row. Only scalars are copied: an arbitrary, unchecked nested input is never cloned here.
-    pub fn visible_values(&self, values: &Map<String, Value>) -> Map<String, Value> {
-        let mut values: Map<String, Value> =
-            values.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).map(|(k, v)| (k.clone(), v.clone())).collect();
-        for name in &self.order {
-            if self.fields.get(name).is_some_and(|f| !f.visible(&values)) {
-                values.remove(name);
+    /// Scalar controller values after all of this scope's visibility rules have been applied.
+    pub fn visible_values(&self, values: &Map<String, Value>) -> Result<Map<String, Value>> {
+        visible_values(values, self.fields.iter().map(|(name, rules)| (name.as_str(), rules)))
+    }
+}
+
+/// Evaluate controllers across all applicable scopes, with each controller resolved before its
+/// dependents. A field hidden by any scope cannot control a field in another scope. Only scalars
+/// are copied, so unchecked nested input is never cloned here.
+pub fn visible_values<'a>(
+    values: &Map<String, Value>,
+    fields: impl IntoIterator<Item = (&'a str, &'a FieldConditions)>,
+) -> Result<Map<String, Value>> {
+    let mut values: Map<String, Value> =
+        values.iter().filter(|(_, v)| !v.is_object() && !v.is_array()).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut remaining: BTreeMap<&str, Vec<&FieldConditions>> = BTreeMap::new();
+    for (name, rules) in fields {
+        remaining.entry(name).or_default().push(rules);
+    }
+    let mut dependents: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut counts = BTreeMap::new();
+    let mut ready = BTreeSet::new();
+    for (name, rules) in &remaining {
+        let mut dependencies = BTreeSet::new();
+        for rule in rules {
+            if let Some(condition) = &rule.visible {
+                condition.fields(&mut dependencies);
             }
         }
-        values
+        dependencies.retain(|dependency| remaining.contains_key(dependency));
+        counts.insert(*name, dependencies.len());
+        if dependencies.is_empty() {
+            ready.insert(*name);
+        }
+        for dependency in dependencies {
+            dependents.entry(dependency).or_default().insert(*name);
+        }
     }
+    while let Some(name) = ready.pop_first() {
+        if let Some(rules) = remaining.remove(name)
+            && rules.iter().any(|rule| !rule.visible(&values))
+        {
+            values.remove(name);
+        }
+        if let Some(dependents) = dependents.get(name) {
+            for dependent in dependents {
+                if let Some(count) = counts.get_mut(dependent) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        ready.insert(*dependent);
+                    }
+                }
+            }
+        }
+    }
+    if !remaining.is_empty() {
+        return Err(invalid("input_schema", format!("conditional field cycle: {}", remaining.keys().copied().collect::<Vec<_>>().join(", "))));
+    }
+    Ok(values)
 }
 
 fn parse_condition(
@@ -221,7 +282,7 @@ pub fn has_conditions(schema: &Value) -> bool {
 
 // At composition boundaries, scalar choice-option annotations belong to the enclosing field,
 // not to an object branch. Conditions below properties/items still need branch projection.
-fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
+pub(crate) fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
     fn visit(schema: &Value, depth: usize, budget: &mut usize, choice_filters: bool) -> bool {
         if depth > 32 || *budget == 0 {
             return true;
@@ -252,7 +313,7 @@ fn contains_conditions(schema: &Value, choice_filters: bool) -> bool {
 
 // A required, unconditional finite scalar discriminator proves that two branches cannot both
 // match. The same numeric comparison as input checking avoids rounding integer discriminators.
-fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budget: &mut usize) -> Result<bool> {
+fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budget: &mut usize, input: Option<&Value>) -> Result<bool> {
     fn domain(property: &Value) -> Option<&[Value]> {
         let values = property.get("const").map(std::slice::from_ref).or_else(|| property.get("enum").and_then(Value::as_array).map(Vec::as_slice))?;
         (!values.is_empty() && values.len() <= 256 && values.iter().all(|v| !v.is_object() && !v.is_array())).then_some(values)
@@ -291,11 +352,108 @@ fn disjoint_branches(a: &Value, b: &Value, objects_only: bool, path: &str, budge
                 break;
             }
         }
-        if !overlap {
+        if !overlap && input.is_none_or(|input| input.get(name).is_some_and(|value| a.iter().any(|option| scalar_equal(value, option)))) {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+// Use only the discriminators that prove branches disjoint, rather than validating fields
+// that another scope may hide. Single branches need no discriminator.
+pub(crate) fn selected_branch<'a>(options: &'a [Value], value: &Value, budget: &mut usize) -> Result<Option<&'a Value>> {
+    if options.len() == 1 {
+        return Ok(options.first());
+    }
+    for (index, option) in options.iter().take(256).enumerate() {
+        let mut matches = true;
+        for (other_index, other) in options.iter().take(256).enumerate() {
+            if index != other_index && !disjoint_branches(option, other, true, "input_schema", budget, Some(value))? {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            return Ok(Some(option));
+        }
+    }
+    Ok(None)
+}
+
+// Expand alternatives independently: combining all alternatives would invent cycles between
+// mutually exclusive branches. Children inherit the same combination of enclosing scopes.
+fn validate_visibility_combinations(schemas: &[&Value], path: &str, depth: usize, budget: &mut usize) -> Result<()> {
+    #[derive(Clone, Copy)]
+    enum Pending<'a> {
+        Schema(&'a Value),
+        Choice(&'a [Value]),
+    }
+    fn spend(budget: &mut usize, amount: usize, path: &str) -> Result<()> {
+        *budget = budget.checked_sub(amount).ok_or_else(|| invalid(path, "conditional scope combinations are too large"))?;
+        Ok(())
+    }
+    if depth > 32 {
+        return Err(invalid(path, "schema is too deeply nested"));
+    }
+    let mut combinations = vec![(schemas.iter().copied().map(Pending::Schema).collect::<Vec<_>>(), Vec::new())];
+    'combinations: while let Some((mut pending, mut applied)) = combinations.pop() {
+        while let Some(next) = pending.pop() {
+            spend(budget, 1, path)?;
+            match next {
+                Pending::Schema(schema) => {
+                    applied.push(schema);
+                    for key in ["oneOf", "anyOf"] {
+                        if let Some(options) = schema.get(key).and_then(Value::as_array)
+                            && options.iter().any(|option| contains_conditions(option, false))
+                        {
+                            pending.push(Pending::Choice(options));
+                        }
+                    }
+                }
+                Pending::Choice(options) => {
+                    for option in options {
+                        spend(budget, pending.len() + applied.len() + 1, path)?;
+                        let mut branch = pending.clone();
+                        branch.push(Pending::Schema(option));
+                        combinations.push((branch, applied.clone()));
+                    }
+                    continue 'combinations;
+                }
+            }
+        }
+        let mut conditions = Vec::new();
+        for schema in &applied {
+            let rules = InputConditions::parse(schema)?;
+            spend(budget, rules.fields.len() + rules.fields.values().map(|field| field.dependencies.len()).sum::<usize>(), path)?;
+            conditions.push(rules);
+        }
+        visible_values(&Map::new(), conditions.iter().flat_map(|scope| scope.fields.iter().map(|(name, rules)| (name.as_str(), rules))))?;
+        let mut names = BTreeSet::new();
+        for schema in &applied {
+            if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+                spend(budget, properties.len(), path)?;
+                names.extend(properties.keys().map(String::as_str));
+            }
+        }
+        for name in names {
+            let children: Vec<_> = applied
+                .iter()
+                .filter_map(|schema| {
+                    schema.get("properties").and_then(|properties| properties.get(name)).or_else(|| schema.get("additionalProperties"))
+                })
+                .collect();
+            if children.iter().any(|child| contains_conditions(child, false)) {
+                validate_visibility_combinations(&children, &format!("{path}.properties.{name}"), depth + 1, budget)?;
+            }
+        }
+        for key in ["items", "additionalProperties"] {
+            let children: Vec<_> = applied.iter().filter_map(|schema| schema.get(key)).collect();
+            if children.iter().any(|child| contains_conditions(child, false)) {
+                validate_visibility_combinations(&children, &format!("{path}.{key}"), depth + 1, budget)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Validate every object scope at load, including schemas the GUI does not draw.
@@ -329,7 +487,7 @@ pub fn validate_conditions(schema: &Value) -> Result<()> {
                     for (i, a) in options.iter().enumerate() {
                         for b in options.iter().skip(i + 1) {
                             *budget = budget.checked_sub(1).ok_or_else(|| invalid(&location, "conditional composition is too large"))?;
-                            if !disjoint_branches(a, b, schema.get("type").and_then(Value::as_str) == Some("object"), &location, budget)? {
+                            if !disjoint_branches(a, b, schema.get("type").and_then(Value::as_str) == Some("object"), &location, budget, None)? {
                                 return Err(invalid(&location, "conditional branches need disjoint required scalar const/enum discriminators"));
                             }
                         }
@@ -342,5 +500,10 @@ pub fn validate_conditions(schema: &Value) -> Result<()> {
         }
         Ok(())
     }
-    visit(schema, "input_schema", 0, &mut 100_000)
+    let mut budget = 100_000;
+    visit(schema, "input_schema", 0, &mut budget)?;
+    if contains_conditions(schema, false) {
+        validate_visibility_combinations(&[schema], "input_schema", 0, &mut budget)?;
+    }
+    Ok(())
 }

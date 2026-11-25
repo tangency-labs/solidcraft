@@ -26,8 +26,8 @@ use solidcore::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
 use solidcore::blend::fillet_executive::p1::ExecutiveObjects;
 use solidcore::blend::fillet_executive::p2::FilletParameters;
 use solidcore::blend::fillet_executive::p3::{
-    ContextMark, CornerView, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
-    StitchAttempt, StitchSettings, TopoEdgeView,
+    ContextMark, CornerView, ErrorInfo, ExecutiveAccess, FilletExecutive, StitchAttempt,
+    StitchSettings, TopoEdgeView,
 };
 use solidcore::blend::fillet_geom::p1::{FilStatus, FilletEdgeType};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
@@ -1449,7 +1449,9 @@ impl ExecutiveAccess<Handle> for Access {
 /// `-2`).
 const OP_P2: &str = "blend::fillet_executive::p2: ";
 
-/// The p2 module's operation: its null objects, typed, are `Missing` blend failures of it.
+/// The p2 module's operation: its null objects, typed, are blend failures of it that keep
+/// the status `SM_ERR_NULL_POINTER` (a `Defect` for an object the executive built, the
+/// named cause for the caller's missing law list; #19823).
 const P2_OP: &str = "blend::fillet_executive::p2";
 
 /// The `SmStatus` of a Rust error.
@@ -1458,13 +1460,11 @@ fn status_of(e: &SolidError) -> f64 {
         SolidError::Upstream {
             operation, code, ..
         } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
-        // the p2 module's own null objects, typed (#13790): a `Missing` blend failure of
-        // the module's operation
+        // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
+        // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
-            && matches!(
-                e.blend_failure(),
-                Some(solidcore::error::blend::BlendFailure::Missing(_))
-            ) =>
+            && e.blend_failure().is_some()
+            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }
@@ -1577,56 +1577,18 @@ fn box_access(bx: &BoxIn) -> Result<Result<Access, Output>, HarnessError> {
 
 /// The executive state the C++ constructor leaves (`SmFilletExecutive(ctx, target)`).
 fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
-    let mut executive = FilletExecutive {
+    let mut executive = FilletExecutive::new(
         target,
-        fillet: None,
-        corners: vec![],
-        solvers: vec![],
-        topo_edges: vec![],
-        edge_attribute: None,
-        initialized: false,
-        options: ExecutionOptions {
-            piecewise_merge: false,
-            topology_insertion: true,
-            global_merge: false,
-            trimming: true,
-            classification: true,
+        ExecutiveObjects {
+            executive: Handle::Brep(0),
+            pseudo_brep: Handle::Brep(0),
+            edge_attribute: Handle::Brep(0),
         },
-        error: ErrorInfo::default(),
-        intersector: TopologyIntersector::new(
-            None,
-            None,
-            solidcore::math::EFF_ZERO_SQ,
-            30.0 * (solidcore::math::PI / 180.0),
-        ),
-        intersection_edges: vec![],
-        intersection_vertices: vec![],
-        law_sequence_edges: vec![],
-        pseudo_brep: None,
-        surface_generators: vec![],
-        filleted_vertices: Vec::new(),
-        vertex_corner_map: BTreeMap::new(),
-        edgeuse_solver_map: BTreeMap::new(),
-        self_intersection_handler: None,
-        mark_corner_patches: false,
-        cliff_overflow: false,
-        open_ends: Vec::new(),
-        overflow_first: false,
-        classify_only: false,
-        roll_over_pass: false,
-        overflow_edges: Vec::new(),
-        mitred_edges: Vec::new(),
-        fan_split_points: Vec::new(),
-        earlier_pass_faces: Vec::new(),
-        // the fork's refusal fit (WR-696): none noted, as `FilletExecutive::new` leaves it
-        fit_radius: -1.0,
-        fit_edge: None,
-        fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
-        fit_setback: -1.0,
-        rollover_adjusting: false,
-        rolled_beside_band: false,
-    };
-    executive.intersector.ignore_tangency = true;
+    );
+    // The fixture does not allocate these objects.
+    executive.edge_attribute = None;
+    executive.pseudo_brep = None;
+    executive.error = ErrorInfo::default();
     executive
 }
 
@@ -2393,6 +2355,23 @@ pub(crate) use loader::{loader_rust, LoaderScript};
 mod tests {
     use super::*;
     use solidcore::blend::fillet_executive::p2::{with_temporary_radius_change, TemporaryRadiusChange};
+
+    /// tangency-labs/solidcraft#18634: `set_params_short_box_regression`'s 1e-3 box at
+    /// (1e6, -1e6, 0) was refused by its constructor (status 1001), as main's
+    /// position-scaled degeneracy floor refused sides up to about 1e-9 times the
+    /// coordinate. It now builds, and the case's result is the one the same box gets at
+    /// the origin: where the box is no longer decides what `set_params` answers.
+    #[test]
+    fn far_short_box_sets_params_as_at_the_origin() {
+        let far = crate::case::regression_case(&Runner, "set_params_short_box_regression");
+        assert_eq!(far.inputs["box"]["origin"], serde_json::json!([1e6, -1e6, 0.0]));
+        let mut near = far.clone();
+        near.inputs["box"]["origin"] = serde_json::json!([0.0, 0.0, 0.0]);
+        let (far_out, near_out) = (Runner.run_rust(&far).unwrap(), Runner.run_rust(&near).unwrap());
+        assert_eq!(far_out.error, None);
+        assert_eq!(far_out.rejected, None);
+        assert_eq!(far_out, near_out);
+    }
 
     #[test]
     fn temporary_radius_setup_error_never_enters_the_filleting_body() {

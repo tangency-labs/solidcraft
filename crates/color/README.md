@@ -8,6 +8,9 @@ The sRGB transfer function (IEC 61966-2-1) lives here once: every encode and dec
 through `srgb`, so a change to the rule is one change. Shaders can't call Rust and keep their own
 copies.
 
+Colours as text live here once too: `hex` reads and writes `#rrggbb` and `#rrggbbaa` for theme
+files, the colour field, 3MF files and appearance replies.
+
 ## API
 
 | Item | What it is |
@@ -16,5 +19,8 @@ copies.
 | `srgb::decode(encoded)` | An sRGB value (0..1) to linear light |
 | `srgb::encode8(linear)` | Linear light to the nearest 8-bit sRGB code (out of range clamps, NaN reads as 0) |
 | `srgb::decode8(code)` | An 8-bit sRGB code to linear light |
+| `hex::parse(text)` | `#rrggbb` or `#rrggbbaa` (either case, straight alpha) to bytes; anything else, spaces and signs included, is `None` |
+| `hex::parse_digits(digits)` | The same without the `#` |
+| `hex::format(rgb)`, `hex::format_alpha(rgb, a)` | Bytes to `#rrggbb` or `#rrggbbaa`, lower case |
 | `AnalysisColors` | The surface analysis palette (draft, accessibility, curvature, hatch), straight sRGB 0..1 as the shader takes it; the theme fills it and the renderer reads it |
 | `AnalysisColors::DEFAULT` | The light theme's colours with no colour vision mode, as headless pictures use |

@@ -13,7 +13,8 @@
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
 //! for a part and for an assembly, one sheet with the ISO border and the built-in title block
 //! ([`default_block`](title_block::default_block)), the kind's general tolerances typed over its
-//! cell ([`PART_NOTE`], [`ASSEMBLY_NOTE`]). A part's drawing starts from ISO A3 and an assembly's from
+//! cell ([`PART_NOTE`], [`ASSEMBLY_NOTE`]) and its document type over its type cell ([`PART_TYPE`],
+//! [`ASSEMBLY_TYPE`]). A part's drawing starts from ISO A3 and an assembly's from
 //! ISO A2 ([`default_for`]). A drawing saved as a template replaces or changes them: a copy of a
 //! built-in with a company's changes, its own note among them, is a template like any other. A later
 //! built-in never changes a drawing made from an earlier one: a drawing keeps copies, never names.
@@ -59,6 +60,10 @@ pub const PART_NOTE: &str = "Unless stated: linear ±0.2 mm, angles ±0.5°. Bre
 pub const ASSEMBLY_NOTE: &str = "Unless stated: assembled positions ±0.5 mm, angles ±1°. Part tolerances are on the part drawings.";
 /// The title block cell the notes are typed over.
 const TOLERANCES_CELL: &str = "general_tolerances";
+/// What a part's built-ins and an assembly's call their document, typed over the block's type cell.
+pub const PART_TYPE: &str = "Part drawing";
+pub const ASSEMBLY_TYPE: &str = "Assembly drawing";
+const TYPE_CELL: &str = "document_type";
 
 /// The built-in a new drawing starts from when nothing else is chosen: ISO A3 for a part, ISO A2 for
 /// an assembly.
@@ -66,9 +71,14 @@ pub fn default_for(assembly: bool) -> &'static str {
     if assembly { "iso-a2-assembly" } else { "iso-a3-part" }
 }
 
-/// Whether `doc`'s drawings are an assembly's, for the template they start from: it places components.
+/// Whether `doc`'s drawings are an assembly's: it places two or more components, or one beside a
+/// body of its own. A STEP file of one part opens as one component (#19753).
 pub fn is_assembly(doc: &Document) -> bool {
-    !doc.occurrences.is_empty()
+    match doc.occurrences.len() {
+        0 => false,
+        1 => doc.features.iter().any(|f| f.component == 0 && !matches!(f.kind, crate::FeatureKind::Sketch { .. }) && !f.kind.is_construction()),
+        _ => true,
+    }
 }
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template
@@ -246,18 +256,20 @@ pub fn built_in(name: &str) -> Option<Result<Drawing>> {
     let (size, title, assembly) = parse(name)?;
     // A4 is used upright (ISO 5457); the larger sizes lie flat.
     let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
-    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation), if assembly { ASSEMBLY_NOTE } else { PART_NOTE }))
+    let (note, kind) = if assembly { (ASSEMBLY_NOTE, ASSEMBLY_TYPE) } else { (PART_NOTE, PART_TYPE) };
+    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation), note, kind))
 }
 
 /// One sheet of `paper` with the ISO border and the built-in title block, `note` typed over its
-/// general tolerances.
-fn made(title: &str, paper: drawing_sheet::Sheet, note: &str) -> Result<Drawing> {
+/// general tolerances and `kind` over its document type.
+fn made(title: &str, paper: drawing_sheet::Sheet, note: &str, kind: &str) -> Result<Drawing> {
     let mut id_source = IdSource::seeded(BUILT_IN_SEED);
     let mut d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
     if let Some(first) = d.sheets.first_mut() {
         let first = Arc::make_mut(first);
         first.title_block = Some(title_block::default_block());
         first.title_block_overrides.insert(TOLERANCES_CELL.into(), note.into());
+        first.title_block_overrides.insert(TYPE_CELL.into(), kind.into());
     }
     check(&d)?;
     Ok(d)

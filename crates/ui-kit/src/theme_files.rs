@@ -419,15 +419,14 @@ pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> 
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
     let data = crate::icons::installed().data();
-    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
     for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
-            out.insert((*name).into(), json!(hex(rgb)));
+            out.insert((*name).into(), json!(solidcraft_color::hex::format(rgb)));
         }
     }
     for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
-            out.insert(name.into(), json!(colors.map(hex)));
+            out.insert(name.into(), json!(colors.map(solidcraft_color::hex::format)));
         }
     }
     out
@@ -528,18 +527,13 @@ const RENAMED_COLORS: [(&str, &str); 4] =
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
-    let hex = s.trim().strip_prefix('#')?;
-    if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
-    let a = if hex.len() == 8 { byte(6)? } else { 255 };
-    Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
+    let ([r, g, b], a) = solidcraft_color::hex::parse(s.trim())?;
+    Some(Color32::from_rgba_unmultiplied(r, g, b, a.unwrap_or(255)))
 }
 
 fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
-    if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
+    if a == 255 { solidcraft_color::hex::format([r, g, b]) } else { solidcraft_color::hex::format_alpha([r, g, b], a) }
 }
 
 /// The colours a value gives for a slot of `len` colours, or why not.

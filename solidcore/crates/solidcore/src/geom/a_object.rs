@@ -75,6 +75,7 @@
 //! - **Inline helpers.** The `NLI_Math.h` functions return their result instead of
 //!   writing an out-parameter.
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -996,9 +997,9 @@ pub fn sag_cache_make_or_validate(
 ) -> Result<Option<CacheId>> {
     // check that object is an SmBrep or SmPolyBrep object
     if target_type != BREP_TYPE && target_type != POLY_BREP_TYPE {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::a_object::sag_cache_make_or_validate",
-            "the target is neither a B-rep nor a poly B-rep",
+            GeomFailure::UnsupportedTargetType { target_type },
         ));
     }
     // low work - use OldCache when its given
