@@ -29,7 +29,7 @@ const EMBOSS_CONTRACT: TypedContract<EmbossParams> = TypedContract::new();
 const REPLACE_FACE_CONTRACT: TypedContract<ReplaceFaceParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
+    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("boundary_fill")
         .contract(&BOUNDARY_FILL_CONTRACT)
@@ -37,43 +37,44 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
         ),
-    CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
+    CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
+         end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
-    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib))
+    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("rib")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal); extend?: bool (run the curves' open ends on to the body; default false)"),
-    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
+    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("web")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal; extend?: bool (default false)"),
-    CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss))
+    CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
-    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] on the face to emboss: planar, a cylinder wall (on a partial outside wall, a profile running past the wall's edge carries on onto the face there when that face is a rectangle tangent to the wall; the profile must lie within the wall and those faces) or another curved face (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+    CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face)).begins_edit()
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .at("SOLID", "MODIFY")
         .icon("replace_face")
         .params("faces: [[x,y,z] points on planar faces, or face names from model.faces]; target: plane (XY|XZ|YZ|construction plane|{origin, normal}) | target_face: [x,y,z] on a parallel planar face; body?"),
-    CommandSpec::new("solid.align", "Align", crate::checked!("solid.align", align))
+    CommandSpec::new("solid.align", "Align", crate::checked!("solid.align", align)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("align")
         .contract(&ALIGN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
-    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove))
+    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove)).begins_edit()
         .at("SOLID", "MODIFY")
         .icon("delete")
         .contract(&REMOVE_CONTRACT)
@@ -86,7 +87,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
     let profile_mode = given("sketch");
     if profile_mode {
-        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle"].into_iter().find(|k| given(k)) {
+        if let Some(k) = ["diameter", "section_size", "section", "section_position", "start_angle", "end_cut"].into_iter().find(|k| given(k)) {
             return Err(bad(cmd, format!("`{k}` does not apply with `sketch`: the section comes from the sketch")));
         }
     } else if given("profiles") {
@@ -144,6 +145,11 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "start_angle")?;
     }
     let clockwise = bool_(p, "clockwise").unwrap_or(false);
+    let end_cut = match str_(p, "end_cut").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("axial") => solidcraft_doc::CoilEndCut::Axial,
+        Some("square") => solidcraft_doc::CoilEndCut::Square,
+        Some(o) => return Err(bad(cmd, format!("unknown end cut `{o}` (axial or square)"))),
+    };
     let operation = super::features::operation(p, cmd)?;
     add_feature(
         s,
@@ -161,6 +167,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
             position,
             start_angle,
             clockwise,
+            end_cut,
             operation,
             targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },

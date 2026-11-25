@@ -3,6 +3,7 @@
 //! Rust workspace tooling. External tools (`cargo`, and Python 3.11+ for the
 //! original icon collection) are invoked through `std::process::Command`.
 
+mod app_geometry;
 mod app_icons;
 mod assets;
 mod book;
@@ -133,8 +134,15 @@ commands:
                   AGENTS.md and new skills stay short
   mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
                   geometry: fails on a function outside display, export, previews and mesh bodies
-                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
+  app-geometry [--print]
+                  check that apps compute no geometry: fails on a function in crates/doc, engine,
+                  ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
+                  new since the base (git merge-base HEAD origin/main, else HEAD~1) and
+                  xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
+                  on stale lines; prints the listed count per crate. --print writes the sites
+                  found, in the list's format
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
@@ -161,7 +169,7 @@ commands:
                   test instead; --list only prints what would run. Every step runs; the failures
                   are listed at the end. CI runs the full gate
   ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
-                  ui-containers, mesh-decisions, clippy -D warnings, then the tests
+                  ui-containers, mesh-decisions, app-geometry, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -194,6 +202,7 @@ fn main() -> ExitCode {
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),
         Some("mesh-decisions") => mesh_decisions::run(&root()),
+        Some("app-geometry") => app_geometry::run(&root(), &rest),
         Some("fmt") => match rest[..] {
             [] => rustfmt::run(&root(), false),
             ["--check"] => rustfmt::run(&root(), true),
@@ -522,6 +531,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
         .map(|c| c.name.clone())
         .collect();
     set.push("solidcraft-web".into());
+    set.push("ui-kit-gallery".into());
     let mut c = cargo();
     c.args(["check", "--target", "wasm32-unknown-unknown", "--profile", "ci"]);
     for p in &set {
@@ -543,6 +553,7 @@ fn cmd_ci() -> Result<(), String> {
     shared::run(&root())?;
     ui_containers::run(&root())?;
     mesh_decisions::run(&root())?;
+    app_geometry::run(&root(), &[])?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;

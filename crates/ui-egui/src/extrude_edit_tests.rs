@@ -1477,3 +1477,17 @@ fn removing_an_earlier_input_keeps_the_active_one() {
     crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
     assert_eq!(inputs[active].label, "Target Bodies");
 }
+
+#[test]
+fn editing_symmetric_extrude_toggles_symmetric_offset() {
+    let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
+    assert!(!extent(&h).symmetric_offset);
+    open(&mut h);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(extent(&h).symmetric_offset);
+}

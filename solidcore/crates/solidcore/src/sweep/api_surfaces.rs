@@ -49,7 +49,8 @@
 //!   failure) and then returns `SM_ERR`, a path the port does not have.
 
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::sweep::SweepFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -151,8 +152,8 @@ fn validate_skin_primitive_inputs(
 fn copy_skin_primitive_curves(k: &Kernel, input_curves: &[Option<&Curve>]) -> Result<Vec<Curve>> {
     let mut curve_copies = Vec::new();
     for curve in input_curves {
-        let curve =
-            curve.ok_or_else(|| SolidError::sweep_missing(OP_SKIN_PRIMITIVE, "a curve to skin"))?;
+        let curve = curve
+            .ok_or_else(|| SolidError::sweep(OP_SKIN_PRIMITIVE, SweepFailure::NullProfileCurve))?;
         curve_copies.push(curve.copy(k)?);
     }
     Ok(curve_copies)
@@ -273,8 +274,9 @@ fn skin_primitive(
 
     let mut curves: Vec<Option<Curve>> = curve_copies.into_iter().map(Some).collect();
     let copy_count = curves.len();
-    let (brep, (start_faces, side_faces, end_faces)) =
-        PrimitiveModel::build_new(k, |pc, model| {
+    let (brep, (start_faces, side_faces, end_faces)) = PrimitiveModel::build_new(
+        k,
+        |pc, model| {
             let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
             let mut transferred = Vec::new();
             let free = ends == [SkinEnd::Free; 2];
@@ -321,16 +323,24 @@ fn skin_primitive(
             match status {
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Ownership is indeterminate for copies without a report entry.
-                _ if transferred.len() != copy_count => {
-                    return Err(SolidError::sweep_failed(
+                status if transferred.len() != copy_count => {
+                    let defect = Failure::new(
                         OP_SKIN_PRIMITIVE,
-                        "a skinning curve copy has no ownership record",
-                    ));
+                        SweepFailure::Defect {
+                            why: "create_skin_primitive records each curve copy's owner, or that it stayed with the caller, so every copy has a record",
+                        },
+                    );
+                    return Err(match status {
+                        Err(e) => defect.caused_by(e),
+                        Ok(()) => defect,
+                    }
+                    .into_error());
                 }
                 other => other?,
             }
             Ok((start, side, end))
-        })?;
+        },
+    )?;
     // Not upstream: the flat side walls are their planes (WR-782).
     let mut brep = brep;
     crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
@@ -470,9 +480,12 @@ pub fn create_surface_revolution(
     })?
     .first()
     .copied()
-    .ok_or_else(|| SolidError::sweep_failed(OP_REVOLUTION, "the revolved body has no face"))?;
+    .ok_or_else(|| SolidError::sweep(OP_REVOLUTION, SweepFailure::RevolutionSweepsNoFace))?;
     let mut surface = brep.face_mut(face)?.surface.take().ok_or_else(|| {
-        SolidError::sweep_failed(OP_REVOLUTION, "the revolved face has no surface")
+        SolidError::sweep_defect(
+            OP_REVOLUTION,
+            "surface_owners lists only faces that own a surface, and the face's was not taken before",
+        )
     })?;
     surface.set_owner(None);
     Ok(surface)

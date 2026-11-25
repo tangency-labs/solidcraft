@@ -219,7 +219,7 @@ fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Re
 }
 
 /// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
-/// chose nothing, the curvature fillet's wedges): while a dump folder is set, `body` is left
+/// chose nothing): while a dump folder is set, `body` is left
 /// there, as for a refusal of solidcore-ops'.
 fn failed(call: &'static str, body: &Body, e: Error) -> Error {
     super::dump::failed_ops(call, &e.to_string(), &[("brep", body)]);
@@ -343,14 +343,6 @@ pub(crate) enum Corners {
     Open,
 }
 
-/// Why a curvature fillet over edges of different wedge angles is refused: SolidCraft refuses it
-/// since every edge took the equal-area thumbweight of the first one's wedge (in the fork as in
-/// solidcore#2261), so that an edge of another wedge took off another area than its own, and
-/// which one depended on the edges' order.
-pub(crate) const CURVATURE_MIXED_WEDGES: &str = "a curvature-continuous fillet on solidcore over edges whose faces meet at different \
-angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area \
-(https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)";
-
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 pub(crate) fn blend(
@@ -445,11 +437,6 @@ fn blend_call(
         .zip(&at.first)
         .map(|(&vertex, &j)| solidcore_ops::SetBack { vertex, distance: setbacks.get(j).copied().unwrap_or(0.0) })
         .collect();
-    // Edges of other wedges than the first's are not built together curvature-continuously
-    // (solidcore#2250's comment 6563419897).
-    if kind == Blend::Curvature && !ops(CALL, &w, || solidcore_ops::blend::edges_share_wedge(&w, &picked.entities))? {
-        return Err(failed(CALL, &w, Error::Unported(CURVATURE_MIXED_WEDGES)));
-    }
     let kind = match kind {
         Blend::Round => solidcore_ops::Blend::Round,
         Blend::Curvature => solidcore_ops::Blend::Curvature,
@@ -460,6 +447,7 @@ fn blend_call(
         turn: match turn {
             Turn::Mitre => solidcore_ops::Turn::Mitre,
             Turn::Swept => solidcore_ops::Turn::Swept,
+            Turn::Auto => solidcore_ops::Turn::Auto,
         },
         ..solidcore_ops::BlendOptions::default()
     };
@@ -626,8 +614,8 @@ mod tests {
         use solidcore::error::Failure;
         use solidcore::error::sweep::SweepFailure;
         let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
-        assert!(matches!(status(sweep(SweepFailure::Failed("the face was already swept"))), Error::Status(1001)));
-        assert!(matches!(status(sweep(SweepFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(sweep(SweepFailure::FaceAlreadySwept)), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::NullTarget)), Error::Status(1006)));
         assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));

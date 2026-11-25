@@ -1198,10 +1198,21 @@ mod local_operation {
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
             let (out, _) = with_fitted_spheres(|| {
-                with_trim_cover_put_back(|| Runner.run_rust(&case).unwrap())
+                with_trim_cover_put_back(|| {
+                    crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                        Runner.run_rust(&case)
+                    })
+                    .unwrap()
+                })
             });
-            let ((_, mut bodies), _) =
-                with_fitted_spheres(|| with_trim_cover_put_back(|| result_breps(&case).unwrap()));
+            let ((_, mut bodies), _) = with_fitted_spheres(|| {
+                with_trim_cover_put_back(|| {
+                    crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                        result_breps(&case)
+                    })
+                    .unwrap()
+                })
+            });
             let (_, b) = &mut bodies[0];
             for c in certify_row(row.case, &out, b, row.main, row.new, row.moved) {
                 match c {
@@ -1270,6 +1281,11 @@ mod local_operation {
 /// listed), and each body's moved values are classed by [`certify_body`]: edge and vertex
 /// tolerances against the trims' certified bounds, edge and surface samples by enclosed
 /// distances, a moved surface domain as the samples it moves.
+///
+/// #17739 raises one vertex tolerance of `fillet_group_fillet1019_rb23` to cover twice its
+/// vertex's gap, 4.7505e-4 in both bodies: at `feature0_geometry[171]` (the copy alone gives
+/// 4.4536e-4, main 5.657e-4) and at `base_geometry[267]` (main 4.4536e-4), which the row
+/// lists for it. Both are classed against main's values like any moved value.
 mod feature_executive {
     use super::{certify_body, certify_rewritten, plain_digest, Class, FALSE_POSITIVES, REWRITTEN};
     use crate::units::blend_feature_executive::{result_breps, Runner};
@@ -1289,7 +1305,10 @@ mod feature_executive {
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
             let case = crate::case::regression_case(&Runner, row.case);
-            let out = Runner.run_rust(&case).unwrap();
+            let out = crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                Runner.run_rust(&case)
+            })
+            .unwrap();
             assert_eq!(
                 plain_digest(&out, row.moved, false),
                 row.new,
@@ -1302,7 +1321,10 @@ mod feature_executive {
                 "{}: more than the listed values moved",
                 row.case
             );
-            let (mut input, mut base, features) = result_breps(&case);
+            let (mut input, mut base, features) =
+                crate::wr450_rows::with_mains_choices_for(Runner.id(), row.case, || {
+                    result_breps(&case)
+                });
             // the input model's own level 2: a trim this branch copies carries its warnings
             let operand = solidcore::topology::brep::validation::soundness(
                 &mut solidcore::kernel::Kernel::default(),
@@ -1442,7 +1464,11 @@ mod trim_blocks {
                     .unwrap_or_else(|e| panic!("{name}: {e}"));
                     sink.borrow_mut().extend(c);
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(
@@ -1450,7 +1476,12 @@ mod trim_blocks {
                 row.new,
                 "{name}: not the row"
             );
-            let blind = with_hook(Box::new(clear_trims), || runner.run_rust(&case)).unwrap();
+            let blind = with_hook(Box::new(clear_trims), || {
+                crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                    runner.run_rust(&case)
+                })
+            })
+            .unwrap();
             assert_eq!(
                 digest(&blind.values, &blind.ints),
                 row.main,
@@ -1506,26 +1537,6 @@ mod trim_blocks {
         moved: &'static [(&'static str, usize, f64, f64)],
     }
 
-    /// The edge uses whose trims the drop leaves in place although main writes them off
-    /// their edges too: a kept trim is not a moved row. In the `heal.heal_data_p3` cuts
-    /// through 90 degrees (`*_s90_*`) and the wide ones (`*_wide_*`) the cut's two trims,
-    /// edge uses 1 and 11, run past the cone's seam (`u` to 1.086..1.096 on its `[0, 1]`
-    /// domain); the kernel's own surface evaluation puts them 0.037 to 1.85 off their
-    /// edges on main (7d4445c0c) and here (sampled, 201 points each against 4001
-    /// of the edge), so they are not certified. Filed as
-    /// `plan/findings/heal.heal_data_p3--split-face-seam-trims-past-seam.md`. On main edge uses 5 and 8
-    /// of those cases are off too (to 0.356): the drop removes those, and the trims made
-    /// again from their edges are certified.
-    fn off_on_main(case: &str) -> &'static [u32] {
-        if case.starts_with("split_face_seam_cone_")
-            && (case.contains("_s90_") || case.contains("_wide_"))
-        {
-            &[1, 11]
-        } else {
-            &[]
-        }
-    }
-
     /// Certifies the drop rows `rows` of `runner`'s unit, where `drop(main, now)` says a
     /// moved value records fewer trims now than on main.
     /// * **Replay**: the case's output has this branch's digest, so the run is the row.
@@ -1536,9 +1547,10 @@ mod trim_blocks {
     /// * **Trims on edges**: on a scratch copy of each body the unit writes, each edge use
     ///   with no trim (nor its mate) gets the one made from its edge when a caller asks for
     ///   it ([`remade`]); every trim then lies on its edge within the edge's tolerance
-    ///   ([`certify_edgeuse`]), but for the kept trims main writes off their edges too
-    ///   ([`off_on_main`], each of which must be there). So a consumer of the body gets trims on its edges, and a
-    ///   dropped trim is equal or closer, never farther.
+    ///   ([`certify_edgeuse`]), the kept trims included (in the `heal.heal_data_p3` seam
+    ///   cuts, the cut's trims on edge uses 1 and 11 too, which the healer must have kept).
+    ///   So a consumer of the body gets trims on its edges, and a dropped trim is equal or
+    ///   closer, never farther.
     ///
     /// The trims made again, in all.
     fn certify_drops(runner: &dyn UnitDiff, rows: &[DropRow], drop: fn(f64, f64) -> bool) -> usize {
@@ -1553,16 +1565,24 @@ mod trim_blocks {
             let out = with_hook(
                 Box::new(move |b: &mut Brep| {
                     let k = Kernel::default();
+                    // the seam cut's own trims, which a sampled check once put off their
+                    // edges: the healer keeps them (checked on its body, before any trim
+                    // is made again), and they are certified below like the rest
+                    if name.starts_with("split_face_seam_cone_") {
+                        let kept: Vec<u32> = b
+                            .edgeuses()
+                            .iter()
+                            .filter(|(_, r)| r.uv_trim_curve.is_some())
+                            .map(|(eu, _)| eu.index())
+                            .collect();
+                        for eu in [1, 11] {
+                            assert!(kept.contains(&eu), "{name}: no kept trim on edge use {eu}");
+                        }
+                    }
                     let (s, n) = remade(&k, b);
                     *made_sink.borrow_mut() += n;
-                    let kept_off = off_on_main(name);
-                    let mut skipped = Vec::new();
                     for (eu, r) in s.edgeuses().iter() {
                         if r.uv_trim_curve.is_none() {
-                            continue;
-                        }
-                        if kept_off.contains(&eu.index()) {
-                            skipped.push(eu.index());
                             continue;
                         }
                         let tol = s.edge(r.edge.unwrap()).unwrap().tolerance;
@@ -1570,9 +1590,12 @@ mod trim_blocks {
                             .unwrap_or_else(|e| panic!("{name}: edge use {}: {e}", eu.index()));
                         sink.borrow_mut().push(c);
                     }
-                    assert_eq!(skipped, kept_off, "{name}: the kept trims off their edges");
                 }),
-                || runner.run_rust(&case),
+                || {
+                    crate::wr450_rows::with_mains_choices_for(runner.id(), name, || {
+                        runner.run_rust(&case)
+                    })
+                },
             )
             .unwrap();
             assert_eq!(

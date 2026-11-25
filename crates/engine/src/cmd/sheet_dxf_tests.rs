@@ -676,6 +676,161 @@ fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
     }
 }
 
+/// A shop's DXF profile (`docs/formats/dxf-profiles.md`): the outline and the cut-outs on one
+/// layer, both bend directions on another with short dashes, the notes renamed, cut letters left
+/// out.
+fn shop_profile() -> Value {
+    json!({
+        "format": "solidcraft-dxf-profile",
+        "version": 1,
+        "name": "Example laser",
+        "roles": {
+            "outline": {"layer": "CUT", "color": 7},
+            "cut": {"layer": "CUT", "color": 7},
+            "cut_text": {"on": false},
+            "etch": {"layer": "MARK", "color": 2},
+            "bend_up": {"layer": "FOLD", "color": 3, "linetype": "hidden"},
+            "bend_down": {"layer": "FOLD", "color": 3, "linetype": "hidden"},
+            "bend_notes": {"layer": "NOTES", "color": 9},
+            "pockets": {"layer": "MILL", "color": 6}
+        }
+    })
+}
+
+/// The layers of a DXF as `layer_table` reads them.
+fn layers_are(dxf: &str, want: &[(&str, i64, &str)]) {
+    assert_eq!(layer_table(dxf), want.iter().map(|(n, c, l)| (n.to_string(), (*c, l.to_string()))).collect());
+}
+
+/// Without a profile the export writes what it always wrote; the neutral profile is those layers
+/// written out, and gives the same bytes. A shop's profile changes the layers and nothing else:
+/// the same entities in the same order, less the roles it turns off.
+#[test]
+fn a_dxf_profile_gives_each_role_its_layer_colour_and_linetype() {
+    let mut s = tray_with(&marks());
+    let standard_dxf = export(&mut s, json!({"bend_notes": true}));
+    layers_are(
+        &standard_dxf,
+        &[
+            ("0", 7, "Continuous"),
+            ("OUTLINE", 7, "Continuous"),
+            ("CUT", 4, "Continuous"),
+            ("TEXT", 2, "Continuous"),
+            ("BEND_UP", 1, "DASHED"),
+            ("BEND_DOWN", 5, "DASHED"),
+            ("BEND_NOTES", 8, "Continuous"),
+        ],
+    );
+    let neutral = solidcraft_io::DxfExportProfile::neutral().to_json();
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": neutral})), standard_dxf);
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": {"format": "solidcraft-dxf-profile"}})), standard_dxf);
+    for options in [json!({}), json!({"curves": "arcs", "text": "etch", "bend_lines": false})] {
+        let mut with = options.clone();
+        with["profile"] = neutral.clone();
+        assert_eq!(export(&mut s, with), export(&mut s, options.clone()), "{options}");
+    }
+
+    let dxf = export(&mut s, json!({"bend_notes": true, "profile": shop_profile()}));
+    layers_are(&dxf, &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN"), ("NOTES", 9, "Continuous")]);
+    let (standard, es) = (entities(&standard_dxf), entities(&dxf));
+    let kept: Vec<&Entity> = standard.iter().filter(|e| layer_of(e) != "TEXT").collect();
+    assert!(kept.len() < standard.len(), "the tray has cut letters");
+    assert_eq!(es.len(), kept.len());
+    for (written, was) in es.iter().zip(&kept) {
+        assert_eq!((&written.0, &written.1, written.3, &written.4), (&was.0, &was.1, was.3, &was.4));
+        let layer = match layer_of(was).as_str() {
+            "OUTLINE" | "CUT" => "CUT",
+            "BEND_UP" | "BEND_DOWN" => "FOLD",
+            "BEND_NOTES" => "NOTES",
+            other => panic!("{other}"),
+        };
+        assert_eq!(layer_of(written), layer);
+    }
+    // The export's own options still hold: a role is written when both they and the profile
+    // allow it. No notes unless asked for, no bend lines when they are turned off, and `text`
+    // chooses the letters' role, which this profile writes on MARK.
+    let plain = export(&mut s, json!({"profile": shop_profile()}));
+    layers_are(&plain, &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN")]);
+    let no_bends = export(&mut s, json!({"bend_lines": false, "profile": shop_profile()}));
+    assert!(entities(&no_bends).iter().all(|e| layer_of(e) == "CUT"));
+    let etched = entities(&export(&mut s, json!({"text": "etch", "profile": shop_profile()})));
+    assert_eq!(on_layer(&etched, "MARK"), on_layer(&standard, "TEXT"));
+
+    // A profile file is the same profile. Every sheet body's file is written with it.
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-dxf-profile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let file = dir.join("example-laser.json").to_string_lossy().to_string();
+    std::fs::write(&file, shop_profile().to_string()).unwrap_or_default();
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": file})), dxf);
+    let mut bodies = lid_and_wall();
+    let r = run(&mut bodies, "sheet.export_dxf", json!({"per_body": true, "profile": file}));
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    assert_eq!(files.len(), 2);
+    for f in &files {
+        let layers = layer_table(f["dxf"].as_str().unwrap_or_default());
+        assert!(layers.contains_key("CUT") && !layers.contains_key("OUTLINE"), "{}: {layers:?}", f["body"]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_dxf_profile_keeps_a_pockets_depth_in_its_layer_name() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(layer_table(&export(&mut s, json!({}))).contains_key("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
+    // The profile's name stands where POCKET stood; the side and the depth are the pocket's.
+    let dxf = export(&mut s, json!({"profile": shop_profile()}));
+    layers_are(
+        &dxf,
+        &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN"), ("MILL_BOTTOM_Z0.000000_TO_1.000000_MM", 6, "Continuous")],
+    );
+    assert_eq!(on_layer(&entities(&dxf), "MILL_BOTTOM_Z0.000000_TO_1.000000_MM").len(), 4);
+}
+
+#[test]
+fn a_dxf_profile_that_cannot_be_used_is_refused_and_writes_nothing() {
+    let mut s = tray_with(&[]);
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-dxf-profile-refused-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let out = dir.join("flat.dxf").to_string_lossy().to_string();
+    let missing = dir.join("no-such-profile.json").to_string_lossy().to_string();
+    let not_a_profile = dir.join("rules.json").to_string_lossy().to_string();
+    std::fs::write(&not_a_profile, r#"{"format": "solidcraft-sheet-rules", "rules": []}"#).unwrap_or_default();
+    let profile = |roles: Value| json!({"format": "solidcraft-dxf-profile", "roles": roles});
+    for (given, why) in [
+        (profile(json!({"bend_sideways": {"layer": "FOLD"}})), "role `bend_sideways` is not known; the roles are outline, cut,"),
+        (profile(json!({"cut": {"color": 300}})), "role `cut`: `color` must be an AutoCAD colour index, a whole number from 1 to 255, not 300"),
+        (profile(json!({"cut": {"color": "red"}})), "role `cut`: `color` must be"),
+        (profile(json!({"bend_up": {"linetype": "center"}})), "role `bend_up`: `linetype` must be continuous, dashed or hidden"),
+        (profile(json!({"outline": {"layer": "CUT"}})), "roles `outline` and `cut` share layer \"CUT\" but give it different colours or linetypes"),
+        (json!({"format": "solidcraft-dxf-profile", "version": 2}), "the profile is version 2"),
+        (json!({"roles": {}}), "format"),
+        (json!(7), "`profile` must be a DXF profile file's path or a profile object"),
+        (json!(""), "`profile` must be a DXF profile file's path or a profile object"),
+        (json!(missing), "no-such-profile.json"),
+        (json!(not_a_profile), "`format` must be \"solidcraft-dxf-profile\""),
+    ] {
+        let error = s.execute("sheet.export_dxf", &json!({"profile": given, "path": out})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(why), "{given}: {error}");
+        assert!(!std::path::Path::new(&out).exists(), "{given}");
+    }
+    // Everything on layer 0 and a layer for each role are two answers to one question.
+    let neutral = solidcraft_io::DxfExportProfile::neutral().to_json();
+    let error = s.execute("sheet.export_dxf", &json!({"layers": "single", "profile": neutral})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`layers: single`"), "{error}");
+    assert!(s.execute("sheet.export_dxf", &json!({"layers": "roles", "profile": neutral})).is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The DXF of a sheet folded across a curved outer outline has the curve as drawn, not arcs fitted
 /// to it, and no seams where the fold cut it: the blank, with its bend line where the bend is.
 #[test]
@@ -1489,7 +1644,7 @@ mod caller_circle_compatibility {
     }
     fn expect_arcs(lp: &Loop2) {
         assert!(super::super::loop_circle(lp).is_none());
-        assert!(solidcore_ops::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
+        assert!(solidcraft_kernel::services::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
         let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
         assert!(json.get("circle").is_none());
         let segments = json["segments"].as_array().unwrap();
@@ -1511,7 +1666,7 @@ mod caller_circle_compatibility {
         assert!(center.dist(second) > 0.0 && center.dist(second) < 1e-9);
         assert!(other_radius > radius && other_radius - radius < 1e-9);
         let lp = halves(center, radius, second, other_radius);
-        assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
+        assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
         expect_circle(&lp, center, radius);
     }
     #[test]
@@ -1605,7 +1760,7 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         ],
     };
     assert_eq!(super::loop_circle(&lp), Some((center, 8.0)));
-    assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
+    assert!(solidcraft_kernel::services::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
     let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
     assert!(error.to_string().contains("arc endpoints collapse"));
 
@@ -1628,7 +1783,7 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         let shapes = super::flat_loop_shapes(&flat[0].outer, style).expect("admitted legacy whole circle remains exportable");
         assert!(matches!(shapes.as_slice(), [DxfShape::Circle { c, r }] if *c == center && *r == 8.0));
     }
-    let dxf = super::surface_dxf(&session, &sheet, &super::DxfOptions::default())
+    let dxf = super::surface_dxf(&session, &sheet, &super::DxfOptions::default(), None)
         .expect("the real default flat-pattern exporter retains its whole-circle result");
     let es = entities(&dxf);
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));

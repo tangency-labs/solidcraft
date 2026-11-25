@@ -179,11 +179,146 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
 /// point lies on it, and its name is exact. A name that ends with the number of the edge a blend
-/// replaced is found at its point too (see [`recover_blend_numbered_edge`]). Other edge references
+/// replaced is found at its point too (see [`recover_blend_numbered_edge`]), as are the unreliable
+/// ordinals once assigned by Align (see [`recover_align_projected_edge`]). Other edge references
 /// still require the stored name as picked.
 pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near)
-        .or_else(|miss| recover_numbered_projected_edge(b, name, near).or_else(|| recover_blend_numbered_edge(b, name, near)).ok_or(miss))
+    locate_projected_edge_from(b, &b.name, name, near)
+}
+
+/// As [`locate_projected_edge`], retaining the saved source body's name when Project searches
+/// surviving bodies after a join. Align ordinals alone never identify which aligned body was picked.
+pub(crate) fn locate_projected_edge_from(b: &ModelBody, saved_body: &str, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| {
+        recover_numbered_projected_edge(b, name, near)
+            .or_else(|| recover_blend_numbered_edge(b, name, near))
+            .or_else(|| recover_align_projected_edge(b, saved_body, name, near))
+            .or_else(|| recover_positional_edge(b, name, near))
+            .ok_or(miss)
+    })
+}
+
+/// The number of face `name` names on body `b` by position (`<body>:face:<k>`): a body past the
+/// naming depth limit names its faces so (see `naming::names`). `None` for any other name.
+fn positional_face(b: &ModelBody, name: &str) -> Option<usize> {
+    let k = name.strip_prefix(b.name.as_str())?.strip_prefix(":face:")?;
+    if k.is_empty() || !k.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    k.parse().ok().filter(|k| *k < b.body.face_count())
+}
+
+/// An edge saved by position (`Cleat:face:0|Cleat:face:2`) on a body that is named from its
+/// history now (#20956). The naming depth counts every feature before, so deleting earlier
+/// features, even ones that never touched the body, can bring a body named past the limit back
+/// under it. The numbers are the faces' places in the kernel's order, which is all such a name
+/// ever said: the one exact edge between those two faces that the saved point lies on.
+fn recover_positional_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let parts = split_top_level_bars(strip_edge_number(name));
+    let [fa, fb] = parts.as_slice() else { return None };
+    let (fa, fb) = (positional_face(b, fa)?, positional_face(b, fb)?);
+    let reach = pick_reach(b);
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        let (p, q) = (p.face as usize, q.face as usize);
+        ((p, q) == (fa, fb) || (q, p) == (fa, fb)) && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
+}
+
+/// A face saved by position (`Cleat:face:3`) on a body named from its history now: face 3 of
+/// that body, when the saved point lies on it (see [`recover_positional_edge`]).
+fn recover_positional_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if !p.is_finite() {
+        return None;
+    }
+    let (body, b, face) =
+        st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).find_map(|(i, b)| Some((i, b, positional_face(b, name)?)))?;
+    let (_, point) = on_face(b, face, p)?;
+    Some(FaceHit { body, face, point, verified: false, on_point: true })
+}
+
+/// Align used to discard its transform's history and give faces it could not find at the
+/// unmoved position names such as `F3:face:0`. rc.4 and 0.45.0 could enumerate those faces
+/// differently (#20288). Neither numbering is a persistent identity: recover a saved Project
+/// link only on its saved body or its descendant through proven non-copy rigid transforms and
+/// joins, at one unique exact edge through its saved point. No mesh or nearest-edge substitution
+/// decides this, and another body moved by the same Align gets no fallback.
+fn recover_align_projected_edge(b: &ModelBody, saved_body: &str, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, Role};
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    if read.tie.is_some()
+        || read.faces.len() != 2
+        || read.faces.first() == read.faces.get(1)
+        || !read.faces.iter().any(|face| matches!(&face.base, Base::Made { role: Role::Index(_), .. }))
+    {
+        return None;
+    }
+    let record = b.body.record();
+    let mut on = record.edges.iter().enumerate().filter(|(i, edge)| {
+        let tolerance = record.tolerance.max(edge.tolerance);
+        tolerance.is_finite() && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= tolerance)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    let found = record.edges.get(edge)?;
+    if found.uses.len() != 2 {
+        return None;
+    }
+    let mut ancestor = b;
+    let mut ancestor_edge = edge;
+    let mut from_saved_body = b.name == saved_body;
+    let mut align = None;
+    // Bound the walk even for an unusually long or damaged naming chain.
+    for _ in 0..400 {
+        let origin = ancestor.names.origin.as_ref()?;
+        if let FeatureKind::Align { bodies, .. } = &origin.feature.kind
+            && bodies.iter().any(|body| *body == ancestor.name)
+            && read.faces.iter().any(|face| matches!(&face.base, Base::Made { feature, role: Role::Index(_) } if feature.0 == origin.feature.id))
+        {
+            if !from_saved_body {
+                return None;
+            }
+            align = Some((origin.feature.id, ancestor.body.face_count()));
+            break;
+        }
+        (ancestor, ancestor_edge) = naming::inherited_edge_predecessor(ancestor, ancestor_edge)?;
+        from_saved_body |= ancestor.name == saved_body;
+    }
+    let (align, face_count) = align?;
+    let mut numbered = false;
+    for face in &read.faces {
+        if let Base::Made { feature, role: Role::Index(index) } = &face.base
+            && feature.0 == align
+        {
+            if !face.suffixes.is_empty() || (*index as usize) >= face_count {
+                return None;
+            }
+            numbered = true;
+        }
+    }
+    if !numbered {
+        return None;
+    }
+    let faces = naming::names(b);
+    // An ordinary face name, where Align happened to retain one by overlap, must still
+    // name an incident face. Only this Align's unreliable ordinals are read at the point.
+    let incident = |edge: &solidcore_record::brep::Edge| {
+        read.faces.iter().all(|face| match &face.base {
+            Base::Made { feature, role: Role::Index(_) } if feature.0 == align => true,
+            _ => edge.uses.iter().any(|u| crate::history_names::matches(&faces, u.face as usize, &face.to_string()).is_some_and(exactly)),
+        })
+    };
+    if !incident(found) {
+        return None;
+    }
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 /// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
@@ -582,7 +717,7 @@ fn exactly(level: Match) -> bool {
 }
 
 /// How far from an edge a picked point may lie and still be on it.
-fn pick_reach(b: &ModelBody) -> f64 {
+pub(crate) fn pick_reach(b: &ModelBody) -> f64 {
     (b.body.size() * 2e-3).max(1e-3)
 }
 
@@ -877,30 +1012,15 @@ impl FaceHit {
 
 impl FaceHit {
     /// Where the line through `p` along `dir` meets the face found (the hit nearest `p`, on
-    /// either side of it), `None` when the line misses the face or runs along it. A place on
-    /// a face follows the face this way, along its own axis, instead of sliding sideways to
-    /// [`point`](Self::point), the face's nearest point.
-    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> Option<Vec3> {
-        let b = st.bodies.get(self.body)?;
-        let d = dir.normalized()?;
-        let m = b.mesh();
-        let slack = (b.body.size() * 1e-9).max(1e-9);
-        let mut best: Option<f64> = None;
-        for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-            if *f as usize != self.face {
-                continue;
-            }
-            let Some([a, bb, c]) = m.tri(t) else { continue };
-            // A hair's width around each triangle, so a place on the seam of two is on the face.
-            let centre = (a + bb + c) * (1.0 / 3.0);
-            let grow = |v: Vec3| v + (v - centre).normalized().unwrap_or(Vec3::ZERO) * slack;
-            if let Some(hit) = naming::ray_hit(p, d, grow(a), grow(bb), grow(c))
-                && best.is_none_or(|old| hit.abs() < old.abs())
-            {
-                best = Some(hit);
-            }
-        }
-        best.map(|t| p + d * t)
+    /// either side of it), `None` when the line misses the face or runs along it, or the body
+    /// is gone; `Err` when the kernel fails to meet them. A place on a face follows the face
+    /// this way, along its own axis, instead of sliding sideways to [`point`](Self::point), the
+    /// face's nearest point. Decided on the face's exact surface and trim
+    /// ([`solidcraft_kernel::Body::face_line_hit`]), never its display mesh: from a facet of a
+    /// curved face a hole would start inside the surface (#20741).
+    pub fn along(&self, st: &ModelState, p: Vec3, dir: Vec3) -> solidcraft_kernel::Result<Option<Vec3>> {
+        let Some(b) = st.bodies.get(self.body) else { return Ok(None) };
+        b.body.face_line_hit(self.face, p, dir)
     }
 
     /// A point that picks the face found again by itself: [`point`](Self::point) when the
@@ -908,18 +1028,24 @@ impl FaceHit {
     /// nearest `p` that keeps clear of every edge of it. The nearest point of a face the
     /// reference's point no longer lies on is on the face's boundary (a parameter moved the face
     /// away from the pick), where a pick by point finds the face beside it as well (#2531).
+    /// The chosen interior point is projected onto the exact trimmed face when that finds it (a
+    /// curved face's triangle lies off its surface by the display deviation); when the exact
+    /// query finds nothing the unprojected point is returned, as it always was.
     pub fn pick_point(&self, st: &ModelState, p: Vec3) -> Vec3 {
         let Some(b) = st.bodies.get(self.body) else { return self.point };
         let m = b.mesh();
         // Clear of the edges by a few pick tolerances, or by half the face's roomiest triangle
         // on a face narrower than that.
-        let Some(margin) = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5)) else {
-            return self.point;
+        let margin = roomiest_inradius(&m, self.face).map(|r| (4.0 * (b.body.size() * 1e-3).max(1e-3)).min(r * 0.5));
+        let point = match margin {
+            Some(margin) if self.on_point && edge_clearance(&m, self.face, self.point) >= margin => self.point,
+            Some(margin) => inside_nearest(&m, self.face, p, margin).unwrap_or(self.point),
+            None => self.point,
         };
-        if self.on_point && edge_clearance(&m, self.face, self.point) >= margin {
-            return self.point;
+        match solidcraft_kernel::point_closest(point, &b.body, solidcraft_kernel::Members::Faces(&[self.face])) {
+            Ok(Some(nearest)) => nearest.to,
+            _ => point,
         }
-        inside_nearest(&m, self.face, p, margin).unwrap_or(self.point)
     }
 }
 
@@ -1019,9 +1145,10 @@ fn locate_face_with(st: &ModelState, name: &str, p: Vec3, round: bool) -> Option
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
     match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
         Ok(hit) => Some(hit),
-        Err(Miss::Gone) => {
-            recover_numbered_face_in(st, name, p, round).or_else(|| replaced_side_line(st, name, p)).or_else(|| numbered_sheet_face(st, name, p))
-        }
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p, round)
+            .or_else(|| replaced_side_line(st, name, p))
+            .or_else(|| numbered_sheet_face(st, name, p))
+            .or_else(|| recover_positional_face(st, name, p)),
         Err(Miss::Several) => None,
     }
 }

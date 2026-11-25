@@ -4,6 +4,11 @@
 //!
 //! - [`edges`]: per point, the body's edge nearest it.
 //! - [`vertices`]: per point, the body's vertex nearest it.
+//! - [`Body::face_at`]: the face a point lies on, by the kernel's classification.
+//! - [`Body::faces_on_one_surface`]: picks grown across the edges where the kernel proves one
+//!   surface continues.
+//! - [`stored_face`] and [`stored_edge`]: whether a saved record index and approximate hit
+//!   still name that exact face or edge, without choosing a replacement entity.
 //!
 //! The rule is one for both. A point picks the entity nearest it. It picks none
 //! ([`Miss::None`]) when that entity is farther than the tolerance asked. It is ambiguous
@@ -18,9 +23,19 @@
 //! ([`Body::copy`]).
 
 use solidcore::query::api_queries as q;
+use std::collections::BTreeMap;
+
+use solidcore::error::EntityRef;
+use solidcore::intersect::point_class::PointClassType;
+use solidcore::query::brep::BrepClassifier;
+use solidcore::query::faces_continue::{faces_continue, Continues};
+use solidcore::topology::{edge, face, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, Point3};
+use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
+use crate::measure::box_max_distance_to_point;
+use crate::order::{self, Order};
 use crate::session::{answer, read_body, Answer};
 use crate::{Error, Result};
 
@@ -141,6 +156,155 @@ pub fn vertices(body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Pick
     })
 }
 
+impl Answer for Vec<FaceId> {}
+
+impl Body {
+    /// The record face (through `order`) point `p` lies on, within `reach` of it, or `None`:
+    /// the kernel's classification of the point against the body at that tolerance
+    /// (`SmBrep::Point3DClassify`, with boundary intersections). A point the kernel puts on an
+    /// edge or a vertex is on more than one face and picks none; so does a point off the body or
+    /// one the kernel does not classify. Never a face guessed by nearness.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a coordinate or a reach that is not finite and positive; the
+    /// kernel's status (its classification may add trim curves to the body).
+    pub fn face_at(&self, order: &Order, p: [f64; 3], reach: f64) -> Result<Option<usize>> {
+        if !(p.iter().all(|x| x.is_finite()) && reach.is_finite() && reach > 0.0) {
+            return Err(Error::Argument);
+        }
+        let point = Point3::new(p[0], p[1], p[2]);
+        let found = read_body("face_at", self, |k, b| {
+            let mut classifier = BrepClassifier::of_brep(b);
+            let pc = match classifier.point_3d_classify(k, point, reach, true) {
+                Ok(pc) => pc,
+                Err(e) if e.sm_status().is_some() => return Ok(None),
+                Err(e) => return Err(e),
+            };
+            Ok(match (pc.point_class(), pc.object()) {
+                (PointClassType::Face, Some(EntityRef::Face(f))) => Some(f),
+                _ => None,
+            })
+        })?;
+        Ok(found.and_then(|f| order.faces.iter().position(|&x| x == f)))
+    }
+
+    /// Record faces `faces` (through `order`) and every face joined to them, across an edge not
+    /// in `keep_edges` (record edge indices: the edges that stay apart, such as a split face's
+    /// line), where the kernel proves the two faces continue one surface with the same outward
+    /// side ([`faces_continue`]). An edge the kernel leaves undecided is not crossed. The picks
+    /// first, in their order, then each face as it is reached.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or the edges; the kernel's (a side it is
+    /// unsure is material, a dangling id).
+    pub fn faces_on_one_surface(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        keep_edges: &[usize],
+    ) -> Result<Vec<usize>> {
+        let seeds: Vec<FaceId> = faces
+            .iter()
+            .map(|&i| order::face(order, i))
+            .collect::<Result<_>>()?;
+        let keep: Vec<EdgeId> = keep_edges
+            .iter()
+            .map(|&i| order::edge(order, i))
+            .collect::<Result<_>>()?;
+        let index: BTreeMap<FaceId, usize> = order
+            .faces
+            .iter()
+            .enumerate()
+            .map(|(i, &f)| (f, i))
+            .collect();
+        let grown = read_body("faces_on_one_surface", self, |_, b| {
+            let mut out: Vec<FaceId> = Vec::new();
+            for f in seeds {
+                if !out.contains(&f) {
+                    out.push(f);
+                }
+            }
+            let mut next = 0;
+            while let Some(&f) = out.get(next) {
+                next += 1;
+                for e in face::edges(b, f, None, false, None)? {
+                    if keep.contains(&e) {
+                        continue;
+                    }
+                    for g in edge::faces(b, e, None)? {
+                        if g != f
+                            && !out.contains(&g)
+                            && faces_continue(b, f, g, e)? == Continues::Proved
+                        {
+                            out.push(g);
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        })?;
+        grown
+            .into_iter()
+            .map(|f| index.get(&f).copied().ok_or(Error::Argument))
+            .collect()
+    }
+}
+
+/// The allowance of an approximate stored hit: a thousandth of the exact box diagonal,
+/// at least a thousandth of a unit and the record's tolerance. Measuring the farthest box
+/// corner from its least corner gives the diagonal through an existing kernel query.
+#[allow(
+    clippy::float_arithmetic,
+    reason = "scales the kernel's measured diagonal for a workflow tolerance, not a geometric quantity (docs/layers.md)"
+)]
+fn stored_tolerance(body: &Body, record_tolerance: f64) -> Result<f64> {
+    let (lo, hi) = body.bounds()?;
+    let diagonal = box_max_distance_to_point(lo, hi, lo)?;
+    let tolerance = (diagonal * 1e-3).max(1e-3).max(record_tolerance);
+    if !tolerance.is_finite() {
+        return Err(Error::Argument);
+    }
+    Ok(tolerance)
+}
+
+/// Whether a stored face index and approximate hit still name that exact trimmed face.
+/// The allowance is a thousandth of the exact body box diagonal, at least a thousandth
+/// of a unit and the record's tolerance. The point must
+/// lie on the named face's surface and within its own trims, as [`Body::point_on_face`]
+/// decides. No nearest face or display mesh substitutes for the supplied index.
+///
+/// The record must be a B-rep; callers holding mesh bodies must reject them before this call.
+///
+/// # Errors
+/// Those of [`Body::from_record`], [`Body::bounds`] and [`Body::point_on_face`];
+/// [`Error::Argument`] for an allowance that is not finite.
+pub fn stored_face(record: &Record, face: usize, point: [f64; 3]) -> Result<bool> {
+    let (body, order) = Body::from_record(record, true)?;
+    let tolerance = stored_tolerance(&body, record.tolerance)?;
+    Ok(body
+        .point_on_face(&order, face, point, tolerance)?
+        .is_some())
+}
+
+/// Whether a stored edge index and approximate hit still name that exact trimmed curve.
+/// The allowance is a thousandth of the exact body box diagonal, at least a thousandth
+/// of a unit and the record's tolerance. The named
+/// edge's closest-point distance must be within it. No nearest edge or display mesh
+/// substitutes for the supplied index.
+///
+/// The record must be a B-rep; callers holding mesh bodies must reject them before this call.
+///
+/// # Errors
+/// Those of [`Body::from_record`], [`Body::bounds`] and [`Body::edge_closest_point`];
+/// [`Error::Argument`] for an allowance that is not finite.
+pub fn stored_edge(record: &Record, edge: usize, point: [f64; 3]) -> Result<bool> {
+    let (body, order) = Body::from_record(record, true)?;
+    let tolerance = stored_tolerance(&body, record.tolerance)?;
+    Ok(body
+        .edge_closest_point(&order, edge, point)?
+        .is_some_and(|p| p.distance <= tolerance))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +398,74 @@ mod tests {
         assert_eq!(vertices(&b, &[middle], 1.0).unwrap(), Err(Miss::None(0)));
         // no points pick nothing
         assert_eq!(edges(&b, &[], 0.1).unwrap(), Ok(Vec::new()));
+    }
+
+    /// The 3 x 4 x 12 box has diagonal 13, so saved hits may be 0.013 away. Its bottom
+    /// face and bottom front edge accept a 0.01 offset, refuse 0.02 and never substitute a
+    /// different face or edge. A point on their untrimmed support beyond the box is refused.
+    #[test]
+    fn stored_hits_validate_the_named_trimmed_entity_with_exact_scale() {
+        let body = make_box([0.0; 3], [3.0, 4.0, 12.0]).unwrap();
+        let (record, order) = body.to_record().unwrap();
+        assert_eq!(
+            stored_tolerance(&body, record.tolerance).unwrap(),
+            13.0 * 1e-3
+        );
+        let face_point = [1.5, 2.0, 0.0];
+        let face = (0..record.faces.len())
+            .find(|&face| {
+                body.point_on_face(&order, face, face_point, 1e-6)
+                    .unwrap()
+                    .is_some()
+            })
+            .unwrap();
+        assert!(stored_face(&record, face, face_point).unwrap());
+        assert!(stored_face(&record, face, [1.5, 2.0, 0.01]).unwrap());
+        assert!(!stored_face(&record, face, [1.5, 2.0, 0.02]).unwrap());
+        assert!(!stored_face(&record, face, [4.0, 2.0, 0.0]).unwrap());
+        assert!((0..record.faces.len())
+            .filter(|&other| other != face)
+            .all(|other| !stored_face(&record, other, face_point).unwrap()));
+
+        let edge_point = [1.5, 0.0, 0.0];
+        let edge = (0..record.edges.len())
+            .find(|&edge| {
+                body.edge_closest_point(&order, edge, edge_point)
+                    .unwrap()
+                    .is_some_and(|p| p.distance < 1e-6)
+            })
+            .unwrap();
+        assert!(stored_edge(&record, edge, edge_point).unwrap());
+        assert!(stored_edge(&record, edge, [1.5, 0.01, 0.0]).unwrap());
+        assert!(!stored_edge(&record, edge, [1.5, 0.02, 0.0]).unwrap());
+        assert!(!stored_edge(&record, edge, [4.0, 0.0, 0.0]).unwrap());
+        assert!((0..record.edges.len())
+            .filter(|&other| other != edge)
+            .all(|other| !stored_edge(&record, other, edge_point).unwrap()));
+        assert_eq!(
+            stored_face(&record, record.faces.len(), face_point),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            stored_edge(&record, record.edges.len(), edge_point),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            stored_face(&record, face, [f64::NAN, 0.0, 0.0]),
+            Err(Error::Argument)
+        );
+        assert_eq!(
+            stored_edge(&record, edge, [0.0, f64::INFINITY, 0.0]),
+            Err(Error::Argument)
+        );
+    }
+
+    #[test]
+    fn stored_hit_allowance_keeps_absolute_and_record_tolerance_floors() {
+        let body = make_box([0.0; 3], [0.1; 3]).unwrap();
+        assert_eq!(stored_tolerance(&body, 1e-6).unwrap(), 1e-3);
+        assert_eq!(stored_tolerance(&body, 0.02).unwrap(), 0.02);
+        assert_eq!(stored_tolerance(&body, f64::INFINITY), Err(Error::Argument));
     }
 
     #[test]

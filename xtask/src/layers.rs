@@ -42,6 +42,8 @@ impl Class {
 /// prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
+    // the kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md); solidcore-record only
+    ("kernel-api", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
     ("space-mouse", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
@@ -50,6 +52,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
+    // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
+    ("design-preview", Class::Standalone),
     ("sketch", Class::Layer(1)),
     // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
     ("develop", Class::Layer(1)),
@@ -106,14 +110,19 @@ pub const TABLE: &[(&str, Class)] = &[
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
+    // the UI kit's component gallery (docs.solidcraft.io/kit/), desktop and browser
+    ("ui-kit-gallery", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
 /// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"]];
+/// Sketch and sheet development reach solidcore's services through the kernel, its adapter.
+pub const INTRA_LAYER_ORDER: &[&[&str]] =
+    &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"], &["kernel", "sketch"], &["kernel", "develop"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));
