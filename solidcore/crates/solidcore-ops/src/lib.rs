@@ -85,6 +85,7 @@ pub mod network;
 pub mod offset;
 pub mod order;
 pub mod outline;
+pub mod paper_gaps;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
