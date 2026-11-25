@@ -35,7 +35,7 @@ fn tube_area() -> f64 {
 
 /// The plane square to the line from `a` towards `b`, centred on `a`, as a member's section is placed.
 fn square_to(a: Vec3, b: Vec3) -> Plane {
-    let (x, y) = frame::member_axes(b - a, 0.0).unwrap();
+    let (x, y) = frame::member_axes(b - a, 0.0, frame::UpAxis::Z).unwrap();
     Plane::new(a, x, y).unwrap()
 }
 
@@ -166,7 +166,7 @@ fn an_x_brace_crossing_does_not_cut_the_brace() {
     let other = fit_tool(&square_to(c, d), &box_tube(), 0.0, c.dist(d), &[], 0.0).unwrap();
     let side = fit_tool(&square_to(d, b), &box_tube(), -20.0, 420.0, &[], 0.0).unwrap();
     let toward = (b - a).normalized().unwrap();
-    let (x, _) = frame::member_axes(toward, 0.0).unwrap();
+    let (x, _) = frame::member_axes(toward, 0.0, frame::UpAxis::Z).unwrap();
     // In the wall at the brace's middle, where the other diagonal crosses it.
     let middle = (a + b) * 0.5 + x * 18.5;
     let fitted = fit_end(&brace, b, toward, middle, &[&other, &side], "brace").unwrap();
@@ -196,7 +196,7 @@ fn auto_groups_sharing_a_point_fit_across() {
     planes.extend([Some((-Vec3::Y, Vec3::X)); 4]);
     let placed = |m: usize, at: Vec3| {
         let (_, a, b) = &segs[m];
-        let (x, y) = frame::member_axes(*b - *a, 0.0).unwrap();
+        let (x, y) = frame::member_axes(*b - *a, 0.0, frame::UpAxis::Z).unwrap();
         Plane::new(at, x, y).unwrap()
     };
     let drawn: Vec<usize> = (0..segs.len()).collect();

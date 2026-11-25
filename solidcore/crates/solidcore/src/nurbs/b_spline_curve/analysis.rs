@@ -6,8 +6,8 @@
 //! - [`AnalysisMemo`]: the analyses' results kept in the kernel by the curve's exact
 //!   content, so an unchanged curve checked again is not solved again.
 //!
-//! It is off when `Kernel::memoize_curve_caches` is off (the `curve-memo-off` feature),
-//! which runs every analysis in full, to check that it changes nothing.
+//! It is off when `Kernel::memoize_curve_caches` is off (set on the kernel), which runs
+//! every analysis in full, to check that it changes nothing.
 //!
 //! The control-point bounds that used to skip an analysis whose tolerance they cleared
 //! are gone: the analyses' own statuses are passed on (WR-663, tangency-labs/smlib

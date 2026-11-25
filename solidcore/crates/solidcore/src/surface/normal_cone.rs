@@ -12,6 +12,7 @@
 //! |------------------------------------|-----------------------------------------------|
 //! | [`Surface::normal_cone_in_ball`]   | plane, cylinder, cone, sphere, ring torus     |
 //! | [`intersection_reach`]             | a curve with a hull (`curve/proximity.rs`)    |
+//! | [`crossing_line_in_ball`]          | the two surfaces' crossing over a ball        |
 //!
 //! **A normal cone.** For a ball about `m` of radius `rho`, a cone (an axis and a half
 //! angle) that holds the normal line of the surface at every point of it inside the ball,
@@ -174,6 +175,85 @@ fn line_angle(a: Vec3, b: Vec3) -> f64 {
     between.min(std::f64::consts::PI - between)
 }
 
+/// How two surfaces cross over a ball: their normal cones there, proved apart.
+#[derive(Clone, Copy, Debug)]
+struct Crossing {
+    /// A lower bound of the angle between the two surfaces at every point of both in the
+    /// ball (radians, above zero).
+    theta: f64,
+    /// The two cones' half angles together.
+    wide: f64,
+    /// The two cones' unit axes.
+    axes: [Vec3; 2],
+}
+
+/// How `s1` and `s2` cross at every point of both within `ball` of `centre`: the angle
+/// between the two cones' axes (as lines) less both half angles, rounding included (module
+/// docs, "The angle"); `None` where either has no cone there or the angle is not proved
+/// above zero.
+fn crossing_over_ball(s1: &Surface, s2: &Surface, centre: Vec3, ball: f64) -> Option<Crossing> {
+    let (c1, c2) = s1
+        .normal_cone_in_ball(centre, ball)
+        .zip(s2.normal_cone_in_ball(centre, ball))?;
+    let wide = c1.half_angle + c2.half_angle;
+    let theta = line_angle(c1.axis, c2.axis) * (1.0 - gamma(8)) - wide;
+    (theta > 0.0).then_some(Crossing {
+        theta,
+        wide,
+        axes: [c1.axis, c2.axis],
+    })
+}
+
+/// Where the intersection of two surfaces runs over a ball ([`crossing_line_in_ball`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CrossingLine {
+    /// A unit direction: the cross product of the two cones' axes.
+    pub(crate) line: Vec3,
+    /// An upper bound, below one, of the sine of the angle between `line` and the tangent
+    /// line of the intersection at every point of it in the ball, rounding included.
+    pub(crate) spread: f64,
+}
+
+/// Not upstream: where `s1` and `s2` are proved to cross, never tangent, at every point of
+/// both within `radius` of `centre`, the line their intersection runs along there. The
+/// intersection is then regular in the ball: no branch point, touch point or tangent curve,
+/// one smooth curve through each of its points (docs/ssi.md §4.4), whose tangent is
+/// `n1 x n2`, `n1` and `n2` the normals there.
+///
+/// The bound: with `a1`, `a2` the cones' axes, `L` their unit cross product and `n_i` within
+/// the half angle `alpha_i` of `a_i`, the height of `n_i` over the plane of the axes is
+/// `|n_i . L| <= sin alpha_i`. Write `n_i = p_i + h_i L`, `p_i` in that plane: then
+/// `n1 x n2 = p1 x p2 + h2 p1 x L + h1 L x p2`, whose first term runs along `L` and whose
+/// others, across `L`, are no longer than `|h1| + |h2| <= alpha1 + alpha2`. The normals'
+/// angle as lines lies between `theta` and a quarter turn, so `|n1 x n2| >= sin theta`, and
+/// the sine of the angle between `n1 x n2` and `L` is at most `(alpha1 + alpha2) / sin
+/// theta`. `L` itself is read to `gamma_8 / sin theta` of the exact cross product's line.
+///
+/// `None` where a surface is of a kind without a cone here, the ball reaches its axis,
+/// centre or apex height, or the crossing is not proved with a bound below one (the surfaces
+/// tangent or nearly so in the ball).
+#[must_use]
+pub(crate) fn crossing_line_in_ball(
+    s1: &Surface,
+    s2: &Surface,
+    centre: Vec3,
+    radius: f64,
+) -> Option<CrossingLine> {
+    let crossing = crossing_over_ball(s1, s2, centre, radius)?;
+    let [a1, a2] = crossing.axes;
+    let line = a1.cross(a2);
+    let len = line.length();
+    let sine = crossing.theta.sin() * (1.0 - gamma(4));
+    if !(len.is_finite() && len > 0.0 && sine > 0.0) {
+        return None;
+    }
+    let spread = (crossing.wide + gamma(8)) / sine * (1.0 + gamma(4));
+    (spread.is_finite() && spread < 1.0).then(|| CrossingLine {
+        line: line / len,
+        spread,
+    })
+}
+
 /// A lower bound of the sine of the angle between `s1` and `s2` wherever both have a
 /// point within `rho` of `curve` over `interval` (module docs); `None` where a piece no
 /// larger than `rho` proves no angle, or the pieces run out.
@@ -210,15 +290,7 @@ fn least_crossing_sine(
             return Ok(None);
         };
         let ball = (piece + rho) * (1.0 + gamma(2));
-        let theta = s1
-            .normal_cone_in_ball(centre, ball)
-            .zip(s2.normal_cone_in_ball(centre, ball))
-            .map(|(c1, c2)| {
-                let wide = c1.half_angle + c2.half_angle;
-                let theta = line_angle(c1.axis, c2.axis) * (1.0 - gamma(8)) - wide;
-                (theta, wide)
-            })
-            .filter(|(theta, _)| *theta > 0.0);
+        let theta = crossing_over_ball(s1, s2, centre, ball).map(|c| (c.theta, c.wide));
         let mid = 0.5 * (x + y);
         let halves = piece > rho && x < mid && mid < y;
         match theta {

@@ -4326,6 +4326,8 @@ mod measure_centre_tests;
 #[cfg(test)]
 mod measure_surface_tests;
 #[cfg(test)]
+mod midsurface_samples_tests;
+#[cfg(test)]
 mod naming_history_tests;
 #[cfg(test)]
 mod pattern_suppress_tests;
@@ -4491,6 +4493,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         browser_order,
         named_views,
         home_view,
+        saved_sections,
         notes,
         visibility,
         drawings,
@@ -4536,6 +4539,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *browser_order == b.browser_order
         && *named_views == b.named_views
         && *home_view == b.home_view
+        && *saved_sections == b.saved_sections
         && *notes == b.notes
         && *visibility == b.visibility
         && *drawings == b.drawings

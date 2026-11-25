@@ -522,6 +522,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     }
     part.named_views.clear();
     part.home_view = None;
+    part.saved_sections.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
     let features: BTreeMap<u64, u64> = sc.inside.iter().chain(&sc.carried).map(|f| (*f, *f)).collect();
@@ -788,7 +789,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
     // The link keeps what the new file holds, as Insert Design's does (#9739).
-    if let Some(read) = file_sha256(&file, s.path.as_deref())
+    if let Some(read) = file_sha256(&file, s.path.as_deref(), false)
         && let Some(link) = s.doc_mut().links.get_mut(&comp)
     {
         link.file_sha256 = Some(read);

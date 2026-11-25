@@ -979,6 +979,40 @@ fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
     assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
 }
 
+/// A camera move asks which sketches failed many times a frame. Only a sketch that lost a
+/// projection is looked up among the model's sketches: looking up every feature's took most of
+/// each frame in a design of thousands of features.
+#[test]
+fn a_camera_move_looks_up_only_the_sketches_that_lost_a_projection() {
+    let orbit = |h: &mut crate::scenario::Harness| {
+        let before = super::failed_sketches_asked(&h.app);
+        for _ in 0..3 {
+            h.app.cam.yaw += 0.1;
+            h.frame();
+        }
+        super::failed_sketches_asked(&h.app) - before
+    };
+    let mut h = crate::scenario::Harness::new();
+    for i in 0..4 {
+        h.app.run("sketch.create", json!({"plane":"XY","offset":10 * i,"name":format!("Sound{i}")})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.frames(3);
+    assert!(h.app.session.model.results.len() >= 4);
+    assert_eq!(orbit(&mut h), 0, "no sketch lost a projection: none is looked up");
+
+    // One that did, among sound ones: it alone is looked up, as often as it is asked for.
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let asked = orbit(&mut h);
+    let once = super::failed_sketches_asked(&h.app);
+    let (shown, _) = super::failed_sketches(&h.app);
+    assert_eq!(shown.iter().map(|ss| ss.feature).collect::<Vec<_>>(), sketches, "still found");
+    assert_eq!(super::failed_sketches_asked(&h.app) - once, 1, "one answer looks up one sketch");
+    assert!(asked > 0);
+    assert!(h.app.session.model.results.len() > 1, "there are others it could have looked up");
+}
+
 /// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn
 /// with, so it is not clipped away; Fit frames the bodies and the sketches it can pick only.
 #[test]
