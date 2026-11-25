@@ -161,7 +161,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             };
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, out, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, out, mb.feature) };
             }
             Ok(())
         }
@@ -263,7 +263,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // A match rebuilds the face in place: the body keeps its name, and whatever meets it
             // downstream still finds it.
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, made, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, made, mb.feature) };
             }
             Ok(())
         }
@@ -301,7 +301,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 report.movement
             ));
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, faired, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, faired, mb.feature) };
             }
             Ok(())
         }
@@ -329,7 +329,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced, stays_surface } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -368,6 +368,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
             };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
+            if *stays_surface && let Some(made) = st.bodies.last_mut() {
+                made.sheet = true;
+            }
             Ok(())
         }
         FeatureKind::Unstitch { body, faces } => {

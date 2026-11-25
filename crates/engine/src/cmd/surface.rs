@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_revolve")
         .contract(&SURFACE_REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); stays_surface?: bool (default true: a full turn that closes the walls is a closed surface body, which Stitch makes a solid; false: it becomes a solid, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -428,7 +428,15 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => true,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
     };
-    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced })
+    let stays_surface = match p.get("stays_surface") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`stays_surface` must be true or false"))?,
+    };
+    add_feature(
+        s,
+        p,
+        FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced, stays_surface },
+    )
 }
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1192,7 +1200,8 @@ mod tests {
         run(&mut s, "edit.redo", json!({}));
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!((area(&cold, "Cone") - area(&s, "Cone")).abs() < 1e-9);
-        // A rectangle off the axis turned all the way round closes into the ring solid.revolve makes.
+        // A rectangle off the axis turned all the way round closes on the ring solid.revolve makes
+        // (its shells close; the body stays a surface, #21969).
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "R"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [7, 3]}));
         run(&mut s, "sketch.finish", json!({}));
@@ -1247,6 +1256,76 @@ mod tests {
         run(&mut s, "surface.revolve", turn("NewTurn", "NewRing"));
         assert!(faced(&s, "NewTurn"));
         assert_eq!(ends(&s, "NewRing"), (-1.0, 1.0));
+    }
+
+    /// #21969: a closed profile turned all the way round is a closed surface body, as every other
+    /// surface revolve's result is a surface: no volume, and a boolean refuses it until Stitch
+    /// makes it a solid. The rectangle x 5…10, z 0…10 about Z: walls 2π·10·10 + 2π·5·10 and two
+    /// annuli π(10² − 5²) each, 450π mm² in all; the solid Stitch makes is π(10² − 5²)·10 = 750π
+    /// mm³, positive, so its faces face out. A design saved before `stays_surface` keeps the solid
+    /// it built through reopening and a redefine.
+    #[test]
+    fn surface_revolve_of_a_closed_profile_through_a_full_turn_stays_a_surface() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let turn = json!({"sketch": "S", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "name": "Turn", "body_name": "R"});
+        run(&mut s, "surface.revolve", turn.clone());
+        let close = |a: f64, want: f64| assert!((a - want).abs() < want * 2e-3, "{a} vs {want}"); // (measured on meshes)
+        let kind = |s: &Session| {
+            let st = s.world_state().unwrap();
+            let b = st.body("R").unwrap();
+            (b.is_surface(), b.is_closed())
+        };
+        assert_eq!(kind(&s), (true, false), "a closed full turn stays a surface body");
+        close(area(&s, "R"), 450.0 * PI);
+        let measured = run(&mut s, "inspect.measure", json!({"bodies": ["R"]}));
+        let r = &measured["bodies"][0];
+        assert_eq!((r["faces"].as_u64(), r["closed"].as_bool(), r["volume_mm3"].is_null()), (Some(4), Some(false), true), "{r}");
+        // Reopened, it is still a surface.
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(kind(&s), (true, false));
+        // A boolean refuses it, as target or tool, and names the way to a solid.
+        run(&mut s, "solid.box", json!({"length": 3, "width": 4, "height": 4, "corner": [6, -2, 2], "body_name": "Block"}));
+        for (target, tools, operation) in
+            [("R", ["Block"], "join"), ("Block", ["R"], "join"), ("Block", ["R"], "cut"), ("Block", ["R"], "intersect"), ("R", ["Block"], "cut")]
+        {
+            let err = s.execute("solid.combine", &json!({"target": target, "tools": tools, "operation": operation})).unwrap_err().to_string();
+            assert!(err.contains("R is a surface body: Stitch it into a solid first."), "{target} {operation}: {err}");
+        }
+        // Stitch takes the one closed body and makes the ring's solid, faces out.
+        run(&mut s, "surface.stitch", json!({"bodies": ["R"]}));
+        assert_eq!(kind(&s), (false, true));
+        close(volume(&s, "R"), 750.0 * PI);
+        run(&mut s, "solid.combine", json!({"target": "R", "tools": ["Block"], "operation": "cut"}));
+        // A design saved before `stays_surface`: the closed full turn is the solid it built.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.revolve", turn.clone());
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("stays_surface");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert_eq!(kind(&s), (false, true), "an older design keeps its solid");
+        close(volume(&s, "R"), 750.0 * PI);
+        let mut params = turn.clone();
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": "surface.revolve", "params": params}));
+        assert_eq!(kind(&s), (false, true), "a redefine keeps what the design built");
+        // Asked for, a new surface revolve makes the solid too.
+        let mut legacy = turn;
+        legacy.as_object_mut().unwrap().extend([
+            ("name".into(), json!("Solid")),
+            ("body_name".into(), json!("Q")),
+            ("stays_surface".into(), json!(false)),
+        ]);
+        run(&mut s, "surface.revolve", legacy);
+        assert!(s.world_state().unwrap().body("Q").unwrap().is_closed());
     }
 
     /// Surface Sweep: a line along y carried up a path in the XZ plane, straight then round a

@@ -165,7 +165,7 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
             area: m.area,
             centroid: solidcraft_doc::apply_point(&transform, m.centroid),
             bbox,
-            closed: crate::cmd::inspect::encloses_volume(&body.body),
+            closed: body.is_closed(),
             faces: m.merged.faces,
             edges: m.merged.edges,
             vertices: m.merged.vertices,
@@ -180,7 +180,7 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
         area: m.area,
         centroid: m.centroid,
         bbox: m.bbox,
-        closed: crate::cmd::inspect::encloses_volume(&placed),
+        closed: crate::cmd::inspect::encloses_volume(&placed) && !body.is_closed_sheet(),
         faces: m.merged.faces,
         edges: m.merged.edges,
         vertices: m.merged.vertices,
@@ -300,13 +300,8 @@ fn measure(s: &Session, doc: &Document, selected: &[u64], descendants: bool, abo
     // How each closed body's volume spreads about its centre of mass (#8095): one tessellation
     // however often it is placed, which each placement then turns.
     let components: BTreeSet<u64> = selected_placements.iter().map(|(component, _, _)| *component).collect();
-    let spread_bodies: Vec<usize> = components
-        .iter()
-        .filter_map(|c| by_component.get(c))
-        .flatten()
-        .filter(|(_, b)| crate::cmd::inspect::encloses_volume(&b.body))
-        .map(|(i, _)| *i)
-        .collect();
+    let spread_bodies: Vec<usize> =
+        components.iter().filter_map(|c| by_component.get(c)).flatten().filter(|(_, b)| b.is_closed()).map(|(i, _)| *i).collect();
     #[cfg(test)]
     work::count(|w| w.spreads += spread_bodies.len());
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
