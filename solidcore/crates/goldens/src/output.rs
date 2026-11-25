@@ -278,6 +278,19 @@ pub fn next_step_status(step: solidcore::surface::surface_point_solve::p3::NextS
     }
 }
 
+/// The upstream status number the goldens record for an arc-length parameter
+/// (`FindParameterAtArcLength`): 0 when the iteration converged, `SM_ERR_NOT_CONVERGING`
+/// (1022) when it did not, so the recorded rows stay as they are. The golden re-bless
+/// (#21874) replaces this conversion with the typed value.
+#[must_use]
+pub fn arc_length_status(r: &solidcore::curve::curve::p3::ArcLengthParameter) -> i32 {
+    if r.converged {
+        0
+    } else {
+        solidcore::error::SM_ERR_NOT_CONVERGING
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{blend_status, float_bits};
