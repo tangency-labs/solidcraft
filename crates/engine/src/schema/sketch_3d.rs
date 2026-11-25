@@ -1,6 +1,6 @@
-//! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.line3d`,
-//! `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`, `sketch.point3d` and
-//! `sketch.move3d`.
+//! Contracts and result types for the commands in `cmd/sketch_3d.rs`: `sketch.create3d`,
+//! `sketch.line3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.arc3d`,
+//! `sketch.point3d` and `sketch.move3d`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether the sketch has 3D Sketch on, a wire
@@ -22,6 +22,36 @@ use super::sketch_ends::SketchTarget;
 use super::sketch_shapes::Created;
 use super::types::{Point3, PointExpr3, SketchRef, present};
 use crate::params;
+
+/// Start a 3D sketch with no plane to choose: a new sketch with 3D Sketch on, opened for
+/// editing, so `sketch.line3d`, `sketch.spline3d`, `sketch.arc3d` and `sketch.point3d` draw in
+/// it at once. The sketch rests on the XY origin plane of the active component, and its curves
+/// may leave that plane. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct Create3dParams {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
+    /// The sketch's name. Default: numbered.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// What `sketch.create3d` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Create3dResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
+    /// The new sketch's feature id.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
 /// on for the sketch (`sketch.options` with `sketch_3d: true`). One undo step.
@@ -558,7 +588,54 @@ impl JsonSchema for PlaneName {
     }
 }
 
-/// Hold 3D points on an origin plane.
+/// The plane a 3D constraint is held to (#10616): an origin plane (`xy`, `yz` or `xz`), a
+/// construction plane's name, or `{face: [x,y,z], body?}`, the planar model face through that
+/// point. The handler resolves it; a name that is no plane is its to refuse.
+#[derive(Clone, Debug)]
+pub struct PlaneTarget(pub Value);
+
+impl<'de> Deserialize<'de> for PlaneTarget {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let ok = match &v {
+            Value::String(name) => !name.is_empty(),
+            Value::Object(o) => {
+                o.keys().all(|k| k == "face" || k == "body")
+                    && o.get("face")
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| a.len() == 3 && a.iter().all(|x| x.as_f64().is_some_and(f64::is_finite)))
+                    && o.get("body").is_none_or(Value::is_string)
+            }
+            _ => false,
+        };
+        if ok { Ok(PlaneTarget(v)) } else { Err(D::Error::custom("must be xy, yz or xz, a construction plane's name, or {face: [x,y,z], body?}")) }
+    }
+}
+
+impl JsonSchema for PlaneTarget {
+    fn schema_name() -> Cow<'static, str> {
+        "PlaneTarget".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An origin plane (xy, yz or xz), a construction plane's name, or {face: [x,y,z], body?}: the planar model face through that point.",
+            "oneOf": [
+                {"type": "string", "minLength": 1},
+                {
+                    "type": "object",
+                    "properties": {
+                        "face": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["face"],
+                    "additionalProperties": false
+                }
+            ]
+        })
+    }
+}
+
+/// Hold 3D points on a plane.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OnPlaneParams {
@@ -568,8 +645,9 @@ pub struct OnPlaneParams {
     /// Several 3D point refs, each held on the plane.
     #[serde(default)]
     pub points: Option<Vec<String>>,
-    /// The origin plane of the sketch's 3D space.
-    pub plane: PlaneName,
+    /// The plane: an origin plane of the sketch's 3D space, a construction plane, or a planar
+    /// model face.
+    pub plane: PlaneTarget,
     /// The sketch (default: the one being edited).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]

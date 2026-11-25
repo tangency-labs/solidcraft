@@ -216,7 +216,7 @@ pub(crate) enum PickKind {
     Vertex,
     /// The nearest edge (`nearest_edge`, an extension's picker).
     NearestEdge,
-    /// The nearest face (`face_at`, an untrim's picker).
+    /// The nearest face as it is trimmed (an untrim's picker).
     NearestFace,
 }
 

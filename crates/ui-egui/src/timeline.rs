@@ -140,8 +140,11 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
                 && section.tabs.iter().any(|instance| instance.0 == "history")
         })
     });
-    if side_history || app.preferences.history_in_browser || !app.preferences.history_steps_component {
+    if app.preferences.history_in_browser || !app.preferences.history_steps_component {
         return crate::timeline_fold::View::of(doc, None, true);
+    }
+    if side_history {
+        return crate::timeline_fold::View::of(doc, None, app.tree.history_show_hidden);
     }
     let within = crate::timeline_scope::shown(app).map(|c| crate::timeline_scope::components_within(app, c));
     crate::timeline_fold::View::of(doc, within.as_ref(), app.tree.history_show_hidden)
@@ -271,7 +274,10 @@ impl TimelineKind {
     pub(crate) fn of(kind: &FeatureKind) -> Self {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
-            FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. }
+            | FeatureKind::Coil { sketch: Some(sketch), .. } => Self::Profile(*sketch),
             // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
             FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
@@ -306,6 +312,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceSweep { .. } => "surface_sweep",
         FeatureKind::SurfaceLoft { .. } => "surface_loft",
         FeatureKind::SurfaceOffset { .. } => "surface_offset",
+        FeatureKind::SurfaceMidsurface { .. } => "surface_offset",
         FeatureKind::SurfaceRuled { .. } => "surface_ruled",
         FeatureKind::SurfaceUntrim { .. } => "surface_untrim",
         FeatureKind::SurfaceBlend { .. } => "surface_blend",
@@ -346,6 +353,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
@@ -645,6 +653,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
         v.push(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
+        v.push(rule.one(Item::action("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).
@@ -1606,6 +1615,15 @@ impl history_bar::Contents for BarSteps<'_> {
 /// (Preferences › Layout), the first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
 pub(crate) fn find_in_browser(app: &mut SolveApp, ids: &[u64]) {
+    // A construction plane, axis or point is found in its Construction folder (#15355).
+    if let [id] = ids
+        && app.session.doc.feature(*id).is_some_and(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        })
+    {
+        crate::browser::reveal_construction(app, *id);
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let mut bodies: Vec<String> = Vec::new();
     let mut items: Vec<serde_json::Value> = Vec::new();

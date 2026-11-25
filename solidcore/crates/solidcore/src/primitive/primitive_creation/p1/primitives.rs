@@ -870,7 +870,11 @@ impl PrimitiveCreation {
         let domain = Extent2d::from_bounds(0.0, 0.0, 360.0, height);
         match cylinder.adjust_step_uv_domain(k, &domain) {
             Ok(()) => {}
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 return Err(Failure::new(OP, PrimitiveFailure::CylinderDomainNotSet)
                     .caused_by(e)
@@ -1448,6 +1452,10 @@ impl PrimitiveCreation {
                 distance = -distance;
             }
             let mut analytic_domain = Extent2d::from_bounds(0.0, 0.0, 1.0, distance);
+            // A single full-circle sweep into an empty B-rep makes the same convex right cylinder
+            // as `create_cylinder`, so `stitch_solid` can orient its shell without a closing ray.
+            let was_empty = cap_ends && curves.len() == 1 && is_empty(brep);
+            let mut single_cylinder: Option<FaceId> = None;
             for curve in &curves {
                 let interval = match curve.kind() {
                     crate::curve::curve::CurveKind::Line(c) => c.step_interval(),
@@ -1501,7 +1509,12 @@ impl PrimitiveCreation {
                                 &Extent2d::from_bounds(0.0, 0.0, 360.0, distance),
                             )?;
                             let domain = cylinder.rev.base().natural_uv_domain();
-                            cone_face(k, brep, &cylinder, domain)?;
+                            let alone = was_empty
+                                && one_solid_as_built(brep, &frame, &[radius, radius, distance]);
+                            let side = cone_face(k, brep, &cylinder, domain)?;
+                            if alone {
+                                single_cylinder = Some(side);
+                            }
                             continue;
                         }
                     }
@@ -1547,7 +1560,14 @@ impl PrimitiveCreation {
                     end_curves.push(copy);
                 }
                 planar_faces(k, brep, self.region(), &end_curves, brep.tolerance())?;
-                stitch(k, brep)?;
+                let outside = if brep.face_list().len() == 3 {
+                    single_cylinder.and_then(|side| {
+                        side_away_from(k, brep, (side, [0.25, 0.5]), (side, [0.75, 0.5]))
+                    })
+                } else {
+                    None
+                };
+                stitch_solid(k, brep, outside)?;
             } else {
                 // the profile's two copies stay open: the walls are a sheet
                 stitch_open(k, brep)?;
