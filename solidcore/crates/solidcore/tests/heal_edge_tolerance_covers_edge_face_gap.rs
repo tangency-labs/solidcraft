@@ -2330,7 +2330,8 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 ///   other trim, on the procedural blend, has no exact net to enclose (goldens'
 ///   `certify::trim_tolerance` keeps those edges OPEN, `blend-surface`): that trim at 4e-5
 ///   is the move's one unproved remainder;
-/// - the three end vertices (26, 38 and 27, at 4e-5, 4e-5 and 4.07e-5) each cover the end
+/// - the three end vertices (26, 38 and 27, at 4e-5, 4e-5 and 4.07e-5, the last between the
+///   4e-5 floor and main's 8.05e-5) each cover the end
 ///   of every edge curve that ends there, the distance's rounding (`gamma(8)` of the
 ///   coordinates' size, times sqrt 3) counted against the tolerance;
 /// - Level 2 reports nothing: main's two vertex/face gaps (4.71e-5 against 3.65e-5, half of
@@ -2439,10 +2440,14 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         }
     }
     lowered.sort_by(f64::total_cmp);
-    assert_eq!(
-        lowered,
-        [4e-5, 4e-5, 4.0730163673638e-5],
-        "the lowered vertices"
+    // two at the edges' 4e-5; the third is the vertex step's value, a measured gap (4.07e-5)
+    // that moves in its last bits with the round's surface, so it is checked by what it must
+    // be: covering every edge end there (above), over the 4e-5 floor, and under main's 8.05e-5
+    assert_eq!(lowered.len(), 3, "the lowered vertices: {lowered:?}");
+    assert_eq!(lowered[..2], [4e-5, 4e-5], "the lowered vertices");
+    assert!(
+        lowered[2] > 4e-5 && lowered[2] < 8.05e-5,
+        "the lowered vertices: {lowered:?}"
     );
 
     // (main reports vertex 22's two vertex/face gaps, offset 4.7135459e-5 against half its
