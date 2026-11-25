@@ -4827,7 +4827,8 @@ fn countersink_for_a_countersunk_screw_head() {
 fn head_countersink_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_countersink("ISO 10642", "M6"), Some(14.44), "dk 13.44");
     assert_eq!(cmd::head_countersink("countersunk_socket_screw", "M4x0.7"), Some(9.96), "dk 8.96, the pitch written out");
-    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), None, "the table starts at M3");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M2"), Some(5.7), "dk 4.7");
+    assert_eq!(cmd::head_countersink("ISO 10642", "M1.6"), None, "the table starts at M2");
     assert_eq!(cmd::head_countersink("ISO 4762", "M6"), None, "a socket head is no countersunk head");
     assert_eq!(cmd::head_counterbore("ISO 10642", "M6"), None, "nor a counterbore's");
 }
@@ -8972,7 +8973,7 @@ fn head_counterbore_is_the_head_plus_the_default_gap() {
     assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
     assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
     assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
-    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M14"), None, "the button head table has no M14");
     assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
 }
 
