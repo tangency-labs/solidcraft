@@ -268,12 +268,12 @@ pub enum CellGridMode {
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
-pub const CELL_GRID_MIN_SIZE: f64 = solidcraft_kernel::services::cell_grid::MIN_SIZE;
+pub const CELL_GRID_MIN_SIZE: f64 = solidcraft_kernel::CELL_GRID_LIMITS.min_size;
 
 /// The most sides of a polygon cell.
-pub const CELL_GRID_MAX_SIDES: u32 = solidcraft_kernel::services::cell_grid::MAX_SIDES;
+pub const CELL_GRID_MAX_SIDES: u32 = solidcraft_kernel::CELL_GRID_LIMITS.max_sides;
 /// The most lattice lines a snapped field edge may be moved in.
-pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcraft_kernel::services::cell_grid::MAX_SNAP_INSET;
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcraft_kernel::CELL_GRID_LIMITS.max_snap_inset;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -1749,7 +1749,7 @@ pub enum FeatureKind {
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
     /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
     /// from the sketch plane and joined to the targets. The cells are planned by solidcore
-    /// (`solidcraft_kernel::services::cell_grid`) and cut in one boolean.
+    /// (`solidcraft_kernel::plan_cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
         sketch: SketchId,
@@ -1880,7 +1880,16 @@ pub enum FeatureKind {
         #[walk(length = "Distance")]
         distance: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Bend radius")]
+        radius: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<String>,
+        /// center | side1 | side2 (where the contour lies across the sheet thickness).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        orientation: Option<String>,
+        /// Apply the contour distance on both sides of the sketch plane (twice the total width).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        symmetric: bool,
         /// Material on the other side of the chain.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
@@ -2261,6 +2270,10 @@ pub enum FeatureKind {
     /// tools and outside the rest), each picked by a point inside it.
     BoundaryFill {
         tools: Vec<BodyName>,
+        /// Planes (origin or construction planes) that also bound the cells, each cutting space
+        /// like an infinite plane: a cell lies on the side of it its point is on.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        planes: Vec<PlaneRef>,
         cells: Vec<Position>,
         #[serde(default)]
         operation: Operation,
@@ -4279,6 +4292,10 @@ pub struct StandardPart {
     pub size: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
+    /// How its metric thread is made: `modeled` (cut into the body). Absent: a cosmetic thread,
+    /// recorded on the face, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
 }
 
 /// A component whose contents come from a design or STEP source file: where that file

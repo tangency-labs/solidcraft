@@ -489,6 +489,33 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "placement", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "u64")]
     pub occurrence: Option<u64>,
+    /// `keep` (the default) leaves the body names as relinking always did (replaced only when
+    /// the new source has another number of bodies); `sync` takes the new source's body names,
+    /// also in the materials, appearances and features that name those bodies, and gives the
+    /// linked feature the source design's name when it still has its component's. The
+    /// component's own name stays yours. Not used when `occurrence` relinks one of several
+    /// placements: that placement then shows a component made from the new source.
+    #[serde(default, deserialize_with = "names_mode", skip_serializing_if = "Option::is_none")]
+    pub names: Option<RelinkNames>,
+}
+
+/// Which names `component.relink` leaves on the linked bodies: `keep` (the names they have) or
+/// `sync` (the new source's names). The variants carry no docs of their own, so the schema is a
+/// plain `enum` of the two strings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RelinkNames {
+    Keep,
+    Sync,
+}
+
+/// `names`, `keep` or `sync`, with the handler's message for anything else.
+fn names_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RelinkNames>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) if s == "keep" => Ok(Some(RelinkNames::Keep)),
+        Value::String(s) if s == "sync" => Ok(Some(RelinkNames::Sync)),
+        _ => Err(D::Error::custom(whole("`names` must be \"keep\" or \"sync\""))),
+    }
 }
 
 /// What `component.relink` returns.
